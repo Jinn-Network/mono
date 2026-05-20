@@ -444,11 +444,15 @@ export function JoinFlow({
             label="Roles help"
             docHref={`${JOIN_FORM_CONTEXT_DOC}#solver-vs-evaluator`}
           >
-            Solver attempts tasks and submits solutions — this is the
-            spending role (model inference + gas) and the one with the most
-            per-task upside. Evaluator verifies others' solutions — lower spend,
-            steadier, lower variance. You can take either or both. Unsure? Start
-            as a solver on one SolverNet with a model you already pay for.
+            Solver attempts tasks and submits solutions. It is the spending
+            role: you pay for model inference and gas. It also has the most
+            upside per task.
+            {'\n\n'}
+            Evaluator checks other operators' solutions. Lower spend, steadier
+            returns, less variance.
+            {'\n\n'}
+            You can take either role, or both. New here? Start as a solver on
+            one SolverNet, using a model you already pay for.
           </InlineHelp>
         </span>
         <div
@@ -532,14 +536,17 @@ export function JoinFlow({
                   label="Harness help"
                   docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
                 >
-                  The harness is the runtime that executes a task. You need
-                  credentials for one harness, not for the harness and the
-                  model both. Claude Code uses whatever the `claude` CLI is
-                  signed in with — a Claude subscription or an Anthropic API
-                  key. Hermes Agent is a separate package; the join form runs an
-                  install precheck for it. The default shown is the SolverNet's
-                  first compatible option, not a recommendation to pay for two
-                  things.
+                  The harness is the runtime that runs a task.
+                  {'\n\n'}
+                  You only need credentials for one harness — the harness, not
+                  the harness and the model separately.
+                  {'\n\n'}
+                  Claude Code uses whatever the `claude` CLI is signed in with:
+                  a Claude subscription or an Anthropic API key. Hermes Agent is
+                  a separate package; the join form checks it is installed.
+                  {'\n\n'}
+                  The default is the SolverNet's first compatible harness. Pick
+                  one. You do not need to pay for two.
                 </InlineHelp>
               </span>
               <select
@@ -642,12 +649,16 @@ export function JoinFlow({
                   label="Model help"
                   docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
                 >
-                  The model is the LLM the harness drives. The list is filtered
-                  to the models the selected harness supports — changing the
-                  harness resets the model to that harness's default. You pay
-                  for the model through the harness's credentials; there is no
-                  separate model subscription on top of that. See the cost
-                  estimate below before you commit.
+                  The model is the LLM the harness runs.
+                  {'\n\n'}
+                  This list only shows models the selected harness supports.
+                  Change the harness and the model resets to that harness's
+                  default.
+                  {'\n\n'}
+                  You pay for the model through the harness's credentials. There
+                  is no extra model subscription on top.
+                  {'\n\n'}
+                  Check the cost estimate below before you join.
                 </InlineHelp>
               </span>
               <select
@@ -726,12 +737,16 @@ export function JoinFlow({
                 label="Plugins help"
                 docHref={`${JOIN_FORM_CONTEXT_DOC}#plug-ins`}
               >
-                Plug-ins are optional — on a first run you almost certainly do
-                not need to touch this. A SolverPlugin is reusable AI tooling
-                (MCP servers, skills, extensions) a harness can load while it
-                solves. SolverNets ship task-specific plug-ins enabled by
-                default; you would only add your own here if you have built one.
-                You can re-join later with plug-ins added.
+                Plug-ins are optional. On your first run you do not need to
+                touch this section.
+                {'\n\n'}
+                A plug-in is reusable AI tooling — MCP servers, skills,
+                extensions — that the harness can load while it solves.
+                {'\n\n'}
+                This SolverNet already enables the plug-ins its tasks need. Add
+                your own only if you have built one.
+                {'\n\n'}
+                You can re-join later with more plug-ins.
               </InlineHelp>
             </span>
             <PluginPicker
@@ -757,12 +772,15 @@ export function JoinFlow({
               label="Evaluator configuration help"
               docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
             >
-              There is no harness or model picker for the evaluator role — and
-              that is by design, not a sign the role is underdeveloped. Every
-              evaluator on a SolverNet must run the same evaluation function so
-              verdicts are comparable, so the SolverNet's manifest binds it for
-              you. For many SolverNets that function is deterministic and calls
-              no model at all.
+              The evaluator role has no harness or model picker. That is by
+              design.
+              {'\n\n'}
+              Every evaluator on a SolverNet must run the same evaluation
+              function, so verdicts can be compared. The SolverNet's manifest
+              sets it for you.
+              {'\n\n'}
+              For many SolverNets that function is deterministic and uses no
+              model at all.
             </InlineHelp>
           </span>
           <p
@@ -790,10 +808,12 @@ export function JoinFlow({
               label="Evaluator binding help"
               docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
             >
-              The evaluator harness is bound by the SolverNet's manifest so
-              every evaluator runs the same evaluation function — verdicts have
-              to be comparable to be trustworthy. The harness and model fields
-              above configure only the solver role.
+              The SolverNet's manifest sets the evaluator harness for you.
+              {'\n\n'}
+              Every evaluator runs the same evaluation function, so verdicts can
+              be compared and trusted.
+              {'\n\n'}
+              The harness and model fields above apply only to the solver role.
             </InlineHelp>
           </span>
           <p
