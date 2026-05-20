@@ -263,6 +263,10 @@ export function OverviewPage(): JSX.Element {
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}
+        // `liveNow.line` is the human-readable why — the first error
+        // diagnostic's message, "N tasks restoring", "waiting for next task",
+        // etc. — surfaced under the label in the STATUS tile.
+        statusReason={liveNow.line}
         activeAction={activeAction}
         evicted={isEvicted}
         evictedServiceId={evictedServiceId}
@@ -302,13 +306,20 @@ export function OverviewPage(): JSX.Element {
             { autoClearMs: 5_000 },
           )}
         onRestart={() =>
-          runAction('Restart node', async () => {
-            const res = await api.restartDaemon();
-            if (!res.ok) {
-              throw new Error('Restart request failed.');
-            }
-            return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
-          })}
+          runAction(
+            'Restart node',
+            async () => {
+              const res = await api.restartDaemon();
+              if (!res.ok) {
+                throw new Error('Restart request failed.');
+              }
+              return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
+            },
+            // Restart confirmation is transient — surface it, then fade after
+            // ~10s so it doesn't linger until the next action. The dashboard
+            // reconnects on its own when the daemon is back.
+            { autoClearMs: 10_000 },
+          )}
         onRestake={async (serviceId) => {
           const res = await api.restake(serviceId);
           if (!res.ok) {

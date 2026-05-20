@@ -22,7 +22,7 @@ describe('OfflineBanner', () => {
     expect(screen.queryByTestId('offline-banner')).toBeNull();
   });
 
-  it('surfaces the offline state and a restart CTA when disconnected', () => {
+  it('surfaces the offline state when disconnected', () => {
     render(<OfflineBanner connection={disconnected} />);
     const banner = screen.getByTestId('offline-banner');
     expect(banner).toBeTruthy();
@@ -30,7 +30,7 @@ describe('OfflineBanner', () => {
     expect(banner.getAttribute('role')).toBe('alert');
     expect(screen.getByText(/daemon offline/i)).toBeTruthy();
     expect(screen.getByText(/reconnecting automatically/i)).toBeTruthy();
-    // Plain-speech CTA: the operator needs to know to re-run the node.
-    expect(screen.getByText('jinn run')).toBeTruthy();
+    // No terminal CTA — auto-reconnect and in-app respawn (#289) supersede it.
+    expect(screen.queryByText('jinn run')).toBeNull();
   });
 });

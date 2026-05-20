@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -536,14 +536,64 @@ describe('OverviewPage empty-state gating', () => {
   });
 });
 
-// ── Gas top-up: explicit click, no auto-fire (jinn-mono #336) ───────────────
+// ── Restart notice auto-clears ──────────────────────────────────────────────
 //
-// rvx in the v0.1.6 dogfood: "I hit the button 'Top up' and it just magically
-// increases the number ... can't seem to stop it." The Dashboard Gas top-up
-// must be a single, explicit action: one click → exactly one faucet call, no
-// re-firing while the Dashboard stays mounted, a one-line amount + tx-hash
-// confirmation, and the button disabled while the request is in flight.
-describe('OverviewPage gas top-up (jinn-mono #336)', () => {
+// The restart-requested notice must not stay pinned to the dashboard until the
+// operator triggers some other action. The confirmation is transient, so the
+// Restart action must pass `autoClearMs` (like the gas top-up does) and the
+// notice must disappear on its own.
+describe('OverviewPage restart notice', () => {
+  const restartStatus = {
+    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+    masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
+    fleet: { services: [] },
+    predictionV1: {
+      operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+      totals: { observedTasks: 1, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+    },
+  };
+
+  it('auto-clears the restart-requested notice after its autoClearMs window', async () => {
+    vi.useFakeTimers();
+    try {
+      getStatusMock.mockResolvedValue(restartStatus);
+      getBootstrapMock.mockResolvedValue({ solverNets: {} });
+      restartDaemonMock.mockResolvedValue({ ok: true });
+      render(withProviders(<OverviewPage />));
+
+      const restartButton = await vi.waitFor(() =>
+        screen.getByRole('button', { name: /restart/i }),
+      );
+      fireEvent.click(restartButton);
+
+      // The confirmation surfaces first.
+      const notice = await vi.waitFor(() => screen.getByTestId('dashboard-action-notice'));
+      expect(notice.textContent).toMatch(/restart requested/i);
+
+      // Before the auto-clear window elapses the notice is still present.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9_000);
+      });
+      expect(screen.queryByTestId('dashboard-action-notice')).not.toBeNull();
+
+      // Past the 10s window the notice clears itself — no other action needed.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(screen.queryByTestId('dashboard-action-notice')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── Gas top-up: explicit click, no auto-fire ────────────────────────────────
+//
+// The Dashboard Gas top-up must be a single, explicit action: one click →
+// exactly one faucet call, no re-firing while the Dashboard stays mounted, a
+// one-line amount + tx-hash confirmation, and the button disabled while the
+// request is in flight.
+describe('OverviewPage gas top-up', () => {
   const gasStatus = {
     rewards: { pendingStakingRewardsWei: '1000000000000000000' },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
