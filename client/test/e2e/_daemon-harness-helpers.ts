@@ -973,7 +973,14 @@ export async function startDaemon(
     // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
     restorationEngine: {
       paths: {
-        workingDirRoot: join(fixture.workingDirRoot, label),
+        // Default consumer (daemon-harness-cycle.ts) calls startDaemon with no
+        // opts → label === 'daemon'; keep its working dir at the fixture root
+        // exactly as before. Multi-operator scenarios (T2.2) pass a distinct
+        // instanceLabel and get a per-label subdir so two daemons don't collide.
+        workingDirRoot:
+          label === 'daemon'
+            ? fixture.workingDirRoot
+            : join(fixture.workingDirRoot, label),
         implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
       },
       implRegistry,
