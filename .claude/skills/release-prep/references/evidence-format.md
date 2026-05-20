@@ -28,15 +28,15 @@ Each release-prep run produces three artifact types under `<outputDir>/`:
    ```
    <!-- jinn-release-evidence:v1
    release-candidate=v0.1.7
-   tier-1-t1-1=passed
-   tier-1-t1-2=passed
-   tier-1-t1-3=skipped:helper-pending
-   tier-1-t1-4=passed
-   tier-1-overall=passed
+   tier-1-bootstrap=passed
+   tier-1-harness-readiness=passed
+   tier-1-indexer-roundtrip=skipped:helper-pending
+   tier-1-spa-route-smoke=passed
+   tier-1-overall=passed-with-skips
    -->
    ```
 
-   The schema extends the existing `jinn-release-evidence:v1` shape with `tier-1-*` keys. Each scenario gets one key shaped `tier-1-<id-lowercased-dot-to-dash>=<status>`. Status is one of `passed`, `failed:<failClass>`, or `skipped:<reason>`.
+   The schema extends the existing `jinn-release-evidence:v1` shape with the `tier-1-*` keys defined in the release-readiness spec §"Marker schema extension": `tier-1-bootstrap` (T1.1), `tier-1-harness-readiness` (T1.2), `tier-1-indexer-roundtrip` (T1.3), `tier-1-spa-route-smoke` (T1.4). Status is one of `passed`, `failed:<failClass>`, or `skipped:<reason>`. `tier-1-overall` is `passed` (all scenarios passed), `passed-with-skips` (no failures but at least one scenario skipped — e.g. T1.3 pending its Ponder helper), or `failed` (at least one scenario failed).
 
 3. **`<scenarioId>.log`** — per-scenario evidence file. Free-form text written by each scenario; convention is to include phase markers and timestamps.
 
