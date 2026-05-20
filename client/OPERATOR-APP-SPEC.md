@@ -21,9 +21,11 @@ This is **UI domain modelling** with a state-machine flavour. It is not REST API
 
 ## 2. Components
 
-### 2.1 Node
+### 2.1 Daemon
 
-The running daemon itself.
+The long-running daemon process.
+
+The *node* is the union of every component in this spec — daemon, identity, funds, memberships, and so on. This component is the daemon process specifically: the thing that has a binary, a PID, loops, logs, and a lifecycle separate from the operator app's other state.
 
 - **Static**
   - status
@@ -34,7 +36,7 @@ The running daemon itself.
   - type
   - datetime
 - **State messages**
-  - misconfigured node
+  - misconfigured
   - restart required
 
 ### 2.2 Identity
@@ -49,19 +51,23 @@ Operators have multiple addresses serving distinct purposes. The spec separates 
   - Safe address — the fleet Safe; the on-chain identity for ERC-8004 binding
   - service ID — assigned by the staking layer
   - agent ID — assigned by the IdentityRegistry
-- **Actions**
-  - rotate agent key *(open question — see §4)*
 - **State messages**
   - Safe not bound
   - agent ID not minted
   - identity migration pending
 
+Agent-key rotation without re-bootstrapping is out of scope for v1.
+
 ### 2.3 Funds
 
-ETH and OLAS the operator holds across master, agent, and Safe.
+ETH the operator holds.
+
+OLAS held in staking or as bonds is system-internal once committed and does not appear on the operator-facing surface. The node wallet's ETH is what funds gas; that is what Funds shows.
+
+ETH actually lives across three roles — the **agent address** (gas float for the signing key), the **Safe** (operations float for Safe-executed batches), and the **master address** (refill pool). Funds presents a single rolled-up total with a per-role drill-down. This is the simplest model that does not lie about where the ETH is.
 
 - **Static**
-  - eth amount
+  - eth amount (rolled-up; drill-down per role: master / agent / Safe)
   - runway
     - **Actions**
       - request funds from faucet
@@ -71,6 +77,7 @@ ETH and OLAS the operator holds across master, agent, and Safe.
 - **Streams**
   - transactions
     - time
+    - originating address (master / agent / Safe)
     - recipient
     - amount
     - explorer URL
@@ -84,8 +91,7 @@ ETH and OLAS the operator holds across master, agent, and Safe.
 The SolverNets this operator has joined. One entry per joined SolverNet, keyed by manifest CID.
 
 - **Static (per joined SolverNet)**
-  - participation health
-  - last action at
+  - last action at — the timestamp of the most recent loop tick that produced an event for this SolverNet (claim attempt, delivery, evaluation, or no-op check). This is the operator's liveness indicator for the membership; the spec deliberately does not expose a derived "participation health" metric on top.
   - environment
     - harness
     - model
@@ -148,14 +154,14 @@ Distinct from the per-membership stream in §2.4: streams are historical; the in
   - claimed at
   - harness
   - expected completion
-- **Actions**
-  - cancel task *(open question — see §4)*
 - **Streams**
   - progress updates
 - **State messages**
   - task stalled
   - harness crashed mid-task
   - evaluation overdue
+
+Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
@@ -317,7 +323,15 @@ Streams across components share a single event vocabulary — kinds, fields, and
 
 This means: if two components appear to need the same event with different fields, the spec is wrong and one of them needs a different event kind.
 
-### 3.4 Severity
+### 3.4 Notifications are derived, not durable
+
+Notifications are recomputed from current component state on daemon boot. They are not persisted across restarts.
+
+Notifications are derivable from the state of the components they describe: `funding_low` is a function of current Funds; `harness_not_ready` is a function of current Harness Readiness. Persisting them risks showing a stale notice after a state change the operator made offline. Recomputing means the notice surface is always current.
+
+The trade-off is that a dismissed-but-still-valid notice does not survive a restart — the operator may need to re-dismiss it. That is acceptable: dismissal is a UI gesture, not a fact about the world.
+
+### 3.5 Severity
 
 State messages have one of three severities, used by §2.10 Notifications for ordering and by every component for local rendering:
 
@@ -331,10 +345,4 @@ A component cannot invent a new severity. If a message does not fit one of the t
 
 These are unresolved spec questions, not implementation TODOs. They are pinned here until ratified.
 
-- Whether `last action at` on a Membership is the most-recent claim, delivery, or any loop tick.
-- Whether Notifications persist across daemon restarts, or are recomputed from current state on boot.
-- Whether `participation health` is a derived metric or a first-class field; if derived, what its inputs are.
 - Whether per-task progress in §2.6 Tasks is a stream of structured events or a single mutable current-state field.
-- Whether Identity rotation — rotating the agent key without re-bootstrapping — is in scope for v1.
-- Whether `cancel task` in §2.6 is in scope for v1, or strictly future.
-- Whether the operator app surfaces a *master vs agent* funds split, or a single rolled-up runway figure with a drill-down.
