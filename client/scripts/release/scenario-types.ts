@@ -30,27 +30,32 @@ export interface ScenarioOptions {
   rpcUrl?: string;
 }
 
-const FLAKE_INFRA_PATTERNS = [
-  /HTTP request failed/i,
-  /ECONNREFUSED/i,
-  /ECONNRESET/i,
-  /socket hang up/i,
-  /network/i,
-  /getaddrinfo/i,
-];
-const FLAKE_TIMING_PATTERNS = [
-  /timed out/i,
-  /timeout/i,
-  /waiting for/i,
+/**
+ * Flake-classification rules, checked top to bottom — list order is precedence.
+ * A failure not matched by any rule defaults to `real-bug` (conservative).
+ */
+const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
+  {
+    klass: 'flake-infra',
+    patterns: [
+      /HTTP request failed/i,
+      /ECONNREFUSED/i,
+      /ECONNRESET/i,
+      /socket hang up/i,
+      /network/i,
+      /getaddrinfo/i,
+    ],
+  },
+  {
+    klass: 'flake-timing',
+    patterns: [/timed out/i, /timeout/i, /waiting for/i],
+  },
 ];
 
 export function classifyFailure(err: unknown): FailClass {
   const msg = err instanceof Error ? err.message : String(err);
-  for (const re of FLAKE_INFRA_PATTERNS) {
-    if (re.test(msg)) return 'flake-infra';
-  }
-  for (const re of FLAKE_TIMING_PATTERNS) {
-    if (re.test(msg)) return 'flake-timing';
+  for (const { klass, patterns } of FLAKE_RULES) {
+    if (patterns.some((re) => re.test(msg))) return klass;
   }
   return 'real-bug';
 }
