@@ -1,6 +1,6 @@
 import { createPublicClient, http, parseAbi, type Address } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { loadManifestSafe, type VerifyResult } from './types';
+import { loadManifestSafe, serializeVerifyResult, type VerifyResult } from './types';
 import { goldPath } from './substrate-paths';
 
 const MIN_MASTER_ETH_WEI = 2_000_000_000_000_000n;   // 0.002 ETH
@@ -99,17 +99,7 @@ async function cliMain(): Promise<void> {
   }
   const skipOnChain = process.argv.includes('--skip-on-chain');
   const result = await verifySubstrate(opName, { skipOnChain });
-  const printable = {
-    ...result,
-    onChain: result.onChain
-      ? {
-          ...result.onChain,
-          ethBalanceWei: result.onChain.ethBalanceWei.toString(),
-          olasBalanceWei: result.onChain.olasBalanceWei?.toString() ?? null,
-        }
-      : null,
-  };
-  console.log(JSON.stringify(printable, null, 2));
+  console.log(JSON.stringify(serializeVerifyResult(result), null, 2));
   process.exit(result.ok ? 0 : 1);
 }
 

@@ -95,6 +95,29 @@ export interface VerifyResult {
   } | null;                     // null if on-chain check was skipped
 }
 
+/** A VerifyResult with its on-chain bigint balances rendered as strings. */
+export interface SerializedVerifyResult extends Omit<VerifyResult, 'onChain'> {
+  onChain: {
+    boundSafeAddress: string | null;
+    ethBalanceWei: string;
+    olasBalanceWei: string | null;
+  } | null;
+}
+
+/** Render a VerifyResult to a JSON-safe shape (bigint balances → strings). */
+export function serializeVerifyResult(result: VerifyResult): SerializedVerifyResult {
+  return {
+    ...result,
+    onChain: result.onChain
+      ? {
+          ...result.onChain,
+          ethBalanceWei: result.onChain.ethBalanceWei.toString(),
+          olasBalanceWei: result.onChain.olasBalanceWei?.toString() ?? null,
+        }
+      : null,
+  };
+}
+
 export interface TopupResult {
   opName: string;
   needs: { resource: 'ETH' | 'USDC'; have: bigint; want: bigint }[];

@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { verifySubstrate } from '../../../scripts/release/substrate-verify';
-import type { Manifest } from '../../../scripts/release/types';
+import { serializeVerifyResult, type Manifest } from '../../../scripts/release/types';
 import { spawnAnvilFork, type AnvilForkHandle } from './helpers/anvil-fork';
 
 describe('substrate-verify (manifest only)', () => {
@@ -124,16 +124,7 @@ describe('substrate-verify (on-chain check)', () => {
     expect(result.onChain!.ethBalanceWei).toBe(0n);
     expect(result.failures.some((f) => f.toLowerCase().includes('eth balance'))).toBe(true);
 
-    const printable = {
-      ...result,
-      onChain: result.onChain
-        ? {
-            ...result.onChain,
-            ethBalanceWei: result.onChain.ethBalanceWei.toString(),
-            olasBalanceWei: result.onChain.olasBalanceWei?.toString() ?? null,
-          }
-        : null,
-    };
+    const printable = serializeVerifyResult(result);
     expect(() => JSON.stringify(printable)).not.toThrow();
     expect(typeof printable.onChain!.ethBalanceWei).toBe('string');
   });
