@@ -45,6 +45,12 @@ export interface HandoffDocInput {
   independentEvidence?: string;
 }
 
+// Render a scenario verdict as a release-evidence marker value: `passed` or
+// `failed:<failClass>`. Shared by the per-scenario lines of the marker block.
+function verdictMarker(verdict: ScenarioVerdict): string {
+  return verdict.verdict === 'pass' ? 'passed' : `failed:${verdict.failClass}`;
+}
+
 export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): Promise<void> {
   await fs.mkdir(path.dirname(outPath), { recursive: true });
   const lines: string[] = [];
@@ -121,11 +127,11 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   push(`release-tag=${input.candidateVersion}`);
   push(`release-commit=${input.branchSha}`);
   for (const v of input.releasePrepVerdicts) {
-    const key = `${v.scenarioId.toLowerCase().replace(/\./g, '-').replace(/^t/, 'tier-')}`;
-    push(`${key}=${v.verdict === 'pass' ? 'passed' : `failed:${v.failClass}`}`);
+    const key = v.scenarioId.toLowerCase().replace(/\./g, '-').replace(/^t/, 'tier-');
+    push(`${key}=${verdictMarker(v)}`);
   }
   if (input.tier3Verdict) {
-    push(`tier-3-t3-1=${input.tier3Verdict.verdict === 'pass' ? 'passed' : `failed:${input.tier3Verdict.failClass}`}`);
+    push(`tier-3-t3-1=${verdictMarker(input.tier3Verdict)}`);
   } else {
     push(`tier-3-t3-1=skipped:${input.mode === 'autonomous' ? 'autonomous-mode' : 'human-skipped'}`);
   }
