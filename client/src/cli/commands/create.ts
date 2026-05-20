@@ -241,7 +241,7 @@ Examples:
   jinn create plugin  @example/my-runtime --pattern runtime-plugin
 
 Quickstart:
-  https://github.com/Jinn-Network/mono/blob/main/client/docs/build/quickstart.md
+  https://github.com/Jinn-Network/mono/blob/next/client/docs/build/quickstart.md
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -327,7 +327,7 @@ async function run(ctx: CommandContext): Promise<void> {
   ctx.writer.write(
     `Created ${packageName} at ${target}\n` +
     `Next: cd ${target} && yarn install && yarn test\n` +
-    `Quickstart: https://github.com/Jinn-Network/mono/blob/main/client/docs/build/quickstart.md\n`,
+    `Quickstart: https://github.com/Jinn-Network/mono/blob/next/client/docs/build/quickstart.md\n`,
   );
 }
 

@@ -35,7 +35,7 @@ const HERMES_AGENT_DESCRIPTION =
  * there for the full picture (Issue #334).
  */
 const JOIN_FORM_CONTEXT_DOC =
-  'https://github.com/Jinn-Network/mono/blob/main/client/docs/operator/join-form-context.md';
+  'https://github.com/Jinn-Network/mono/blob/next/client/docs/operator/join-form-context.md';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
