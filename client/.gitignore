@@ -10,6 +10,7 @@ acceptance-runs/
 release-runs/
 tier-1-evidence/
 tier-2-evidence/
+tier-3-evidence/
 test-results/
 playwright-report/
 playwright/.cache/

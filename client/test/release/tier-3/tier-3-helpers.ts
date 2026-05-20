@@ -21,19 +21,23 @@ export async function isDailyDriverRunning(opts: IsDailyDriverOptions = {}): Pro
   return false;
 }
 
+// Liveness check by *connecting* rather than binding. The daily-driver daemon's
+// API binds 127.0.0.1 explicitly (see client/src/api/server.ts — `hostname:
+// config.bindHost ?? '127.0.0.1'`). A bind-based probe on the default interface
+// (`::`) does not reliably collide with a 127.0.0.1-only listener on macOS, so
+// it would silently miss a running daily driver and defeat the mutex. A TCP
+// connect to 127.0.0.1 is unambiguous: it succeeds iff something is listening.
 async function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const tester = net.createServer();
-    tester.once('error', (err: NodeJS.ErrnoException) => {
-      resolve(err.code === 'EADDRINUSE');
-    });
-    tester.once('listening', () => {
-      tester.close(() => resolve(false));
-    });
-    // Omit host arg so the tester binds to the same default interface (::) that
-    // net.createServer().listen(port) uses on dual-stack systems. Pinning to
-    // '127.0.0.1' here would miss an IPv6 listener occupying the same port.
-    tester.listen(port);
+    const socket = net.connect({ port, host: '127.0.0.1' });
+    const done = (inUse: boolean) => {
+      socket.destroy();
+      resolve(inUse);
+    };
+    socket.setTimeout(1000);
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false));
   });
 }
 
