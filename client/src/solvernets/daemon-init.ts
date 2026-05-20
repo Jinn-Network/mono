@@ -375,6 +375,20 @@ export async function initSolverNetSubsystem(
 
 // ── Catalog cache ───────────────────────────────────────────────────────────
 
+/**
+ * Recover the typed `DiscoveryUnavailableError.code` from a refresh failure.
+ * In every current production path the on-chain floor throws the
+ * DiscoveryUnavailableError directly; the `cause` lookup is defensive — should
+ * an enrichment layer ever wrap the error, the typed signal is still recovered
+ * rather than collapsed to a generic failure. See jinn-mono #325.
+ */
+function discoveryCodeOf(err: unknown): DiscoveryUnavailableCode | undefined {
+  if (err instanceof DiscoveryUnavailableError) return err.code;
+  const cause = err instanceof Error ? (err as { cause?: unknown }).cause : undefined;
+  if (cause instanceof DiscoveryUnavailableError) return cause.code;
+  return undefined;
+}
+
 interface CatalogCacheConfig {
   registryClient: SolverNetRegistryClient;
   network: 'base-sepolia' | 'base';
@@ -405,16 +419,8 @@ function createCatalogCache(config: CatalogCacheConfig): SolverNetCatalogCache {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Preserve the typed `rpc_rate_limited` signal so the operator UI can
-      // tell a throttled RPC apart from a generic catalog failure. The error
-      // may arrive directly (the on-chain floor wrapped a 429) or as the
-      // `cause` of an enrichment-layer error — check both. See jinn-mono #325.
-      const code =
-        err instanceof DiscoveryUnavailableError && err.code !== undefined
-          ? err.code
-          : err instanceof Error &&
-              (err as { cause?: unknown }).cause instanceof DiscoveryUnavailableError
-            ? ((err as { cause?: unknown }).cause as DiscoveryUnavailableError).code
-            : undefined;
+      // tell a throttled RPC apart from a generic catalog failure.
+      const code = discoveryCodeOf(err);
       lastError = { message, at: now(), ...(code !== undefined ? { code } : {}) };
       config.logger.warn(
         `[solvernet] catalog refresh failed${code ? ` (${code})` : ''}: ${message}`,

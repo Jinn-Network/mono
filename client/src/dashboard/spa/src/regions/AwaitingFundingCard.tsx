@@ -291,7 +291,7 @@ export function AwaitingFundingCard({
           className="j-mono text-[11px]"
           style={{ color: 'var(--fg-dim)' }}
         >
-          Using a shared trial RPC — add your own key in Settings &gt; Network
+          Using a shared trial RPC — add your own key in the Network section
           for reliable operation.
         </p>
       )}

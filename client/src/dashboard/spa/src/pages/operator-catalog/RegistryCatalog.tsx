@@ -71,12 +71,13 @@ interface RegistryErrorCopy {
 /**
  * Operator-facing copy for a rate-limited RPC. The default Base Sepolia RPC is
  * shared across the whole operator pool, so a 429 here is an operator-actionable
- * condition — point them at Settings to add their own free key rather than
- * leaving them with a generic "catalog not found". See jinn-mono #325.
+ * condition — point them at the Network section to add their own free key
+ * rather than leaving them with a generic "catalog not found". See
+ * jinn-mono #325.
  */
 const RPC_RATE_LIMITED_COPY: RegistryErrorCopy = {
   title: 'Your RPC endpoint is rate-limited.',
-  detail: 'Open Settings > Network and add your own free key.',
+  detail: 'Open the Network section and add your own free key.',
   actionHref: '/operator#network',
   actionLabel: 'Open Network settings →',
 };

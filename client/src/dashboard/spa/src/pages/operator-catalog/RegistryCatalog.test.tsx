@@ -399,7 +399,7 @@ describe('RegistryCatalog', () => {
     );
     expect(screen.getByText(/your rpc endpoint is rate-limited/i)).toBeTruthy();
     expect(
-      screen.getByText(/open settings > network and add your own free key/i),
+      screen.getByText(/open the network section and add your own free key/i),
     ).toBeTruthy();
     const action = screen.getByTestId('registry-catalog-error-action');
     expect(action.getAttribute('href')).toBe('/operator#network');
