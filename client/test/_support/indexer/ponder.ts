@@ -215,6 +215,15 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
   let exited = false;
   child.once('exit', () => { exited = true; });
 
+  // Terminate the child: SIGTERM, a grace period to flush, then SIGKILL if it
+  // is still alive. Used by both the spawn-failure path and teardown.
+  const terminateChild = async (graceMs: number): Promise<void> => {
+    if (exited) return;
+    try { child.kill('SIGTERM'); } catch {}
+    await new Promise<void>((r) => setTimeout(r, graceMs));
+    if (!exited) { try { child.kill('SIGKILL'); } catch {} }
+  };
+
   // Race readiness against three failure conditions:
   // 1. Process exits unexpectedly (binary missing, immediate crash)
   // 2. RPC diagnostic fails after retries (RPC unreachable; fast-fail before timeout)
@@ -240,11 +249,7 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
   } catch (err) {
     // Always detach RPC watcher listeners before throwing.
     rpcWatcher.cancel();
-    if (!exited) {
-      try { child.kill('SIGTERM'); } catch {}
-      await new Promise<void>((r) => setTimeout(r, 200));
-      if (!exited) { try { child.kill('SIGKILL'); } catch {} }
-    }
+    await terminateChild(200);
     throw err;
   }
   // Detach RPC watcher listeners on the happy path so they don't accumulate.
@@ -258,12 +263,7 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
     teardown: async (): Promise<void> => {
       if (torn) return;
       torn = true;
-      try { child.kill('SIGTERM'); } catch {}
-      // Give the process a short grace period to flush and exit.
-      await new Promise<void>((r) => setTimeout(r, 300));
-      if (!exited) {
-        try { child.kill('SIGKILL'); } catch {}
-      }
+      await terminateChild(300);
     },
   };
 }
