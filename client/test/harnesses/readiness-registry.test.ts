@@ -35,6 +35,36 @@ describe('HarnessReadinessRegistry', () => {
     ]);
   });
 
+  it('snapshots every registered harness, even those not joined to any SolverNet (#332)', async () => {
+    // The join form consults the readiness snapshot BEFORE any join exists,
+    // so a harness the operator could pick must appear with empty manifestCids.
+    const claude = fakeHarness('claude-code', { ready: true, reason: 'ok' });
+    const codex = fakeHarness('codex', {
+      ready: false,
+      reason: 'codex CLI not installed',
+      nextStep: { description: 'Install Codex CLI', cli: 'npm i -g @openai/codex' },
+    });
+    const registry = new HarnessReadinessRegistry({
+      harnessesByName: { 'claude-code': claude, codex },
+      // claude-code is joined; codex is registered but NOT joined.
+      joinedHarnessesByCid: {
+        'bafkrei.claude': { harnessName: 'claude-code', roles: ['solver'] },
+      },
+      tickIntervalMs: 4000,
+    });
+    await registry.refreshNow();
+    const snapshot = registry.getSnapshot();
+    const byName = new Map(snapshot.harnesses.map((h) => [h.harnessName, h]));
+    expect(byName.get('claude-code')).toEqual(
+      expect.objectContaining({ ready: true, manifestCids: ['bafkrei.claude'] }),
+    );
+    // Unjoined harness still snapshotted, with an empty manifestCids list.
+    expect(byName.get('codex')).toEqual(
+      expect.objectContaining({ ready: false, manifestCids: [] }),
+    );
+    expect(byName.get('codex')?.nextStep?.description).toBe('Install Codex CLI');
+  });
+
   it('isReadyForClaim returns ready=false for unknown manifestCid', async () => {
     const registry = new HarnessReadinessRegistry({
       harnessesByName: {},

@@ -26,6 +26,7 @@ const apiMock = vi.hoisted(() => ({
   operatorJoin: vi.fn(),
   operatorLeave: vi.fn(),
   hermesDoctor: vi.fn(),
+  harnessReadiness: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({
@@ -39,6 +40,7 @@ vi.mock('../../api/client.js', () => ({
       leave: (cid: string) => apiMock.operatorLeave(cid),
     },
     hermesDoctor: () => apiMock.hermesDoctor(),
+    harnessReadiness: (name: string) => apiMock.harnessReadiness(name),
   },
 }));
 
@@ -143,6 +145,15 @@ beforeEach(() => {
   apiMock.operatorJoin.mockReset();
   apiMock.operatorLeave.mockReset();
   apiMock.hermesDoctor.mockReset();
+  apiMock.harnessReadiness.mockReset();
+
+  // Default: every probed harness reports ready. Tests that exercise the
+  // not-ready path override this per harness name.
+  apiMock.harnessReadiness.mockImplementation(async (name: string) => ({
+    harnessName: name,
+    manifestCids: [],
+    ready: true,
+  }));
 
   apiMock.getManifest.mockResolvedValue({
     manifest: baseManifest,
@@ -389,6 +400,174 @@ describe('JoinFlow — harness options', () => {
     const chipPlugins = chips.map((c) => c.getAttribute('data-plugin'));
     expect(chipPlugins).not.toContain('claude-code-learner');
     expect(chipPlugins).toContain('network-tools');
+  });
+});
+
+describe('JoinFlow — per-harness readiness gate (#332)', () => {
+  /** Catalog with Claude Code + Codex, both compatible. */
+  const twoHarnessCatalog = {
+    ...baseCatalog,
+    nets: [
+      {
+        ...baseCatalog.nets[0]!,
+        compatibleHarnesses: [
+          { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+        ],
+      },
+    ],
+  };
+
+  it('disables the harness option for a not-ready harness', async () => {
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+      if (name === 'codex') {
+        return {
+          harnessName: 'codex',
+          manifestCids: [],
+          ready: false,
+          reason: 'codex CLI not installed',
+          nextStep: { description: 'Install Codex CLI', cli: 'npm i -g @openai/codex' },
+        };
+      }
+      return { harnessName: name, manifestCids: [], ready: true };
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    await waitFor(() => {
+      const codexOption = screen
+        .getAllByTestId('join-harness-option')
+        .find((o) => o.getAttribute('data-harness') === 'codex') as HTMLOptionElement;
+      expect(codexOption.disabled).toBe(true);
+    });
+    const codexOption = screen
+      .getAllByTestId('join-harness-option')
+      .find((o) => o.getAttribute('data-harness') === 'codex') as HTMLOptionElement;
+    expect(codexOption.textContent).toMatch(/setup required/i);
+
+    // Claude Code is ready — its option stays selectable.
+    const claudeOption = screen
+      .getAllByTestId('join-harness-option')
+      .find((o) => o.getAttribute('data-harness') === 'claude-code') as HTMLOptionElement;
+    expect(claudeOption.disabled).toBe(false);
+  });
+
+  it('shows the nextStep caption when the selected harness is not ready', async () => {
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    // Claude Code (the default selection) is not ready.
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+      if (name === 'claude-code') {
+        return {
+          harnessName: 'claude-code',
+          manifestCids: [],
+          ready: false,
+          reason: 'not signed in',
+          nextStep: { description: 'Sign in to Claude Code', cli: 'claude login' },
+        };
+      }
+      return { harnessName: name, manifestCids: [], ready: true };
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-harness-not-ready')).toBeTruthy(),
+    );
+    const banner = screen.getByTestId('join-harness-not-ready');
+    expect(banner.textContent).toMatch(/not ready/i);
+    expect(banner.textContent).toMatch(/not signed in/);
+    expect(screen.getByTestId('join-harness-not-ready-next-step').textContent).toMatch(
+      /Sign in to Claude Code/,
+    );
+    expect(screen.getByTestId('join-harness-not-ready-next-step').textContent).toMatch(
+      /claude login/,
+    );
+  });
+
+  it('gates Save & Join when the selected solver harness is not ready', async () => {
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+      if (name === 'claude-code') {
+        return {
+          harnessName: 'claude-code',
+          manifestCids: [],
+          ready: false,
+          reason: 'not signed in',
+          nextStep: { description: 'Sign in to Claude Code' },
+        };
+      }
+      return { harnessName: name, manifestCids: [], ready: true };
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    // Default harness (claude-code) is not ready — submit must be disabled.
+    await waitFor(() => {
+      const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
+    });
+  });
+
+  it('does NOT gate Save & Join when the selected harness is ready', async () => {
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    // Default mock: all ready.
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    await waitFor(() => expect(apiMock.harnessReadiness).toHaveBeenCalled());
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    expect(screen.queryByTestId('join-harness-not-ready')).toBeNull();
+  });
+
+  it('does NOT gate Save & Join on harness readiness when only evaluator is selected', async () => {
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    // Even if a solver harness probe came back not-ready, the evaluator-only
+    // path binds harness from the manifest and must not be readiness-gated.
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => ({
+      harnessName: name,
+      manifestCids: [],
+      ready: false,
+      reason: 'not signed in',
+    }));
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    // The solver-only not-ready banner is not rendered without solver fields.
+    expect(screen.queryByTestId('join-harness-not-ready')).toBeNull();
+  });
+
+  it('does not crash when a harness is absent from the readiness snapshot (404)', async () => {
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    apiMock.harnessReadiness.mockImplementation(async (_name: string) => {
+      const err = new Error('404 Not Found') as Error & { code?: string };
+      err.code = 'harness_not_found';
+      throw err;
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    await waitFor(() => expect(apiMock.harnessReadiness).toHaveBeenCalled());
+    // Unknown readiness → not blocked, no not-ready banner, options enabled.
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    expect(screen.queryByTestId('join-harness-not-ready')).toBeNull();
+    const options = screen.getAllByTestId('join-harness-option') as HTMLOptionElement[];
+    expect(options.every((o) => !o.disabled)).toBe(true);
   });
 });
 

@@ -105,8 +105,16 @@ export class HarnessReadinessRegistry {
   }
 
   private async _doRefresh(): Promise<void> {
-    // Group joined entries by harnessName so we only call isReady() once per harness.
+    // Group joined entries by harnessName so we only call isReady() once per
+    // harness. Seed the map with EVERY registered harness — not just joined
+    // ones — so the snapshot covers harnesses the operator could pick but
+    // has not joined yet. The SPA join form (#332) consults this snapshot to
+    // disable not-ready harness options before any join exists, so an
+    // unjoined harness must still appear (with an empty `manifestCids`).
     const harnessToCids = new Map<string, string[]>();
+    for (const name of Object.keys(this.opts.harnessesByName)) {
+      harnessToCids.set(name, []);
+    }
     for (const [cid, joined] of Object.entries(this.opts.joinedHarnessesByCid)) {
       const list = harnessToCids.get(joined.harnessName) ?? [];
       list.push(cid);

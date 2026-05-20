@@ -27,6 +27,7 @@ import type {
   DiscoveryPluginPublicationsResponse,
   DiscoveryBuilderArtifactsResponse,
   DiscoveryPluginScoresResponse,
+  HarnessReadinessEntry,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -205,6 +206,18 @@ export const api = {
   hermesDoctor: () =>
     jfetch<{ installed: boolean; exitCode: number | null; stdout: string; stderr: string }>(
       '/api/hermes/doctor',
+    ),
+
+  /**
+   * Per-harness readiness snapshot (vh74.2 Stage A — #248 / #332).
+   * `GET /v1/harnesses/:name/readiness` keys by the daemon's `Harness.name`,
+   * which is the canonical harness name the join form already carries in
+   * `form.harness`. A 404 (`harness_not_found`) propagates as a thrown Error
+   * with `code === 'harness_not_found'`.
+   */
+  harnessReadiness: (name: string) =>
+    jfetch<HarnessReadinessEntry>(
+      `/v1/harnesses/${encodeURIComponent(name)}/readiness`,
     ),
 
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
