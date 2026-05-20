@@ -50,28 +50,22 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
   const processes: ChildProcess[] = [];
 
   async function killAll(): Promise<void> {
-    for (const proc of processes) {
-      if (!proc.killed && proc.pid) {
-        try { proc.kill('SIGTERM'); } catch {}
+    const signal = (sig: NodeJS.Signals) => {
+      for (const proc of processes) {
+        if (!proc.killed && proc.pid) {
+          try { proc.kill(sig); } catch {}
+        }
       }
-    }
+    };
+    signal('SIGTERM');
     await new Promise((r) => setTimeout(r, 200));
-    for (const proc of processes) {
-      if (!proc.killed && proc.pid) {
-        try { proc.kill('SIGKILL'); } catch {}
-      }
-    }
+    signal('SIGKILL');
   }
 
-  // When the test seed config has an unreachable rpcUrl (e.g. a dummy hostname
-  // used in beforeAll setup), JINN_RPC_URL overrides config so the daemon's
-  // RPC preflight can pass. config.ts gives JINN_RPC_URL unconditional precedence
-  // over BASE_RPC_URL and BASE_SEPOLIA_RPC_URL, so the helper must consult any
-  // RPC URL the caller put in extraEnv (e.g. an Anvil fork URL) and surface it
-  // through JINN_RPC_URL — otherwise extraEnv.BASE_RPC_URL would be silently
-  // overridden by the host fallback. Resolution order: extraEnv.JINN_RPC_URL,
-  // extraEnv.BASE_RPC_URL, host JINN_RPC_URL, host BASE_SEPOLIA_RPC_URL, then
-  // the public Tenderly gateway (matches config.ts:986).
+  // config.ts gives JINN_RPC_URL unconditional precedence over BASE_RPC_URL,
+  // so any RPC URL the caller passed in extraEnv must be surfaced through it.
+  // Resolution order: extraEnv JINN/BASE RPC URL, host JINN/BASE_SEPOLIA RPC
+  // URL, then the public Tenderly gateway (matches config.ts:986).
   const fallbackRpcUrl =
     opts.extraEnv?.['JINN_RPC_URL'] ??
     opts.extraEnv?.['BASE_RPC_URL'] ??
