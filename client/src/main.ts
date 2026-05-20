@@ -36,6 +36,7 @@ import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
+import { isEmbeddedAgentEnabled } from './api/bootstrap-endpoint.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { requestDaemonRestart } from './restart-daemon.js';
@@ -171,6 +172,13 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
   config.network = 'testnet';
   config.rpcUrl = 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
 }
+// Issue #326: the embedded Claude agent chat surface (right rail + onboarding
+// "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
+// action-authority / plugin-scope shape is still in design. Set
+// `JINN_ENABLE_EMBEDDED_AGENT=1` to re-enable it for development. This does
+// NOT affect Claude-Code-as-a-solver-harness — that path is independent.
+const embeddedAgentEnabled = isEmbeddedAgentEnabled();
+
 let activeClaudePath = config.claudePath ?? 'claude';
 const selectClaudePath = (claudePath: string): void => {
   activeClaudePath = claudePath;
@@ -1036,6 +1044,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           solverNets: config.solverNets as Record<string, unknown> | undefined,
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
         }),
+        // Issue #326: gate the embedded agent chat surface. Off by default;
+        // `JINN_ENABLE_EMBEDDED_AGENT=1` re-enables it for development.
+        embeddedAgentEnabled: embeddedAgentEnabled,
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
       // Once the daemon's harness/plugin registry is loaded, swap this for a
@@ -1342,38 +1353,52 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // can attach to a long-lived embedded `claude` subprocess. The embedded
   // session reads MCP config we materialise to disk so it can reach the
   // operator MCP server (`jinn mcp`) for tool calls.
-  const operatorMcpConfigPath = join(homedir(), '.jinn-client', 'operator-mcp-config.json');
-  try {
-    mkdirSync(dirname(operatorMcpConfigPath), { recursive: true });
-    writeFileSyncMain(
-      operatorMcpConfigPath,
-      JSON.stringify(
-        {
-          mcpServers: {
-            'jinn-operator': {
-              command: 'jinn',
-              args: ['mcp'],
+  //
+  // Issue #326: the embedded agent chat surface is hidden by default. The WS
+  // bridge mounts only when `JINN_ENABLE_EMBEDDED_AGENT=1` so the dev-time
+  // path stays end-to-end; with the flag off there is no /api/agent/ws route
+  // and the SPA never renders the chat panel. Claude-Code-as-solver-harness
+  // is independent of this bridge and unaffected.
+  if (embeddedAgentEnabled) {
+    const operatorMcpConfigPath = join(homedir(), '.jinn-client', 'operator-mcp-config.json');
+    try {
+      mkdirSync(dirname(operatorMcpConfigPath), { recursive: true });
+      writeFileSyncMain(
+        operatorMcpConfigPath,
+        JSON.stringify(
+          {
+            mcpServers: {
+              'jinn-operator': {
+                command: 'jinn',
+                args: ['mcp'],
+              },
             },
           },
-        },
-        null,
-        2,
-      ),
+          null,
+          2,
+        ),
+      );
+    } catch (err) {
+      console.warn(
+        `[main] Failed to write operator MCP config at ${operatorMcpConfigPath}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+    attachAgentWs({
+      httpServer: setupApiServer.server,
+      uiToken,
+      claudePath: activeClaudePath,
+      cwd: process.cwd(),
+      mcpConfigPath: operatorMcpConfigPath,
+    });
+    console.log(
+      `[main] Agent WS bridge mounted at ws://127.0.0.1:${setupApiServer.port}/api/agent/ws`,
     );
-  } catch (err) {
-    console.warn(
-      `[main] Failed to write operator MCP config at ${operatorMcpConfigPath}: ` +
-        (err instanceof Error ? err.message : String(err)),
+  } else {
+    console.log(
+      '[main] Embedded agent surface disabled (set JINN_ENABLE_EMBEDDED_AGENT=1 to enable).',
     );
   }
-  attachAgentWs({
-    httpServer: setupApiServer.server,
-    uiToken,
-    claudePath: activeClaudePath,
-    cwd: process.cwd(),
-    mcpConfigPath: operatorMcpConfigPath,
-  });
-  console.log(`[main] Agent WS bridge mounted at ws://127.0.0.1:${setupApiServer.port}/api/agent/ws`);
 
   // ── Init-if-missing ──────────────────────────────────────────────────────
   // If the keystore is missing but we have a password, run `jinn init` now so

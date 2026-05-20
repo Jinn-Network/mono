@@ -18,4 +18,20 @@ describe('AppShell', () => {
     expect(screen.getByTestId('rail')).toBeTruthy();
     expect(screen.getByTestId('main')).toBeTruthy();
   });
+
+  // Issue #326: when the embedded agent surface is hidden the rail prop is
+  // omitted; the shell renders no aside and collapses to a single column.
+  it('renders no rail aside when the rail prop is omitted', () => {
+    render(
+      <AppShell
+        header={<div data-testid="header">H</div>}
+        tabs={<div data-testid="tabs">T</div>}
+      >
+        <div data-testid="main">M</div>
+      </AppShell>,
+    );
+    expect(screen.getByTestId('header')).toBeTruthy();
+    expect(screen.getByTestId('main')).toBeTruthy();
+    expect(screen.queryByTestId('rail')).toBeNull();
+  });
 });

@@ -53,6 +53,9 @@ export default function App(): JSX.Element {
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
   const masterAddress = data.master_address ?? '';
+  // Issue #326: the embedded agent rail renders only when the daemon reports
+  // the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
+  const embeddedAgentEnabled = data.embeddedAgentEnabled === true;
 
   return (
     <Router>
@@ -66,7 +69,7 @@ export default function App(): JSX.Element {
       <AppShell
         header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
         tabs={<TopTabs />}
-        rail={<AgentRail />}
+        rail={embeddedAgentEnabled ? <AgentRail /> : undefined}
       >
         <Switch>
           <Route path="/overview/activity"><OverviewActivityPage /></Route>

@@ -26,6 +26,27 @@ export interface BootstrapEndpointConfig {
     solverNets?: Record<string, unknown>;
     joinedSolverNets?: Record<string, unknown>;
   };
+  /**
+   * Feature flag for the embedded Claude agent chat surface in the operator
+   * SPA. Defaults to false; set via `JINN_ENABLE_EMBEDDED_AGENT=1` for
+   * development. When false, the SPA hides the agent rail / "Ask Claude"
+   * onboarding panel and the daemon does not mount the `/api/agent/ws`
+   * bridge. The Claude-Code-as-solver-harness path is unaffected. See
+   * GitHub issue #326.
+   */
+  embeddedAgentEnabled?: boolean;
+}
+
+/**
+ * Resolves the JINN_ENABLE_EMBEDDED_AGENT env var. Default off. Anything
+ * other than '1' / 'true' (case-insensitive) is treated as off so a stray
+ * value can't accidentally re-enable the surface.
+ */
+export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env['JINN_ENABLE_EMBEDDED_AGENT'];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
 }
 
 const STEPS = [
@@ -131,6 +152,7 @@ function fundingTargetWei(fundingGate: FundingGateOnDisk): string | undefined {
 
 export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): void {
   app.get('/v1/bootstrap', (c) => {
+    const embeddedAgentEnabled = config.embeddedAgentEnabled ?? false;
     const path = join(config.earningDir, 'earning_state.json');
     if (!existsSync(path)) {
       return c.json({
@@ -139,6 +161,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
         steps: STEPS,
         currentStep: STEPS[0],
         services: [],
+        embeddedAgentEnabled,
       });
     }
 
@@ -204,6 +227,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       steps: STEPS,
       currentStep,
       services,
+      embeddedAgentEnabled,
       master_address: parsed.master_address,
       chain: parsed.chain,
       ...(parsed.fleet_agent_id ? { fleet_agent_id: parsed.fleet_agent_id } : {}),

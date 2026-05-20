@@ -116,6 +116,10 @@ export function Onboarding(): JSX.Element {
   // momentary drip that briefly crossed the threshold doesn't flip the row
   // to DONE before the bootstrapper advances past awaiting_funding on-chain.
   const fundingTargetMet = bootstrap.funding?.targetMet;
+  // Issue #326: the embedded "Ask Claude" panel renders only when the daemon
+  // reports the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). When off,
+  // the bootstrap-progress column spans the full width.
+  const embeddedAgentEnabled = bootstrap.embeddedAgentEnabled === true;
   return (
     <div
       className="min-h-screen w-full"
@@ -124,7 +128,9 @@ export function Onboarding(): JSX.Element {
       <style>{ANIMATIONS}</style>
 
       <div className="max-w-[1280px] mx-auto px-10 py-10 grid grid-cols-12 gap-10">
-        <section className="col-span-12 lg:col-span-7 flex flex-col gap-8">
+        <section
+          className={`col-span-12 ${embeddedAgentEnabled ? 'lg:col-span-7' : ''} flex flex-col gap-8`}
+        >
           <header className="flex items-baseline justify-between">
             <span className="j-label" style={{ color: 'var(--accent-gold)' }}>
               Jinn · Onboarding
@@ -171,15 +177,17 @@ export function Onboarding(): JSX.Element {
           </ol>
         </section>
 
-        <aside className="col-span-12 lg:col-span-5 flex flex-col gap-3">
-          <span className="j-label">Ask Claude</span>
-          <div
-            className="j-card overflow-hidden"
-            style={{ height: 'calc(100vh - 220px)', minHeight: '520px' }}
-          >
-            <Agent agentGated={false} />
-          </div>
-        </aside>
+        {embeddedAgentEnabled && (
+          <aside className="col-span-12 lg:col-span-5 flex flex-col gap-3">
+            <span className="j-label">Ask Claude</span>
+            <div
+              className="j-card overflow-hidden"
+              style={{ height: 'calc(100vh - 220px)', minHeight: '520px' }}
+            >
+              <Agent agentGated={false} />
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

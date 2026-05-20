@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Embedded agent surface hidden by default (issue #326)
+
+- **The embedded Claude agent chat surface no longer renders in the operator
+  app by default.** The right-rail agent panel (running mode) and the
+  "Ask Claude" panel (onboarding) are hidden. The 2026-05-19 v0.1.6 dogfood
+  found the surface isn't robust enough for first-time operators — it is the
+  only daemon-side surface that strictly requires Claude auth, and its
+  action-authority / plugin-scope shape is still in design (#177 / #178).
+- **Feature flag: `JINN_ENABLE_EMBEDDED_AGENT`.** Set
+  `JINN_ENABLE_EMBEDDED_AGENT=1` (also accepts `true`) to re-enable the
+  surface for development. Default is off. When off, the daemon does not
+  mount the `/api/agent/ws` bridge and the SPA renders no agent panel; when
+  on, the dev-time path works end-to-end as before.
+- **Claude-Code-as-a-solver-harness is unaffected.** Operators can still pick
+  Claude Code as their SolverNet harness — that path is independent of the
+  embedded chat surface and its WebSocket bridge.
+
 ### SWE-rebench v2 admission
 
 - **Admission semantics bumped from `'2'` → `'3'`.** Operators running the
