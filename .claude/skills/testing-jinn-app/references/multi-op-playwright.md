@@ -2,6 +2,19 @@
 
 For automated regression coverage of two-operator flows. Tests live under `client/test/dashboard/multi-op/`. Pattern below mirrors the existing single-op `client/test/dashboard/spa-config.e2e.test.ts` but with two daemons + two Playwright pages.
 
+> **Prerequisites — not yet on the Plan B branch.**
+> - **Plan A's `substrate-copy.ts`.** The templates below import `copyWorkspace`
+>   from `client/scripts/release/substrate-copy.ts`. That file is a Plan A
+>   artifact and does not exist on this branch.
+> - **A shared, port-aware `mockDaemonApi`.** The templates call
+>   `mockDaemonApi(page, { port })` — a two-arg form. The current
+>   `mockDaemonApi` is a private single-arg function inside
+>   `client/test/dashboard/spa-config.e2e.test.ts` with the port hardcoded to
+>   7332. It must first be extracted to a shared module (e.g.
+>   `client/test/dashboard/helpers/mock-daemon-api.ts`) and extended to accept
+>   a `port` argument. **Plan C does this extraction.** Until both land, the
+>   mocked variant of these templates will not compile.
+
 ## Template
 
 ```typescript
@@ -87,7 +100,7 @@ Two modes, choose per scenario:
 
 ### Mocked (T1.4 SPA route smoke, T2.3 multi-op SPA flow lite variant)
 
-Each Playwright page gets its own `mockDaemonApi(page, { port })` call. Reuses the existing single-op mock helper. Fast, deterministic, doesn't need real daemons running — but doesn't catch bugs that only surface with real daemon state.
+Each Playwright page gets its own `mockDaemonApi(page, { port })` call. Reuses the existing single-op mock helper — **but only once it is extracted to a shared, port-aware module (Plan C); see the Prerequisites note at the top.** Fast, deterministic, doesn't need real daemons running — but doesn't catch bugs that only surface with real daemon state.
 
 ### Real (T2.1, T2.2, T2.3 full variant)
 

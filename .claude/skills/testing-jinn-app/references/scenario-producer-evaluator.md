@@ -4,6 +4,11 @@
 **Wall-clock budget:** 5 minutes
 **Catches:** claim → solve → deliver → evaluate loop regressions; activity-counter increments; verdict pipeline end-to-end mechanically.
 
+> **Prerequisite: Plan A's `substrate-copy.ts`.** This scenario imports
+> `copyWorkspace` from `client/scripts/release/substrate-copy.ts`, a Plan A
+> artifact. It does not exist on the Plan B branch — this scenario is not
+> runnable until Plan A lands.
+
 ## Goal
 
 op-a posts a known-solvable SWE-rebench v2 task, claims it, solves it via a *stubbed harness* (deterministic cached solution), delivers; op-b claims the verdict request, evaluates via real evaluator Docker image, posts verdict. Assert verdictCode matches expected.

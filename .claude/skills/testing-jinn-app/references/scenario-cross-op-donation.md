@@ -4,6 +4,11 @@
 **Wall-clock budget:** 5 minutes
 **Catches:** x402 + ERC-8128 handshake regressions, corpus indexer attribution bugs, payment-gated artifact access bugs.
 
+> **Prerequisite: Plan A's `substrate-copy.ts`.** This scenario imports
+> `copyWorkspace` from `client/scripts/release/substrate-copy.ts`, a Plan A
+> artifact. It does not exist on the Plan B branch — this scenario is not
+> runnable until Plan A lands.
+
 ## Goal
 
 op-a produces a corpus artifact, indexer picks it up, op-b queries Discovery API for the artifact, op-b pays x402 USDC, op-b retrieves the artifact, signature + payload validate end-to-end.

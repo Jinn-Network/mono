@@ -4,6 +4,11 @@
 **Wall-clock budget:** 5 minutes
 **Catches:** cross-op UI flows that pass with mocks but break with real daemons; SPA-side state synchronization; Launcher → Operator catalog visibility.
 
+> **Prerequisite: Plan A's `substrate-copy.ts`.** This scenario imports
+> `copyWorkspace` from `client/scripts/release/substrate-copy.ts`, a Plan A
+> artifact. It does not exist on the Plan B branch — this scenario is not
+> runnable until Plan A lands.
+
 ## Goal
 
 op-a launches a SolverNet via the SPA Launcher Create wizard. op-b sees it appear in the Operator catalog. op-b joins via the SPA. op-a's launched-SolverNet dashboard shows op-b's join.

@@ -95,6 +95,14 @@ it('does cross-op thing', async () => {
 });
 ```
 
+## Readiness timeout
+
+`readyTimeoutMs` (default 30s) is applied **per daemon**, not per group. The
+helper spawns and awaits each daemon in `ops` sequentially, so the worst-case
+total wall time for a group of N daemons is `N × readyTimeoutMs`. Size the
+timeout for a single daemon's bootstrap, and account for the multiplier when
+setting a test's overall timeout (e.g. Vitest `testTimeout`).
+
 ## Port selection
 
 Substrate ops are pre-configured with apiPorts (op-a=7332, op-b=7333, op-c-legacy=7334). For tests that need different ports (e.g. avoiding collision with the daily-driver daemon at 7332), override via the `apiPort` option in the helper. The helper passes it as `JINN_API_PORT` env var; the daemon's config-resolution prefers env over config file.
