@@ -8,8 +8,9 @@ export function defaultSubstrateRoot(): string {
 
 /**
  * Recursively copy a directory tree, preserving file modes (so chmod-600
- * files like keystore-password stay locked down). When `exclude` is given,
- * any entry it returns true for is skipped.
+ * files like keystore-password stay locked down). Symlinks are recreated
+ * as symlinks (a symlinked keystore-password must not be silently dropped).
+ * When `exclude` is given, any entry it returns true for is skipped.
  */
 export async function copyTree(
   srcDir: string,
@@ -22,7 +23,10 @@ export async function copyTree(
     if (exclude?.(ent.name)) continue;
     const srcPath = path.join(srcDir, ent.name);
     const dstPath = path.join(dstDir, ent.name);
-    if (ent.isDirectory()) {
+    if (ent.isSymbolicLink()) {
+      const target = await fs.readlink(srcPath);
+      await fs.symlink(target, dstPath);
+    } else if (ent.isDirectory()) {
       await copyTree(srcPath, dstPath, exclude);
     } else if (ent.isFile()) {
       await fs.copyFile(srcPath, dstPath);
