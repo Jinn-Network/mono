@@ -24,16 +24,16 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist/",
-    "deployments/",
-    "plugins/",
-    "skills/",
-    "templates/",
-    "docker-compose.yml",
-    "CONTRIBUTING.md",
-    "CHANGELOG.md",
-    "README.md",
-    "LICENSE"
+    "/dist/",
+    "/deployments/",
+    "/plugins/",
+    "/skills/",
+    "/templates/",
+    "/docker-compose.yml",
+    "/CONTRIBUTING.md",
+    "/CHANGELOG.md",
+    "/README.md",
+    "/LICENSE"
   ],
   "publishConfig": {
     "access": "public"
