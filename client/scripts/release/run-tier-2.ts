@@ -36,8 +36,8 @@ async function runT23MultiOpSpaFlow(outputDir: string): Promise<ScenarioVerdict>
     );
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('close', async (code) => {
       const wallClockMs = Date.now() - started;
       await fs.writeFile(
