@@ -1,6 +1,6 @@
-import { createPublicClient, http, parseAbi, type Address } from 'viem';
-import { baseSepolia } from 'viem/chains';
-import { loadManifestSafe, serializeVerifyResult, type VerifyResult } from './types';
+import { createPublicClient, http, parseAbi, type Address, type Chain } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
+import { loadManifestSafe, serializeVerifyResult, type Manifest, type VerifyResult } from './types';
 import { goldPath } from './substrate-paths';
 
 const MIN_MASTER_ETH_WEI = 2_000_000_000_000_000n;   // 0.002 ETH
@@ -11,6 +11,16 @@ const OLAS_TOKEN_ADDRESS_BASE_SEPOLIA: Address = '0x54330d28ca3357F294334BDC454a
 const OLAS_TOKEN_ABI = parseAbi([
   'function balanceOf(address account) view returns (uint256)',
 ]);
+
+/** Map a manifest network value to its viem chain definition. */
+function chainForNetwork(network: Manifest['network']): Chain {
+  switch (network) {
+    case 'base':
+      return base;
+    case 'base-sepolia':
+      return baseSepolia;
+  }
+}
 
 export interface VerifyOptions {
   substrateRoot?: string;
@@ -41,7 +51,10 @@ export async function verifySubstrate(opName: string, opts: VerifyOptions = {}):
     return { opName, ok: failures.length === 0, failures, warnings, onChain: null };
   }
 
-  const client = createPublicClient({ chain: baseSepolia, transport: http(manifest.config.rpcUrl) });
+  const client = createPublicClient({
+    chain: chainForNetwork(manifest.network),
+    transport: http(manifest.config.rpcUrl),
+  });
   const onChain = {
     boundSafeAddress: null as string | null,
     ethBalanceWei: 0n,
