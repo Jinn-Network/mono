@@ -68,25 +68,20 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   push();
   push(`## Gap log`);
   push();
-  const blocking = input.gaps.filter((g) => g.classification === 'BLOCKING');
-  const deferrable = input.gaps.filter((g) => g.classification === 'DEFERRABLE');
-  const alreadyMet = input.gaps.filter((g) => g.classification === 'ALREADY-MET');
-  push(`### Blocking (${blocking.length})`);
-  for (const g of blocking) {
-    push(`- **${g.id}** [${g.source}] ${g.status}: ${g.notes}`);
-  }
-  push();
-  push(`### Deferrable (${deferrable.length})`);
-  for (const g of deferrable) {
+  const gapSection = (heading: string, classification: Gap['classification'], renderGap: (g: Gap) => string) => {
+    const matched = input.gaps.filter((g) => g.classification === classification);
+    push(`### ${heading} (${matched.length})`);
+    for (const g of matched) {
+      push(renderGap(g));
+    }
+    push();
+  };
+  gapSection('Blocking', 'BLOCKING', (g) => `- **${g.id}** [${g.source}] ${g.status}: ${g.notes}`);
+  gapSection('Deferrable', 'DEFERRABLE', (g) => {
     const tag = g.ghIssue ? ` (${g.ghIssue}${g.milestone ? `, milestone ${g.milestone}` : ''})` : '';
-    push(`- **${g.id}** [${g.source}]${tag}: ${g.notes}`);
-  }
-  push();
-  push(`### Already met (${alreadyMet.length})`);
-  for (const g of alreadyMet) {
-    push(`- **${g.id}** [${g.source}]: ${g.notes}`);
-  }
-  push();
+    return `- **${g.id}** [${g.source}]${tag}: ${g.notes}`;
+  });
+  gapSection('Already met', 'ALREADY-MET', (g) => `- **${g.id}** [${g.source}]: ${g.notes}`);
   push(`## release-prep evidence`);
   for (const v of input.releasePrepVerdicts) {
     push(`- ${v.scenarioId}: ${v.verdict}${v.failClass ? ` (${v.failClass})` : ''} (${v.wallClockMs}ms)`);
