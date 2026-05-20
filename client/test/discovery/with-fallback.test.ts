@@ -79,8 +79,9 @@ function makeStub(overrides?: Partial<Record<MethodName, DiscoveryAPI[MethodName
     findClaimableTasks: vi.fn(async () => [TASK_CANDIDATE]),
     listLaunchedSolverNets: vi.fn(async () => [SOLVER_NET_SUMMARY]),
     getLifecycleStatus: vi.fn(async () => LIFECYCLE_STATUS),
+    getSolverNetOperatorCount: vi.fn(async () => 1),
     queryEnvelopes: vi.fn(async () => [ENVELOPE_REF]),
-  };
+  } as unknown as DiscoveryAPI;
   return { ...defaults, ...(overrides ?? {}) };
 }
 
@@ -92,8 +93,9 @@ function makeThrowingStub(error: Error): DiscoveryAPI {
     findClaimableTasks: vi.fn(async () => { throw error; }),
     listLaunchedSolverNets: vi.fn(async () => { throw error; }),
     getLifecycleStatus: vi.fn(async () => { throw error; }),
+    getSolverNetOperatorCount: vi.fn(async () => { throw error; }),
     queryEnvelopes: vi.fn(async () => { throw error; }),
-  };
+  } as unknown as DiscoveryAPI;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -364,6 +366,17 @@ describe('withFallback — all four methods', () => {
 
     expect(result).toEqual([ENVELOPE_REF]);
     expect(floor.queryEnvelopes).toHaveBeenCalledOnce();
+  });
+
+  it('getSolverNetOperatorCount routes to floor on DiscoveryUnavailableError', async () => {
+    const primary = makeThrowingStub(ERROR);
+    const floor = makeStub();
+    const api = makeWrapper(primary, floor);
+
+    const result = await api.getSolverNetOperatorCount('bafkreitest');
+
+    expect(result).toBe(1);
+    expect(floor.getSolverNetOperatorCount).toHaveBeenCalledOnce();
   });
 });
 

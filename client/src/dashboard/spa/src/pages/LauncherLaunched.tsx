@@ -73,6 +73,20 @@ export function LauncherLaunchedPage({
     staleTime: Infinity,
   });
 
+  // Distinct operators with on-chain activity on this SolverNet (issue #351).
+  // Polls alongside the record so the header reflects new participants without
+  // a manual reload. A discovery outage / pre-bootstrap 503 leaves the query
+  // in error; StatusHeader renders nothing in that case rather than a stale 0.
+  const operatorCountQuery = useQuery<number>({
+    queryKey: ['solvernets', 'operator-count', manifestCid],
+    queryFn: async () => {
+      const res = await api.discovery.getSolverNetOperatorCount(manifestCid!);
+      return res.operatorCount;
+    },
+    enabled: Boolean(manifestCid),
+    refetchInterval: pollIntervalMs,
+  });
+
   const [dialogTarget, setDialogTarget] = useState<LifecycleTarget | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
@@ -163,6 +177,7 @@ export function LauncherLaunchedPage({
       <StatusHeader
         record={record}
         manifest={manifest}
+        operatorCount={operatorCountQuery.data}
         onAction={(target) => {
           setDialogError(null);
           setDialogTarget(target);

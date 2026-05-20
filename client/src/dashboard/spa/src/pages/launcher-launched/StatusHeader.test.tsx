@@ -261,4 +261,45 @@ describe('StatusHeader', () => {
     // Truncated cid: first 8 chars + ellipsis + last 6 chars.
     expect(screen.getByTestId('launcher-launched-manifest-cid').textContent).toMatch(/bafybeig…/);
   });
+
+  // ── operator-count (issue #351) ───────────────────────────────────────────
+
+  it('renders the operator count when supplied', () => {
+    render(
+      <StatusHeader
+        record={buildRecord()}
+        manifest={buildManifest()}
+        operatorCount={3}
+        onAction={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('launcher-launched-operator-count').textContent).toMatch(/3/);
+    // The aliased `operator-count` test-id (the T2.3 selector) carries the
+    // same value via a hidden span — mirrors the `manifest-cid` aliasing.
+    expect(screen.getByTestId('operator-count').textContent).toBe('3');
+  });
+
+  it('renders an operator count of 0 when no operator has participated yet', () => {
+    render(
+      <StatusHeader
+        record={buildRecord()}
+        manifest={buildManifest()}
+        operatorCount={0}
+        onAction={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('operator-count').textContent).toBe('0');
+  });
+
+  it('omits the operator-count field when the count is undefined', () => {
+    render(
+      <StatusHeader
+        record={buildRecord()}
+        manifest={buildManifest()}
+        onAction={() => undefined}
+      />,
+    );
+    expect(screen.queryByTestId('launcher-launched-operator-count')).toBeNull();
+    expect(screen.queryByTestId('operator-count')).toBeNull();
+  });
 });

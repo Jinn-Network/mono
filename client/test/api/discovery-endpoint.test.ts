@@ -9,6 +9,7 @@ function stubDiscovery(partial: Partial<DiscoveryAPI>): DiscoveryAPI {
     findClaimableTasks: vi.fn(),
     listLaunchedSolverNets: vi.fn(),
     getLifecycleStatus: vi.fn(),
+    getSolverNetOperatorCount: vi.fn().mockResolvedValue(0),
     queryEnvelopes: vi.fn(),
     listPluginPublications: vi.fn().mockResolvedValue([]),
     getPluginScores: vi.fn().mockResolvedValue([]),
@@ -98,6 +99,42 @@ describe('discovery-endpoint (hfmf)', () => {
     const app = new Hono();
     addDiscoveryRoutes(app, { discovery: () => discovery });
     const res = await app.request('/v1/discovery/plugin-publications');
+    expect(res.status).toBe(503);
+  });
+
+  it('GET /v1/discovery/solvernet-operator-count?cid= returns the count (#351)', async () => {
+    const discovery = stubDiscovery({
+      getSolverNetOperatorCount: vi.fn().mockResolvedValue(3),
+    });
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    const res = await app.request(
+      '/v1/discovery/solvernet-operator-count?cid=bafkreitest',
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.manifestCid).toBe('bafkreitest');
+    expect(body.operatorCount).toBe(3);
+    expect(discovery.getSolverNetOperatorCount).toHaveBeenCalledWith('bafkreitest');
+  });
+
+  it('GET /v1/discovery/solvernet-operator-count without cid returns 400', async () => {
+    const discovery = stubDiscovery({});
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    const res = await app.request('/v1/discovery/solvernet-operator-count');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /v1/discovery/solvernet-operator-count 503s on discovery outage', async () => {
+    const discovery = stubDiscovery({
+      getSolverNetOperatorCount: vi.fn().mockRejectedValue(new Error('indexer down')),
+    });
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    const res = await app.request(
+      '/v1/discovery/solvernet-operator-count?cid=bafkreitest',
+    );
     expect(res.status).toBe(503);
   });
 });

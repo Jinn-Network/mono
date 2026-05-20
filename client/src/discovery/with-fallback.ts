@@ -202,6 +202,13 @@ export function withFallback(
       );
     },
 
+    getSolverNetOperatorCount(manifestCid) {
+      return dispatch(
+        () => primary.getSolverNetOperatorCount(manifestCid),
+        () => floor.getSolverNetOperatorCount(manifestCid),
+      );
+    },
+
     queryEnvelopes(query) {
       return dispatch(
         () => primary.queryEnvelopes(query),

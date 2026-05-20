@@ -763,6 +763,18 @@ export interface DiscoveryPluginScoresResponse {
   scores: PluginScoreHistoryRowDto[];
 }
 
+/**
+ * Response from `GET /v1/discovery/solvernet-operator-count?cid=<manifestCid>`.
+ * `operatorCount` is the number of distinct operators with on-chain activity
+ * (claimed tasks) on the SolverNet — see the daemon's
+ * `DiscoveryAPI.getSolverNetOperatorCount` for why this counts participating
+ * operators rather than config-level joins. Issue #351.
+ */
+export interface DiscoverySolverNetOperatorCountResponse {
+  manifestCid: string;
+  operatorCount: number;
+}
+
 // ── Per-harness readiness (vh74.2 Stage A — #248 / #332) ─────────────────────
 // Mirrors the daemon's `HarnessReadinessSnapshot` entry shape exposed at
 // `GET /v1/harnesses/:name/readiness`. The join form consults this to disable

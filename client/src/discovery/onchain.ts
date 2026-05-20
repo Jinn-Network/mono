@@ -949,6 +949,121 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     };
   }
 
+  // ── getSolverNetOperatorCount ──────────────────────────────────────────────
+
+  async function getSolverNetOperatorCount(manifestCid: string): Promise<number> {
+    if (!routerAddress) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI: no routerAddress configured for chainId=${opts.chainId}`,
+      );
+    }
+
+    const client = getClient();
+    let currentBlock: bigint;
+    try {
+      currentBlock = await (client as PublicClient).getBlockNumber();
+    } catch (err) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getSolverNetOperatorCount: failed to get block number`,
+        err,
+      );
+    }
+
+    // Scan from the execution-discovery floor (not the cursor cache): like
+    // listPluginPublications this is a complete-recount call with no
+    // accumulator, so it must always see every TaskCreated / TaskAttemptCreated
+    // event for the SolverNet.
+    const fromBlock = resolveScanFromBlock(opts, currentBlock);
+    const targetDigest = manifestDigestForCid(manifestCid).toLowerCase() as Hex;
+
+    // Pass 1: TaskCreated → the set of task ids belonging to this SolverNet.
+    let solverNetTaskIds: Set<string>;
+    try {
+      const taskIdLists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: string[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskCreated') continue;
+              const evArgs = event.args as { taskId: bigint; manifestDigest: Hex };
+              if ((evArgs.manifestDigest as string).toLowerCase() !== targetDigest) continue;
+              decoded.push(String(evArgs.taskId));
+            } catch {
+              // Not a TaskCreated event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+      );
+      solverNetTaskIds = new Set(taskIdLists);
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getSolverNetOperatorCount: getLogs for TaskCreated failed`,
+        err,
+      );
+    }
+
+    // No tasks → no attempts → no participating operators.
+    if (solverNetTaskIds.size === 0) return 0;
+
+    // Pass 2: TaskAttemptCreated → distinct operators across those tasks.
+    let operators: Set<string>;
+    try {
+      const operatorLists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: string[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskAttemptCreated') continue;
+              const evArgs = event.args as { taskId: bigint; operator: Address };
+              if (!solverNetTaskIds.has(String(evArgs.taskId))) continue;
+              decoded.push(evArgs.operator.toLowerCase());
+            } catch {
+              // Not a TaskAttemptCreated event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+      );
+      operators = new Set(operatorLists);
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getSolverNetOperatorCount: getLogs for TaskAttemptCreated failed`,
+        err,
+      );
+    }
+
+    return operators.size;
+  }
+
   // ── queryEnvelopes ─────────────────────────────────────────────────────────
 
   async function queryEnvelopes(query: CorpusQuery): Promise<EnvelopeRef[]> {
@@ -1121,6 +1236,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     findClaimableTasks,
     listLaunchedSolverNets,
     getLifecycleStatus,
+    getSolverNetOperatorCount,
     queryEnvelopes,
     listPluginPublications,
     getPluginScores,

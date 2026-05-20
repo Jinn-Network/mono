@@ -27,6 +27,7 @@ import type {
   DiscoveryPluginPublicationsResponse,
   DiscoveryBuilderArtifactsResponse,
   DiscoveryPluginScoresResponse,
+  DiscoverySolverNetOperatorCountResponse,
   HarnessReadinessEntry,
 } from './types.js';
 
@@ -472,6 +473,13 @@ export const api = {
       if (limit !== undefined) q.set('limit', String(limit));
       return jfetch<DiscoveryPluginScoresResponse>(
         `/v1/discovery/plugin-scores?${q.toString()}`,
+      );
+    },
+    // Distinct operators with on-chain activity on a SolverNet (issue #351).
+    getSolverNetOperatorCount: (cid: string) => {
+      const q = new URLSearchParams({ cid });
+      return jfetch<DiscoverySolverNetOperatorCountResponse>(
+        `/v1/discovery/solvernet-operator-count?${q.toString()}`,
       );
     },
   },

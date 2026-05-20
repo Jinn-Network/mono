@@ -182,6 +182,25 @@ export interface DiscoveryAPI {
   getLifecycleStatus(manifestCid: string): Promise<SolverNetLifecycleStatus | undefined>;
 
   /**
+   * Returns the number of distinct operators that have on-chain activity on
+   * the SolverNet identified by `manifestCid` — i.e. the count of unique
+   * `attempt.operator` Safe addresses across every task whose
+   * `manifestDigest === keccak256(manifestCid)`.
+   *
+   * This is the protocol-observable participation signal: a "join" in the
+   * operator app is purely a local config write (`joinedSolverNets[<cid>]`,
+   * see `spec/2026-05-05-solvernet-creation-and-launch.md` §12) and leaves no
+   * on-chain footprint. An operator only becomes visible to the network once
+   * they claim a task — `TaskAttemptCreated` is the first on-chain event tied
+   * to (operator, SolverNet). This method therefore counts *participating*
+   * operators (operators who have claimed at least one task), which is the
+   * only honest cross-operator count derivable from the indexer / chain.
+   *
+   * Returns `0` when no operator has attempted a task on the SolverNet yet.
+   */
+  getSolverNetOperatorCount(manifestCid: string): Promise<number>;
+
+  /**
    * Returns envelope refs matching the query. Refs only — byte retrieval is
    * done by the corpus library on demand.
    *

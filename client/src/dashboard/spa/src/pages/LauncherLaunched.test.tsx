@@ -29,6 +29,9 @@ vi.mock('../api/client.js', () => ({
       transitionLifecycle: vi.fn(),
       updateGeneratorConfig: vi.fn(),
     },
+    discovery: {
+      getSolverNetOperatorCount: vi.fn(),
+    },
   },
 }));
 
@@ -149,6 +152,11 @@ beforeEach(() => {
     generatedAt: '',
     nets: [],
   } satisfies LauncherStatusResponse);
+  // Default: 0 participating operators. Per-test overrides set a real count.
+  vi.mocked(api.discovery.getSolverNetOperatorCount).mockResolvedValue({
+    manifestCid: 'bafybeigtest1234567890',
+    operatorCount: 0,
+  });
 });
 
 afterEach(() => {
@@ -186,6 +194,35 @@ describe('LauncherLaunchedPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('launcher-launched-name').textContent).toBe('Polymarket'),
     );
+  });
+
+  it('surfaces the operator-join count from the discovery API (issue #351)', async () => {
+    vi.mocked(api.solvernets.get).mockResolvedValue(buildRecord());
+    vi.mocked(api.solvernets.getManifest).mockResolvedValue(buildManifestResponse());
+    vi.mocked(api.discovery.getSolverNetOperatorCount).mockResolvedValue({
+      manifestCid: 'bafybeigtest1234567890',
+      operatorCount: 2,
+    });
+    wrap(<LauncherLaunchedPage solverNetId="sn-1" pollIntervalMs={1000} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('operator-count').textContent).toBe('2'),
+    );
+    expect(api.discovery.getSolverNetOperatorCount).toHaveBeenCalledWith(
+      'bafybeigtest1234567890',
+    );
+  });
+
+  it('omits the operator-count field when the discovery query fails', async () => {
+    vi.mocked(api.solvernets.get).mockResolvedValue(buildRecord());
+    vi.mocked(api.solvernets.getManifest).mockResolvedValue(buildManifestResponse());
+    vi.mocked(api.discovery.getSolverNetOperatorCount).mockRejectedValue(
+      new Error('discovery_unavailable'),
+    );
+    wrap(<LauncherLaunchedPage solverNetId="sn-1" pollIntervalMs={1000} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-launched-status-header')).toBeTruthy(),
+    );
+    expect(screen.queryByTestId('operator-count')).toBeNull();
   });
 
   it('still renders panels when manifest fetch fails (degrades gracefully)', async () => {

@@ -31,6 +31,15 @@ import {
 export interface StatusHeaderProps {
   record: LaunchedSolverNetRecord;
   manifest?: SolverNetManifestV1;
+  /**
+   * Number of distinct operators with on-chain activity on this SolverNet
+   * (issue #351). `undefined` while the discovery query is loading or after
+   * a discovery outage — the Operators field is omitted rather than showing a
+   * misleading 0. The count reflects operators who have *claimed a task*: an
+   * operator "join" in the app is a local config write with no on-chain
+   * footprint (see `spec/2026-05-05-solvernet-creation-and-launch.md` §12).
+   */
+  operatorCount?: number;
   /** Triggered when the operator clicks Pause / Resume / Retire. */
   onAction: (target: LifecycleTarget) => void;
   /** When a lifecycle transition is in flight, disable buttons + show pill. */
@@ -46,6 +55,7 @@ const ACTION_LABELS: Record<LifecycleTarget, string> = {
 export function StatusHeader({
   record,
   manifest,
+  operatorCount,
   onAction,
   pending,
 }: StatusHeaderProps): JSX.Element {
@@ -169,6 +179,16 @@ export function StatusHeader({
           testid="launcher-launched-agent"
           mono
         />
+        {operatorCount !== undefined && (
+          <IdentityField
+            label="Operators"
+            value={String(operatorCount)}
+            testid="launcher-launched-operator-count"
+            additionalTestIds={['operator-count']}
+            mono
+            title="Distinct operators that have claimed a task on this SolverNet"
+          />
+        )}
       </dl>
     </header>
   );

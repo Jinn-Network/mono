@@ -6,6 +6,7 @@
  *   GET /v1/discovery/plugin-publications?solverType&builderAgentId&includeRevoked
  *   GET /v1/discovery/builder-artifacts?builderAgentId&limit
  *   GET /v1/discovery/plugin-scores?cid&limit
+ *   GET /v1/discovery/solvernet-operator-count?cid
  *
  * Used by the /build SPA route (hfmf) to render published plug-ins, the
  * local operator's published plug-ins, and per-plug-in score history.
@@ -80,6 +81,34 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
       });
       return c.json({ artifacts });
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) {
+        return c.json({ error: 'discovery_unavailable' }, 503);
+      }
+      return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
+    }
+  });
+
+  // GET /v1/discovery/solvernet-operator-count?cid=<manifestCid>
+  //
+  // Returns the count of distinct operators with on-chain activity (claimed
+  // tasks) on the SolverNet identified by `cid`. Backs the operator-count
+  // surface on the launched-SolverNet dashboard (issue #351). See
+  // `DiscoveryAPI.getSolverNetOperatorCount` for why this counts
+  // *participating* operators rather than config-level "joins".
+  app.get('/v1/discovery/solvernet-operator-count', async (c) => {
+    const discovery = getDiscovery();
+    if (!discovery) {
+      return c.json(
+        { error: 'subsystem_not_ready', message: 'DiscoveryAPI still initialising' },
+        503,
+      );
+    }
+    const cid = c.req.query('cid');
+    if (!cid) return c.json({ error: 'cid is required' }, 400);
+    try {
+      const operatorCount = await discovery.getSolverNetOperatorCount(cid);
+      return c.json({ manifestCid: cid, operatorCount });
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) {
         return c.json({ error: 'discovery_unavailable' }, 503);
