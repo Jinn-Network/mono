@@ -14,6 +14,7 @@ import { resolvePluginRoot } from './plugin-path.js';
 import { harvestOutput } from './harvest.js';
 import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
+import { isLocalCodexBaseUrl } from './adapters/codex-code.js';
 
 /**
  * `Harness` shell. Bridges the engine's dispatch contract
@@ -30,6 +31,7 @@ export class LearnerHarness implements Harness {
   private readonly pluginRoot: string;
   private readonly claudePath: string;
   private readonly codexPath: string | undefined;
+  private readonly codexBaseUrl: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
 
@@ -40,6 +42,7 @@ export class LearnerHarness implements Harness {
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
     this.claudePath = config.claudePath ?? 'claude';
     this.codexPath = config.codexPath;
+    this.codexBaseUrl = config.codexBaseUrl;
     this.codexDoctorTimeoutMs = config.codexDoctorTimeoutMs;
     this.runtimeMode = config.runtimeMode ?? 'bare';
   }
@@ -80,6 +83,8 @@ export class LearnerHarness implements Harness {
    *     failed claims (#348).
    *   - `exitCode !== 0` → binary exists but `codex --version` failed →
    *     ready=false pointing at the Codex precheck panel.
+   *   - local `codexBaseUrl` → binary runs and the local sidecar owns auth, so
+   *     Codex auth is not required.
    *   - `authStatus: 'not_configured'` → binary runs but no `OPENAI_API_KEY`
    *     and no `codex login` session → ready=false with a sign-in nextStep.
    *   - `authStatus: 'expired'` → an `auth.json` is present but its OAuth
@@ -116,6 +121,20 @@ export class LearnerHarness implements Harness {
         nextStep: {
           description:
             'Run `codex --version` locally to surface the problem, or open the Codex precheck panel in the operator dashboard.',
+          url: '/api/codex/doctor',
+        },
+      };
+    }
+    if (this.codexBaseUrl) {
+      if (isLocalCodexBaseUrl(this.codexBaseUrl)) {
+        return { ready: true };
+      }
+      return {
+        ready: false,
+        reason: 'codex base URL must be local',
+        nextStep: {
+          description:
+            'Use a local Codex provider URL such as http://127.0.0.1:11434/v1 or unset JINN_CODEX_BASE_URL.',
           url: '/api/codex/doctor',
         },
       };

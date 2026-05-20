@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { accessSync, constants, createWriteStream, mkdirSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,7 @@ import type { HarnessAdapter, TaskSessionInputs } from '../types.js';
 export interface CodexCodeHarnessAdapterConfig {
   codexPath?: string;
   codexModel?: string;
+  codexBaseUrl?: string;
   storePath?: string;
   daemonApiUrl?: string;
   daemonApiToken?: string;
@@ -27,6 +29,7 @@ export interface CodexCodeHarnessAdapterConfig {
 }
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
+const LOCAL_CODEX_PROVIDER = 'jinn-local';
 const MACOS_CODEX_APP_BINARY = '/Applications/Codex.app/Contents/Resources/codex';
 
 const ENV_ALLOWLIST = [
@@ -91,6 +94,49 @@ function taskContextJson(inputs: TaskSessionInputs): string {
   }
 }
 
+function codexConfigPath(parts: string[]): string {
+  return parts.map((part) =>
+    /^[A-Za-z0-9_-]+$/.test(part)
+      ? part
+      : `"${part.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  ).join('.');
+}
+
+function codexConfigValue(value: string): string {
+  return JSON.stringify(value);
+}
+
+export function isLocalCodexBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.username || url.password) return false;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost') return true;
+    if (hostname === '[::1]' || hostname === '::1') return true;
+    return isIP(hostname) === 4 && hostname.startsWith('127.');
+  } catch {
+    return false;
+  }
+}
+
+function codexProviderConfigArgs(baseUrl: string | undefined): string[] {
+  const normalizedBaseUrl = baseUrl?.trim();
+  if (!normalizedBaseUrl) return [];
+  if (normalizedBaseUrl && !isLocalCodexBaseUrl(normalizedBaseUrl)) {
+    throw new Error('codex-code adapter: codexBaseUrl must be local; remote custom providers are not supported');
+  }
+
+  const args = [`model_provider=${codexConfigValue(LOCAL_CODEX_PROVIDER)}`];
+  if (normalizedBaseUrl) {
+    const prefix = ['model_providers', LOCAL_CODEX_PROVIDER];
+    args.push(`${codexConfigPath([...prefix, 'name'])}=${codexConfigValue(LOCAL_CODEX_PROVIDER)}`);
+    args.push(`${codexConfigPath([...prefix, 'base_url'])}=${codexConfigValue(normalizedBaseUrl)}`);
+    args.push(`${codexConfigPath([...prefix, 'wire_api'])}=${codexConfigValue('responses')}`);
+  }
+  return args;
+}
+
 /**
  * Construct the initial task prompt for the Codex Code agent.
  *
@@ -138,6 +184,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
 
   private readonly codexPath: string;
   private readonly codexModel: string;
+  private readonly codexBaseUrl: string | undefined;
   private readonly storePath: string | undefined;
   private readonly daemonApiUrl: string | undefined;
   private readonly daemonApiToken: string | undefined;
@@ -149,6 +196,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
   constructor(config: CodexCodeHarnessAdapterConfig = {}) {
     this.codexPath = config.codexPath ?? defaultCodexPath();
     this.codexModel = config.codexModel ?? DEFAULT_CODEX_MODEL;
+    this.codexBaseUrl = config.codexBaseUrl;
     this.storePath = config.storePath;
     this.daemonApiUrl = config.daemonApiUrl;
     this.daemonApiToken = config.daemonApiToken;
@@ -221,6 +269,9 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       '-m',
       inputs.model ?? inputs.claudeModel ?? this.codexModel,
     ];
+    for (const configArg of codexProviderConfigArgs(this.codexBaseUrl)) {
+      args.push('-c', configArg);
+    }
     for (const configArg of prepared.configArgs) {
       args.push('-c', configArg);
     }

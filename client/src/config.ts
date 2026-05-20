@@ -15,6 +15,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
@@ -60,6 +61,20 @@ export interface DefaultSolverNetConfig extends Record<string, unknown> {
 export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {};
 
 const HarnessNameSchema = z.string().transform((name) => canonicalHarnessName(name));
+
+function isLocalCodexBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.username || url.password) return false;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost') return true;
+    if (hostname === '[::1]' || hostname === '::1') return true;
+    return isIP(hostname) === 4 && hostname.startsWith('127.');
+  } catch {
+    return false;
+  }
+}
 
 export const JinnConfigSchema = z.object({
   /**
@@ -163,6 +178,16 @@ export const JinnConfigSchema = z.object({
 
   /** Path to the `codex` executable. Defaults to `codex` when unset. */
   codexPath: z.string().optional(),
+
+  /** Default Codex model when a SolverNet does not specify one. */
+  codexModel: z.string().optional(),
+
+  /** Local Codex provider base URL, e.g. http://127.0.0.1:11434/v1 for Ollama. */
+  codexBaseUrl: z
+    .string()
+    .url()
+    .refine(isLocalCodexBaseUrl, 'codexBaseUrl must be a local HTTP(S) URL')
+    .optional(),
 
   /**
    * Timeout in ms for `codex --version` health-check runs.
@@ -805,6 +830,8 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.hermesDoctorTimeoutMs = parseInt(env['JINN_HERMES_DOCTOR_TIMEOUT_MS'], 10);
   }
   if (env['JINN_CODEX_PATH'])        merged.codexPath = env['JINN_CODEX_PATH'];
+  if (env['JINN_CODEX_MODEL'])       merged.codexModel = env['JINN_CODEX_MODEL'];
+  if (env['JINN_CODEX_BASE_URL'])    merged.codexBaseUrl = env['JINN_CODEX_BASE_URL'];
   if (env['JINN_CODEX_DOCTOR_TIMEOUT_MS']) {
     merged.codexDoctorTimeoutMs = parseInt(env['JINN_CODEX_DOCTOR_TIMEOUT_MS'], 10);
   }
@@ -1136,6 +1163,10 @@ const TRACKED_ENV_VARS = [
   'JINN_HERMES_MODEL',
   'JINN_HERMES_PROVIDER',
   'JINN_HERMES_DOCTOR_TIMEOUT_MS',
+  'JINN_CODEX_PATH',
+  'JINN_CODEX_MODEL',
+  'JINN_CODEX_BASE_URL',
+  'JINN_CODEX_DOCTOR_TIMEOUT_MS',
   'JINN_RUNTIME_MODE',
   'JINN_PEERS',
   'JINN_DISCOVERY_MODE',
