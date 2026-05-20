@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { adoptOperator } from '../../../scripts/release/substrate-adopt';
 import { checkSubstrateTopup } from '../../../scripts/release/substrate-topup';
 import { spawnAnvilFork, type AnvilForkHandle } from './helpers/anvil-fork';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('substrate-topup', () => {
   let tmpRoot: string;
