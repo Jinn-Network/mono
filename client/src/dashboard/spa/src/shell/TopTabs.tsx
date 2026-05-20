@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import { api } from '../api/client.js';
+import { getFeatures } from '../lib/features.js';
 
-const TABS = [
+// The Build tab is gated behind the `pluginBuilderUi` feature flag (issue
+// #327) — appended to the base tabs only when the daemon was started with
+// JINN_ENABLE_PLUGIN_BUILDER_UI=1.
+const BASE_TABS = [
   { path: '/overview', label: 'Dashboard' },
   { path: '/operator', label: 'Settings' },
-  { path: '/build', label: 'Build' },
 ] as const;
 
 export function TopTabs(): JSX.Element {
@@ -17,8 +20,13 @@ export function TopTabs(): JSX.Element {
     refetchInterval: 30_000,
     enabled: !onLauncherRoute,
   });
+  const baseTabs = getFeatures().pluginBuilderUi
+    ? [...BASE_TABS, { path: '/build', label: 'Build' } as const]
+    : BASE_TABS;
   const showLauncher = onLauncherRoute || (launched?.records.length ?? 0) > 0;
-  const tabs = showLauncher ? [...TABS, { path: '/launcher', label: 'Launcher' } as const] : TABS;
+  const tabs = showLauncher
+    ? [...baseTabs, { path: '/launcher', label: 'Launcher' } as const]
+    : baseTabs;
 
   return (
     <nav

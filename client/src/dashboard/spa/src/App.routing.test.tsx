@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { Router, Route, Switch } from 'wouter';
+import { Router, Route, Switch, Redirect, useLocation } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
@@ -9,6 +9,7 @@ import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
+import { getFeatures } from './lib/features.js';
 
 // Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
@@ -197,6 +198,46 @@ describe('App routes', () => {
     await waitFor(() =>
       expect(screen.getByTestId('launcher-create-step-1')).toBeTruthy(),
     );
+  });
+
+  // ── /build feature gate (issue #327) ──
+  // The /build route mirrors App.tsx: BuildPage when the pluginBuilderUi flag
+  // is on, else a redirect to /overview. The substrate stays live; only the
+  // operator-app promotion is gated.
+
+  afterEach(() => {
+    delete (window as { __JINN_FEATURES__?: unknown }).__JINN_FEATURES__;
+  });
+
+  function LocationProbe(): JSX.Element {
+    const [location] = useLocation();
+    return <div data-testid="location">{location}</div>;
+  }
+
+  function BuildRoute(): JSX.Element {
+    const pluginBuilderUi = getFeatures().pluginBuilderUi;
+    return (
+      <Switch>
+        <Route path="/build">
+          {pluginBuilderUi ? <div data-testid="build-page" /> : <Redirect to="/overview" />}
+        </Route>
+        <Route path="/overview"><LocationProbe /></Route>
+      </Switch>
+    );
+  }
+
+  it('redirects /build to /overview when the pluginBuilderUi flag is off (default)', async () => {
+    render(withProviders(<BuildRoute />, '/build'));
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/overview'),
+    );
+    expect(screen.queryByTestId('build-page')).toBeNull();
+  });
+
+  it('renders the build page on /build when the pluginBuilderUi flag is on', () => {
+    window.__JINN_FEATURES__ = { pluginBuilderUi: true };
+    render(withProviders(<BuildRoute />, '/build'));
+    expect(screen.getByTestId('build-page')).toBeTruthy();
   });
 
   it('renders LauncherLaunchedPage on /launcher/launched/:solverNetId and exposes the param', async () => {
