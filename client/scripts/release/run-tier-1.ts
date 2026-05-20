@@ -71,32 +71,46 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   );
   await fs.mkdir(outputDir, { recursive: true });
 
-  // T1.1-T1.3 callables run in parallel.
-  const scenarioPromises = [
-    runT11BootstrapFreshAnvil({
-      evidencePath: path.join(outputDir, 'T1.1.log'),
-      wallClockBudgetMs: 180000,
-    }),
-    runT12HarnessReadinessContract({
-      evidencePath: path.join(outputDir, 'T1.2.log'),
-    }),
-    runT13IndexerRoundTrip({
-      evidencePath: path.join(outputDir, 'T1.3.log'),
-    }),
+  // T1.1-T1.3 callables run in parallel. Each is wrapped so an unexpected
+  // throw (rather than a returned fail verdict) becomes an agent-crash verdict
+  // — keeps the scenarioId paired with its runner, no index correlation.
+  const callables: { id: string; run: () => Promise<ScenarioVerdict> }[] = [
+    {
+      id: 'T1.1',
+      run: () => runT11BootstrapFreshAnvil({
+        evidencePath: path.join(outputDir, 'T1.1.log'),
+        wallClockBudgetMs: 180000,
+      }),
+    },
+    {
+      id: 'T1.2',
+      run: () => runT12HarnessReadinessContract({
+        evidencePath: path.join(outputDir, 'T1.2.log'),
+      }),
+    },
+    {
+      id: 'T1.3',
+      run: () => runT13IndexerRoundTrip({
+        evidencePath: path.join(outputDir, 'T1.3.log'),
+      }),
+    },
   ];
-  const settled = await Promise.allSettled(scenarioPromises);
-  const ids = ['T1.1', 'T1.2', 'T1.3'] as const;
-  const callableVerdicts: ScenarioVerdict[] = settled.map((result, idx) => {
-    if (result.status === 'fulfilled') return result.value;
-    return {
-      scenarioId: ids[idx],
-      verdict: 'fail' as const,
-      wallClockMs: 0,
-      evidencePath: path.join(outputDir, `${ids[idx]}.log`),
-      failClass: 'agent-crash' as const,
-      failNotes: result.reason instanceof Error ? result.reason.message : String(result.reason),
-    };
-  });
+  const callableVerdicts = await Promise.all(
+    callables.map(async ({ id, run }): Promise<ScenarioVerdict> => {
+      try {
+        return await run();
+      } catch (err) {
+        return {
+          scenarioId: id,
+          verdict: 'fail',
+          wallClockMs: 0,
+          evidencePath: path.join(outputDir, `${id}.log`),
+          failClass: 'agent-crash',
+          failNotes: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }),
+  );
 
   // T1.4 needs a separate subprocess (Playwright).
   const t14 = await runT14SpaRouteSmoke(outputDir);
@@ -116,23 +130,27 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   };
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
-  // Marker block
+  // Marker block — one `tier-1-<id>=<status>` line per scenario.
+  const markerValue = (v: ScenarioVerdict): string => {
+    switch (v.verdict) {
+      case 'pass':
+        return 'passed';
+      case 'skip':
+        return `skipped:${v.failNotes ?? 'no-reason'}`;
+      case 'fail':
+        return `failed:${v.failClass}`;
+    }
+  };
   const markerLines: string[] = [
     '<!-- jinn-release-evidence:v1',
     `release-candidate=${opts.candidateVersion ?? 'unknown'}`,
+    ...verdicts.map((v) => {
+      const key = `tier-1-${v.scenarioId.toLowerCase().replace(/\./g, '-')}`;
+      return `${key}=${markerValue(v)}`;
+    }),
+    `tier-1-overall=${allPassed ? 'passed' : 'failed'}`,
+    '-->',
   ];
-  for (const v of verdicts) {
-    const key = `tier-1-${v.scenarioId.toLowerCase().replace(/\./g, '-')}`;
-    if (v.verdict === 'pass') {
-      markerLines.push(`${key}=passed`);
-    } else if (v.verdict === 'skip') {
-      markerLines.push(`${key}=skipped:${v.failNotes ?? 'no-reason'}`);
-    } else {
-      markerLines.push(`${key}=failed:${v.failClass}`);
-    }
-  }
-  markerLines.push(`tier-1-overall=${allPassed ? 'passed' : 'failed'}`);
-  markerLines.push('-->');
   await fs.writeFile(path.join(outputDir, 'marker.txt'), markerLines.join('\n') + '\n');
 
   return { verdicts, allPassed, outputDir };
