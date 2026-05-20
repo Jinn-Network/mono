@@ -424,12 +424,39 @@ export class TaskEngine {
     }
   }
 
+  /**
+   * Pre-claim acceptance check used by the daemon's engine-watcher loop.
+   *
+   * Performance contract (issue #398): this runs once per task announcement,
+   * on the engine-watcher hot path, for every observed task. It MUST NOT
+   * perform per-task blocking I/O. In particular it does not probe
+   * `impl.isReady()` — for the Hermes harness that runs two blocking
+   * `spawnSync` child processes, so a backlog would pay per-task blocking
+   * spawns and starve the daemon event loop.
+   *
+   * Harness readiness for the claim gate is instead served O(1) from the
+   * daemon's cached `HarnessReadinessRegistry` snapshot: the engine-watcher
+   * loop calls `gateClaimByReadiness(...)` immediately after `canAcceptTask`
+   * returns. A ~tickIntervalMs-stale snapshot is acceptable — harness
+   * readiness changes on a minutes scale (auth/config) and the daemon
+   * already trusts that cached registry for its post-`canAcceptTask` gate.
+   *
+   * `claim()` (the DISCOVERED → CLAIMED transition) still probes
+   * `impl.isReady()` directly — it runs once per claimed task, not per
+   * announcement, and is the authoritative pre-execution gate.
+   */
   async canAcceptTask(input: {
     solverType?: string;
     taskRole?: 'restoration' | 'evaluation';
     task?: Task;
   }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const reason = await this.runnableFailureReason(input.solverType, input.taskRole ?? 'restoration', input.task);
+    const reason = await this.runnableFailureReason(
+      input.solverType,
+      input.taskRole ?? 'restoration',
+      input.task,
+      undefined,
+      { skipReadinessProbe: true },
+    );
     return reason ? { ok: false, reason } : { ok: true };
   }
 
@@ -863,11 +890,23 @@ export class TaskEngine {
     return null;
   }
 
+  /**
+   * Shared eligibility evaluation behind both `canAcceptTask` and `claim`.
+   *
+   * `opts.skipReadinessProbe` (issue #398): when true, the per-task
+   * `impl.isReady()` probe is skipped. The engine-watcher's `canAcceptTask`
+   * sets this — it relies on the daemon's cached `HarnessReadinessRegistry`
+   * (via `gateClaimByReadiness`) for the readiness gate instead of a
+   * blocking per-announcement probe. `claim()` leaves it false so the
+   * DISCOVERED → CLAIMED transition still runs the authoritative readiness
+   * probe (once per claimed task, not per announcement).
+   */
   private async runnableFailureReason(
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
     currentRequestId?: string,
+    opts: { skipReadinessProbe?: boolean } = {},
   ): Promise<string | null> {
     // Per-launch operator-eligibility filter (Task 28 of
     // `spec/2026-05-05-solvernet-creation-and-launch.md` §14). When the
@@ -932,7 +971,12 @@ export class TaskEngine {
         }
       }
     }
-    if (impl.isReady) {
+    // The per-task `impl.isReady()` probe is the only blocking I/O on this
+    // path (the Hermes harness spawns child processes synchronously). The
+    // engine-watcher's `canAcceptTask` skips it — readiness is gated O(1) by
+    // the daemon's cached `HarnessReadinessRegistry` right after this call.
+    // `claim()` keeps it as the authoritative pre-execution check.
+    if (!opts.skipReadinessProbe && impl.isReady) {
       const status = await impl.isReady({ solverType: routingKey, role });
       if (!status.ready) {
         return `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
