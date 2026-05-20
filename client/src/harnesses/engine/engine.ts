@@ -15,6 +15,11 @@ import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput }
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
+  reapWorkDirs,
+  DEFAULT_ORPHAN_MAX_AGE_MS,
+  type ReapWorkDirsReport,
+} from './work-dir-reaper.js';
+import {
   provisionWorkingDir,
   provisionImplStateDir,
   walkArtifacts,
@@ -308,6 +313,28 @@ export interface TaskEngineOptions {
    * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.3
    */
   harnessMode?: 'train' | 'frozen';
+  /**
+   * Working-directory reaper tuning (issue #320). Each task run provisions a
+   * heavy scratch directory under `paths.workingDirRoot`; without cleanup an
+   * operator accumulates hundreds of dirs / tens of GB. The engine reaps a
+   * task's directory once it reaches a terminal state (COMPLETE / FAILED),
+   * and periodically sweeps the root for crash-orphaned dirs.
+   *
+   * Optional — sensible defaults apply when absent.
+   */
+  workDirReaper?: {
+    /**
+     * Age above which a directory with no DB row (orphaned by a crash or an
+     * older daemon) is removed. Defaults to {@link DEFAULT_ORPHAN_MAX_AGE_MS}
+     * (24h). Set to a large value to keep orphans for forensic inspection.
+     */
+    orphanMaxAgeMs?: number;
+    /**
+     * Disable the reaper entirely (escape hatch for debugging a stuck task).
+     * Defaults to false — the reaper runs.
+     */
+    disabled?: boolean;
+  };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -393,6 +420,9 @@ export class TaskEngine {
     this.stopResolve = resolve;
   });
 
+  /** Working-dir reaper tuning (issue #320). */
+  protected readonly workDirReaperOpts: { orphanMaxAgeMs: number; disabled: boolean };
+
   constructor(opts: TaskEngineOptions) {
     this.persistence = new TaskRunPersistence(opts.store.db);
     this.store = opts.store;
@@ -408,6 +438,10 @@ export class TaskEngine {
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
     this.harnessMode = opts.harnessMode ?? 'train';
+    this.workDirReaperOpts = {
+      orphanMaxAgeMs: opts.workDirReaper?.orphanMaxAgeMs ?? DEFAULT_ORPHAN_MAX_AGE_MS,
+      disabled: opts.workDirReaper?.disabled ?? false,
+    };
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -483,12 +517,54 @@ export class TaskEngine {
       }
     }
 
+    // Reap the working directories of tasks that have reached a terminal
+    // state. Cheap (one readdir + a few rmSync) and idempotent, so it runs
+    // every tick — there is no separate reaper loop to keep alive or crash.
+    this.reapWorkDirsNow();
+
     if (!wait) return;
 
     const reports = await Promise.all(scheduled);
     for (const report of reports) {
       this.logProcessReport('tick', report);
     }
+  }
+
+  /**
+   * Reap on-disk per-task working directories (issue #320).
+   *
+   * Removes the scratch directory of every task in a terminal state
+   * (COMPLETE / FAILED) and any crash-orphaned directory older than the
+   * configured max age. In-flight tasks are never touched. Safe to call at
+   * any time; never throws (filesystem errors are collected into the report).
+   *
+   * Called automatically every `tick()`; also exposed for the one-shot
+   * cleanup script and for tests.
+   */
+  reapWorkDirsNow(): ReapWorkDirsReport {
+    const empty: ReapWorkDirsReport = { removed: [], protected: [], scanned: 0, errors: [] };
+    if (this.workDirReaperOpts.disabled) return empty;
+
+    const inFlightRequestIds = new Set(this.persistence.getInFlight().map((t) => t.requestId));
+    const terminalRequestIds = new Set(this.persistence.getTerminal().map((t) => t.requestId));
+
+    const report = reapWorkDirs({
+      workingDirRoot: this.paths.workingDirRoot,
+      terminalRequestIds,
+      inFlightRequestIds,
+      orphanMaxAgeMs: this.workDirReaperOpts.orphanMaxAgeMs,
+    });
+
+    if (report.removed.length > 0) {
+      console.log(
+        `[harness-engine] work-dir reaper removed ${report.removed.length} ` +
+        `terminal/orphaned task dir(s) under ${this.paths.workingDirRoot}`,
+      );
+    }
+    for (const e of report.errors) {
+      console.warn(`[harness-engine] work-dir reaper failed to remove ${e.requestId}: ${e.error}`);
+    }
+    return report;
   }
 
   /**

@@ -574,6 +574,19 @@ export class TaskRunPersistence {
     return rows.map(rowToTaskRun);
   }
 
+  /**
+   * Fetch all terminal tasks (COMPLETE or FAILED).
+   * Used by the working-dir reaper (issue #320) to decide which on-disk
+   * scratch directories are safe to delete.
+   */
+  getTerminal(): PersistedTaskRun[] {
+    const terminalList = [...TERMINAL_STATES];
+    const placeholders = terminalList.map(() => '?').join(', ');
+    const sql = `SELECT * FROM task_runs WHERE state IN (${placeholders}) ORDER BY state_updated_at ASC`;
+    const rows = this.db.prepare(sql).all(...terminalList) as RawRow[];
+    return rows.map(rowToTaskRun);
+  }
+
   hasInFlightFor(args: {
     solverType: string;
     taskRole: 'restoration' | 'evaluation';

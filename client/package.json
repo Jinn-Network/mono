@@ -77,6 +77,7 @@
     "release:testnet-acceptance:docker": "node scripts/testnet-acceptance-docker.mjs",
     "release:testnet-acceptance:host": "node scripts/testnet-acceptance.mjs",
     "status": "tsx scripts/status.ts",
+    "cleanup:engine-work": "tsx scripts/cleanup-engine-work.ts",
     "e2e": "tsx test/e2e/validate.ts",
     "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",
     "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
