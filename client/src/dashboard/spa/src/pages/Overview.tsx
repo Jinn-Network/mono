@@ -202,7 +202,11 @@ export function OverviewPage(): JSX.Element {
   const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
-  const liveNow = deriveLiveNow(status);
+  // Gate the LiveNow attention banner on the freshly-polled join map so a
+  // stale `prediction_solvernet_missing` diagnostic (the daemon only
+  // re-reads `joinedSolverNets` on restart) does not contradict the joined
+  // SolverNet shown below (#333).
+  const liveNow = deriveLiveNow(status, bootstrap?.joinedSolverNets);
   const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
   // Auto-clear timer for transient success notices (e.g. the gas top-up
   // confirmation, which should surface the amount + tx hash for ~5s then
