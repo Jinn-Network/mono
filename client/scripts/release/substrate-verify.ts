@@ -7,7 +7,9 @@ const MIN_MASTER_ETH_WEI = 2_000_000_000_000_000n;   // 0.002 ETH
 const IDENTITY_REGISTRY_ABI = parseAbi([
   'function getAgentWallet(uint256 agentId) view returns (address)',
 ]);
-const OLAS_TOKEN_ADDRESS_BASE_SEPOLIA: Address = '0x54330d28ca3357F294334BDC454a032e7f353416';
+// OLAS token address — currently identical on both supported networks
+// (base and base-sepolia). Split into a per-network map if that ever diverges.
+const OLAS_TOKEN_ADDRESS: Address = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const OLAS_TOKEN_ABI = parseAbi([
   'function balanceOf(address account) view returns (uint256)',
 ]);
@@ -92,7 +94,7 @@ export async function verifySubstrate(opName: string, opts: VerifyOptions = {}):
   // OLAS balance on Safe (informational; staked balance is locked so we just check)
   try {
     onChain.olasBalanceWei = await client.readContract({
-      address: OLAS_TOKEN_ADDRESS_BASE_SEPOLIA,
+      address: OLAS_TOKEN_ADDRESS,
       abi: OLAS_TOKEN_ABI,
       functionName: 'balanceOf',
       args: [manifest.operator.safeAddress as Address],
