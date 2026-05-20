@@ -754,3 +754,23 @@ export interface DiscoveryBuilderArtifactsResponse {
 export interface DiscoveryPluginScoresResponse {
   scores: PluginScoreHistoryRowDto[];
 }
+
+// ── Per-harness readiness (vh74.2 Stage A — #248 / #332) ─────────────────────
+// Mirrors the daemon's `HarnessReadinessSnapshot` entry shape exposed at
+// `GET /v1/harnesses/:name/readiness`. The join form consults this to disable
+// harness options whose external dependencies (CLI install, provider key)
+// are unsatisfied.
+
+export interface HarnessReadinessNextStep {
+  description: string;
+  cli?: string;
+  url?: string;
+}
+
+export interface HarnessReadinessEntry {
+  harnessName: string;
+  manifestCids: string[];
+  ready: boolean;
+  reason?: string;
+  nextStep?: HarnessReadinessNextStep;
+}

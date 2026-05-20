@@ -4,6 +4,7 @@ import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type {
+  HarnessReadinessEntry,
   RegistryManifestResponse,
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
@@ -83,6 +84,51 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
+/**
+ * Readiness lookup keyed by harness name. `undefined` for a name means the
+ * probe is still in flight or the harness is absent from the daemon's
+ * readiness snapshot (404 — treated as not-yet-known, not a hard failure).
+ */
+type ReadinessMap = Map<string, HarnessReadinessEntry | undefined>;
+
+/**
+ * Probes `GET /v1/harnesses/:name/readiness` for each candidate harness so
+ * the join form (#332) can disable harness options whose external
+ * dependencies (CLI install, provider API key) are unsatisfied — and gate
+ * Save & Join on the selected harness reporting ready.
+ *
+ * The daemon's readiness snapshot covers every registered harness (not just
+ * joined ones — see `readiness-registry.ts` `_doRefresh`), so an unjoined
+ * harness still resolves here. A 404 is swallowed to `undefined` rather than
+ * thrown: a harness the daemon does not know about should not crash the form.
+ */
+function useReadiness(harnessNames: string[]): { readiness: ReadinessMap } {
+  // Sort + dedupe for a stable query key regardless of catalog ordering.
+  const sortedNames = [...new Set(harnessNames)].sort();
+  const query = useQuery<ReadinessMap>({
+    queryKey: ['harness-readiness', sortedNames.join(',')],
+    enabled: sortedNames.length > 0,
+    // Re-probe periodically so an operator who installs a CLI / adds a key
+    // in another window sees the option un-disable without a full reload.
+    refetchInterval: 5_000,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        sortedNames.map(async (name): Promise<[string, HarnessReadinessEntry | undefined]> => {
+          try {
+            return [name, await api.harnessReadiness(name)];
+          } catch (err) {
+            const code = (err as { code?: string }).code;
+            if (code === 'harness_not_found') return [name, undefined];
+            throw err;
+          }
+        }),
+      );
+      return new Map(entries);
+    },
+  });
+  return { readiness: query.data ?? new Map() };
+}
+
 export function JoinFlow({
   manifestCid: manifestCidOverride,
   navigateTo,
@@ -157,6 +203,15 @@ export function JoinFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogPreferredHarness]);
   const modelOptions = modelOptionsForHarness(form.harness);
+
+  // Per-harness readiness (#332). Probe every solver-compatible harness so
+  // not-ready options render disabled, and Save & Join can gate on the
+  // selected harness reporting ready. The daemon keys the readiness endpoint
+  // by `Harness.name` — the same canonical name `form.harness` carries.
+  const { readiness } = useReadiness(
+    solverCompatibleHarnesses.map((h) => h.name),
+  );
+  const selectedHarnessReadiness = readiness.get(form.harness);
 
   const submitMutation = useMutation({
     mutationFn: () =>
@@ -248,8 +303,19 @@ export function JoinFlow({
   const requiresCostConfirmation = showSolverFields && costDecision.requiresConfirmation;
   const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
 
+  // Readiness gate (#332): block Save & Join when the selected solver harness
+  // reports a definitive `ready: false`. A still-loading or unknown probe
+  // (`undefined`) does NOT block — the not-ready *options* are disabled in
+  // the select, so an operator cannot land on a known-not-ready harness, and
+  // we avoid flashing a disabled button before the first probe resolves.
+  const harnessReadinessBlocked =
+    showSolverFields && selectedHarnessReadiness?.ready === false;
+
   const canSubmit =
-    form.roles.length > 0 && !submitMutation.isPending && !costGateBlocked;
+    form.roles.length > 0 &&
+    !submitMutation.isPending &&
+    !costGateBlocked &&
+    !harnessReadinessBlocked;
 
   return (
     <main data-testid="join-flow" data-manifest-cid={cid} style={pageStyle}>
@@ -424,11 +490,25 @@ export function JoinFlow({
                 }}
                 style={selectStyle}
               >
-                {solverCompatibleHarnesses.map((h) => (
-                  <option key={h.name} value={h.name}>
-                    {harnessOptionLabel(h.name, h.version)}
-                  </option>
-                ))}
+                {solverCompatibleHarnesses.map((h) => {
+                  const entry = readiness.get(h.name);
+                  const notReady = entry?.ready === false;
+                  return (
+                    <option
+                      key={h.name}
+                      value={h.name}
+                      disabled={notReady}
+                      data-testid="join-harness-option"
+                      data-harness={h.name}
+                      data-harness-ready={
+                        entry === undefined ? 'unknown' : entry.ready ? 'true' : 'false'
+                      }
+                    >
+                      {harnessOptionLabel(h.name, h.version)}
+                      {notReady ? ' — setup required' : ''}
+                    </option>
+                  );
+                })}
                 {(!catalogEntry || solverCompatibleHarnesses.length === 0) && (
                   <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
                 )}
@@ -444,6 +524,54 @@ export function JoinFlow({
                 >
                   {HERMES_AGENT_DESCRIPTION}
                 </span>
+              )}
+              {selectedHarnessReadiness?.ready === false && (
+                <div
+                  data-testid="join-harness-not-ready"
+                  data-harness={form.harness}
+                  role="status"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    padding: '10px 12px',
+                    border: '1px solid var(--break-red)',
+                    borderRadius: 'var(--radius-2)',
+                    background: 'var(--bg)',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    color: 'var(--fg)',
+                  }}
+                >
+                  <span style={{ color: 'var(--break-red)' }}>
+                    {harnessDisplayName(form.harness)} is not ready
+                    {selectedHarnessReadiness.reason
+                      ? `: ${selectedHarnessReadiness.reason}`
+                      : ''}
+                  </span>
+                  {selectedHarnessReadiness.nextStep && (
+                    <span
+                      data-testid="join-harness-not-ready-next-step"
+                      style={{ color: 'var(--fg-muted)' }}
+                    >
+                      {selectedHarnessReadiness.nextStep.description}
+                      {selectedHarnessReadiness.nextStep.cli
+                        ? ` (${selectedHarnessReadiness.nextStep.cli})`
+                        : ''}
+                    </span>
+                  )}
+                  {selectedHarnessReadiness.nextStep?.url && (
+                    <a
+                      href={selectedHarnessReadiness.nextStep.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid="join-harness-not-ready-url"
+                      style={{ color: 'var(--accent-sky)' }}
+                    >
+                      {selectedHarnessReadiness.nextStep.url}
+                    </a>
+                  )}
+                </div>
               )}
             </div>
 
