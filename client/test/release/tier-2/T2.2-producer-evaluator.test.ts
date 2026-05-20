@@ -45,5 +45,10 @@ describe('T2.2 producer-evaluator', () => {
     } finally {
       await fs.rm(evidenceDir, { recursive: true, force: true });
     }
-  }, 20 * 60 * 1000);
+    // 25 min: the callable enforces its own 18-min wall-clock budget via a
+    // Promise.race deadline, so on overrun it returns a classified verdict
+    // well before this fires. The extra margin over the 18-min budget only
+    // covers the post-deadline teardown (Anvil + mock servers) so the run
+    // still ends with a real verdict instead of a process kill.
+  }, 25 * 60 * 1000);
 });

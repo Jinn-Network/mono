@@ -40,6 +40,22 @@ export class EvidenceLog {
   }
 }
 
+/** Build a `pass` verdict. */
+export function passVerdict(args: {
+  scenarioId: string;
+  startedAt: number;
+  evidencePath: string;
+}): ScenarioVerdict {
+  return {
+    scenarioId: args.scenarioId,
+    verdict: 'pass',
+    wallClockMs: Date.now() - args.startedAt,
+    evidencePath: args.evidencePath,
+    failClass: null,
+    failNotes: null,
+  };
+}
+
 /** Build a `skip` verdict — used for missing-prerequisite / missing-endpoint paths. */
 export function skipVerdict(args: {
   scenarioId: string;

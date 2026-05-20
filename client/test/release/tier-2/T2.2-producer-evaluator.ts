@@ -84,7 +84,7 @@ import {
   type RunningDaemon,
 } from '../../e2e/_daemon-harness-helpers.js';
 import { jsonRpc as anvilJsonRpc } from '../../_support/chain/anvil.js';
-import { EvidenceLog, failVerdict } from './scenario-evidence.js';
+import { EvidenceLog, failVerdict, passVerdict } from './scenario-evidence.js';
 import type {
   ScenarioVerdict,
   ScenarioOptions,
@@ -101,20 +101,14 @@ const FIXTURE_MARKET_ID = 'jinn-daemon-harness-e2e-task4';
 const FIXTURE_CONDITION_ID = '0xcondition-daemon-harness-e2e-task4';
 const FIXTURE_MARKET_SLUG = 'jinn-daemon-harness-e2e-task4';
 
-/** Build a `pass` ScenarioVerdict. */
-function passVerdict(args: {
-  startedAt: number;
-  evidencePath: string;
-}): ScenarioVerdict {
-  return {
-    scenarioId: 'T2.2',
-    verdict: 'pass',
-    wallClockMs: Date.now() - args.startedAt,
-    evidencePath: args.evidencePath,
-    failClass: null,
-    failNotes: null,
-  };
-}
+/**
+ * Default in-scenario wall-clock budget (ms). The orchestrator may override it
+ * via `opts.wallClockBudgetMs`; the Vitest wrapper passes 18 min. Enforced via
+ * a `Promise.race` deadline inside `runT22ProducerEvaluator` so an overrun
+ * yields a classified `flake-timing` verdict instead of letting the Vitest
+ * process timeout kill the run with no verdict at all.
+ */
+const DEFAULT_WALL_CLOCK_BUDGET_MS = 18 * 60 * 1000;
 
 // ── Callable entry point for the orchestrator ────────────────────────────────
 
@@ -124,6 +118,50 @@ export async function runT22ProducerEvaluator(
   const started = Date.now();
   const evidence = new EvidenceLog(opts.evidencePath);
   const log = (msg: string): void => evidence.log(msg);
+
+  // Enforce the wall-clock budget in-scenario: race the scenario body against a
+  // deadline timer. If the body overruns, the timer wins and we return a
+  // classified `flake-timing` fail — a real verdict — rather than depending on
+  // the Vitest process timeout, which kills the process with no verdict.
+  const budgetMs = opts.wallClockBudgetMs ?? DEFAULT_WALL_CLOCK_BUDGET_MS;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<ScenarioVerdict>((resolve) => {
+    deadlineTimer = setTimeout(() => {
+      log(
+        `ERROR: scenario exceeded wall-clock budget of ${budgetMs}ms — aborting`,
+      );
+      // Flush is best-effort and non-blocking here; the body's finally block
+      // still runs in the background to release Anvil / mock servers.
+      void evidence.flush();
+      resolve(
+        failVerdict({
+          scenarioId: 'T2.2',
+          startedAt: started,
+          evidencePath: opts.evidencePath,
+          error: new Error(
+            `T2.2 timed out after ${budgetMs}ms (wall-clock budget exceeded)`,
+          ),
+        }),
+      );
+    }, budgetMs);
+  });
+
+  try {
+    return await Promise.race([
+      runScenarioBody(opts, started, evidence, log),
+      deadline,
+    ]);
+  } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer);
+  }
+}
+
+async function runScenarioBody(
+  opts: ScenarioOptions,
+  started: number,
+  evidence: EvidenceLog,
+  log: (msg: string) => void,
+): Promise<ScenarioVerdict> {
 
   let fixture: DaemonHarnessFixture | null = null;
   let mockIpfs: MockIpfsServer | null = null;
@@ -361,7 +399,11 @@ export async function runT22ProducerEvaluator(
     log('');
     log('Verdict: pass — full producer → solve → deliver → evaluate → verdict loop closed on-chain');
     await evidence.flush();
-    return passVerdict({ startedAt: started, evidencePath: opts.evidencePath });
+    return passVerdict({
+      scenarioId: 'T2.2',
+      startedAt: started,
+      evidencePath: opts.evidencePath,
+    });
   } catch (err) {
     log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
     await evidence.flush();
