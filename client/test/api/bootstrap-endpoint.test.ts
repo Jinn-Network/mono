@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
-import {
-  addBootstrapRoutes,
-  isEmbeddedAgentEnabled,
-} from '../../src/api/bootstrap-endpoint.js';
+import { addBootstrapRoutes } from '../../src/api/bootstrap-endpoint.js';
 import { buildEnvelope } from '../../src/errors/envelope.js';
 import { persistBootstrapError } from '../../src/errors/persisted-bootstrap-error.js';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -311,33 +308,13 @@ describe('GET /v1/bootstrap', () => {
   });
 });
 
-// Issue #326: the embedded agent chat surface is gated behind
-// JINN_ENABLE_EMBEDDED_AGENT. The endpoint surfaces the resolved flag so the
-// SPA can hide the agent rail / onboarding panel; the daemon also uses it to
-// decide whether to mount /api/agent/ws.
-describe('isEmbeddedAgentEnabled', () => {
-  it('defaults to false when the env var is unset', () => {
-    expect(isEmbeddedAgentEnabled({})).toBe(false);
-  });
-
-  it('is true for "1"', () => {
-    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '1' })).toBe(true);
-  });
-
-  it('is true for "true" (case-insensitive, trimmed)', () => {
-    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: 'true' })).toBe(true);
-    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: ' TRUE ' })).toBe(true);
-  });
-
-  it('is false for any other value', () => {
-    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '0' })).toBe(false);
-    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: 'yes' })).toBe(false);
-    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '' })).toBe(false);
-  });
-});
-
-describe('GET /v1/bootstrap — embeddedAgentEnabled flag (issue #326)', () => {
-  it('reports embeddedAgentEnabled=false by default', async () => {
+// Issue #367: `/v1/bootstrap` no longer carries the embedded-agent feature
+// flag. The operator app reads it (and every feature flag) via the injected
+// `window.__JINN_FEATURES__` — see `test/api/feature-flags-inject.test.ts`
+// (`isEmbeddedAgentEnabled` + `resolveFeatureFlags`) and the SPA's
+// `lib/features.test.ts`.
+describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
+  it('does not include embeddedAgentEnabled in the response', async () => {
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
       chain: 'base-sepolia',
@@ -346,30 +323,17 @@ describe('GET /v1/bootstrap — embeddedAgentEnabled flag (issue #326)', () => {
     const app = new Hono();
     addBootstrapRoutes(app, { earningDir });
     const res = await app.request('/v1/bootstrap');
-    const body = await res.json() as { embeddedAgentEnabled?: boolean };
-    expect(body.embeddedAgentEnabled).toBe(false);
+    const body = await res.json() as Record<string, unknown>;
+    expect('embeddedAgentEnabled' in body).toBe(false);
   });
 
-  it('reports embeddedAgentEnabled=true when the flag is set on the config', async () => {
-    const earningDir = makeFixtureEarningDir({
-      master_address: '0xabc',
-      chain: 'base-sepolia',
-      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
-    });
-    const app = new Hono();
-    addBootstrapRoutes(app, { earningDir, embeddedAgentEnabled: true });
-    const res = await app.request('/v1/bootstrap');
-    const body = await res.json() as { embeddedAgentEnabled?: boolean };
-    expect(body.embeddedAgentEnabled).toBe(true);
-  });
-
-  it('reports embeddedAgentEnabled=false on the uninitialized branch', async () => {
-    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-bootstrap-empty-326-'));
+  it('does not include embeddedAgentEnabled on the uninitialized branch', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-bootstrap-empty-367-'));
     const app = new Hono();
     addBootstrapRoutes(app, { earningDir });
     const res = await app.request('/v1/bootstrap');
-    const body = await res.json() as { mode: string; embeddedAgentEnabled?: boolean };
-    expect(body.mode).toBe('uninitialized');
-    expect(body.embeddedAgentEnabled).toBe(false);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body['mode']).toBe('uninitialized');
+    expect('embeddedAgentEnabled' in body).toBe(false);
   });
 });
