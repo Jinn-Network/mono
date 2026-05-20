@@ -1,0 +1,15 @@
+{
+  "network": "testnet",
+  "rpcUrl": "https://base-sepolia.example/fixture-key",
+  "apiPort": 7333,
+  "joinedSolverNets": {
+    "bafkrei-fixture-cid": {
+      "name": "fixture-swe-rebench",
+      "manifestCid": "bafkrei-fixture-cid",
+      "roles": ["solving"],
+      "harness": "claude-code-learner",
+      "plugins": [],
+      "model": "claude-haiku-4-5-20251001"
+    }
+  }
+}
