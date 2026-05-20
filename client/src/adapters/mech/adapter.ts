@@ -44,6 +44,7 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
+import { isNonRecoverableInnerRevert } from './safe-revert.js';
 import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
@@ -70,6 +71,44 @@ interface PendingEvaluationSolution {
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
+
+/**
+ * Yield to the Node event loop every N evaluation opportunities while draining
+ * the retry queue. A real fleet can accumulate a large backlog of pending
+ * evaluation solutions; without an explicit yield the synchronous-feeling
+ * async loop can starve the HTTP API (the operator SPA reads `/health` and
+ * flips its "Daemon offline" banner if a probe round-trip exceeds its window).
+ */
+const EVALUATION_RETRY_YIELD_EVERY = 10;
+
+/**
+ * Decide whether a `canClaimEvaluation` failure reason means the opportunity
+ * can NEVER become claimable (terminal) and should be pruned from the working
+ * set, versus a reason that could still clear later (transient — keep
+ * retrying).
+ *
+ * `canClaimEvaluation` returns `reason` as either a decoded known revert
+ * (`TCAttemptAlreadyFinalized(1, 0)` or the bare `TCAttemptAlreadyFinalized`)
+ * or an arbitrary flattened error message. We strip any decoded-argument
+ * suffix to recover the bare revert name and defer to
+ * `isNonRecoverableInnerRevert` — the module's existing, maintained
+ * classification of "permanent failure for this requestId, never worth
+ * retrying" (covers TCAttemptAlreadyFinalized / TCEvaluationDeadlinePassed /
+ * TCMaxVerdictsReached, etc.).
+ *
+ * Anything that does not resolve to a known non-recoverable revert name —
+ * generic RPC errors, rate-limit messages, "not yet announced" style
+ * failures — is treated as transient and left in the working set. A
+ * false-keep (re-checking a dead opportunity) only costs one more RPC; a
+ * false-prune (dropping a still-claimable opportunity) loses real work, so
+ * when in doubt we keep.
+ */
+function isTerminalEvaluationReason(reason: string | undefined): boolean {
+  if (!reason) return false;
+  // Strip a decoded-argument suffix, e.g. `TCAttemptAlreadyFinalized(1, 0)`.
+  const bareName = reason.replace(/\(.*$/s, '').trim();
+  return isNonRecoverableInnerRevert(bareName);
+}
 const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
 /**
  * Floor block for the on-chain TaskCreated backlog scan, per chain.
@@ -722,7 +761,12 @@ export class MechAdapter implements ExecutionAdapter {
       return undefined;
     }
 
-    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
+    // Cheap claimability gate FIRST — before the restoration lookup + IPFS
+    // fetch. A backlog of terminal opportunities (finalized / evaluation
+    // deadline passed / max verdicts reached) must not pay the expensive
+    // restoration-announcement cost on every poll cycle. Terminal reasons are
+    // pruned from the working set so the loop never re-scans on-chain history;
+    // transient reasons are left in place to be retried next cycle.
     const claimable = await canClaimEvaluation(
       this.publicClient,
       this.config.safeAddress,
@@ -732,13 +776,18 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.mechContractAddress,
     );
     if (!claimable.ok) {
+      const terminal = isTerminalEvaluationReason(claimable.reason);
       console.log(
-        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}`,
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}` +
+          (terminal ? ' (terminal — pruned)' : ' (transient — will retry)'),
       );
-      this.forgetPendingEvaluationSolution(solution.requestId);
+      if (terminal) {
+        this.forgetPendingEvaluationSolution(solution.requestId);
+      }
       return undefined;
     }
 
+    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
     const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
@@ -771,14 +820,23 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async *retryPendingEvaluationSolutions(): AsyncIterable<TaskAnnouncement> {
+    let processed = 0;
     for (const [requestId, solution] of Array.from(this.pendingEvaluationSolutions)) {
+      // Yield to the event loop periodically so a large backlog of pending
+      // evaluation solutions can't starve the HTTP API mid-cycle.
+      if (processed > 0 && processed % EVALUATION_RETRY_YIELD_EVERY === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      processed++;
       try {
         const announcement = await this.evaluationAnnouncementForSolution(solution);
         if (announcement) {
           yield announcement;
-        } else {
-          this.forgetPendingEvaluationSolution(requestId);
         }
+        // No announcement does NOT mean "forget". evaluationAnnouncementForSolution
+        // owns pruning: it removes the solution only for terminal reasons and
+        // intentionally leaves transient failures in the working set so they
+        // are retried on the next cycle.
       } catch (err) {
         console.error(
           `[mech] evaluation opportunity retry failed for ${requestId}:`,
