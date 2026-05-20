@@ -55,19 +55,19 @@ export interface Tier3Handle {
 }
 
 export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3Handle> {
-  // 1. Daily-driver mutex check
+  // 1. Daily-driver mutex check. Either mode refuses to run while the daily
+  // driver holds a substrate-shared port — we never auto-SIGTERM from here
+  // because that requires permission over a process we don't own. Autonomous
+  // mode tells the caller to stop it; human-invoked mode defers the SIGTERM to
+  // release-readiness's own daemon-mutex Phase 5 logic.
   const dailyUp = await isDailyDriverRunning({ ports: opts.dailyDriverPorts });
+  if (dailyUp && opts.mode === 'autonomous') {
+    throw new Error(
+      'daily driver appears to be running on one of the substrate-shared ports. ' +
+      'Autonomous mode refuses to SIGTERM it. Re-run in human-invoked mode or stop the daily driver first.',
+    );
+  }
   if (dailyUp) {
-    if (opts.mode === 'autonomous') {
-      throw new Error(
-        'daily driver appears to be running on one of the substrate-shared ports. ' +
-        'Autonomous mode refuses to SIGTERM it. Re-run in human-invoked mode or stop the daily driver first.',
-      );
-    }
-    // human-invoked mode: instruct caller to stop daily driver first.
-    // We don't auto-SIGTERM because that requires the caller's process to have permission
-    // over the daily-driver process; instead surface explicitly and let release-readiness
-    // handle the SIGTERM via its own daemon-mutex Phase 5 logic.
     throw new Error(
       'daily driver is running on a substrate-shared port. ' +
       'In human-invoked mode, release-readiness should SIGTERM it before invoking Tier 3.',
