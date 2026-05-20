@@ -532,7 +532,6 @@ export async function runT21CrossOpDonation(
 
     log('');
     log('Verdict: pass — cross-operator corpus donation handshake completed end-to-end.');
-    await evidence.flush();
     return passVerdict({
       scenarioId: 'T2.1',
       startedAt: started,
@@ -540,7 +539,6 @@ export async function runT21CrossOpDonation(
     });
   } catch (err) {
     log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-    await evidence.flush();
     return failVerdict({
       scenarioId: 'T2.1',
       startedAt: started,
@@ -556,5 +554,7 @@ export async function runT21CrossOpDonation(
     if (handle) {
       try { await handle.teardown(); } catch {}
     }
+    // flush() last — captures any line a teardown step logged. Best-effort.
+    await evidence.flush();
   }
 }
