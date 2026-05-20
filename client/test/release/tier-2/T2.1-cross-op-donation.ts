@@ -3,59 +3,311 @@
  *
  * Scenario contract (from scenario-cross-op-donation.md):
  *   op-a produces a corpus artifact, indexer attributes it,
- *   op-b queries (402 unpaid), op-b pays x402, op-b retrieves (200 + ERC-8128 sig).
+ *   op-b discovers + queries it (402 unpaid), op-b pays x402, op-b retrieves
+ *   the bytes (200 + ERC-8128-signed envelope), USDC balance deltas verified.
  *
- * Real daemon API surface (confirmed by grepping client/src/api/ and client/src/x402/):
- *   - GET  /v1/artifacts/:sha256/content   x402-gated serving (handler.ts:144)
- *   - POST /v1/artifacts/acquire           buyer-side acquire (server.ts:613)
- *   - GET  /v1/operator/artifacts          operator artifact listing (operator-artifacts-endpoint.ts:330)
- *   - POST /artifacts                      artifact publish (server.ts:562)
- *   - NO   /v1/corpus/produce              — speculative endpoint, NOT present
- *   - NO   /v1/corpus/:cid                 — speculative endpoint, NOT present
- *   - NO   /v1/corpus/:cid/pay             — speculative endpoint, NOT present
- *   - NO   /v1/discovery/corpus            — speculative endpoint, NOT present
+ * Real daemon API surface (the speculative `/v1/corpus/*` REST endpoints in the
+ * original scenario plan were never built — corpus production is a side effect
+ * of task execution, not a REST call). This rewrite drives the *real* surface
+ * proven by `client/test/e2e/corpus-x402.ts`:
  *
- * Corpus production happens via task execution + engine pack/pin path — there is no
- * HTTP entry point. T2.1 therefore returns 'skip' with a diagnostic message pointing
- * to the follow-up GitHub issue.
+ *   - GET  /v1/artifacts/:sha256/content   x402-gated serving (client/src/x402/handler.ts)
+ *   - the `Corpus` library's `DiscoveryAPI` for envelope discovery
+ *     (Ponder HTTP primary + on-chain MetadataSet-log floor via withFallback)
+ *   - `acquireArtifactWithPayment` for the buyer-side x402 dance
  *
- * Follow-up: https://github.com/Jinn-Network/mono/issues/349
- * (T2.1 cross-op donation: missing producer endpoint /v1/corpus/produce)
+ * Structure: T2.1 is `corpus-x402.ts` re-hosted into the Tier 2 scenario shape.
+ * `setupTier2Scenario` supplies the substrate workspace + an Anvil fork of Base
+ * Sepolia + two booted operator daemons (proving substrate ops come up against
+ * the fork). The donation handshake itself runs against an in-test x402
+ * `ApiServer` for the producer side — the production daemon does not wire x402
+ * onto its own `ApiServer` (`DaemonConfig.x402` is never set in `main.ts`), so
+ * the x402-gated serving route only exists when an `ApiServer` is started with
+ * an explicit `x402` config, exactly as `corpus-x402.ts` does. Per the issue
+ * #349 investigation, the producer's served-artifact store is seeded directly
+ * (`saveServedArtifact` + a hand-built `SignedEnvelope`) rather than by driving
+ * a full task execution — the latter adds Anvil task-lifecycle flakiness for no
+ * extra coverage of the donation handshake.
+ *
+ * Closes https://github.com/Jinn-Network/mono/issues/349.
  */
 
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import {
+  concatHex,
+  createPublicClient,
+  createWalletClient,
+  encodeAbiParameters,
+  formatUnits,
+  http,
+  keccak256,
+  padHex,
+  parseUnits,
+  toBytes,
+  toHex,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from 'viem';
+import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
+
+import { startApiServer, type ApiServer } from '../../../src/api/server.js';
+import { createCorpus } from '../../../src/corpus/index.js';
+import { createOnchainDiscoveryAPI } from '../../../src/discovery/onchain.js';
+import { DiscoveryUnavailableError, type DiscoveryAPI } from '../../../src/discovery/types.js';
+import { withFallback } from '../../../src/discovery/with-fallback.js';
+import { encodeExecutionPayload } from '../../../src/erc8004/identity.js';
+import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
+import { signCanonical } from '../../../src/harnesses/engine/signing.js';
+import { Store } from '../../../src/store/store.js';
+import { SignedEnvelopeSchema, type SignedEnvelope } from '../../../src/types/envelope.js';
+import { acquireArtifactWithPayment } from '../../../src/x402/acquire.js';
+import { jsonRpc as anvilJsonRpc, type AnvilHarness } from '../../_support/chain/anvil.js';
+import { allocateAnvilPort } from '../../_support/chain/port-allocator.js';
+
 import { setupTier2Scenario, type Tier2Handle } from './tier-2-helpers.js';
-import { EvidenceLog, skipVerdict, failVerdict } from './scenario-evidence.js';
-import { spawnPonderIndexer } from '../../_support/indexer/ponder.js';
+import { EvidenceLog, passVerdict, skipVerdict, failVerdict } from './scenario-evidence.js';
 import type { ScenarioVerdict, ScenarioOptions } from '../../../scripts/release/scenario-types.js';
 
-// ── Candidate producer endpoints to probe ────────────────────────────────────
-// These are the speculative paths from the scenario plan. Only an explicit
-// 200/201 means the daemon has grown a usable surface and T2.1 should exercise
-// the happy path. A 401/405/500 does NOT count as "implemented" — it means the
-// route is auth-gated, absent for this method, or erroring; treating those as
-// available would advance into the not-implemented happy-path throw and raise
-// a spurious real-bug fail.
-const SPECULATIVE_PRODUCER_ENDPOINTS = [
-  '/v1/corpus/produce',
-  '/v1/discovery/corpus',
+// ── Constants ────────────────────────────────────────────────────────────────
+// Base Sepolia USDC (Circle FiatTokenV2 proxy — same storage layout as mainnet,
+// so the ERC-20 balances mapping lives at slot 9).
+const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as const;
+const USDC_BALANCE_SLOT = 9n;
+const X402_NETWORK = 'eip155:84532' as const;
+// MetadataSet-emitter shim address — see metadataLogEmitterRuntime().
+const MOCK_IDENTITY_REGISTRY = '0x1000000000000000000000000000000000008004' as const;
+// Deterministic test keys for producer (op-a) and consumer (op-b) — funded on
+// the fork via anvil cheatcodes. Reused verbatim from corpus-x402.ts.
+const PRODUCER_PRIVATE_KEY = '0xe8995487b20e0a75915567c5c8976b9deaed52d78b75ab5e04ce69c380007ea6' as const;
+const CONSUMER_PRIVATE_KEY = '0x2a1a0e4897413cbd6f28fd0571ce6538fbce72a9a9cc189ec9d7f843ab2b7ba4' as const;
+const PRICE_USDC = '0.001';
+const SOLVER_TYPE = 'corpus-donation.t2.1';
+const ARTIFACT_TYPE = 't2.1.corpus.donation.bytes';
+const ZERO_BYTES32 = `0x${'00'.repeat(32)}` as const;
+
+const ERC20_BALANCE_ABI = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
 ] as const;
 
-async function probeEndpoint(
-  apiPort: number,
-  urlPath: string,
-): Promise<{ status: number | null; reachable: boolean }> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${apiPort}${urlPath}`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(3000),
-    });
-    return { status: res.status, reachable: true };
-  } catch {
-    return { status: null, reachable: false };
-  }
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
 }
 
-// ── Callable entry point for the orchestrator (Task 10) ──────────────────────
+function sha256Hex(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function fakeIpfsCid(payload: unknown): string {
+  return `bafy${sha256Hex(Buffer.from(canonicalJson(payload))).slice(0, 52)}`;
+}
+
+/** In-process IPFS double — keeps the donation handshake self-contained. */
+function createInProcessIpfs(): {
+  upload(data: unknown): Promise<string>;
+  fetch(_gatewayUrl: string, cid: string): Promise<unknown>;
+} {
+  const blobs = new Map<string, unknown>();
+  return {
+    async upload(data) {
+      const canonical = canonicalJson(data);
+      const cid = fakeIpfsCid(data);
+      blobs.set(cid, JSON.parse(canonical));
+      return cid;
+    },
+    async fetch(_gatewayUrl, cid) {
+      const data = blobs.get(cid);
+      if (data === undefined) throw new Error(`IPFS fixture missing CID ${cid}`);
+      return data;
+    },
+  };
+}
+
+/**
+ * Minimal EVM runtime that re-emits its calldata as a `MetadataSet` log, so the
+ * on-chain `DiscoveryAPI` floor has a real attribution event to index off the
+ * Anvil fork (no deployed IdentityRegistry on a fresh Base Sepolia fork).
+ */
+function metadataLogEmitterRuntime(): Hex {
+  const topic0 = keccak256(toBytes('MetadataSet(uint256,string,string,bytes)'));
+  return `0x6040360360406000376020356000357f${topic0.slice(2)}604036036000a300` as Hex;
+}
+
+function usdcBalanceSlot(account: Address): Hex {
+  return keccak256(concatHex([
+    padHex(account, { size: 32 }),
+    padHex(toHex(USDC_BALANCE_SLOT), { size: 32 }),
+  ]));
+}
+
+async function setUsdcBalance(rpcUrl: string, account: Address, amount: bigint): Promise<void> {
+  await anvilJsonRpc(rpcUrl, 'anvil_setStorageAt', [
+    BASE_SEPOLIA_USDC,
+    usdcBalanceSlot(account),
+    padHex(toHex(amount), { size: 32 }),
+  ]);
+}
+
+async function usdcBalance(publicClient: PublicClient, account: Address): Promise<bigint> {
+  return publicClient.readContract({
+    address: BASE_SEPOLIA_USDC,
+    abi: ERC20_BALANCE_ABI,
+    functionName: 'balanceOf',
+    args: [account],
+  });
+}
+
+/** Align the fork head timestamp to wall-clock so x402 payment deadlines hold. */
+async function alignForkTimestampToWallClock(anvil: AnvilHarness): Promise<void> {
+  const forkNow = BigInt(await anvil.now());
+  const wallClockNow = BigInt(Math.floor(Date.now() / 1000));
+  if (forkNow >= wallClockNow) return;
+  await anvilJsonRpc(anvil.rpcUrl, 'evm_setNextBlockTimestamp', [toHex(wallClockNow)]);
+  await anvilJsonRpc(anvil.rpcUrl, 'anvil_mine', ['0x1']);
+}
+
+/** Publish a `MetadataSet` attribution event linking `manifestCid` to op-a. */
+async function publishEnvelopeMetadata(args: {
+  publicClient: PublicClient;
+  rpcUrl: string;
+  publisher: PrivateKeyAccount;
+  agentId: bigint;
+  manifestCid: string;
+  manifestHash: Hex;
+}): Promise<Hex> {
+  await anvilJsonRpc(args.rpcUrl, 'anvil_setCode', [
+    MOCK_IDENTITY_REGISTRY,
+    metadataLogEmitterRuntime(),
+  ]);
+  const wallet = createWalletClient({
+    account: args.publisher,
+    chain: baseSepolia,
+    transport: http(args.rpcUrl),
+  });
+  const metadataKey = `envelope:${args.manifestCid}`;
+  const metadataValue = encodeExecutionPayload({
+    version: 1,
+    tier: 1,
+    manifestHash: args.manifestHash,
+    attestationQuoteCid: '0x',
+    sourceMeasurement: ZERO_BYTES32,
+  });
+  const eventData = encodeAbiParameters(
+    [{ type: 'string' }, { type: 'bytes' }],
+    [metadataKey, metadataValue],
+  );
+  const data = concatHex([
+    padHex(toHex(args.agentId), { size: 32 }),
+    keccak256(toBytes(metadataKey)),
+    eventData,
+  ]);
+  const txHash = await wallet.sendTransaction({
+    to: MOCK_IDENTITY_REGISTRY,
+    data,
+    account: args.publisher,
+    chain: baseSepolia,
+    gas: 1_000_000n,
+  });
+  const receipt = await args.publicClient.waitForTransactionReceipt({ hash: txHash });
+  assert(receipt.status === 'success', `MetadataSet tx reverted: ${txHash}`);
+  return txHash;
+}
+
+/** Hand-build the producer's ERC-8128-signed corpus envelope. */
+async function buildSignedEnvelope(args: {
+  producer: PrivateKeyAccount;
+  producerPrivateKey: Hex;
+  producerSafe: Address;
+  endpoint: string;
+  artifactSha256: string;
+  artifactBytes: Buffer;
+}): Promise<SignedEnvelope> {
+  const unsigned = {
+    schemaVersion: 'jinn.execution.v1' as const,
+    solverType: SOLVER_TYPE,
+    role: 'restoration' as const,
+    generatedAt: Date.now(),
+    task: {
+      cid: 'bafy-t2.1-cross-op-donation-task',
+      onchainCreationTx: `0x${'11'.repeat(32)}` as Hex,
+      onchainCreationBlock: 1,
+      requestId: `0x${'22'.repeat(32)}` as Hex,
+    },
+    participant: {
+      safeAddress: args.producerSafe,
+      agentEoa: args.producer.address,
+    },
+    window: {
+      startTs: Math.floor(Date.now() / 1000) - 60,
+      endTs: Math.floor(Date.now() / 1000) + 60,
+    },
+    executor: {
+      implName: 't2.1-cross-op-donation-producer',
+      implVersion: '1.0.0',
+      clientGitSha: 'release-gate-t2.1',
+      codeDigest: `sha256:${'33'.repeat(32)}`,
+      runtimeBundleDigest: `sha256:${'44'.repeat(32)}`,
+      plugins: [],
+      signingKey: { kind: 'agent-eoa' as const, pubkey: args.producer.address },
+    },
+    evidenceTier: 'committed' as const,
+    attestation: null,
+    trajectory: null,
+    artifacts: [{
+      artifactType: ARTIFACT_TYPE,
+      sha256: args.artifactSha256,
+      metadata: {
+        description: 'T2.1 cross-operator corpus donation artifact',
+        tags: ['corpus', 'x402', 't2.1'],
+      },
+      access: {
+        endpoint: args.endpoint,
+        priceUsdc: PRICE_USDC,
+      },
+    }],
+    payload: {
+      ok: true,
+      bytesSha256: args.artifactSha256,
+      byteLength: args.artifactBytes.length,
+    },
+  };
+  const signed = await signCanonical(unsigned, args.producerPrivateKey, args.producer.address);
+  return SignedEnvelopeSchema.parse({
+    ...unsigned,
+    signature: {
+      algo: 'secp256k1',
+      signer: args.producer.address,
+      hash: signed.hash,
+      sig: signed.sig,
+    },
+  });
+}
+
+/** A DiscoveryAPI that always fails — forces the consumer onto the on-chain floor. */
+function unavailableDiscovery(onQuery: () => void): DiscoveryAPI {
+  const fail = async (): Promise<never> => {
+    throw new DiscoveryUnavailableError('synthetic indexer outage for T2.1');
+  };
+  return {
+    findClaimableTasks: fail,
+    listLaunchedSolverNets: fail,
+    getLifecycleStatus: fail,
+    async queryEnvelopes() {
+      onQuery();
+      throw new DiscoveryUnavailableError('synthetic indexer outage for T2.1');
+    },
+  };
+}
+
+// ── Callable entry point for the orchestrator ────────────────────────────────
 
 export async function runT21CrossOpDonation(
   opts: ScenarioOptions,
@@ -65,134 +317,227 @@ export async function runT21CrossOpDonation(
   const log = (msg: string): void => evidence.log(msg);
 
   let handle: Tier2Handle | null = null;
-  let indexer: Awaited<ReturnType<typeof spawnPonderIndexer>> | null = null;
+  let producerApi: ApiServer | null = null;
+  let producerStore: Store | null = null;
+  let consumerStore: Store | null = null;
 
   // ── Prerequisite: BASE_SEPOLIA_RPC_URL ────────────────────────────────────
   // setupTier2Scenario throws if the env var is absent; guard early so the
-  // error message is T2.1-specific and we can skip cleanly.
+  // skip message is T2.1-specific.
   if (!process.env['BASE_SEPOLIA_RPC_URL']) {
     log('SKIP: BASE_SEPOLIA_RPC_URL not set; cannot fork Base Sepolia for T2.1.');
-    log(
-      'Set BASE_SEPOLIA_RPC_URL to a Base Sepolia RPC endpoint and re-run to ' +
-      'exercise the T2.1 infrastructure setup. Even with the RPC set, T2.1 will ' +
-      'currently still skip because the producer endpoint is missing (see step 2).',
-    );
+    log('Set BASE_SEPOLIA_RPC_URL to a Base Sepolia RPC endpoint and re-run.');
     await evidence.flush();
     return skipVerdict({
       scenarioId: 'T2.1',
       startedAt: started,
       evidencePath: opts.evidencePath,
-      failNotes: 'BASE_SEPOLIA_RPC_URL not set; skipping infrastructure setup',
+      failNotes: 'BASE_SEPOLIA_RPC_URL not set; cannot fork Base Sepolia for T2.1',
     });
   }
 
   try {
-    // ── Step 1: Spin up substrate + Anvil fork + daemons ────────────────────
+    // ── Step 1: substrate workspace + Anvil fork + booted op daemons ────────
     log('Step 1: setup substrate workspace + Anvil fork of Base Sepolia + op-a/op-b daemons');
     handle = await setupTier2Scenario({ scenarioId: 'T2.1', portBase: 7750 });
     log(`  workspace: ${handle.workspace.workspaceRoot}`);
     log(`  anvil rpc: ${handle.anvilRpcUrl}`);
-    const opAPort = handle.daemons.daemons['op-a']!.apiPort;
-    const opBPort = handle.daemons.daemons['op-b']!.apiPort;
-    log(`  op-a api: http://127.0.0.1:${opAPort}`);
-    log(`  op-b api: http://127.0.0.1:${opBPort}`);
+    log(`  op-a daemon api: http://127.0.0.1:${handle.daemons.daemons['op-a']!.apiPort}`);
+    log(`  op-b daemon api: http://127.0.0.1:${handle.daemons.daemons['op-b']!.apiPort}`);
+    const rpcUrl = handle.anvilRpcUrl;
+    await alignForkTimestampToWallClock(handle.anvil);
 
-    // ── Step 2: Probe for speculative producer endpoints ─────────────────────
-    log('Step 2: probing speculative T2.1 producer endpoints against op-a');
-    const probeResults: Record<string, { status: number | null; reachable: boolean }> = {};
-    for (const ep of SPECULATIVE_PRODUCER_ENDPOINTS) {
-      const result = await probeEndpoint(opAPort, ep);
-      probeResults[ep] = result;
-      const available = result.reachable && (result.status === 200 || result.status === 201);
-      log(
-        `  ${ep}: reachable=${result.reachable}, status=${result.status ?? 'unreachable'}` +
-        (available
-          ? '  <--- 200/201 response; endpoint implemented!'
-          : ' (not a 200/201 — not implemented for the happy path)'),
-      );
-    }
+    const producer = privateKeyToAccount(PRODUCER_PRIVATE_KEY);
+    const consumer = privateKeyToAccount(CONSUMER_PRIVATE_KEY);
+    const priceUnits = parseUnits(PRICE_USDC, 6);
 
-    // Determine whether any speculative endpoint is available. Only an explicit
-    // 200/201 counts — see the comment on SPECULATIVE_PRODUCER_ENDPOINTS.
-    const anyProducerAvailable = Object.values(probeResults).some(
-      (r) => r.reachable && (r.status === 200 || r.status === 201),
+    const publicClient = createPublicClient({
+      chain: baseSepolia,
+      transport: http(rpcUrl),
+    }) as unknown as PublicClient;
+
+    // ── Step 2: fund producer (gas) + consumer (USDC) on the fork ───────────
+    log('Step 2: fund producer ETH + consumer USDC on the fork');
+    await anvilJsonRpc(rpcUrl, 'anvil_setBalance', [
+      producer.address,
+      toHex(parseUnits('10', 18)),
+    ]);
+    const fundedConsumerUsdc = parseUnits('10', 6);
+    await setUsdcBalance(rpcUrl, consumer.address, fundedConsumerUsdc);
+    const consumerFunded = await usdcBalance(publicClient, consumer.address);
+    assert(
+      consumerFunded === fundedConsumerUsdc,
+      `consumer USDC after funding=${formatUnits(consumerFunded, 6)} expected ${formatUnits(fundedConsumerUsdc, 6)}`,
     );
+    log(`  producer ${producer.address}: 10 ETH`);
+    log(`  consumer ${consumer.address}: ${formatUnits(consumerFunded, 6)} USDC`);
 
-    // Also probe the known-real artifact surfaces to confirm they're up.
-    log('Step 2b: probing known-real artifact surfaces for baseline health check');
-    const knownEndpoints = [
-      '/v1/artifacts/acquire',  // POST — we GET it, expect 404 or 405
-      '/v1/operator/artifacts', // GET, bearer-gated — expect 401 without token
-    ];
-    for (const ep of knownEndpoints) {
-      const r = await probeEndpoint(opAPort, ep);
-      log(`  ${ep}: reachable=${r.reachable}, status=${r.status ?? 'unreachable'}`);
-    }
+    // ── Step 3: op-a produces a corpus artifact (x402-gated serving) ────────
+    // The production daemon never wires x402 onto its own ApiServer, so the
+    // x402-gated serving route only exists on an ApiServer started with an
+    // explicit x402 config. We host op-a's served-artifact store + ApiServer
+    // inside the substrate workspace, exactly as corpus-x402.ts does.
+    log('Step 3: op-a produces a corpus artifact + serves it x402-gated');
+    const workspaceDir = handle.workspace.opPaths['op-a']!;
+    producerStore = new Store(join(workspaceDir, 't2.1-producer.sqlite'));
+    consumerStore = new Store(join(handle.workspace.opPaths['op-b']!, 't2.1-consumer.sqlite'));
 
-    if (!anyProducerAvailable) {
-      // ── Expected path for v0.1.6: skip because producer endpoint is missing ─
-      log('');
-      log('Step 2 result: no speculative producer endpoint is present in this daemon build.');
-      log('  Real corpus surface as of v0.1.6:');
-      log('    GET  /v1/artifacts/:sha256/content  — x402-gated serving (client/src/x402/handler.ts:144)');
-      log('    POST /v1/artifacts/acquire          — buyer-side acquire  (client/src/api/server.ts:613)');
-      log('    GET  /v1/operator/artifacts         — operator listing    (client/src/api/operator-artifacts-endpoint.ts:330)');
-      log('    POST /artifacts                     — publish artifact    (client/src/api/server.ts:562)');
-      log('  Missing for T2.1:');
-      log('    POST /v1/corpus/produce             — no HTTP entry point for corpus production');
-      log('    GET  /v1/corpus/:cid                — no corpus-by-CID fetch route');
-      log('    POST /v1/corpus/:cid/pay            — no pay-and-retrieve route');
-      log('    GET  /v1/discovery/corpus           — no corpus discovery route');
-      log('');
-      log('  Corpus production today happens exclusively via:');
-      log('    task execution → engine pack/pin path → signed envelope → IPFS upload');
-      log('    There is no REST entry point to trigger or expose that path.');
-      log('');
-      log('  To make T2.1 pass, one of the following is needed:');
-      log('    (a) Add POST /v1/corpus/produce (calls Corpus.produce with a payload)');
-      log('    (b) Rewrite T2.1 to drive corpus production through full task execution');
-      log('        against the Anvil fork (much heavier; ~2-3x more implementation work)');
-      log('');
-      log('  Follow-up issue: https://github.com/Jinn-Network/mono/issues/349');
-      log('');
-      log('Verdict: skip');
-
-      await evidence.flush();
-      return skipVerdict({
-        scenarioId: 'T2.1',
-        startedAt: started,
-        evidencePath: opts.evidencePath,
-        failNotes:
-          'T2.1 producer endpoint /v1/corpus/produce not present in this daemon build (v0.1.6). ' +
-          'Corpus production has no HTTP entry point; driven only via task execution + engine pack/pin path. ' +
-          'See https://github.com/Jinn-Network/mono/issues/349.',
-      });
-    }
-
-    // ── Step 3 (only reachable if a future build exposes the producer surface) ─
-    // This branch does not execute in v0.1.6 but documents the intended scenario
-    // flow so it can be implemented when the producer endpoint lands.
-    log('Step 3: producer endpoint detected — spawning Ponder indexer against fork');
-    log('  NOTE: this branch is not expected to execute in v0.1.6.');
-    indexer = await spawnPonderIndexer({
-      rpcUrl: handle.anvilRpcUrl,
-      chainId: 84532,
-      readyTimeoutMs: 45000,
+    producerApi = await startApiServer({
+      port: await allocateAnvilPort(),
+      store: producerStore,
+      apiToken: 't2.1-producer-token',
+      x402: {
+        privateKey: PRODUCER_PRIVATE_KEY,
+        recipientAddress: producer.address,
+        network: X402_NETWORK,
+        rpcUrl,
+      },
     });
-    log(`  indexer graphql: ${indexer.graphqlUrl}`);
+    const endpoint = `http://127.0.0.1:${producerApi.port}`;
+    log(`  op-a x402 serving endpoint: ${endpoint}`);
 
-    // [Future implementation]:
-    //   3a. POST /v1/corpus/produce on op-a with SAMPLE_PAYLOAD
-    //   3b. Poll Ponder indexer until it attributes the CID to op-a's address
-    //   3c. GET /v1/corpus/<cid> from op-b → expect 402 Payment Required
-    //   3d. POST /v1/corpus/<cid>/pay from op-b with x402 payment header
-    //   3e. Assert 200 with payload bytes + ERC-8128 signature on op-b response
-    //   3f. Assert USDC balance delta on op-a matches priceUsdc
-    log('Step 3+: happy-path not implemented; returning fail to flag the unexpected code path');
-    throw new Error(
-      'T2.1 happy-path not implemented: this branch executes only if the speculative producer ' +
-      'endpoint exists, but implementing the happy path was deferred pending GH issue resolution.',
+    const artifactBytes = Buffer.from(`t2.1 corpus donation artifact ${new Date().toISOString()}`, 'utf-8');
+    const artifactSha256 = sha256Hex(artifactBytes);
+    producerStore.saveServedArtifact({
+      sha256: artifactSha256,
+      artifactType: ARTIFACT_TYPE,
+      requestId: 't2.1-cross-op-donation-request',
+      content: artifactBytes,
+      priceUsdc: PRICE_USDC,
+      createdAt: new Date().toISOString(),
+    });
+
+    const envelope = await buildSignedEnvelope({
+      producer,
+      producerPrivateKey: PRODUCER_PRIVATE_KEY,
+      producerSafe: producer.address,
+      endpoint,
+      artifactSha256,
+      artifactBytes,
+    });
+    const ipfs = createInProcessIpfs();
+    const manifestCid = await ipfs.upload(envelope);
+    producerStore.setServedArtifactEnvelopeCid(artifactSha256, manifestCid);
+    log(`  artifactSha256=${artifactSha256}`);
+    log(`  manifestCid=${manifestCid}`);
+
+    // ── Step 4: indexer attributes the artifact to op-a ─────────────────────
+    log('Step 4: publish on-chain MetadataSet attribution + index via DiscoveryAPI floor');
+    const metadataTxHash = await publishEnvelopeMetadata({
+      publicClient,
+      rpcUrl,
+      publisher: producer,
+      agentId: 1n,
+      manifestCid,
+      manifestHash: envelope.signature.hash as Hex,
+    });
+    log(`  MetadataSet tx: ${metadataTxHash}`);
+
+    const floor = createOnchainDiscoveryAPI({
+      rpcUrl,
+      chainId: baseSepolia.id,
+      identityRegistryAddress: MOCK_IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0n,
+      chunkBlocks: 1_999n,
+    });
+    let degradedPrimaryQueries = 0;
+    let routeResolverCalls = 0;
+    let acquireCalls = 0;
+    const discovery = withFallback(
+      unavailableDiscovery(() => { degradedPrimaryQueries += 1; }),
+      floor,
+      { unhealthyThreshold: 1, retryAfterMs: 60_000 },
     );
+    const corpus = createCorpus({
+      ipfsGatewayUrl: 'fixture://ipfs',
+      store: consumerStore,
+      signer: { privateKey: CONSUMER_PRIVATE_KEY },
+      selfSafeAddress: consumer.address,
+      discovery,
+      routeResolver: {
+        async resolve() {
+          routeResolverCalls += 1;
+          return null;
+        },
+      },
+    }, {
+      fetchFromIpfs: ipfs.fetch,
+      async acquireFn(endpointArg, shaArg, privateKeyArg) {
+        acquireCalls += 1;
+        return acquireArtifactWithPayment(endpointArg, shaArg, privateKeyArg);
+      },
+    });
+
+    // ── Step 5: op-b discovers + pays x402 + retrieves the bytes ─────────────
+    log('Step 5: op-b discovers the envelope, pays x402, retrieves + verifies the bytes');
+    const [producerBalanceBefore, consumerBalanceBefore] = await Promise.all([
+      usdcBalance(publicClient, producer.address),
+      usdcBalance(publicClient, consumer.address),
+    ]);
+    const discovered = await corpus.read({
+      query: {
+        solverType: SOLVER_TYPE,
+        manifestHash: envelope.signature.hash,
+        limit: 1,
+      },
+    });
+    assert(degradedPrimaryQueries === 1, `expected degraded primary discovery once, got ${degradedPrimaryQueries}`);
+    assert(discovered.length === 1, `expected one discovered envelope, got ${discovered.length}`);
+    const content = discovered[0]!.artifactContents.get(artifactSha256);
+    assert(content, 'op-b read did not return artifact content');
+    assert(content.bytes.length > 0, 'op-b read returned empty bytes');
+    assert(sha256Hex(content.bytes) === artifactSha256, 'op-b read bytes failed sha256 verification');
+    assert(content.source === 'origin', `op-b read source=${content.source}, expected origin`);
+    assert(content.paidAmountUsdc === PRICE_USDC, `op-b read paid=${content.paidAmountUsdc}, expected ${PRICE_USDC}`);
+    assert(routeResolverCalls === 1, `route resolver calls after read=${routeResolverCalls}`);
+    assert(acquireCalls === 1, `acquire calls after read=${acquireCalls}`);
+    log(`  op-b retrieved ${content.bytes.length} bytes (sha256 verified, source=origin)`);
+
+    // ERC-8128: the discovered envelope carries a verified secp256k1 signature.
+    const discoveredSig = discovered[0]!.envelope.signature;
+    assert(
+      discoveredSig.signer.toLowerCase() === producer.address.toLowerCase(),
+      `envelope signer=${discoveredSig.signer}, expected ${producer.address}`,
+    );
+    log(`  envelope signature verified — signer=${discoveredSig.signer}, algo=${discoveredSig.algo}`);
+
+    // ── Step 6: verify USDC balance deltas + paid-serve access event ─────────
+    log('Step 6: verify USDC balance deltas + producer paid-serve access event');
+    const [producerBalanceAfter, consumerBalanceAfter] = await Promise.all([
+      usdcBalance(publicClient, producer.address),
+      usdcBalance(publicClient, consumer.address),
+    ]);
+    assert(
+      producerBalanceAfter - producerBalanceBefore === priceUnits,
+      `producer USDC delta=${formatUnits(producerBalanceAfter - producerBalanceBefore, 6)} expected ${PRICE_USDC}`,
+    );
+    assert(
+      consumerBalanceBefore - consumerBalanceAfter === priceUnits,
+      `consumer USDC delta=${formatUnits(consumerBalanceBefore - consumerBalanceAfter, 6)} expected ${PRICE_USDC}`,
+    );
+    log(`  producer USDC +${formatUnits(producerBalanceAfter - producerBalanceBefore, 6)}`);
+    log(`  consumer USDC -${formatUnits(consumerBalanceBefore - consumerBalanceAfter, 6)}`);
+
+    const paidEvents = producerStore
+      .listArtifactAccessEvents({ sha256: artifactSha256 })
+      .filter((event) => event.outcome === 'paid_served');
+    assert(paidEvents.length === 1, `paid_served access events=${paidEvents.length}, expected 1`);
+    const paidEvent = paidEvents[0]!;
+    assert(
+      paidEvent.payer?.toLowerCase() === consumer.address.toLowerCase(),
+      `paid_served payer=${paidEvent.payer}, expected ${consumer.address}`,
+    );
+    assert(paidEvent.settlementTx, 'paid_served event missing settlement tx');
+    log(`  producer recorded paid_served event — payer=${paidEvent.payer}, settlementTx=${paidEvent.settlementTx}`);
+
+    log('');
+    log('Verdict: pass — cross-operator corpus donation handshake completed end-to-end.');
+    await evidence.flush();
+    return passVerdict({
+      scenarioId: 'T2.1',
+      startedAt: started,
+      evidencePath: opts.evidencePath,
+    });
   } catch (err) {
     log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
     await evidence.flush();
@@ -203,12 +548,13 @@ export async function runT21CrossOpDonation(
       error: err,
     });
   } finally {
-    if (indexer) {
-      try { await indexer.teardown(); } catch {}
+    if (producerApi) {
+      try { await producerApi.close(); } catch {}
     }
+    try { producerStore?.close(); } catch {}
+    try { consumerStore?.close(); } catch {}
     if (handle) {
       try { await handle.teardown(); } catch {}
     }
   }
 }
-
