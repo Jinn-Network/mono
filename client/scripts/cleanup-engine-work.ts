@@ -43,6 +43,7 @@ import {
   reapWorkDirs,
   DEFAULT_ORPHAN_MAX_AGE_MS,
 } from '../src/harnesses/engine/work-dir-reaper.js';
+import { TERMINAL_STATES, type TaskRunState } from '../src/harnesses/engine/state.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -90,7 +91,7 @@ function loadIdSets(dbPath: string): {
     const terminal = new Set<string>();
     const inFlight = new Set<string>();
     for (const r of rows) {
-      if (r.state === 'COMPLETE' || r.state === 'FAILED') terminal.add(r.request_id);
+      if (TERMINAL_STATES.has(r.state as TaskRunState)) terminal.add(r.request_id);
       else inFlight.add(r.request_id);
     }
     return { terminal, inFlight };
