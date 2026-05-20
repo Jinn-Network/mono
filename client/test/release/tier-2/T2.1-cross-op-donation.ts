@@ -300,6 +300,9 @@ function unavailableDiscovery(onQuery: () => void): DiscoveryAPI {
     findClaimableTasks: fail,
     listLaunchedSolverNets: fail,
     getLifecycleStatus: fail,
+    listPluginPublications: fail,
+    getPluginScores: fail,
+    listBuilderArtifacts: fail,
     async queryEnvelopes() {
       onQuery();
       throw new DiscoveryUnavailableError('synthetic indexer outage for T2.1');
@@ -495,7 +498,8 @@ export async function runT21CrossOpDonation(
     });
     assert(degradedPrimaryQueries === 1, `expected degraded primary discovery once, got ${degradedPrimaryQueries}`);
     assert(discovered.length === 1, `expected one discovered envelope, got ${discovered.length}`);
-    const content = discovered[0]!.artifactContents.get(artifactSha256);
+    const discoveredEnvelope = discovered[0]!;
+    const content = discoveredEnvelope.artifactContents.get(artifactSha256);
     assert(content, 'op-b read did not return artifact content');
     assert(content.bytes.length > 0, 'op-b read returned empty bytes');
     assert(sha256Hex(content.bytes) === artifactSha256, 'op-b read bytes failed sha256 verification');
@@ -506,7 +510,7 @@ export async function runT21CrossOpDonation(
     log(`  op-b retrieved ${content.bytes.length} bytes (sha256 verified, source=origin)`);
 
     // ERC-8128: the discovered envelope carries a verified secp256k1 signature.
-    const discoveredSig = discovered[0]!.envelope.signature;
+    const discoveredSig = discoveredEnvelope.envelope.signature;
     assert(
       discoveredSig.signer.toLowerCase() === producer.address.toLowerCase(),
       `envelope signer=${discoveredSig.signer}, expected ${producer.address}`,
