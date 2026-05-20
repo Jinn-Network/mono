@@ -23,6 +23,9 @@ import { CapturesTab } from './captures/CapturesTab.js';
 import { BuildPage } from './pages/Build.js';
 import { getFeatures } from './lib/features.js';
 
+// Canonical routes enumerated in ./routes.ts — T1.4 imports that list for
+// route-smoke coverage. Keep ROUTES in sync whenever the Switch below changes.
+
 /**
  * App routes between two distinct phases of operator life:
  *

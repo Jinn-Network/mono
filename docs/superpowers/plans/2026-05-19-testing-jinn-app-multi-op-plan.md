@@ -144,10 +144,18 @@ export function makeHandshakeCollector(timeoutMs: number): HandshakeCollector {
   return {
     feed(chunk: string) {
       buffer += chunk;
-      const url = extractHandshakeUrl(buffer);
-      if (url) {
-        clearTimeout(timer);
-        resolve(url);
+      // Split on newlines so the regex doesn't match a partial URL that's
+      // been buffered across two chunk arrivals (e.g. `http://12` then
+      // `7.0.0.1:7332/...`). Only check complete (newline-terminated) lines.
+      const lines = buffer.split(/\r?\n/);
+      const completeLines = lines.slice(0, -1);
+      for (const line of completeLines) {
+        const url = extractHandshakeUrl(line);
+        if (url) {
+          clearTimeout(timer);
+          resolve(url);
+          return;
+        }
       }
     },
     promise,
@@ -332,10 +340,27 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
     }
   }
 
+  // When the test seed config has an unreachable rpcUrl (e.g. a dummy hostname
+  // used in beforeAll setup), JINN_RPC_URL overrides config so the daemon's
+  // RPC preflight can pass. config.ts gives JINN_RPC_URL unconditional precedence
+  // over BASE_RPC_URL and BASE_SEPOLIA_RPC_URL, so the helper must consult any
+  // RPC URL the caller put in extraEnv (e.g. an Anvil fork URL) and surface it
+  // through JINN_RPC_URL — otherwise extraEnv.BASE_RPC_URL would be silently
+  // overridden by the host fallback. Resolution order: extraEnv.JINN_RPC_URL,
+  // extraEnv.BASE_RPC_URL, host JINN_RPC_URL, host BASE_SEPOLIA_RPC_URL, then
+  // the public Tenderly gateway (matches config.ts:986).
+  const fallbackRpcUrl =
+    opts.extraEnv?.['JINN_RPC_URL'] ??
+    opts.extraEnv?.['BASE_RPC_URL'] ??
+    process.env['JINN_RPC_URL'] ??
+    process.env['BASE_SEPOLIA_RPC_URL'] ??
+    'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
+
   try {
     for (const op of opts.ops) {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
+        JINN_RPC_URL: fallbackRpcUrl,
         ...opts.extraEnv,
         HOME: op.home,
         JINN_API_PORT: op.apiPort.toString(),
@@ -487,7 +512,10 @@ Two flavors:
 1. **Substrate-derived workspaces** — use Plan A's `substrate-copy.ts` to create per-run isolated copies of `op-a` / `op-b` from gold. Best for scenarios that need pre-bootstrapped identity (most T2.x scenarios).
 
    ```typescript
-   import { copyWorkspace } from '@/scripts/release/substrate-copy';
+   // Path relative to the importing file. Plan A's substrate-copy lives at
+   // `client/scripts/release/substrate-copy.ts` (outside `src/`, so the `@/`
+   // alias does NOT reach it — use a relative path).
+   import { copyWorkspace } from '../../scripts/release/substrate-copy';
 
    const handle = await copyWorkspace({ ops: ['op-a', 'op-b'] });
    // handle.opPaths['op-a'] → '/Users/.../jinn-dev/workspaces/<run-id>/op-a/'
@@ -737,7 +765,12 @@ For automated regression coverage of two-operator flows. Tests live under `clien
 import { test, expect, type Page } from '@playwright/test';
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon';
 import { copyWorkspace } from '../../../scripts/release/substrate-copy';
-import { mockDaemonApi } from '../helpers/mock-daemon-api';   // existing single-op mock helper
+// `mockDaemonApi` is currently a private function inside
+// `client/test/dashboard/spa-config.e2e.test.ts` (line ~130). Before
+// landing multi-op tests, Plan C/D needs to extract it to a shared module —
+// e.g. `client/test/dashboard/helpers/mock-daemon-api.ts` — and accept a
+// `port` argument (the single-op version is hardcoded to 7332).
+import { mockDaemonApi } from '../helpers/mock-daemon-api';
 
 let workspace: Awaited<ReturnType<typeof copyWorkspace>>;
 let daemons: MultiOpHandle;
@@ -930,6 +963,8 @@ Load every SPA route against a mocked daemon API. For each route, assert:
 
 ```typescript
 import { test, expect, type Page } from '@playwright/test';
+// `mockDaemonApi` is currently private inside `client/test/dashboard/spa-config.e2e.test.ts`.
+// Plan C/D should extract it to a shared module before this test can import.
 import { mockDaemonApi } from '../helpers/mock-daemon-api';
 import { ROUTES } from '../../../src/dashboard/spa/src/routes';   // exported list of route paths
 
@@ -1000,7 +1035,7 @@ These belong in T2.x (cross-op) and Tier 3 (real testnet) scenarios.
 ## Dependencies
 
 - The SPA must export a `ROUTES` constant from a single module so this test parameterizes correctly. If `ROUTES` doesn't exist yet, Plan C/D's implementation should add it (small refactor — extract route table from App.tsx).
-- `mockDaemonApi` helper from single-op tests (already exists).
+- `mockDaemonApi` helper — currently a private function inside `client/test/dashboard/spa-config.e2e.test.ts:~130` (single-arg, hardcoded port 7332). Plan C/D should extract it to a shared module (e.g. `client/test/dashboard/helpers/mock-daemon-api.ts`) before the multi-op tests can import it.
 ```
 
 - [ ] **Step 2: Commit**
@@ -1197,14 +1232,25 @@ This is the Anvil-fork mechanical counterpart to Tier 3's real-testnet variant. 
 ## Steps
 
 ```typescript
+import { spawnAnvilFork } from '../_support/chain/anvil';   // base-fork helper
+import { baseSepolia } from 'viem/chains';
+
 const workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-const anvil = await spawnAnvilForkOfBaseSepolia();    // existing helper, returns rpcUrl + cleanup
+const anvil = await spawnAnvilFork({
+  forkUrl: process.env['BASE_SEPOLIA_RPC_URL']!,
+  chain: baseSepolia,
+  silent: true,
+});
 const daemons = await spawnMultiOpDaemons({
   ops: [
     { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
     { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
   ],
-  extraEnv: { BASE_RPC_URL: anvil.rpcUrl, JINN_HARNESS_STUB_INSTANCE: KNOWN_INSTANCE_ID },
+  // JINN_RPC_URL — not BASE_RPC_URL — because config.ts gives JINN_RPC_URL
+  // unconditional precedence; the spawn helper surfaces extraEnv RPC keys
+  // through JINN_RPC_URL so this works either way, but using JINN_RPC_URL
+  // here makes the precedence explicit.
+  extraEnv: { JINN_RPC_URL: anvil.rpcUrl, JINN_HARNESS_STUB_INSTANCE: KNOWN_INSTANCE_ID },
 });
 
 // 1. op-a posts a known-solvable task
@@ -1245,7 +1291,7 @@ expect(opBActivity.verdictsCount).toBeGreaterThan(0);
 
 // 6. Cleanup
 await daemons.teardown();
-await anvil.stop();
+await anvil.teardown();
 await workspace.teardown();
 ```
 
@@ -1293,8 +1339,8 @@ This avoids the ~$0.10 API call per run while exercising the rest of the loop.
 ## Dependencies
 
 - Substrate workspace from Plan A
-- Existing `spawnAnvilForkOfBaseSepolia` helper (from `client/test/e2e/task-first-helpers.ts`)
-- Existing JinnRouter V3 fork-upgrade pattern (same file)
+- Existing `spawnAnvilFork` helper at `client/test/_support/chain/anvil.ts`. Pass `forkUrl: BASE_SEPOLIA_RPC_URL` and `chain: baseSepolia` for a Base Sepolia fork (no convenience wrapper today). Teardown via `harness.teardown()`. The full Task-First fork runner at `client/test/e2e/task-first-helpers.ts` (`runBaseSepoliaForkTaskFirstFullLoop`) shows the JinnRouter V3 fork-upgrade pattern.
+- Existing JinnRouter V3 fork-upgrade pattern (in `client/test/e2e/task-first-helpers.ts`)
 - Stubbed harness registration mechanism — to be added or extended in Plan C/D if not present
 - KNOWN_INSTANCE_ID, KNOWN_REPO, KNOWN_COMMIT, KNOWN_EXPECTED_VERDICT — fixture constants for a known-solvable SWE-rebench instance (existing pattern in `client/test/release/tier-2/fixtures/`)
 
@@ -1350,21 +1396,27 @@ This catches a class of bug invisible to single-op tests and to mocked multi-op 
 
 ```typescript
 import { test, expect } from '@playwright/test';
+import { baseSepolia } from 'viem/chains';
 import { spawnMultiOpDaemons } from '../../helpers/multi-op-daemon';
 import { copyWorkspace } from '../../../scripts/release/substrate-copy';
-import { spawnAnvilForkOfBaseSepolia } from '../../e2e/task-first-helpers';
+import { spawnAnvilFork } from '../../_support/chain/anvil';
 
 let workspace, daemons, anvil, opAUrl, opBUrl;
 
 test.beforeAll(async () => {
   workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-  anvil = await spawnAnvilForkOfBaseSepolia();
+  anvil = await spawnAnvilFork({
+    forkUrl: process.env['BASE_SEPOLIA_RPC_URL']!,
+    chain: baseSepolia,
+    silent: true,
+  });
   daemons = await spawnMultiOpDaemons({
     ops: [
       { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
       { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
     ],
-    extraEnv: { BASE_RPC_URL: anvil.rpcUrl },
+    // JINN_RPC_URL — config.ts gives it unconditional precedence over BASE_RPC_URL.
+    extraEnv: { JINN_RPC_URL: anvil.rpcUrl },
   });
   opAUrl = daemons.daemons['op-a'].handshakeUrl ?? `http://127.0.0.1:7732/`;
   opBUrl = daemons.daemons['op-b'].handshakeUrl ?? `http://127.0.0.1:7733/`;
@@ -1372,7 +1424,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await daemons?.teardown();
-  await anvil?.stop();
+  await anvil?.teardown();
   await workspace?.teardown();
 });
 
@@ -1469,7 +1521,7 @@ test('op-a launches → op-b sees → op-b joins → op-a sees join', async ({ b
 ## Dependencies
 
 - Substrate workspace from Plan A
-- spawnAnvilForkOfBaseSepolia helper (existing)
+- `spawnAnvilFork` helper at `client/test/_support/chain/anvil.ts` (pass `forkUrl: BASE_SEPOLIA_RPC_URL` + `chain: baseSepolia` for a Base Sepolia fork)
 - The SPA Launcher Create wizard's data-testid attributes (`manifest-cid` etc.) — may need to be added to the SPA in Plan C/D if missing
 - The Operator catalog page at `/operator/...` (existing in v0.1.6)
 - The launched-SolverNet dashboard at `/launcher/launched/:id` (existing in v0.1.6)
