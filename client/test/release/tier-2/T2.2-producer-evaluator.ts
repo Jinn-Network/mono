@@ -54,14 +54,20 @@ const fixturesDir = path.resolve(import.meta.dirname, 'fixtures');
 
 // ── Speculative task-posting endpoint to probe ───────────────────────────────
 // This is the endpoint the scenario would use if it existed. If it ever returns
-// non-404, T2.2 should be updated to proceed to the happy path below.
+// a clear success (200/201), T2.2 should be updated to proceed to the happy
+// path below.
+//
+// IMPORTANT: the "available" check is intentionally narrow. A 401/405/500 does
+// NOT mean the happy path is ready — it means the route is absent for this
+// method, auth-gated, or erroring. Treating those as "implemented" would
+// advance into the not-implemented happy path and raise a spurious real-bug
+// fail. Only an explicit 200/201 counts as available.
 async function probeTaskPostEndpoint(
   apiPort: number,
 ): Promise<{ reachable: boolean; status: number | null }> {
   try {
-    // GET on the speculative endpoint — if it's mounted, even read-only,
-    // we'd get 200/401/405; if not mounted, 404. Either way the answer
-    // tells us whether the POST path exists.
+    // GET on the speculative endpoint — if it's mounted and read-able we'd
+    // get 200; if not mounted (or mounted POST-only) we'd get 404/405.
     const res = await fetch(`http://127.0.0.1:${apiPort}/v1/tasks`, {
       method: 'GET',
       signal: AbortSignal.timeout(3000),
@@ -139,11 +145,13 @@ export async function runT22ProducerEvaluator(
     // ── Step 2: Probe for speculative /v1/tasks endpoint ─────────────────────
     log('Step 2: probing speculative /v1/tasks endpoint against op-a');
     const probe = await probeTaskPostEndpoint(opAPort);
+    const probeIndicatesAvailable =
+      probe.reachable && (probe.status === 200 || probe.status === 201);
     log(
       `  GET /v1/tasks: reachable=${probe.reachable}, status=${probe.status ?? 'unreachable'}` +
-      (probe.reachable && probe.status !== null && probe.status !== 404
-        ? '  <--- non-404 response; endpoint may be implemented!'
-        : ' (404/unreachable — not implemented)'),
+      (probeIndicatesAvailable
+        ? '  <--- 200/201 response; endpoint implemented!'
+        : ' (not a 200/201 — not implemented for the happy path)'),
     );
 
     // Also probe known-real endpoints to confirm daemon health.
@@ -163,8 +171,10 @@ export async function runT22ProducerEvaluator(
       }
     }
 
-    const taskEndpointAvailable =
-      probe.reachable && probe.status !== null && probe.status !== 404;
+    // Narrow: only an explicit 200/201 means the happy path is implementable.
+    // 401/405/500 are treated as "not present for this method" so the scenario
+    // skips cleanly instead of advancing into the not-implemented throw.
+    const taskEndpointAvailable = probeIndicatesAvailable;
 
     if (!taskEndpointAvailable) {
       // ── Expected path for v0.1.6: skip because /v1/tasks is missing ─────────

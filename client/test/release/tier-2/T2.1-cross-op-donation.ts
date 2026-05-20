@@ -29,9 +29,12 @@ import { spawnPonderIndexer } from '../../_support/indexer/ponder.js';
 import type { ScenarioVerdict, ScenarioOptions } from '../../../scripts/release/scenario-types.js';
 
 // ── Candidate producer endpoints to probe ────────────────────────────────────
-// These are the speculative paths from the scenario plan. If any return non-404
-// (e.g. 200, 405, 401) that means the daemon has grown the surface and T2.1
-// should be updated to exercise it.
+// These are the speculative paths from the scenario plan. Only an explicit
+// 200/201 means the daemon has grown a usable surface and T2.1 should exercise
+// the happy path. A 401/405/500 does NOT count as "implemented" — it means the
+// route is auth-gated, absent for this method, or erroring; treating those as
+// available would advance into the not-implemented happy-path throw and raise
+// a spurious real-bug fail.
 const SPECULATIVE_PRODUCER_ENDPOINTS = [
   '/v1/corpus/produce',
   '/v1/discovery/corpus',
@@ -100,17 +103,19 @@ export async function runT21CrossOpDonation(
     for (const ep of SPECULATIVE_PRODUCER_ENDPOINTS) {
       const result = await probeEndpoint(opAPort, ep);
       probeResults[ep] = result;
+      const available = result.reachable && (result.status === 200 || result.status === 201);
       log(
         `  ${ep}: reachable=${result.reachable}, status=${result.status ?? 'unreachable'}` +
-        (result.reachable && result.status !== 404
-          ? '  <--- non-404 response; endpoint may be implemented!'
-          : ' (404/unreachable — not implemented)'),
+        (available
+          ? '  <--- 200/201 response; endpoint implemented!'
+          : ' (not a 200/201 — not implemented for the happy path)'),
       );
     }
 
-    // Determine whether any speculative endpoint is available (non-404, reachable).
-    const anyProducerAvailable = Object.entries(probeResults).some(
-      ([, r]) => r.reachable && r.status !== null && r.status !== 404,
+    // Determine whether any speculative endpoint is available. Only an explicit
+    // 200/201 counts — see the comment on SPECULATIVE_PRODUCER_ENDPOINTS.
+    const anyProducerAvailable = Object.values(probeResults).some(
+      (r) => r.reachable && (r.status === 200 || r.status === 201),
     );
 
     // Also probe the known-real artifact surfaces to confirm they're up.
