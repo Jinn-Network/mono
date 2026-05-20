@@ -88,6 +88,32 @@ Exit codes:
 - `1` — at least one `verdict=fail` with `failClass=real-bug`
 - `2` — internal orchestrator error
 
+## Tier 3 orchestrator
+
+`run-tier-3.ts` runs the single Tier 3 scenario (T3.1 producer-evaluator-real) against the real Base Sepolia testnet. **This spends real test ETH + real OpenRouter API budget (~$0.10).** Only run when intentional.
+
+```bash
+yarn release:tier-3 <candidate-version>
+```
+
+Output goes to `tier-3-evidence/<timestamp>/`.
+
+Per-scenario standalone (gated on `JINN_T31_REAL=1`):
+
+```bash
+yarn release:tier-3:T3.1
+```
+
+## release-readiness skill
+
+The audit + triage + closure + handoff meta-skill. Invoked from a Claude Code session:
+
+```bash
+# Skill release-readiness --candidateVersion v0.1.7 --mode human-invoked
+```
+
+See `.claude/skills/release-readiness/SKILL.md` for the full skill contract.
+
 ## Programmatic API
 
 Each substrate script exports its core function:

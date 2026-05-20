@@ -20,6 +20,9 @@ export default defineConfig({
       // callable *.ts files (which have no Vitest deps and are safe to import
       // from the orchestrator without triggering Vitest at module load time).
       'test/release/**/*.test.ts',
+      // The release-readiness scaffolding unit test lives next to its source
+      // under scripts/release/ (pure unit test, no network or real spend).
+      'scripts/release/**/*.test.ts',
     ],
     exclude: [
       'test/e2e/**',
