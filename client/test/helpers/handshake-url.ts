@@ -12,6 +12,7 @@ export interface HandshakeCollector {
 
 export function makeHandshakeCollector(timeoutMs: number): HandshakeCollector {
   let buffer = '';
+  let settled = false;
   let resolve!: (url: string) => void;
   let reject!: (err: Error) => void;
   const promise = new Promise<string>((res, rej) => {
@@ -19,17 +20,22 @@ export function makeHandshakeCollector(timeoutMs: number): HandshakeCollector {
     reject = rej;
   });
   const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
     reject(new Error(`handshake URL collector timed out after ${timeoutMs}ms; buffered: ${buffer.slice(0, 200)}`));
   }, timeoutMs);
   return {
     feed(chunk: string) {
+      if (settled) return;
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
-      // All lines except the last are complete (terminated by a newline)
-      const completeLines = lines.slice(0, -1);
-      for (const line of completeLines) {
+      // Keep only the trailing unterminated partial line; everything before it
+      // is complete and has been scanned, so it must not accumulate in buffer.
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
         const url = extractHandshakeUrl(line);
         if (url) {
+          settled = true;
           clearTimeout(timer);
           resolve(url);
           return;

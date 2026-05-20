@@ -44,4 +44,25 @@ describe('makeHandshakeCollector', () => {
     collector.feed('only unrelated lines\n');
     await expect(collector.promise).rejects.toThrow(/timed out/i);
   });
+
+  it('does not retain already-scanned complete lines in the buffer', async () => {
+    const collector = makeHandshakeCollector(50);
+    // Emit a large volume of complete (newline-terminated) noise lines.
+    for (let i = 0; i < 1000; i++) {
+      collector.feed(`noise log line ${i} with some padding text\n`);
+    }
+    // The timeout error reports the buffered tail; if scanned lines were
+    // retained it would be huge. Only an unterminated partial may remain.
+    await expect(collector.promise).rejects.toThrow(/buffered: $/);
+  });
+
+  it('keeps the trailing partial line across feeds and still matches', async () => {
+    const collector = makeHandshakeCollector(5000);
+    for (let i = 0; i < 500; i++) {
+      collector.feed(`noise line ${i}\n`);
+    }
+    collector.feed('UI handshake URL: http://127');
+    collector.feed('.0.0.1:7332/auth?t=tail\n');
+    expect(await collector.promise).toBe('http://127.0.0.1:7332/auth?t=tail');
+  });
 });
