@@ -113,6 +113,10 @@ export async function runT22ProducerEvaluator(
       extraEnv: {
         JINN_HARNESS_STUB_INSTANCE: KNOWN_INSTANCE_ID,
         JINN_HARNESS_STUB_FIXTURES_DIR: fixturesDir,
+        // Required sentinel: the stub harness factory throws unless JINN_TEST_MODE
+        // is exactly '1' (defense-in-depth so a stray env var can never activate
+        // the fake harness in a real operator run).
+        JINN_TEST_MODE: '1',
       },
     });
     log(`  workspace: ${handle.workspace.workspaceRoot}`);

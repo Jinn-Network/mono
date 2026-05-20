@@ -129,15 +129,17 @@ describe('StubHarness.maybeCreateStubHarnessFromEnv', () => {
     expect(result).toBeNull();
   });
 
-  it('returns a StubHarness when JINN_HARNESS_STUB_INSTANCE is set', async () => {
+  it('returns a StubHarness when JINN_HARNESS_STUB_INSTANCE and JINN_TEST_MODE=1 are set', async () => {
     const { maybeCreateStubHarnessFromEnv, StubHarness: StubHarnessClass } = await import(
       '../../src/harnesses/impls/stub.js'
     );
     const savedInstance = process.env['JINN_HARNESS_STUB_INSTANCE'];
     const savedDir = process.env['JINN_HARNESS_STUB_FIXTURES_DIR'];
+    const savedTestMode = process.env['JINN_TEST_MODE'];
     try {
       process.env['JINN_HARNESS_STUB_INSTANCE'] = 'test-instance';
       process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] = os.tmpdir();
+      process.env['JINN_TEST_MODE'] = '1';
       const result = maybeCreateStubHarnessFromEnv();
       expect(result).toBeInstanceOf(StubHarnessClass);
       expect(result?.name).toBe('harness:stub');
@@ -146,6 +148,29 @@ describe('StubHarness.maybeCreateStubHarnessFromEnv', () => {
       else process.env['JINN_HARNESS_STUB_INSTANCE'] = savedInstance;
       if (savedDir === undefined) delete process.env['JINN_HARNESS_STUB_FIXTURES_DIR'];
       else process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] = savedDir;
+      if (savedTestMode === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = savedTestMode;
+    }
+  });
+
+  it('throws when JINN_HARNESS_STUB_INSTANCE is set but JINN_TEST_MODE is not "1"', async () => {
+    const { maybeCreateStubHarnessFromEnv } = await import('../../src/harnesses/impls/stub.js');
+    const savedInstance = process.env['JINN_HARNESS_STUB_INSTANCE'];
+    const savedTestMode = process.env['JINN_TEST_MODE'];
+    try {
+      process.env['JINN_HARNESS_STUB_INSTANCE'] = 'test-instance';
+      delete process.env['JINN_TEST_MODE'];
+      expect(() => maybeCreateStubHarnessFromEnv()).toThrow(
+        /stub harness must never activate in a real operator run/,
+      );
+      // A non-'1' value must also throw.
+      process.env['JINN_TEST_MODE'] = 'true';
+      expect(() => maybeCreateStubHarnessFromEnv()).toThrow(/JINN_TEST_MODE/);
+    } finally {
+      if (savedInstance === undefined) delete process.env['JINN_HARNESS_STUB_INSTANCE'];
+      else process.env['JINN_HARNESS_STUB_INSTANCE'] = savedInstance;
+      if (savedTestMode === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = savedTestMode;
     }
   });
 });

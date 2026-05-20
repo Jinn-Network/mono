@@ -6,8 +6,19 @@
  * restoration solution. Never calls an LLM; never accepts tasks whose
  * spec.instance_id differs from the configured matcher.
  *
+ * PRODUCTION SAFETY — two-env-var requirement.
+ * This is a *fake* harness: it produces canned, non-genuine work. If it ever
+ * entered a real operator run it would generate fraudulent on-chain activity.
+ * To make accidental activation impossible, the factory requires BOTH:
+ *   JINN_HARNESS_STUB_INSTANCE     — instance ID this stub responds to
+ *   JINN_TEST_MODE === '1'         — explicit test-mode sentinel
+ * If JINN_HARNESS_STUB_INSTANCE is set but JINN_TEST_MODE is not '1', the
+ * factory THROWS rather than silently registering the stub. A single stray
+ * exported env var in an operator's shell can no longer activate it.
+ *
  * Activated by environment variables:
  *   JINN_HARNESS_STUB_INSTANCE     — instance ID this stub responds to (required to activate)
+ *   JINN_TEST_MODE                 — must equal '1' (defense-in-depth; required to activate)
  *   JINN_HARNESS_STUB_FIXTURES_DIR — dir containing <instanceMatcher>.patch files
  *                                    (default: client/test/release/tier-2/fixtures)
  */
@@ -72,10 +83,23 @@ export class StubHarness implements Harness {
  * Factory that reads JINN_HARNESS_STUB_INSTANCE and JINN_HARNESS_STUB_FIXTURES_DIR
  * from the environment and returns a configured StubHarness, or null if the env
  * var is absent (allowing the registry to skip registration silently).
+ *
+ * Defense-in-depth: if JINN_HARNESS_STUB_INSTANCE is set but JINN_TEST_MODE is
+ * not exactly '1', this THROWS rather than returning a harness — a real
+ * operator run must never silently pick up the fake stub harness.
  */
 export function maybeCreateStubHarnessFromEnv(): StubHarness | null {
   const instanceMatcher = process.env['JINN_HARNESS_STUB_INSTANCE'];
   if (!instanceMatcher) return null;
+  if (process.env['JINN_TEST_MODE'] !== '1') {
+    throw new Error(
+      'stub harness must never activate in a real operator run: ' +
+        'JINN_HARNESS_STUB_INSTANCE is set but JINN_TEST_MODE is not "1". ' +
+        'The stub harness produces canned, non-genuine work and would generate ' +
+        'fraudulent on-chain activity. Set JINN_TEST_MODE=1 if this is a Tier 2 ' +
+        'test; otherwise unset JINN_HARNESS_STUB_INSTANCE.',
+    );
+  }
   const fixturesDir =
     process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] ??
     path.resolve(process.cwd(), 'test', 'release', 'tier-2', 'fixtures');
