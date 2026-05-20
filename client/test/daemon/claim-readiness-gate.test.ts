@@ -170,6 +170,43 @@ describe('Daemon — claim readiness gate (#330)', () => {
     await daemon.stop();
   });
 
+  it('does NOT claim when Hermes reports OpenRouter not connected (#332)', async () => {
+    // v0.1.6 dogfood finding #3: `hermes doctor` exits 0 even when every
+    // model provider is logged out, so HermesHarness.isReady() now also
+    // gates on OpenRouter auth. The gate is harness-agnostic — it just reads
+    // the reason — so an "OpenRouter not connected" not-ready must block
+    // claims exactly like the missing-binary case.
+    const adapter = new LocalAdapter();
+    const claimSpy = vi.spyOn(adapter, 'claimTask');
+
+    const registry = controlledRegistry(() => ({
+      ready: false,
+      reason: 'OpenRouter not connected — Hermes has no usable model provider',
+    }));
+
+    const daemon = new Daemon({
+      adapter,
+      runner: new SimpleRunner(async (d) => `done: ${d}`),
+      taskSources: [],
+      dbPath: ':memory:',
+      restorationEngine: minimalEngineConfig(),
+      harnessReadinessRegistry: registry,
+    });
+    await daemon.start();
+
+    await adapter.postTask({
+      id: 'task-hermes-no-openrouter',
+      description: 'hermes SolverNet — OpenRouter not connected',
+      solverNetManifestCid: 'bafkrei.fake-cid',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(registry.isReadyForClaim).toHaveBeenCalledWith('bafkrei.fake-cid');
+    expect(claimSpy).not.toHaveBeenCalled();
+
+    await daemon.stop();
+  });
+
   it('surfaces the not-ready reason via a warn log on first transition', async () => {
     const adapter = new LocalAdapter();
 

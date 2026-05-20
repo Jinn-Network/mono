@@ -3,7 +3,7 @@ import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types
 import { HERMES_AGENT_HARNESS } from '../../names.js';
 import type { HermesHarnessAdapter } from './adapter.js';
 import { harvestOutput } from '../learner/harvest.js';
-import { probeHermesDoctor } from '../../../api/hermes-doctor-endpoint.js';
+import { probeHermesDoctor, probeHermesAuthStatus } from '../../../api/hermes-doctor-endpoint.js';
 
 export interface HermesHarnessConfig {
   adapter: HermesHarnessAdapter;
@@ -51,7 +51,13 @@ export class HermesHarness implements Harness {
    *   - `exitCode !== 0` → binary exists but `hermes doctor` reports a
    *     configuration problem (e.g. provider not signed in) → ready=false
    *     with a nextStep that points at the SPA precheck panel.
-   *   - `exitCode === 0` → ready=true.
+   *   - OpenRouter not authenticated → ready=false. `hermes doctor` exits 0
+   *     even when every provider is logged out (it treats missing providers
+   *     as warnings), so this third gate probes `hermes auth status
+   *     openrouter` directly. Hermes is OpenRouter-only, so a logged-out
+   *     OpenRouter means Hermes has no usable model provider and every
+   *     claim would burn (#332/#330/#348).
+   *   - all three gates pass → ready=true.
    */
   async isReady(_ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<ReadyStatus> {
     const config: { hermesPath?: string; hermesDoctorTimeoutMs?: number } = {};
@@ -79,6 +85,21 @@ export class HermesHarness implements Harness {
         nextStep: {
           description:
             'Run `hermes doctor` locally to surface the configuration problem, or open the Hermes precheck panel in the operator dashboard to sign in / select a provider.',
+          url: '/api/hermes/doctor',
+        },
+      };
+    }
+    // Third gate: `hermes doctor` exits 0 even when every model provider is
+    // logged out. Hermes is OpenRouter-only, so probe OpenRouter auth
+    // directly — a logged-out OpenRouter means Hermes cannot run a task.
+    const auth = probeHermesAuthStatus('openrouter', config);
+    if (!auth.authed) {
+      return {
+        ready: false,
+        reason: 'OpenRouter not connected — Hermes has no usable model provider',
+        nextStep: {
+          description:
+            'Connect OpenRouter — sign in via the Hermes precheck panel in the operator dashboard, or run `hermes login` locally.',
           url: '/api/hermes/doctor',
         },
       };

@@ -65,6 +65,61 @@ export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctor
   };
 }
 
+/**
+ * Result of probing a single Hermes model provider's auth state.
+ */
+export interface HermesAuthStatus {
+  /** Provider name probed, e.g. `openrouter`. */
+  provider: string;
+  /** True only when the provider is authenticated (logged in). */
+  authed: boolean;
+  /** Raw `hermes auth status <provider>` stdout (trimmed, truncated). */
+  raw: string;
+}
+
+/**
+ * Synchronously runs `hermes auth status <provider>` and classifies whether
+ * the provider is authenticated.
+ *
+ * CRITICAL: `hermes auth status` ALWAYS exits 0 — it reports state via
+ * stdout, never via exit code. A not-logged-in provider prints e.g.
+ * `openrouter: logged out`. So we cannot rely on `result.status`; we parse
+ * stdout instead:
+ *   - stdout matches /logged out/i → not authed
+ *   - stdout is empty → not authed (binary said nothing definitive)
+ *   - ENOENT / spawn error → not authed (binary not on PATH)
+ *   - otherwise → authed
+ *
+ * Pure (no Hono dependency) so the harness layer can call it without
+ * pulling the API server in. This is the third readiness gate for Hermes:
+ * `hermes doctor` exits 0 even when every provider is logged out (it treats
+ * missing providers as warnings), so the harness must probe auth directly.
+ */
+export function probeHermesAuthStatus(
+  provider: string,
+  config: HermesDoctorConfig = {},
+): HermesAuthStatus {
+  const hermesBin = config.hermesPath ?? 'hermes';
+  const timeoutMs = config.hermesDoctorTimeoutMs ?? 30_000;
+
+  const result = spawnSync(hermesBin, ['auth', 'status', provider], {
+    timeout: timeoutMs,
+    encoding: 'utf8',
+  });
+
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  const raw = (result.stdout ?? '').trim().slice(0, 4000);
+
+  // Binary not found, or any other spawn error, or no output → not authed.
+  if (errorCode != null || raw.length === 0) {
+    return { provider, authed: false, raw };
+  }
+  // `hermes auth status` always exits 0; state is in stdout. A "logged out"
+  // line means the provider is not authenticated.
+  const loggedOut = /logged out/i.test(raw);
+  return { provider, authed: !loggedOut, raw };
+}
+
 export function addHermesDoctorRoutes(app: Hono, config: HermesDoctorConfig = {}): void {
   app.get('/api/hermes/doctor', (c) => {
     return c.json(probeHermesDoctor(config));

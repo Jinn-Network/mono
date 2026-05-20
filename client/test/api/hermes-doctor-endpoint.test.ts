@@ -17,7 +17,9 @@ vi.mock('node:child_process', () => ({
   spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
 }));
 
-const { addHermesDoctorRoutes } = await import('../../src/api/hermes-doctor-endpoint.js');
+const { addHermesDoctorRoutes, probeHermesAuthStatus } = await import(
+  '../../src/api/hermes-doctor-endpoint.js'
+);
 
 interface HermesDoctorBody {
   installed: boolean;
@@ -176,5 +178,94 @@ describe('GET /api/hermes/doctor', () => {
 
     expect(body.stdout).toHaveLength(4000);
     expect(body.stderr).toHaveLength(4000);
+  });
+});
+
+describe('probeHermesAuthStatus', () => {
+  it('reports not-authed when `hermes auth status` prints "logged out" (exit 0)', () => {
+    // CRITICAL: hermes auth status always exits 0 — state is in stdout.
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      error: undefined,
+      stdout: 'openrouter: logged out\n',
+      stderr: '',
+    });
+
+    const result = probeHermesAuthStatus('openrouter');
+    expect(result.provider).toBe('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.raw).toBe('openrouter: logged out');
+  });
+
+  it('reports authed when `hermes auth status` prints a logged-in line (exit 0)', () => {
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      error: undefined,
+      stdout: 'openrouter: logged in as sk-or-...8f2a\n',
+      stderr: '',
+    });
+
+    const result = probeHermesAuthStatus('openrouter');
+    expect(result.provider).toBe('openrouter');
+    expect(result.authed).toBe(true);
+    expect(result.raw).toContain('logged in');
+  });
+
+  it('reports not-authed when stdout is empty even though exit code is 0', () => {
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      error: undefined,
+      stdout: '',
+      stderr: '',
+    });
+
+    const result = probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+  });
+
+  it('reports not-authed gracefully when the hermes binary is not found (ENOENT)', () => {
+    spawnSyncMock.mockReturnValue({
+      status: null,
+      error: Object.assign(new Error('spawn hermes ENOENT'), { code: 'ENOENT' }),
+      stdout: '',
+      stderr: '',
+    });
+
+    const result = probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+    expect(result.raw).toBe('');
+  });
+
+  it('reports not-authed when spawnSync errors (e.g. timeout) regardless of stdout', () => {
+    spawnSyncMock.mockReturnValue({
+      status: null,
+      signal: 'SIGTERM',
+      error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      stdout: 'openrouter: logged in\n',
+      stderr: '',
+    });
+
+    const result = probeHermesAuthStatus('openrouter');
+    expect(result.authed).toBe(false);
+  });
+
+  it('invokes `hermes auth status <provider>` with the configured binary and timeout', () => {
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      error: undefined,
+      stdout: 'openrouter: logged in\n',
+      stderr: '',
+    });
+
+    probeHermesAuthStatus('openrouter', {
+      hermesPath: '/opt/hermes/bin/hermes',
+      hermesDoctorTimeoutMs: 5_000,
+    });
+
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      '/opt/hermes/bin/hermes',
+      ['auth', 'status', 'openrouter'],
+      expect.objectContaining({ timeout: 5_000, encoding: 'utf8' }),
+    );
   });
 });
