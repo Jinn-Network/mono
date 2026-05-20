@@ -71,7 +71,6 @@ export class HermesHarness implements Harness {
         nextStep: {
           description:
             'Install the Hermes agent runner — see the Hermes precheck panel in the operator dashboard for the install command.',
-          url: '/api/hermes/doctor',
         },
       };
     }
@@ -85,7 +84,6 @@ export class HermesHarness implements Harness {
         nextStep: {
           description:
             'Run `hermes doctor` locally to surface the configuration problem, or open the Hermes precheck panel in the operator dashboard to sign in / select a provider.',
-          url: '/api/hermes/doctor',
         },
       };
     }
@@ -100,7 +98,6 @@ export class HermesHarness implements Harness {
         nextStep: {
           description:
             'Connect OpenRouter — sign in via the Hermes precheck panel in the operator dashboard, or run `hermes login` locally.',
-          url: '/api/hermes/doctor',
         },
       };
     }

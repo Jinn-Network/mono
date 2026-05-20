@@ -74,6 +74,10 @@ export function InlineHelp({
             fontWeight: 400,
             letterSpacing: 'normal',
             textTransform: 'none',
+            // `pre-line` collapses runs of spaces but keeps newlines, so help
+            // copy can use blank lines (`\n\n`) to break dense paragraphs
+            // into short, scannable chunks (#328 inline-help polish).
+            whiteSpace: 'pre-line',
             color: 'var(--fg-muted)',
             maxWidth: '420px',
           }}

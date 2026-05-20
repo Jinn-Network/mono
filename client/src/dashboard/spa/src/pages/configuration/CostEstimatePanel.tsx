@@ -111,10 +111,7 @@ export function CostEstimatePanel({
             color: 'var(--fg-muted)',
           }}
         >
-          Heuristic: ~{(estimate.typicalInputTokens / 1000).toFixed(0)}k input + ~
-          {(estimate.typicalOutputTokens / 1000).toFixed(0)}k output @ ${estimate.entry.inputPer1kTokens.toFixed(4)}
-          /1k in, ${estimate.entry.outputPer1kTokens.toFixed(4)}/1k out (provider: {estimate.entry.provider}).
-          Real usage will vary.
+          Rough estimate — actual cost varies.
         </span>
       )}
       {usd === null && (
