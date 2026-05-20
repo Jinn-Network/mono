@@ -158,6 +158,10 @@ export function Onboarding(): JSX.Element {
                       minimumWei={bootstrap.funding?.targetWei ?? '10000000000000000'}
                       chainExplorerBase={explorer}
                       chain={bootstrap.chain}
+                      onSharedDefaultRpc={
+                        bootstrap.rpcUrl === undefined ||
+                        bootstrap.rpcUrl === bootstrap.defaultRpcUrl
+                      }
                     />
                   )}
                   {!showError && p === 3 && status === 'active' && (

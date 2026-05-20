@@ -51,3 +51,21 @@ export function isTransientEthReadError(error: unknown): boolean {
 
   return false;
 }
+
+/**
+ * True when an RPC read failed specifically because the endpoint rate-limited
+ * the daemon (HTTP 429 / "too many requests"). This is a strict subset of
+ * `isTransientEthReadError` — it deliberately does NOT match generic timeouts
+ * or 5xx errors. The shared default Base Sepolia RPC throttles the whole
+ * operator pool; classifying a throttle distinctly lets the UI tell the
+ * operator to add their own key rather than showing a generic outage message.
+ * See jinn-mono #325.
+ */
+export function isRateLimitedEthReadError(error: unknown): boolean {
+  const msg = flattenErrorMessage(error).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests')
+  );
+}

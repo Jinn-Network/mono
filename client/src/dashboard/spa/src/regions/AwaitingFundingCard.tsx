@@ -8,6 +8,12 @@ interface Props {
   /** Daemon's configured chain (e.g. 'base' or 'base-sepolia'). Surfaced in
    *  the funding-card copy so the operator knows which network to send on. */
   chain?: string;
+  /**
+   * True when the daemon is running on the shared default RPC. Surfaces a
+   * one-line BYO-RPC nudge in the first-run flow so the operator sees the
+   * option before they bounce off a rate-limit failure later. See jinn-mono #325.
+   */
+  onSharedDefaultRpc?: boolean;
 }
 
 const CHAIN_DISPLAY_NAME: Record<string, string> = {
@@ -20,6 +26,7 @@ export function AwaitingFundingCard({
   minimumWei,
   chainExplorerBase,
   chain,
+  onSharedDefaultRpc = false,
 }: Props): JSX.Element {
   const [copied, setCopied] = useState(false);
   const [fundingStartedAt, setFundingStartedAt] = useState<number | null>(null);
@@ -276,6 +283,16 @@ export function AwaitingFundingCard({
       {dripStatus.state === 'failed' && (
         <p className="j-mono text-[11px]" style={{ color: 'var(--break-red)' }}>
           {dripStatus.reason}
+        </p>
+      )}
+      {onSharedDefaultRpc && (
+        <p
+          data-testid="onboarding-shared-rpc-nudge"
+          className="j-mono text-[11px]"
+          style={{ color: 'var(--fg-dim)' }}
+        >
+          Using a shared trial RPC — add your own key in Settings &gt; Network
+          for reliable operation.
         </p>
       )}
     </div>

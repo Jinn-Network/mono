@@ -1551,22 +1551,24 @@ function makeOwnedRecord(args: {
  * as the real cache from `daemon-init.ts`; refresh() is a noop unless the test
  * supplies a `refreshHandler`.
  */
+type MockCatalogError = { message: string; at: Date; code?: 'rpc_rate_limited' };
+
 interface MockCatalog extends SolverNetCatalogCache {
   refreshCalls: number;
   setSnapshot: (snapshot: SolverNetManifestSummary[]) => void;
-  setError: (err: { message: string; at: Date } | null) => void;
+  setError: (err: MockCatalogError | null) => void;
   setLastRefreshedAt: (at: Date | null) => void;
 }
 
 function makeMockCatalog(initial: {
   snapshot?: SolverNetManifestSummary[];
   lastRefreshedAt?: Date | null;
-  lastError?: { message: string; at: Date } | null;
+  lastError?: MockCatalogError | null;
   refreshHandler?: () => Promise<void>;
 } = {}): MockCatalog {
   let snapshot: SolverNetManifestSummary[] = initial.snapshot ?? [];
   let lastRefreshedAt: Date | null = initial.lastRefreshedAt ?? null;
-  let lastError: { message: string; at: Date } | null = initial.lastError ?? null;
+  let lastError: MockCatalogError | null = initial.lastError ?? null;
   let refreshCalls = 0;
   const refreshHandler = initial.refreshHandler;
 
@@ -2022,6 +2024,31 @@ describe('GET /v1/solvernets/registry (Task 15)', () => {
       message: 'subgraph timed out',
       at: errAt.toISOString(),
     });
+  });
+
+  it('passes the rpc_rate_limited code through in the lastError payload', async () => {
+    // jinn-mono #325: the typed throttle signal must survive the daemon→SPA
+    // hop so the operator UI can render an actionable message.
+    const errAt = new Date('2026-05-06T01:00:00.000Z');
+    const catalog = makeMockCatalog({
+      snapshot: [],
+      lastError: {
+        message: 'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
+        at: errAt,
+        code: 'rpc_rate_limited',
+      },
+    });
+    const { app } = buildTestApp({ store, catalog });
+
+    const res = await app.request('/v1/solvernets/registry', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lastError: { message: string; at: string; code?: string } | null;
+    };
+    expect(body.lastError?.code).toBe('rpc_rate_limited');
   });
 
   it('forces a refresh when ?refresh=1 is supplied', async () => {

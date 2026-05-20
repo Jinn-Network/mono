@@ -45,6 +45,10 @@ export interface BootstrapState {
   }>;
   master_address?: string;
   chain?: string;
+  /** Operator-configured RPC URL (absent when the default is in use). */
+  rpcUrl?: string;
+  /** Chain default RPC URL — the shared, rate-limited trial endpoint. */
+  defaultRpcUrl?: string;
   fleet_agent_id?: string;
   fleet_safe_address?: string;
   funding?: {
@@ -654,10 +658,18 @@ export interface LaunchAction {
 /** Response shape for `PATCH /v1/solvernets/launched/:id/lifecycle`. */
 export type LifecycleTransition = LaunchedSolverNetRecord;
 
+/**
+ * Typed reason a registry catalog refresh failed. Currently only
+ * `rpc_rate_limited` — the configured RPC endpoint returned a 429. The SPA
+ * branches on this to show an operator-actionable message ("add your own RPC
+ * key") instead of a generic failure string. See jinn-mono #325.
+ */
+export type RegistryErrorCode = 'rpc_rate_limited';
+
 export interface RegistryListResponse {
   summaries: SolverNetManifestSummary[];
   lastRefreshedAt: Iso8601 | null;
-  lastError: { message: string; at: Iso8601 } | null;
+  lastError: { message: string; at: Iso8601; code?: RegistryErrorCode } | null;
 }
 
 export interface RegistryManifestResponse {
