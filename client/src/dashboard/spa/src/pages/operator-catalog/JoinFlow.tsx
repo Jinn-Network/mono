@@ -631,17 +631,6 @@ export function JoinFlow({
                         : ''}
                     </span>
                   )}
-                  {selectedHarnessReadiness.nextStep?.url && (
-                    <a
-                      href={selectedHarnessReadiness.nextStep.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      data-testid="join-harness-not-ready-url"
-                      style={{ color: 'var(--accent-sky)' }}
-                    >
-                      {selectedHarnessReadiness.nextStep.url}
-                    </a>
-                  )}
                 </div>
               )}
             </div>
