@@ -90,6 +90,15 @@ query Tasks(
  */
 const ATTEMPTS_PAGE_LIMIT = 1000;
 
+/**
+ * Hard cap on `OPERATOR_COUNT_TASKS_QUERY` pages (leg 1 of the operator-count
+ * query). At `ATTEMPTS_PAGE_LIMIT` rows per page that is 50_000 tasks — far
+ * beyond any realistic SolverNet — and bounds the scan so the dashboard's
+ * recurring poll cannot trigger an unbounded walk. On a SolverNet past the cap
+ * the resulting count is a lower bound; see `getSolverNetOperatorCount`.
+ */
+const MAX_OPERATOR_COUNT_TASK_PAGES = 50;
+
 const ATTEMPTS_FOR_TASKS_QUERY = `
 query AttemptsForTasks($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $after: String) {
   attempts(
@@ -161,6 +170,12 @@ query GetLifecycleStatus($manifestCid: String!) {
  * so this runs in two legs: first `OPERATOR_COUNT_TASKS_QUERY` (task ids for
  * the digest), then `OPERATOR_COUNT_ATTEMPTS_QUERY` batched over those ids via
  * the `_in` operator — the same pattern `findClaimableTasks` already uses.
+ *
+ * The task query intentionally does NOT filter `finalized` / `refunded`: the
+ * on-chain backing reads raw `TaskAttemptCreated` logs and cannot see lifecycle
+ * state, so adding the filter here would make HTTP and on-chain disagree. The
+ * count is an *ever-participated* signal across all task lifecycle states — see
+ * `DiscoveryAPI.getSolverNetOperatorCount`.
  */
 const OPERATOR_COUNT_TASKS_QUERY = `
 query OperatorCountTasks($manifestDigest: String!, $limit: Int!, $after: String) {
@@ -720,16 +735,18 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const manifestDigest = manifestDigestForCid(manifestCid).toLowerCase();
 
     // Leg 1: page every task id for this SolverNet. Single-chain query, so all
-    // rows share a chainId — captured for the leg-2 attempt filter.
+    // rows share a chainId — captured for the leg-2 attempt filter. Capped at
+    // MAX_OPERATOR_COUNT_TASK_PAGES so the dashboard's recurring poll cannot
+    // trigger an unbounded scan.
     const taskIds: string[] = [];
     let chainId: number | undefined;
     let taskCursor: string | null = null;
-    for (;;) {
+    for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
       const data: OperatorCountTasksPage = await postGql<OperatorCountTasksPage>(
         gqlUrl,
         fetchImpl,
         OPERATOR_COUNT_TASKS_QUERY,
-        { manifestDigest, limit: 1000, after: taskCursor },
+        { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
       );
       const items = data.tasks?.items ?? [];
       for (const row of items) {

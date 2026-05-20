@@ -182,12 +182,20 @@ export interface DiscoveryAPI {
   getLifecycleStatus(manifestCid: string): Promise<SolverNetLifecycleStatus | undefined>;
 
   /**
-   * Returns the number of distinct operators that have on-chain activity on
-   * the SolverNet identified by `manifestCid` — i.e. the count of unique
+   * Returns the number of distinct operators that have *ever* claimed a task
+   * on the SolverNet identified by `manifestCid` — i.e. the count of unique
    * `attempt.operator` Safe addresses across every task whose
-   * `manifestDigest === keccak256(manifestCid)`.
+   * `manifestDigest === keccak256(manifestCid)`, **including tasks that are
+   * now finalized or refunded**.
    *
-   * This is the protocol-observable participation signal: a "join" in the
+   * This is an *ever-participated* signal, not a "currently active" one. The
+   * count never filters on task lifecycle state: the on-chain backing reads
+   * raw `TaskAttemptCreated` logs, which carry no finalized/refunded flag, so
+   * the only count consistent across all three backings (HTTP / embedded /
+   * on-chain) is the all-time distinct-operator total. Treat it as "operators
+   * who have participated at least once", not "operators participating today".
+   *
+   * It is the protocol-observable participation signal: a "join" in the
    * operator app is purely a local config write (`joinedSolverNets[<cid>]`,
    * see `spec/2026-05-05-solvernet-creation-and-launch.md` §12) and leaves no
    * on-chain footprint. An operator only becomes visible to the network once
@@ -195,6 +203,10 @@ export interface DiscoveryAPI {
    * to (operator, SolverNet). This method therefore counts *participating*
    * operators (operators who have claimed at least one task), which is the
    * only honest cross-operator count derivable from the indexer / chain.
+   *
+   * Task pagination is hard-capped (`MAX_OPERATOR_COUNT_TASK_PAGES` in each
+   * backing) so a pathological task volume cannot turn this into an unbounded
+   * scan; on a SolverNet beyond the cap the count is a lower bound.
    *
    * Returns `0` when no operator has attempted a task on the SolverNet yet.
    */

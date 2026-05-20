@@ -70,6 +70,15 @@ const DEFAULT_ROUTER_BY_CHAIN_ID: Record<number, Address> = {
 /** Concurrency cap for parallel canClaimTask calls. */
 const CLAIM_CHECK_CONCURRENCY = 8;
 
+/**
+ * Hard cap on the number of getLogs chunks `getSolverNetOperatorCount` scans
+ * per pass. Bounds the dashboard's recurring operator-count poll so it cannot
+ * walk unbounded chain history; past the cap the count is a lower bound. See
+ * `DiscoveryAPI.getSolverNetOperatorCount`. The HTTP backing's sibling cap is
+ * `MAX_OPERATOR_COUNT_TASK_PAGES` in `http.ts`.
+ */
+const MAX_OPERATOR_COUNT_TASK_PAGES = 50;
+
 const SOLVERNET_MANIFEST_KEY_PREFIX = 'solvernet-manifest:';
 
 // ── ABI fragments ─────────────────────────────────────────────────────────────
@@ -448,6 +457,11 @@ function foldPluginPublications(events: PluginMetadataEvent[]): {
  * items have been accumulated — avoiding scanning the entire history when
  * only a bounded result set is needed. Without `maxResults`, scans
  * oldest-first (standard order).
+ *
+ * When `maxChunks` is provided, the oldest-first scan stops after at most
+ * `maxChunks` getLogs round-trips. This bounds a recurring caller (e.g. the
+ * dashboard's operator-count poll) so it cannot walk unbounded history; past
+ * the cap the result set is a prefix of the full range.
  */
 async function scanLogsInChunks<T>(
   getLogs: (fromBlock: bigint, toBlock: bigint) => Promise<T[]>,
@@ -455,6 +469,7 @@ async function scanLogsInChunks<T>(
   toBlock: bigint,
   chunkBlocks: bigint,
   maxResults?: number,
+  maxChunks?: number,
 ): Promise<T[]> {
   const results: T[] = [];
 
@@ -477,10 +492,13 @@ async function scanLogsInChunks<T>(
     // Oldest-first scan. Each chunk is [start, start + chunkBlocks] inclusive,
     // and the next iteration starts at `start + chunkBlocks + 1n` — no overlap,
     // no gap.
+    let chunksScanned = 0;
     for (let start = fromBlock; start <= toBlock; start += chunkBlocks + 1n) {
+      if (maxChunks !== undefined && chunksScanned >= maxChunks) break;
       const end = start + chunkBlocks > toBlock ? toBlock : start + chunkBlocks;
       const chunk = await getLogs(start, end);
       results.push(...chunk);
+      chunksScanned += 1;
     }
   }
 
@@ -972,7 +990,9 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     // Scan from the execution-discovery floor (not the cursor cache): like
     // listPluginPublications this is a complete-recount call with no
     // accumulator, so it must always see every TaskCreated / TaskAttemptCreated
-    // event for the SolverNet.
+    // event for the SolverNet. Both passes are capped at
+    // MAX_OPERATOR_COUNT_TASK_PAGES getLogs chunks so this recurring poll
+    // cannot walk unbounded history; past the cap the count is a lower bound.
     const fromBlock = resolveScanFromBlock(opts, currentBlock);
     const targetDigest = manifestDigestForCid(manifestCid).toLowerCase() as Hex;
 
@@ -1007,6 +1027,8 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
         fromBlock,
         currentBlock,
         chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
       );
       solverNetTaskIds = new Set(taskIdLists);
     } catch (err) {
@@ -1051,6 +1073,8 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
         fromBlock,
         currentBlock,
         chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
       );
       operators = new Set(operatorLists);
     } catch (err) {
