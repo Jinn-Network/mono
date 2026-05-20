@@ -1,149 +1,129 @@
-# Scenario T2.2 — Producer/evaluator (Anvil-fork)
+# Scenario T2.2 — Producer/evaluator (Anvil-fork, real on-chain loop)
 
-**Tier:** 2 (substrate-derived workspace, Anvil-fork, runs in release-prep)
-**Wall-clock budget:** 5 minutes
-**Catches:** claim → solve → deliver → evaluate loop regressions; activity-counter increments; verdict pipeline end-to-end mechanically.
-
-> **Prerequisite: Plan A's `substrate-copy.ts`.** This scenario imports
-> `copyWorkspace` from `client/scripts/release/substrate-copy.ts`, a Plan A
-> artifact. It does not exist on the Plan B branch — this scenario is not
-> runnable until Plan A lands.
+**Tier:** 2 (Anvil-fork of Base, in-process daemons, runs in release-prep)
+**Wall-clock budget:** ~18 minutes (two `FleetBootstrapper` runs + a slow-RPC-tolerant on-chain loop)
+**Catches:** producer → solve → deliver → evaluate → verdict loop regressions; on-chain activity-counter increments; the verdict pipeline end-to-end through a real daemon.
 
 ## Goal
 
-op-a posts a known-solvable SWE-rebench v2 task, claims it, solves it via a *stubbed harness* (deterministic cached solution), delivers; op-b claims the verdict request, evaluates via real evaluator Docker image, posts verdict. Assert verdictCode matches expected.
+Drive the full producer/evaluator loop **the real on-chain way**. A producer
+operator's daemon claims a task posted on-chain, solves it, and delivers a
+solution on-chain. A separate evaluator operator's daemon discovers that
+solution, claims the evaluation request, runs the real evaluator, and settles a
+verdict on-chain. Assert the on-chain verdict code and that the on-chain
+activity counters increment for both operators.
 
-This is the Anvil-fork mechanical counterpart to Tier 3's real-testnet variant. Same loop, but stubbed harness (no real OpenRouter spend) and forked chain.
+This is the Anvil-fork mechanical counterpart to Tier 3's real-testnet variant
+— same loop, but on a forked chain with deterministic, offline harnesses (no
+LLM/API spend).
+
+## Why this is not an HTTP-endpoint scenario
+
+The first cut of T2.2 assumed an HTTP task-control plane (`POST /v1/tasks`,
+`GET /v1/tasks/:id`, `GET /v1/verdicts`, `GET /v1/activity`). **None of those
+exist, and none should.** Jinn is an on-chain protocol:
+
+- Tasks enter via a `createTask` tx on the JinnRouter V3. The daemon's
+  `CreatorLoop` posts generator-produced tasks on-chain — there is no operator
+  HTTP entry point for posting protocol tasks.
+- Solving, delivery, evaluation and verdicts are all driven by daemon loops
+  reacting to on-chain events; verdicts settle on-chain.
+- Activity counters are on-chain state (`TaskActivityCheckerV3.eligibleActivityWeight`).
+  The daemon only *mirrors* a snapshot into `GET /v1/status`; the gate asserts
+  the on-chain source of truth.
+
+The investigation on [issue #350](https://github.com/Jinn-Network/mono/issues/350)
+confirmed option (b): rewrite T2.2 to drive the loop the real way. T2.2 no
+longer probes for or skips on missing endpoints.
 
 ## Implementation location
 
-`client/test/release/tier-2/T2.2-producer-evaluator-fork.ts`
+`client/test/release/tier-2/T2.2-producer-evaluator.ts` (callable) +
+`T2.2-producer-evaluator.test.ts` (Vitest wrapper).
 
-## Setup
+## How it works
 
-- substrate workspace via `copyWorkspace({ ops: ['op-a', 'op-b'] })`
-- Anvil fork of Base Sepolia at the substrate's last-known-good block; impersonate proxy owner; upgrade JinnRouter to V3 inline (existing pattern in `client/test/e2e/task-first-helpers.ts`)
-- op-a config: `roles: ['solving']` for swe-rebench-v2 SolverNet
-- op-b config: `roles: ['evaluating']` for same SolverNet
-- Harness stub: register a fake harness that returns a canned solution for the known-instance task (so no real OpenRouter call happens)
+T2.2 composes the `yarn e2e:daemon-harness` helpers
+(`client/test/e2e/_daemon-harness-helpers.ts`) — the existing pattern that
+already does producer → solve → deliver → activity the real way — and extends
+them with the genuinely-new **evaluator/verdict leg**.
 
-## Steps
-
-```typescript
-import { spawnAnvilFork } from '../_support/chain/anvil';   // base-fork helper
-import { baseSepolia } from 'viem/chains';
-
-const workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-const anvil = await spawnAnvilFork({
-  forkUrl: process.env['BASE_SEPOLIA_RPC_URL']!,
-  chain: baseSepolia,
-  silent: true,
-});
-const daemons = await spawnMultiOpDaemons({
-  ops: [
-    { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
-    { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
-  ],
-  // JINN_RPC_URL — not BASE_RPC_URL — because config.ts gives JINN_RPC_URL
-  // unconditional precedence; the spawn helper surfaces extraEnv RPC keys
-  // through JINN_RPC_URL so this works either way, but using JINN_RPC_URL
-  // here makes the precedence explicit.
-  extraEnv: { JINN_RPC_URL: anvil.rpcUrl, JINN_HARNESS_STUB_INSTANCE: KNOWN_INSTANCE_ID },
-});
-
-// 1. op-a posts a known-solvable task
-const postRes = await fetch(`http://127.0.0.1:7732/v1/tasks`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({
-    solverType: 'swe-rebench-v2.v1',
-    spec: { instanceId: KNOWN_INSTANCE_ID, repo: KNOWN_REPO, commit: KNOWN_COMMIT },
-  }),
-});
-const { taskId, requestId } = await postRes.json();
-
-// 2. Wait for op-a to claim + solve + deliver (auto via solving role)
-const delivered = await waitFor(async () => {
-  const res = await fetch(`http://127.0.0.1:7732/v1/tasks/${taskId}`);
-  const body = await res.json();
-  return body.state === 'DELIVERED' ? body : null;
-}, { timeoutMs: 90000, intervalMs: 2000 });
-expect(delivered.deliveryTxHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
-
-// 3. Wait for op-b to claim verdict request + run evaluator + post verdict
-const verdict = await waitFor(async () => {
-  const res = await fetch(`http://127.0.0.1:7733/v1/verdicts?taskId=${taskId}`);
-  const body = await res.json();
-  return body.verdicts?.length > 0 ? body.verdicts[0] : null;
-}, { timeoutMs: 120000, intervalMs: 2000 });
-
-// 4. Assertions
-expect(verdict.verdictCode).toBe(KNOWN_EXPECTED_VERDICT);   // 1 if patch applies + tests pass
-expect(verdict.verdictTxHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
-
-// 5. Activity counters incremented
-const opAActivity = await fetch(`http://127.0.0.1:7732/v1/activity`).then(r => r.json());
-expect(opAActivity.deliveriesCount).toBeGreaterThan(0);
-const opBActivity = await fetch(`http://127.0.0.1:7733/v1/activity`).then(r => r.json());
-expect(opBActivity.verdictsCount).toBeGreaterThan(0);
-
-// 6. Cleanup
-await daemons.teardown();
-await anvil.teardown();
-await workspace.teardown();
-```
+1. **Anvil fork of Base + a fresh V3 task stack.** `setupAnvilFixture` forks
+   Base; `deployMinimalV3Stack` deploys `JinnRouterV3 + TaskCoordinator +
+   TaskActivityCheckerV3 + MockTaskMarketplace`. The production V1 JinnRouter
+   does not expose the `createTask` interface, so a V3 stack is deployed on the
+   fork.
+2. **Two staked operators.** `bootstrapStakedOperator` runs the real
+   `FleetBootstrapper` twice — op-a (producer/solver) and op-b (evaluator).
+   `deployOperatorMech` gives op-b its own mock mech so the V3 router's
+   `claimEvaluation` operator check passes for op-b's Safe.
+3. **Post a prediction.v1 task on-chain.** `postPredictionV1Task` issues the
+   `createTask` tx with a verdict budget. prediction.v1 is chosen over the
+   SWE-rebench stub harness because its baseline solver and
+   `PredictionV1Evaluator` are both **deterministic, need no Docker and no LLM
+   API key**, and are the path the daemon-harness helpers already support —
+   keeping T2.2 deterministic and cheap, as the release gate requires.
+4. **Producer leg.** op-a's daemon discovers the task on-chain, claims it
+   (`waitForDaemonClaim`), solves it with the deterministic
+   `prediction-v1-baseline` harness, and delivers on-chain (`waitForDelivery`).
+5. **Evaluator/verdict leg (new).** op-b's daemon discovers op-a's on-chain
+   solution delivery, claims the evaluation request, runs the real
+   `PredictionV1Evaluator`, and settles a verdict on-chain (`waitForVerdict`,
+   watching `VerdictDeliveryClaimed`).
+6. **Deterministic verdict.** The evaluator resolves the fixture market against
+   an in-process **mock Polymarket Gamma server** (`startMockPolymarketGammaServer`),
+   wired in via `startDaemon`'s `polymarketGammaBaseUrl` option. The fixture
+   market resolves YES, so the evaluator derives a Pass verdict
+   (`verdictCode === 1`) deterministically and offline.
+7. **Assertions.** On-chain `verdictCode === 1`, and `eligibleActivityWeight`
+   incremented for both the solver and the evaluator.
 
 ## Assertions (summary)
 
 | # | Assertion | Why |
 |---|---|---|
-| A1 | Task post returns valid taskId + requestId | task admission works |
-| A2 | op-a delivers within 90s | producer side: claim + stubbed solve + deliver loop closes |
-| A3 | delivery has a valid tx hash | on-chain delivery succeeded |
-| A4 | op-b posts verdict within 120s of delivery | evaluator side: claim + eval + verdict loop closes |
-| A5 | verdictCode matches KNOWN_EXPECTED_VERDICT | substrate recheck + scoring is correct |
-| A6 | op-a deliveriesCount incremented | activity-counter accounting works |
-| A7 | op-b verdictsCount incremented | activity-counter accounting works |
+| A1 | op-a claims the task on-chain (`TaskAttemptCreated`) | producer claim loop closes |
+| A2 | op-a delivers the solution on-chain (`Deliver`) | producer solve + deliver loop closes |
+| A3 | op-b settles a verdict on-chain (`VerdictDeliveryClaimed`) | evaluator claim + eval + verdict loop closes |
+| A4 | on-chain `verdictCode === 1` (Pass) | evaluator scoring is correct against the deterministic fixture market |
+| A5 | producer `eligibleActivityWeight` incremented | solution-delivery activity accounting works |
+| A6 | evaluator `eligibleActivityWeight` incremented | verdict-delivery activity accounting works |
 
-## Stubbed harness
+## Why not the substrate multi-op workspace
 
-Activated via `JINN_HARNESS_STUB_INSTANCE=<instance-id>` env var. The stub:
-- Pattern-matches on instance ID; only stubs the one we're testing.
-- Returns a canned patch from `client/test/release/tier-2/fixtures/<instance-id>.patch`.
-- Logs that it stubbed (so a real-harness-still-invoked regression would show absent stub logs).
-
-This avoids the ~$0.10 API call per run while exercising the rest of the loop.
+`setupTier2Scenario` spawns production daemon binaries against substrate gold
+operators on a Base Sepolia fork. Those daemons are pinned to the
+already-deployed Base Sepolia contracts and **cannot be redirected at a
+freshly-deployed V3 router**. Driving the real loop end-to-end therefore uses
+the in-process daemon-harness daemons, which can be pointed at the fresh V3
+stack. The two-operator shape preserves the producer/evaluator contract.
 
 ## Failure modes
 
 | Failure | Class | Triage |
 |---|---|---|
-| Task post returns 4xx | real-bug | BLOCKING — admission gate broken |
-| op-a never delivers within 90s | could be: harness stub not picked up; daemon misconfig; chain stall | inspect logs; flake on first, real-bug on retry |
-| Delivery tx revert | real-bug | BLOCKING — JinnRouter regression |
-| op-b never picks up verdict request | real-bug | BLOCKING — evaluator role inactive |
-| Evaluator Docker fails to run | flake-infra (Docker daemon) or real-bug (image broken) | check `docker ps`; retry |
-| verdictCode mismatches expected | real-bug | BLOCKING — substrate/scoring regression |
-| Activity counter not incremented | real-bug | BLOCKING — accounting regression |
-
-## Wall-clock
-
-~5 minutes:
-- 30s daemon spawn + Anvil fork
-- 90s producer loop
-- 120s evaluator loop
-- 30s setup/teardown
+| `anvil`/`forge` not on PATH, or fork RPC unreachable | flake-infra | install Foundry; check `BASE_RPC_URL` |
+| op-a never claims/delivers within budget | real-bug or flake-timing | inspect evidence log; flake on first, real-bug on retry |
+| Delivery/verdict tx revert | real-bug | BLOCKING — JinnRouter V3 regression |
+| op-b never settles a verdict | real-bug | BLOCKING — evaluator loop or `claimEvaluation` operator check regression |
+| `verdictCode` not 1 | real-bug | BLOCKING — `PredictionV1Evaluator` scoring regression |
+| Activity counter not incremented | real-bug | BLOCKING — `TaskActivityCheckerV3` accounting regression |
 
 ## Dependencies
 
-- Substrate workspace from Plan A
-- Existing `spawnAnvilFork` helper at `client/test/_support/chain/anvil.ts`. Pass `forkUrl: BASE_SEPOLIA_RPC_URL` and `chain: baseSepolia` for a Base Sepolia fork (no convenience wrapper today). Teardown via `harness.teardown()`. The full Task-First fork runner at `client/test/e2e/task-first-helpers.ts` (`runBaseSepoliaForkTaskFirstFullLoop`) shows the JinnRouter V3 fork-upgrade pattern.
-- Existing JinnRouter V3 fork-upgrade pattern (in `client/test/e2e/task-first-helpers.ts`)
-- Stubbed harness registration mechanism — to be added or extended in Plan C/D if not present
-- KNOWN_INSTANCE_ID, KNOWN_REPO, KNOWN_COMMIT, KNOWN_EXPECTED_VERDICT — fixture constants for a known-solvable SWE-rebench instance (existing pattern in `client/test/release/tier-2/fixtures/`)
+- Foundry (`anvil`, `forge`) on PATH.
+- An Anvil-forkable Base RPC (`BASE_RPC_URL`, defaults to the public
+  `https://mainnet.base.org`).
+- Compiled `contracts/` artifacts — `compileContracts` builds them at runtime.
+- The shared daemon-harness helpers at `client/test/e2e/_daemon-harness-helpers.ts`
+  (`setupAnvilFixture`, `bootstrapStakedOperator`, `deployMinimalV3Stack`,
+  `deployOperatorMech`, `startDaemon`, `postPredictionV1Task`,
+  `waitForDaemonClaim`, `waitForDelivery`, `waitForVerdict`, `readActivityCount`,
+  `startMockIpfsServer`, `startMockPolymarketGammaServer`).
 
 ## What this scenario does NOT catch
 
-- Real OpenRouter API behavior (Tier 3 covers that)
-- Real RPC behavior under load (this uses Anvil; Tier 3 uses real testnet)
-- Cross-chain verdict flows
+- Real LLM-harness behaviour (Tier 3 covers that).
+- Real RPC behaviour under load (this uses an Anvil fork; Tier 3 uses real testnet).
+- The SWE-rebench Docker evaluator path (prediction.v1 is used for determinism).
+- Cross-chain verdict flows.

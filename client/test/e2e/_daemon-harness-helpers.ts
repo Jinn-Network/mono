@@ -743,12 +743,29 @@ export async function startDaemon(
    * Falls back to the real Autonolas registry when absent.
    */
   ipfsRegistryUrl?: string,
+  /**
+   * Optional overrides for the daemon's build. Used by multi-operator
+   * scenarios (T2.2) that need to evaluate prediction.v1 solutions against a
+   * deterministic, offline market-resolution source rather than the live
+   * Polymarket Gamma API.
+   *
+   * - `polymarketGammaBaseUrl` — base URL of a Polymarket Gamma API mirror.
+   *   `buildHarnesses` forwards it into `PredictionV1Evaluator`, whose
+   *   `getResolution` call then hits the mock server instead of
+   *   `gamma-api.polymarket.com`. Point it at a `MockPolymarketGammaServer`
+   *   so the evaluator/verdict leg is deterministic and needs no network.
+   */
+  opts?: { polymarketGammaBaseUrl?: string; instanceLabel?: string },
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const chainCfg = getChainConfig('base');
 
   // 1. SQLite store (Daemon owns this instance; stop() will close it).
-  const storePath = join(fixture.implStateRoot, 'daemon-jinn.db');
+  //    Multi-operator scenarios (T2.2) start two daemons against one fixture;
+  //    `instanceLabel` keeps their SQLite files and impl-state dirs distinct so
+  //    they do not collide on a shared `implStateRoot`.
+  const label = opts?.instanceLabel ?? 'daemon';
+  const storePath = join(fixture.implStateRoot, `${label}-jinn.db`);
   const store = new Store(storePath);
 
   // 2. Fix for the Task 3 latent daemonApiUrl: 0 bug.
@@ -801,7 +818,8 @@ export async function startDaemon(
     storePath,
     daemonApiUrl,
     // daemonApiToken omitted → harnesses will handle missing token gracefully
-    implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
+    // Label-scoped so two daemons (T2.2) do not share an impl-state dir.
+    implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
     // ipfsRegistryUrl wired so harnesses that upload artifacts use the mock
     ipfsRegistryUrl: resolvedIpfsRegistryUrl,
     // Codex subprocess env defaults
@@ -813,6 +831,12 @@ export async function startDaemon(
     hermesProvider: process.env['JINN_HERMES_PROVIDER'] ?? 'openrouter',
     // externalImpls omitted — no operator-supplied harnesses
     // disabledNames omitted — use production defaults
+    // polymarketGammaBaseUrl: when set, the PredictionV1Evaluator resolves
+    // markets against this mirror instead of the live Gamma API. T2.2 points
+    // it at a MockPolymarketGammaServer so the verdict leg is deterministic.
+    ...(opts?.polymarketGammaBaseUrl
+      ? { polymarketGammaBaseUrl: opts.polymarketGammaBaseUrl }
+      : {}),
   });
 
   // 4. Wire the selected harness into HarnessRegistry dispatch.
@@ -949,8 +973,8 @@ export async function startDaemon(
     // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
     restorationEngine: {
       paths: {
-        workingDirRoot: fixture.workingDirRoot,
-        implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
+        workingDirRoot: join(fixture.workingDirRoot, label),
+        implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
       },
       implRegistry,
       packagingDeps,
@@ -1460,4 +1484,260 @@ export async function readActivityCount(
     args: [operator.safeAddress as Address],
   });
   return result as bigint;
+}
+
+// ── Multi-operator evaluator/verdict leg (T2.2) ───────────────────────────────
+//
+// The single-operator daemon-harness cycle stops at solution delivery. T2.2
+// (`client/test/release/tier-2/T2.2-producer-evaluator.ts`) drives the full
+// producer → solve → deliver → evaluate → verdict loop the real way: a second
+// operator's daemon claims the evaluation request, runs the real
+// PredictionV1Evaluator, and settles a verdict on-chain. The helpers below are
+// the genuinely-new pieces that leg needs — they compose with the existing
+// `deployMinimalV3Stack` / `postPredictionV1Task` / `waitForDaemonClaim` /
+// `waitForDelivery` machinery rather than duplicating it.
+
+/**
+ * Deploy a second `MockTaskMechWithDelivery` whose `operator` is the *evaluator*
+ * operator's Safe, so the V3 router's `claimEvaluation` →
+ * `_validateMechOperator(evaluatorMech, msg.sender)` check passes when the
+ * evaluator daemon claims an evaluation request via its Safe.
+ *
+ * The V3 router validates that `msg.sender` (the evaluator's Safe) is an
+ * operator of `evaluatorMech`. The solver's mech (deployed by
+ * `deployMinimalV3Stack` with `operator = solver.safeAddress`) would fail that
+ * check for the evaluator. Each operator therefore needs its own mech against
+ * the shared V3 router + marketplace + activity checker.
+ *
+ * Returns a `TaskV3Env` view scoped to the evaluator operator: identical
+ * router/marketplace/activityChecker, but `mockMechAddress` is the evaluator's
+ * mech. Pass it as the evaluator daemon's `v3Env` so the daemon claims
+ * evaluation requests through the mech it operates.
+ */
+export async function deployOperatorMech(
+  fixture: DaemonHarnessFixture,
+  evaluator: BootstrappedOperator,
+  baseV3Env: TaskV3Env,
+  deployerPrivKey: `0x${string}`,
+): Promise<TaskV3Env> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const deployer = privateKeyToAccount(deployerPrivKey);
+  const NATIVE_PAYMENT_TYPE =
+    '0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1' as Hex;
+  const MOCK_MECH_RATE = parseEther('0.0001');
+
+  const mechArtifact = await loadContractArtifact(
+    'artifacts/src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMechWithDelivery.json',
+  );
+  const evaluatorMech = await deployContractFromArtifact(
+    fixture.publicClient,
+    rpcUrl,
+    deployer,
+    mechArtifact,
+    [
+      MOCK_MECH_RATE,
+      NATIVE_PAYMENT_TYPE,
+      evaluator.safeAddress,
+      baseV3Env.mockMarketplaceAddress,
+    ],
+  );
+
+  return {
+    routerAddress: baseV3Env.routerAddress,
+    mockMechAddress: evaluatorMech,
+    mockMarketplaceAddress: baseV3Env.mockMarketplaceAddress,
+    activityCheckerAddress: baseV3Env.activityCheckerAddress,
+  };
+}
+
+// ── Mock Polymarket Gamma server ──────────────────────────────────────────────
+
+/**
+ * A minimal in-process HTTP server that mimics the one Polymarket Gamma API
+ * endpoint the prediction.v1 evaluator depends on: `GET /markets/{marketId}`.
+ *
+ * `PredictionV1Evaluator.run` calls `getResolution({ marketId, ... })` which
+ * issues a single `GET ${gammaBaseUrl}/markets/{marketId}` request. The live
+ * Gamma API would make the verdict leg network-dependent and non-deterministic
+ * (a market's resolution state can change). Pointing the daemon's evaluator at
+ * this mock — via `startDaemon`'s `opts.polymarketGammaBaseUrl` — makes the
+ * verdict deterministic, offline, and free.
+ *
+ * The served market record is `closed: true` with `outcomePrices: ['1','0']`,
+ * which `getResolution` normalises to `status: 'resolved', outcome: 'YES'` →
+ * the evaluator derives `verdict: 'SCORED'` → on-chain `verdictCode = 1` (Pass).
+ */
+export interface MockPolymarketGammaServer {
+  /** Base URL of the server (e.g. `http://127.0.0.1:PORT`). */
+  baseUrl: string;
+  /** Tear down the HTTP server. */
+  close(): Promise<void>;
+}
+
+/**
+ * Spawn the mock Gamma server. The `marketId` / `conditionId` / `slug` must
+ * match the prediction.v1 task fixture's `spec.source.identifiers` so the
+ * evaluator's `market.identity` check passes.
+ */
+export async function startMockPolymarketGammaServer(args: {
+  marketId: string;
+  conditionId: string;
+  slug: string;
+  /** Resolved binary outcome. Default `'YES'`. */
+  outcome?: 'YES' | 'NO';
+}): Promise<MockPolymarketGammaServer> {
+  const outcome = args.outcome ?? 'YES';
+  // outcomePrices: index 0 = YES, index 1 = NO. A price >= 0.999 marks the
+  // winner (see outcomeFromRecord in client/src/venues/polymarket/client.ts).
+  const outcomePrices = outcome === 'YES' ? ['1', '0'] : ['0', '1'];
+  const marketRecord = {
+    id: args.marketId,
+    conditionId: args.conditionId,
+    slug: args.slug,
+    question: 'Will the daemon-harness e2e task claim succeed?',
+    description: 'Deterministic T2.2 fixture market.',
+    active: false,
+    closed: true,
+    archived: false,
+    outcomes: JSON.stringify(['Yes', 'No']),
+    outcomePrices: JSON.stringify(outcomePrices),
+    clobTokenIds: JSON.stringify(['yes-token', 'no-token']),
+    resolutionStatus: 'resolved',
+    endDate: new Date().toISOString(),
+    resolvedAt: new Date().toISOString(),
+    liquidity: '50000',
+    volume24hr: '20000',
+  };
+
+  const server = createServer((req, res) => {
+    void (async () => {
+      try {
+        const url = req.url ?? '';
+        // GET /markets/{marketId} — single-market resolution lookup.
+        if (req.method === 'GET' && /^\/markets\/[^/?]+/.test(url)) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(marketRecord));
+          return;
+        }
+        // GET /markets?... — list query; return the single fixture market so a
+        // conditionId-keyed lookup also resolves.
+        if (req.method === 'GET' && url.startsWith('/markets')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify([marketRecord]));
+          return;
+        }
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end('not found');
+      } catch (err) {
+        res.writeHead(500, { 'content-type': 'text/plain' });
+        res.end(err instanceof Error ? err.message : String(err));
+      }
+    })();
+  });
+
+  const port = await listenServer(server);
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close() {
+      return closeServer(server);
+    },
+  };
+}
+
+// ── Verdict event ─────────────────────────────────────────────────────────────
+
+export interface SettledVerdict {
+  /** Verdict request id from the EvaluationAttemptCreated event. */
+  verdictRequestId: `0x${string}`;
+  /** Tx hash of the VerdictDeliveryClaimed event on the V3 router. */
+  verdictTxHash: `0x${string}`;
+  /** taskId the verdict settled against. */
+  taskId: bigint;
+  /** On-chain verdict code: 1=Pass, 2=Fail, 3=Invalid, 4=Unresolved. */
+  verdictCode: number;
+  /** Evaluator Safe address that settled the verdict. */
+  evaluator: `0x${string}`;
+}
+
+/**
+ * Poll the locally-deployed V3 JinnRouter for a `VerdictDeliveryClaimed` event
+ * matching `taskId` and the evaluator operator's Safe address.
+ *
+ * This is the evaluator/verdict leg that no prior e2e exercised end-to-end
+ * through a real daemon. `waitForDelivery` stops at the *solution* `Deliver`
+ * event; `waitForVerdict` continues to the *verdict* settlement: the evaluator
+ * daemon claims the evaluation request (`claimEvaluation`), runs the
+ * `PredictionV1Evaluator`, and settles the verdict (`claimVerdictDelivery`),
+ * which the V3 router surfaces as `VerdictDeliveryClaimed`.
+ *
+ * Resolves when the verdict is on-chain; rejects after `timeoutMs`.
+ */
+export async function waitForVerdict(
+  fixture: DaemonHarnessFixture,
+  task: PostedPredictionTask,
+  evaluator: BootstrappedOperator,
+  v3Env: TaskV3Env,
+  timeoutMs = 240_000,
+): Promise<SettledVerdict> {
+  const routerAddress = v3Env.routerAddress;
+  const deadline = Date.now() + timeoutMs;
+  // First scan must cover the block containing TaskCreated — the whole loop
+  // (claim → solve → deliver → claimEvaluation → verdict) can race forward on
+  // Anvil's instant-mine, so start the floor at the task's creation block.
+  let scannedUpTo: bigint =
+    task.createdAtBlock > 0n ? task.createdAtBlock - 1n : 0n;
+
+  while (Date.now() < deadline) {
+    const currentBlock = await fixture.publicClient.getBlockNumber();
+    const fromBlock = scannedUpTo + 1n;
+    scannedUpTo = currentBlock;
+
+    if (fromBlock <= currentBlock) {
+      const logs = await fixture.publicClient.getLogs({
+        address: routerAddress,
+        fromBlock,
+        toBlock: currentBlock,
+      });
+
+      for (const log of logs as Log[]) {
+        try {
+          const decoded = decodeEventLog({
+            abi: JINN_ROUTER_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+          if (decoded.eventName !== 'VerdictDeliveryClaimed') continue;
+          const args = decoded.args as {
+            evaluator: `0x${string}`;
+            requestId: `0x${string}`;
+            taskId: bigint;
+            attemptIndex: number;
+            verdictIndex: number;
+            verdictCode: number;
+          };
+          // Filter by taskId and evaluator (the evaluator's Safe address).
+          if (args.taskId !== task.taskId) continue;
+          if (getAddress(args.evaluator) !== getAddress(evaluator.safeAddress)) {
+            continue;
+          }
+          return {
+            verdictRequestId: args.requestId,
+            verdictTxHash: (log.transactionHash ?? '0x') as `0x${string}`,
+            taskId: args.taskId,
+            verdictCode: Number(args.verdictCode),
+            evaluator: args.evaluator,
+          };
+        } catch {
+          // Not a VerdictDeliveryClaimed event for our ABI — skip.
+        }
+      }
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    `waitForVerdict: timed out after ${timeoutMs}ms waiting for VerdictDeliveryClaimed ` +
+      `(taskId=${task.taskId}, evaluator=${evaluator.safeAddress})`,
+  );
 }
