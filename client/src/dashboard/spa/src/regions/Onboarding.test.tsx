@@ -6,7 +6,7 @@ import type { BootstrapState } from '../api/types.js';
 
 // Mock the API client so we control what bootstrap + status data returns.
 // `bootstrapOverride` lets individual tests tweak the returned bootstrap state
-// (e.g. the issue #326 embedded-agent flag) without re-mocking the module.
+// without re-mocking the module.
 let bootstrapOverride: Partial<BootstrapState> = {};
 
 vi.mock('../api/client.js', () => ({
@@ -31,6 +31,7 @@ vi.mock('./Agent.js', () => ({
 
 afterEach(() => {
   bootstrapOverride = {};
+  delete (window as { __JINN_FEATURES__?: unknown }).__JINN_FEATURES__;
 });
 
 function withQueryClient(node: JSX.Element): JSX.Element {
@@ -57,25 +58,26 @@ describe('Onboarding (3-phase post-vh74.2)', () => {
     expect(screen.queryByText(/Sign in to Claude/i)).toBeNull();
   });
 
-  // Issue #326: the embedded "Ask Claude" panel is hidden by default. It only
-  // renders when the daemon reports embeddedAgentEnabled === true.
-  it('hides the "Ask Claude" panel when embeddedAgentEnabled is absent', async () => {
+  // Issue #326 / #367: the embedded "Ask Claude" panel is hidden by default.
+  // It renders only when the `embeddedAgent` feature flag is injected via
+  // `window.__JINN_FEATURES__` (converged channel — see #367).
+  it('hides the "Ask Claude" panel when no feature flags are injected', async () => {
     render(withQueryClient(<Onboarding />));
     await screen.findByText(/Provisioning your wallet/i);
     expect(screen.queryByText(/Ask Claude/i)).toBeNull();
     expect(screen.queryByTestId('agent-stub')).toBeNull();
   });
 
-  it('hides the "Ask Claude" panel when embeddedAgentEnabled is false', async () => {
-    bootstrapOverride = { embeddedAgentEnabled: false };
+  it('hides the "Ask Claude" panel when embeddedAgent is false', async () => {
+    window.__JINN_FEATURES__ = { embeddedAgent: false };
     render(withQueryClient(<Onboarding />));
     await screen.findByText(/Provisioning your wallet/i);
     expect(screen.queryByText(/Ask Claude/i)).toBeNull();
     expect(screen.queryByTestId('agent-stub')).toBeNull();
   });
 
-  it('renders the "Ask Claude" panel when embeddedAgentEnabled is true', async () => {
-    bootstrapOverride = { embeddedAgentEnabled: true };
+  it('renders the "Ask Claude" panel when embeddedAgent is true', async () => {
+    window.__JINN_FEATURES__ = { embeddedAgent: true };
     render(withQueryClient(<Onboarding />));
     await screen.findByText(/Provisioning your wallet/i);
     expect(screen.getByText(/Ask Claude/i)).toBeTruthy();

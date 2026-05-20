@@ -14,7 +14,9 @@
   `JINN_ENABLE_EMBEDDED_AGENT=1` (also accepts `true`) to re-enable the
   surface for development. Default is off. When off, the daemon does not
   mount the `/api/agent/ws` bridge and the SPA renders no agent panel; when
-  on, the dev-time path works end-to-end as before.
+  on, the dev-time path works end-to-end as before. (Issue #367: the SPA now
+  reads this flag through the injected `window.__JINN_FEATURES__`, the same
+  channel as the plug-in builder UI flag — no behaviour change for operators.)
 - **Claude-Code-as-a-solver-harness is unaffected.** Operators can still pick
   Claude Code as their SolverNet harness — that path is independent of the
   embedded chat surface and its WebSocket bridge.

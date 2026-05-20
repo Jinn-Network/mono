@@ -28,6 +28,7 @@ import type {
 } from '../api/types.js';
 import { AwaitingFundingCard } from './AwaitingFundingCard.js';
 import { Agent } from './Agent.js';
+import { getFeatures } from '../lib/features.js';
 
 type Phase = 1 | 2 | 3;
 type PhaseStatus = 'done' | 'active' | 'queued' | 'error';
@@ -116,10 +117,11 @@ export function Onboarding(): JSX.Element {
   // momentary drip that briefly crossed the threshold doesn't flip the row
   // to DONE before the bootstrapper advances past awaiting_funding on-chain.
   const fundingTargetMet = bootstrap.funding?.targetMet;
-  // Issue #326: the embedded "Ask Claude" panel renders only when the daemon
-  // reports the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). When off,
-  // the bootstrap-progress column spans the full width.
-  const embeddedAgentEnabled = bootstrap.embeddedAgentEnabled === true;
+  // Issue #326 / #367: the embedded "Ask Claude" panel renders only when the
+  // daemon reports the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). When
+  // off, the bootstrap-progress column spans the full width. Read via the
+  // `window.__JINN_FEATURES__` channel like every other operator-app flag.
+  const embeddedAgentEnabled = getFeatures().embeddedAgent;
   return (
     <div
       className="min-h-screen w-full"

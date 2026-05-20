@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe('getFeatures', () => {
   it('defaults every flag off when window.__JINN_FEATURES__ is absent', () => {
-    expect(getFeatures()).toEqual({ pluginBuilderUi: false });
+    expect(getFeatures()).toEqual({ pluginBuilderUi: false, embeddedAgent: false });
   });
 
   it('reads pluginBuilderUi true when injected as true', () => {
@@ -38,6 +38,32 @@ describe('getFeatures', () => {
 
   it('treats a non-object injection as all-off', () => {
     window.__JINN_FEATURES__ = 'enabled' as unknown as Record<string, unknown>;
-    expect(getFeatures()).toEqual({ pluginBuilderUi: false });
+    expect(getFeatures()).toEqual({ pluginBuilderUi: false, embeddedAgent: false });
+  });
+
+  // Issue #367: the embedded-agent flag converged onto this same channel.
+  it('reads embeddedAgent true when injected as true', () => {
+    window.__JINN_FEATURES__ = { embeddedAgent: true };
+    expect(getFeatures().embeddedAgent).toBe(true);
+  });
+
+  it('treats embeddedAgent false as off', () => {
+    window.__JINN_FEATURES__ = { embeddedAgent: false };
+    expect(getFeatures().embeddedAgent).toBe(false);
+  });
+
+  it('coerces a non-boolean embeddedAgent to off', () => {
+    window.__JINN_FEATURES__ = { embeddedAgent: 'true' as unknown };
+    expect(getFeatures().embeddedAgent).toBe(false);
+  });
+
+  it('treats a missing embeddedAgent key as off', () => {
+    window.__JINN_FEATURES__ = { pluginBuilderUi: true };
+    expect(getFeatures().embeddedAgent).toBe(false);
+  });
+
+  it('reads both flags independently', () => {
+    window.__JINN_FEATURES__ = { pluginBuilderUi: true, embeddedAgent: true };
+    expect(getFeatures()).toEqual({ pluginBuilderUi: true, embeddedAgent: true });
   });
 });

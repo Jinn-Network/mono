@@ -84,14 +84,9 @@ export interface BootstrapState {
   }>;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
-  /**
-   * Issue #326: whether the embedded Claude agent chat surface should render.
-   * Driven by the daemon's `JINN_ENABLE_EMBEDDED_AGENT` env var; false by
-   * default. When false the SPA hides the agent rail and the onboarding
-   * "Ask Claude" panel, and the daemon does not mount `/api/agent/ws`.
-   * Absent on responses from older daemons — treat absent as false.
-   */
-  embeddedAgentEnabled?: boolean;
+  // Issue #367: the embedded-agent feature flag is no longer carried in this
+  // response. The operator app reads it (and every other feature flag) via the
+  // injected `window.__JINN_FEATURES__` — see `lib/features.ts` `getFeatures()`.
 }
 
 export interface ClaudeAuthState {
