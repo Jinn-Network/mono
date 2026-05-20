@@ -14,6 +14,13 @@ export interface HeroStatsProps {
   statusLabel: string;
   statusState: LiveNowState;
   statusDot: string;
+  /**
+   * Human-readable reason for the current status — `deriveLiveNow().line`.
+   * Rendered as a small subdued line under the status label so the operator
+   * sees *why* the node is in this state (e.g. the first error diagnostic's
+   * message for ATTENTION, or "waiting for next task" when idle). #328 fix #1.
+   */
+  statusReason: string;
   activeAction: string | null;
   /** When true, the service has been evicted from the staking proxy. */
   evicted?: boolean;
@@ -207,11 +214,13 @@ function StatusStat({
   label,
   state,
   dot,
+  reason,
   action,
 }: {
   label: string;
   state: LiveNowState;
   dot: string;
+  reason: string;
   action: JSX.Element;
 }): JSX.Element {
   return (
@@ -258,6 +267,22 @@ function StatusStat({
         </span>
         {label}
       </span>
+      {reason && (
+        <span
+          data-testid="overview-status-reason"
+          style={{
+            color: 'var(--fg-muted)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            lineHeight: 1.4,
+            marginTop: '6px',
+            display: 'block',
+            wordBreak: 'break-word',
+          }}
+        >
+          {reason}
+        </span>
+      )}
       {action}
     </div>
   );
@@ -271,6 +296,7 @@ export function HeroStats({
   statusLabel,
   statusState,
   statusDot,
+  statusReason,
   activeAction,
   evicted = false,
   evictedServiceId,
@@ -321,6 +347,7 @@ export function HeroStats({
         label={statusLabel}
         state={statusState}
         dot={statusDot}
+        reason={statusReason}
         action={(
           <ActionButton action="Restart node" activeAction={activeAction} onClick={onRestart}>
             Restart
