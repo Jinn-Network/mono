@@ -21,7 +21,19 @@ export default defineConfig({
       // from the orchestrator without triggering Vitest at module load time).
       'test/release/**/*.test.ts',
     ],
-    exclude: ['test/e2e/**', 'test/**/*.e2e.test.ts', 'node_modules/**'],
+    exclude: [
+      'test/e2e/**',
+      'test/**/*.e2e.test.ts',
+      'node_modules/**',
+      // Heavy Tier 1 release scenarios need external prerequisites — T1.1 forks
+      // real Base mainnet RPC (~1min), T1.2 needs a built `dist/bin/jinn.js`.
+      // They break a clean-checkout `yarn test` run, so they are excluded from
+      // the default suite and run only via `yarn release:tier-1[:T1.x]`.
+      // The pure-unit tests in that dir (scenario-types, T1.3 skip stub) stay
+      // in the default run.
+      'test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts',
+      'test/release/tier-1/T1.2-harness-readiness-contract.test.ts',
+    ],
     // Default to node; SPA component tests opt into jsdom via the .tsx
     // matcher below. Keeps the daemon-side suite as fast as it is today.
     environmentMatchGlobs: [
