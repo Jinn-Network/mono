@@ -4,6 +4,8 @@ import { copyTree, goldPath } from './substrate-paths';
 import type { Manifest } from './types';
 import { ManifestSchema } from './types';
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
 const EXCLUDE_DIRS = new Set(['engine']);
 const EXCLUDE_PATTERNS: RegExp[] = [
   /^jinn\.db\.bak/,
@@ -115,9 +117,9 @@ export async function adoptOperator(opts: AdoptOptions): Promise<void> {
       serviceStep: svc.step ?? 'unknown',
       agentEoa: svc.agent_address,
       safeAddress: svc.safe_address,
-      mechAddress: svc.mech_address ?? '0x0000000000000000000000000000000000000000',
-      stakingAddress: svc.staking_address ?? '0x0000000000000000000000000000000000000000',
-      identityRegistry: svc.identity_registry_address ?? state.fleet_identity_registry ?? '0x0000000000000000000000000000000000000000',
+      mechAddress: svc.mech_address ?? ZERO_ADDRESS,
+      stakingAddress: svc.staking_address ?? ZERO_ADDRESS,
+      identityRegistry: svc.identity_registry_address ?? state.fleet_identity_registry ?? ZERO_ADDRESS,
     },
     config: {
       apiPort: opts.apiPort,
