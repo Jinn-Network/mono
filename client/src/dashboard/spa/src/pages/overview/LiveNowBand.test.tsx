@@ -9,6 +9,7 @@ import { api } from '../../api/client.js';
 vi.mock('../../api/client.js', () => ({
   api: {
     getStatus: vi.fn(),
+    getBootstrap: vi.fn(),
   },
 }));
 
@@ -26,6 +27,9 @@ function wrap(ui: JSX.Element): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: no joined SolverNets. Tests that exercise the joined-gating
+  // path override this with a populated map.
+  vi.mocked(api.getBootstrap).mockResolvedValue({} as never);
 });
 
 afterEach(() => {
@@ -142,6 +146,88 @@ describe('deriveLiveNow', () => {
       label: 'Configure SolverNet',
       href: '/operator#solvernets',
     });
+  });
+
+  it('suppresses the "No active SolverNet" banner when joinedSolverNets is non-empty (#333)', () => {
+    // The daemon only re-reads joinedSolverNets on restart, so the live
+    // status payload can still carry a stale `prediction_solvernet_missing`
+    // diagnostic after a successful join. Gating on the freshly-polled join
+    // map keeps the banner from contradicting the joined list.
+    const result = deriveLiveNow(
+      {
+        fleet: { services: [{ index: 0, step: 'complete' }] },
+        activity: { recent: [{ ts: '2026-05-19T10:00:00.000Z', kind: 'startup' }] },
+        predictionV1: {
+          totals: { activeTaskRuns: 0 },
+          operator: {
+            diagnostics: [
+              {
+                code: 'prediction_solvernet_missing',
+                severity: 'error',
+                message: 'No active SolverNet configured.',
+                configField: 'solverNets',
+              },
+            ],
+          },
+        },
+      },
+      { bafybeiaaa: { name: 'Prediction Markets', roles: ['solver'] } },
+    );
+
+    // No attention — the join map proves a SolverNet is configured.
+    expect(result.state).not.toBe('attention');
+    expect(result.line).not.toContain('No active SolverNet');
+  });
+
+  it('still surfaces non-missing diagnostics when joinedSolverNets is non-empty (#333)', () => {
+    // The join-map gate is scoped to `prediction_solvernet_missing` only —
+    // a real harness diagnostic must still raise the attention banner.
+    const result = deriveLiveNow(
+      {
+        fleet: { services: [{ index: 0, step: 'complete' }] },
+        predictionV1: {
+          totals: { activeTaskRuns: 0 },
+          operator: {
+            diagnostics: [
+              {
+                code: 'harness_mismatch',
+                severity: 'error',
+                message: 'Selected Harness does not support prediction.v1 restoration Tasks.',
+              },
+            ],
+          },
+        },
+      },
+      { bafybeiaaa: { name: 'Prediction Markets', roles: ['solver'] } },
+    );
+
+    expect(result.state).toBe('attention');
+    expect(result.line).toContain('does not support prediction.v1');
+  });
+
+  it('still surfaces the "No active SolverNet" banner when joinedSolverNets is empty (#333)', () => {
+    const result = deriveLiveNow(
+      {
+        fleet: { services: [{ index: 0, step: 'complete' }] },
+        predictionV1: {
+          totals: { activeTaskRuns: 0 },
+          operator: {
+            diagnostics: [
+              {
+                code: 'prediction_solvernet_missing',
+                severity: 'error',
+                message: 'No active SolverNet configured.',
+                configField: 'solverNets',
+              },
+            ],
+          },
+        },
+      },
+      {},
+    );
+
+    expect(result.state).toBe('attention');
+    expect(result.line).toBe('No active SolverNet configured.');
   });
 
   it('excludes prediction_solvernet_disabled from attention triggers', () => {
@@ -290,6 +376,74 @@ describe('<LiveNowBand />', () => {
     expect(screen.getByTestId('live-now-cta').textContent).toMatch(/Configure SolverNet/);
     expect(screen.getByTestId('live-now-cta').getAttribute('style')).toContain(
       'border: 1px solid var(--accent-sky)',
+    );
+  });
+
+  it('does not render the "No active SolverNet" attention banner when a SolverNet is joined (#333)', async () => {
+    // Stale daemon diagnostic + a fresh joined-SolverNets map: the banner
+    // must defer to the join map and not contradict the joined list.
+    const status: LiveNowStatusInput = {
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      predictionV1: {
+        totals: { activeTaskRuns: 0 },
+        operator: {
+          diagnostics: [
+            {
+              code: 'prediction_solvernet_missing',
+              severity: 'error',
+              message: 'No active SolverNet configured.',
+              configField: 'solverNets',
+            },
+          ],
+        },
+      },
+    };
+    vi.mocked(api.getStatus).mockResolvedValue(status);
+    vi.mocked(api.getBootstrap).mockResolvedValue({
+      joinedSolverNets: {
+        bafybeiaaa: { name: 'Prediction Markets', roles: ['solver'] },
+      },
+    } as never);
+
+    wrap(<LiveNowBand />);
+
+    await waitFor(() => {
+      const band = screen.getByTestId('live-now-band');
+      expect(band.getAttribute('data-state')).not.toBe('attention');
+    });
+    expect(screen.getByTestId('live-now-line').textContent).not.toContain(
+      'No active SolverNet',
+    );
+  });
+
+  it('still renders the "No active SolverNet" attention banner when no SolverNet is joined (#333)', async () => {
+    const status: LiveNowStatusInput = {
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      predictionV1: {
+        totals: { activeTaskRuns: 0 },
+        operator: {
+          diagnostics: [
+            {
+              code: 'prediction_solvernet_missing',
+              severity: 'error',
+              message: 'No active SolverNet configured.',
+              configField: 'solverNets',
+            },
+          ],
+        },
+      },
+    };
+    vi.mocked(api.getStatus).mockResolvedValue(status);
+    vi.mocked(api.getBootstrap).mockResolvedValue({ joinedSolverNets: {} } as never);
+
+    wrap(<LiveNowBand />);
+
+    await waitFor(() => {
+      const band = screen.getByTestId('live-now-band');
+      expect(band.getAttribute('data-state')).toBe('attention');
+    });
+    expect(screen.getByTestId('live-now-line').textContent).toContain(
+      'No active SolverNet',
     );
   });
 

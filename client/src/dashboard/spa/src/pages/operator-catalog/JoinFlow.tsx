@@ -72,6 +72,19 @@ interface JoinFormState {
 }
 
 /**
+ * Result of a successful join, retained so the flow can render an explicit
+ * success affordance on the join page rather than redirecting silently to
+ * `/operator` — the v0.1.6 dogfood paper cut where rvx couldn't tell the join
+ * had succeeded (#333).
+ */
+interface JoinSuccess {
+  manifestCid: string;
+  name: string;
+  roles: Role[];
+  restartRequired: boolean;
+}
+
+/**
  * Match a manifest's contract to a catalog entry by the canonical
  * `{id, version}` pair. Replaces the predecessor concatenated-solverType
  * string match (PRs d4491879 / 26548969 removed the `solverType` concept
@@ -182,6 +195,7 @@ export function JoinFlow({
     model: defaultModel,
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<JoinSuccess | null>(null);
   const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
   // Tracks whether the operator has explicitly picked a harness in this
   // session. Once true, the catalog-arrival effect below MUST NOT stomp
@@ -239,11 +253,21 @@ export function JoinFlow({
             }
           : {}),
       }),
-    onSuccess: () => {
-      // Invalidate so the catalog's joined-indicator badge appears on the
+    onSuccess: (result) => {
+      // Invalidate so the catalog's joined-indicator badge and the Operator
+      // page's joined list / LiveNow banner pick the new entry up on the
       // next tick instead of waiting up to 30s for the next refetch.
       void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
-      navigate('/operator#solvernets');
+      void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+      // Render an explicit success state on this page rather than a silent
+      // redirect to /operator — the v0.1.6 dogfood paper cut (#333). The
+      // operator confirms the join landed, then chooses where to go next.
+      setJoinSuccess({
+        manifestCid: result.manifestCid,
+        name: result.config.name ?? manifest?.name ?? result.manifestCid,
+        roles: result.config.roles,
+        restartRequired: result.restartRequired,
+      });
     },
     onError: (err) => {
       setSubmitError(err instanceof Error ? err.message : String(err));
@@ -283,6 +307,17 @@ export function JoinFlow({
             void manifestQuery.refetch();
           }}
         />
+      </main>
+    );
+  }
+
+  // Successful join — show an explicit confirmation on this page instead of
+  // a silent redirect to /operator (#333). The operator sees the SolverNet
+  // they just joined, the restart hint, and clear next-step CTAs.
+  if (joinSuccess) {
+    return (
+      <main data-testid="join-flow-success" style={pageStyle}>
+        <JoinSuccessCard success={joinSuccess} navigate={navigate} />
       </main>
     );
   }
@@ -913,6 +948,124 @@ function ErrorBanner({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Post-join success affordance (#333). Renders in place of the form once the
+ * join config write succeeds: a green-bordered confirmation naming the
+ * SolverNet just joined, the restart hint when the daemon needs a restart to
+ * pick the config up, and explicit CTAs into the joined list / catalog. This
+ * replaces the silent redirect to `/operator` that left v0.1.6 operators
+ * unsure whether their join had landed.
+ */
+function JoinSuccessCard({
+  success,
+  navigate,
+}: {
+  success: JoinSuccess;
+  navigate: (path: string) => void;
+}): JSX.Element {
+  const roleLabel = success.roles
+    .map((r) => (r === 'solver' ? 'Solver' : 'Evaluator'))
+    .join(' + ');
+  return (
+    <>
+      <div
+        data-testid="join-flow-success-card"
+        role="status"
+        style={{
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--vow-green)',
+          borderRadius: 'var(--radius-3)',
+          padding: '20px 24px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '11px',
+            fontWeight: 500,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--vow-green)',
+          }}
+        >
+          Joined
+        </span>
+        <span
+          data-testid="join-flow-success-name"
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '18px',
+            fontWeight: 500,
+            color: 'var(--fg)',
+          }}
+        >
+          You joined {success.name}
+        </span>
+        <span
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            color: 'var(--fg-muted)',
+            lineHeight: 1.5,
+          }}
+        >
+          You're in as {roleLabel || 'an operator'}. This SolverNet now shows in
+          your joined list.
+        </span>
+        {success.restartRequired && (
+          <span
+            data-testid="join-flow-success-restart"
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: 'var(--accent-gold)',
+              lineHeight: 1.5,
+            }}
+          >
+            Restart the node to start participating — the daemon picks up
+            SolverNet config on restart.
+          </span>
+        )}
+      </div>
+      <footer
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: '12px',
+        }}
+      >
+        <button
+          type="button"
+          data-testid="join-flow-success-browse"
+          onClick={() => navigate('/operator#solvernets')}
+          style={ghostButtonStyle}
+        >
+          Browse SolverNets
+        </button>
+        <button
+          type="button"
+          data-testid="join-flow-success-view"
+          onClick={() =>
+            navigate(`/operator#solvernets/${success.manifestCid}`)
+          }
+          style={{
+            ...ghostButtonStyle,
+            background: 'var(--accent-sky)',
+            color: 'var(--bg-sunken)',
+            border: '1px solid var(--accent-sky)',
+          }}
+        >
+          View joined SolverNet
+        </button>
+      </footer>
+    </>
   );
 }
 

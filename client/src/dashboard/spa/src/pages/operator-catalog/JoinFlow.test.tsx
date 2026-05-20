@@ -733,7 +733,7 @@ describe('JoinFlow — role selection', () => {
 });
 
 describe('JoinFlow — submission', () => {
-  it('calls api.operator.join with the chosen roles + solver fields and navigates on success', async () => {
+  it('calls api.operator.join with the chosen roles + solver fields and shows the success affordance', async () => {
     const { nav } = wrap(<JoinFlow />);
     await waitFor(() =>
       expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
@@ -765,9 +765,58 @@ describe('JoinFlow — submission', () => {
         disabledDefaultPlugins: [],
       }),
     );
+    // #333: a successful join shows an explicit success state ON the join
+    // page — it must NOT silently redirect to /operator.
     await waitFor(() =>
-      expect(nav.history.at(-1)).toBe('/operator#solvernets'),
+      expect(screen.getByTestId('join-flow-success')).toBeTruthy(),
     );
+    expect(nav.history.at(-1)).toBe('/operator/join/bafybeiaaa');
+  });
+
+  it('renders a success card naming the joined SolverNet and a restart hint (#333)', async () => {
+    apiMock.operatorJoin.mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: {
+        manifestCid: 'bafybeiaaa',
+        name: 'Prediction Markets',
+        roles: ['solver'],
+      },
+    });
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-success-card')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('join-flow-success-name').textContent).toMatch(
+      /Prediction Markets/,
+    );
+    expect(screen.getByTestId('join-flow-success-restart')).toBeTruthy();
+    // The form is gone — the operator is on a confirmation, not the picker.
+    expect(screen.queryByTestId('join-flow-submit')).toBeNull();
+  });
+
+  it('success-card CTA navigates into the joined SolverNet (#333)', async () => {
+    const { nav } = wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-success-view')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId('join-flow-success-view'));
+    expect(nav.history.at(-1)).toBe('/operator#solvernets/bafybeiaaa');
   });
 
   it('omits solver-only fields when only evaluator is selected', async () => {

@@ -139,7 +139,25 @@ function summarizeStages(tasks: readonly LiveTaskRun[] | undefined): { line: str
   return { line, longestMs };
 }
 
-export function deriveLiveNow(status: LiveNowStatusInput | undefined): LiveNowDerived {
+/**
+ * `true` when the operator has at least one joined SolverNet. The daemon's
+ * diagnostic pipeline already gates `prediction_solvernet_missing` on this
+ * (#239), but the daemon only re-reads `joinedSolverNets` on restart — so a
+ * stale `prediction_solvernet_missing` diagnostic survives in the live status
+ * payload between a successful join and the next restart. `deriveLiveNow`
+ * gates the banner on the SPA's freshly-polled `joinedSolverNets` map so the
+ * attention banner clears the moment the join lands (#333).
+ */
+function hasJoinedSolverNet(
+  joinedSolverNets: Record<string, unknown> | undefined,
+): boolean {
+  return Boolean(joinedSolverNets) && Object.keys(joinedSolverNets!).length > 0;
+}
+
+export function deriveLiveNow(
+  status: LiveNowStatusInput | undefined,
+  joinedSolverNets?: Record<string, unknown>,
+): LiveNowDerived {
   const viewActivityCta = { label: 'View activity', href: VIEW_ACTIVITY_HREF };
 
   // Bootstrapping: any service not at a complete-equivalent step.
@@ -162,8 +180,18 @@ export function deriveLiveNow(status: LiveNowStatusInput | undefined): LiveNowDe
   // `Configure prediction`, etc.) — the operator goes there to resolve, not
   // to /overview/activity. The `N more` pill (when set) handles "see all
   // current attentions" by linking into the activity page.
+  //
+  // `prediction_solvernet_missing` is additionally suppressed once the
+  // operator has a joined SolverNet — the live status payload can carry a
+  // stale copy until the daemon restarts and re-reads `joinedSolverNets`
+  // (#333). Gating on the SPA's freshly-polled join map keeps the "No active
+  // SolverNet configured" banner from contradicting the joined list.
+  const operatorHasJoined = hasJoinedSolverNet(joinedSolverNets);
   const diagnostics = (status?.predictionV1?.operator?.diagnostics ?? []).filter(
-    (d) => d.severity === 'error' && d.code !== 'prediction_solvernet_disabled',
+    (d) =>
+      d.severity === 'error' &&
+      d.code !== 'prediction_solvernet_disabled' &&
+      !(d.code === 'prediction_solvernet_missing' && operatorHasJoined),
   );
   if (diagnostics.length > 0) {
     const first = diagnostics[0]!;
@@ -219,13 +247,26 @@ export const LIVE_NOW_STATE_LABEL: Record<LiveNowState, string> = {
   idle: 'IDLE',
 };
 
+interface BootstrapWithJoined {
+  joinedSolverNets?: Record<string, unknown>;
+}
+
 export function LiveNowBand(): JSX.Element {
   const { data } = useQuery<LiveNowStatusInput>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<LiveNowStatusInput>,
     refetchInterval: 5_000,
   });
-  const derived = deriveLiveNow(data);
+  // Bootstrap carries the operator's joined-SolverNet map. Sharing the
+  // ['bootstrap'] query key with Overview/Operator avoids a double-poll;
+  // the join flow invalidates ['operator', 'joined'] but the bootstrap
+  // refetch interval picks the map change up within 30s either way.
+  const { data: bootstrap } = useQuery<BootstrapWithJoined>({
+    queryKey: ['bootstrap'],
+    queryFn: () => api.getBootstrap() as Promise<BootstrapWithJoined>,
+    refetchInterval: 30_000,
+  });
+  const derived = deriveLiveNow(data, bootstrap?.joinedSolverNets);
   const tone = LIVE_NOW_TONE[derived.state];
   const stateLabel = LIVE_NOW_STATE_LABEL[derived.state];
 
