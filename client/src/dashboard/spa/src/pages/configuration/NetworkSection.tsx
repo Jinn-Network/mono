@@ -59,7 +59,7 @@ export function NetworkSection({
         label: rpcHealthy ? 'Healthy' : 'Unreachable',
         tone: rpcHealthy ? 'live' : 'danger',
       }}
-      defaultExpanded={defaultExpanded}
+      defaultExpanded={defaultExpanded || onSharedDefault}
       dirty={
         dirty
           ? {

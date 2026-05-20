@@ -42,6 +42,7 @@ import type {
   MetadataPublisher,
   SetMetadataPublishResult,
 } from '../../src/solvernets/registry-client-erc8004.js';
+import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -410,7 +411,59 @@ describe('initSolverNetSubsystem — catalog cache', () => {
 
       expect(subsystem.catalog.getCatalog()).toEqual([]);
       expect(subsystem.catalog.lastError()?.message).toContain('subgraph 503');
+      // A generic failure carries no typed code.
+      expect(subsystem.catalog.lastError()?.code).toBeUndefined();
       expect(subsystem.catalog.lastRefreshedAt()).toBeNull();
+    } finally {
+      subsystem.stop();
+    }
+  });
+
+  it('propagates an rpc_rate_limited code from a throttled RPC', async () => {
+    // jinn-mono #325: when the registry refresh fails because the RPC is
+    // rate-limited, the catalog cache must surface the typed code so the
+    // operator UI can render an actionable message instead of "stale".
+    const registryClient = makeMockRegistryClient({
+      summaries: [],
+      failNextList: new DiscoveryUnavailableError(
+        'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
+        new Error('429 Too Many Requests'),
+        'rpc_rate_limited',
+      ),
+    });
+
+    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(subsystem.catalog.lastError()?.code).toBe('rpc_rate_limited');
+    } finally {
+      subsystem.stop();
+    }
+  });
+
+  it('reads rpc_rate_limited from an enrichment-layer error cause', async () => {
+    // The error can arrive wrapped: the registry client's IPFS-enrichment
+    // layer may surface its own Error whose `cause` is the typed
+    // DiscoveryUnavailableError. The cache must still extract the code.
+    const wrapped = new Error('listLaunched failed during enrichment');
+    (wrapped as { cause?: unknown }).cause = new DiscoveryUnavailableError(
+      'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
+      undefined,
+      'rpc_rate_limited',
+    );
+    const registryClient = makeMockRegistryClient({
+      summaries: [],
+      failNextList: wrapped,
+    });
+
+    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(subsystem.catalog.lastError()?.code).toBe('rpc_rate_limited');
     } finally {
       subsystem.stop();
     }

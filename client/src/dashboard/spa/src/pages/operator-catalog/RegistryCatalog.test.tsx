@@ -357,4 +357,51 @@ describe('RegistryCatalog', () => {
       'subgraph 502',
     );
   });
+
+  it('surfaces a rate-limited RPC distinctly in the stale-warning row', async () => {
+    // jinn-mono #325: when the catalog refresh fails because the RPC is
+    // throttled, the stale indicator must show an operator-actionable line
+    // with a deep-link to Network settings, not a generic "stale (...)".
+    listRegistryMock.mockResolvedValue({
+      summaries: [],
+      lastRefreshedAt: '2026-05-05T01:23:00Z',
+      lastError: {
+        message: 'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
+        at: '2026-05-05T01:24:00Z',
+        code: 'rpc_rate_limited',
+      },
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-warn')).toBeTruthy(),
+    );
+    const warn = screen.getByTestId('registry-catalog-warn');
+    expect(warn.getAttribute('data-error-code')).toBe('rpc_rate_limited');
+    expect(warn.textContent).toMatch(/rpc rate-limited — add your own key/i);
+    // Does NOT fall back to the generic "stale (...)" string.
+    expect(warn.textContent).not.toMatch(/^stale \(/i);
+    // Deep-links to the Network settings section.
+    const action = screen.getByTestId('registry-catalog-warn-action');
+    expect(action.getAttribute('href')).toBe('/operator#network');
+  });
+
+  it('explains rpc_rate_limited query errors with a BYO-RPC nudge', async () => {
+    listRegistryMock.mockRejectedValue(
+      Object.assign(new Error('rpc_rate_limited: 429 Too Many Requests'), {
+        code: 'rpc_rate_limited',
+      }),
+    );
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-error')).toBeTruthy(),
+    );
+    expect(screen.getByText(/your rpc endpoint is rate-limited/i)).toBeTruthy();
+    expect(
+      screen.getByText(/open the network section and add your own free key/i),
+    ).toBeTruthy();
+    const action = screen.getByTestId('registry-catalog-error-action');
+    expect(action.getAttribute('href')).toBe('/operator#network');
+  });
 });

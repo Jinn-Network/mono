@@ -754,6 +754,89 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
       }),
     ).rejects.toThrow(DiscoveryUnavailableError);
   });
+
+  it('preserves an `rpc_rate_limited` code when the RPC returns a 429', async () => {
+    // jinn-mono #325: a throttled shared RPC must be classifiable end-to-end so
+    // the operator UI can render an actionable "add your own key" message
+    // rather than a generic "catalog not found".
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => { throw new Error('HTTP 429: Too Many Requests'); }),
+      getLogs: vi.fn(async () => []),
+      simulateContract: vi.fn(async () => ({ result: undefined })),
+    };
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      routerAddress: ROUTER,
+      safeAddress: SAFE_ADDRESS,
+      mechAddress: MECH_ADDRESS,
+      publicClient: mockClient as never,
+    });
+
+    let caught: unknown;
+    try {
+      await api.findClaimableTasks({
+        solverNetManifestCids: [MANIFEST_CID],
+        operatorAddress: OPERATOR_ADDRESS,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as DiscoveryUnavailableError).code).toBe('rpc_rate_limited');
+  });
+
+  it('leaves `code` undefined for a non-rate-limit RPC failure', async () => {
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => { throw new Error('fetch failed: connection reset'); }),
+      getLogs: vi.fn(async () => []),
+      simulateContract: vi.fn(async () => ({ result: undefined })),
+    };
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      routerAddress: ROUTER,
+      safeAddress: SAFE_ADDRESS,
+      mechAddress: MECH_ADDRESS,
+      publicClient: mockClient as never,
+    });
+
+    let caught: unknown;
+    try {
+      await api.findClaimableTasks({
+        solverNetManifestCids: [MANIFEST_CID],
+        operatorAddress: OPERATOR_ADDRESS,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as DiscoveryUnavailableError).code).toBeUndefined();
+  });
+
+  it('preserves `rpc_rate_limited` through a getLogs failure on listLaunchedSolverNets', async () => {
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => CURRENT_BLOCK),
+      getLogs: vi.fn(async () => { throw new Error('the RPC endpoint says: rate limit exceeded'); }),
+      simulateContract: vi.fn(async () => ({ result: undefined })),
+    };
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    let caught: unknown;
+    try {
+      await api.listLaunchedSolverNets();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as DiscoveryUnavailableError).code).toBe('rpc_rate_limited');
+  });
 });
 
 describe('OnchainDiscoveryAPI — cursorCache', () => {
