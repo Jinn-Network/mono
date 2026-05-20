@@ -34,7 +34,14 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          git fetch --tags --depth=1 origin "$RELEASE_TAG"
+          # Fetch the tag deeply (no --depth=1). A shallow tag fetch creates a
+          # shallow graft at the tag commit; subsequent `git fetch origin next`
+          # does NOT auto-unshallow that graft, so the line-75 ancestry check
+          # (`git merge-base --is-ancestor main <tag>`) fails when walking
+          # across the boundary. Tag fetches are cheap (no large objects); the
+          # deep fetch pulls only the ancestry needed to resolve ancestry from
+          # main to the tag commit. See #308.
+          git fetch --tags origin "$RELEASE_TAG"
           SHA="$(git rev-parse "$RELEASE_TAG^{commit}")"
           echo "release_sha=$SHA" >> "$GITHUB_OUTPUT"
 
