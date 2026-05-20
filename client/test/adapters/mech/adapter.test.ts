@@ -807,7 +807,6 @@ describe('MechAdapter TaskCoordinator flow', () => {
       ok: false,
       reason: 'TCAttemptAlreadyFinalized(1, 0)',
     });
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
@@ -833,11 +832,147 @@ describe('MechAdapter TaskCoordinator flow', () => {
       0,
       TEST_CONFIG.mechContractAddress,
     );
+    // The claimability gate runs before the restoration lookup — a terminal
+    // opportunity never pays the restoration / delivery / IPFS cost.
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
     expect(getMarketplaceRequestDeliveryMech).not.toHaveBeenCalled();
     expect(findLatestDeliveryDataHexForRequest).not.toHaveBeenCalled();
     expect(fetchFromIpfs).not.toHaveBeenCalled();
 
     await adapter.stop();
+  });
+
+  it('prunes a terminal-reason evaluation opportunity before the expensive restoration lookup', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCMaxVerdictsReached(1, 0)',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Terminal reason -> pruned from the working set so the loop never re-scans it.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    // The claimability gate runs FIRST; the restoration lookup is never attempted.
+    expect(getTaskCidDigest).not.toHaveBeenCalled();
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('retains a transient-reason evaluation opportunity for retry', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'HTTP request failed: 429 Too Many Requests',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Transient reason -> kept in the working set; it must be retried next cycle.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+  });
+
+  it('retryPendingEvaluationSolutions drops terminal opportunities and keeps re-checking transient ones', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    const TERMINAL_REQUEST_ID = ('0x' + 'ce'.repeat(32)) as `0x${string}`;
+    const TRANSIENT_REQUEST_ID = ('0x' + 'cf'.repeat(32)) as `0x${string}`;
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const mkSolution = (taskId: string, requestId: `0x${string}`) => ({
+      taskId,
+      attemptIndex: 0,
+      requestId,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    });
+    (adapter as any).pendingEvaluationSolutions.set(TERMINAL_REQUEST_ID, mkSolution('1', TERMINAL_REQUEST_ID));
+    (adapter as any).pendingEvaluationSolutions.set(TRANSIENT_REQUEST_ID, mkSolution('2', TRANSIENT_REQUEST_ID));
+
+    // canClaimEvaluation: terminal task -> non-recoverable revert; transient task -> generic RPC error.
+    // mockImplementation persists across tests (vi.clearAllMocks only resets call
+    // data, not the implementation), so it is restored before this test returns.
+    const claimImpl = async (
+      _pc: unknown,
+      _safe: unknown,
+      _router: unknown,
+      taskId: unknown,
+    ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      if (String(taskId) === '1') {
+        return { ok: false, reason: 'TCEvaluationDeadlinePassed(1)' };
+      }
+      return { ok: false, reason: 'execution reverted: connection timeout' };
+    };
+    vi.mocked(canClaimEvaluation).mockImplementation(claimImpl as never);
+
+    const drain = async () => {
+      for await (const _ of (adapter as any).retryPendingEvaluationSolutions()) {
+        // nothing claimable in this scenario
+      }
+    };
+
+    // Cycle 1: both opportunities are checked.
+    await drain();
+    expect(canClaimEvaluation).toHaveBeenCalledTimes(2);
+    // Terminal one is pruned; transient one survives.
+    expect((adapter as any).pendingEvaluationSolutions.has(TERMINAL_REQUEST_ID)).toBe(false);
+    expect((adapter as any).pendingEvaluationSolutions.has(TRANSIENT_REQUEST_ID)).toBe(true);
+
+    // Cycle 2: only the transient opportunity is re-checked — terminal history is not re-scanned.
+    vi.mocked(canClaimEvaluation).mockClear();
+    await drain();
+    expect(canClaimEvaluation).toHaveBeenCalledTimes(1);
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '2',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
+    expect((adapter as any).pendingEvaluationSolutions.has(TRANSIENT_REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+    // Restore the default so the persisted mockImplementation does not leak.
+    vi.mocked(canClaimEvaluation).mockReset();
+    vi.mocked(canClaimEvaluation).mockResolvedValue({ ok: true });
   });
 
   it('bounds the default delivery-log scan around delayed SolutionDeliveryClaimed events', async () => {
