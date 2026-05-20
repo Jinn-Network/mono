@@ -16,6 +16,11 @@
  *   from IdentityRegistry (key prefix `solvernet-manifest:`) and fold via the
  *   existing `resolveMostRecentWins` helper.
  *
+ * - `listPluginPublications` / `listBuilderArtifacts` read `MetadataSet` events
+ *   (key prefix `plugin:`), decode the on-chain PLUGIN_PAYLOAD_TUPLE /
+ *   REVOCATION_PAYLOAD_TUPLE, and fold most-recent-wins so the operator app's
+ *   /build registry panels keep rendering during an indexer outage (gh#290).
+ *
  * - `queryEnvelopes` delegates to the existing `runOnchainCorpusQuery`.
  *
  * - `cursorCache` is an optional injection point: when provided, the start
@@ -27,6 +32,7 @@
 
 import {
   createPublicClient,
+  decodeAbiParameters,
   decodeEventLog,
   http,
   type Address,
@@ -42,6 +48,8 @@ import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
 import { canClaimTask } from '../adapters/mech/contracts.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
+import { PLUGIN_PAYLOAD_TUPLE, REVOCATION_PAYLOAD_TUPLE } from '../erc8004/abis.js';
+import { PLUGIN_METADATA_KEY_PREFIX } from '../erc8004/plugin-registry.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -151,6 +159,25 @@ function resolveFromBlock(
   return toBigInt(opts.taskDiscoveryFromBlock, defaultFromBlock);
 }
 
+/**
+ * Resolve the start block for a scan that must always see full history,
+ * deliberately ignoring `cursorCache`. Used by `scanPluginMetadataEvents`:
+ * `foldPluginPublications` re-folds from scratch each call, so a cursor would
+ * cause latent data-loss (every publication before the cursor would vanish).
+ * Priority order:
+ *  1. opts.taskDiscoveryFromBlock — explicit override
+ *  2. DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[chainId] — chain default
+ *  3. currentBlock (no history)
+ */
+function resolveScanFromBlock(
+  opts: OnchainDiscoveryAPIOptions,
+  currentBlock: bigint,
+): bigint {
+  const defaultFromBlock =
+    DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[opts.chainId] ?? currentBlock;
+  return toBigInt(opts.taskDiscoveryFromBlock, defaultFromBlock);
+}
+
 /** Decode a MetadataSet log into a SetMetadataEvent or null if not a solvernet-manifest event. */
 function decodeSolvernetMetadataLog(log: {
   data: Hex;
@@ -198,6 +225,221 @@ function decodeSolvernetMetadataLog(log: {
     blockNumber: Number(log.blockNumber ?? 0n),
     transactionIndex: log.transactionIndex ?? 0,
   };
+}
+
+// ── Plug-in publication on-chain floor ────────────────────────────────────────
+//
+// The on-chain floor enumerates `plugin:<cid>` MetadataSet events directly so
+// the operator app's /build registry panels keep rendering during an indexer
+// outage. The indexer's `pluginPublication` entity is the rich source (it also
+// IPFS-enriches); this floor decodes the same on-chain payload tuples
+// (PLUGIN_PAYLOAD_TUPLE / REVOCATION_PAYLOAD_TUPLE) without the IPFS hop, then
+// folds most-recent-wins by (blockNumber, transactionIndex, logIndex).
+
+/**
+ * A decoded `plugin:<cid>` MetadataSet event. `kind` discriminates a v1
+ * publish (carries the full payload) from a v2 revocation (carries only the
+ * reason). Provenance fields drive the most-recent-wins fold.
+ */
+interface PluginMetadataEvent {
+  agentId: string;
+  pluginCid: string;
+  blockNumber: bigint;
+  transactionIndex: number;
+  logIndex: number;
+  kind: 'publish' | 'revoke';
+  /** v1-publish fields — present only when kind === 'publish'. */
+  publish?: {
+    pluginName: string;
+    pluginVersion: string;
+    pluginSha256: `0x${string}`;
+    supports: readonly string[];
+    publishedAt: number;
+  };
+  /** v2-revocation reason — present only when kind === 'revoke'. */
+  revokedReason?: string;
+}
+
+/**
+ * Decode a MetadataSet log into a PluginMetadataEvent, or null if the key is
+ * not a `plugin:` key or the payload decodes to neither a v1-publish nor a
+ * v2-revocation tuple. Mirrors `decodeSolvernetMetadataLog`.
+ */
+function decodePluginMetadataLog(log: {
+  data: Hex;
+  topics: readonly Hex[];
+  blockNumber: bigint | null;
+  transactionIndex: number | null;
+  logIndex: number | null;
+}): PluginMetadataEvent | null {
+  let decoded: {
+    eventName: 'MetadataSet';
+    args: { agentId: bigint; metadataKey: string; metadataValue: Hex };
+  };
+  try {
+    decoded = decodeEventLog({
+      abi: IDENTITY_METADATA_ABI,
+      data: log.data,
+      topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
+    }) as typeof decoded;
+  } catch {
+    return null;
+  }
+
+  if (decoded.eventName !== 'MetadataSet') return null;
+  if (!decoded.args.metadataKey.startsWith(PLUGIN_METADATA_KEY_PREFIX)) return null;
+
+  const pluginCid = decoded.args.metadataKey.slice(PLUGIN_METADATA_KEY_PREFIX.length);
+  if (pluginCid.length === 0) return null;
+
+  const base = {
+    agentId: decoded.args.agentId.toString(),
+    pluginCid,
+    blockNumber: log.blockNumber ?? 0n,
+    transactionIndex: log.transactionIndex ?? 0,
+    logIndex: log.logIndex ?? 0,
+  };
+
+  // Try v1 publish first; on failure fall back to v2 revocation. Garbage
+  // payloads decode to neither and are dropped (return null).
+  try {
+    const d = decodeAbiParameters(PLUGIN_PAYLOAD_TUPLE, decoded.args.metadataValue);
+    if (Number(d[0]) === 1) {
+      return {
+        ...base,
+        kind: 'publish',
+        publish: {
+          pluginName: d[1],
+          pluginVersion: d[2],
+          pluginSha256: d[3],
+          supports: d[4],
+          publishedAt: Number(d[5]),
+        },
+      };
+    }
+  } catch {
+    // not a v1 payload — try v2 below
+  }
+  try {
+    const d = decodeAbiParameters(REVOCATION_PAYLOAD_TUPLE, decoded.args.metadataValue);
+    if (Number(d[0]) === 2 && d[1] === true) {
+      return { ...base, kind: 'revoke', revokedReason: d[2] };
+    }
+  } catch {
+    // not a v2 payload either
+  }
+  return null;
+}
+
+/**
+ * The chain-attested provenance anchor for a folded publication. Carried
+ * alongside the public `PluginPublication` shape so `listPluginPublications`
+ * can sort by `(blockNumber, transactionIndex, logIndex) desc` for true
+ * parity with the HTTP layer's `orderBy: blockNumber` without widening the
+ * public result type.
+ */
+interface PluginPublicationAnchor {
+  blockNumber: bigint;
+  transactionIndex: number;
+  logIndex: number;
+}
+
+/**
+ * Fold a stream of plug-in MetadataSet events into the latest state per
+ * `<agentId>:<pluginCid>` key, most-recent-wins by
+ * (blockNumber, transactionIndex, logIndex). A v2 revocation only mutates the
+ * `revoked` / `revokedReason` fields of an existing publish; a revocation with
+ * no prior publish is meaningless and dropped (no row materialised).
+ *
+ * Returns the materialised rows plus an `anchors` map keyed by row identity,
+ * so callers can sort by the chain-attested anchor.
+ */
+function foldPluginPublications(events: PluginMetadataEvent[]): {
+  rows: PluginPublication[];
+  anchors: Map<PluginPublication, PluginPublicationAnchor>;
+} {
+  interface Folded {
+    agentId: string;
+    pluginCid: string;
+    blockNumber: bigint;
+    transactionIndex: number;
+    logIndex: number;
+    pluginName: string;
+    pluginVersion: string;
+    pluginSha256: `0x${string}`;
+    supports: readonly string[];
+    publishedAt: number;
+    revoked: boolean;
+    revokedReason?: string;
+  }
+  const byKey = new Map<string, Folded>();
+
+  const isNewer = (e: PluginMetadataEvent, row: Folded): boolean =>
+    e.blockNumber > row.blockNumber ||
+    (e.blockNumber === row.blockNumber && e.transactionIndex > row.transactionIndex) ||
+    (e.blockNumber === row.blockNumber &&
+      e.transactionIndex === row.transactionIndex &&
+      e.logIndex > row.logIndex);
+
+  for (const e of events) {
+    const key = `${e.agentId}:${e.pluginCid}`;
+    const existing = byKey.get(key);
+
+    if (e.kind === 'publish' && e.publish) {
+      // A republish un-revokes (revoked resets to false), matching the
+      // indexer's handleMetadataSet v1 path.
+      if (!existing || isNewer(e, existing)) {
+        byKey.set(key, {
+          agentId: e.agentId,
+          pluginCid: e.pluginCid,
+          blockNumber: e.blockNumber,
+          transactionIndex: e.transactionIndex,
+          logIndex: e.logIndex,
+          pluginName: e.publish.pluginName,
+          pluginVersion: e.publish.pluginVersion,
+          pluginSha256: e.publish.pluginSha256,
+          supports: e.publish.supports,
+          publishedAt: e.publish.publishedAt,
+          revoked: false,
+          revokedReason: undefined,
+        });
+      }
+      continue;
+    }
+
+    // revoke — only valid against an existing publish, and only if newer.
+    if (e.kind === 'revoke' && existing && isNewer(e, existing)) {
+      existing.revoked = true;
+      existing.revokedReason = e.revokedReason;
+      existing.blockNumber = e.blockNumber;
+      existing.transactionIndex = e.transactionIndex;
+      existing.logIndex = e.logIndex;
+    }
+  }
+
+  const rows: PluginPublication[] = [];
+  const anchors = new Map<PluginPublication, PluginPublicationAnchor>();
+  for (const row of byKey.values()) {
+    const out: PluginPublication = {
+      artifactType: 'plugin',
+      builderAgentId: row.agentId,
+      cid: row.pluginCid,
+      name: row.pluginName,
+      version: row.pluginVersion,
+      supports: row.supports,
+      publishedAt: row.publishedAt,
+      pluginSha256: row.pluginSha256,
+      revoked: row.revoked,
+    };
+    if (row.revokedReason !== undefined) out.revokedReason = row.revokedReason;
+    rows.push(out);
+    anchors.set(out, {
+      blockNumber: row.blockNumber,
+      transactionIndex: row.transactionIndex,
+      logIndex: row.logIndex,
+    });
+  }
+  return { rows, anchors };
 }
 
 /**
@@ -728,15 +970,152 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     }
   }
 
-  // ── Builder discovery stubs (attd) ────────────────────────────────────────
-  // Builder discovery requires the indexer's `pluginPublication` entity; the
-  // on-chain RPC floor does not enumerate it (would require a getLogs sweep +
-  // payload decode that the floor is not designed for). When falling back to the
-  // on-chain floor, builder browsing is unavailable until the indexer recovers.
+  // ── listPluginPublications (gh#290) ───────────────────────────────────────
+  // The on-chain floor enumerates `plugin:<cid>` MetadataSet events directly so
+  // the operator app's /build registry panels keep rendering during an indexer
+  // outage. Unlike the indexer's `pluginPublication` entity, the floor does NOT
+  // IPFS-enrich — but the rich fields (name, version, supports, sha256,
+  // publishedAt) are all in the on-chain PLUGIN_PAYLOAD_TUPLE, so the floor
+  // serves complete rows without an IPFS hop.
 
-  async function listPluginPublications(): Promise<PluginPublication[]> { return []; }
+  async function scanPluginMetadataEvents(): Promise<PluginMetadataEvent[]> {
+    if (!identityRegistryAddress) return [];
+
+    const client = getClient();
+    let currentBlock: bigint;
+    try {
+      currentBlock = await (client as PublicClient).getBlockNumber();
+    } catch (err) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.listPluginPublications: failed to get block number`,
+        err,
+      );
+    }
+
+    // No cursor here. `listPluginPublications` must return the *complete*
+    // catalog from a single call: `foldPluginPublications` re-folds from
+    // scratch every call, so it must see *all* events. A cursor would scan
+    // only `[cachedBlock, head]` on the second call and silently drop every
+    // publication before the cursor — unlike `findClaimableTasks`, whose
+    // caller accumulates across calls, this method has no accumulator.
+    // Always scan from the chain default, ignoring any injected cursorCache.
+    const fromBlock = resolveScanFromBlock(opts, currentBlock);
+
+    let events: PluginMetadataEvent[];
+    try {
+      events = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: identityRegistryAddress,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: PluginMetadataEvent[] = [];
+          for (const log of logs) {
+            const event = decodePluginMetadataLog(log as {
+              data: Hex;
+              topics: readonly Hex[];
+              blockNumber: bigint | null;
+              transactionIndex: number | null;
+              logIndex: number | null;
+            });
+            if (event) decoded.push(event);
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+      );
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.listPluginPublications: getLogs for MetadataSet failed`,
+        err,
+      );
+    }
+
+    // Intentionally no cursorCache.write here — see resolveScanFromBlock.
+    return events;
+  }
+
+  async function listPluginPublications(args?: {
+    solverType?: string;
+    builderAgentId?: string;
+    includeRevoked?: boolean;
+    limit?: number;
+  }): Promise<PluginPublication[]> {
+    let events: PluginMetadataEvent[];
+    try {
+      events = await scanPluginMetadataEvents();
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.listPluginPublications: scan failed`,
+        err,
+      );
+    }
+
+    const { rows: foldedRows, anchors: foldedAnchors } = foldPluginPublications(events);
+    let rows = foldedRows;
+
+    // Apply the same filters the HTTP layer pushes into its `where` clause.
+    if (args?.builderAgentId !== undefined) {
+      rows = rows.filter((r) => r.builderAgentId === args.builderAgentId);
+    }
+    if (args?.solverType !== undefined) {
+      rows = rows.filter((r) => r.supports.includes(args.solverType as string));
+    }
+    // Revoked rows are included by default; drop them only when asked.
+    if (args?.includeRevoked === false) {
+      rows = rows.filter((r) => !r.revoked);
+    }
+
+    // Newest-first by the fold's chain-attested anchor
+    // (blockNumber, transactionIndex, logIndex) desc — true parity with the
+    // HTTP layer's `orderBy: "blockNumber", orderDirection: "desc"`. Sorting
+    // by the builder-supplied `publishedAt` would diverge: that value is not
+    // chain-attested. `foldedAnchors` carries the anchor alongside each row so
+    // the public `PluginPublication` shape stays unchanged.
+    rows.sort((a, b) => {
+      const aa = foldedAnchors.get(a);
+      const ba = foldedAnchors.get(b);
+      if (!aa || !ba) return 0;
+      if (aa.blockNumber !== ba.blockNumber) {
+        return aa.blockNumber > ba.blockNumber ? -1 : 1;
+      }
+      if (aa.transactionIndex !== ba.transactionIndex) {
+        return ba.transactionIndex - aa.transactionIndex;
+      }
+      return ba.logIndex - aa.logIndex;
+    });
+
+    // Clamp `limit` to `[1, 500]` (default 100), mirroring the HTTP layer for
+    // drop-in `with-fallback` parity.
+    const limit = Math.min(500, Math.max(1, args?.limit ?? 100));
+    return rows.slice(0, limit);
+  }
+
+  // ── listBuilderArtifacts (gh#290) ─────────────────────────────────────────
+  // Today only plug-ins are published; mirror the HTTP layer and delegate to
+  // listPluginPublications so the "Your published plug-ins" panel populates on
+  // the floor too. The harness variant is added when Path 2 ships.
+
+  async function listBuilderArtifacts(args: {
+    builderAgentId: string;
+    limit?: number;
+  }): Promise<PublishedArtifact[]> {
+    return listPluginPublications({
+      builderAgentId: args.builderAgentId,
+      limit: args.limit,
+    });
+  }
+
+  // ── getPluginScores stub (ebu7 dependency) ────────────────────────────────
+  // Score history needs the indexer's `attemptEnvelopeMeta` + `verdict`
+  // enrichment join, which the on-chain floor cannot reconstruct. Stays a stub.
+
   async function getPluginScores(): Promise<PluginScoreHistoryRow[]> { return []; }
-  async function listBuilderArtifacts(): Promise<PublishedArtifact[]> { return []; }
 
   return {
     findClaimableTasks,
