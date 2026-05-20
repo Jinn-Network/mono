@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { makeHandshakeCollector } from './handshake-url';
 
 export interface OpSpec {
@@ -23,8 +23,14 @@ export interface MultiOpHandle {
 
 export interface SpawnMultiOpOptions {
   ops: OpSpec[];
-  readyTimeoutMs?: number;      // default 30s
-  jinnBinPath?: string;         // default: resolve from cwd / dist/bin/jinn.js
+  /**
+   * Per-daemon readiness timeout in milliseconds (default 30s). Applied
+   * independently to each daemon in `ops` — the worst-case total wall time
+   * for a group of N daemons is N × readyTimeoutMs, since daemons are spawned
+   * and awaited sequentially.
+   */
+  readyTimeoutMs?: number;
+  jinnBinPath?: string;         // default: dist/bin/jinn.js resolved relative to this module
   extraEnv?: NodeJS.ProcessEnv;
 }
 
@@ -44,7 +50,10 @@ async function waitForBootstrap(apiPort: number, timeoutMs: number): Promise<voi
 
 export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<MultiOpHandle> {
   const readyTimeoutMs = opts.readyTimeoutMs ?? 30000;
-  const jinnBin = opts.jinnBinPath ?? path.resolve(process.cwd(), 'dist', 'bin', 'jinn.js');
+  // Resolve the built binary relative to this module rather than process.cwd(),
+  // which is unstable across test runners and invocation directories.
+  const jinnBin =
+    opts.jinnBinPath ?? fileURLToPath(new URL('../../dist/bin/jinn.js', import.meta.url));
 
   const daemons: Record<string, DaemonHandle> = {};
   const processes: ChildProcess[] = [];
@@ -89,8 +98,18 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
       processes.push(proc);
 
       const collector = makeHandshakeCollector(readyTimeoutMs);
-      proc.stdout?.on('data', (chunk) => collector.feed(chunk.toString()));
-      proc.stderr?.on('data', (chunk) => collector.feed(chunk.toString()));
+      const onStdout = (chunk: Buffer | string) => collector.feed(chunk.toString());
+      const onStderr = (chunk: Buffer | string) => collector.feed(chunk.toString());
+      proc.stdout?.on('data', onStdout);
+      proc.stderr?.on('data', onStderr);
+      // Detach the handshake listeners once the collector settles, so they do
+      // not stay attached for the child's lifetime (MaxListenersExceededWarning
+      // risk across many daemons + no-op feed() churn).
+      const detachHandshakeListeners = () => {
+        proc.stdout?.off('data', onStdout);
+        proc.stderr?.off('data', onStderr);
+      };
+      collector.promise.then(detachHandshakeListeners, detachHandshakeListeners);
 
       // Wait for bootstrap to be reachable
       await waitForBootstrap(op.apiPort, readyTimeoutMs);
@@ -104,6 +123,11 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
         ]);
       } catch {
         handshakeUrl = null;
+      } finally {
+        // If the 2s race lost, collector.promise may still be pending; dispose
+        // it so its timeout clears and detach the listeners now.
+        collector.dispose();
+        detachHandshakeListeners();
       }
 
       daemons[op.name] = {

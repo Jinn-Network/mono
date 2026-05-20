@@ -8,6 +8,13 @@ export function extractHandshakeUrl(line: string): string | null {
 export interface HandshakeCollector {
   feed: (chunk: string) => void;
   promise: Promise<string>;
+  /**
+   * Clears the pending timeout and marks the collector settled so further
+   * `feed()` calls become no-ops. Idempotent. Callers should still detach
+   * their own stream listeners; `promise` settling (resolve/reject/dispose)
+   * is the signal to do so.
+   */
+  dispose: () => void;
 }
 
 export function makeHandshakeCollector(timeoutMs: number): HandshakeCollector {
@@ -43,5 +50,13 @@ export function makeHandshakeCollector(timeoutMs: number): HandshakeCollector {
       }
     },
     promise,
+    dispose() {
+      if (settled) {
+        clearTimeout(timer);
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+    },
   };
 }
