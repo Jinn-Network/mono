@@ -68,6 +68,11 @@ export interface HarnessEnv {
   codexPath?: string;
   /** Default Codex model when a SolverNet does not specify one. */
   codexModel?: string;
+  /**
+   * Timeout (ms) for the `codex --version` probe in the Codex variant of
+   * `LearnerHarness.isReady`.
+   */
+  codexDoctorTimeoutMs?: number;
   /** Optional Polymarket Gamma API override for acceptance or private mirrors. */
   polymarketGammaBaseUrl?: string;
   /** Optional Polymarket CLOB API override for acceptance or private mirrors. */
@@ -249,6 +254,10 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
     claudePath: env.claudePath,
+    ...(env.codexPath !== undefined ? { codexPath: env.codexPath } : {}),
+    ...(env.codexDoctorTimeoutMs !== undefined
+      ? { codexDoctorTimeoutMs: env.codexDoctorTimeoutMs }
+      : {}),
   }));
 
   const hermesAdapter = new HermesHarnessAdapter({

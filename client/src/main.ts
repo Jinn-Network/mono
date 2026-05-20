@@ -980,6 +980,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
       },
+      codexDoctor: {
+        codexPath: config.codexPath,
+        codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
+      },
       admin: {
         // jinn-mono #289: in interactive mode (the dashboard SPA case),
         // spawn a detached replacement before exiting so the panel reconnects
@@ -1869,6 +1873,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesModel: config.hermesModel,
     hermesProvider: config.hermesProvider,
     hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
+    codexPath: config.codexPath,
+    codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
   })) {
     implRegistry.register(impl);
   }

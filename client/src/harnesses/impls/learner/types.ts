@@ -124,4 +124,15 @@ export interface LearnerHarnessConfig {
    * Defaults to 'bare'.
    */
   runtimeMode?: 'bare' | 'container' | 'docker-compose';
+  /**
+   * Path to the `codex` executable. Used by `isReady()` when this
+   * `LearnerHarness` is the Codex variant (`name === CODEX_HARNESS`) — it is
+   * passed to `probeCodexDoctor()`. Defaults to 'codex' (from PATH).
+   */
+  codexPath?: string;
+  /**
+   * Timeout (ms) for the `codex --version` probe in the Codex variant's
+   * `isReady()`. Defaults to 30s.
+   */
+  codexDoctorTimeoutMs?: number;
 }
