@@ -99,7 +99,6 @@ export async function runT31ProducerEvaluatorReal(opts: ScenarioOptionsT3): Prom
     }
     log('   PASS — verdict matches');
 
-    await fs.writeFile(opts.evidencePath, evidenceLines.join('\n'));
     return {
       scenarioId: 'T3.1',
       verdict: 'pass',
@@ -110,7 +109,6 @@ export async function runT31ProducerEvaluatorReal(opts: ScenarioOptionsT3): Prom
     };
   } catch (err) {
     log(`FAILED: ${err instanceof Error ? err.message : String(err)}`);
-    await fs.writeFile(opts.evidencePath, evidenceLines.join('\n'));
     return {
       scenarioId: 'T3.1',
       verdict: 'fail',
@@ -120,6 +118,8 @@ export async function runT31ProducerEvaluatorReal(opts: ScenarioOptionsT3): Prom
       failNotes: err instanceof Error ? err.message : String(err),
     };
   } finally {
+    // Always flush the evidence log, on both the pass and fail paths.
+    await fs.writeFile(opts.evidencePath, evidenceLines.join('\n'));
     if (handle) { try { await handle.teardown(); } catch {} }
   }
 }
