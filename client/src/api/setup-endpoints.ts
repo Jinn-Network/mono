@@ -165,10 +165,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   });
 
   // POST /v1/setup/drip — user-triggered Base Sepolia faucet funding for the
-  // master EOA. One click drains the tiny CDP drip repeatedly until the wallet
-  // reaches the bootstrap floor, the faucet rate-limits, or the safety cap is
-  // hit. Mainnet rejects.
+  // master EOA. By default ("?singleDrip" absent) one click drains the tiny
+  // CDP drip repeatedly until the wallet reaches the bootstrap floor, the
+  // faucet rate-limits, or the safety cap is hit — this is the bootstrap
+  // funding gate (AwaitingFundingCard). With `?singleDrip=true` the endpoint
+  // fires the faucet EXACTLY ONCE and returns immediately with txHash +
+  // deltaWei — this is the running-mode Dashboard "Top up" button, which must
+  // require an explicit click and never auto-fire (jinn-mono #336). Mainnet
+  // rejects.
   app.post('/v1/setup/drip', async (c) => {
+    const singleDrip = c.req.query('singleDrip') === 'true';
     const earningDir =
       config.earningDir ??
       process.env['JINN_EARNING_DIR'] ??
@@ -250,6 +256,53 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
           balanceWei: balanceWei.toString(),
           targetWei: targetWei.toString(),
         });
+      }
+
+      // Single-drip mode (jinn-mono #336): the running-mode Dashboard "Top up"
+      // button must fire the faucet EXACTLY ONCE per click — never loop. The
+      // multi-drip loop below is for the one-time bootstrap funding gate
+      // (AwaitingFundingCard), where the wallet has to clear the entire
+      // bootstrap floor. On the running dashboard the operator just wants a
+      // single, explicit top-up they can see confirmed (amount + tx hash).
+      if (singleDrip) {
+        const balanceBefore = balanceWei;
+        const result = await requestFunding(address, 'base-sepolia');
+        if (!result.ok) {
+          return c.json(
+            {
+              ok: false,
+              address,
+              txHashes,
+              attempts: 0,
+              balanceWei: balanceWei?.toString(),
+              targetWei: targetWei?.toString(),
+              reason: result.reason,
+              rateLimited: result.rateLimited,
+            },
+            200,
+          );
+        }
+        if (result.txHash) txHashes.push(result.txHash);
+        balanceWei = await getBalance();
+        persistFundingGate(balanceWei);
+        const deltaWei =
+          balanceBefore !== null && balanceWei !== null && balanceWei > balanceBefore
+            ? balanceWei - balanceBefore
+            : null;
+        return c.json(
+          {
+            ok: txHashes.length > 0,
+            address,
+            txHash: result.txHash,
+            txHashes,
+            attempts: txHashes.length,
+            balanceWei: balanceWei?.toString(),
+            targetWei: targetWei?.toString(),
+            deltaWei: deltaWei !== null ? deltaWei.toString() : undefined,
+            reason: txHashes.length > 0 ? undefined : 'faucet_did_not_send',
+          },
+          txHashes.length > 0 ? 202 : 200,
+        );
       }
 
       const maxFaucetIters = computeFaucetDripCap({

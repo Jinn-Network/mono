@@ -463,6 +463,125 @@ describe('POST /v1/setup/drip', () => {
   // than a special reason code. The drip-cap-test that PR #84 added
   // upstream (`runs the user-triggered faucet loop for the persisted Base
   // Sepolia master wallet`, above) covers the new behaviour.
+
+  // ── Single-drip mode (jinn-mono #336) ────────────────────────────────────
+  //
+  // The running-mode Dashboard "Top up" button must fire the faucet EXACTLY
+  // ONCE per click — never loop. `?singleDrip=true` selects that path. These
+  // tests lock the invariant: one request → one `requestFunding` call, even
+  // when the multi-drip cap would otherwise loop dozens of times.
+  it('fires the faucet exactly once with ?singleDrip=true (jinn-mono #336)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-single-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x5555555555555555555555555555555555555555',
+    });
+
+    const requestFunding = vi.fn(async () => ({
+      ok: true,
+      txHash: '0x' + '5a'.repeat(32),
+    }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      // A target that the multi-drip loop would chase for dozens of
+      // iterations — singleDrip must ignore the cap entirely.
+      minEoaGasWei: '10000000000000000',
+      interDripPauseMs: 0,
+    });
+
+    const res = await app.request('/v1/setup/drip?singleDrip=true', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(202);
+    expect(requestFunding).toHaveBeenCalledTimes(1);
+    expect(requestFunding).toHaveBeenCalledWith(
+      '0x5555555555555555555555555555555555555555',
+      'base-sepolia',
+    );
+    const body = (await res.json()) as {
+      ok: boolean;
+      txHash?: string;
+      txHashes: string[];
+      attempts: number;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.attempts).toBe(1);
+    expect(body.txHashes).toHaveLength(1);
+    expect(body.txHash).toBe('0x' + '5a'.repeat(32));
+  });
+
+  it('still runs the multi-drip loop when ?singleDrip is absent (jinn-mono #336 regression guard)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-multi-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x6666666666666666666666666666666666666666',
+    });
+
+    const requestFunding = vi.fn(async () => ({
+      ok: true,
+      txHash: '0x' + '6b'.repeat(32),
+    }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      maxFaucetIters: 3,
+      interDripPauseMs: 0,
+    });
+
+    const res = await app.request('/v1/setup/drip', { method: 'POST' });
+
+    expect(res.status).toBe(202);
+    // The bootstrap funding gate keeps looping — singleDrip did not regress it.
+    expect(requestFunding).toHaveBeenCalledTimes(3);
+  });
+
+  it('surfaces a faucet failure on the single-drip path without looping (jinn-mono #336)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-single-fail-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x7777777777777777777777777777777777777777',
+    });
+
+    const requestFunding = vi.fn(async () => ({
+      ok: false,
+      rateLimited: true,
+      reason: 'Faucet rate limited (1 claim per 24 hours per address).',
+    }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      minEoaGasWei: '10000000000000000',
+      interDripPauseMs: 0,
+    });
+
+    const res = await app.request('/v1/setup/drip?singleDrip=true', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(200);
+    expect(requestFunding).toHaveBeenCalledTimes(1);
+    const body = (await res.json()) as {
+      ok: boolean;
+      rateLimited?: boolean;
+      reason?: string;
+    };
+    expect(body.ok).toBe(false);
+    expect(body.rateLimited).toBe(true);
+  });
 });
 
 describe('POST /v1/setup/solvernets/:name', () => {

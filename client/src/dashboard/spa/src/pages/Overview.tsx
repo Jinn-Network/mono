@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
@@ -102,6 +102,27 @@ function formatEth(wei?: string): string {
   }
 }
 
+/**
+ * Format a wei amount for a one-line top-up confirmation. Drips are tiny, so
+ * show enough precision to be meaningful (6 dp) without a trailing wall of
+ * zeros.
+ */
+function formatDripEth(wei?: string): string | null {
+  if (!wei || !/^\d+$/.test(wei)) return null;
+  try {
+    const eth = Number(BigInt(wei)) / 1e18;
+    return `${eth.toFixed(6)} ETH`;
+  } catch {
+    return null;
+  }
+}
+
+/** Shorten a tx hash for inline display (0x1234…abcd). */
+function truncTx(hash?: string): string | null {
+  if (!hash || hash.length < 12) return hash ?? null;
+  return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
+}
+
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
@@ -183,12 +204,28 @@ export function OverviewPage(): JSX.Element {
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
   const liveNow = deriveLiveNow(status);
   const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
+  // Auto-clear timer for transient success notices (e.g. the gas top-up
+  // confirmation, which should surface the amount + tx hash for ~5s then
+  // fade — issue #336).
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
+
   const runAction = (
     label: string,
     action: () => Promise<{ message?: string } | void> | { message?: string } | void,
+    opts?: { autoClearMs?: number },
   ): void => {
     setActiveAction(label);
     setNotice(null);
+    if (noticeTimerRef.current) {
+      clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
     Promise.resolve()
       .then(action)
       .then((result) => {
@@ -196,6 +233,12 @@ export function OverviewPage(): JSX.Element {
           tone: 'success',
           text: result?.message ?? `${label} requested.`,
         });
+        if (opts?.autoClearMs) {
+          noticeTimerRef.current = setTimeout(() => {
+            setNotice(null);
+            noticeTimerRef.current = null;
+          }, opts.autoClearMs);
+        }
       })
       .catch((err) => {
         setNotice({
@@ -228,20 +271,32 @@ export function OverviewPage(): JSX.Element {
             return { message: 'JINN claim command completed.' };
           })}
         onTopUp={() =>
-          runAction('Top up gas', async () => {
-            const res = await api.triggerDrip();
-            if (!res.ok) {
-              throw new Error(res.reason ?? 'Gas top-up failed.');
-            }
-            const txCount = res.txHashes?.length ?? (res.txHash ? 1 : 0);
-            if (txCount > 0) {
-              return { message: `Gas top-up requested (${txCount} ${txCount === 1 ? 'transaction' : 'transactions'}).` };
-            }
-            if (res.attempts === 0) {
-              return { message: 'Gas balance is already above the testnet top-up target.' };
-            }
-            return { message: 'Gas top-up checked; no additional funding was needed.' };
-          })}
+          runAction(
+            'Top up gas',
+            async () => {
+              // Issue #336: one explicit click → exactly one faucet drip.
+              // `singleDrip: true` makes the daemon fire the faucet once and
+              // return immediately — no server-side loop, so the gas number
+              // never "magically" keeps climbing while the Dashboard is open.
+              const res = await api.triggerDrip({ singleDrip: true });
+              if (!res.ok) {
+                throw new Error(res.reason ?? 'Gas top-up failed.');
+              }
+              const txHash = res.txHash ?? res.txHashes?.at(-1);
+              if (!txHash) {
+                return { message: 'Gas top-up checked; the faucet sent no funds.' };
+              }
+              const amount = formatDripEth(res.deltaWei);
+              const txLabel = truncTx(txHash);
+              return {
+                message: amount
+                  ? `Gas topped up: +${amount} · tx ${txLabel}`
+                  : `Gas top-up sent · tx ${txLabel}`,
+              };
+            },
+            // Confirmation is transient — surface it, then fade after ~5s.
+            { autoClearMs: 5_000 },
+          )}
         onRestart={() =>
           runAction('Restart node', async () => {
             const res = await api.restartDaemon();

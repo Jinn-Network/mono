@@ -94,7 +94,18 @@ export const api = {
     jfetch<{ ok: boolean; reason?: string }>('/v1/auth/claude/spawn', {
       method: 'POST',
     }),
-  triggerDrip: () =>
+  /**
+   * Trigger a Base Sepolia faucet drip for the master EOA.
+   *
+   * - Default (bootstrap funding gate): the daemon loops the tiny CDP drip
+   *   until the wallet clears the entire bootstrap floor.
+   * - `{ singleDrip: true }` (running-mode Dashboard "Top up"): the daemon
+   *   fires the faucet EXACTLY ONCE and returns immediately with a `deltaWei`
+   *   reporting how much the balance moved. This is what makes the Dashboard
+   *   Gas top-up an explicit, one-shot action with no re-firing loop
+   *   (jinn-mono #336).
+   */
+  triggerDrip: (opts?: { singleDrip?: boolean }) =>
     jfetch<{
       ok: boolean;
       address?: string;
@@ -103,10 +114,11 @@ export const api = {
       attempts?: number;
       balanceWei?: string;
       targetWei?: string;
+      deltaWei?: string;
       reason?: string;
       rateLimited?: boolean;
     }>(
-      '/v1/setup/drip',
+      opts?.singleDrip ? '/v1/setup/drip?singleDrip=true' : '/v1/setup/drip',
       { method: 'POST' },
     ),
   changeKeystorePassword: (current: string, next: string) =>

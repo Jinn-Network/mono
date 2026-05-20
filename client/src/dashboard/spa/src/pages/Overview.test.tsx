@@ -27,7 +27,7 @@ vi.mock('../api/client.js', () => ({
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
     claimRewards: () => claimRewardsMock(),
-    triggerDrip: () => triggerDripMock(),
+    triggerDrip: (opts?: { singleDrip?: boolean }) => triggerDripMock(opts),
     restartDaemon: () => restartDaemonMock(),
   },
 }));
@@ -533,5 +533,140 @@ describe('OverviewPage empty-state gating', () => {
     fireEvent.click(screen.getByRole('button', { name: /restart/i }));
     await waitFor(() => expect(restartDaemonMock).toHaveBeenCalledOnce());
     expect(history.at(-1)).toBe('/overview');
+  });
+});
+
+// ── Gas top-up: explicit click, no auto-fire (jinn-mono #336) ───────────────
+//
+// rvx in the v0.1.6 dogfood: "I hit the button 'Top up' and it just magically
+// increases the number ... can't seem to stop it." The Dashboard Gas top-up
+// must be a single, explicit action: one click → exactly one faucet call, no
+// re-firing while the Dashboard stays mounted, a one-line amount + tx-hash
+// confirmation, and the button disabled while the request is in flight.
+describe('OverviewPage gas top-up (jinn-mono #336)', () => {
+  const gasStatus = {
+    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+    masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
+    fleet: { services: [] },
+    predictionV1: {
+      operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+      totals: { observedTasks: 1, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+    },
+  };
+
+  it('fires the faucet exactly once per click, in single-drip mode', async () => {
+    getStatusMock.mockResolvedValue(gasStatus);
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    triggerDripMock.mockResolvedValue({
+      ok: true,
+      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      deltaWei: '5000000000000000',
+      attempts: 1,
+    });
+    render(withProviders(<OverviewPage />));
+
+    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    fireEvent.click(topUpButton);
+
+    await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
+    // Single-drip is the contract that prevents the server-side loop: the
+    // page must ask for the one-shot path, never the bootstrap loop.
+    expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
+  });
+
+  it('does not re-fire the faucet while the Dashboard stays mounted', async () => {
+    getStatusMock.mockResolvedValue(gasStatus);
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    triggerDripMock.mockResolvedValue({
+      ok: true,
+      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      deltaWei: '5000000000000000',
+      attempts: 1,
+    });
+    const { rerender } = render(withProviders(<OverviewPage />));
+
+    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    fireEvent.click(topUpButton);
+    await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
+
+    // Status polling re-renders the page repeatedly; none of those re-renders
+    // may re-invoke the faucet. Force several re-renders and assert the call
+    // count is still 1.
+    for (let i = 0; i < 5; i++) {
+      rerender(withProviders(<OverviewPage />));
+    }
+    await new Promise((r) => setTimeout(r, 50));
+    expect(triggerDripMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a one-line confirmation with the amount and tx hash', async () => {
+    getStatusMock.mockResolvedValue(gasStatus);
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    triggerDripMock.mockResolvedValue({
+      ok: true,
+      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      deltaWei: '5000000000000000', // 0.005 ETH
+      attempts: 1,
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByRole('button', { name: /top up/i }));
+
+    const notice = await screen.findByTestId('dashboard-action-notice');
+    expect(notice.textContent).toMatch(/0\.005000 ETH/);
+    expect(notice.textContent).toMatch(/0xabc0…1234/);
+  });
+
+  it('disables the Top up button while the request is in flight', async () => {
+    getStatusMock.mockResolvedValue(gasStatus);
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    let resolveDrip: (v: unknown) => void = () => undefined;
+    triggerDripMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDrip = resolve;
+      }),
+    );
+    render(withProviders(<OverviewPage />));
+
+    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    fireEvent.click(topUpButton);
+
+    // While the faucet call is unresolved the button must be disabled.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /working/i })).toHaveProperty('disabled', true),
+    );
+
+    resolveDrip({
+      ok: true,
+      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      deltaWei: '5000000000000000',
+      attempts: 1,
+    });
+
+    // After resolution the button re-enables and the confirmation shows.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /top up/i })).toHaveProperty('disabled', false),
+    );
+    expect((await screen.findByTestId('dashboard-action-notice')).textContent).toMatch(/tx 0xabc0…1234/);
+  });
+
+  it('surfaces a faucet failure as an error notice', async () => {
+    getStatusMock.mockResolvedValue(gasStatus);
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    triggerDripMock.mockResolvedValue({
+      ok: false,
+      rateLimited: true,
+      reason: 'Faucet rate limited (1 claim per 24 hours per address).',
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByRole('button', { name: /top up/i }));
+
+    const notice = await screen.findByRole('alert');
+    expect(notice.textContent).toMatch(/rate limited/i);
   });
 });
