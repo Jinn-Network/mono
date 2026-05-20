@@ -70,26 +70,25 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
   );
   await fs.mkdir(outputDir, { recursive: true });
 
-  // T2.1-T2.2 callables run in parallel.
-  const scenarioPromises = [
-    runT21CrossOpDonation({
-      evidencePath: path.join(outputDir, 'T2.1.log'),
-      wallClockBudgetMs: 5 * 60 * 1000,
-    }),
-    runT22ProducerEvaluator({
-      evidencePath: path.join(outputDir, 'T2.2.log'),
-      wallClockBudgetMs: 5 * 60 * 1000,
-    }),
-  ];
-  const settled = await Promise.allSettled(scenarioPromises);
-  const ids = ['T2.1', 'T2.2'] as const;
+  // T2.1-T2.2 callables run in parallel. Each descriptor carries its own id and
+  // evidence path so the crash-fallback verdict needs no positional bookkeeping.
+  const WALL_CLOCK_BUDGET_MS = 5 * 60 * 1000;
+  const callables = [
+    { id: 'T2.1', run: runT21CrossOpDonation },
+    { id: 'T2.2', run: runT22ProducerEvaluator },
+  ].map((s) => ({ id: s.id, evidencePath: path.join(outputDir, `${s.id}.log`), run: s.run }));
+
+  const settled = await Promise.allSettled(
+    callables.map((s) => s.run({ evidencePath: s.evidencePath, wallClockBudgetMs: WALL_CLOCK_BUDGET_MS })),
+  );
   const callableVerdicts: ScenarioVerdict[] = settled.map((result, idx) => {
     if (result.status === 'fulfilled') return result.value;
+    const { id, evidencePath } = callables[idx]!;
     return {
-      scenarioId: ids[idx],
+      scenarioId: id,
       verdict: 'fail' as const,
       wallClockMs: 0,
-      evidencePath: path.join(outputDir, `${ids[idx]}.log`),
+      evidencePath,
       failClass: 'agent-crash' as const,
       failNotes: result.reason instanceof Error ? result.reason.message : String(result.reason),
     };
