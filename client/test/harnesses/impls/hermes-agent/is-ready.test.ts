@@ -1,10 +1,9 @@
 // client/test/harnesses/impls/hermes-agent/is-ready.test.ts
 //
-// Regression coverage for #330: HermesHarness must expose isReady() so the
-// readiness registry can prevent the claim loop from claiming tasks against
-// an uninstalled / mis-configured hermes binary. Pre-fix HermesHarness had
-// no isReady; the registry treated it as always-ready and rvx's fresh
-// install burned 26 failed claims in minutes.
+// Regression coverage: HermesHarness must expose isReady() so the readiness
+// registry can prevent the claim loop from claiming tasks against an
+// uninstalled / mis-configured hermes binary. Without isReady the registry
+// treats the harness as always-ready and a fresh install burns failed claims.
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { HermesHarness } from '../../../../src/harnesses/impls/hermes-agent/harness.js';
 import {
@@ -76,9 +75,9 @@ describe('HermesHarness.isReady', () => {
     expect(result.nextStep?.description).toMatch(/sign in|configure|hermes/i);
   });
 
-  // Core regression for the v0.1.6 dogfood finding #3: `hermes doctor` exits 0
-  // even when every model provider is logged out. The auth gate must catch
-  // that — ready MUST be false even though the doctor probe says exit 0.
+  // `hermes doctor` exits 0 even when every model provider is logged out. The
+  // auth gate must catch that — ready MUST be false even though the doctor
+  // probe says exit 0.
   it('returns ready=false when OpenRouter is NOT authed even though hermes doctor exit is 0', async () => {
     vi.mocked(probeHermesDoctor).mockReturnValue({
       installed: true,

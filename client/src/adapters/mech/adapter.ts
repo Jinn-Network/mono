@@ -72,36 +72,19 @@ const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
 
-/**
- * Yield to the Node event loop every N evaluation opportunities while draining
- * the retry queue. A real fleet can accumulate a large backlog of pending
- * evaluation solutions; without an explicit yield the synchronous-feeling
- * async loop can starve the HTTP API (the operator SPA reads `/health` and
- * flips its "Daemon offline" banner if a probe round-trip exceeds its window).
- */
+/** Yield to the event loop every N evaluation opportunities so a large retry
+ *  backlog can't starve the HTTP API mid-cycle. */
 const EVALUATION_RETRY_YIELD_EVERY = 10;
 
 /**
  * Decide whether a `canClaimEvaluation` failure reason means the opportunity
- * can NEVER become claimable (terminal) and should be pruned from the working
- * set, versus a reason that could still clear later (transient — keep
- * retrying).
+ * can NEVER become claimable (terminal, prune it) versus one that could still
+ * clear later (transient, keep retrying).
  *
- * `canClaimEvaluation` returns `reason` as either a decoded known revert
- * (`TCAttemptAlreadyFinalized(1, 0)` or the bare `TCAttemptAlreadyFinalized`)
- * or an arbitrary flattened error message. We strip any decoded-argument
- * suffix to recover the bare revert name and defer to
- * `isNonRecoverableInnerRevert` — the module's existing, maintained
- * classification of "permanent failure for this requestId, never worth
- * retrying" (covers TCAttemptAlreadyFinalized / TCEvaluationDeadlinePassed /
- * TCMaxVerdictsReached, etc.).
- *
- * Anything that does not resolve to a known non-recoverable revert name —
- * generic RPC errors, rate-limit messages, "not yet announced" style
- * failures — is treated as transient and left in the working set. A
- * false-keep (re-checking a dead opportunity) only costs one more RPC; a
- * false-prune (dropping a still-claimable opportunity) loses real work, so
- * when in doubt we keep.
+ * A false-keep (re-checking a dead opportunity) only costs one more RPC; a
+ * false-prune (dropping a still-claimable opportunity) loses real work — so
+ * when in doubt we keep. Anything that does not resolve to a known
+ * non-recoverable revert name is treated as transient.
  */
 function isTerminalEvaluationReason(reason: string | undefined): boolean {
   if (!reason) return false;
@@ -833,10 +816,8 @@ export class MechAdapter implements ExecutionAdapter {
         if (announcement) {
           yield announcement;
         }
-        // No announcement does NOT mean "forget". evaluationAnnouncementForSolution
-        // owns pruning: it removes the solution only for terminal reasons and
-        // intentionally leaves transient failures in the working set so they
-        // are retried on the next cycle.
+        // No announcement does NOT mean "forget" — pruning is owned by
+        // evaluationAnnouncementForSolution, which only removes terminal cases.
       } catch (err) {
         console.error(
           `[mech] evaluation opportunity retry failed for ${requestId}:`,

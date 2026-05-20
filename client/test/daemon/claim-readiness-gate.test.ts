@@ -1,11 +1,10 @@
 // client/test/daemon/claim-readiness-gate.test.ts
 //
-// Regression for #330: the daemon must not claim tasks against a SolverNet
-// whose harness reports not-ready. Pre-fix on v0.1.6, a fresh operator who
-// joined SWE-rebench v2 without installing/authing Hermes burned 26 failed
-// claims in minutes — every claim landed because the gate was wired but
-// `HermesHarness` had no `isReady()` so the registry treated it as
-// always-ready.
+// Regression: the daemon must not claim tasks against a SolverNet whose
+// harness reports not-ready. A fresh operator who joined SWE-rebench v2
+// without installing/authing Hermes would otherwise burn failed claims —
+// every claim landed because the gate was wired but `HermesHarness` had no
+// `isReady()`, so the registry treated it as always-ready.
 //
 // The test spins up a real `Daemon` against a `LocalAdapter`, posts a task
 // whose `solverNetManifestCid` matches a joined entry, and verifies the
@@ -51,7 +50,7 @@ beforeEach(() => {
   _resetReadinessGateMemoForTests();
 });
 
-describe('Daemon — claim readiness gate (#330)', () => {
+describe('Daemon — claim readiness gate', () => {
   it('does NOT call adapter.claimTask when registry reports the harness not ready', async () => {
     const adapter = new LocalAdapter();
     const claimSpy = vi.spyOn(adapter, 'claimTask');
@@ -133,7 +132,7 @@ describe('Daemon — claim readiness gate (#330)', () => {
     await daemon.stop();
   });
 
-  it('does NOT claim for a Codex SolverNet when the codex harness reports not ready (#348)', async () => {
+  it('does NOT claim for a Codex SolverNet when the codex harness reports not ready', async () => {
     // Same-shape regression as the Hermes case above: a Codex-harness
     // SolverNet whose `codex` CLI is missing must not have tasks claimed
     // against it. The gate is harness-agnostic — it reads whatever reason
@@ -170,12 +169,12 @@ describe('Daemon — claim readiness gate (#330)', () => {
     await daemon.stop();
   });
 
-  it('does NOT claim when Hermes reports OpenRouter not connected (#332)', async () => {
-    // v0.1.6 dogfood finding #3: `hermes doctor` exits 0 even when every
-    // model provider is logged out, so HermesHarness.isReady() now also
-    // gates on OpenRouter auth. The gate is harness-agnostic — it just reads
-    // the reason — so an "OpenRouter not connected" not-ready must block
-    // claims exactly like the missing-binary case.
+  it('does NOT claim when Hermes reports OpenRouter not connected', async () => {
+    // `hermes doctor` exits 0 even when every model provider is logged out, so
+    // HermesHarness.isReady() also gates on OpenRouter auth. The gate is
+    // harness-agnostic — it just reads the reason — so an "OpenRouter not
+    // connected" not-ready must block claims exactly like the missing-binary
+    // case.
     const adapter = new LocalAdapter();
     const claimSpy = vi.spyOn(adapter, 'claimTask');
 

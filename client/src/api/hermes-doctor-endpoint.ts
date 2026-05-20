@@ -17,6 +17,7 @@
  * precheck panel and the daemon's claim-readiness gate (#330).
  */
 import type { Hono } from 'hono';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 
 export interface HermesDoctorResponse {
@@ -32,20 +33,34 @@ export interface HermesDoctorConfig {
 }
 
 /**
- * Synchronously runs `hermes doctor` and classifies the result. Pure (no
- * Hono dependency) so the harness layer can call it without pulling the API
- * server in.
+ * Shared `hermes <args>` spawn scaffolding for both probes: resolves the binary
+ * and timeout from config, runs `spawnSync`, and extracts the spawn-error code.
+ * Each probe applies its own classification/parsing to the returned result.
  */
-export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctorResponse {
+function runHermes(
+  args: string[],
+  config: HermesDoctorConfig,
+): { result: SpawnSyncReturns<string>; errorCode: string | undefined } {
   const hermesBin = config.hermesPath ?? 'hermes';
   const timeoutMs = config.hermesDoctorTimeoutMs ?? 30_000;
 
-  const result = spawnSync(hermesBin, ['doctor'], {
+  const result = spawnSync(hermesBin, args, {
     timeout: timeoutMs,
     encoding: 'utf8',
   });
 
   const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  return { result, errorCode };
+}
+
+/**
+ * Synchronously runs `hermes doctor` and classifies the result. Pure (no
+ * Hono dependency) so the harness layer can call it without pulling the API
+ * server in.
+ */
+export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctorResponse {
+  const { result, errorCode } = runHermes(['doctor'], config);
+
   // installed=true means we found the binary on disk. ENOENT is the only
   // definitive not-installed signal. Other errors (EACCES = wrong
   // permissions; ETIMEDOUT = ran but didn't finish in time) indicate the
@@ -99,15 +114,7 @@ export function probeHermesAuthStatus(
   provider: string,
   config: HermesDoctorConfig = {},
 ): HermesAuthStatus {
-  const hermesBin = config.hermesPath ?? 'hermes';
-  const timeoutMs = config.hermesDoctorTimeoutMs ?? 30_000;
-
-  const result = spawnSync(hermesBin, ['auth', 'status', provider], {
-    timeout: timeoutMs,
-    encoding: 'utf8',
-  });
-
-  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  const { result, errorCode } = runHermes(['auth', 'status', provider], config);
   const raw = (result.stdout ?? '').trim().slice(0, 4000);
 
   // Binary not found, or any other spawn error, or no output → not authed.

@@ -50,7 +50,7 @@ describe('SkipLogDeduper (jinn-mono-kzan)', () => {
   });
 });
 
-describe('SkipLogDeduper work-skip cache (dogfood #14)', () => {
+describe('SkipLogDeduper work-skip cache', () => {
   it('shouldRecheck is true for a task never skipped', () => {
     const dedup = new SkipLogDeduper();
     expect(dedup.shouldRecheck('84')).toBe(true);
@@ -148,7 +148,7 @@ describe('SkipLogDeduper work-skip cache (dogfood #14)', () => {
   });
 });
 
-describe('engine-watcher work-skip semantics (dogfood #14 integration)', () => {
+describe('engine-watcher work-skip semantics (integration)', () => {
   /**
    * Mirrors the engine-watcher loop's decision logic against a fake
    * `canAcceptTask`, asserting the expensive call is NOT re-run within the TTL

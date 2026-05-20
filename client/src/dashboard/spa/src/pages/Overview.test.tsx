@@ -536,13 +536,13 @@ describe('OverviewPage empty-state gating', () => {
   });
 });
 
-// ── Restart notice auto-clears (jinn-mono #328 fix #6) ──────────────────────
+// ── Restart notice auto-clears ──────────────────────────────────────────────
 //
-// In the v0.1.6 dogfood the restart-requested notice never cleared — it stayed
-// pinned to the dashboard until the operator triggered some other action. The
-// confirmation is transient, so the Restart action must pass `autoClearMs`
-// (like the gas top-up does) and the notice must disappear on its own.
-describe('OverviewPage restart notice (jinn-mono #328 fix #6)', () => {
+// The restart-requested notice must not stay pinned to the dashboard until the
+// operator triggers some other action. The confirmation is transient, so the
+// Restart action must pass `autoClearMs` (like the gas top-up does) and the
+// notice must disappear on its own.
+describe('OverviewPage restart notice', () => {
   const restartStatus = {
     rewards: { pendingStakingRewardsWei: '1000000000000000000' },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
@@ -587,14 +587,13 @@ describe('OverviewPage restart notice (jinn-mono #328 fix #6)', () => {
   });
 });
 
-// ── Gas top-up: explicit click, no auto-fire (jinn-mono #336) ───────────────
+// ── Gas top-up: explicit click, no auto-fire ────────────────────────────────
 //
-// rvx in the v0.1.6 dogfood: "I hit the button 'Top up' and it just magically
-// increases the number ... can't seem to stop it." The Dashboard Gas top-up
-// must be a single, explicit action: one click → exactly one faucet call, no
-// re-firing while the Dashboard stays mounted, a one-line amount + tx-hash
-// confirmation, and the button disabled while the request is in flight.
-describe('OverviewPage gas top-up (jinn-mono #336)', () => {
+// The Dashboard Gas top-up must be a single, explicit action: one click →
+// exactly one faucet call, no re-firing while the Dashboard stays mounted, a
+// one-line amount + tx-hash confirmation, and the button disabled while the
+// request is in flight.
+describe('OverviewPage gas top-up', () => {
   const gasStatus = {
     rewards: { pendingStakingRewardsWei: '1000000000000000000' },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },

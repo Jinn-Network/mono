@@ -18,7 +18,7 @@ export interface HeroStatsProps {
    * Human-readable reason for the current status — `deriveLiveNow().line`.
    * Rendered as a small subdued line under the status label so the operator
    * sees *why* the node is in this state (e.g. the first error diagnostic's
-   * message for ATTENTION, or "waiting for next task" when idle). #328 fix #1.
+   * message for ATTENTION, or "waiting for next task" when idle).
    */
   statusReason: string;
   activeAction: string | null;

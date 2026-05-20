@@ -462,14 +462,11 @@ export class Daemon {
         if (this.engineStopped) break;
       }
 
-      // Work-skip cache: on a single-slot daemon watchForTasks() re-yields every
-      // pending task each pass. canAcceptTask() resolves manifests, validates
-      // schemas, and probes impl.isReady() — with a large backlog of
-      // persistently-unacceptable tasks that contiguous run blocks the event
-      // loop ~1-2s and starves the HTTP API. If this task was recently skipped
-      // (within SKIP_RECHECK_TTL_MS) fast-skip it without re-running that work.
-      // The TTL is bounded on purpose: once it elapses we fall through and
-      // re-check, so a task that becomes acceptable is still picked up.
+      // canAcceptTask() resolves manifests, validates schemas, and probes
+      // impl.isReady() — expensive enough that re-running it for every
+      // persistently-unacceptable task each pass starves the HTTP API. Fast-skip
+      // tasks skipped within the bounded SKIP_RECHECK_TTL_MS; once the TTL
+      // elapses we fall through so a now-acceptable task is still picked up.
       if (!this.skipLogDeduper.shouldRecheck(taskAnnouncement.taskId)) {
         continue;
       }
@@ -478,22 +475,16 @@ export class Daemon {
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
       const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
-        // Record the skip so the next cycle within the TTL fast-skips the work
-        // above instead of re-running canAcceptTask.
         this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason);
-        // Dedupe per (taskId, reason): on a single-slot daemon the engine-watcher
-        // re-observes every pending task each pass, so the original `console.log`
-        // here produced hundreds of identical "another … task is already in flight"
-        // lines per minute. We log once per (taskId, reason) and stay quiet until
-        // the reason for skipping changes (jinn-mono-kzan).
+        // Log once per (taskId, reason) — the engine-watcher re-observes every
+        // pending task each pass, so an unguarded log here floods the console.
         if (this.skipLogDeduper.shouldLog(taskAnnouncement.taskId, accept.reason)) {
           console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         }
         continue;
       }
-      // Task is acceptable now; reset dedupe + work-skip state so a future skip
-      // (e.g. after this slot fills again) logs once instead of being silently
-      // swallowed, and is re-checked immediately rather than fast-skipped.
+      // Task is acceptable now; reset skip state so a future skip logs once and
+      // is re-checked immediately rather than fast-skipped.
       this.skipLogDeduper.forget(taskAnnouncement.taskId);
 
       // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),

@@ -318,7 +318,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
-        // Opt out of the gh #300 ghost-task floor for this test — the
+        // Opt out of the ghost-task floor for this test — the
         // fixture candidates use tiny block numbers that pre-date the
         // production default floor; this test is about discovery
         // yielding, not floor filtering.
@@ -364,7 +364,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('discovery filters out pre-floor candidates (gh #300 ghost-task floor)', async () => {
+  it('discovery filters out pre-floor candidates (ghost-task floor)', async () => {
     // The DiscoveryAPI (Ponder indexer or onchain-floor listClaimableTasks)
     // returns all claimable tasks regardless of when they were created.
     // Without a parallel floor filter here, the floor on the on-chain
@@ -507,7 +507,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
-        // gh #300: opt out of the floor — fixtures use tiny block numbers.
+        // Opt out of the floor — fixtures use tiny block numbers.
         onchainFromBlock: 0,
       },
     });
@@ -566,7 +566,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
         allowedTaskIds: ['43'],
-        // gh #300: opt out of the floor — fixtures use tiny block numbers.
+        // Opt out of the floor — fixtures use tiny block numbers.
         onchainFromBlock: 0,
       },
     });
@@ -1647,7 +1647,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
   });
 });
 
-describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (gh #300 — ghost-task floor)', () => {
+describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (ghost-task floor)', () => {
   // The Base Sepolia floor sits just after the 2026-05-14T17:28Z rebuild of
   // the fufn validated-pool to `EVAL_SEMANTICS_VERSION='3'`. Tasks created
   // before that rebuild are admitted under a prior semantics regime and the

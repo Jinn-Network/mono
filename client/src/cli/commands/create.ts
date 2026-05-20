@@ -43,6 +43,9 @@ const NETWORK_CHAIN_IDS: Record<string, number> = {
   'ethereum-mainnet': 1,
 };
 
+const QUICKSTART_URL =
+  'https://github.com/Jinn-Network/mono/blob/next/client/docs/build/quickstart.md';
+
 export type HarnessPattern = 'forecaster' | 'evaluator' | 'alternative-harness';
 
 export const SUPPORTED_PATTERNS: readonly HarnessPattern[] = [
@@ -241,7 +244,7 @@ Examples:
   jinn create plugin  @example/my-runtime --pattern runtime-plugin
 
 Quickstart:
-  https://github.com/Jinn-Network/mono/blob/next/client/docs/build/quickstart.md
+  ${QUICKSTART_URL}
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -327,7 +330,7 @@ async function run(ctx: CommandContext): Promise<void> {
   ctx.writer.write(
     `Created ${packageName} at ${target}\n` +
     `Next: cd ${target} && yarn install && yarn test\n` +
-    `Quickstart: https://github.com/Jinn-Network/mono/blob/next/client/docs/build/quickstart.md\n`,
+    `Quickstart: ${QUICKSTART_URL}\n`,
   );
 }
 

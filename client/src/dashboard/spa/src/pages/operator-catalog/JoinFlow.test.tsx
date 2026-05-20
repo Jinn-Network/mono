@@ -304,14 +304,12 @@ describe('JoinFlow — harness options', () => {
     );
   });
 
-  it('selecting Claude Code in the dropdown sticks even when the catalog default is Hermes (issue #329)', async () => {
-    // Issue #329 regression. Production SWE-rebench v2 catalog
-    // (`client/src/main.ts`) lists Hermes first; selecting Claude Code from
-    // the dropdown silently reverted to Hermes on every render because a
-    // render-time `setForm` was bouncing form.harness back to the catalog
-    // default whenever it equalled the seed `claude-code`. Cover the full
-    // sequence: catalog default Hermes -> operator picks Claude Code -> value
-    // sticks across re-renders -> submit carries claude-code.
+  it('selecting Claude Code in the dropdown sticks even when the catalog default is Hermes', async () => {
+    // A render-time `setForm` was bouncing form.harness back to the catalog
+    // default whenever it equalled the seed `claude-code`, so picking Claude
+    // Code from the dropdown silently reverted to Hermes on every render. Cover
+    // the full sequence: catalog default Hermes -> operator picks Claude Code
+    // -> value sticks across re-renders -> submit carries claude-code.
     apiMock.getSolverNets.mockResolvedValue({
       ...baseCatalog,
       nets: [
@@ -407,7 +405,7 @@ describe('JoinFlow — harness options', () => {
   });
 });
 
-describe('JoinFlow — per-harness readiness gate (#332)', () => {
+describe('JoinFlow — per-harness readiness gate', () => {
   /** Catalog with Claude Code + Codex, both compatible. */
   const twoHarnessCatalog = {
     ...baseCatalog,
@@ -769,15 +767,15 @@ describe('JoinFlow — submission', () => {
         disabledDefaultPlugins: [],
       }),
     );
-    // #333: a successful join shows an explicit success state ON the join
-    // page — it must NOT silently redirect to /operator.
+    // A successful join shows an explicit success state ON the join page — it
+    // must NOT silently redirect to /operator.
     await waitFor(() =>
       expect(screen.getByTestId('join-flow-success')).toBeTruthy(),
     );
     expect(nav.history.at(-1)).toBe('/operator/join/bafybeiaaa');
   });
 
-  it('renders a success card naming the joined SolverNet and a restart hint (#333)', async () => {
+  it('renders a success card naming the joined SolverNet and a restart hint', async () => {
     apiMock.operatorJoin.mockResolvedValue({
       ok: true,
       restartRequired: true,
@@ -807,7 +805,7 @@ describe('JoinFlow — submission', () => {
     expect(screen.queryByTestId('join-flow-submit')).toBeNull();
   });
 
-  it('success-card CTA navigates into the joined SolverNet (#333)', async () => {
+  it('success-card CTA navigates into the joined SolverNet', async () => {
     const { nav } = wrap(<JoinFlow />);
     await waitFor(() =>
       expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
@@ -823,7 +821,7 @@ describe('JoinFlow — submission', () => {
     expect(nav.history.at(-1)).toBe('/operator#solvernets/bafybeiaaa');
   });
 
-  it('success-card restart button restarts the daemon and goes to /overview (#328)', async () => {
+  it('success-card restart button restarts the daemon and goes to /overview', async () => {
     const { nav } = wrap(<JoinFlow />);
     await waitFor(() =>
       expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
@@ -843,7 +841,7 @@ describe('JoinFlow — submission', () => {
     await waitFor(() => expect(nav.history.at(-1)).toBe('/overview'));
   });
 
-  it('success-card restart button surfaces an error and stays put on failure (#328)', async () => {
+  it('success-card restart button surfaces an error and stays put on failure', async () => {
     apiMock.restartDaemon.mockResolvedValue({ ok: false });
     const { nav } = wrap(<JoinFlow />);
     await waitFor(() =>
@@ -954,9 +952,9 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
     fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
     await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
 
-    // Hermes default is Opus 4.7 — above the $1/task cost gate (Issue
-    // #331). Acknowledge it so the submit button isn't gated; these
-    // tests are exercising the precheck path, not the cost gate.
+    // Hermes default is Opus 4.7 — above the $1/task cost gate. Acknowledge it
+    // so the submit button isn't gated; these tests exercise the precheck path,
+    // not the cost gate.
     await waitFor(() =>
       expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy(),
     );
@@ -1092,7 +1090,7 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
   });
 });
 
-describe('JoinFlow — cost surfacing + confirmation gate (Issue #331 P0)', () => {
+describe('JoinFlow — cost surfacing + confirmation gate', () => {
   /**
    * Catalog with Hermes + Claude Code, both compatible. The default solver
    * harness is the first compatible — Claude Code — so the cost surface
@@ -1219,7 +1217,7 @@ describe('JoinFlow — cost surfacing + confirmation gate (Issue #331 P0)', () =
   });
 });
 
-describe('JoinFlow — inline decision-context help (#334)', () => {
+describe('JoinFlow — inline decision-context help', () => {
   it('renders a help trigger next to the Roles label', async () => {
     wrap(<JoinFlow />);
     await waitFor(() =>
@@ -1320,7 +1318,7 @@ describe('JoinFlow — inline decision-context help (#334)', () => {
 
     const link = screen.getByTestId('inline-help-doc-link');
     // Assert the full path — a filename-only match let a stale
-    // `cargo/client/docs/...` segment (which 404s) slip through (#328).
+    // `cargo/client/docs/...` segment (which 404s) slip through.
     expect(link.getAttribute('href')).toMatch(
       /\/client\/docs\/operator\/join-form-context\.md/,
     );

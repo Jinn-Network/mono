@@ -88,12 +88,12 @@ describe('HeroStats', () => {
     expect(screen.queryByTestId('restake-button')).toBeNull();
   });
 
-  // ── Status tile reason line (jinn-mono #328 fix #1) ───────────────────────
+  // ── Status tile reason line ───────────────────────────────────────────────
   //
-  // The STATUS hero tile used to render only the label ("ATTENTION") with no
-  // explanation. `statusReason` (deriveLiveNow().line) is now surfaced as a
-  // small subdued secondary line under the label so the operator sees *why*.
-  it('renders the status reason line under the STATUS label (jinn-mono #328 fix #1)', () => {
+  // The STATUS hero tile renders `statusReason` (deriveLiveNow().line) as a
+  // small subdued secondary line under the label so the operator sees *why*,
+  // rather than only the bare label ("ATTENTION").
+  it('renders the status reason line under the STATUS label', () => {
     render(<HeroStats {...defaultProps()} statusReason="1 task restoring" />);
     const reason = screen.getByTestId('overview-status-reason');
     expect(reason.textContent).toBe('1 task restoring');
@@ -101,7 +101,7 @@ describe('HeroStats', () => {
     expect(screen.getByTestId('overview-status-stat').contains(reason)).toBe(true);
   });
 
-  it('surfaces the attention reason so ATTENTION is never bare (jinn-mono #328 fix #1)', () => {
+  it('surfaces the attention reason so ATTENTION is never bare', () => {
     render(
       <HeroStats
         {...defaultProps()}
@@ -117,7 +117,7 @@ describe('HeroStats', () => {
     );
   });
 
-  it('renders the reason line in non-attention states too (jinn-mono #328 fix #1)', () => {
+  it('renders the reason line in non-attention states too', () => {
     render(
       <HeroStats
         {...defaultProps()}
@@ -132,7 +132,7 @@ describe('HeroStats', () => {
     );
   });
 
-  it('omits the reason line when statusReason is empty (jinn-mono #328 fix #1)', () => {
+  it('omits the reason line when statusReason is empty', () => {
     render(<HeroStats {...defaultProps()} statusReason="" />);
     expect(screen.queryByTestId('overview-status-reason')).toBeNull();
   });

@@ -59,10 +59,10 @@ describe('buildPredictionOperatorStatus — joinedSolverNets awareness (jinn-mon
   });
 });
 
-describe('buildPredictionOperatorStatus — gate on real prediction participation (issue #328, dogfood #9)', () => {
+describe('buildPredictionOperatorStatus — gate on real prediction participation', () => {
   it('returns the benign missing status when the operator joined ONLY a non-prediction SolverNet', async () => {
-    // Dogfood finding #9: an operator on SWE-rebench v2 (hermes-agent) must not
-    // see prediction diagnostics. Prediction is a deprecated SolverNet.
+    // An operator on SWE-rebench v2 (hermes-agent) must not see prediction
+    // diagnostics. Prediction is a deprecated SolverNet.
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
         solverNets: {},

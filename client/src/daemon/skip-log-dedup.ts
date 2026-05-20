@@ -19,7 +19,7 @@
  * due for re-check, so a task that becomes acceptable (operator enables the
  * harness, a slot frees up) is always picked up within the TTL.
  *
- * See jinn-mono-kzan (log dedup) and dogfood finding #14 (work-skip cache).
+ * See jinn-mono-kzan (log dedup).
  */
 
 /**

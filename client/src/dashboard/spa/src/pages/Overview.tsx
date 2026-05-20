@@ -263,7 +263,6 @@ export function OverviewPage(): JSX.Element {
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}
-        // #328 fix #1: the bare status label ("ATTENTION") gave no reason.
         // `liveNow.line` is the human-readable why — the first error
         // diagnostic's message, "N tasks restoring", "waiting for next task",
         // etc. — surfaced under the label in the STATUS tile.
@@ -316,9 +315,9 @@ export function OverviewPage(): JSX.Element {
               }
               return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
             },
-            // Issue #328 fix #6: the restart confirmation is transient — surface
-            // it, then fade after ~10s so it doesn't linger until the next
-            // action. The dashboard reconnects on its own when the daemon is back.
+            // Restart confirmation is transient — surface it, then fade after
+            // ~10s so it doesn't linger until the next action. The dashboard
+            // reconnects on its own when the daemon is back.
             { autoClearMs: 10_000 },
           )}
         onRestake={async (serviceId) => {
