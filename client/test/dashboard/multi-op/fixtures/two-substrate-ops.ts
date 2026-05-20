@@ -11,7 +11,10 @@ export const test = base.extend<TwoSubstrateOpsFixtures>({
   tier2: async ({}, use, testInfo) => {
     const handle = await setupTier2Scenario({
       scenarioId: testInfo.titlePath.join('-').replace(/[^a-zA-Z0-9-]/g, '_'),
-      portBase: 7754,
+      // T2.3 port range. Each Tier 2 scenario reserves a 10-port block to avoid
+      // collisions under parallel runs: tier-2-helpers tests 7740-7743,
+      // T2.1 7750-7751, T2.2 7760-7761, T2.3 7770-7771.
+      portBase: 7770,
     });
     try {
       await use(handle);
