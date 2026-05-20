@@ -940,3 +940,107 @@ describe('JoinFlow — cost surfacing + confirmation gate (Issue #331 P0)', () =
     expect(submit.disabled).toBe(true);
   });
 });
+
+describe('JoinFlow — inline decision-context help (#334)', () => {
+  it('renders a help trigger next to the Roles label', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    expect(screen.getByRole('button', { name: 'Roles help' })).toBeTruthy();
+  });
+
+  it('expands Roles help with solver-vs-evaluator trade-off copy', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Roles help' }));
+
+    const panels = screen.getAllByTestId('inline-help-panel');
+    expect(panels.length).toBeGreaterThan(0);
+    const rolesPanel = panels.find((p) =>
+      /spending role/i.test(p.textContent ?? ''),
+    );
+    expect(rolesPanel).toBeTruthy();
+    expect(rolesPanel?.textContent).toMatch(/evaluator/i);
+  });
+
+  it('shows Harness, Model and Plugins help triggers once the solver role is selected', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    expect(screen.getByRole('button', { name: 'Harness help' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Model help' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Plugins help' })).toBeTruthy();
+  });
+
+  it('Harness help explains harnesses need credentials for one, not both', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByRole('button', { name: 'Harness help' }));
+
+    const panels = screen.getAllByTestId('inline-help-panel');
+    const harnessPanel = panels.find((p) =>
+      /credentials for one harness/i.test(p.textContent ?? ''),
+    );
+    expect(harnessPanel).toBeTruthy();
+  });
+
+  it('Plugins help tells first-run operators they can skip the section', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByRole('button', { name: 'Plugins help' }));
+
+    const panels = screen.getAllByTestId('inline-help-panel');
+    const pluginsPanel = panels.find((p) =>
+      /do not need to touch/i.test(p.textContent ?? ''),
+    );
+    expect(pluginsPanel).toBeTruthy();
+  });
+
+  it('Evaluator-info help explains the empty model selector is by design', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Evaluator configuration help' }),
+    );
+
+    const panels = screen.getAllByTestId('inline-help-panel');
+    const evalPanel = panels.find((p) =>
+      /by design/i.test(p.textContent ?? ''),
+    );
+    expect(evalPanel).toBeTruthy();
+    expect(evalPanel?.textContent).toMatch(/same evaluation function/i);
+  });
+
+  it('inline help links out to the join-form-context doc', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Roles help' }));
+
+    const link = screen.getByTestId('inline-help-doc-link');
+    expect(link.getAttribute('href')).toMatch(/join-form-context\.md/);
+  });
+});
