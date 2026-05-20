@@ -551,7 +551,7 @@ describe('JoinFlow — per-harness readiness gate (#332)', () => {
 
   it('does not crash when a harness is absent from the readiness snapshot (404)', async () => {
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
-    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+    apiMock.harnessReadiness.mockImplementation(async (_name: string) => {
       const err = new Error('404 Not Found') as Error & { code?: string };
       err.code = 'harness_not_found';
       throw err;
