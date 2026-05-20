@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Router, Route, Switch, Redirect } from 'wouter';
 import { api } from './api/client.js';
 import type { BootstrapState } from './api/types.js';
+import { useConnectionState } from './api/connection-state.js';
 import { LoadingScreen } from './regions/LoadingScreen.js';
 import { Onboarding } from './regions/Onboarding.js';
 import { AppShell } from './shell/AppShell.js';
@@ -10,6 +11,7 @@ import { Header } from './shell/Header.js';
 import { TopTabs } from './shell/TopTabs.js';
 import { AgentRail } from './shell/AgentRail.js';
 import { RestartBanner } from './shell/RestartBanner.js';
+import { OfflineBanner } from './shell/OfflineBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
 import { OperatorPage } from './pages/Operator.js';
@@ -37,18 +39,37 @@ export default function App(): JSX.Element {
     refetchInterval: 1500,
   });
   const [restartPending, setRestartPending] = useState(false);
+  // #335: detect a dead daemon so the operating shell stops silently
+  // rendering stale state. The probe runs regardless of bootstrap phase.
+  const connection = useConnectionState();
 
+  // #335: the OfflineBanner must surface a dead daemon in *every* render
+  // branch, not just the operating shell. If the daemon dies while the
+  // operator is still bootstrapping, the loading/onboarding screens would
+  // otherwise sit stale with no offline signal — the exact "UI lies about
+  // daemon state" failure #335 names. Hoist the banner above all three
+  // branches so it is reachable regardless of bootstrap phase.
   if (isLoading || !data || data.mode === 'uninitialized') {
     const headline = !data
       ? 'Starting jinn'
       : data.mode === 'uninitialized'
         ? 'Setting up your wallet'
         : 'Loading';
-    return <LoadingScreen headline={headline} />;
+    return (
+      <>
+        <OfflineBanner connection={connection} />
+        <LoadingScreen headline={headline} />
+      </>
+    );
   }
 
   if (data.mode !== 'running') {
-    return <Onboarding />;
+    return (
+      <>
+        <OfflineBanner connection={connection} />
+        <Onboarding />
+      </>
+    );
   }
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
@@ -59,6 +80,7 @@ export default function App(): JSX.Element {
 
   return (
     <Router>
+      <OfflineBanner connection={connection} />
       <RestartBanner
         restartPending={restartPending}
         onRestart={async () => {
