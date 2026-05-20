@@ -58,4 +58,8 @@ describe('substrate-copy', () => {
   it('throws if requested op is not in gold', async () => {
     await expect(copyWorkspace({ ops: ['op-z'], substrateRoot: tmpRoot })).rejects.toThrow(/op-z/);
   });
+
+  it('throws if ops is empty', async () => {
+    await expect(copyWorkspace({ ops: [], substrateRoot: tmpRoot })).rejects.toThrow(/non-empty/);
+  });
 });

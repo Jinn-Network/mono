@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { copyTree, goldPath, workspacePath, generateRunId } from './substrate-paths';
+import { copyTree, goldPath, workspacePath, workspacesRoot, generateRunId } from './substrate-paths';
 
 export interface CopyWorkspaceOptions {
   ops: string[];                    // names of gold ops to include
@@ -16,6 +16,8 @@ export interface WorkspaceHandle {
 }
 
 export async function copyWorkspace(opts: CopyWorkspaceOptions): Promise<WorkspaceHandle> {
+  if (opts.ops.length === 0) throw new Error('copyWorkspace: ops must be non-empty');
+
   const runId = opts.runId ?? generateRunId();
   const opPaths: Record<string, string> = {};
 
@@ -37,7 +39,7 @@ export async function copyWorkspace(opts: CopyWorkspaceOptions): Promise<Workspa
     opPaths[opName] = dst;
   }
 
-  const workspaceRoot = path.dirname(opPaths[opts.ops[0]]);
+  const workspaceRoot = path.join(workspacesRoot(opts.substrateRoot), runId);
 
   // Tag the workspace with provenance
   await fs.writeFile(
