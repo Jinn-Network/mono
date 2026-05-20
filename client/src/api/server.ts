@@ -45,6 +45,7 @@ import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
+import { addCodexDoctorRoutes, type CodexDoctorConfig } from './codex-doctor-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
@@ -150,6 +151,11 @@ export interface ApiServerConfig {
    * Powers the dashboard's Hermes install precheck panel in the join flow.
    */
   hermesDoctor?: HermesDoctorConfig;
+  /**
+   * When set, mounts `GET /api/codex/doctor` under the UI token gate.
+   * Powers the dashboard's Codex install precheck panel in the join flow.
+   */
+  codexDoctor?: CodexDoctorConfig;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
@@ -469,6 +475,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.ui) {
     addHermesDoctorRoutes(app, config.hermesDoctor ?? {});
+    addCodexDoctorRoutes(app, config.codexDoctor ?? {});
   }
 
   if (config.ui) {

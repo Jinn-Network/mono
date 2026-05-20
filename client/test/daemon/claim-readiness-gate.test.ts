@@ -133,6 +133,43 @@ describe('Daemon — claim readiness gate (#330)', () => {
     await daemon.stop();
   });
 
+  it('does NOT claim for a Codex SolverNet when the codex harness reports not ready (#348)', async () => {
+    // Same-shape regression as the Hermes case above: a Codex-harness
+    // SolverNet whose `codex` CLI is missing must not have tasks claimed
+    // against it. The gate is harness-agnostic — it reads whatever reason
+    // the registry surfaces — so a codex-flavoured not-ready reason must
+    // block claims exactly as the hermes one does.
+    const adapter = new LocalAdapter();
+    const claimSpy = vi.spyOn(adapter, 'claimTask');
+
+    const registry = controlledRegistry(() => ({
+      ready: false,
+      reason: 'codex binary not installed',
+    }));
+
+    const daemon = new Daemon({
+      adapter,
+      runner: new SimpleRunner(async (d) => `done: ${d}`),
+      taskSources: [],
+      dbPath: ':memory:',
+      restorationEngine: minimalEngineConfig(),
+      harnessReadinessRegistry: registry,
+    });
+    await daemon.start();
+
+    await adapter.postTask({
+      id: 'task-codex-not-ready',
+      description: 'codex SolverNet — gate not ready',
+      solverNetManifestCid: 'bafkrei.codex-cid',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(registry.isReadyForClaim).toHaveBeenCalledWith('bafkrei.codex-cid');
+    expect(claimSpy).not.toHaveBeenCalled();
+
+    await daemon.stop();
+  });
+
   it('surfaces the not-ready reason via a warn log on first transition', async () => {
     const adapter = new LocalAdapter();
 
