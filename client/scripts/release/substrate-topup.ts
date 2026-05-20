@@ -1,7 +1,7 @@
 import { createPublicClient, http, parseAbi, type Address } from 'viem';
-import { baseSepolia } from 'viem/chains';
 import { loadManifest, type TopupResult } from './types';
 import { goldPath } from './substrate-paths';
+import { chainForNetwork } from './substrate-verify';
 
 const TARGET_ETH_WEI = 5_000_000_000_000_000n;       // 0.005 ETH
 const TARGET_USDC_UNITS = 1_000_000n;                // 1.00 USDC (6 decimals)
@@ -15,7 +15,10 @@ export interface TopupOptions {
 export async function checkSubstrateTopup(opName: string, opts: TopupOptions = {}): Promise<TopupResult> {
   const manifest = await loadManifest(goldPath(opName, opts.substrateRoot));
 
-  const client = createPublicClient({ chain: baseSepolia, transport: http(manifest.config.rpcUrl) });
+  const client = createPublicClient({
+    chain: chainForNetwork(manifest.network),
+    transport: http(manifest.config.rpcUrl),
+  });
   const needs: TopupResult['needs'] = [];
 
   // ETH on master EOA (for posting txs from substrate ops)

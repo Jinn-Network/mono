@@ -13,7 +13,7 @@ const OLAS_TOKEN_ABI = parseAbi([
 ]);
 
 /** Map a manifest network value to its viem chain definition. */
-function chainForNetwork(network: Manifest['network']): Chain {
+export function chainForNetwork(network: Manifest['network']): Chain {
   switch (network) {
     case 'base':
       return base;
