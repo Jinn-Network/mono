@@ -151,6 +151,15 @@ export const JinnConfigSchema = z.object({
    */
   hermesDoctorTimeoutMs: z.number().int().positive().default(30_000),
 
+  /** Path to the `codex` executable. Defaults to `codex` when unset. */
+  codexPath: z.string().optional(),
+
+  /**
+   * Timeout in ms for `codex --version` health-check runs.
+   * Default 30 000 ms. Env: JINN_CODEX_DOCTOR_TIMEOUT_MS.
+   */
+  codexDoctorTimeoutMs: z.number().int().positive().default(30_000),
+
   /**
    * How the operator runs the daemon. Set once by app-guided setup or the
    * legacy `jinn auth` compatibility command, then read by every command that
@@ -759,6 +768,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_HERMES_PROVIDER'])   merged.hermesProvider = env['JINN_HERMES_PROVIDER'];
   if (env['JINN_HERMES_DOCTOR_TIMEOUT_MS']) {
     merged.hermesDoctorTimeoutMs = parseInt(env['JINN_HERMES_DOCTOR_TIMEOUT_MS'], 10);
+  }
+  if (env['JINN_CODEX_PATH'])        merged.codexPath = env['JINN_CODEX_PATH'];
+  if (env['JINN_CODEX_DOCTOR_TIMEOUT_MS']) {
+    merged.codexDoctorTimeoutMs = parseInt(env['JINN_CODEX_DOCTOR_TIMEOUT_MS'], 10);
   }
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
