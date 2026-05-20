@@ -206,6 +206,106 @@ function buildSolvernetMetadataLog(
   } as unknown as Log;
 }
 
+// ── Plug-in publication ABI tuples + log builders (gh#290) ────────────────────
+
+const PLUGIN_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'pluginName', type: 'string' },
+  { name: 'pluginVersion', type: 'string' },
+  { name: 'pluginSha256', type: 'bytes32' },
+  { name: 'supports', type: 'string[]' },
+  { name: 'publishedAt', type: 'uint64' },
+] as const;
+
+const REVOCATION_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'revoked', type: 'bool' },
+  { name: 'reason', type: 'string' },
+] as const;
+
+/** Build a MetadataSet log for a `plugin:<cid>` v1 publish payload. */
+function buildPluginPublishLog(args: {
+  agentId: bigint;
+  pluginCid: string;
+  pluginName: string;
+  pluginVersion: string;
+  pluginSha256: Hex;
+  supports: string[];
+  publishedAt: bigint;
+  blockNumber: bigint;
+  transactionIndex?: number;
+  logIndex?: number;
+}): Log {
+  const metadataKey = `plugin:${args.pluginCid}`;
+  const valueHex = encodeAbiParameters(PLUGIN_PAYLOAD_TUPLE, [
+    1,
+    args.pluginName,
+    args.pluginVersion,
+    args.pluginSha256,
+    args.supports,
+    args.publishedAt,
+  ]);
+  const topics = encodeEventTopics({
+    abi: METADATA_ABI,
+    eventName: 'MetadataSet',
+    args: { agentId: args.agentId, indexedMetadataKey: metadataKey },
+  });
+  const data = encodeAbiParameters(
+    [
+      { name: 'metadataKey', type: 'string' },
+      { name: 'metadataValue', type: 'bytes' },
+    ],
+    [metadataKey, valueHex],
+  );
+  return {
+    address: IDENTITY_REGISTRY,
+    data,
+    topics,
+    blockNumber: args.blockNumber,
+    blockHash: `0x${'00'.repeat(32)}` as Hex,
+    transactionHash: `0x${'44'.repeat(32)}` as Hex,
+    transactionIndex: args.transactionIndex ?? 0,
+    logIndex: args.logIndex ?? 0,
+    removed: false,
+  } as unknown as Log;
+}
+
+/** Build a MetadataSet log for a `plugin:<cid>` v2 revocation payload. */
+function buildPluginRevokeLog(args: {
+  agentId: bigint;
+  pluginCid: string;
+  reason: string;
+  blockNumber: bigint;
+  transactionIndex?: number;
+  logIndex?: number;
+}): Log {
+  const metadataKey = `plugin:${args.pluginCid}`;
+  const valueHex = encodeAbiParameters(REVOCATION_PAYLOAD_TUPLE, [2, true, args.reason]);
+  const topics = encodeEventTopics({
+    abi: METADATA_ABI,
+    eventName: 'MetadataSet',
+    args: { agentId: args.agentId, indexedMetadataKey: metadataKey },
+  });
+  const data = encodeAbiParameters(
+    [
+      { name: 'metadataKey', type: 'string' },
+      { name: 'metadataValue', type: 'bytes' },
+    ],
+    [metadataKey, valueHex],
+  );
+  return {
+    address: IDENTITY_REGISTRY,
+    data,
+    topics,
+    blockNumber: args.blockNumber,
+    blockHash: `0x${'00'.repeat(32)}` as Hex,
+    transactionHash: `0x${'55'.repeat(32)}` as Hex,
+    transactionIndex: args.transactionIndex ?? 0,
+    logIndex: args.logIndex ?? 0,
+    removed: false,
+  } as unknown as Log;
+}
+
 // ── Mock client builder ───────────────────────────────────────────────────────
 
 /** Build a mock PublicClient with a queue of log batches per getLogs call. */
@@ -753,6 +853,283 @@ describe('OnchainDiscoveryAPI — cursorCache', () => {
 
     await api.getLifecycleStatus('unknown-cid');
     expect(cache.write).toHaveBeenCalledWith('solvernets', CURRENT_BLOCK);
+  });
+});
+
+describe('OnchainDiscoveryAPI — listPluginPublications (gh#290)', () => {
+  const SHA_1 = `0x${'aa'.repeat(32)}` as Hex;
+  const SHA_2 = `0x${'bb'.repeat(32)}` as Hex;
+
+  it('decodes a v1 publish MetadataSet log into a PluginPublication row', async () => {
+    const log = buildPluginPublishLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      pluginName: '@builder/swe-skill',
+      pluginVersion: '0.1.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_700_000n,
+      blockNumber: 5_000n,
+    });
+    const mockClient = buildMockClient([[log]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    const rows = await api.listPluginPublications();
+    expect(rows).toEqual([
+      {
+        artifactType: 'plugin',
+        builderAgentId: '42',
+        cid: 'bafyPluginOne',
+        name: '@builder/swe-skill',
+        version: '0.1.0',
+        supports: ['swe-rebench-v2.v1'],
+        publishedAt: 1_715_700_000,
+        pluginSha256: SHA_1,
+        revoked: false,
+      },
+    ]);
+  });
+
+  it('returns an empty array when no plugin: MetadataSet events are found', async () => {
+    const mockClient = buildMockClient([[]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    expect(await api.listPluginPublications()).toEqual([]);
+  });
+
+  it('ignores non-plugin MetadataSet keys (solvernet-manifest:)', async () => {
+    const solvernetLog = buildSolvernetMetadataLog(7n, 'bafyManifest', 'launched', 4_000n);
+    const mockClient = buildMockClient([[solvernetLog]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    expect(await api.listPluginPublications()).toEqual([]);
+  });
+
+  it('a v2 revocation flips revoked=true and carries the reason', async () => {
+    const publish = buildPluginPublishLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      pluginName: '@builder/swe-skill',
+      pluginVersion: '0.1.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_700_000n,
+      blockNumber: 5_000n,
+    });
+    const revoke = buildPluginRevokeLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      reason: 'cve-2026-xxxx',
+      blockNumber: 6_000n,
+    });
+    const mockClient = buildMockClient([[publish, revoke]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    const rows = await api.listPluginPublications();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ revoked: true, revokedReason: 'cve-2026-xxxx' });
+  });
+
+  it('excludes revoked rows when includeRevoked is false', async () => {
+    const publish = buildPluginPublishLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      pluginName: '@builder/swe-skill',
+      pluginVersion: '0.1.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_700_000n,
+      blockNumber: 5_000n,
+    });
+    const revoke = buildPluginRevokeLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      reason: 'mistake',
+      blockNumber: 6_000n,
+    });
+    const mockClient = buildMockClient([[publish, revoke]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    expect(await api.listPluginPublications({ includeRevoked: false })).toEqual([]);
+  });
+
+  it('a v1 republish after a revocation un-revokes the row', async () => {
+    const publish = buildPluginPublishLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      pluginName: '@builder/swe-skill',
+      pluginVersion: '0.1.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_700_000n,
+      blockNumber: 5_000n,
+    });
+    const revoke = buildPluginRevokeLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      reason: 'mistake',
+      blockNumber: 6_000n,
+    });
+    const republish = buildPluginPublishLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      pluginName: '@builder/swe-skill',
+      pluginVersion: '0.2.0',
+      pluginSha256: SHA_2,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_800_000n,
+      blockNumber: 7_000n,
+    });
+    const mockClient = buildMockClient([[publish, revoke, republish]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    const rows = await api.listPluginPublications();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ revoked: false, version: '0.2.0' });
+    expect(rows[0]?.revokedReason).toBeUndefined();
+  });
+
+  it('filters by builderAgentId and solverType', async () => {
+    const logs = (): Log[] => [
+      buildPluginPublishLog({
+        agentId: 1n,
+        pluginCid: 'bafyA',
+        pluginName: '@a/plugin',
+        pluginVersion: '1.0.0',
+        pluginSha256: SHA_1,
+        supports: ['swe-rebench-v2.v1'],
+        publishedAt: 100n,
+        blockNumber: 1_000n,
+      }),
+      buildPluginPublishLog({
+        agentId: 2n,
+        pluginCid: 'bafyB',
+        pluginName: '@b/plugin',
+        pluginVersion: '1.0.0',
+        pluginSha256: SHA_2,
+        supports: ['other-type.v1'],
+        publishedAt: 200n,
+        blockNumber: 2_000n,
+      }),
+    ];
+    const mkApi = () =>
+      createOnchainDiscoveryAPI({
+        chainId: CHAIN_ID,
+        identityRegistryAddress: IDENTITY_REGISTRY,
+        taskDiscoveryFromBlock: 0,
+        // Fresh mock client per call — buildMockClient's batch queue is consumed.
+        publicClient: buildMockClient([logs()]) as never,
+      });
+
+    const byBuilder = await mkApi().listPluginPublications({ builderAgentId: '2' });
+    expect(byBuilder.map((r) => r.cid)).toEqual(['bafyB']);
+
+    const bySolverType = await mkApi().listPluginPublications({
+      solverType: 'swe-rebench-v2.v1',
+    });
+    expect(bySolverType.map((r) => r.cid)).toEqual(['bafyA']);
+  });
+
+  it('ignores garbage payloads on a plugin: key without throwing', async () => {
+    // Hand-craft a MetadataSet log with a non-decodable value.
+    const metadataKey = 'plugin:bafyGarbage';
+    const topics = encodeEventTopics({
+      abi: METADATA_ABI,
+      eventName: 'MetadataSet',
+      args: { agentId: 9n, indexedMetadataKey: metadataKey },
+    });
+    const data = encodeAbiParameters(
+      [
+        { name: 'metadataKey', type: 'string' },
+        { name: 'metadataValue', type: 'bytes' },
+      ],
+      [metadataKey, '0xdeadbeef'],
+    );
+    const garbage = {
+      address: IDENTITY_REGISTRY,
+      data,
+      topics,
+      blockNumber: 3_000n,
+      blockHash: `0x${'00'.repeat(32)}` as Hex,
+      transactionHash: `0x${'66'.repeat(32)}` as Hex,
+      transactionIndex: 0,
+      logIndex: 0,
+      removed: false,
+    } as unknown as Log;
+    const mockClient = buildMockClient([[garbage]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    expect(await api.listPluginPublications()).toEqual([]);
+  });
+
+  it('listBuilderArtifacts delegates to listPluginPublications', async () => {
+    const log = buildPluginPublishLog({
+      agentId: 42n,
+      pluginCid: 'bafyPluginOne',
+      pluginName: '@builder/swe-skill',
+      pluginVersion: '0.1.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_700_000n,
+      blockNumber: 5_000n,
+    });
+    const mockClient = buildMockClient([[log]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    const artifacts = await api.listBuilderArtifacts({ builderAgentId: '42' });
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({ artifactType: 'plugin', cid: 'bafyPluginOne' });
+  });
+
+  it('throws DiscoveryUnavailableError when getLogs fails', async () => {
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => CURRENT_BLOCK),
+      getLogs: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+      simulateContract: vi.fn(),
+    };
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+    await expect(api.listPluginPublications()).rejects.toBeInstanceOf(DiscoveryUnavailableError);
   });
 });
 
