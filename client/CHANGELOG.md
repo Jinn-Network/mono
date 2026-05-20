@@ -19,6 +19,20 @@
   Claude Code as their SolverNet harness — that path is independent of the
   embedded chat surface and its WebSocket bridge.
 
+### Operator app
+
+- **Plug-in builder UI surfaces hidden by default (issue #327).** The `/build`
+  route and the Build top-tab no longer appear in the operator app. Hitting
+  `/build` by direct URL redirects to `/overview`. The plug-in substrate stays
+  fully live — `jinn solver-plugins publish` / `revoke`, the Ponder indexer,
+  the Discovery API endpoints, and the `client/docs/build/` tree are
+  unchanged, so direct-CLI builders following the docs are not blocked. The
+  surfaces are gated to keep the operator-app first-run UX focused; they will
+  be re-promoted once that UX is solid and plug-in indexing is end-to-end
+  populated. Set `JINN_ENABLE_PLUGIN_BUILDER_UI=1` on the daemon to re-enable
+  the full builder surface for development and design work — the daemon injects
+  the flag into the SPA via `window.__JINN_FEATURES__`.
+
 ### SWE-rebench v2 admission
 
 - **Admission semantics bumped from `'2'` → `'3'`.** Operators running the

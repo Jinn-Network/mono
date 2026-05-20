@@ -21,6 +21,7 @@ import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 import { CapturesTab } from './captures/CapturesTab.js';
 import { BuildPage } from './pages/Build.js';
+import { getFeatures } from './lib/features.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -78,6 +79,12 @@ export default function App(): JSX.Element {
   // the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
   const embeddedAgentEnabled = data.embeddedAgentEnabled === true;
 
+  // Issue #327: the builder surfaces (/build route + Build top-tab) are hidden
+  // until the operator-app first-run UX is solid. The plug-in substrate stays
+  // live for direct-CLI builders; only the operator-app promotion is gated.
+  // Set JINN_ENABLE_PLUGIN_BUILDER_UI=1 on the daemon to re-enable.
+  const pluginBuilderUi = getFeatures().pluginBuilderUi;
+
   return (
     <Router>
       <OfflineBanner connection={connection} />
@@ -108,7 +115,9 @@ export default function App(): JSX.Element {
             <LauncherLaunchedPage />
           </Route>
           <Route path="/launcher"><LauncherPage /></Route>
-          <Route path="/build"><BuildPage /></Route>
+          <Route path="/build">
+            {pluginBuilderUi ? <BuildPage /> : <Redirect to="/overview" />}
+          </Route>
           <Route><Redirect to="/overview" /></Route>
         </Switch>
       </AppShell>

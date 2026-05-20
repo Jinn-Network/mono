@@ -226,9 +226,54 @@ function resolveDashboardDir(): string | null {
 const dashboardDir = resolveDashboardDir() ?? join(__dirname, '..', 'dashboard');
 const assetsDir = join(dashboardDir, 'assets');
 
+/**
+ * Resolve the operator-app feature flags from the daemon environment.
+ *
+ * Each flag is derived from a `JINN_ENABLE_*` env var ("1" enables). The SPA
+ * reads the injected `window.__JINN_FEATURES__` via `lib/features.ts`; absent
+ * or partial injection is treated as all-off there, so this can stay a flat
+ * boolean record.
+ *
+ * Issue #327: `pluginBuilderUi` gates the operator-app builder surfaces
+ * (`/build` route + Build top-tab). Default-off until the first-run UX is
+ * solid; the plug-in substrate (CLI verbs, indexer, Discovery API, docs)
+ * stays live regardless.
+ */
+function resolveFeatureFlags(): Record<string, boolean> {
+  return {
+    pluginBuilderUi: process.env['JINN_ENABLE_PLUGIN_BUILDER_UI'] === '1',
+  };
+}
+
+/**
+ * Inject the feature-flag bootstrap script into the SPA `index.html`.
+ *
+ * The script sets `window.__JINN_FEATURES__` before the SPA module loads, so
+ * the first render already sees the flags. Inserted immediately before the
+ * SPA's `<script type="module">` tag; if that tag is missing the script is
+ * appended before `</head>` (or `</body>`) so the SPA still gets it.
+ *
+ * Exported for unit testing — the runtime call lives in `readSpaIndex`.
+ */
+export function injectFeatureFlags(html: string, features: Record<string, boolean>): string {
+  const script = `<script>window.__JINN_FEATURES__=${JSON.stringify(features)};</script>`;
+  const moduleTagMatch = html.match(/<script\b[^>]*type=["']module["'][^>]*>/i);
+  if (moduleTagMatch?.index !== undefined) {
+    return html.slice(0, moduleTagMatch.index) + script + html.slice(moduleTagMatch.index);
+  }
+  if (html.includes('</head>')) {
+    return html.replace('</head>', `${script}</head>`);
+  }
+  if (html.includes('</body>')) {
+    return html.replace('</body>', `${script}</body>`);
+  }
+  return html + script;
+}
+
 function readSpaIndex(): string {
   try {
-    return readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
+    const html = readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
+    return injectFeatureFlags(html, resolveFeatureFlags());
   } catch {
     return [
       '<!doctype html><html><body style="font-family:system-ui;padding:2rem;max-width:48rem;line-height:1.5">',
