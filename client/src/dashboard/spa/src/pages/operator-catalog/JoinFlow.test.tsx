@@ -1269,6 +1269,10 @@ describe('JoinFlow — inline decision-context help (#334)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Roles help' }));
 
     const link = screen.getByTestId('inline-help-doc-link');
-    expect(link.getAttribute('href')).toMatch(/join-form-context\.md/);
+    // Assert the full path — a filename-only match let a stale
+    // `cargo/client/docs/...` segment (which 404s) slip through (#328).
+    expect(link.getAttribute('href')).toMatch(
+      /\/client\/docs\/operator\/join-form-context\.md/,
+    );
   });
 });

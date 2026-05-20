@@ -6,7 +6,7 @@ import quickstartMd from '../../../../../../docs/build/quickstart.md?raw';
 import { PanelCard } from '../../components/PanelCard.js';
 
 const QUICKSTART_URL =
-  'https://github.com/Jinn-Network/mono/blob/main/cargo/client/docs/build/quickstart.md';
+  'https://github.com/Jinn-Network/mono/blob/main/client/docs/build/quickstart.md';
 
 export function IntroCard(): JSX.Element {
   return (
