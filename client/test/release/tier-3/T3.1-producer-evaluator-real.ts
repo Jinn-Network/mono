@@ -1,12 +1,12 @@
 import * as fs from 'node:fs/promises';
-import { setupTier3Scenario, type Tier3Handle } from './tier-3-helpers';
-import { classifyFailure, type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types';
+import { setupTier3Scenario, type Tier3Handle } from './tier-3-helpers.js';
+import { classifyFailure, type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types.js';
 import {
   KNOWN_INSTANCE_ID,
   KNOWN_REPO,
   KNOWN_COMMIT,
   KNOWN_EXPECTED_VERDICT,
-} from '../tier-2/fixtures/known-instance';
+} from '../tier-2/fixtures/known-instance.js';
 
 const COST_CAP_USD = 0.25;
 const WALL_CLOCK_BUDGET_MS = 10 * 60 * 1000;

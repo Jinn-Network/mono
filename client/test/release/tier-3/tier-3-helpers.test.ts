@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning } from './tier-3-helpers';
+import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning } from './tier-3-helpers.js';
 
 describe('isDailyDriverRunning', () => {
   it('returns false when nothing is on the daily-driver ports', async () => {

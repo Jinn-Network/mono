@@ -1,6 +1,6 @@
 import * as net from 'node:net';
-import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon';
-import { goldPath } from '../../../scripts/release/substrate-paths';
+import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon.js';
+import { goldPath } from '../../../scripts/release/substrate-paths.js';
 
 const DAILY_DRIVER_PORTS = [7331, 7332];     // ~/.jinn-client and ~/jinn-canary-test default ports
 

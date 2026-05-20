@@ -8,7 +8,7 @@ import {
   appendAuditTrailEntry,
   type HandoffDocInput,
   type ReadinessRecommendation,
-} from './release-readiness';
+} from './release-readiness.js';
 
 describe('release-readiness scaffolding', () => {
   let tmpRoot: string;

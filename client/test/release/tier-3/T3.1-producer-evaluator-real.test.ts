@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { runT31ProducerEvaluatorReal } from './T3.1-producer-evaluator-real';
+import { runT31ProducerEvaluatorReal } from './T3.1-producer-evaluator-real.js';
 
 describe('T3.1 producer-evaluator-real', () => {
   // Gated: this test spends real testnet ETH + real OpenRouter $. Only runs when

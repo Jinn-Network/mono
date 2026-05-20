@@ -1,8 +1,8 @@
 // client/scripts/release/run-tier-3.ts
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { runT31ProducerEvaluatorReal } from '../../test/release/tier-3/T3.1-producer-evaluator-real';
-import { type ScenarioVerdict, ScenarioVerdictSchema } from './scenario-types';
+import { runT31ProducerEvaluatorReal } from '../../test/release/tier-3/T3.1-producer-evaluator-real.js';
+import { type ScenarioVerdict, ScenarioVerdictSchema } from './scenario-types.js';
 
 interface RunOptions {
   outputDir?: string;

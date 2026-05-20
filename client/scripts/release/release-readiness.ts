@@ -1,7 +1,7 @@
 // client/scripts/release/release-readiness.ts
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { ScenarioVerdict } from './scenario-types';
+import type { ScenarioVerdict } from './scenario-types.js';
 
 export type ReadinessRecommendation = 'SHIP' | 'DEFER' | 'BLOCK';
 
