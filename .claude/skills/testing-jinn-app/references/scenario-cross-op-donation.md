@@ -8,7 +8,7 @@
 
 op-a produces a corpus artifact, indexer picks it up, op-b queries Discovery API for the artifact, op-b pays x402 USDC, op-b retrieves the artifact, signature + payload validate end-to-end.
 
-This is the gate that should have caught the #310 silent breakage (donation-consumption gate was passing because Op A wasn't producing, so consumption couldn't verify).
+This is the gate that should have caught the #310 silent breakage (donation-consumption gate was passing because op-a wasn't producing, so consumption couldn't verify).
 
 ## Implementation location
 

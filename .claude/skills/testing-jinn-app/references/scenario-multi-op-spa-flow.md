@@ -129,7 +129,7 @@ test('op-a launches → op-b sees → op-b joins → op-a sees join', async ({ b
 
 | Failure | Class | Triage |
 |---|---|---|
-| Wizard wizard step doesn't advance | real-bug | BLOCKING — wizard UI regression |
+| Wizard step doesn't advance | real-bug | BLOCKING — wizard UI regression |
 | Launch state machine times out before `launched` | could be: pinning hang, broadcast fail, indexer fail | inspect launch-progress record; flake on first |
 | op-b's catalog doesn't show within 30s | indexer slow OR catalog query broken | check Discovery API directly; if working, SPA-side bug |
 | op-b's join doesn't write config | real-bug | BLOCKING — operator.join broken |
