@@ -19,8 +19,11 @@ describe('substrate-reap', () => {
   async function seedWorkspace(name: string, ageDays: number): Promise<void> {
     const wsDir = path.join(tmpRoot, 'workspaces', name);
     await fs.mkdir(wsDir, { recursive: true });
-    await fs.writeFile(path.join(wsDir, '.created-by'), JSON.stringify({ runId: name }));
     const ageMs = Date.now() - ageDays * 24 * 60 * 60 * 1000;
+    await fs.writeFile(
+      path.join(wsDir, '.created-by'),
+      JSON.stringify({ runId: name, createdAt: new Date(ageMs).toISOString() }),
+    );
     const time = new Date(ageMs);
     await fs.utimes(wsDir, time, time);
   }
@@ -56,5 +59,33 @@ describe('substrate-reap', () => {
     await fs.writeFile(path.join(tmpRoot, 'workspaces', 'a-file.txt'), 'not a dir');
     const result = await reapWorkspaces({ substrateRoot: tmpRoot, maxAgeDays: 7 });
     expect(result.reaped).toEqual([]);
+  });
+
+  it('uses .created-by createdAt over a fresher dir mtime', async () => {
+    // An old workspace whose dir mtime was just bumped (e.g. a nested
+    // write) must still be reaped based on its recorded createdAt.
+    const wsDir = path.join(tmpRoot, 'workspaces', 'old-but-touched');
+    await fs.mkdir(wsDir, { recursive: true });
+    const oldMs = Date.now() - 10 * 24 * 60 * 60 * 1000;
+    await fs.writeFile(
+      path.join(wsDir, '.created-by'),
+      JSON.stringify({ runId: 'old-but-touched', createdAt: new Date(oldMs).toISOString() }),
+    );
+    const now = new Date();
+    await fs.utimes(wsDir, now, now);
+
+    const result = await reapWorkspaces({ substrateRoot: tmpRoot, maxAgeDays: 7 });
+    expect(result.reaped).toEqual(['old-but-touched']);
+  });
+
+  it('falls back to dir mtime when .created-by is absent', async () => {
+    const wsDir = path.join(tmpRoot, 'workspaces', 'no-provenance');
+    await fs.mkdir(wsDir, { recursive: true });
+    const oldMs = Date.now() - 10 * 24 * 60 * 60 * 1000;
+    const time = new Date(oldMs);
+    await fs.utimes(wsDir, time, time);
+
+    const result = await reapWorkspaces({ substrateRoot: tmpRoot, maxAgeDays: 7 });
+    expect(result.reaped).toEqual(['no-provenance']);
   });
 });

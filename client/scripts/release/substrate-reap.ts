@@ -34,8 +34,8 @@ export async function reapWorkspaces(opts: ReapOptions = {}): Promise<ReapResult
   for (const ent of entries) {
     if (!ent.isDirectory()) continue;
     const fullPath = path.join(root, ent.name);
-    const stat = await fs.stat(fullPath);
-    if (stat.mtimeMs < cutoffMs) {
+    const createdMs = await workspaceCreatedMs(fullPath);
+    if (createdMs < cutoffMs) {
       await fs.rm(fullPath, { recursive: true, force: true });
       reaped.push(ent.name);
     } else {
@@ -44,6 +44,34 @@ export async function reapWorkspaces(opts: ReapOptions = {}): Promise<ReapResult
   }
 
   return { reaped, kept };
+}
+
+/**
+ * Resolve a workspace's creation time (ms epoch) for the age check.
+ *
+ * Prefer the `createdAt` recorded in the `.created-by` provenance file
+ * written at workspace creation: a directory's own mtime does not update
+ * when files in nested subdirectories change (notably on macOS), so a
+ * live workspace can otherwise look stale and be reaped mid-run.
+ *
+ * Fall back to the directory mtime, with a warning, when `.created-by`
+ * is missing or unparseable.
+ */
+async function workspaceCreatedMs(workspaceDir: string): Promise<number> {
+  const createdByPath = path.join(workspaceDir, '.created-by');
+  try {
+    const raw = await fs.readFile(createdByPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { createdAt?: unknown };
+    if (typeof parsed.createdAt === 'string') {
+      const ms = Date.parse(parsed.createdAt);
+      if (!Number.isNaN(ms)) return ms;
+    }
+    console.error(`reap: ${createdByPath} has no usable createdAt; falling back to dir mtime`);
+  } catch {
+    console.error(`reap: ${createdByPath} missing or unreadable; falling back to dir mtime`);
+  }
+  const stat = await fs.stat(workspaceDir);
+  return stat.mtimeMs;
 }
 
 async function cliMain(): Promise<void> {
