@@ -53,8 +53,9 @@ Build the gate as **Option B-adapted, a soft convention** (project owner's call)
    best-effort `gh pr comment` step records the publish for the audit trail.
 3. `npm-publish.yml` — no change. This is a soft gate; nothing mechanically
    blocks publish.
-4. Docs — `docs/engineering/handbook.md` §Cadence and `docs/runbooks/hotfix.md`
-   document the release-review PR and the hotfix carve-out.
+4. Docs — `docs/runbooks/hotfix.md` documents the hotfix carve-out (ships in
+   this PR). `docs/engineering/handbook.md` §Cadence gains a release-review-gate
+   paragraph in a separate Discussion-gated docs PR (canonical-doc change).
 
 **Hotfixes do not open a release-review PR.** They bypass
 `release-notes-scaffold.yml` entirely; their holistic-review surface is the
@@ -76,8 +77,15 @@ hotfix PR-to-`main` itself.
   `promote-main.yml` fast-forward mechanics untouched.
 - **Idempotency is free.** GitHub permits at most one open PR per base/head
   pair and auto-refreshes its diff as `next` advances. "Create if absent, else
-  no-op/refresh" is the entire contract; there is no per-cut PR lifecycle to
-  manage. The PR closes itself when `promote-main.yml` fast-forwards `main`.
+  no-op/refresh" is the entire contract. On the happy path the PR closes itself
+  when `promote-main.yml` fast-forwards `main`, so there is no per-cut PR
+  lifecycle to manage. The one off-happy-path case is an **abandoned draft**: if
+  a Monday draft is never published, the release-review PR stays open and the
+  next Monday's scaffold finds it and refreshes (re-labels) its title/body to
+  the new window rather than opening a second PR. That adopt-and-relabel
+  behaviour is the accepted outcome — it falls out of the "create if absent,
+  else refresh" contract for free and keeps exactly one standing PR regardless
+  of how many drafts were skipped.
 - **Option C (release-draft reviewers) was rejected** — GitHub Releases have no
   reviewer-approval primitive; a draft's only gate is who can click Publish.
   There is nothing to build against.
@@ -89,9 +97,15 @@ Implemented in this change:
 - `.github/workflows/release-notes-scaffold.yml` — `pull-requests: write`
   permission; new "Open or update the release-review PR" step after the draft
   step.
-- `.github/workflows/promote-main.yml` — `pull-requests: write` permission;
-  trailing best-effort audit-comment step (no change to FF mechanics).
-- `docs/engineering/handbook.md`, `docs/runbooks/hotfix.md` — documentation.
+- `.github/workflows/promote-main.yml` — `pull-requests: write` permission; a
+  step that captures the open release-review PR number before the fast-forward,
+  and a trailing best-effort audit-comment step that comments on that exact
+  captured PR (no change to FF mechanics).
+- `docs/runbooks/hotfix.md` — documents the hotfix carve-out.
+- `docs/engineering/handbook.md` §Cadence — the release-review-gate paragraph
+  ships as a **separate docs PR**. The handbook is a canonical doc, so per the
+  `docs` work-shape SOP its edit needs a Discussion + CODEOWNERS approval and
+  cannot ride this `chore` PR.
 
 A GitHub Actions workflow cannot be fully e2e-tested locally. The YAML parses
 (`python3 -c "import yaml; ..."`) and lints (`actionlint`); the `gh pr`

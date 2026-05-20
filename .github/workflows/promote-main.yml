@@ -91,6 +91,29 @@ jobs:
             exit 1
           fi
 
+      - name: Capture release-review PR before it auto-closes (issue #307)
+        id: review_pr
+        if: steps.skip_check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Capture the open release-review PR's number BEFORE the fast-forward below
+          # closes it. The release-review PR is the single open base:main head:next PR
+          # opened by release-notes-scaffold.yml — GitHub permits at most one open PR per
+          # base/head pair, so `--state open` is unambiguous (no number-sorting heuristic).
+          # Capturing it here, while it is still open, makes the audit comment correct-by-
+          # construction: it cannot mis-target a manual next->main PR or a stale closed one.
+          # Best-effort: a missing PR (e.g. a manual cut that skipped the scaffold) is fine.
+          PR="$(gh pr list --repo "${{ github.repository }}" \
+            --base main --head next --state open \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+          if [ -n "$PR" ]; then
+            echo "::notice::release-review PR #$PR captured for post-promotion audit comment"
+          else
+            echo "::notice::no open release-review PR found to audit-comment (non-fatal)"
+          fi
+
       - name: Fast-forward main
         if: steps.skip_check.outputs.skip != 'true'
         env:
@@ -104,22 +127,16 @@ jobs:
           echo "::notice::main advanced to $RELEASE_SHA (release $RELEASE_TAG)"
 
       - name: Audit-comment the auto-closed release-review PR (issue #307)
-        if: steps.skip_check.outputs.skip != 'true'
+        if: steps.skip_check.outputs.skip != 'true' && steps.review_pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+          REVIEW_PR: ${{ steps.review_pr.outputs.number }}
         run: |
-          # Audit trail only. The fast-forward above auto-closes the standing release-review
-          # PR (base:main head:next) as merged; this records which release published it.
-          # Best-effort: a missing PR (e.g. a manual cut that skipped the scaffold) is fine.
-          PR="$(gh pr list --repo "${{ github.repository }}" \
-            --base main --head next --state all \
-            --json number,state --jq 'sort_by(.number) | last | .number // empty' 2>/dev/null || true)"
-          if [ -n "$PR" ]; then
-            gh pr comment "$PR" --repo "${{ github.repository }}" \
-              --body "Release \`${RELEASE_TAG}\` published; \`main\` fast-forwarded to \`${RELEASE_SHA}\`. This release-review PR closed as merged by the promotion. (issue #307)" \
-              || echo "::notice::could not comment on release-review PR #$PR (non-fatal)"
-          else
-            echo "::notice::no release-review PR found to audit-comment (non-fatal)"
-          fi
+          # Audit trail only. The fast-forward above auto-closed the exact release-review PR
+          # captured in the previous step (base:main head:next) as merged; this records
+          # which release published it. Best-effort: a comment failure is non-fatal.
+          gh pr comment "$REVIEW_PR" --repo "${{ github.repository }}" \
+            --body "Release \`${RELEASE_TAG}\` published; \`main\` fast-forwarded to \`${RELEASE_SHA}\`. This release-review PR closed as merged by the promotion. (issue #307)" \
+            || echo "::notice::could not comment on release-review PR #$REVIEW_PR (non-fatal)"

@@ -250,9 +250,11 @@ jobs:
               --target next
             echo "Created new draft: $TAG"
           fi
-          # The draft is unpublished, so `gh release view --json url` returns the public
-          # /releases/tag/<tag> URL that resolves once published. Fall back to the releases
-          # index if the lookup fails for any reason.
+          # `gh release view --json url` returns the canonical /releases/tag/<tag> URL.
+          # While the release is still a draft this URL 404s for anyone but a repo
+          # collaborator (the git tag does not exist yet) — it resolves publicly only
+          # once Captain publishes. The release-review PR body links it as the eventual
+          # destination. Fall back to the releases index if the lookup fails.
           RELEASE_URL="$(gh release view "$TAG" --json url --jq '.url' 2>/dev/null \
             || echo "https://github.com/${{ github.repository }}/releases")"
           {
@@ -276,7 +278,8 @@ jobs:
           #
           # This step opens-or-updates a single standing PR with base:main head:next. GitHub
           # keeps exactly one open PR per base/head pair and auto-refreshes its diff as `next`
-          # advances, so the idempotency contract is: create only if absent, otherwise no-op.
+          # advances, so the idempotency contract is: create only if absent, otherwise
+          # refresh the existing PR's title + body.
           #
           # Soft convention (DR-2026-05-20): nothing mechanically blocks publish. The value is
           # the whole-window diff existing and being looked at before Captain clicks Publish.
@@ -324,8 +327,19 @@ jobs:
               --title "$TITLE" --body-file "$BODY_FILE"
             echo "::notice::Updated existing release-review PR #$EXISTING_PR (base:main head:next)"
           else
-            gh pr create --repo "${{ github.repository }}" \
-              --base main --head next \
-              --title "$TITLE" --body-file "$BODY_FILE"
-            echo "::notice::Opened release-review PR (base:main head:next) for v$SUGGESTED"
+            # `gh pr create` errors if there are no commits between base and head. This
+            # happens right after a promotion (main == next) before any new work merges.
+            # Skip cleanly with a notice rather than failing the scaffold run. Fetch both
+            # refs first — checkout only materialises the workflow's own branch.
+            git fetch --quiet origin main next 2>/dev/null || true
+            AHEAD="$(git rev-list --count origin/main..origin/next 2>/dev/null || echo 0)"
+            if [ "${AHEAD:-0}" -eq 0 ]; then
+              echo "::notice::next has no commits ahead of main — skipping release-review PR creation (nothing to review yet)"
+            else
+              gh pr create --repo "${{ github.repository }}" \
+                --base main --head next \
+                --title "$TITLE" --body-file "$BODY_FILE" \
+                || echo "::notice::could not open release-review PR (base:main head:next) — non-fatal"
+              echo "::notice::Opened release-review PR (base:main head:next) for v$SUGGESTED"
+            fi
           fi
