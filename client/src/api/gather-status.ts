@@ -11,6 +11,8 @@ type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
+import type { CredentialId } from '../spend/credential.js';
+import { isOverSpendCap } from '../daemon/spend-cap-gate.js';
 import { FleetStateStore } from '../earning/store.js';
 import {
   DEFAULT_TESTNET_ARTIFACTS,
@@ -232,7 +234,7 @@ export interface StatusGatherConfig {
   config?: JinnConfig;
   configPath?: string;
   /** Per-credential daily caps; when present, /v1/status carries a `spend` block. */
-  spendCaps?: Record<string, number>;
+  spendCaps?: Record<CredentialId, number>;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -1271,7 +1273,7 @@ export async function gatherStatusForApi(
     body.spend = {
       credentials: Object.entries(caps).map(([credentialId, capUsd]) => {
         const spentTodayUsd = store.spentTodayMicros(credentialId, now) / 1_000_000;
-        return { credentialId, capUsd, spentTodayUsd, paused: spentTodayUsd >= capUsd, resetsAt };
+        return { credentialId, capUsd, spentTodayUsd, paused: isOverSpendCap(spentTodayUsd, capUsd), resetsAt };
       }),
     };
   }

@@ -10,6 +10,15 @@ import type { GateLogger } from './gate-logger.js';
 const lastPausedByCredential = new Map<string, boolean>();
 
 /**
+ * Whether today's spend has reached or exceeded the cap. The single source of
+ * the cap predicate — shared by the gate and the `/v1/status` spend block so
+ * the two surfaces cannot disagree.
+ */
+export function isOverSpendCap(spentTodayUsd: number, capUsd: number): boolean {
+  return spentTodayUsd >= capUsd;
+}
+
+/**
  * Decide whether a claim may proceed for a credential given today's spend.
  * Mirrors `gateClaimByReadiness`. `newlyPaused` is true only on the first skip
  * of an under->over transition — the daemon emits one event on that edge.
@@ -20,7 +29,7 @@ export function gateClaimBySpendCap(args: {
   spentTodayUsd: number;
   logger: GateLogger;
 }): { proceed: true } | { proceed: false; reason: string; newlyPaused: boolean } {
-  const over = args.spentTodayUsd >= args.capUsd;
+  const over = isOverSpendCap(args.spentTodayUsd, args.capUsd);
   const wasPaused = lastPausedByCredential.get(args.credentialId) ?? false;
 
   if (!over) {

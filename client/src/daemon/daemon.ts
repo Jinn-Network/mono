@@ -520,15 +520,17 @@ export class Daemon {
       // is re-checked immediately rather than fast-skipped.
       this.skipLogDeduper.forget(taskAnnouncement.taskId);
 
+      const manifestCid = taskAnnouncement.task.solverNetManifestCid;
+      const gateLogger = { warn: (msg: string) => console.warn(msg), info: (msg: string) => console.log(msg) };
+
       // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
       // skip this task without blocking other loops. Logs once per ready↔not-ready transition.
       if (this.config.harnessReadinessRegistry) {
-        const manifestCid = taskAnnouncement.task.solverNetManifestCid;
         if (manifestCid) {
           const gate = gateClaimByReadiness({
             manifestCid,
             registry: this.config.harnessReadinessRegistry,
-            logger: { warn: (msg) => console.warn(msg), info: (msg) => console.log(msg) },
+            logger: gateLogger,
           });
           if (!gate.proceed) continue;
         }
@@ -536,10 +538,9 @@ export class Daemon {
 
       // Spend-cap gate: skip claims for a credential that has hit its daily budget.
       if (this.config.spendCap) {
-        const spendManifestCid = taskAnnouncement.task.solverNetManifestCid;
         // No manifest CID -> no credential to attribute -> task is not spend-gated.
-        const credentialId = spendManifestCid
-          ? this.config.spendCap.manifestCredentials[spendManifestCid]
+        const credentialId = manifestCid
+          ? this.config.spendCap.manifestCredentials[manifestCid]
           : undefined;
         const capUsd = credentialId ? this.config.spendCap.caps[credentialId] : undefined;
         if (credentialId && capUsd != null) {
@@ -548,7 +549,7 @@ export class Daemon {
             credentialId,
             capUsd,
             spentTodayUsd,
-            logger: { warn: (m) => console.warn(m), info: (m) => console.log(m) },
+            logger: gateLogger,
           });
           if (!spendGate.proceed) {
             if (spendGate.newlyPaused) {

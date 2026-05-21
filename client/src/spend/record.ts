@@ -16,9 +16,10 @@ export function recordTaskCost(
     workingDir: string;
     solverType: string | null;
   },
+  env: NodeJS.ProcessEnv = process.env,
 ): void {
   try {
-    const credentialId = resolveCredentialId(args.harness, process.env);
+    const credentialId = resolveCredentialId(args.harness, env);
     if (!credentialId) return;
     const usage = harvestHarnessUsage(args.harness, args.workingDir, args.model);
     store.recordActivityEvent({

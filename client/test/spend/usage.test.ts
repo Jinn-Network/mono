@@ -2,7 +2,12 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseClaudeCodeUsage, parseCodexUsage, harvestHarnessUsage } from '../../src/spend/usage.js';
+import {
+  parseClaudeCodeUsage,
+  parseCodexUsage,
+  harvestHarnessUsage,
+  UNKNOWN_MODEL_FALLBACK_USD,
+} from '../../src/spend/usage.js';
 
 describe('parseClaudeCodeUsage', () => {
   it('extracts total_cost_usd from the result line', () => {
@@ -68,6 +73,6 @@ describe('harvestHarnessUsage', () => {
     const dir = mkdtempSync(join(tmpdir(), 'spend-unk-'));
     const usage = harvestHarnessUsage('hermes-agent', dir, undefined);
     expect(usage.estimated).toBe(true);
-    expect(usage.costUsd).toBe(1.0);
+    expect(usage.costUsd).toBe(UNKNOWN_MODEL_FALLBACK_USD);
   });
 });
