@@ -509,6 +509,22 @@ export function OverviewPage(): JSX.Element {
           daemonStatus={daemonStatus}
           daemonStateMessage={daemonStateMessage}
           rpcStatus={rpcStatus}
+          onStop={async () => {
+            const res = await api.stopDaemon();
+            if (!res.ok) {
+              throw new Error('Stop request failed.');
+            }
+          }}
+          onRestart={async () => {
+            // Pass `forceRespawn: true` so the daemon respawns even when
+            // launched with `--no-ui` (`JINN_NO_UI=1`) — without it the
+            // operator clicks Restart in headless mode and the daemon just
+            // stops. See client/src/restart-daemon.ts.
+            const res = await api.restartDaemon({ forceRespawn: true });
+            if (!res.ok) {
+              throw new Error('Restart request failed.');
+            }
+          }}
         />
       </aside>
     </div>

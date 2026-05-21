@@ -1,14 +1,14 @@
+import { useState } from 'react';
 import { useLocation } from 'wouter';
 
 /**
  * Node Health card — the right-rail summary of this operator's daemon and
  * RPC connection. Renders two rows:
  *
- *   1. Daemon — running/stopped, with a state-message slot. Stop + Start
- *      buttons are rendered as forward-looking controls; until the daemon
- *      ships POST /v1/daemon/stop and POST /v1/daemon/start, both are
- *      disabled with a tooltip pointing the operator at the terminal. The
- *      shape is what we want; the wiring catches up.
+ *   1. Daemon — running/stopped, with a state-message slot. Two actions:
+ *      Stop (calls POST /api/admin/stop, daemon exits and stays down) and
+ *      Restart (calls POST /api/admin/restart with `forceRespawn: true` so
+ *      the daemon respawns even in `--no-ui` mode).
  *
  *   2. RPC — healthy/unreachable, moved out of the page header so health
  *      state lives next to the action that resolves it. The Manage RPC
@@ -17,8 +17,7 @@ import { useLocation } from 'wouter';
  * Eviction and re-stake recovery used to live inline in the old Status
  * tile. They now belong to the `service_evicted` notification (severity
  * blocking) and to a dedicated banner on /overview when applicable —
- * Node Health stays focused on the two health rows the operator asked
- * for.
+ * Node Health stays focused on the two health rows.
  */
 export type DaemonStatus = 'running' | 'stopped';
 export type RpcStatus = 'healthy' | 'unreachable';
@@ -28,6 +27,13 @@ export interface NodeHealthCardProps {
   /** One-line reason for the current daemon state (e.g. "waiting for next task"). */
   daemonStateMessage?: string;
   rpcStatus: RpcStatus;
+  /** Called when the operator clicks Stop. Should POST /api/admin/stop. */
+  onStop?: () => Promise<void> | void;
+  /**
+   * Called when the operator clicks Restart. Should POST /api/admin/restart
+   * with `forceRespawn: true`.
+   */
+  onRestart?: () => Promise<void> | void;
 }
 
 const ROW_LABEL_STYLE: React.CSSProperties = {
@@ -64,14 +70,18 @@ const BUTTON_ROW_STYLE: React.CSSProperties = {
 
 function GhostButton({
   children,
+  busyLabel,
   disabled,
+  busy,
   title,
   onClick,
   tone = 'sky',
   testId,
 }: {
   children: string;
+  busyLabel?: string;
   disabled?: boolean;
+  busy?: boolean;
   title?: string;
   onClick?: () => void;
   tone?: 'sky' | 'red';
@@ -82,7 +92,7 @@ function GhostButton({
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
+      disabled={disabled || busy}
       title={title}
       data-testid={testId}
       style={{
@@ -90,16 +100,16 @@ function GhostButton({
         border: `1px solid ${color}`,
         borderRadius: 'var(--radius-2)',
         color,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        cursor: busy ? 'wait' : disabled ? 'not-allowed' : 'pointer',
         fontFamily: 'var(--mono)',
         fontSize: 'var(--text-xs)',
         letterSpacing: '0.14em',
-        opacity: disabled ? 0.4 : 1,
+        opacity: (disabled || busy) ? (busy ? 0.7 : 0.4) : 1,
         padding: '6px 10px',
         textTransform: 'uppercase',
       }}
     >
-      {children}
+      {busy ? (busyLabel ?? 'Working...') : children}
     </button>
   );
 }
@@ -125,10 +135,30 @@ export function NodeHealthCard({
   daemonStatus,
   daemonStateMessage,
   rpcStatus,
+  onStop,
+  onRestart,
 }: NodeHealthCardProps): JSX.Element {
   const [, navigate] = useLocation();
+  const [activeAction, setActiveAction] = useState<'stop' | 'restart' | null>(null);
   const daemonRunning = daemonStatus === 'running';
   const rpcHealthy = rpcStatus === 'healthy';
+
+  function handleAction(label: 'stop' | 'restart', action?: () => Promise<void> | void): void {
+    if (!action || activeAction) return;
+    setActiveAction(label);
+    Promise.resolve()
+      .then(action)
+      .catch((err) => console.error(`[node-health] ${label} failed:`, err))
+      // Don't clear `activeAction` on success — the daemon is about to
+      // exit, so the in-flight UI state should persist until the dashboard
+      // reconnects (which remounts the whole tree).
+      .finally(() => {
+        // The endpoint returns { ok: true, scheduled: true } before the
+        // process exits. We keep the button busy while the dashboard
+        // reconnects; if anything went wrong we'll still see the error in
+        // the console.
+      });
+  }
 
   return (
     <section
@@ -172,25 +202,23 @@ export function NodeHealthCard({
           <GhostButton
             tone="red"
             disabled={!daemonRunning}
-            title={
-              daemonRunning
-                ? 'Daemon stop control will land with daemon-side POST /v1/daemon/stop. Use Ctrl-C in your terminal for now.'
-                : 'Daemon is already stopped.'
-            }
+            busy={activeAction === 'stop'}
+            busyLabel="Stopping..."
+            title={daemonRunning ? 'Stop the daemon. It stays down until you re-run jinn from your terminal.' : 'Daemon is already stopped.'}
             testId="node-health-stop"
+            onClick={() => handleAction('stop', onStop)}
           >
             Stop
           </GhostButton>
           <GhostButton
-            disabled={daemonRunning}
-            title={
-              daemonRunning
-                ? 'Daemon is currently running. Start activates once the daemon is stopped.'
-                : 'Daemon start control will land with daemon-side POST /v1/daemon/start. Re-run jinn from your terminal for now.'
-            }
-            testId="node-health-start"
+            disabled={!daemonRunning}
+            busy={activeAction === 'restart'}
+            busyLabel="Restarting..."
+            title={daemonRunning ? 'Restart the daemon. The dashboard reconnects when it comes back.' : 'Daemon is stopped — re-run jinn from your terminal to start it.'}
+            testId="node-health-restart"
+            onClick={() => handleAction('restart', onRestart)}
           >
-            Start
+            Restart
           </GhostButton>
         </div>
       </div>

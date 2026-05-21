@@ -126,7 +126,10 @@ export interface ApiServerConfig {
   /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
-  admin?: { onRestartRequested: () => void };
+  admin?: {
+    onRestartRequested: (opts: { forceRespawn?: boolean }) => void;
+    onStopRequested: () => void;
+  };
   /**
    * When set, mounts `GET /api/harness/status` under the UI token gate.
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).

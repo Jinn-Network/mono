@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { NodeHealthCard } from './NodeHealthCard.js';
@@ -37,9 +37,7 @@ describe('NodeHealthCard', () => {
 
   it('shows Stopped + Unreachable when degraded', () => {
     render(
-      wrap(
-        <NodeHealthCard daemonStatus="stopped" rpcStatus="unreachable" />,
-      ),
+      wrap(<NodeHealthCard daemonStatus="stopped" rpcStatus="unreachable" />),
     );
     expect(screen.getByTestId('node-health-daemon-row').textContent).toMatch(/stopped/i);
     expect(screen.getByTestId('node-health-rpc-row').textContent).toMatch(/unreachable/i);
@@ -50,15 +48,66 @@ describe('NodeHealthCard', () => {
     expect(screen.queryByTestId('node-health-daemon-state')).toBeNull();
   });
 
-  it('renders Stop + Start buttons; disabled state reflects daemon status', () => {
-    render(wrap(<NodeHealthCard daemonStatus="running" rpcStatus="healthy" />));
+  it('renders Stop + Restart buttons; both enabled when daemon is running', () => {
+    render(
+      wrap(
+        <NodeHealthCard
+          daemonStatus="running"
+          rpcStatus="healthy"
+          onStop={vi.fn()}
+          onRestart={vi.fn()}
+        />,
+      ),
+    );
     const stop = screen.getByTestId('node-health-stop') as HTMLButtonElement;
-    const start = screen.getByTestId('node-health-start') as HTMLButtonElement;
-    // When running: Stop is the actionable one (currently disabled until daemon
-    // endpoint exists, see TODOs in the component), Start is always disabled.
-    expect(stop).toBeTruthy();
-    expect(start).toBeTruthy();
-    expect(start.disabled).toBe(true);
+    const restart = screen.getByTestId('node-health-restart') as HTMLButtonElement;
+    expect(stop.disabled).toBe(false);
+    expect(restart.disabled).toBe(false);
+    expect(restart.textContent).toMatch(/restart/i);
+  });
+
+  it('disables Stop + Restart when daemon is stopped', () => {
+    render(
+      wrap(<NodeHealthCard daemonStatus="stopped" rpcStatus="healthy" />),
+    );
+    expect((screen.getByTestId('node-health-stop') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('node-health-restart') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('invokes onStop when Stop is clicked', async () => {
+    const onStop = vi.fn().mockResolvedValue(undefined);
+    render(
+      wrap(
+        <NodeHealthCard
+          daemonStatus="running"
+          rpcStatus="healthy"
+          onStop={onStop}
+          onRestart={vi.fn()}
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByTestId('node-health-stop'));
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce());
+    // While the action is in flight the button reports "Stopping..." and is
+    // disabled — the daemon is about to exit, so we don't want a second click.
+    expect(screen.getByTestId('node-health-stop').textContent).toMatch(/stopping/i);
+  });
+
+  it('invokes onRestart when Restart is clicked', async () => {
+    const onRestart = vi.fn().mockResolvedValue(undefined);
+    render(
+      wrap(
+        <NodeHealthCard
+          daemonStatus="running"
+          rpcStatus="healthy"
+          onStop={vi.fn()}
+          onRestart={onRestart}
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByTestId('node-health-restart'));
+    await waitFor(() => expect(onRestart).toHaveBeenCalledOnce());
+    expect(screen.getByTestId('node-health-restart').textContent).toMatch(/restarting/i);
   });
 
   it('exposes a Manage RPC button that points at /operator/network', () => {

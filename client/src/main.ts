@@ -994,7 +994,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // to a live daemon instead of seeing a 502 + terminal prompt. In
         // headless mode (`JINN_NO_UI=1`), exit without respawning so the
         // supervisor / systemd / docker entrypoint decides what to do.
-        onRestartRequested: () => requestDaemonRestart(),
+        // Stop: pure exit, never respawn. The operator clicked Stop; they
+        // want the daemon down until they explicitly start it again.
+        onStopRequested: () => process.exit(0),
+        onRestartRequested: (opts) => requestDaemonRestart({ forceRespawn: opts.forceRespawn }),
       },
       harnessStatus: {
         getStatus: async () => {
