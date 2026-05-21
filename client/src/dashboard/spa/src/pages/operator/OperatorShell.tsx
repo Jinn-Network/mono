@@ -1,10 +1,23 @@
 import type { ReactNode } from 'react';
+import { OperatorSubNav } from './OperatorSubNav.js';
 
 /**
  * Shell wrapper for /operator/* sub-routes.
- * Task 5.1 stub — renders children only.
- * Task 5.2 will add <OperatorSubNav /> and the sidebar layout.
+ * Renders <OperatorSubNav /> in a left sidebar alongside the page content.
  */
 export function OperatorShell({ children }: { children: ReactNode }): JSX.Element {
-  return <div data-testid="operator-shell">{children}</div>;
+  return (
+    <div
+      data-testid="operator-shell"
+      style={{
+        display: 'flex',
+        gap: '24px',
+        padding: '24px',
+        alignItems: 'flex-start',
+      }}
+    >
+      <OperatorSubNav />
+      <div style={{ flex: '1 1 0', minWidth: 0 }}>{children}</div>
+    </div>
+  );
 }
