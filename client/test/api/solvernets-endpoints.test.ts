@@ -20,6 +20,7 @@ import {
   registerSolverNetsEndpoints,
   type SolverNetsEndpointsDeps,
 } from '../../src/api/solvernets-endpoints.js';
+import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
 import { requireUiToken } from '../../src/api/handshake.js';
 import {
   createSolverNetStore,
@@ -1461,6 +1462,92 @@ describe('GET /v1/solvernets/launched/:id (Task 14)', () => {
       headers: {},
     });
     expect(res.status).toBe(401);
+  });
+
+  it('overlays live generatorState on single-record and list responses', async () => {
+    const persistedState = {
+      lastPollAt: '2026-05-06T00:00:00.000Z',
+      lastError: { message: 'persisted failure', at: '2026-05-06T00:01:00.000Z' },
+    };
+    const liveState: LauncherGeneratorStateSnapshot = {
+      cadenceMs: 120000,
+      lastPollAt: '2026-05-06T00:10:00.000Z',
+      lastPollSummary: { evaluated: 8, posted: 2, skipped: 6 },
+    };
+    const record: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({ solverNetId: 'rec-live', status: 'launched' }),
+      generatorState: persistedState,
+    };
+    const pendingGenerators = {
+      current: [
+        {
+          record,
+          recordRef: { current: record },
+          configRef: { current: {} as PredictionV1GeneratorRuntimeConfig },
+        },
+      ] as PendingGeneratorSpawn[],
+    };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const launch = {
+      ...launchBundle.launch!,
+      getGeneratorState: (solverNetId: string) =>
+        solverNetId === 'rec-live' ? liveState : undefined,
+    } as SolverNetsEndpointsDeps['launch'];
+    const { app } = buildTestApp({ store, launch });
+    await store.writeRecord(record);
+
+    const singleRes = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(singleRes.status).toBe(200);
+    const singleBody = (await singleRes.json()) as LaunchedSolverNetRecord;
+    expect(singleBody.generatorState).toEqual(liveState);
+
+    const listRes = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as { records: LaunchedSolverNetRecord[] };
+    expect(listBody.records).toHaveLength(1);
+    expect(listBody.records[0]?.generatorState).toEqual(liveState);
+  });
+
+  it('falls back to persisted generatorState when no live generator snapshot exists', async () => {
+    const persistedState = {
+      lastPollAt: '2026-05-06T00:00:00.000Z',
+      lastError: { message: 'persisted failure', at: '2026-05-06T00:01:00.000Z' },
+    };
+    const record: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({ solverNetId: 'rec-persisted', status: 'launched' }),
+      generatorState: persistedState,
+    };
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const launch = {
+      ...launchBundle.launch!,
+      getGeneratorState: () => undefined,
+    } as SolverNetsEndpointsDeps['launch'];
+    const { app } = buildTestApp({ store, launch });
+    await store.writeRecord(record);
+
+    const singleRes = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(singleRes.status).toBe(200);
+    const singleBody = (await singleRes.json()) as LaunchedSolverNetRecord;
+    expect(singleBody.generatorState).toEqual(persistedState);
+
+    const listRes = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as { records: LaunchedSolverNetRecord[] };
+    expect(listBody.records).toHaveLength(1);
+    expect(listBody.records[0]?.generatorState).toEqual(persistedState);
   });
 
   // ── Summary enrichment (follow-up .35) ──────────────────────────────────

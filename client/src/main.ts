@@ -32,6 +32,7 @@ import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/se
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
+import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
@@ -78,6 +79,7 @@ import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
+import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
@@ -926,7 +928,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     | undefined;
   const launchedGeneratorStateBySolverType = new Map<
     string,
-    () => import('./api/launcher-status.js').LauncherGeneratorStateSnapshot | undefined
+    () => LauncherGeneratorStateSnapshot | undefined
   >();
   let safeAddressForLauncher: `0x${string}` | undefined;
   let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
@@ -2223,11 +2225,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         if (!safeAddressForLauncher) {
           throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
         }
+        const getGeneratorState = (
+          solverNetId: string,
+        ): LauncherGeneratorStateSnapshot | undefined => {
+          const entry = pendingGeneratorsRef.current.find(
+            (g) => g.recordRef.current.solverNetId === solverNetId,
+          );
+          const resolved = resolveContractFromSolverNetId(
+            entry?.recordRef.current.solverNetId ?? solverNetId,
+          );
+          if (!resolved) return undefined;
+          return launchedGeneratorStateBySolverType.get(resolved.solverType)?.();
+        };
         solverNetEndpointsDepsHolder.current = {
           store: solverNetStore,
           launch: {
             launchAction,
             lifecycleTransition,
+            getGeneratorState,
             pendingGenerators: pendingGeneratorsRef,
             signer: launcherSigner,
             network: 'base-sepolia',

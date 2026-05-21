@@ -78,6 +78,7 @@ import {
   resolveLaunchedRecordContract,
   type LaunchedRecordContractRef,
 } from '../solvernets/launched-record-dispatcher.js';
+import type { LauncherGeneratorStateSnapshot } from './launcher-status.js';
 import type {
   SignerWithAgentEoa,
   SolverNetManifestSummary,
@@ -92,6 +93,13 @@ import type {
 export interface SolverNetsLaunchDeps {
   launchAction: LaunchAction;
   lifecycleTransition: LifecycleTransition;
+  /**
+   * Live generator-state reader, keyed by `solverNetId`. Returns the running
+   * generator's current poll/error snapshot, or `undefined` when the record
+   * has no active generator. When omitted, responses fall back to the
+   * record's persisted `generatorState`. See #471.
+   */
+  getGeneratorState?: (solverNetId: string) => LauncherGeneratorStateSnapshot | undefined;
   /** Live mirror of the daemon's per-record generator state. The endpoint
    * mutates `configRef.current` for the matching record so the next
    * generator tick sees hot-applied config. Lookups by `solverNetId`. */
@@ -128,6 +136,21 @@ export interface SolverNetsEndpointsDeps {
    * one but not the other (in practice they ship together).
    */
   registry?: SolverNetRegistryClient;
+}
+
+/**
+ * Overlay the live generator-state snapshot onto a launched record. The live
+ * snapshot wins over the persisted `generatorState`, which is only a
+ * best-effort checkpoint. Without a live reader or active generator, keep the
+ * persisted value unchanged. See #471.
+ */
+function withLiveGeneratorState(
+  record: LaunchedSolverNetRecord,
+  getGeneratorState: SolverNetsLaunchDeps['getGeneratorState'],
+): LaunchedSolverNetRecord {
+  const live = getGeneratorState?.(record.solverNetId);
+  if (!live) return record;
+  return { ...record, generatorState: live };
 }
 
 // ── Draft CRUD validation schemas ──────────────────────────────────────────
@@ -1093,12 +1116,13 @@ export function registerSolverNetsEndpoints(
         (g) => g.recordRef.current.solverNetId === id,
       );
       if (entry) {
-        const summary = await tryGetSummary(
+        const liveRecord = withLiveGeneratorState(
           entry.recordRef.current,
-          deps.registry,
+          deps.launch.getGeneratorState,
         );
+        const summary = await tryGetSummary(liveRecord, deps.registry);
         return c.json({
-          ...entry.recordRef.current,
+          ...liveRecord,
           ...(summary !== undefined ? { summary } : {}),
         });
       }
@@ -1119,9 +1143,10 @@ export function registerSolverNetsEndpoints(
     if (!record) {
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
-    const summary = await tryGetSummary(record, deps.registry);
+    const liveRecord = withLiveGeneratorState(record, deps.launch?.getGeneratorState);
+    const summary = await tryGetSummary(liveRecord, deps.registry);
     return c.json({
-      ...record,
+      ...liveRecord,
       ...(summary !== undefined ? { summary } : {}),
     });
   });
@@ -1415,8 +1440,9 @@ export function registerSolverNetsEndpoints(
     // day-1 implementation is a synchronous Map read.
     const enriched = await Promise.all(
       records.map(async (record) => {
-        const summary = await tryGetSummary(record, deps.registry);
-        return summary !== undefined ? { ...record, summary } : record;
+        const liveRecord = withLiveGeneratorState(record, deps.launch?.getGeneratorState);
+        const summary = await tryGetSummary(liveRecord, deps.registry);
+        return summary !== undefined ? { ...liveRecord, summary } : liveRecord;
       }),
     );
 
