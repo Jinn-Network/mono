@@ -197,10 +197,8 @@ Field id: `PVTSSF_lADODh3-Ac4BXYaIzhTdqSM`
 | `P3` | `3ccfaa6f` |
 | `P4` | `9b48afe5` |
 
-> **Note:** The SKILL.md vocabulary lists `P0`–`P3` only. The provisioned field
-> also has `P4`. SKILL.md's four tiers are fully present; `P4` is an additional
-> option the skill does not surface to the person filing, but it is valid if
-> someone sets it directly in GitHub.
+> The provisioned field has `P0`–`P4`. SKILL.md lists all five tiers; `P4` is
+> a valid option that can be set directly in GitHub.
 
 To parse these dynamically in a script:
 
@@ -276,7 +274,7 @@ PRIORITY_FIELD_ID=$(echo "$FIELDS" | jq -r '.[] | select(.name == "Priority") | 
 # Set BLOCKED_VALUE, EFFORT_VALUE, PRIORITY_VALUE to the chosen option names:
 #   Blocked on: "Nothing" | "Human" | "Another issue"
 #   Effort:     "Low" | "Medium" | "High"
-#   Priority:   "P0" | "P1" | "P2" | "P3"
+#   Priority:   "P0" | "P1" | "P2" | "P3" | "P4"
 BLOCKED_VALUE="Nothing"
 EFFORT_VALUE="Low"
 PRIORITY_VALUE="P1"

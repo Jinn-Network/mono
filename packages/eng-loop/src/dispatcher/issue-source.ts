@@ -145,6 +145,7 @@ export class GhIssueSource implements IssueSource {
       'issue', 'list',
       '--repo', REPO,
       '--state', 'open',
+      // TODO: `labels` is the hook for per-issue `agent:*` implementer override (Phase 3 stacked dispatch).
       '--json', 'number,title,labels',
       '--limit', '200',
     ]);
@@ -167,9 +168,11 @@ export class GhIssueSource implements IssueSource {
       }
     }
 
-    // 3. Batch-query Issue Types via GraphQL for all issues
-    // Build aliased query: i<number>: issue(number:<number>) { issueType { name } }
+    // 3. Batch-query Issue Types via GraphQL for all issues.
+    //    Short-circuit when the issue list is empty — an empty selection set may
+    //    be rejected by GitHub's GraphQL endpoint.
     const issueNumbers = ghIssues.map((i) => i.number);
+    if (issueNumbers.length === 0) return [];
     const aliases = issueNumbers
       .map((n) => `i${n}: issue(number: ${n}) { issueType { name } }`)
       .join('\n    ');
@@ -210,7 +213,7 @@ export class GhIssueSource implements IssueSource {
         title: ghIssue.title,
         shape: shapeMap.get(ghIssue.number) ?? null,
         blockedOn,
-        blockedOnIssue: null,   // "Another issue #N" has no number suffix in the field value
+        blockedOnIssue: null,   // Always null in v1 — the field stores "Another issue" with no number suffix; see PolledIssue.blockedOnIssue
         effort,
         priority,
         status,

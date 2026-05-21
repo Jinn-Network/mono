@@ -256,5 +256,5 @@ jinn run
 
 - Upstream: `implement-issue` produces the draft PRs this skill consumes. The skill works on any ready PRs against `next`; it does not require `implement-issue` to have produced them.
 - Downstream: `next` advances; the existing auto-canary publishes a canary build; the human app-tests `next` (spec §6); the Monday `promote-main.yml` cut is unchanged.
-- Rebase mechanics: see `references/merge-mechanics.md` (forward reference — authored in Task 2 of the implementation plan).
+- Rebase mechanics: see `references/merge-mechanics.md`.
 - Does not invoke: `eng-orchestrator` (the dispatcher is not involved in the merge phase), the Monday cut (untouched by this skill).

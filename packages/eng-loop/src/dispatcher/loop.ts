@@ -1,5 +1,6 @@
 import type { IssueSource } from './issue-source.js';
 import type { DispatcherConfig, InFlightSession, ReadyIssue } from './types.js';
+import type { WallClock } from './wall-clock.js';
 import { selectReady } from './ready-filter.js';
 import { concurrencyOk, backpressureOk } from './throttles.js';
 
@@ -17,6 +18,12 @@ export interface CycleReport {
   drift: string[];
   /** True when the open-PR count exceeded `cfg.openPrBackpressure`. */
   backpressureTripped: boolean;
+  /**
+   * Issue numbers of in-flight sessions paused this cycle because the
+   * wall-clock ceiling was exceeded (spec §4 circuit-breaker).
+   * A paused session keeps its concurrency slot — a human resolves it.
+   */
+  paused: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +50,17 @@ export interface CycleDeps {
    * Injected so loop.ts stays free of gh/git calls.
    */
   countOpenReadyPrs(): Promise<number>;
+  /**
+   * Wall-clock circuit-breaker — checks whether an in-flight session has
+   * exceeded its ceiling (spec §4). Injected so loop.ts stays gh-free.
+   */
+  wallClock: WallClock;
+  /**
+   * Pause one in-flight session that exceeded its wall-clock ceiling.
+   * Sets the issue's "Blocked on" Project field to "Human".
+   * Injected so loop.ts stays gh-free.
+   */
+  pauseSession(issueNumber: number): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,16 +72,17 @@ export interface CycleDeps {
  *
  * 1. Poll the issue source.
  * 2. Derive in-flight state (crash-safe: authoritative external state).
- * 3. Apply the ready filter (triage-complete, unblocked, Todo, not in-flight).
- * 4. Check backpressure — if open ready PRs exceed the threshold, dispatch nothing.
- * 5. Check concurrency — dispatch the top `cap − inFlight` ready issues.
- * 6. Return a `CycleReport` for the operator log.
+ * 3. Wall-clock circuit-breaker — pause any in-flight session past its ceiling.
+ * 4. Apply the ready filter (triage-complete, unblocked, Todo, not in-flight).
+ * 5. Check backpressure — if open ready PRs exceed the threshold, dispatch nothing.
+ * 6. Check concurrency — dispatch the top `cap − inFlight` ready issues.
+ * 7. Return a `CycleReport` for the operator log.
  *
  * `loop.ts` contains NO `gh` or `git` calls — all external I/O is behind the
  * injected `deps` (§9 seam discipline).
  */
 export async function runCycle(deps: CycleDeps): Promise<CycleReport> {
-  const { source, cfg, deriveInFlight, dispatchIssue, countOpenReadyPrs } = deps;
+  const { source, cfg, deriveInFlight, dispatchIssue, countOpenReadyPrs, wallClock, pauseSession } = deps;
 
   // 1. Poll + derive in-flight in parallel for efficiency
   const [polled, { inFlight, drift }, openPrCount] = await Promise.all([
@@ -72,23 +91,35 @@ export async function runCycle(deps: CycleDeps): Promise<CycleReport> {
     countOpenReadyPrs(),
   ]);
 
-  // 2. Build the in-flight set for the ready filter
+  // 2. Wall-clock circuit-breaker (spec §4): pause any in-flight session that
+  //    has exceeded its ceiling. Paused sessions keep their concurrency slot —
+  //    a human resolves them.
+  const paused: number[] = [];
+  for (const session of inFlight) {
+    if (wallClock.expired(session)) {
+      await pauseSession(session.issueNumber);
+      paused.push(session.issueNumber);
+    }
+  }
+
+  // 3. Build the in-flight set for the ready filter
   const inFlightSet: ReadonlySet<number> = new Set<number>(inFlight.map((s) => s.issueNumber));
 
-  // 3. Apply ready filter (ordered by priority then issue number)
+  // 4. Apply ready filter (ordered by priority then issue number)
   const ready = selectReady(polled, inFlightSet);
 
-  // 4. Check backpressure
+  // 5. Check backpressure
   if (!backpressureOk(openPrCount, cfg.openPrBackpressure)) {
     return {
       dispatched: [],
       skippedForThrottle: ready.length,
       drift,
       backpressureTripped: true,
+      paused,
     };
   }
 
-  // 5. Concurrency budget
+  // 6. Concurrency budget
   const budget = concurrencyOk(inFlight.length, cfg.concurrencyCap)
     ? cfg.concurrencyCap - inFlight.length
     : 0;
@@ -96,7 +127,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleReport> {
   const toDispatch = ready.slice(0, budget);
   const skippedForThrottle = ready.length - toDispatch.length;
 
-  // 6. Dispatch
+  // 7. Dispatch
   const dispatched: number[] = [];
   for (const issue of toDispatch) {
     await dispatchIssue(issue);
@@ -108,5 +139,6 @@ export async function runCycle(deps: CycleDeps): Promise<CycleReport> {
     skippedForThrottle,
     drift,
     backpressureTripped: false,
+    paused,
   };
 }

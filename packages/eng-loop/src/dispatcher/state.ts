@@ -8,8 +8,8 @@ import type { InFlightSession } from './types.js';
 const PROJECT_OWNER = 'Jinn-Network';
 const PROJECT_NUMBER = '1';
 
-/** Worktrees under this path component are task worktrees. */
-const TASKS_PATH_SEGMENT = 'cargo/.tasks/';
+/** Path components that identify a task worktree directory (in order). */
+const TASKS_PATH_COMPONENTS = ['cargo', '.tasks'];
 
 // ---------------------------------------------------------------------------
 // Internal types mirroring real gh output shapes
@@ -89,15 +89,30 @@ function parseWorktreePorcelain(output: string): ParsedWorktree[] {
 /**
  * Extract the issue number from a cargo/.tasks/<N> worktree path.
  * Returns null if the path is not a task worktree.
+ *
+ * Matches `cargo/.tasks/<N>` as proper path components (split on `/`) so that
+ * a repo mounted under a path whose directory name itself contains the fragment
+ * (e.g. `/home/user/cargo/.tasks-backup/foo/cargo/.tasks/418`) is not
+ * misidentified — only the final two components before the issue number are
+ * examined.
  */
 function extractTaskIssueNumber(worktreePath: string): number | null {
-  const idx = worktreePath.indexOf(TASKS_PATH_SEGMENT);
-  if (idx === -1) return null;
-  const suffix = worktreePath.slice(idx + TASKS_PATH_SEGMENT.length);
-  // suffix should be just the issue number (no trailing slash)
-  const n = parseInt(suffix, 10);
-  if (isNaN(n) || String(n) !== suffix) return null;
-  return n;
+  // Split on '/' into proper path components (filter leading '' from absolute paths).
+  const parts = worktreePath.split('/').filter((p, i) => i > 0 || p !== '');
+  const [seg0, seg1] = TASKS_PATH_COMPONENTS;
+  // Find the index where the `cargo/.tasks` sequence begins as proper components.
+  for (let i = 0; i < parts.length - 2; i++) {
+    if (parts[i] === seg0 && parts[i + 1] === seg1) {
+      const candidate = parts[i + 2];
+      if (candidate == null) return null;
+      // Must be the final component (no trailing path segments after the issue number).
+      if (i + 3 !== parts.length) return null;
+      const n = parseInt(candidate, 10);
+      if (isNaN(n) || String(n) !== candidate) return null;
+      return n;
+    }
+  }
+  return null;
 }
 
 /**

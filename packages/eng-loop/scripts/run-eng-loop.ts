@@ -7,14 +7,15 @@
  */
 
 import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
-import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { ReadyIssue } from '../src/dispatcher/types.js';
+import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { spawn } from 'node:child_process';
+import type { SpawnOptions } from 'node:child_process';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,23 +29,74 @@ const REPO = 'Jinn-Network/mono';
 // ---------------------------------------------------------------------------
 
 interface GhPr {
-  number: number;
-  state: string;
   isDraft: boolean;
 }
 
 async function countOpenReadyPrs(): Promise<number> {
-  // Use gh pr list to count open, non-draft PRs (ready for review / merge)
+  // Count ALL open PRs against `next` — both draft and non-draft — because the
+  // implement-issue pipeline opens draft PRs. Excluding drafts would hide the
+  // dispatcher's own output from the backpressure count, defeating the §2 throttle.
   const raw = await realRunner('gh', [
     'pr', 'list',
     '--repo', REPO,
+    '--base', 'next',
     '--state', 'open',
-    '--json', 'number,state,isDraft',
+    '--json', 'isDraft',
     '--limit', '200',
   ]);
   const prs: GhPr[] = JSON.parse(raw) as GhPr[];
-  // Count open, non-draft PRs — these are the ones waiting for human attention
-  return prs.filter((pr) => !pr.isDraft).length;
+  return prs.length;
+}
+
+// ---------------------------------------------------------------------------
+// pauseSession — wall-clock circuit-breaker (spec §4)
+//
+// Sets the issue's "Blocked on" Project field to "Human" so the merge-batch
+// and eng-day skills skip it. Field/option ids from gh-taxonomy.md (provisioned
+// 2026-05-21; re-discover via `gh project field-list 1 --owner Jinn-Network`
+// if a field is rebuilt).
+// ---------------------------------------------------------------------------
+
+const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
+const BLOCKED_ON_FIELD_ID = 'PVTSSF_lADODh3-Ac4BXYaIzhTdqRo';
+const BLOCKED_ON_HUMAN_OPTION_ID = 'a20d20ac';
+
+interface GhProjectItemsForPause {
+  items: Array<{
+    id: string;
+    content?: { number: number; type: string };
+  }>;
+}
+
+async function pauseSession(issueNumber: number): Promise<void> {
+  console.log(`[eng:loop] WALL-CLOCK EXPIRED — pausing session for issue #${issueNumber} (Blocked on: Human)`);
+
+  // Resolve the project item id for this issue
+  const itemListRaw = await realRunner('gh', [
+    'project', 'item-list', '1',
+    '--owner', 'Jinn-Network',
+    '--format', 'json',
+    '--limit', '500',
+  ]);
+  const itemsData = JSON.parse(itemListRaw) as GhProjectItemsForPause;
+  const item = itemsData.items.find(
+    (it) => it.content?.type === 'Issue' && it.content.number === issueNumber,
+  );
+  if (item == null) {
+    console.error(`[eng:loop] pauseSession: issue #${issueNumber} not found in project board — cannot set Blocked on: Human`);
+    return;
+  }
+
+  // Set Blocked on → Human
+  await realRunner('gh', [
+    'project', 'item-edit',
+    '--id', item.id,
+    '--project-id', PROJECT_ID,
+    '--field-id', BLOCKED_ON_FIELD_ID,
+    '--single-select-option-id', BLOCKED_ON_HUMAN_OPTION_ID,
+  ]);
+
+  console.log(`[eng:loop] issue #${issueNumber} set to Blocked on: Human (wall-clock ceiling exceeded).`);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +119,10 @@ function printReport(report: CycleReport, label: string): void {
 
   console.log(`   skipped (throttle): ${report.skippedForThrottle}`);
 
+  if (report.paused.length > 0) {
+    console.log(`\n   WALL-CLOCK PAUSED: #${report.paused.join(', #')} (Blocked on: Human)`);
+  }
+
   if (report.drift.length > 0) {
     console.log('\n   DRIFT:');
     for (const d of report.drift) {
@@ -88,7 +144,8 @@ async function main(): Promise<void> {
 
   const cfg = DEFAULT_CONFIG;
   const source = new GhIssueSource(realRunner);
-  const _sink = new GhPrSink(realRunner); // constructed; used for future wiring
+  const wallClock = new WallClock(cfg.wallClockMs);
+  // TODO: wire GhPrSink.collect once session-completion detection exists
 
   if (isDryRun) {
     console.log('[eng:loop] DRY RUN — polling live issue queue; will NOT dispatch, mutate board, or create worktrees.');
@@ -113,6 +170,8 @@ async function main(): Promise<void> {
       deriveInFlight: () => deriveInFlight(realRunner),
       dispatchIssue: dryDispatch,
       countOpenReadyPrs,
+      wallClock,
+      pauseSession,
     });
 
     printReport(report, 'Cycle report (DRY RUN — no mutations)');
@@ -139,7 +198,7 @@ async function main(): Promise<void> {
           dispatchIssue(issue, cfg, {
             runner: realRunner,
             spawn: (cmd, args, opts) => {
-              const child = spawn(cmd, args, opts);
+              const child = spawn(cmd, args, opts as SpawnOptions);
               if (child.pid != null) {
                 child.unref();
               }
@@ -147,6 +206,8 @@ async function main(): Promise<void> {
             },
           }),
         countOpenReadyPrs,
+        wallClock,
+        pauseSession,
       });
       printReport(report, 'Cycle report');
     } catch (err) {

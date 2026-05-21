@@ -15,7 +15,12 @@ export interface PolledIssue {
   /** null = Issue Type not set — the issue is not triage-complete. */
   shape: IssueShape | null;
   blockedOn: BlockedOn | null;
-  /** Set when blockedOn === 'Another issue'. */
+  /**
+   * Always `null` in v1. The "Blocked on" Project field stores the literal
+   * string "Another issue" with no number suffix, so no issue number can be
+   * extracted from it. Populating this field requires parsing the issue body,
+   * deferred to Phase 3 (stacked dispatch). Keep the field for that future use.
+   */
   blockedOnIssue: number | null;
   effort: Effort | null;
   priority: Priority | null;

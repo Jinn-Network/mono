@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runCycle } from '../../src/dispatcher/loop.js';
 import type { CycleReport } from '../../src/dispatcher/loop.js';
+import { WallClock } from '../../src/dispatcher/wall-clock.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import type {
   PolledIssue,
@@ -29,18 +30,24 @@ function makePolled(overrides: Partial<PolledIssue> = {}): PolledIssue {
   };
 }
 
-function makeInFlight(issueNumber: number): InFlightSession {
+function makeInFlight(issueNumber: number, startedAt?: number): InFlightSession {
   return {
     issueNumber,
     branch: `feat/${issueNumber}-something`,
     worktreePath: `cargo/.tasks/${issueNumber}`,
     pid: 1234,
-    startedAt: Date.now(),
+    startedAt: startedAt ?? Date.now(),
   };
 }
 
 function makeSource(issues: PolledIssue[]): IssueSource {
   return { poll: vi.fn().mockResolvedValue(issues) };
+}
+
+/** A WallClock that never expires any session (all sessions are fresh). */
+function makeNeverExpiredClock(): WallClock {
+  // Use a nowFn that always returns 0 so elapsed is always negative vs. a large wallClockMs
+  return new WallClock(DEFAULT_CONFIG.wallClockMs, () => 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -70,12 +77,15 @@ describe('runCycle', () => {
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
       dispatchIssue,
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(report.dispatched).toEqual([101, 102, 103]);
     expect(report.skippedForThrottle).toBe(0);
     expect(report.drift).toEqual([]);
     expect(report.backpressureTripped).toBe(false);
+    expect(report.paused).toEqual([]);
     expect(dispatchIssue).toHaveBeenCalledTimes(3);
   });
 
@@ -102,12 +112,15 @@ describe('runCycle', () => {
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: existingInFlight, drift: [] }),
       dispatchIssue,
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
     });
 
     // Budget = 3 - 2 = 1; only top-priority (101) is dispatched
     expect(report.dispatched).toEqual([101]);
     expect(report.skippedForThrottle).toBe(2); // 102, 103 skipped
     expect(report.backpressureTripped).toBe(false);
+    expect(report.paused).toEqual([]);
     expect(dispatchIssue).toHaveBeenCalledTimes(1);
   });
 
@@ -130,11 +143,14 @@ describe('runCycle', () => {
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: existingInFlight, drift: [] }),
       dispatchIssue,
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(report.dispatched).toEqual([]);
     expect(report.skippedForThrottle).toBe(2);
     expect(report.backpressureTripped).toBe(false);
+    expect(report.paused).toEqual([]);
     expect(dispatchIssue).not.toHaveBeenCalled();
   });
 
@@ -155,6 +171,8 @@ describe('runCycle', () => {
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
       dispatchIssue,
       countOpenReadyPrs: vi.fn().mockResolvedValue(6), // over threshold
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(report.dispatched).toEqual([]);
@@ -175,6 +193,8 @@ describe('runCycle', () => {
       }),
       dispatchIssue: vi.fn(),
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(report.drift).toHaveLength(1);
@@ -202,11 +222,70 @@ describe('runCycle', () => {
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: existingInFlight, drift: [] }),
       dispatchIssue,
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
     });
 
     // Only 102 should be dispatched; 101 is in-flight (budget = 3-1 = 2, but only 1 ready)
     expect(report.dispatched).toEqual([102]);
     expect(dispatchIssue).toHaveBeenCalledTimes(1);
     expect(dispatchIssue.mock.calls[0][0].number).toBe(102);
+  });
+
+  it('pauses an in-flight session whose wall-clock ceiling is exceeded', async () => {
+    // Issue 201 has been running since the epoch (startedAt=0), clock is now
+    // past the wallClockMs — wall clock expired → pauseSession called.
+    const WALL_CLOCK_MS = 4 * 60 * 60 * 1000; // 4 hours
+    const expiredSession = makeInFlight(201, 0); // started at epoch
+    const nowMs = WALL_CLOCK_MS + 1000; // just past the ceiling
+
+    // A WallClock whose nowFn returns nowMs — session 201 is expired
+    const wallClock = new WallClock(WALL_CLOCK_MS, () => nowMs);
+    const pauseSession = vi.fn().mockResolvedValue(undefined);
+
+    const source = makeSource([]);
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, wallClockMs: WALL_CLOCK_MS };
+
+    const report: CycleReport = await runCycle({
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [expiredSession], drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock,
+      pauseSession,
+    });
+
+    // pauseSession must be called for the expired session
+    expect(pauseSession).toHaveBeenCalledOnce();
+    expect(pauseSession).toHaveBeenCalledWith(201);
+
+    // The paused session must appear in CycleReport.paused
+    expect(report.paused).toEqual([201]);
+  });
+
+  it('does not pause in-flight sessions that are within the wall-clock ceiling', async () => {
+    const WALL_CLOCK_MS = 4 * 60 * 60 * 1000;
+    const freshSession = makeInFlight(301, Date.now()); // just started
+
+    // WallClock uses real Date.now — session is fresh, not expired
+    const wallClock = new WallClock(WALL_CLOCK_MS);
+    const pauseSession = vi.fn().mockResolvedValue(undefined);
+
+    const source = makeSource([]);
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, wallClockMs: WALL_CLOCK_MS };
+
+    const report: CycleReport = await runCycle({
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [freshSession], drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock,
+      pauseSession,
+    });
+
+    expect(pauseSession).not.toHaveBeenCalled();
+    expect(report.paused).toEqual([]);
   });
 });
