@@ -58,91 +58,48 @@ export interface PythonEvalRunnerOptions {
   /** Workers for parallel eval (defaults to 1; we run one task at a time). */
   maxWorkers?: number;
   /**
-   * Max number of distinct eval images to keep in the local Docker cache.
-   * The runner tracks an in-process LRU keyed by image tag; once usage exceeds
-   * this cap, the least-recently-used images are removed via
-   * {@link PythonEvalRunnerOptions.cleanupImage}.
+   * Removes a completed round's entire Docker footprint — the round's image,
+   * stopped containers, and build cache — so eval disk usage never
+   * accumulates across instances (#476). Called once per `runEval`, in a
+   * `finally`, even when the eval threw.
    *
-   * The leaderboard pool has hundreds of unique instances at ~3 GB/image, so
-   * an unbounded cache fills operator disks in days (jinn-mono-uy6v.11).
-   *
-   * Default: `process.env.JINN_EVAL_IMAGE_CACHE_MAX` parsed as an integer, or
-   * `DEFAULT_EVAL_IMAGE_CACHE_MAX` (20) if unset/invalid.
+   * Defaults to {@link defaultPruneRound}. Implementations MUST NOT throw —
+   * `runEval` guards defensively, but cleanup failures should be swallowed
+   * (logged elsewhere if desired) so a flaky `docker` never escapes `runEval`.
    */
-  imageCacheMax?: number;
-  /**
-   * Removes an image from the local Docker cache (or no-ops if the operator
-   * has chosen not to GC). Called for each eviction from the LRU.
-   *
-   * Defaults to `docker rmi <image>` via the system `docker` binary. Test
-   * suites inject a stub to capture the eviction order without shelling out.
-   *
-   * Implementations MUST NOT throw — failures should be swallowed (logged
-   * elsewhere if desired) so a missing/failed `docker rmi` never escapes
-   * `runEval`. The runner enforces this defensively too.
-   */
-  cleanupImage?: (image: string) => Promise<void>;
+  pruneRound?: (image: string) => Promise<void>;
 }
 
 /**
- * Default cap on the per-instance Docker image cache when no explicit
- * `imageCacheMax` and no `JINN_EVAL_IMAGE_CACHE_MAX` env var are configured.
- *
- * 20 images × ~3 GB/image ≈ 60 GB working set — small enough that even a
- * 256 GB disk has headroom, large enough that the steady-state loop on a
- * frequently-repeating subset of the pool rarely re-pulls.
+ * Spawn `docker <args>`, resolving regardless of outcome — a failed cleanup
+ * command is logged, never thrown (#476: cleanup must not break the eval loop).
  */
-export const DEFAULT_EVAL_IMAGE_CACHE_MAX = 20;
-
-export function resolveImageCacheMax(opt: number | undefined): number {
-  if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
-  const envRaw = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-  if (envRaw !== undefined) {
-    // `Number()` returns 0 for `""` / whitespace and NaN for strings with
-    // non-numeric content (e.g. `"garbage"`, `"1e3oops"`) — unlike `parseInt`,
-    // which would silently accept `parseInt("1e3oops") === 1`. Either way we
-    // reject anything that isn't a positive integer.
-    const parsed = Number(envRaw);
-    if (Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0) return parsed;
-    // Surface the typo so operators discover it before the disk fills,
-    // rather than silently running on the default.
-    console.warn(
-      `[swe-rebench-v2] JINN_EVAL_IMAGE_CACHE_MAX=${JSON.stringify(envRaw)} is not a positive integer — using default ${DEFAULT_EVAL_IMAGE_CACHE_MAX}`,
-    );
-  }
-  return DEFAULT_EVAL_IMAGE_CACHE_MAX;
-}
-
-/**
- * Production `cleanupImage`: spawn `docker rmi <image>`. Errors are tolerated
- * — a missing/failed `docker rmi` is operationally survivable (the image
- * stays on disk; cache stays bloated for a while; not a correctness failure)
- * — but we warn on non-zero exit and on failed-to-spawn so a persistently-flaky
- * daemon (or a permission slip) becomes visible before disks fill. Silent
- * leaks were the original failure mode `jinn-mono-uy6v.11` exists to fix.
- *
- * We listen on `'exit'` rather than `'close'` and route stdio to `'ignore'`
- * so the resolve path doesn't depend on parent-side stream draining (which
- * can fail to fire `'close'` cleanly when piped without backpressure on the
- * right tick). The image tag + exit code is sufficient signal; operators can
- * grep the docker daemon log for the underlying reason.
- */
-function defaultCleanupImage(image: string): Promise<void> {
+function runDocker(args: string[]): Promise<void> {
   return new Promise((resolve) => {
-    const child = spawn('docker', ['rmi', image], { stdio: ['ignore', 'ignore', 'ignore'] });
+    const child = spawn('docker', args, { stdio: ['ignore', 'ignore', 'ignore'] });
     child.on('exit', (code, signal) => {
       if (code !== 0) {
         const status =
           code !== null ? `exited ${code}` : `terminated by signal ${signal ?? 'unknown'}`;
-        console.warn(`[swe-rebench-v2] docker rmi ${image} ${status}`);
+        console.warn(`[swe-rebench-v2] docker ${args.join(' ')} ${status}`);
       }
       resolve();
     });
     child.on('error', (err) => {
-      console.warn(`[swe-rebench-v2] docker rmi ${image} failed to spawn: ${err.message}`);
+      console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${err.message}`);
       resolve();
     });
   });
+}
+
+/**
+ * Production `pruneRound`: remove the round's image, then prune stopped
+ * containers and build cache. Each step is best-effort.
+ */
+async function defaultPruneRound(image: string): Promise<void> {
+  if (image) await runDocker(['rmi', '-f', image]);
+  await runDocker(['container', 'prune', '-f']);
+  await runDocker(['builder', 'prune', '-f']);
 }
 
 /**
@@ -224,62 +181,23 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
 }
 
 export class PythonEvalRunner implements EvalRunner {
-  /**
-   * LRU of image tags whose Docker layers may be cached locally. Stored as a
-   * `Set<string>` because `Set` preserves insertion order; we delete-then-add
-   * to refresh recency and `next()` on the keys iterator to find the
-   * least-recently-used entry.
-   */
-  private readonly imageLru = new Set<string>();
-  private readonly imageCacheMax: number;
-  private readonly cleanupImage: (image: string) => Promise<void>;
+  private readonly pruneRound: (image: string) => Promise<void>;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
-    this.imageCacheMax = resolveImageCacheMax(opts.imageCacheMax);
-    this.cleanupImage = opts.cleanupImage ?? defaultCleanupImage;
+    this.pruneRound = opts.pruneRound ?? defaultPruneRound;
   }
 
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
     try {
       return await this.runEvalImpl(args);
     } finally {
-      // Always record the image and run GC — even when the eval threw. A
-      // pull-and-crash failure (Docker storage IO error, image_arch_mismatch,
-      // patch_corrupt, eval_no_report) still left an image on disk; we must
-      // count it toward the cache cap so the failure path can't leak the LRU.
-      await this.recordImageUsage(args.image);
-    }
-  }
-
-  /**
-   * Move `image` to the most-recently-used slot of the in-process LRU; if the
-   * set now exceeds {@link imageCacheMax}, evict the oldest entries via
-   * {@link cleanupImage}. Eviction failures are swallowed so a flaky
-   * `docker rmi` cannot escape `runEval`.
-   *
-   * The cap is enforced after the just-used image is inserted: the
-   * just-evaluated image is the *most* recent, so repeat-evals of recently
-   * used instances never re-pull. Only when more than N distinct images have
-   * been used does the oldest get rmi'd.
-   */
-  private async recordImageUsage(image: string): Promise<void> {
-    if (!image) return;
-    // Refresh recency: delete-then-add reinserts at the tail of the set.
-    this.imageLru.delete(image);
-    this.imageLru.add(image);
-    while (this.imageLru.size > this.imageCacheMax) {
-      const oldest = this.imageLru.values().next().value;
-      if (!oldest) break;
-      this.imageLru.delete(oldest);
+      // Prune this round's full Docker footprint — even when the eval threw,
+      // a pull-and-crash still left an image on disk (#476).
       try {
-        await this.cleanupImage(oldest);
+        await this.pruneRound(args.image);
       } catch (err) {
-        // Best-effort GC: a failed rmi leaves the image on disk but mustn't
-        // break the loop. Warn so a flaky `docker` (or a permission slip)
-        // becomes visible before disks fill — silent leaks were the whole
-        // problem this bead exists to fix.
         const reason = err instanceof Error ? err.message : String(err);
-        console.warn(`[swe-rebench-v2] eval-image cleanup failed for ${oldest}: ${reason}`);
+        console.warn(`[swe-rebench-v2] pruneRound failed for ${args.image}: ${reason}`);
       }
     }
   }
