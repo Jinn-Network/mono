@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PoolCacheStore } from '../../src/solver-types/_swe-rebench-v2-pool-cache.js';
+import { PoolCacheStore, loadPoolWithCacheFallback } from '../../src/solver-types/_swe-rebench-v2-pool-cache.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
 
 const sampleTasks: PoolTask[] = [
@@ -64,5 +64,72 @@ describe('PoolCacheStore', () => {
     const store = new PoolCacheStore({ stateDir });
     await store.write([]);
     expect((await store.read())!.tasks).toEqual([]);
+  });
+});
+
+describe('loadPoolWithCacheFallback', () => {
+  let stateDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(join(tmpdir(), 'swe-pool-fallback-'));
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('returns the freshly loaded pool and writes it to the cache on success', async () => {
+    const cache = new PoolCacheStore({ stateDir });
+    const result = await loadPoolWithCacheFallback({
+      loadPool: async () => sampleTasks,
+      cache,
+      currentPool: [],
+    });
+
+    expect(result.pool).toEqual(sampleTasks);
+    expect(result.fromCache).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect((await cache.read())!.tasks).toEqual(sampleTasks);
+  });
+
+  it('keeps the existing in-memory pool when the load fails and a pool is already held', async () => {
+    const cache = new PoolCacheStore({ stateDir });
+    const result = await loadPoolWithCacheFallback({
+      loadPool: async () => { throw new Error('HF datasets-server returned 429'); },
+      cache,
+      currentPool: sampleTasks,
+    });
+
+    expect(result.pool).toEqual(sampleTasks);
+    expect(result.fromCache).toBe(false);
+    expect(result.error?.message).toContain('429');
+  });
+
+  it('falls back to the disk cache when the load fails and no in-memory pool is held', async () => {
+    const cache = new PoolCacheStore({ stateDir });
+    await cache.write(sampleTasks);
+
+    const result = await loadPoolWithCacheFallback({
+      loadPool: async () => { throw new Error('HF unreachable'); },
+      cache,
+      currentPool: [],
+    });
+
+    expect(result.pool).toEqual(sampleTasks);
+    expect(result.fromCache).toBe(true);
+    expect(result.error?.message).toContain('HF unreachable');
+  });
+
+  it('returns an empty pool when the load fails, no in-memory pool, and no cache', async () => {
+    const cache = new PoolCacheStore({ stateDir });
+    const result = await loadPoolWithCacheFallback({
+      loadPool: async () => { throw new Error('HF unreachable'); },
+      cache,
+      currentPool: [],
+    });
+
+    expect(result.pool).toEqual([]);
+    expect(result.fromCache).toBe(false);
+    expect(result.error?.message).toContain('HF unreachable');
   });
 });
