@@ -1392,6 +1392,8 @@ git commit -m "feat(346): expose per-credential spend on /v1/status"
 
 ## Task 11: Rewire #345's cost surface to credential resolution
 
+> **REVERTED → [#474](https://github.com/Jinn-Network/mono/issues/474).** This task was implemented and then reverted during execution. The final whole-feature review found `harnessUsesPaidApiKey` / `decideCostSurface` are consumed exclusively by the browser SPA (`CostEstimatePanel`), and `resolveCredentialId` reads `process.env` — which Vite stubs to `{}` in a browser bundle, so a browser-side rewire delivers nothing. The genuine #331-UI fix (daemon exposes paid-API status, SPA consumes it) is re-homed to **#474**. The shipped feature is Tasks 1–10 only.
+
 **Files:**
 - Modify: `client/src/harnesses/cost-estimates.ts`
 - Test: `client/test/harnesses/cost-estimates-credential.test.ts`

@@ -203,6 +203,8 @@ The #346 comment notes that `claude-code` / `codex` on a *raw API key* currently
 
 `resolveCredentialId()` (§4.1) is the fix. In addition to gating the spend cap, #345's cost-surface decision (`decideCostSurface` / `harnessUsesPaidApiKey` in `cost-estimates.ts`) is **rewired to key off the resolved credential** rather than the harness-name `HARNESS_BILLING` flag. A raw-key `claude-code` then resolves to `anthropic:api-key` and receives the surface, the per-task gate, *and* the daily cap. This satisfies the comment's addition to #346's acceptance.
 
+> **Implementation note (reverted → [#474](https://github.com/Jinn-Network/mono/issues/474)).** The cost-surface rewire described in this section was attempted (plan §11 step 10) and **reverted**. `harnessUsesPaidApiKey` / `decideCostSurface` are consumed exclusively by the browser SPA (`CostEstimatePanel`), and `resolveCredentialId` reads `process.env`, which Vite stubs to `{}` in a browser bundle — so a browser-side rewire resolves every credential to `null` and delivers nothing. The daemon-side spend cap (the substance of this spec) does not depend on it. The genuine #331-UI fix requires the daemon to *expose* paid-API status and the SPA to consume it — re-homed to **#474**.
+
 ## 10. Testing
 
 Per `docs/runbooks/testing.md` (feat shape = TDD; integration over mocks for store/loop surfaces):
@@ -223,7 +225,7 @@ For the implementation plan to expand. Steps 1–8 and 10 are daemon-side and do
 7. Config `spendCaps` + `JINN_SPEND_CAP_USD`.
 8. `/v1/status` `spend` block.
 9. **Spend component UI** (blocked-by #453) — renders the component's four axes; provider-cap nudge.
-10. Rewire #345's cost-surface decision to `resolveCredentialId` (§9).
+10. ~~Rewire #345's cost-surface decision to `resolveCredentialId` (§9).~~ — **reverted → [#474](https://github.com/Jinn-Network/mono/issues/474)** (browser-SPA-only surface; see §9 implementation note). Shipped scope is steps 1–8.
 
 ## 12. Deviations from #346 as written
 
