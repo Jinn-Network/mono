@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "pressure": "tsx scripts/run-pressure-suite.ts"
+    "pressure": "tsx scripts/run-pressure-suite.ts",
+    "eng:loop": "tsx scripts/run-eng-loop.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
