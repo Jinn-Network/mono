@@ -48,7 +48,7 @@ describe('NodeHealthCard', () => {
     expect(screen.queryByTestId('node-health-daemon-state')).toBeNull();
   });
 
-  it('renders Stop + Restart buttons; both enabled when daemon is running', () => {
+  it('renders the Restart button; enabled when daemon is running', () => {
     render(
       wrap(
         <NodeHealthCard
@@ -59,38 +59,19 @@ describe('NodeHealthCard', () => {
         />,
       ),
     );
-    const stop = screen.getByTestId('node-health-stop') as HTMLButtonElement;
     const restart = screen.getByTestId('node-health-restart') as HTMLButtonElement;
-    expect(stop.disabled).toBe(false);
     expect(restart.disabled).toBe(false);
     expect(restart.textContent).toMatch(/restart/i);
+    // Stop is currently commented out — the dashboard process dies with the
+    // daemon so the button can't confirm the action completed.
+    expect(screen.queryByTestId('node-health-stop')).toBeNull();
   });
 
-  it('disables Stop + Restart when daemon is stopped', () => {
+  it('disables Restart when daemon is stopped', () => {
     render(
       wrap(<NodeHealthCard daemonStatus="stopped" rpcStatus="healthy" />),
     );
-    expect((screen.getByTestId('node-health-stop') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('node-health-restart') as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('invokes onStop when Stop is clicked', async () => {
-    const onStop = vi.fn().mockResolvedValue(undefined);
-    render(
-      wrap(
-        <NodeHealthCard
-          daemonStatus="running"
-          rpcStatus="healthy"
-          onStop={onStop}
-          onRestart={vi.fn()}
-        />,
-      ),
-    );
-    fireEvent.click(screen.getByTestId('node-health-stop'));
-    await waitFor(() => expect(onStop).toHaveBeenCalledOnce());
-    // While the action is in flight the button reports "Stopping..." and is
-    // disabled — the daemon is about to exit, so we don't want a second click.
-    expect(screen.getByTestId('node-health-stop').textContent).toMatch(/stopping/i);
   });
 
   it('invokes onRestart when Restart is clicked', async () => {

@@ -135,8 +135,10 @@ export function NodeHealthCard({
   daemonStatus,
   daemonStateMessage,
   rpcStatus,
-  onStop,
   onRestart,
+  // onStop is intentionally not destructured while the Stop button is
+  // commented out — keep it in the props interface so re-enabling Stop
+  // is a one-block restore.
 }: NodeHealthCardProps): JSX.Element {
   const [, navigate] = useLocation();
   const [activeAction, setActiveAction] = useState<'stop' | 'restart' | null>(null);
@@ -199,6 +201,17 @@ export function NodeHealthCard({
           </span>
         )}
         <div style={BUTTON_ROW_STYLE}>
+          {/*
+            Stop is commented out for now. When the daemon stops, the
+            dashboard goes with it (same process serves the SPA), so the
+            button gets stuck on "Stopping…" and the operator has no way
+            to confirm the action completed. The deeper fix is to split
+            the dashboard process off from the daemon — until then,
+            shipping Stop without Start is more confusing than useful.
+            Leaving the API client (`api.stopDaemon`), the daemon-side
+            POST /api/admin/stop endpoint, and the `onStop` prop in place
+            so un-commenting this block is the only restore step.
+
           <GhostButton
             tone="red"
             disabled={!daemonRunning}
@@ -210,6 +223,7 @@ export function NodeHealthCard({
           >
             Stop
           </GhostButton>
+          */}
           <GhostButton
             disabled={!daemonRunning}
             busy={activeAction === 'restart'}
