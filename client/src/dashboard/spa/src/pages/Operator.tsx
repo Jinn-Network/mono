@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { api } from '../api/client.js';
-import { SolverNetsSection } from './configuration/SolverNetsSection.js';
 import { NetworkSection } from './configuration/NetworkSection.js';
 import { SecuritySection } from './configuration/SecuritySection.js';
 import { useHashSection } from './configuration/useHashSection.js';
@@ -28,11 +27,6 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
   const hash = useHashSection();
   const hashParts = hash?.split('/') ?? [];
   const expandedSection = hashParts[0];
-  // Anything after `solvernets/` is forwarded to the section so a deep-link
-  // like `solvernets/<cid>/harness` can auto-expand the matching joined card
-  // and focus the harness picker.
-  const joinedHashFragment =
-    expandedSection === 'solvernets' ? hashParts.slice(1).join('/') || undefined : undefined;
 
   const chain = data?.chain ?? 'base-sepolia';
   const rpcUrl = data?.rpcUrl ?? '';
@@ -95,11 +89,6 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
           Open Launcher →
         </Link>
       </section>
-      <SolverNetsSection
-        defaultExpanded={expandedSection === 'solvernets' || expandedSection === undefined}
-        joinedHashFragment={joinedHashFragment}
-        onRestartPending={onRestartPending}
-      />
       <OperatorDataMarket
         defaultExpanded={expandedSection === 'data-market'}
         onRestartPending={onRestartPending}

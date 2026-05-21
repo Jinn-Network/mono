@@ -158,12 +158,11 @@ describe('App routes', () => {
     });
     expect(screen.getByText(/launcher tools/i).closest('section')).toBeTruthy();
     expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
-    // Operator is the configuration surface (SolverNets / Harness / Network /
-    // Security). The SolverNets head is the most stable assertion since it
-    // never collapses to nothing.
+    // Operator is the configuration surface. The Data Donation section is the
+    // most stable assertion since SolverNets moved to sub-routes.
     await waitFor(() => expect(
       screen.getByText((_, el) =>
-        el?.tagName === 'SPAN' && el.textContent === 'SolverNets',
+        el?.tagName === 'SPAN' && el.textContent === 'Data donation',
       ),
     ).toBeTruthy());
   });
