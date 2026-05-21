@@ -220,7 +220,7 @@ export function buildHeadlessPrompt(skill: string, scenario: string): string {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `(cd packages/eng-loop && yarn test test/headless.test.ts)`
-Expected: PASS — 3 tests.
+Expected: PASS — 2 tests.
 
 - [ ] **Step 5: Commit**
 
