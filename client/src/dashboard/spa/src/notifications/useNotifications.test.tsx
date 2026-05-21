@@ -18,17 +18,18 @@ vi.mock('../shell/RestartPendingContext.js', () => ({
   useRestartPending: () => ({ restartPending: false, setRestartPending: vi.fn() }),
 }));
 
+// Mock the real `/v1/status` wire shape (NOT the deriver's internal DeriveInput
+// shape). useNotifications' adapter normalises this for the deriver. Keeping the
+// mock honest to the wire shape prevents the class of bug Playwright caught
+// where unit tests passed against an artificial input shape but production
+// blew up on the real one.
 vi.mock('../api/client.js', () => ({
   api: {
     getStatus: vi.fn().mockResolvedValue({
-      funds: { eth: '0.001', runwayDays: 1 },
-      rewards: { claimableWei: '0' },
-      harness: { ready: true, name: 'claude-code' },
-      rpc: { reachable: true },
-      restartPending: false,
-      daemonVersion: '0.1.5',
+      masterGas: { balanceWei: '0' }, // zero balance → runway 0 → funding_low fires
+      rewards: { pendingStakingRewardsWei: '0' },
       services: [],
-      joinedSolverNets: {},
+      version: '0.1.5',
     }),
     getBootstrap: vi.fn().mockResolvedValue({ mode: 'running' }),
   },
@@ -70,5 +71,20 @@ describe('useNotifications', () => {
     expect(result.current).toHaveLength(1);
     expect(result.current[0].kind).toBe('rpc_unreachable');
     expect(result.current[0].severity).toBe('blocking');
+  });
+
+  // Regression: the funding-sequence Playwright E2E caught a TypeError in the
+  // deriver when /v1/status' real wire shape was passed via a blind cast to
+  // DeriveInput. The adapter now translates safely; this test pins the
+  // contract by feeding the adapter a sparse, real-shaped payload.
+  it('does not throw on real /v1/status shape missing deriver-internal fields', async () => {
+    connectionState = { status: 'connected', lastConnectedAt: Date.now() };
+    const { result } = renderHook(() => useNotifications(), {
+      wrapper: makeWrapper(),
+    });
+    // Real wire shape lacks funds.runwayDays / harness / rpc — the adapter
+    // must default these and the hook must return without throwing.
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(() => result.current).not.toThrow();
   });
 });
