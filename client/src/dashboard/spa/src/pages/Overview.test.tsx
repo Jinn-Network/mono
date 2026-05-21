@@ -871,6 +871,38 @@ describe('OverviewPage activity surface (issue #219)', () => {
   });
 });
 
+// ── HarnessStatusPanel promotion — spec §2.9 ───────────────────────────────
+//
+// HarnessStatusPanel is a first-class harness-readiness surface (spec §2.9).
+// It must render above the fold on /overview without requiring the operator
+// to expand the "Advanced details" disclosure. This test fails before the
+// promotion and passes after HarnessStatusPanel is moved out of <AdvancedDetails>.
+describe('OverviewPage HarnessStatusPanel (spec §2.9)', () => {
+  it('renders HarnessStatusPanel above the fold (not buried under Advanced details) — spec §2.9', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    // HarnessStatusPanel renders "Harness Status" (its section header) in the
+    // loading/unavailable state ("Harness status unavailable") or after data loads.
+    // We wait for the harness panel — its unavailable state renders without data.
+    await waitFor(() => {
+      expect(screen.getByText(/harness status/i)).toBeTruthy();
+    });
+
+    // Confirm HarnessStatusPanel is NOT a descendant of the AdvancedDetails toggle.
+    const harnessEl = screen.getByText(/harness status/i);
+    const advancedToggle = screen.getByRole('button', { name: /advanced details/i });
+    expect(advancedToggle.parentElement?.contains(harnessEl)).toBe(false);
+  });
+});
+
 // ── IdentityCard promotion — spec §2.2 ─────────────────────────────────────
 //
 // IdentityCard is a first-class identity surface (spec §2.2). It must render

@@ -381,9 +381,8 @@ export function OverviewPage(): JSX.Element {
         safeAddress={services[0]?.safeAddress ?? null}
         services={services}
       />
-      <AdvancedDetails>
-        <HarnessStatusPanel />
-      </AdvancedDetails>
+      <HarnessStatusPanel />
+      <AdvancedDetails />
     </div>
   );
 }
