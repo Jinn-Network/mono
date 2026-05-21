@@ -15,6 +15,13 @@ import { fileURLToPath } from 'node:url';
  * package root) then descends into plugins/learner/. Verifies the
  * expected layout exists and throws with a clear message if not.
  */
+function requireAsset(pluginRoot: string, relative: string, hint?: string): void {
+  if (!existsSync(join(pluginRoot, relative))) {
+    const suffix = hint ? ` — ${hint}` : '';
+    throw new Error(`learner plugin at ${pluginRoot} is missing ${relative}${suffix}`);
+  }
+}
+
 export function resolvePluginRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const packageRoot = resolve(here, '..', '..', '..', '..');
@@ -26,20 +33,8 @@ export function resolvePluginRoot(): string {
         `Resolved from impl dir: ${here}.`,
     );
   }
-  if (!existsSync(join(pluginRoot, 'skills', 'learn', 'SKILL.md'))) {
-    throw new Error(
-      `learner plugin at ${pluginRoot} is missing skills/learn/SKILL.md`,
-    );
-  }
-  if (!existsSync(join(pluginRoot, 'hooks', 'session-start'))) {
-    throw new Error(
-      `learner plugin at ${pluginRoot} is missing hooks/session-start — plugin assets may be stale or incomplete; rebuild the plugin`,
-    );
-  }
-  if (!existsSync(join(pluginRoot, 'hooks', 'hooks.json'))) {
-    throw new Error(
-      `learner plugin at ${pluginRoot} is missing hooks/hooks.json — plugin assets may be stale or incomplete; rebuild the plugin`,
-    );
-  }
+  requireAsset(pluginRoot, 'skills/learn/SKILL.md');
+  requireAsset(pluginRoot, 'hooks/session-start', 'plugin assets may be stale or incomplete; rebuild the plugin');
+  requireAsset(pluginRoot, 'hooks/hooks.json', 'plugin assets may be stale or incomplete; rebuild the plugin');
   return pluginRoot;
 }
