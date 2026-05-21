@@ -72,41 +72,9 @@ function formatElapsed(ms: number): string {
   return `${Math.round(ms / 3_600_000)}h`;
 }
 
-function formatTimestamp(ts: string | null): string {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-}
-
-function formatKind(kind: string): string {
-  return kind.replace(/_/g, ' ');
-}
-
 function truncateRequestId(requestId: string): string {
   if (requestId.length <= 14) return requestId;
   return `${requestId.slice(0, 8)}…${requestId.slice(-4)}`;
-}
-
-function txDisplay(txHash: string | null | undefined): string {
-  if (!txHash) return '—';
-  return txHash.length > 12 ? `${txHash.slice(0, 6)}…${txHash.slice(-4)}` : txHash;
-}
-
-const KIND_TONE: Record<string, string> = {
-  task_posted: 'var(--accent-sky)',
-  request_claimed: 'var(--accent-sky)',
-  delivery_submitted: 'var(--vow-green)',
-  evaluation_submitted: 'var(--vow-green)',
-  reward_claimed: 'var(--accent-gold)',
-  tick_error: 'var(--break-red)',
-  intent_registry_failed: 'var(--break-red)',
-  error: 'var(--break-red)',
-};
-
-function kindColor(kind: string, outcome: string | null): string {
-  if (outcome === 'failed') return 'var(--break-red)';
-  return KIND_TONE[kind] ?? 'var(--accent-sky)';
 }
 
 export interface ActivitySectionsProps {
