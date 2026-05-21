@@ -384,6 +384,41 @@ To add a new **in-repo** SolverType (typed `spec`, `jinn tasks submit --spec-fil
 
 Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a version, date, and author in the header.
 
+## Frontends
+
+All frontends in this repo follow the rules below. They exist so that any operator, contributor, or agent can reason about a frontend by reading its spec and the canonical design docs — without spelunking the component tree.
+
+### Every frontend ships with a spec
+
+Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
+
+### Spec must include a domain model
+
+The domain model enumerates every component the frontend exposes (in the product sense — "Wallet", "Daemon", "SolverNet", not the React-component sense). Each component is described along four axes:
+
+- **State** — point-in-time values about the component. E.g. *daemon status: running | not running*; *wallet balance: 12.4 OLAS*; *staking epoch: 38*. State is read-only, derivable from the underlying data source, and rendered as-is.
+- **State messages** — information about the component's state that requires human attention. E.g. *"Node requires restart to pick up new config"*; *"Safe is under-funded for the next checkpoint"*. Each state message MAY map to one or more **optional actions** (see Actions below) that resolve or acknowledge it. Messages without actions are purely informational and must say so.
+- **Collections** — lists of data items owned by or pertaining to the component. E.g. *wallet transactions*, *recent tasks*, *peer list*, *delivery history*. Each collection declares its item shape, ordering, and any pagination/filtering rules.
+- **Actions** — verbs a human can invoke against the component. E.g. *node → restart*; *task → cancel*; *wallet → withdraw*. Each action declares its **action states/events** — the lifecycle the UI must render. Example for *restart*: `idle → restarting → restarted` (with `failed` as a terminal alternative). Actions that mutate on-chain state or move funds must list their confirmation and error states explicitly.
+
+A component may have zero entries on any axis (e.g. a read-only component has no actions), but the spec must say so — silence is ambiguous.
+
+### Stack: Next.js + shadcn/ui exclusively
+
+- All new frontends use Next.js (App Router unless the spec calls out otherwise).
+- All UI primitives come from [shadcn/ui](https://ui.shadcn.com). Compose, don't reinvent.
+- **No custom components without attempting shadcn first.** Before authoring a custom component, search the shadcn catalog and document the attempt in the PR description.
+- If no suitable shadcn component exists, request **"snowflake" approval** from a human maintainer before writing the custom component. The request must include:
+  - Why no shadcn primitive (or composition of primitives) fits.
+  - The ongoing **maintenance costs** of owning the snowflake: who maintains it, what it depends on, what breaks if shadcn ships an equivalent later, what the migration path back to shadcn looks like.
+  - The smallest possible surface — snowflakes stay narrow.
+
+Snowflake approvals are recorded in the PR thread; recurring patterns should graduate to a shared internal package rather than living as one-offs per app.
+
+### Design system
+
+See §Design System below — `BRAND.md` for voice and posture, `DESIGN.md` / `DESIGN.json` for tokens, and the non-negotiables (no emoji, no decorative gradients, softened-brutalist corners).
+
 ## Design System
 
 Voice and posture are canonical in [`BRAND.md`](BRAND.md) — read it before any user-facing artifact. The visual sidecar (tokens, spec) is below; folding it into `BRAND.md` is a separate spec.
