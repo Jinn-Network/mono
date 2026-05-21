@@ -1215,6 +1215,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       status: {
         earningDir: config.earningDir,
         rpcUrl: config.rpcUrl,
+        // tJINN identity comes from the bundled JINN MVI L1 artifact
+        // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
+        // is read from `config.ethereumRpcUrl` via the threaded `config`.
+        tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
+        tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
         network: config.network,
         pollIntervalMs: config.pollIntervalMs,
         masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -2367,6 +2372,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
+      // tJINN identity comes from the bundled JINN MVI L1 artifact
+      // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
+      // is read from `config.ethereumRpcUrl` via the threaded `config`.
+      tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
+      tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
       network: config.network,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
