@@ -1,5 +1,41 @@
 export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'error' | 'log';
 
+// ── tJINN status (#406) ───────────────────────────────────────────────────────
+//
+// Mirror of the daemon-side `TjinnStatus` / `TjinnServiceStatus` /
+// `TjinnStatusState` from `client/src/api/status-build.ts`. Surfaced on the
+// `/v1/status` response as `tJinn` (PR #447, daemon half). Mirrored here —
+// rather than imported — to keep the SPA build off the daemon type graph,
+// matching the established pattern for `LauncherStatusResponse` etc.
+
+/** Read state for the Sepolia tJINN ERC-20 Safe balance. */
+export type TjinnStatusState = 'pending' | 'ready' | 'error';
+
+/** Per-service tJINN Safe balance entry. */
+export interface TjinnServiceStatus {
+  index: number;
+  safeAddress: string | null;
+  balanceWei: string | null;
+  state: TjinnStatusState;
+  error: string | null;
+}
+
+/**
+ * Real Sepolia tJINN ERC-20 Safe balance, summed across the operator's fleet
+ * Safes (deduplicated on shared Safe addresses). `safeBalanceWei` is null
+ * unless `state === 'ready'`; a `ready` state with a null balance is a
+ * confirmed-empty balance and should render as `0`.
+ */
+export interface TjinnStatus {
+  state: TjinnStatusState;
+  chainId: number;
+  tokenAddress: string;
+  safeBalanceWei: string | null;
+  safeCount: number;
+  services: TjinnServiceStatus[];
+  error: string | null;
+}
+
 export interface StructuredEvent {
   schemaVersion: 1;
   id: string;
