@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -514,7 +514,7 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
   });
 
-  it('shows compact live status in the HeroStats row', async () => {
+  it('renders the Node Health card with daemon + RPC rows in the right rail', async () => {
     getStatusMock.mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       activity: { recent: [] },
@@ -527,8 +527,12 @@ describe('OverviewPage empty-state gating', () => {
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    await waitFor(() => expect(screen.getByTestId('overview-status-stat')).toBeTruthy());
-    expect(screen.getByTestId('overview-status-stat').getAttribute('data-state')).toBe('idle');
+    await waitFor(() => expect(screen.getByTestId('node-health-card')).toBeTruthy());
+    // The Node Health card replaces the old HeroStats Status tile — the
+    // operator's daemon + RPC health live there now.
+    expect(screen.getByTestId('node-health-daemon-row')).toBeTruthy();
+    expect(screen.getByTestId('node-health-rpc-row')).toBeTruthy();
+    expect(screen.queryByTestId('overview-status-stat')).toBeNull();
     expect(screen.queryByTestId('live-now-band')).toBeNull();
   });
 
@@ -568,60 +572,11 @@ describe('OverviewPage empty-state gating', () => {
     fireEvent.click(screen.getByRole('button', { name: /^top up$/i }));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole('button', { name: /restart/i }));
-    await waitFor(() => expect(restartDaemonMock).toHaveBeenCalledOnce());
+    // Restart-from-Overview was retired with the HeroStats Status tile.
+    // Daemon control now lives on the Node Health card (Stop + Start) and
+    // is presently disabled until daemon-side endpoints land — the operator
+    // restarts via terminal.
     expect(history.at(-1)).toBe('/overview');
-  });
-});
-
-// ── Restart notice auto-clears ──────────────────────────────────────────────
-//
-// The restart-requested notice must not stay pinned to the dashboard until the
-// operator triggers some other action. The confirmation is transient, so the
-// Restart action must pass `autoClearMs` (like the gas top-up does) and the
-// notice must disappear on its own.
-describe('OverviewPage restart notice', () => {
-  const restartStatus = {
-    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
-    masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
-    fleet: { services: [] },
-    predictionV1: {
-      operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
-      totals: { observedTasks: 1, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-    },
-  };
-
-  it('auto-clears the restart-requested notice after its autoClearMs window', async () => {
-    vi.useFakeTimers();
-    try {
-      getStatusMock.mockResolvedValue(restartStatus);
-      getBootstrapMock.mockResolvedValue({ solverNets: {} });
-      restartDaemonMock.mockResolvedValue({ ok: true });
-      render(withProviders(<OverviewPage />));
-
-      const restartButton = await vi.waitFor(() =>
-        screen.getByRole('button', { name: /restart/i }),
-      );
-      fireEvent.click(restartButton);
-
-      // The confirmation surfaces first.
-      const notice = await vi.waitFor(() => screen.getByTestId('dashboard-action-notice'));
-      expect(notice.textContent).toMatch(/restart requested/i);
-
-      // Before the auto-clear window elapses the notice is still present.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(9_000);
-      });
-      expect(screen.queryByTestId('dashboard-action-notice')).not.toBeNull();
-
-      // Past the 10s window the notice clears itself — no other action needed.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_000);
-      });
-      expect(screen.queryByTestId('dashboard-action-notice')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 
@@ -912,15 +867,13 @@ describe('OverviewPage HarnessStatusPanel (spec §2.9)', () => {
 
     // HarnessStatusPanel renders "Harness Status" (its section header) in the
     // loading/unavailable state ("Harness status unavailable") or after data loads.
-    // We wait for the harness panel — its unavailable state renders without data.
     await waitFor(() => {
       expect(screen.getByText(/harness status/i)).toBeTruthy();
     });
 
-    // Confirm HarnessStatusPanel is NOT a descendant of the AdvancedDetails toggle.
-    const harnessEl = screen.getByText(/harness status/i);
-    const advancedToggle = screen.getByRole('button', { name: /advanced details/i });
-    expect(advancedToggle.parentElement?.contains(harnessEl)).toBe(false);
+    // AdvancedDetails was retired with the IA reshuffle — confirm the
+    // empty disclosure isn't lingering.
+    expect(screen.queryByRole('button', { name: /advanced details/i })).toBeNull();
   });
 });
 
@@ -952,15 +905,14 @@ describe('OverviewPage IdentityCard (spec §2.2)', () => {
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    // IdentityCard section header "Identity" must be in the DOM without
-    // expanding the Advanced details disclosure.
+    // IdentityCard section header "Identity" must be in the DOM as a
+    // first-class section, not hidden behind an Advanced disclosure.
     await waitFor(() => {
       expect(screen.getByText('Identity')).toBeTruthy();
     });
 
-    // Confirm IdentityCard is NOT a descendant of the AdvancedDetails toggle.
-    const identityEl = screen.getByText('Identity');
-    const advancedToggle = screen.getByRole('button', { name: /advanced details/i });
-    expect(advancedToggle.parentElement?.contains(identityEl)).toBe(false);
+    // AdvancedDetails was retired with the IA reshuffle — confirm the
+    // empty disclosure isn't lingering.
+    expect(screen.queryByRole('button', { name: /advanced details/i })).toBeNull();
   });
 });

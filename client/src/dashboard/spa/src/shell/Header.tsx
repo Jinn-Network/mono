@@ -2,7 +2,6 @@ import { Link } from 'wouter';
 
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
-  rpcHealthy: boolean;
   masterAddress?: string;
 }
 
@@ -11,7 +10,14 @@ function trunc(addr?: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX.Element {
+/**
+ * Top-of-page chrome. The RPC health pill that used to live here has moved
+ * into the Node Health card on /overview, where the operator can act on a
+ * degraded RPC (Manage RPC → /operator/network) without hunting through the
+ * header. Master address stays in the chrome because there's nowhere else
+ * to surface it without making the IdentityCard chase the viewport.
+ */
+export function Header({ network, masterAddress }: HeaderProps): JSX.Element {
   return (
     <header
       style={{
@@ -54,17 +60,6 @@ export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX
           }}
         >
           {network}
-        </span>
-        <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: rpcHealthy ? 'var(--vow-green)' : 'var(--break-red)',
-            }}
-          />
-          {rpcHealthy ? 'rpc healthy' : 'rpc unreachable'}
         </span>
         <span style={{ color: 'var(--fg-dim)' }}>master {trunc(masterAddress)}</span>
       </div>

@@ -120,8 +120,8 @@ describe('App routes', () => {
         '/overview',
       ),
     );
-    // Overview renders HeroStats (solutions delivered) plus FundsCard / RewardsCard peer cards.
-    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
+    // Overview renders the Node Health card in the right rail plus FundsCard / RewardsCard peer cards.
+    expect(screen.getByText(/^node health$/i)).toBeTruthy();
     // Rewards eyebrow is now in RewardsCard (Task 3.3); Funds eyebrow is in FundsCard.
     expect(screen.getByText(/^rewards$/i)).toBeTruthy();
     expect(screen.getByText(/^funds$/i)).toBeTruthy();

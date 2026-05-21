@@ -82,7 +82,7 @@ export default function App(): JSX.Element {
     <RestartPendingContext.Provider value={restartCtx}>
       <Router>
         <AppShell
-          header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
+          header={<Header network={network} masterAddress={masterAddress} />}
           tabs={<TopTabs />}
           rail={embeddedAgent ? <AgentRail /> : undefined}
         >
