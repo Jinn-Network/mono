@@ -19,6 +19,9 @@ export interface ActivityEventInput {
   solverType?: string | null;
   outcome?: string | null;
   detail?: string | null;
+  credentialId?: string | null;
+  costUsdMicros?: number | null;
+  model?: string | null;
 }
 
 export interface ActivityEventRow {
@@ -31,6 +34,9 @@ export interface ActivityEventRow {
   solverType: string | null;
   outcome: string | null;
   detail: string | null;
+  credentialId: string | null;
+  costUsdMicros: number | null;
+  model: string | null;
 }
 
 export interface RewardClaimInput {
@@ -508,6 +514,7 @@ export class Store {
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.ensureEnvelopeProjectionColumns();
+    this.ensureActivityEventCostColumns();
     this.backfillActivityEvents();
     this.recordLegacyRestorationIntentsIgnored();
   }
@@ -583,6 +590,23 @@ export class Store {
     );
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_envelope_projections_generated ON envelope_projections (generated_at DESC)`,
+    );
+  }
+
+  /** Older local DBs predate the per-credential spend-ledger columns on activity_events. */
+  private ensureActivityEventCostColumns(): void {
+    const activityCols = new Set(
+      (this.db.prepare(`PRAGMA table_info(activity_events)`).all() as Array<{ name: string }>)
+        .map(c => c.name),
+    );
+    const addActivityColumn = (name: string, ddl: string) => {
+      if (!activityCols.has(name)) this.db.exec(`ALTER TABLE activity_events ADD COLUMN ${ddl}`);
+    };
+    addActivityColumn('credential_id', 'credential_id TEXT');
+    addActivityColumn('cost_usd_micros', 'cost_usd_micros INTEGER');
+    addActivityColumn('model', 'model TEXT');
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_activity_events_credential ON activity_events (credential_id, ts)`,
     );
   }
 
@@ -1099,8 +1123,12 @@ export class Store {
 
   recordActivityEvent(event: ActivityEventInput): void {
     this.db.prepare(
-      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail)
-       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @solverType, @outcome, @detail)`,
+      `INSERT INTO activity_events
+         (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
+          credential_id, cost_usd_micros, model)
+       VALUES
+         (@ts, @kind, @requestId, @serviceIndex, @txHash, @solverType, @outcome, @detail,
+          @credentialId, @costUsdMicros, @model)`,
     ).run({
       ts: event.ts ?? null,
       kind: event.kind,
@@ -1110,6 +1138,9 @@ export class Store {
       solverType: event.solverType ?? null,
       outcome: event.outcome ?? null,
       detail: event.detail ?? null,
+      credentialId: event.credentialId ?? null,
+      costUsdMicros: event.costUsdMicros ?? null,
+      model: event.model ?? null,
     });
   }
 
@@ -1130,7 +1161,8 @@ export class Store {
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
-      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
+              credential_id, cost_usd_micros, model
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -1145,6 +1177,9 @@ export class Store {
       solver_type: string | null;
       outcome: string | null;
       detail: string | null;
+      credential_id: string | null;
+      cost_usd_micros: number | null;
+      model: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -1156,6 +1191,9 @@ export class Store {
       solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
+      credentialId: r.credential_id,
+      costUsdMicros: r.cost_usd_micros,
+      model: r.model,
     }));
   }
 
@@ -1164,7 +1202,8 @@ export class Store {
     const effectiveLimit = Math.max(0, Math.min(limit, 1000));
     const rows = this.db
       .prepare(
-        `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
+        `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
+                credential_id, cost_usd_micros, model
          FROM activity_events
          WHERE id > @afterId
          ORDER BY id ASC
@@ -1180,6 +1219,9 @@ export class Store {
         solver_type: string | null;
         outcome: string | null;
         detail: string | null;
+        credential_id: string | null;
+        cost_usd_micros: number | null;
+        model: string | null;
       }>;
     return rows.map((r) => ({
       id: r.id,
@@ -1191,6 +1233,9 @@ export class Store {
       solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
+      credentialId: r.credential_id,
+      costUsdMicros: r.cost_usd_micros,
+      model: r.model,
     }));
   }
 
