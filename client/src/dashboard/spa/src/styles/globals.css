@@ -90,6 +90,30 @@
   --severity-info-border: rgba(122, 167, 220, 0.4);
   --severity-info-bg: transparent;
   --severity-success-fg: var(--vow-green);
+
+  /* shadcn token mapping → our brand tokens. shadcn-vendored primitives
+     reach for `bg-background`, `text-card-foreground`, `border-input`,
+     etc.; these are the variables those utilities resolve to. Brand
+     stays canonical in the block above — this block is pure plumbing. */
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--bg-elevated);
+  --card-foreground: var(--fg);
+  --popover: var(--bg-elevated);
+  --popover-foreground: var(--fg);
+  --primary: var(--accent-sky);
+  --primary-foreground: var(--bg-sunken);
+  --secondary: var(--bg-elevated);
+  --secondary-foreground: var(--fg-muted);
+  --muted: var(--bg-elevated);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--bg-elevated);
+  --accent-foreground: var(--accent-sky);
+  --destructive: var(--break-red);
+  --destructive-foreground: var(--fg);
+  --input: var(--border);
+  --ring: var(--accent-sky);
+  --radius: var(--radius-2);
 }
 
 html,

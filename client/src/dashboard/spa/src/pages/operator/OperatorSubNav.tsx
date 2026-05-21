@@ -1,4 +1,13 @@
-import { Link, useRoute } from 'wouter';
+import { Link, useLocation, useRoute } from 'wouter';
+import { Menu } from 'lucide-react';
+import { cn } from '../../lib/utils.js';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu.js';
+import { Button } from '../../components/ui/button.js';
 
 const TABS = [
   { to: '/operator/memberships', label: 'Memberships' },
@@ -14,19 +23,12 @@ function NavItem({ to, label }: { to: string; label: string }): JSX.Element {
       <Link
         href={to}
         aria-current={active ? 'page' : undefined}
-        style={{
-          display: 'block',
-          padding: '8px 12px',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          letterSpacing: '0.08em',
-          textDecoration: 'none',
-          borderRadius: 'var(--radius-1, 4px)',
-          color: active ? 'var(--fg)' : 'var(--fg-muted)',
-          background: active ? 'var(--bg-elevated)' : 'transparent',
-          fontWeight: active ? 500 : 400,
-          transition: 'color 100ms, background 100ms',
-        }}
+        className={cn(
+          'block rounded-sm px-3 py-2 font-mono text-[12px] tracking-[0.08em] no-underline transition-colors',
+          active
+            ? 'bg-[var(--bg-elevated)] font-medium text-foreground'
+            : 'bg-transparent font-normal text-[var(--fg-muted)] hover:text-foreground',
+        )}
       >
         {label}
       </Link>
@@ -36,31 +38,39 @@ function NavItem({ to, label }: { to: string; label: string }): JSX.Element {
 
 /**
  * Vertical sub-navigation for /operator/* sub-routes.
- * Uses wouter's useRoute to detect the active tab since wouter's Link
- * does NOT auto-set aria-current like react-router-dom's NavLink.
+ *
+ * Renders the desktop vertical list as before, plus a compact narrow-viewport
+ * trigger (`<DropdownMenu>`) that surfaces the same routes from a single
+ * button — useful below the `sm` breakpoint where the rail collapses.
  */
 export function OperatorSubNav(): JSX.Element {
+  const [, navigate] = useLocation();
   return (
     <nav
       aria-label="Operator sections"
       data-testid="operator-sub-nav"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: '160px',
-        paddingTop: '4px',
-      }}
+      className="flex min-w-[160px] flex-col pt-1"
     >
-      <ul
-        style={{
-          listStyle: 'none',
-          margin: 0,
-          padding: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '2px',
-        }}
-      >
+      {/* Compact menu — only shows below `sm`, gives the operator a way to
+          jump between sections without the vertical rail taking screen real
+          estate on narrow viewports. */}
+      <div className="mb-2 sm:hidden">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" data-testid="operator-sub-nav-trigger">
+              <Menu className="h-3.5 w-3.5" /> Sections
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {TABS.map((t) => (
+              <DropdownMenuItem key={t.to} onSelect={() => navigate(t.to)}>
+                {t.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {TABS.map((t) => (
           <NavItem key={t.to} to={t.to} label={t.label} />
         ))}

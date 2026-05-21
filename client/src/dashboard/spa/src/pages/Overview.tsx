@@ -6,6 +6,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
 import type { SolverNetsCatalogResponse } from '../api/types.js';
+import { Alert, AlertDescription } from '../components/ui/alert.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -481,20 +482,22 @@ export function OverviewPage(): JSX.Element {
         )}
 
         {notice && (
-          <div
+          <Alert
+            variant={notice.tone === 'error' ? 'blocking' : 'success'}
             role={notice.tone === 'error' ? 'alert' : 'status'}
             data-testid="dashboard-action-notice"
-            style={{
-              border: `1px solid ${notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)'}`,
-              color: notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)',
-              borderRadius: 'var(--radius-2)',
-              padding: '10px 12px',
-              fontFamily: 'var(--mono)',
-              fontSize: 'var(--text-sm)',
-            }}
+            className="rounded-md border border-l-2 px-3 py-2.5"
           >
-            {notice.text}
-          </div>
+            <AlertDescription
+              className={
+                notice.tone === 'error'
+                  ? 'text-[var(--break-red)]'
+                  : 'text-[var(--vow-green)]'
+              }
+            >
+              {notice.text}
+            </AlertDescription>
+          </Alert>
         )}
 
         {/*

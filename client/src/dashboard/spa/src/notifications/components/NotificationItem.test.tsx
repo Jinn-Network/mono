@@ -71,13 +71,13 @@ describe('NotificationItem', () => {
     expect(li?.getAttribute('data-severity')).toBe('blocking');
   });
 
-  it('applies the severity-specific CSS class so the row tints correctly (closes #444)', () => {
-    const cases: Array<{ severity: OperatorNotification['severity']; expected: string }> = [
-      { severity: 'blocking', expected: 'j-notification--blocking' },
-      { severity: 'warning', expected: 'j-notification--warning' },
-      { severity: 'info', expected: 'j-notification--info' },
+  it('tints the row per severity via a left-border colour token (closes #444)', () => {
+    const cases: Array<{ severity: OperatorNotification['severity']; expectedToken: string }> = [
+      { severity: 'blocking', expectedToken: '--severity-blocking-fg' },
+      { severity: 'warning', expectedToken: '--severity-warning-fg' },
+      { severity: 'info', expectedToken: '--severity-info-fg' },
     ];
-    for (const { severity, expected } of cases) {
+    for (const { severity, expectedToken } of cases) {
       const notice: OperatorNotification = {
         kind: 'restart_required',
         severity,
@@ -85,8 +85,11 @@ describe('NotificationItem', () => {
       };
       const { container, unmount } = render(wrap(<NotificationItem notice={notice} />));
       const li = container.querySelector('li');
-      expect(li?.className).toMatch(/\bj-notification\b/);
-      expect(li?.className).toMatch(new RegExp(`\\b${expected}\\b`));
+      // data-severity is the stable hook for severity-aware styling and tests.
+      expect(li?.getAttribute('data-severity')).toBe(severity);
+      // The shadcn-aligned implementation tints the left border with the
+      // severity colour token via a Tailwind arbitrary value.
+      expect(li?.className).toContain(`border-l-[var(${expectedToken})]`);
       unmount();
     }
   });

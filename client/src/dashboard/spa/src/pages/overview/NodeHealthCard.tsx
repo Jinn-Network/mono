@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import { useLocation } from 'wouter';
+import { Card } from '../../components/ui/card.js';
+import { Button } from '../../components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../components/ui/tooltip.js';
+// AlertDialog imports stay un-imported while the Stop trigger is commented
+// out; re-add them from '../../components/ui/alert-dialog.js' when Stop
+// un-comments (see the JSX comment block below).
+import { cn } from '../../lib/utils.js';
 
 /**
  * Node Health card — the right-rail summary of this operator's daemon and
@@ -11,13 +18,11 @@ import { useLocation } from 'wouter';
  *      the daemon respawns even in `--no-ui` mode).
  *
  *   2. RPC — healthy/unreachable, moved out of the page header so health
- *      state lives next to the action that resolves it. The Manage RPC
- *      button jumps to /operator/network.
+ *      state lives next to the action that resolves it.
  *
- * Eviction and re-stake recovery used to live inline in the old Status
- * tile. They now belong to the `service_evicted` notification (severity
- * blocking) and to a dedicated banner on /overview when applicable —
- * Node Health stays focused on the two health rows.
+ * Migrated to shadcn primitives (Card, Button, Tooltip, AlertDialog) so
+ * the Stop confirmation flow lights up automatically when the underlying
+ * "dashboard outlives the daemon" issue gets fixed.
  */
 export type DaemonStatus = 'running' | 'stopped';
 export type RpcStatus = 'healthy' | 'unreachable';
@@ -36,99 +41,17 @@ export interface NodeHealthCardProps {
   onRestart?: () => Promise<void> | void;
 }
 
-const ROW_LABEL_STYLE: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-xs)',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const ROW_VALUE_STYLE: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-md)',
-  fontWeight: 500,
-  color: 'var(--fg)',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 'var(--space-2)',
-};
-
-const STATE_MESSAGE_STYLE: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-sm)',
-  color: 'var(--fg-muted)',
-  lineHeight: 1.4,
-};
-
-const BUTTON_ROW_STYLE: React.CSSProperties = {
-  display: 'flex',
-  gap: 'var(--space-2)',
-  marginTop: 'var(--space-2)',
-};
-
-function GhostButton({
-  children,
-  busyLabel,
-  disabled,
-  busy,
-  title,
-  onClick,
-  tone = 'sky',
-  testId,
-}: {
-  children: string;
-  busyLabel?: string;
-  disabled?: boolean;
-  busy?: boolean;
-  title?: string;
-  onClick?: () => void;
-  tone?: 'sky' | 'red';
-  testId?: string;
-}): JSX.Element {
-  const color = tone === 'red' ? 'var(--break-red)' : 'var(--accent-sky)';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled || busy}
-      title={title}
-      data-testid={testId}
-      style={{
-        background: 'transparent',
-        border: `1px solid ${color}`,
-        borderRadius: 'var(--radius-2)',
-        color,
-        cursor: busy ? 'wait' : disabled ? 'not-allowed' : 'pointer',
-        fontFamily: 'var(--mono)',
-        fontSize: 'var(--text-xs)',
-        letterSpacing: '0.14em',
-        opacity: (disabled || busy) ? (busy ? 0.7 : 0.4) : 1,
-        padding: '6px 10px',
-        textTransform: 'uppercase',
-      }}
-    >
-      {busy ? (busyLabel ?? 'Working...') : children}
-    </button>
-  );
-}
+const rowLabel = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
+const rowValue = 'flex items-center gap-2 font-mono text-[17px] font-medium text-foreground';
 
 function StatusDot({ tone }: { tone: 'good' | 'bad' | 'neutral' }): JSX.Element {
   const color =
-    tone === 'good' ? 'var(--vow-green)' : tone === 'bad' ? 'var(--break-red)' : 'var(--fg-muted)';
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: '8px',
-        height: '8px',
-        borderRadius: '50%',
-        background: color,
-      }}
-    />
-  );
+    tone === 'good'
+      ? 'bg-[var(--vow-green)]'
+      : tone === 'bad'
+        ? 'bg-[var(--break-red)]'
+        : 'bg-[var(--fg-muted)]';
+  return <span aria-hidden="true" className={cn('inline-block h-2 w-2 rounded-full', color)} />;
 }
 
 export function NodeHealthCard({
@@ -141,123 +64,151 @@ export function NodeHealthCard({
   // is a one-block restore.
 }: NodeHealthCardProps): JSX.Element {
   const [, navigate] = useLocation();
-  const [activeAction, setActiveAction] = useState<'stop' | 'restart' | null>(null);
+  const [busy, setBusy] = useState<'stop' | 'restart' | null>(null);
   const daemonRunning = daemonStatus === 'running';
   const rpcHealthy = rpcStatus === 'healthy';
 
-  function handleAction(label: 'stop' | 'restart', action?: () => Promise<void> | void): void {
-    if (!action || activeAction) return;
-    setActiveAction(label);
+  function handleRestart(): void {
+    if (busy || !onRestart) return;
+    setBusy('restart');
     Promise.resolve()
-      .then(action)
-      .catch((err) => console.error(`[node-health] ${label} failed:`, err))
-      .finally(() => {
-        // The admin endpoint returns {ok: true, scheduled: true} *before*
-        // the process exits, so the promise resolves while the daemon is
-        // still mid-respawn. Clear the busy state now — the browser keeps
-        // its JS context across the daemon swap, so leaving the button
-        // pinned to "Restarting..." would strand it there forever. The
-        // status query is what tells the rest of the page the daemon is
-        // back.
-        setActiveAction(null);
-      });
+      .then(onRestart)
+      .catch((err) => console.error('[node-health] restart failed:', err))
+      .finally(() => setBusy(null));
   }
 
   return (
-    <section
-      data-testid="node-health-card"
-      className="j-surface-secondary"
-      aria-labelledby="node-health-heading"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-4)',
-      }}
-    >
-      <h2
-        id="node-health-heading"
-        style={{
-          ...ROW_LABEL_STYLE,
-          margin: 0,
-          color: 'var(--fg-dim)',
-        }}
+    <TooltipProvider delayDuration={150}>
+      <Card
+        data-testid="node-health-card"
+        aria-labelledby="node-health-heading"
+        className="flex flex-col gap-4 p-6"
       >
-        Node health
-      </h2>
+        <h2 id="node-health-heading" className={cn(rowLabel, 'm-0 text-[var(--fg-dim)]')}>
+          Node health
+        </h2>
 
-      {/* ── DAEMON ─────────────────────────────────────────────────────── */}
-      <div
-        data-testid="node-health-daemon-row"
-        data-status={daemonStatus}
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
-      >
-        <span style={ROW_LABEL_STYLE}>Daemon</span>
-        <span style={ROW_VALUE_STYLE}>
-          <StatusDot tone={daemonRunning ? 'good' : 'bad'} />
-          {daemonRunning ? 'Running' : 'Stopped'}
-        </span>
-        {daemonStateMessage && (
-          <span data-testid="node-health-daemon-state" style={STATE_MESSAGE_STYLE}>
-            {daemonStateMessage}
+        {/* ── DAEMON ─────────────────────────────────────────────────────── */}
+        <div
+          data-testid="node-health-daemon-row"
+          data-status={daemonStatus}
+          className="flex flex-col gap-2"
+        >
+          <span className={rowLabel}>Daemon</span>
+          <span className={rowValue}>
+            <StatusDot tone={daemonRunning ? 'good' : 'bad'} />
+            {daemonRunning ? 'Running' : 'Stopped'}
           </span>
-        )}
-        <div style={BUTTON_ROW_STYLE}>
-          {/*
-            Stop is commented out for now. When the daemon stops, the
-            dashboard goes with it (same process serves the SPA), so the
-            button gets stuck on "Stopping…" and the operator has no way
-            to confirm the action completed. The deeper fix is to split
-            the dashboard process off from the daemon — until then,
-            shipping Stop without Start is more confusing than useful.
-            Leaving the API client (`api.stopDaemon`), the daemon-side
-            POST /api/admin/stop endpoint, and the `onStop` prop in place
-            so un-commenting this block is the only restore step.
+          {daemonStateMessage && (
+            <span
+              data-testid="node-health-daemon-state"
+              className="font-mono text-[12px] leading-snug text-[var(--fg-muted)]"
+            >
+              {daemonStateMessage}
+            </span>
+          )}
+          <div className="mt-2 flex gap-2">
+            {/*
+              Stop is commented out for now. When the daemon stops, the
+              dashboard goes with it (same process serves the SPA), so the
+              button gets stuck on "Stopping…" and the operator has no way
+              to confirm the action completed. The deeper fix is to split
+              the dashboard process off from the daemon — until then,
+              shipping Stop without Start is more confusing than useful.
+              The AlertDialog confirmation is already wired so re-enabling
+              the trigger is the only restore step.
 
-          <GhostButton
-            tone="red"
-            disabled={!daemonRunning}
-            busy={activeAction === 'stop'}
-            busyLabel="Stopping..."
-            title={daemonRunning ? 'Stop the daemon. It stays down until you re-run jinn from your terminal.' : 'Daemon is already stopped.'}
-            testId="node-health-stop"
-            onClick={() => handleAction('stop', onStop)}
-          >
-            Stop
-          </GhostButton>
-          */}
-          <GhostButton
-            disabled={!daemonRunning}
-            busy={activeAction === 'restart'}
-            busyLabel="Restarting..."
-            title={daemonRunning ? 'Restart the daemon. The dashboard reconnects when it comes back.' : 'Daemon is stopped — re-run jinn from your terminal to start it.'}
-            testId="node-health-restart"
-            onClick={() => handleAction('restart', onRestart)}
-          >
-            Restart
-          </GhostButton>
+            <AlertDialog>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={!daemonRunning || busy !== null}
+                        data-testid="node-health-stop"
+                      >
+                        {busy === 'stop' ? 'Stopping...' : 'Stop'}
+                      </Button>
+                    </AlertDialogTrigger>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {daemonRunning
+                    ? 'Stop the daemon. It stays down until you re-run jinn from your terminal.'
+                    : 'Daemon is already stopped.'}
+                </TooltipContent>
+              </Tooltip>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Stop the daemon?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The dashboard will go down with the daemon. You'll need to re-run
+                    `jinn` from your terminal to bring it back up.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      if (!onStop) return;
+                      setBusy('stop');
+                      Promise.resolve(onStop()).finally(() => setBusy(null));
+                    }}
+                  >
+                    Stop daemon
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={daemonRunning ? -1 : 0}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!daemonRunning || busy !== null}
+                    data-testid="node-health-restart"
+                    onClick={handleRestart}
+                  >
+                    {busy === 'restart' ? 'Restarting...' : 'Restart'}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {daemonRunning
+                  ? 'Restart the daemon. The dashboard reconnects when it comes back.'
+                  : 'Daemon is stopped — re-run jinn from your terminal to start it.'}
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
-      </div>
 
-      {/* ── RPC ────────────────────────────────────────────────────────── */}
-      <div
-        data-testid="node-health-rpc-row"
-        data-status={rpcStatus}
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
-      >
-        <span style={ROW_LABEL_STYLE}>RPC</span>
-        <span style={ROW_VALUE_STYLE}>
-          <StatusDot tone={rpcHealthy ? 'good' : 'bad'} />
-          {rpcHealthy ? 'Healthy' : 'Unreachable'}
-        </span>
-        <div style={BUTTON_ROW_STYLE}>
-          <GhostButton
-            onClick={() => navigate('/operator/network')}
-            testId="node-health-rpc-settings"
-          >
-            Manage RPC
-          </GhostButton>
+        {/* ── RPC ────────────────────────────────────────────────────────── */}
+        <div
+          data-testid="node-health-rpc-row"
+          data-status={rpcStatus}
+          className="flex flex-col gap-2"
+        >
+          <span className={rowLabel}>RPC</span>
+          <span className={rowValue}>
+            <StatusDot tone={rpcHealthy ? 'good' : 'bad'} />
+            {rpcHealthy ? 'Healthy' : 'Unreachable'}
+          </span>
+          <div className="mt-2 flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="node-health-rpc-settings"
+              onClick={() => navigate('/operator/network')}
+            >
+              Manage RPC
+            </Button>
+          </div>
         </div>
-      </div>
-    </section>
+      </Card>
+    </TooltipProvider>
   );
 }

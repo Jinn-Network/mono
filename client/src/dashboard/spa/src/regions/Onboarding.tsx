@@ -29,6 +29,9 @@ import type {
 import { AwaitingFundingCard } from './AwaitingFundingCard.js';
 import { Agent } from './Agent.js';
 import { getFeatures } from '../lib/features.js';
+import { Progress } from '../components/ui/progress.js';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
+import { Button } from '../components/ui/button.js';
 
 type Phase = 1 | 2 | 3;
 type PhaseStatus = 'done' | 'active' | 'queued' | 'error';
@@ -146,6 +149,23 @@ export function Onboarding(): JSX.Element {
           >
             Welcome to Jinn.
           </h1>
+
+          {/* Bootstrap progress — visualises overall completion across the
+              three phases. The PhaseRow list below is the source of truth
+              for state; this bar is a glance-level cue so the operator
+              knows roughly how far they are. */}
+          <div
+            className="flex flex-col gap-1.5"
+            data-testid="onboarding-progress"
+            aria-label="Onboarding progress"
+          >
+            <Progress
+              value={Math.min(100, ((currentPhase - 1) / 2) * 100 + (currentPhase === 3 ? 33 : 0))}
+            />
+            <span className="j-label" style={{ color: 'var(--fg-dim)' }}>
+              Phase {currentPhase} of 3
+            </span>
+          </div>
 
           <ol className="flex flex-col">
             {([1, 2, 3] as Phase[]).map((p) => {
@@ -388,27 +408,20 @@ function BootstrapErrorCard({ envelope, chainExplorerBase }: { envelope: Bootstr
   }, []);
 
   return (
-    <div
-      className="px-5 py-4 flex flex-col gap-3"
-      style={{
-        border: '1px solid var(--break-red)',
-        background: 'rgba(168, 90, 90, 0.06)',
-        borderRadius: 'var(--radius-2)',
-      }}
-    >
+    <Alert variant="blocking" className="flex flex-col gap-3 px-5 py-4">
       <div className="flex items-baseline justify-between">
-        <span className="j-label" style={{ color: 'var(--break-red)' }}>
+        <AlertTitle className="text-[var(--break-red)]">
           Bootstrap halted · {envelope.code}
-        </span>
+        </AlertTitle>
         {generatedAt && (
           <span className="j-mono text-[10px]" style={{ color: 'var(--fg-dim)' }}>
             {generatedAt}
           </span>
         )}
       </div>
-      <p className="j-mono text-xs break-words" style={{ color: 'var(--fg)' }}>
+      <AlertDescription className="j-mono text-xs break-words text-foreground">
         {envelope.message}
-      </p>
+      </AlertDescription>
       {isInsufficientFunds && fundingAddress && (
         <div className="flex flex-col gap-1">
           <ErrorDetailRow label="Send ETH to">{fundingAddress}</ErrorDetailRow>
@@ -442,24 +455,18 @@ function BootstrapErrorCard({ envelope, chainExplorerBase }: { envelope: Bootstr
           view failed tx ↗
         </a>
       )}
-      <div className="flex items-center gap-3 mt-1">
-        <button
+      <div className="mt-1 flex items-center gap-3">
+        <Button
+          variant="destructive"
+          size="sm"
           type="button"
-          onClick={() => { void handleRetry(); }}
-          disabled={retryState === 'retrying'}
-          className="j-label"
-          style={{
-            padding: '5px 12px',
-            borderRadius: 'var(--radius-2)',
-            border: '1px solid var(--break-red)',
-            background: retryState === 'retrying' ? 'rgba(168, 90, 90, 0.15)' : 'transparent',
-            color: retryState === 'retrying' ? 'var(--fg-dim)' : 'var(--break-red)',
-            cursor: retryState === 'retrying' ? 'default' : 'pointer',
-            fontSize: '11px',
+          onClick={() => {
+            void handleRetry();
           }}
+          disabled={retryState === 'retrying'}
         >
           {retryState === 'retrying' ? 'Retrying…' : retryState === 'success' ? 'Resuming…' : 'Retry'}
-        </button>
+        </Button>
         {retryState === 'success' && (
           <span className="j-mono text-[11px]" style={{ color: 'var(--fg-muted)' }}>
             Daemon resumed — waiting for bootstrap to complete
@@ -478,7 +485,7 @@ function BootstrapErrorCard({ envelope, chainExplorerBase }: { envelope: Bootstr
           the persisted state.
         </p>
       )}
-    </div>
+    </Alert>
   );
 }
 

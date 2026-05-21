@@ -1,6 +1,17 @@
 import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { api } from '../../api/client.js';
+import { Card } from '../../components/ui/card.js';
+import { Button } from '../../components/ui/button.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Separator } from '../../components/ui/separator.js';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip.js';
+import { Alert, AlertDescription } from '../../components/ui/alert.js';
 
 /**
  * Wallet — single consolidated card on /overview that absorbed the
@@ -8,19 +19,9 @@ import { api } from '../../api/client.js';
  * row. Four hairline-separated sections, all "small text" stats below
  * eyebrows so the card reads as one surface rather than four neighbours.
  *
- * Sections:
- *   - Gas       — ETH balance + runway as the headline stat, Top up faucet button
- *   - Rewards   — Claimable + Claimed as paired headline stats, Claim button
- *   - Identity  — Agent / Master / Safe labelled triplet (chain lives in
- *                 the header pill, so it's not duplicated here). Preserves
- *                 the binding-pending inline retry flow from IdentityCard.
- *   - Password  — Last rotated timestamp + Change Password button
- *                 (jumps to /operator/security)
- *
- * Two bits commented out per operator feedback:
- *   - The "per role" funds drill-down (the daemon only exposes master
- *     today; per-role surfaces nothing useful — issue #430)
- *   - The "last claim" timestamp under Rewards
+ * Migrated to shadcn primitives (Card, Button, Badge, Separator, Tooltip,
+ * Alert). Truncated addresses now ship a Tooltip with the full value
+ * instead of the legacy `title=` attribute.
  */
 export interface ServiceIdentity {
   index: number;
@@ -48,11 +49,10 @@ export interface WalletCardProps {
   /** JINN claimed lifetime, formatted as decimal string */
   claimedJinnLifetime: string;
   // lastClaimAt stays in the props so re-enabling the "last claim" row is
-  // a one-block restore. Currently null because the daemon doesn't
-  // surface it (tracked as a follow-up).
+  // a one-block restore.
   /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
   lastClaimAt?: string | null;
-  /** Operator's master EOA. Moved out of the page header into Identity. */
+  /** Operator's master EOA. */
   masterAddress: string | null;
   agentId: number | null;
   safeAddress: string | null;
@@ -66,72 +66,11 @@ export interface WalletCardProps {
   actionsDisabled?: boolean;
 }
 
-const EYEBROW: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-xs)',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const SECTION_LABEL: React.CSSProperties = {
-  ...EYEBROW,
-  color: 'var(--fg-dim)',
-};
-
-const SECTION_CONTAINER: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 'var(--space-3)',
-};
-
-const STAT_BIG: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-xl)',
-  fontWeight: 500,
-  color: 'var(--fg)',
-  letterSpacing: '-0.01em',
-};
-
-const STAT_UNIT: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-sm)',
-  color: 'var(--fg-muted)',
-  fontWeight: 500,
-};
-
-const STAT_AUX: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-sm)',
-  color: 'var(--fg-dim)',
-};
-
-const SMALL_BUTTON: React.CSSProperties = {
-  background: 'transparent',
-  border: '1px solid var(--accent-sky)',
-  borderRadius: 'var(--radius-2)',
-  color: 'var(--accent-sky)',
-  cursor: 'pointer',
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-xs)',
-  letterSpacing: '0.14em',
-  padding: '6px 10px',
-  textTransform: 'uppercase',
-  alignSelf: 'flex-start',
-};
-
-const SMALL_BUTTON_GHOST: React.CSSProperties = {
-  ...SMALL_BUTTON,
-  border: '1px solid var(--border)',
-  color: 'var(--fg-muted)',
-};
-
-const DIVIDER: React.CSSProperties = {
-  border: 0,
-  borderTop: '1px solid var(--border)',
-  margin: 0,
-};
+const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
+const sectionLabel = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
+const statBig = 'font-mono text-[24px] font-medium tracking-[-0.01em] text-foreground';
+const statUnit = 'font-mono text-[12px] font-medium text-[var(--fg-muted)]';
+const statAux = 'font-mono text-[12px] text-[var(--fg-dim)]';
 
 function trunc(addr: string | null | undefined): string {
   if (!addr || addr.length < 10) return addr ?? '—';
@@ -187,233 +126,175 @@ export function WalletCard({
   };
 
   return (
-    <section
-      role="region"
-      aria-label="Wallet"
-      data-testid="wallet-card"
-      className="j-surface-secondary"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-5)',
-      }}
-    >
-      <span style={EYEBROW}>Wallet</span>
+    <TooltipProvider delayDuration={150}>
+      <Card
+        role="region"
+        aria-label="Wallet"
+        data-testid="wallet-card"
+        className="flex flex-col gap-6 p-6"
+      >
+        <span className={eyebrow}>Wallet</span>
 
-      {/* ── GAS ───────────────────────────────────────────────────────── */}
-      <div style={SECTION_CONTAINER} data-testid="wallet-section-gas">
-        <span style={SECTION_LABEL}>Gas</span>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <span style={STAT_BIG}>{totalEth}</span>
-          <span style={STAT_UNIT}>ETH</span>
-          <span style={STAT_AUX}>·</span>
-          <span style={STAT_AUX}>{runwayDays}d runway</span>
-        </div>
-        {/*
-          PER ROLE drill-down is commented out — the daemon only exposes
-          masterGas today, so the disclosure renders agent + safe as "—".
-          Re-enable when /v1/status surfaces per-role balances (#430).
-
-        <button type="button" aria-expanded={false} onClick={() => {}} style={{ alignSelf: 'flex-start', ... }}>
-          per role
-        </button>
-        */}
-        <button
-          type="button"
-          aria-label="Top up from faucet"
-          onClick={onTopUp}
-          disabled={actionsDisabled}
-          data-testid="wallet-topup"
-          style={{
-            ...SMALL_BUTTON,
-            opacity: actionsDisabled ? 0.55 : 1,
-            cursor: actionsDisabled ? 'not-allowed' : 'pointer',
-            border: `1px solid ${actionsDisabled ? 'var(--border)' : 'var(--accent-sky)'}`,
-            color: actionsDisabled ? 'var(--fg-dim)' : 'var(--accent-sky)',
-          }}
-        >
-          Top up from faucet (free)
-        </button>
-      </div>
-
-      <hr style={DIVIDER} />
-
-      {/* ── REWARDS ───────────────────────────────────────────────────── */}
-      <div style={SECTION_CONTAINER} data-testid="wallet-section-rewards">
-        <span style={SECTION_LABEL}>Rewards</span>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-          <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Claimable</span>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)' }}>
-            <span style={STAT_BIG}>{claimableJinn}</span>
-            <span style={STAT_UNIT}>JINN</span>
+        {/* ── GAS ───────────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3" data-testid="wallet-section-gas">
+          <span className={sectionLabel}>Gas</span>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className={statBig}>{totalEth}</span>
+            <span className={statUnit}>ETH</span>
+            <span className={statAux}>·</span>
+            <span className={statAux}>{runwayDays}d runway</span>
           </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-          <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Claimed</span>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)' }}>
-            <span style={STAT_BIG}>{claimedJinnLifetime}</span>
-            <span style={STAT_UNIT}>JINN</span>
-          </div>
-          <button
-            type="button"
-            aria-label="Claim"
-            onClick={onClaim}
-            disabled={!canClaim || actionsDisabled}
-            data-testid="wallet-claim"
-            style={{
-              ...SMALL_BUTTON,
-              marginTop: 'var(--space-2)',
-              border: `1px solid ${canClaim && !actionsDisabled ? 'var(--accent-sky)' : 'var(--border)'}`,
-              color: canClaim && !actionsDisabled ? 'var(--accent-sky)' : 'var(--fg-dim)',
-              cursor: canClaim && !actionsDisabled ? 'pointer' : 'not-allowed',
-              opacity: canClaim && !actionsDisabled ? 1 : 0.5,
-            }}
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Top up from faucet"
+            onClick={onTopUp}
+            disabled={actionsDisabled}
+            data-testid="wallet-topup"
+            className="self-start"
           >
-            Claim
-          </button>
+            Top up from faucet (free)
+          </Button>
         </div>
-        {/*
-          LAST CLAIM timestamp commented out per operator feedback —
-          it added a "never" line under an already-empty section. Restore
-          if/when the daemon ships `lastClaimAt` (tracked alongside #441).
 
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-dim)' }}>
-          last claim: {lastClaimAt ? <time dateTime={lastClaimAt}>{lastClaimAt}</time> : 'never'}
-        </span>
-        */}
-      </div>
+        <Separator />
 
-      <hr style={DIVIDER} />
+        {/* ── REWARDS ───────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3" data-testid="wallet-section-rewards">
+          <span className={sectionLabel}>Rewards</span>
 
-      {/* ── IDENTITY ──────────────────────────────────────────────────── */}
-      <div style={SECTION_CONTAINER} data-testid="wallet-section-identity">
-        <span style={SECTION_LABEL}>Identity</span>
-        <div style={{ display: 'flex', gap: 'var(--space-6)', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Agent</span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-              {agentId !== null ? `#${agentId}` : '—'}
-              {pendingBinding && (
-                <button
-                  type="button"
-                  onClick={() => setBindingOpen((o) => !o)}
-                  style={{
-                    fontSize: 'var(--text-2xs)',
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    fontFamily: 'var(--mono)',
-                    border: '1px solid var(--wane)',
-                    color: 'var(--wane)',
-                    background: 'transparent',
-                    borderRadius: 'var(--radius-pill)',
-                    padding: '1px 6px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  binding pending
-                </button>
-              )}
-              {retryResult === 'success' && (
-                <span
-                  style={{
-                    fontSize: 'var(--text-2xs)',
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    border: '1px solid var(--vow-green)',
-                    color: 'var(--vow-green)',
-                    borderRadius: 'var(--radius-pill)',
-                    padding: '1px 6px',
-                  }}
-                >
-                  bound
-                </span>
-              )}
-            </span>
+          <div className="flex flex-col gap-1">
+            <span className={sectionLabel}>Claimable</span>
+            <div className="flex items-baseline gap-2">
+              <span className={statBig}>{claimableJinn}</span>
+              <span className={statUnit}>JINN</span>
+            </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Master</span>
-            <span
-              data-testid="wallet-master-address"
-              title={masterAddress ?? undefined}
-              style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)' }}
+
+          <div className="flex flex-col gap-1">
+            <span className={sectionLabel}>Claimed</span>
+            <div className="flex items-baseline gap-2">
+              <span className={statBig}>{claimedJinnLifetime}</span>
+              <span className={statUnit}>JINN</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Claim"
+              onClick={onClaim}
+              disabled={!canClaim || actionsDisabled}
+              data-testid="wallet-claim"
+              className="mt-2 self-start"
             >
-              {trunc(masterAddress)}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Safe</span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)' }}>{trunc(safeAddress)}</span>
+              Claim
+            </Button>
           </div>
         </div>
-        {bindingOpen && pendingBinding && (
-          <div
-            style={{
-              marginTop: 'var(--space-2)',
-              padding: '12px 14px',
-              border: '1px solid var(--wane)',
-              borderRadius: 'var(--radius-2)',
-              background: 'rgba(184, 128, 47, 0.07)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-2)',
-            }}
-          >
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg)' }}>
-              Service #{pendingBinding.index} Safe is not yet bound to agent #{pendingBinding.agentId}.
-              The bootstrap left it unbound; retry to attempt the ERC-1271 bind again.
-            </span>
-            {retryDetail && (
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--break-red)' }}>{retryDetail}</span>
-            )}
-            <button
-              type="button"
-              onClick={() => { void retry(); }}
-              disabled={retrying}
-              style={{
-                alignSelf: 'flex-start',
-                border: '1px solid var(--accent-sky)',
-                background: 'var(--accent-sky)',
-                color: 'var(--bg-sunken)',
-                borderRadius: 'var(--radius-2)',
-                padding: '8px 14px',
-                fontFamily: 'var(--mono)',
-                fontSize: 'var(--text-sm)',
-                cursor: retrying ? 'wait' : 'pointer',
-              }}
-            >
-              {retrying ? 'Retrying…' : 'Retry binding'}
-            </button>
+
+        <Separator />
+
+        {/* ── IDENTITY ──────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3" data-testid="wallet-section-identity">
+          <span className={sectionLabel}>Identity</span>
+          <div className="flex flex-wrap gap-8">
+            <div className="flex flex-col gap-1">
+              <span className={sectionLabel}>Agent</span>
+              <span className="flex items-center gap-2 font-mono text-[14px] text-foreground">
+                {agentId !== null ? `#${agentId}` : '—'}
+                {pendingBinding && (
+                  <button
+                    type="button"
+                    onClick={() => setBindingOpen((o) => !o)}
+                    className="cursor-pointer rounded-full border border-[var(--wane)] bg-transparent px-1.5 py-px font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--wane)]"
+                  >
+                    binding pending
+                  </button>
+                )}
+                {retryResult === 'success' && (
+                  <Badge variant="success" className="rounded-full normal-case tracking-[0.12em]">
+                    bound
+                  </Badge>
+                )}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className={sectionLabel}>Master</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    data-testid="wallet-master-address"
+                    tabIndex={0}
+                    className="cursor-help font-mono text-[14px] text-foreground"
+                  >
+                    {trunc(masterAddress)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{masterAddress ?? 'No master address yet'}</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className={sectionLabel}>Safe</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="cursor-help font-mono text-[14px] text-foreground">
+                    {trunc(safeAddress)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{safeAddress ?? 'No safe address yet'}</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
-        )}
-      </div>
-
-      <hr style={DIVIDER} />
-
-      {/* ── PASSWORD ──────────────────────────────────────────────────── */}
-      <div style={SECTION_CONTAINER} data-testid="wallet-section-password">
-        <span style={SECTION_LABEL}>Password</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
-          last rotated:{' '}
-          {lastPasswordRotationAt ? (
-            <time dateTime={lastPasswordRotationAt} style={{ color: 'var(--fg-muted)' }}>
-              {lastPasswordRotationAt}
-            </time>
-          ) : (
-            <span style={{ color: 'var(--fg-muted)' }}>never</span>
+          {bindingOpen && pendingBinding && (
+            <Alert variant="warning" className="mt-2 flex flex-col gap-2">
+              <AlertDescription>
+                Service #{pendingBinding.index} Safe is not yet bound to agent #{pendingBinding.agentId}.
+                The bootstrap left it unbound; retry to attempt the ERC-1271 bind again.
+              </AlertDescription>
+              {retryDetail && (
+                <span className="font-mono text-[11px] text-[var(--break-red)]">{retryDetail}</span>
+              )}
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => {
+                  void retry();
+                }}
+                disabled={retrying}
+                className="self-start"
+              >
+                {retrying ? 'Retrying…' : 'Retry binding'}
+              </Button>
+            </Alert>
           )}
-        </span>
-        <button
-          type="button"
-          aria-label="Change password"
-          onClick={() => navigate('/operator/security')}
-          data-testid="wallet-change-password"
-          style={SMALL_BUTTON_GHOST}
-        >
-          Change password
-        </button>
-      </div>
-    </section>
+        </div>
+
+        <Separator />
+
+        {/* ── PASSWORD ──────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3" data-testid="wallet-section-password">
+          <span className={sectionLabel}>Password</span>
+          <span className="font-mono text-[12px] text-[var(--fg-dim)]">
+            last rotated:{' '}
+            {lastPasswordRotationAt ? (
+              <time dateTime={lastPasswordRotationAt} className="text-[var(--fg-muted)]">
+                {lastPasswordRotationAt}
+              </time>
+            ) : (
+              <span className="text-[var(--fg-muted)]">never</span>
+            )}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label="Change password"
+            onClick={() => navigate('/operator/security')}
+            data-testid="wallet-change-password"
+            className="self-start"
+          >
+            Change password
+          </Button>
+        </div>
+      </Card>
+    </TooltipProvider>
   );
 }

@@ -1,28 +1,52 @@
 import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { SectionCard } from '../../components/SectionCard.js';
 import { api } from '../../api/client.js';
+import { Button } from '../../components/ui/button.js';
+import { Input } from '../../components/ui/input.js';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '../../components/ui/form.js';
 
 /**
  * /operator/security — keystore password rotation (Funds-Password).
- * Code moved from pages/configuration/SecuritySection.tsx (Task 5.6).
  *
- * Danger-zone section that owns the keystore password rotation flow.
- * Wraps the existing /v1/setup/change-password endpoint.
+ * Migrated to shadcn `Form` primitives (react-hook-form + zod) so
+ * validation lives next to the schema and the inputs get a11y wiring
+ * (aria-describedby, aria-invalid) for free.
  */
+const passwordSchema = z
+  .object({
+    current: z.string().min(1, 'Current password is required.'),
+    next: z.string().min(8, 'New password must be at least 8 characters.'),
+  });
+
+type PasswordFormValues = z.infer<typeof passwordSchema>;
+
 export function SecurityTab(): JSX.Element {
-  const [current, setCurrent] = useState('');
-  const [next, setNext] = useState('');
   const [status, setStatus] = useState<'idle' | 'rotating' | 'rotated' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (): Promise<void> => {
+  const form = useForm<PasswordFormValues>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { current: '', next: '' },
+  });
+
+  const onSubmit = async (values: PasswordFormValues): Promise<void> => {
     setStatus('rotating');
     setError(null);
     try {
-      await api.changeKeystorePassword(current, next);
+      await api.changeKeystorePassword(values.current, values.next);
       setStatus('rotated');
-      setCurrent('');
-      setNext('');
+      form.reset({ current: '', next: '' });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus('failed');
@@ -38,72 +62,61 @@ export function SecurityTab(): JSX.Element {
         variant="danger"
         defaultExpanded={true}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--fg-muted)' }}>
-              Current password
-            </span>
-            <input
-              type="password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-              style={{
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                padding: '10px 12px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '14px',
-                color: 'var(--fg)',
-              }}
-            />
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--fg-muted)' }}>
-              New password
-            </span>
-            <input
-              type="password"
-              value={next}
-              onChange={(e) => setNext(e.target.value)}
-              style={{
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                padding: '10px 12px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '14px',
-                color: 'var(--fg)',
-              }}
-            />
-          </label>
-        </div>
-        <button
-          type="button"
-          onClick={() => { void submit(); }}
-          disabled={status === 'rotating' || current.length === 0 || next.length < 8}
-          style={{
-            alignSelf: 'flex-start',
-            background: 'var(--break-red)',
-            border: '1px solid var(--break-red)',
-            color: 'var(--fg)',
-            borderRadius: '6px',
-            padding: '10px 20px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '14px',
-            cursor: status === 'rotating' ? 'wait' : 'pointer',
-          }}
-        >
-          {status === 'rotating' ? 'Rotating…' : 'Rotate password'}
-        </button>
-        {status === 'rotated' && (
-          <span style={{ color: 'var(--vow-green)', fontSize: '12px' }}>
-            Password rotated. Re-run jinn run with the new password.
-          </span>
-        )}
-        {status === 'failed' && (
-          <span style={{ color: 'var(--break-red)', fontSize: '12px' }}>Rotation failed: {error}</span>
-        )}
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="flex flex-col gap-4"
+            data-testid="security-password-form"
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="current"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Current password</FormLabel>
+                    <FormControl>
+                      <Input type="password" autoComplete="current-password" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="next"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>New password</FormLabel>
+                    <FormControl>
+                      <Input type="password" autoComplete="new-password" {...field} />
+                    </FormControl>
+                    <FormDescription>At least 8 characters.</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={status === 'rotating' || !form.formState.isValid}
+              className="self-start"
+            >
+              {status === 'rotating' ? 'Rotating…' : 'Rotate password'}
+            </Button>
+            {status === 'rotated' && (
+              <span className="font-mono text-[12px] text-[var(--vow-green)]">
+                Password rotated. Re-run jinn run with the new password.
+              </span>
+            )}
+            {status === 'failed' && (
+              <span className="font-mono text-[12px] text-[var(--break-red)]">
+                Rotation failed: {error}
+              </span>
+            )}
+          </form>
+        </Form>
       </SectionCard>
     </div>
   );

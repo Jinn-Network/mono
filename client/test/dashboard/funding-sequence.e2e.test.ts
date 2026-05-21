@@ -244,7 +244,12 @@ test('AwaitingFundingCard auto-continues across Stage 1 → Stage 2 gate change 
   //   4. The second drip POST landed (advancing bootstrap to phase 3 / running).
   //   5. The SPA navigated from <Onboarding/> to the running dashboard.
   await expect(page).toHaveURL(/\/overview$/, { timeout: 20_000 });
-  await expect(page.getByText(/SOLUTIONS DELIVERED/i)).toBeVisible();
+  // The aggregate "SOLUTIONS DELIVERED" counter is gone post-IA-reshuffle
+  // (PR #449) — the running dashboard now leads with the Activity card.
+  // Asserting against the card's stable testId keeps the regression
+  // signal (we reached the running dashboard, not the onboarding takeover)
+  // without depending on copy that the operator app no longer ships.
+  await expect(page.getByTestId('activity-card')).toBeVisible();
 
   // Critical regression assertion: TWO drip POSTs must have fired.
   // Before the u34i fix, only the first click triggered a drip; the second

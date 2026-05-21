@@ -1,21 +1,45 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
+import { Activity as ActivityIcon, Pencil, Plus } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card.js';
+import { Button } from '../../components/ui/button.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Separator } from '../../components/ui/separator.js';
+import { ScrollArea } from '../../components/ui/scroll-area.js';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table.js';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip.js';
+import { cn } from '../../lib/utils.js';
 
 /**
- * Activity — the operator's view of their node's work. Replaces the prior
- * Network · counters / Solving on / In-flight / Recent / Harness Status
- * quintet with a single surface organised by §2.4 Memberships:
+ * Activity — the operator's view of their node's work.
  *
- *   left:    Joined SolverNets list + "Join more" link → /operator/registry
- *   middle:  Selected SolverNet title + table of tasks this node has worked on
- *            (one row per task — fields from §2.6 Tasks)
- *   right:   Read-only environment for the selected membership
- *            (roles, harness, edit link → /operator/memberships)
+ * One `<Card>` with three sibling div sections inside `<CardContent>`:
+ *   - Joined SolverNets list (left rail of selectable Buttons)
+ *   - Selected SolverNet's tasks (shadcn `<Table>`, state column as Badges)
+ *   - Settings panel (roles / harness / model / plugins, Separator between rows)
  *
- * Aggregate counters (tasks/active/solutions/verdicts/...) intentionally
- * dropped — the operator cares about *what happened* on each task, not the
- * rolled-up scoreboard. The marketplace explorer is the right place for
- * the global counts.
+ * Every interactive surface is a shadcn primitive: Button (ghost / outline /
+ * link), Badge (destructive / success / default / outline), Tooltip, ScrollArea.
+ * Eyebrow labels stay as plain `<h3>` headings with shared utility classes —
+ * shadcn's vocabulary intentionally has no "section heading" component, so
+ * matching the brand's eyebrow type comes from tokens, not a primitive.
  */
 
 export interface ActivityTask {
@@ -48,9 +72,7 @@ export interface ActivityJoinedNet {
   model?: string;
   /**
    * Effective plugins for this membership — bundled defaults +
-   * catalog-default-included + explicit, minus operator-disabled. See
-   * `computeEffectivePlugins`. Each entry knows whether it came from the
-   * defaults (`defaultIncluded: true`) so the dashboard can mark it.
+   * catalog-default-included + explicit, minus operator-disabled.
    */
   plugins?: ActivityPlugin[];
 }
@@ -66,34 +88,19 @@ export interface ActivityCardProps {
   tasks: ActivityTask[];
 }
 
-const EYEBROW: React.CSSProperties = {
-  fontFamily: 'var(--mono)',
-  fontSize: 'var(--text-xs)',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
+type StateTone = 'good' | 'bad' | 'active' | 'neutral';
 
-const SECTION_LABEL: React.CSSProperties = {
-  ...EYEBROW,
-  color: 'var(--fg-dim)',
-};
-
-const COLUMN_BG: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 'var(--space-3)',
-  minWidth: 0,
-};
-
-/**
- * Shared grid template for the tasks table header + rows. Splitting header
- * and rows into separate grids (so active rows can carry a background +
- * left border) means both have to reference the same template to stay
- * column-aligned.
- */
-const TABLE_GRID_COLUMNS = 'minmax(110px, 1fr) 90px 110px 130px';
+/** In-flight subset of the harness state machine. */
+const ACTIVE_STATES: ReadonlySet<string> = new Set([
+  'DISCOVERED',
+  'CLAIMED',
+  'WAITING',
+  'PRE_SNAPSHOT',
+  'RUNNING',
+  'POST_SNAPSHOT',
+  'PACKAGING',
+  'DELIVERING',
+]);
 
 function trunc(s: string, head = 6, tail = 4): string {
   if (s.length <= head + tail + 1) return s;
@@ -106,26 +113,7 @@ function formatRole(role: ActivityTask['taskRole']): string {
   return '—';
 }
 
-type StateTone = 'good' | 'bad' | 'active' | 'neutral';
-
-/**
- * The in-flight subset of the harness state machine. Active rows in the
- * Activity table get a left-border accent + sky-blue state text so the
- * operator can tell at a glance which tasks the daemon is still working
- * on, versus the wall of historical Failed/Complete rows.
- */
-const ACTIVE_STATES: ReadonlySet<string> = new Set([
-  'DISCOVERED',
-  'CLAIMED',
-  'WAITING',
-  'PRE_SNAPSHOT',
-  'RUNNING',
-  'POST_SNAPSHOT',
-  'PACKAGING',
-  'DELIVERING',
-]);
-
-function formatState(state: string): { label: string; tone: StateTone } {
+function classifyState(state: string): { label: string; tone: StateTone } {
   if (state === 'COMPLETE') return { label: 'Complete', tone: 'good' };
   if (state === 'FAILED') return { label: 'Failed', tone: 'bad' };
   if (ACTIVE_STATES.has(state)) {
@@ -134,18 +122,13 @@ function formatState(state: string): { label: string; tone: StateTone } {
   return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'neutral' };
 }
 
-function stateToneColor(tone: StateTone): string {
-  switch (tone) {
-    case 'good':
-      return 'var(--vow-green)';
-    case 'bad':
-      return 'var(--break-red)';
-    case 'active':
-      return 'var(--accent-sky)';
-    case 'neutral':
-    default:
-      return 'var(--fg-muted)';
-  }
+function stateBadgeVariant(
+  tone: StateTone,
+): 'destructive' | 'success' | 'default' | 'outline' {
+  if (tone === 'bad') return 'destructive';
+  if (tone === 'good') return 'success';
+  if (tone === 'active') return 'default';
+  return 'outline';
 }
 
 function formatRelative(ts: number): string {
@@ -163,6 +146,35 @@ function normaliseRole(role: string): string {
   return role;
 }
 
+/** Shared eyebrow type for the three column headings. */
+const sectionHeading =
+  'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground m-0';
+
+function SectionHeading({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): JSX.Element {
+  return <h3 className={cn(sectionHeading, className)}>{children}</h3>;
+}
+
+function SettingRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <SectionHeading>{label}</SectionHeading>
+      <div className="font-mono text-[12px] text-foreground">{children}</div>
+    </div>
+  );
+}
+
 export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element {
   const [, navigate] = useLocation();
   const [selectedCid, setSelectedCid] = useState<string | null>(
@@ -171,306 +183,264 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
 
   const selected = useMemo(
     () =>
-      joined.find((n) => (n.manifestCid ?? n.name) === selectedCid) ?? joined[0] ?? null,
+      joined.find((n) => (n.manifestCid ?? n.name) === selectedCid) ??
+      joined[0] ??
+      null,
     [joined, selectedCid],
   );
 
   const filtered = useMemo(() => {
     if (!selected) return [];
-    return tasks.filter((t) => {
-      // Manifest CID is the canonical match; legacy rows without one
-      // belong to whichever SolverNet they ran under. Today that's only
-      // ever one (since multi-SolverNet operation isn't on yet), so we
-      // include them; once tasks reliably carry manifestCid we can drop
-      // this fallback.
-      if (t.manifestCid && selected.manifestCid) return t.manifestCid === selected.manifestCid;
-      return joined.length <= 1;
-    }).slice(0, 50);
+    return tasks
+      .filter((t) => {
+        if (t.manifestCid && selected.manifestCid)
+          return t.manifestCid === selected.manifestCid;
+        return joined.length <= 1;
+      })
+      .slice(0, 50);
   }, [tasks, selected, joined.length, selectedCid]);
 
   return (
-    <section
-      role="region"
-      aria-label="Activity"
-      data-testid="activity-card"
-      className="j-surface-secondary"
-      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
-    >
-      <span style={EYEBROW}>Activity</span>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(160px, 200px) minmax(0, 1fr) minmax(180px, 220px)',
-          gap: 'var(--space-5)',
-          alignItems: 'start',
-        }}
+    <TooltipProvider delayDuration={150}>
+      <Card
+        role="region"
+        aria-label="Activity"
+        data-testid="activity-card"
       >
-        {/* ── LEFT: JOINED SOLVERNETS ─────────────────────────────────── */}
-        <div style={COLUMN_BG} data-testid="activity-joined">
-          <span style={SECTION_LABEL}>Joined</span>
-          {joined.length === 0 ? (
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
-              No SolverNets joined.
-            </span>
-          ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              {joined.map((n) => {
-                const key = n.manifestCid ?? n.name;
-                const isActive = key === (selected?.manifestCid ?? selected?.name);
-                return (
-                  <li key={key}>
-                    <button
-                      type="button"
-                      data-testid={`activity-joined-row-${key}`}
-                      onClick={() => setSelectedCid(key)}
-                      aria-current={isActive ? 'true' : undefined}
-                      style={{
-                        background: isActive ? 'var(--bg-sunken)' : 'transparent',
-                        border: 0,
-                        borderLeft: `2px solid ${isActive ? 'var(--accent-sky)' : 'transparent'}`,
-                        padding: '6px 10px',
-                        fontFamily: 'var(--mono)',
-                        fontSize: 'var(--text-sm)',
-                        color: isActive ? 'var(--fg)' : 'var(--fg-muted)',
-                        textAlign: 'left',
-                        width: '100%',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {n.name}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <button
-            type="button"
-            data-testid="activity-join-more"
-            onClick={() => navigate('/operator/registry')}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--accent-sky)',
-              borderRadius: 'var(--radius-2)',
-              color: 'var(--accent-sky)',
-              cursor: 'pointer',
-              fontFamily: 'var(--mono)',
-              fontSize: 'var(--text-xs)',
-              letterSpacing: '0.14em',
-              padding: '6px 10px',
-              textTransform: 'uppercase',
-              alignSelf: 'flex-start',
-              marginTop: 'var(--space-2)',
-            }}
-          >
-            Join more SolverNets
-          </button>
-        </div>
-
-        {/* ── MIDDLE: TASKS TABLE ────────────────────────────────────── */}
-        <div style={COLUMN_BG} data-testid="activity-tasks">
-          {selected && (
-            <span
-              style={{
-                fontFamily: 'var(--mono)',
-                fontSize: 'var(--text-md)',
-                color: 'var(--fg)',
-                fontWeight: 500,
-              }}
-            >
-              {selected.name}
-            </span>
-          )}
-          {filtered.length === 0 ? (
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
-              No task runs recorded yet.
-            </span>
-          ) : (
+        <CardHeader className="flex flex-row items-center gap-2 pb-3">
+          <ActivityIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <CardTitle>Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid items-start gap-6 [grid-template-columns:minmax(160px,200px)_minmax(0,1fr)_minmax(180px,220px)]">
+            {/* ── LEFT: JOINED SOLVERNETS ─────────────────────────────── */}
             <div
-              role="table"
-              data-testid="activity-tasks-table"
-              style={{
-                fontFamily: 'var(--mono)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--fg)',
-              }}
+              data-testid="activity-joined"
+              className="flex min-w-0 flex-col gap-3"
             >
-              {/* header — uses the same grid template as each row so columns align */}
-              <div
-                role="row"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: TABLE_GRID_COLUMNS,
-                  columnGap: 'var(--space-3)',
-                  padding: 'var(--space-1) var(--space-3)',
-                  borderLeft: '2px solid transparent',
-                }}
+              <SectionHeading>Joined</SectionHeading>
+
+              {joined.length === 0 ? (
+                <p className="m-0 font-mono text-[12px] text-muted-foreground">
+                  No SolverNets joined.
+                </p>
+              ) : (
+                <ScrollArea className="max-h-[280px]">
+                  <div className="flex flex-col gap-1 pr-2">
+                    {joined.map((n) => {
+                      const key = n.manifestCid ?? n.name;
+                      const isActive =
+                        key === (selected?.manifestCid ?? selected?.name);
+                      return (
+                        <Button
+                          key={key}
+                          variant="ghost"
+                          size="sm"
+                          data-testid={`activity-joined-row-${key}`}
+                          data-state={isActive ? 'active' : undefined}
+                          aria-current={isActive ? 'true' : undefined}
+                          onClick={() => setSelectedCid(key)}
+                          className={cn(
+                            'h-auto w-full justify-start gap-0 rounded-sm border-l-2 px-2.5 py-1.5 font-mono text-[12px] normal-case tracking-normal',
+                            isActive
+                              ? 'border-l-primary bg-accent text-foreground'
+                              : 'border-l-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+                          )}
+                        >
+                          <span className="truncate">{n.name}</span>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="activity-join-more"
+                onClick={() => navigate('/operator/registry')}
+                className="self-start"
               >
-                {(['Task', 'Role', 'State', 'Started'] as const).map((label) => (
-                  <span key={label} role="columnheader" style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>
-                    {label}
-                  </span>
-                ))}
-              </div>
-              {/* rows — each its own grid so active rows can carry a background tint + left border */}
-              {filtered.map((t) => {
-                const stateInfo = formatState(t.state);
-                const stateColor = stateToneColor(stateInfo.tone);
-                const isActive = stateInfo.tone === 'active';
-                return (
-                  <div
-                    key={t.requestId}
-                    role="row"
-                    data-active={isActive ? 'true' : undefined}
-                    data-testid={`activity-task-row-${t.requestId}`}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: TABLE_GRID_COLUMNS,
-                      columnGap: 'var(--space-3)',
-                      padding: 'var(--space-1) var(--space-3)',
-                      alignItems: 'baseline',
-                      // Active rows lift visually with the sky-blue tint +
-                      // a 2px left border. Historical rows stay quiet.
-                      background: isActive ? 'rgba(122, 167, 220, 0.06)' : 'transparent',
-                      borderLeft: `2px solid ${isActive ? 'var(--accent-sky)' : 'transparent'}`,
-                      borderRadius: 'var(--radius-1)',
-                    }}
-                  >
-                    <span role="cell" title={t.requestId} style={{ color: isActive ? 'var(--fg)' : 'var(--fg)' }}>
-                      {trunc(t.requestId)}
-                    </span>
-                    <span role="cell" style={{ color: 'var(--fg-muted)' }}>{formatRole(t.taskRole)}</span>
-                    <span role="cell" style={{ color: stateColor, fontWeight: isActive ? 500 : 400 }}>{stateInfo.label}</span>
-                    <span role="cell" style={{ color: 'var(--fg-muted)' }}>{formatRelative(t.windowStartTs || t.stateUpdatedAt)}</span>
-                  </div>
-                );
-              })}
+                <Plus className="h-3 w-3" aria-hidden="true" />
+                Join more SolverNets
+              </Button>
             </div>
-          )}
-        </div>
 
-        {/* ── RIGHT: SETTINGS ────────────────────────────────────────── */}
-        <div style={COLUMN_BG} data-testid="activity-settings">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={SECTION_LABEL}>Settings</span>
-            <button
-              type="button"
-              data-testid="activity-settings-edit"
-              onClick={() => navigate('/operator/memberships')}
-              style={{
-                background: 'transparent',
-                border: 0,
-                color: 'var(--accent-sky)',
-                cursor: 'pointer',
-                fontFamily: 'var(--mono)',
-                fontSize: 'var(--text-xs)',
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                padding: 0,
-              }}
+            {/* ── MIDDLE: TASKS TABLE ─────────────────────────────────── */}
+            <div
+              data-testid="activity-tasks"
+              className="flex min-w-0 flex-col gap-3"
             >
-              Edit →
-            </button>
-          </div>
+              {selected && (
+                <h2 className="m-0 font-serif text-[20px] font-normal leading-tight text-foreground">
+                  {selected.name}
+                </h2>
+              )}
 
-          {!selected ? (
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
-              No SolverNet selected.
-            </span>
-          ) : (
-            <>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Roles</span>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                  {selected.roles.length === 0 ? (
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
-                      None
-                    </span>
-                  ) : (
-                    selected.roles.map((r) => (
-                      <span
-                        key={r}
-                        style={{
-                          fontFamily: 'var(--mono)',
-                          fontSize: 'var(--text-2xs)',
-                          letterSpacing: '0.14em',
-                          textTransform: 'uppercase',
-                          border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius-1)',
-                          padding: '2px 6px',
-                          color: 'var(--fg)',
-                        }}
-                      >
-                        {normaliseRole(r)}
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Harness</span>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg)' }}>
-                  {selected.harness ?? '—'}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Model</span>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: selected.model ? 'var(--fg)' : 'var(--fg-dim)' }}>
-                  {selected.model ?? '—'}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Plugins</span>
-                {!selected.plugins || selected.plugins.length === 0 ? (
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
-                    None
-                  </span>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                    {selected.plugins.map((p) => (
-                      <span
-                        key={p.name}
-                        title={p.name}
-                        data-testid={`activity-plugin-${p.name}`}
-                        style={{
-                          fontFamily: 'var(--mono)',
-                          fontSize: 'var(--text-sm)',
-                          color: 'var(--fg)',
-                          display: 'flex',
-                          alignItems: 'baseline',
-                          gap: 'var(--space-2)',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {p.displayName}
-                        </span>
-                        {p.defaultIncluded && (
-                          <span
-                            style={{
-                              fontSize: 'var(--text-2xs)',
-                              letterSpacing: '0.12em',
-                              textTransform: 'uppercase',
-                              color: 'var(--fg-dim)',
-                            }}
-                          >
-                            default
-                          </span>
-                        )}
-                      </span>
-                    ))}
+              {filtered.length === 0 ? (
+                <p className="m-0 font-mono text-[12px] text-muted-foreground">
+                  No task runs recorded yet.
+                </p>
+              ) : (
+                <ScrollArea className="max-h-[360px]">
+                  <div data-testid="activity-tasks-table">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>Task</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>State</TableHead>
+                          <TableHead>Started</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filtered.map((t) => {
+                          const stateInfo = classifyState(t.state);
+                          const isActive = stateInfo.tone === 'active';
+                          return (
+                            <TableRow
+                              key={t.requestId}
+                              data-active={isActive ? 'true' : undefined}
+                              data-testid={`activity-task-row-${t.requestId}`}
+                              className={cn(
+                                'border-l-2',
+                                isActive
+                                  ? 'border-l-primary bg-primary/[0.06]'
+                                  : 'border-l-transparent',
+                              )}
+                            >
+                              <TableCell>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="cursor-help bg-transparent p-0 font-mono text-[12px] text-foreground"
+                                    >
+                                      {trunc(t.requestId)}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{t.requestId}</TooltipContent>
+                                </Tooltip>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {formatRole(t.taskRole)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={stateBadgeVariant(stateInfo.tone)}>
+                                  {stateInfo.label}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {formatRelative(
+                                  t.windowStartTs || t.stateUpdatedAt,
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
-                )}
+                </ScrollArea>
+              )}
+            </div>
+
+            {/* ── RIGHT: SETTINGS ─────────────────────────────────────── */}
+            <div
+              data-testid="activity-settings"
+              className="flex min-w-0 flex-col gap-3"
+            >
+              <div className="flex items-baseline justify-between">
+                <SectionHeading>Settings</SectionHeading>
+                <Button
+                  variant="link"
+                  size="sm"
+                  data-testid="activity-settings-edit"
+                  onClick={() => navigate('/operator/memberships')}
+                  className="h-auto gap-1 p-0 text-[11px] uppercase tracking-[0.14em]"
+                >
+                  <Pencil className="h-3 w-3" aria-hidden="true" />
+                  Edit
+                </Button>
               </div>
-            </>
-          )}
-        </div>
-      </div>
-    </section>
+
+              {!selected ? (
+                <p className="m-0 font-mono text-[12px] text-muted-foreground">
+                  No SolverNet selected.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <SettingRow label="Roles">
+                    {selected.roles.length === 0 ? (
+                      <span className="text-muted-foreground">None</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selected.roles.map((r) => (
+                          <Badge key={r} variant="outline">
+                            {normaliseRole(r)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </SettingRow>
+
+                  <Separator />
+
+                  <SettingRow label="Harness">{selected.harness ?? '—'}</SettingRow>
+
+                  <Separator />
+
+                  <SettingRow label="Model">
+                    <span
+                      className={cn(
+                        !selected.model && 'text-muted-foreground',
+                      )}
+                    >
+                      {selected.model ?? '—'}
+                    </span>
+                  </SettingRow>
+
+                  <Separator />
+
+                  <SettingRow label="Plugins">
+                    {!selected.plugins || selected.plugins.length === 0 ? (
+                      <span className="text-muted-foreground">None</span>
+                    ) : (
+                      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                        {selected.plugins.map((p) => (
+                          <li
+                            key={p.name}
+                            data-testid={`activity-plugin-${p.name}`}
+                            className="flex items-center gap-2 overflow-hidden"
+                          >
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="cursor-help truncate bg-transparent p-0 text-left font-mono text-[12px] text-foreground"
+                                >
+                                  {p.displayName}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>{p.name}</TooltipContent>
+                            </Tooltip>
+                            {p.defaultIncluded && (
+                              <Badge variant="secondary" className="shrink-0">
+                                default
+                              </Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </SettingRow>
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
   );
 }
-
