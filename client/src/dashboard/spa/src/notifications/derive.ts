@@ -105,7 +105,7 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
       kind: 'restart_required',
       severity: 'warning',
       message: 'A configuration change is pending — restart to apply.',
-      jumpTo: '/overview',
+      jumpTo: '/operator',
     });
   }
 
