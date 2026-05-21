@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Use when asked to implement a specific GitHub issue — e.g. "implement issue #N", "run the pipeline on this issue", "take this issue to a PR", "work on jinn-mono-<id>". Coordinates the full autonomous superpowers pipeline for exactly one triaged issue, dispatching fresh subagents per stage, from worktree setup to a reviewed draft PR against `next`.
+description: Use when asked to implement a specific GitHub issue — e.g. "implement issue #N", "run the pipeline on this issue", "take this issue to a PR". Coordinates the full autonomous superpowers pipeline for exactly one triaged issue, dispatching fresh subagents per stage, from worktree setup to a reviewed draft PR against `next`.
 ---
 
 # implement-issue
@@ -17,7 +17,7 @@ You are the coordinating agent for exactly one triaged GitHub issue. Your job is
 
 ## Step 1 — Read the issue
 
-**Input:** an issue reference — a number (`#N`), a GitHub URL, or a bd id.
+**Input:** an issue reference — a number (`#N`) or a GitHub issue URL.
 
 Fetch the issue in full:
 
