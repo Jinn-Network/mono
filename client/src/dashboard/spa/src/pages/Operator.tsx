@@ -1,16 +1,11 @@
 import { Link } from 'wouter';
-import { useHashSection } from './configuration/useHashSection.js';
-import { OperatorDataMarket } from './operator/OperatorDataMarket.js';
 import { LiveNowBand, ACTIVITY_TARGET_DASHBOARD } from './overview/LiveNowBand.js';
 
 export interface OperatorPageProps {
   onRestartPending?: () => void;
 }
 
-export function OperatorPage({ onRestartPending = () => undefined }: OperatorPageProps): JSX.Element {
-  const hash = useHashSection();
-  const hashParts = hash?.split('/') ?? [];
-  const expandedSection = hashParts[0];
+export function OperatorPage(_props: OperatorPageProps = {}): JSX.Element {
 
   return (
     <div
@@ -67,10 +62,6 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
           Open Launcher →
         </Link>
       </section>
-      <OperatorDataMarket
-        defaultExpanded={expandedSection === 'data-market'}
-        onRestartPending={onRestartPending}
-      />
     </div>
   );
 }
