@@ -140,7 +140,6 @@ describe('App routes', () => {
     await waitFor(() => {
       expect(screen.getByTestId('overview-activity')).toBeTruthy();
     });
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
   });
 
   it('renders OperatorPage on /operator', async () => {
@@ -154,15 +153,6 @@ describe('App routes', () => {
       ),
     );
     expect(screen.getByTestId('operator-page')).toBeTruthy();
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
-    // Issue #219 criterion 3: Settings keeps the live-now band, but its
-    // activity CTA points at the Dashboard (/overview) so /operator no longer
-    // reads as the canonical home for activity.
-    await waitFor(() => {
-      const cta = screen.getByTestId('live-now-cta');
-      expect(cta.getAttribute('href')).toBe('/overview');
-      expect(cta.textContent).toMatch(/View on Dashboard/);
-    });
     expect(screen.getByText(/launcher tools/i).closest('section')).toBeTruthy();
     expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
     // Operator page still renders the launcher-tools banner.

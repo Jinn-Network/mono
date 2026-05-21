@@ -8,7 +8,7 @@
  * and RewardsCard, which Overview renders as peer cards.
  */
 import { useState } from 'react';
-import type { LiveNowState } from './LiveNowBand.js';
+import type { LiveNowState } from './liveNowState.js';
 
 export interface HeroStatsProps {
   tasksDelivered: number;

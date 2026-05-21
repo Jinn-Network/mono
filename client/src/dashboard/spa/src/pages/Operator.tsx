@@ -1,5 +1,4 @@
 import { Link } from 'wouter';
-import { LiveNowBand, ACTIVITY_TARGET_DASHBOARD } from './overview/LiveNowBand.js';
 
 export interface OperatorPageProps {
   onRestartPending?: () => void;
@@ -12,13 +11,6 @@ export function OperatorPage(_props: OperatorPageProps = {}): JSX.Element {
       data-testid="operator-page"
       style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}
     >
-      {/*
-       * Settings keeps the live-now pulse so operators see daemon health
-       * here too, but its activity CTA points at the Dashboard (/overview):
-       * since issue #219 the Dashboard is the home for live activity, and
-       * Settings should not read as that home.
-       */}
-      <LiveNowBand activity={ACTIVITY_TARGET_DASHBOARD} />
       <section
         style={{
           background: 'var(--bg-elevated)',
