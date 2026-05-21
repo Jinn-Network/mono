@@ -66,6 +66,7 @@ import {
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
 import { harnessStateDirName } from '../names.js';
+import { recordTaskCost } from '../../spend/record.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -1299,6 +1300,18 @@ export class TaskEngine {
       clearTimeout(endTimer);
     }
     console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name}`);
+    // Record the run's cost once it has cleanly reached POST_SNAPSHOT — i.e. the
+    // harness completed. Captures cost regardless of whether on-chain delivery
+    // later succeeds. Pre-completion early-exits (SkippableError, freeze-fence
+    // violation) intentionally do not record: the spend cap is an approximate
+    // graceful-pause control (design spec §2), not a precise ledger.
+    recordTaskCost(this.store, {
+      requestId: task.requestId,
+      harness: impl.name,
+      model: solverNet?.model,
+      workingDir,
+      solverType: task.solverType ?? null,
+    });
   }
 
   protected async takePostSnapshot(_intent: PersistedTaskRun): Promise<void> {
