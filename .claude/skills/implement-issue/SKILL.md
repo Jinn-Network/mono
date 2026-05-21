@@ -63,11 +63,11 @@ git worktree add "cargo/.tasks/<issue-number>" -b "$BRANCH" origin/next
 
 All subagents dispatched in subsequent stages work in this worktree. Pass the worktree path and branch name in each subagent prompt.
 
-Set the issue `Status` to `In Progress` on the Project board:
+Set the issue `Status` to `In Progress` on the Project board. `Status` is a single-select field — discover the Status field id and the `In Progress` option id with `gh project field-list 1 --owner Jinn-Network --format json` (the `file-issue` skill's `references/gh-taxonomy.md` documents this discovery), then:
 
 ```bash
 gh project item-edit --id <item-id> --project-id <project-id> \
-  --field-id <status-field-id> --text "In Progress"
+  --field-id <status-field-id> --single-select-option-id <in-progress-option-id>
 ```
 
 ---
@@ -209,6 +209,16 @@ Each subagent receives a **curated prompt** containing:
 - Relevant prior-stage outputs (design note for Stage 2; design note + plan for Stage 3; etc.)
 
 Never forward the coordinator's own conversation history to a subagent. Keep each subagent's context minimal and task-specific. Bloated context degrades output quality and wastes budget.
+
+### Computing the change's diff
+
+The `/simplify`, review, and security stages need *the change's diff*. Compute it from the merge-base — never from `origin/next..HEAD`:
+
+```bash
+git diff $(git merge-base origin/next HEAD)..HEAD
+```
+
+`origin/next` can advance while the pipeline runs (another PR merges); `origin/next..HEAD` would then show unrelated files and mislead a reviewer. The merge-base pins the diff to exactly this branch's change. The Stage 3 / Stage 8 zero-commit guard's `git log origin/next..HEAD` is a *commit-count* check and is unaffected — leave it as-is.
 
 ### Independence invariant
 
