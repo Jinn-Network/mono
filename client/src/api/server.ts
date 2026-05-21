@@ -227,6 +227,22 @@ const dashboardDir = resolveDashboardDir() ?? join(__dirname, '..', 'dashboard')
 const assetsDir = join(dashboardDir, 'assets');
 
 /**
+ * Resolve the `JINN_ENABLE_EMBEDDED_AGENT` env var. Default off. Anything
+ * other than `1` / `true` (case-insensitive) is treated as off so a stray
+ * value can't accidentally re-enable the surface.
+ *
+ * Issue #367: this also has a daemon-side consumer (`main.ts` gates the
+ * `/api/agent/ws` bridge on it), so it stays a standalone helper rather than
+ * being inlined into `resolveFeatureFlags`.
+ */
+export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env['JINN_ENABLE_EMBEDDED_AGENT'];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+/**
  * Resolve the operator-app feature flags from the daemon environment.
  *
  * Each flag is derived from a `JINN_ENABLE_*` env var ("1" enables). The SPA
@@ -238,10 +254,16 @@ const assetsDir = join(dashboardDir, 'assets');
  * (`/build` route + Build top-tab). Default-off until the first-run UX is
  * solid; the plug-in substrate (CLI verbs, indexer, Discovery API, docs)
  * stays live regardless.
+ *
+ * Issue #326 / #367: `embeddedAgent` gates the embedded Claude agent chat
+ * surface (operating-shell rail + onboarding "Ask Claude" panel). Migrated
+ * here from the `/v1/bootstrap` JSON response so the operator app has a single
+ * feature-flag channel — see #367.
  */
 function resolveFeatureFlags(): Record<string, boolean> {
   return {
     pluginBuilderUi: process.env['JINN_ENABLE_PLUGIN_BUILDER_UI'] === '1',
+    embeddedAgent: isEmbeddedAgentEnabled(),
   };
 }
 

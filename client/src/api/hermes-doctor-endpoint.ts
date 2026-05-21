@@ -17,6 +17,7 @@
  * precheck panel and the daemon's claim-readiness gate (#330).
  */
 import type { Hono } from 'hono';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 
 export interface HermesDoctorResponse {
@@ -32,20 +33,34 @@ export interface HermesDoctorConfig {
 }
 
 /**
- * Synchronously runs `hermes doctor` and classifies the result. Pure (no
- * Hono dependency) so the harness layer can call it without pulling the API
- * server in.
+ * Shared `hermes <args>` spawn scaffolding for both probes: resolves the binary
+ * and timeout from config, runs `spawnSync`, and extracts the spawn-error code.
+ * Each probe applies its own classification/parsing to the returned result.
  */
-export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctorResponse {
+function runHermes(
+  args: string[],
+  config: HermesDoctorConfig,
+): { result: SpawnSyncReturns<string>; errorCode: string | undefined } {
   const hermesBin = config.hermesPath ?? 'hermes';
   const timeoutMs = config.hermesDoctorTimeoutMs ?? 30_000;
 
-  const result = spawnSync(hermesBin, ['doctor'], {
+  const result = spawnSync(hermesBin, args, {
     timeout: timeoutMs,
     encoding: 'utf8',
   });
 
   const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  return { result, errorCode };
+}
+
+/**
+ * Synchronously runs `hermes doctor` and classifies the result. Pure (no
+ * Hono dependency) so the harness layer can call it without pulling the API
+ * server in.
+ */
+export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctorResponse {
+  const { result, errorCode } = runHermes(['doctor'], config);
+
   // installed=true means we found the binary on disk. ENOENT is the only
   // definitive not-installed signal. Other errors (EACCES = wrong
   // permissions; ETIMEDOUT = ran but didn't finish in time) indicate the
@@ -63,6 +78,53 @@ export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctor
     stdout: (result.stdout ?? '').slice(0, 4000),
     stderr: (result.stderr ?? '').slice(0, 4000),
   };
+}
+
+/**
+ * Result of probing a single Hermes model provider's auth state.
+ */
+export interface HermesAuthStatus {
+  /** Provider name probed, e.g. `openrouter`. */
+  provider: string;
+  /** True only when the provider is authenticated (logged in). */
+  authed: boolean;
+  /** Raw `hermes auth status <provider>` stdout (trimmed, truncated). */
+  raw: string;
+}
+
+/**
+ * Synchronously runs `hermes auth status <provider>` and classifies whether
+ * the provider is authenticated.
+ *
+ * CRITICAL: `hermes auth status` ALWAYS exits 0 — it reports state via
+ * stdout, never via exit code. A not-logged-in provider prints e.g.
+ * `openrouter: logged out`. So we cannot rely on `result.status`; we parse
+ * stdout instead:
+ *   - stdout matches /logged out/i → not authed
+ *   - stdout is empty → not authed (binary said nothing definitive)
+ *   - ENOENT / spawn error → not authed (binary not on PATH)
+ *   - otherwise → authed
+ *
+ * Pure (no Hono dependency) so the harness layer can call it without
+ * pulling the API server in. This is the third readiness gate for Hermes:
+ * `hermes doctor` exits 0 even when every provider is logged out (it treats
+ * missing providers as warnings), so the harness must probe auth directly.
+ */
+export function probeHermesAuthStatus(
+  provider: string,
+  config: HermesDoctorConfig = {},
+): HermesAuthStatus {
+  const { result, errorCode } = runHermes(['auth', 'status', provider], config);
+  const raw = (result.stdout ?? '').trim().slice(0, 4000);
+
+  // Binary not found, or any other spawn error, or no output → not authed.
+  if (errorCode != null || raw.length === 0) {
+    return { provider, authed: false, raw };
+  }
+  // `hermes auth status` always exits 0; state is in stdout. A "logged out"
+  // line means the provider is not authenticated.
+  const loggedOut = /logged out/i.test(raw);
+  return { provider, authed: !loggedOut, raw };
 }
 
 export function addHermesDoctorRoutes(app: Hono, config: HermesDoctorConfig = {}): void {

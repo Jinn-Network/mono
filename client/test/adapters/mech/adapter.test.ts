@@ -318,7 +318,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
-        // Opt out of the gh #300 ghost-task floor for this test — the
+        // Opt out of the ghost-task floor for this test — the
         // fixture candidates use tiny block numbers that pre-date the
         // production default floor; this test is about discovery
         // yielding, not floor filtering.
@@ -364,7 +364,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('discovery filters out pre-floor candidates (gh #300 ghost-task floor)', async () => {
+  it('discovery filters out pre-floor candidates (ghost-task floor)', async () => {
     // The DiscoveryAPI (Ponder indexer or onchain-floor listClaimableTasks)
     // returns all claimable tasks regardless of when they were created.
     // Without a parallel floor filter here, the floor on the on-chain
@@ -507,7 +507,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
-        // gh #300: opt out of the floor — fixtures use tiny block numbers.
+        // Opt out of the floor — fixtures use tiny block numbers.
         onchainFromBlock: 0,
       },
     });
@@ -566,7 +566,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
         allowedTaskIds: ['43'],
-        // gh #300: opt out of the floor — fixtures use tiny block numbers.
+        // Opt out of the floor — fixtures use tiny block numbers.
         onchainFromBlock: 0,
       },
     });
@@ -806,8 +806,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
       ok: false,
       reason: 'TCAttemptAlreadyFinalized(1, 0)',
+      revertName: 'TCAttemptAlreadyFinalized',
     });
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
@@ -833,11 +833,189 @@ describe('MechAdapter TaskCoordinator flow', () => {
       0,
       TEST_CONFIG.mechContractAddress,
     );
+    // The claimability gate runs before the restoration lookup — a terminal
+    // opportunity never pays the restoration / delivery / IPFS cost.
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
     expect(getMarketplaceRequestDeliveryMech).not.toHaveBeenCalled();
     expect(findLatestDeliveryDataHexForRequest).not.toHaveBeenCalled();
     expect(fetchFromIpfs).not.toHaveBeenCalled();
 
     await adapter.stop();
+  });
+
+  it('classifies a terminal opportunity from the structured revertName even when the formatted reason contains a "("', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    // The formatted `reason` here is intentionally pathological: a leading "("
+    // in the arg rendering. The old code regex-stripped `reason` (`/\(.*$/`)
+    // to recover the bare name — that strip would corrupt this string and the
+    // terminal check would silently fail, re-scanning a dead opportunity
+    // forever. Classification now reads the structured `revertName` directly,
+    // so the "(" in `reason` is irrelevant.
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCAttemptAlreadyFinalized((corrupt) 1, 0)',
+      revertName: 'TCAttemptAlreadyFinalized',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Terminal — classified via the structured name, pruned despite the "(" in reason.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    expect(getTaskCidDigest).not.toHaveBeenCalled();
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('prunes a terminal-reason evaluation opportunity before the expensive restoration lookup', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCMaxVerdictsReached(1, 0)',
+      revertName: 'TCMaxVerdictsReached',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Terminal reason -> pruned from the working set so the loop never re-scans it.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    // The claimability gate runs FIRST; the restoration lookup is never attempted.
+    expect(getTaskCidDigest).not.toHaveBeenCalled();
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('retains a transient-reason evaluation opportunity for retry', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'HTTP request failed: 429 Too Many Requests',
+      revertName: null,
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Transient reason -> kept in the working set; it must be retried next cycle.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+  });
+
+  it('retryPendingEvaluationSolutions drops terminal opportunities and keeps re-checking transient ones', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    const TERMINAL_REQUEST_ID = ('0x' + 'ce'.repeat(32)) as `0x${string}`;
+    const TRANSIENT_REQUEST_ID = ('0x' + 'cf'.repeat(32)) as `0x${string}`;
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const mkSolution = (taskId: string, requestId: `0x${string}`) => ({
+      taskId,
+      attemptIndex: 0,
+      requestId,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    });
+    (adapter as any).pendingEvaluationSolutions.set(TERMINAL_REQUEST_ID, mkSolution('1', TERMINAL_REQUEST_ID));
+    (adapter as any).pendingEvaluationSolutions.set(TRANSIENT_REQUEST_ID, mkSolution('2', TRANSIENT_REQUEST_ID));
+
+    // canClaimEvaluation: terminal task -> non-recoverable revert; transient task -> generic RPC error.
+    // mockImplementation persists across tests (vi.clearAllMocks only resets call
+    // data, not the implementation), so it is restored before this test returns.
+    const claimImpl = async (
+      _pc: unknown,
+      _safe: unknown,
+      _router: unknown,
+      taskId: unknown,
+    ): Promise<{ ok: true } | { ok: false; reason: string; revertName: string | null }> => {
+      if (String(taskId) === '1') {
+        return { ok: false, reason: 'TCEvaluationDeadlinePassed(1)', revertName: 'TCEvaluationDeadlinePassed' };
+      }
+      return { ok: false, reason: 'execution reverted: connection timeout', revertName: null };
+    };
+    vi.mocked(canClaimEvaluation).mockImplementation(claimImpl as never);
+
+    const drain = async () => {
+      for await (const _ of (adapter as any).retryPendingEvaluationSolutions()) {
+        // nothing claimable in this scenario
+      }
+    };
+
+    // Cycle 1: both opportunities are checked.
+    await drain();
+    expect(canClaimEvaluation).toHaveBeenCalledTimes(2);
+    // Terminal one is pruned; transient one survives.
+    expect((adapter as any).pendingEvaluationSolutions.has(TERMINAL_REQUEST_ID)).toBe(false);
+    expect((adapter as any).pendingEvaluationSolutions.has(TRANSIENT_REQUEST_ID)).toBe(true);
+
+    // Cycle 2: only the transient opportunity is re-checked — terminal history is not re-scanned.
+    vi.mocked(canClaimEvaluation).mockClear();
+    await drain();
+    expect(canClaimEvaluation).toHaveBeenCalledTimes(1);
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '2',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
+    expect((adapter as any).pendingEvaluationSolutions.has(TRANSIENT_REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+    // Restore the default so the persisted mockImplementation does not leak.
+    vi.mocked(canClaimEvaluation).mockReset();
+    vi.mocked(canClaimEvaluation).mockResolvedValue({ ok: true });
   });
 
   it('bounds the default delivery-log scan around delayed SolutionDeliveryClaimed events', async () => {
@@ -1512,7 +1690,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
   });
 });
 
-describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (gh #300 — ghost-task floor)', () => {
+describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (ghost-task floor)', () => {
   // The Base Sepolia floor sits just after the 2026-05-14T17:28Z rebuild of
   // the fufn validated-pool to `EVAL_SEMANTICS_VERSION='3'`. Tasks created
   // before that rebuild are admitted under a prior semantics regime and the

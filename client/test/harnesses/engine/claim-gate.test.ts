@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -190,5 +190,76 @@ describe('TaskEngine.claim — impl gate', () => {
     await engine.callClaim(persisted);
     const after = engine.db.getByRequestId(input.requestId)!;
     expect(after.state).toBe(TaskRunState.CLAIMED);
+  });
+
+  // ── Issue #398: canAcceptTask must not run a per-task blocking probe ─────────
+  //
+  // canAcceptTask runs once per task announcement on the engine-watcher hot
+  // path. impl.isReady() is the only blocking I/O it could hit (the Hermes
+  // harness spawns child processes synchronously). The daemon already gates
+  // claims O(1) against the cached HarnessReadinessRegistry immediately after
+  // canAcceptTask returns, so canAcceptTask must NOT probe isReady() itself.
+  describe('canAcceptTask — issue #398 readiness probe', () => {
+    it('does NOT invoke impl.isReady() (cached registry gates this downstream)', async () => {
+      const isReady = vi.fn(async () => ({ ready: true }) as ReadyStatus);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady }) },
+      });
+
+      const accept = await engine.canAcceptTask({
+        solverType: 'portfolio.v0',
+        taskRole: 'restoration',
+        task: { id: 'announced-task', description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
+      });
+
+      expect(accept).toEqual({ ok: true });
+      // The expensive per-task readiness probe must never be reached.
+      expect(isReady).not.toHaveBeenCalled();
+    });
+
+    it('still accepts a task even when the harness would report not-ready (gate is downstream)', async () => {
+      // A harness whose isReady() reports not-ready must NOT make
+      // canAcceptTask reject — the cached-registry gate in the daemon is the
+      // authoritative readiness check on the watcher path.
+      const isReady = vi.fn(async () => ({
+        ready: false,
+        reason: 'would block if probed',
+      }) as ReadyStatus);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady }) },
+      });
+
+      const accept = await engine.canAcceptTask({
+        solverType: 'portfolio.v0',
+        taskRole: 'restoration',
+        task: { id: 'announced-task', description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
+      });
+
+      expect(accept).toEqual({ ok: true });
+      expect(isReady).not.toHaveBeenCalled();
+    });
+
+    it('claim() still probes impl.isReady() — the per-claim authoritative gate is unchanged', async () => {
+      // Contrast with canAcceptTask: claim() runs once per claimed task (not
+      // per announcement) and has no downstream cached-registry gate, so it
+      // must keep probing isReady().
+      const isReady = vi.fn(async () => ({ ready: true }) as ReadyStatus);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady }) },
+      });
+      const input = makeInput();
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      expect(isReady).toHaveBeenCalledTimes(1);
+      expect(engine.db.getByRequestId(input.requestId)!.state).toBe(TaskRunState.CLAIMED);
+    });
   });
 });

@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'wouter';
 import { api } from '../api/client.js';
+import { FundsCard } from './overview/FundsCard.js';
 import { HeroStats } from './overview/HeroStats.js';
-import { AlertBand } from './overview/AlertBand.js';
-import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
+import { RewardsCard } from './overview/RewardsCard.js';
+import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/liveNowState.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard } from './overview/OperatorCard.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
@@ -14,6 +16,8 @@ import {
   operatorWaitingMessage,
   type BootstrapWithSolverNets,
 } from './overview/joined-solver-net.js';
+import { ActivitySections } from './overview/ActivitySections.js';
+import { useRestartPending } from '../shell/RestartPendingContext.js';
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -29,6 +33,14 @@ interface OverviewStatusV1 {
   };
   rewards?: {
     pendingStakingRewardsWei?: string;
+    /** Lifetime JINN claimed. Not yet surfaced by the daemon — null until added. */
+    claimedJinnLifetime?: string;
+    /** ISO timestamp of last claim. Not yet surfaced by the daemon — null until added. */
+    lastClaimAt?: string | null;
+  };
+  /** Security metadata. Not yet surfaced by the daemon — field absent until added. */
+  security?: {
+    lastPasswordRotationAt?: string | null;
   };
   masterGas?: {
     balanceWei?: string;
@@ -126,7 +138,12 @@ function truncTx(hash?: string): string | null {
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [, navigate] = useLocation();
   const queryClient = useQueryClient();
+  // Pulled in so the Restart action can auto-clear the restart-required
+  // notification when the operator clicks "Restart node" from this page.
+  // Without this, the notice lingers forever (Ritsu's review of #426).
+  const { setRestartPending } = useRestartPending();
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -257,23 +274,59 @@ export function OverviewPage(): JSX.Element {
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <HeroStats
         tasksDelivered={tasksDelivered}
-        jinnClaimable={jinnClaimable}
-        gasBalanceEth={gasBalanceEth}
-        gasRunwayDays={gasRunwayDays}
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}
+        // `liveNow.line` is the human-readable why — the first error
+        // diagnostic's message, "N tasks restoring", "waiting for next task",
+        // etc. — surfaced under the label in the STATUS tile.
+        statusReason={liveNow.line}
         activeAction={activeAction}
         evicted={isEvicted}
         evictedServiceId={evictedServiceId}
-        onClaim={() =>
-          runAction('Claim JINN', async () => {
-            const res = await api.claimRewards();
-            if (!res.ok) {
-              throw new Error(res.error ?? 'Reward claim failed.');
-            }
-            return { message: 'JINN claim command completed.' };
-          })}
+        onRestart={() =>
+          runAction(
+            'Restart node',
+            async () => {
+              const res = await api.restartDaemon();
+              if (!res.ok) {
+                throw new Error('Restart request failed.');
+              }
+              // Auto-clear the restart-required notification once the operator
+              // has actually triggered the restart. Without this clear the
+              // `restart_required` notice would linger for the SPA session even
+              // after the daemon is back — the regression Ritsu flagged on #426
+              // (undoes the dogfood fix in 14680bdf).
+              setRestartPending(false);
+              return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
+            },
+            // Restart confirmation is transient — surface it, then fade after
+            // ~10s so it doesn't linger until the next action. The dashboard
+            // reconnects on its own when the daemon is back.
+            { autoClearMs: 10_000 },
+          )}
+        onRestake={async (serviceId) => {
+          const res = await api.restake(serviceId);
+          if (!res.ok) {
+            throw new Error(res.error ?? 'Re-stake failed.');
+          }
+          // Optimistically refetch status so the eviction notice clears.
+          await queryClient.invalidateQueries({ queryKey: ['status'] });
+        }}
+      />
+      <FundsCard
+        totalEth={gasBalanceEth}
+        runwayDays={gasRunwayDays}
+        actionsDisabled={activeAction !== null}
+        perRole={{
+          // Only masterGas is currently exposed by /v1/status.
+          // Agent + Safe balances are not yet surfaced by the daemon —
+          // tracked as a follow-up task. Show "—" until wired.
+          master: gasBalanceEth,
+          agent: '—',
+          safe: '—',
+        }}
+        lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
         onTopUp={() =>
           runAction(
             'Top up gas',
@@ -301,22 +354,28 @@ export function OverviewPage(): JSX.Element {
             // Confirmation is transient — surface it, then fade after ~5s.
             { autoClearMs: 5_000 },
           )}
-        onRestart={() =>
-          runAction('Restart node', async () => {
-            const res = await api.restartDaemon();
-            if (!res.ok) {
-              throw new Error('Restart request failed.');
-            }
-            return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
-          })}
-        onRestake={async (serviceId) => {
-          const res = await api.restake(serviceId);
-          if (!res.ok) {
-            throw new Error(res.error ?? 'Re-stake failed.');
-          }
-          // Optimistically refetch status so the eviction notice clears.
-          await queryClient.invalidateQueries({ queryKey: ['status'] });
+        onChangePassword={() => {
+          // TODO: wire real password-change flow when the daemon exposes
+          // POST /v1/security/change-password. For now, navigate to the
+          // security settings section (spec §2.3 / §3 security tab).
+          navigate('/operator/security');
         }}
+      />
+      <RewardsCard
+        claimableJinn={jinnClaimable}
+        // claimedJinnLifetime + lastClaimAt are not yet surfaced by the daemon.
+        // Pass safe defaults — RewardsCard renders "never" for null lastClaimAt
+        // and "0" for empty lifetime. Tracked as a follow-up task.
+        claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
+        lastClaimAt={status?.rewards?.lastClaimAt ?? null}
+        onClaim={() =>
+          runAction('Claim JINN', async () => {
+            const res = await api.claimRewards();
+            if (!res.ok) {
+              throw new Error(res.error ?? 'Reward claim failed.');
+            }
+            return { message: 'JINN claim command completed.' };
+          })}
       />
       {notice && (
         <div
@@ -339,17 +398,14 @@ export function OverviewPage(): JSX.Element {
       <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
 
       {/*
-       * Operator-side state vs. empty-state — strictly mutually exclusive.
-       * Spec §12: the OperatorCard surfaces the operator's joined SolverNet
-       * from `bootstrap.solverNets`. The empty state ("Pick a SolverNet")
-       * deep-links to `/operator#solvernets` where the registry catalog
-       * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
-       * shape and the new manifestCid-keyed shape during the Tasks 21/22
-       * migration window. The diagnostic-attention state is represented in
-       * the compact status tile above and the full live card on /operator;
-       * this Get-Started AlertBand stays.
+       * Operator-side state — shown when the operator has joined a SolverNet.
+       * The empty-state ("no SolverNets joined") is handled globally via the
+       * `no_solvernets_joined` notification kind in AppShell's NotificationsList
+       * (Task 1.5 / Task 1.6). No local empty-state rendering here.
+       * Spec §12: `detectJoinedSolverNet` accepts the legacy short-name shape
+       * and the new manifestCid-keyed shape during the Tasks 21/22 migration window.
        */}
-      {joined ? (
+      {joined && (
         <OperatorCard
           name={joined.name}
           configId={joined.configId}
@@ -357,24 +413,24 @@ export function OverviewPage(): JSX.Element {
           state="live"
           waitingMessage={waitingMessage}
         />
-      ) : (
-        <AlertBand
-          lead="Get started"
-          body="Pick a SolverNet to participate in"
-          ctaLabel="Configure"
-          ctaHref="/operator#solvernets"
-        />
       )}
 
-      <AdvancedDetails>
-        <IdentityCard
-          agentId={services[0]?.agentId ?? null}
-          chain="Base Sepolia"
-          safeAddress={services[0]?.safeAddress ?? null}
-          services={services}
-        />
-        <HarnessStatusPanel />
-      </AdvancedDetails>
+      {/*
+       * Live activity is a primary Dashboard section (issue #219): an
+       * operator who runs `jinn run` and lands on /overview must see what
+       * their daemon is doing right now without navigating to Settings.
+       * The same surface renders on the dedicated /overview/activity page.
+       */}
+      <ActivitySections />
+
+      <IdentityCard
+        agentId={services[0]?.agentId ?? null}
+        chain="Base Sepolia"
+        safeAddress={services[0]?.safeAddress ?? null}
+        services={services}
+      />
+      <HarnessStatusPanel />
+      <AdvancedDetails />
     </div>
   );
 }

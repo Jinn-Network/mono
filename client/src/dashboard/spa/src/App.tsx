@@ -3,23 +3,25 @@ import { useState } from 'react';
 import { Router, Route, Switch, Redirect } from 'wouter';
 import { api } from './api/client.js';
 import type { BootstrapState } from './api/types.js';
-import { useConnectionState } from './api/connection-state.js';
 import { LoadingScreen } from './regions/LoadingScreen.js';
 import { Onboarding } from './regions/Onboarding.js';
 import { AppShell } from './shell/AppShell.js';
 import { Header } from './shell/Header.js';
 import { TopTabs } from './shell/TopTabs.js';
 import { AgentRail } from './shell/AgentRail.js';
-import { RestartBanner } from './shell/RestartBanner.js';
-import { OfflineBanner } from './shell/OfflineBanner.js';
+import { RestartPendingContext } from './shell/RestartPendingContext.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
-import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 import { CapturesTab } from './captures/CapturesTab.js';
+import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { MembershipsTab } from './pages/operator/MembershipsTab.js';
+import { RegistryTab } from './pages/operator/RegistryTab.js';
+import { NetworkTab } from './pages/operator/NetworkTab.js';
+import { SecurityTab } from './pages/operator/SecurityTab.js';
 import { BuildPage } from './pages/Build.js';
 import { getFeatures } from './lib/features.js';
 
@@ -43,88 +45,88 @@ export default function App(): JSX.Element {
     refetchInterval: 1500,
   });
   const [restartPending, setRestartPending] = useState(false);
-  // #335: detect a dead daemon so the operating shell stops silently
-  // rendering stale state. The probe runs regardless of bootstrap phase.
-  const connection = useConnectionState();
 
-  // #335: the OfflineBanner must surface a dead daemon in *every* render
-  // branch, not just the operating shell. If the daemon dies while the
-  // operator is still bootstrapping, the loading/onboarding screens would
-  // otherwise sit stale with no offline signal — the exact "UI lies about
-  // daemon state" failure #335 names. Hoist the banner above all three
-  // branches so it is reachable regardless of bootstrap phase.
+  // Offline state and restart-pending are both notification categories (§2.10).
+  // They flow through useNotifications / AppShell's NotificationsList instead
+  // of standalone banners. RestartPendingContext makes the flag available to
+  // useNotifications without prop-drilling.
+  const restartCtx = { restartPending, setRestartPending };
+
   if (isLoading || !data || data.mode === 'uninitialized') {
     const headline = !data
       ? 'Starting jinn'
       : data.mode === 'uninitialized'
         ? 'Setting up your wallet'
         : 'Loading';
-    return (
-      <>
-        <OfflineBanner connection={connection} />
-        <LoadingScreen headline={headline} />
-      </>
-    );
+    return <LoadingScreen headline={headline} />;
   }
 
   if (data.mode !== 'running') {
-    return (
-      <>
-        <OfflineBanner connection={connection} />
-        <Onboarding />
-      </>
-    );
+    return <Onboarding />;
   }
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
   const masterAddress = data.master_address ?? '';
-  // Issue #326: the embedded agent rail renders only when the daemon reports
-  // the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
-  const embeddedAgentEnabled = data.embeddedAgentEnabled === true;
 
   // Issue #327: the builder surfaces (/build route + Build top-tab) are hidden
   // until the operator-app first-run UX is solid. The plug-in substrate stays
   // live for direct-CLI builders; only the operator-app promotion is gated.
   // Set JINN_ENABLE_PLUGIN_BUILDER_UI=1 on the daemon to re-enable.
-  const pluginBuilderUi = getFeatures().pluginBuilderUi;
+  //
+  // Issue #326 / #367: the embedded agent rail renders only when the daemon
+  // reports the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
+  // Read via the same `window.__JINN_FEATURES__` channel as every other flag.
+  const { pluginBuilderUi, embeddedAgent } = getFeatures();
 
   return (
-    <Router>
-      <OfflineBanner connection={connection} />
-      <RestartBanner
-        restartPending={restartPending}
-        onRestart={async () => {
-          await api.restartDaemon();
-          setRestartPending(false);
-        }}
-      />
-      <AppShell
-        header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
-        tabs={<TopTabs />}
-        rail={embeddedAgentEnabled ? <AgentRail /> : undefined}
-      >
-        <Switch>
-          <Route path="/overview/activity"><OverviewActivityPage /></Route>
-          <Route path="/overview" component={OverviewPage} />
-          <Route path="/operator/join/:cid"><JoinFlow /></Route>
-          <Route path="/operator/execution-data"><CapturesTab /></Route>
-          <Route path="/operator">
-            <OperatorPage onRestartPending={() => setRestartPending(true)} />
-          </Route>
-          <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
-          <Route path="/configuration"><ConfigurationRedirect /></Route>
-          <Route path="/launcher/create"><LauncherCreatePage /></Route>
-          <Route path="/launcher/launched/:solverNetId">
-            <LauncherLaunchedPage />
-          </Route>
-          <Route path="/launcher"><LauncherPage /></Route>
-          <Route path="/build">
-            {pluginBuilderUi ? <BuildPage /> : <Redirect to="/overview" />}
-          </Route>
-          <Route><Redirect to="/overview" /></Route>
-        </Switch>
-      </AppShell>
-    </Router>
+    <RestartPendingContext.Provider value={restartCtx}>
+      <Router>
+        <AppShell
+          header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
+          tabs={<TopTabs />}
+          rail={embeddedAgent ? <AgentRail /> : undefined}
+        >
+          <Switch>
+            <Route path="/overview/activity"><OverviewActivityPage /></Route>
+            <Route path="/overview" component={OverviewPage} />
+            <Route path="/operator/join/:cid"><JoinFlow /></Route>
+            <Route path="/operator/execution-data"><CapturesTab /></Route>
+            <Route path="/operator/memberships">
+              <OperatorShell>
+                <MembershipsTab onRestartPending={() => setRestartPending(true)} />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator/registry">
+              <OperatorShell>
+                <RegistryTab />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator/network">
+              <OperatorShell>
+                <NetworkTab onRestartPending={() => setRestartPending(true)} />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator/security">
+              <OperatorShell>
+                <SecurityTab />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+            <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
+            <Route path="/configuration"><ConfigurationRedirect /></Route>
+            <Route path="/launcher/create"><LauncherCreatePage /></Route>
+            <Route path="/launcher/launched/:solverNetId">
+              <LauncherLaunchedPage />
+            </Route>
+            <Route path="/launcher"><LauncherPage /></Route>
+            <Route path="/build">
+              {pluginBuilderUi ? <BuildPage /> : <Redirect to="/overview" />}
+            </Route>
+            <Route><Redirect to="/overview" /></Route>
+          </Switch>
+        </AppShell>
+      </Router>
+    </RestartPendingContext.Provider>
   );
 }
 

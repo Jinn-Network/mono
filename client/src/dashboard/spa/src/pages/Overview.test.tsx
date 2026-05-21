@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -32,11 +32,16 @@ vi.mock('../api/client.js', () => ({
   },
 }));
 
+// ActivitySections now uses SSE — mock so these tests don't open EventSource.
+vi.mock('../api/events.js', () => ({
+  useEventStream: vi.fn(() => ({ events: [], connected: false })),
+}));
+
 // Import after the mock so the page picks up the mocked client.
 const { OverviewPage } = await import('./Overview.js');
 const { detectJoinedSolverNet, operatorWaitingMessage } = await import('./overview/joined-solver-net.js');
 
-beforeEach(() => {
+beforeEach(async () => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
   claimRewardsMock.mockReset();
@@ -45,6 +50,9 @@ beforeEach(() => {
   claimRewardsMock.mockResolvedValue({ ok: true });
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
+  // Reset SSE mock to empty default between tests.
+  const { useEventStream } = await import('../api/events.js');
+  vi.mocked(useEventStream).mockReturnValue({ events: [], connected: false });
 });
 
 function withProviders(node: JSX.Element): JSX.Element {
@@ -75,7 +83,7 @@ function operatorCardName(name: string): (_: string, el: Element | null) => bool
 }
 
 describe('OverviewPage empty-state gating', () => {
-  it('shows the "Pick a SolverNet" prompt when the operator has joined nothing', async () => {
+  it('does not show the OperatorCard when the operator has joined nothing', async () => {
     getStatusMock.mockResolvedValue({
       predictionV1: {
         operator: {
@@ -91,7 +99,11 @@ describe('OverviewPage empty-state gating', () => {
     getBootstrapMock.mockResolvedValue({ solverNets: {} });
     render(withProviders(<OverviewPage />));
 
-    expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
+    // AlertBand retired (Task 1.6): the no_solvernets_joined notification
+    // kind in AppShell handles the empty state globally. Overview shows nothing
+    // in the joined-net slot when no net is configured.
+    await screen.findByText(/network/i);
+    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
   });
 
@@ -244,7 +256,8 @@ describe('OverviewPage empty-state gating', () => {
     );
     expect(screen.getByText(/network · swe-rebench v2/i)).toBeTruthy();
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-    const change = screen.getByText(/change/i).closest('a');
+    // Find the "Change →" link in the OperatorCard (not "Change password" in FundsCard).
+    const change = screen.getByText(/change\s*→/i).closest('a');
     expect(change?.getAttribute('href')).toBe('/operator#solvernets');
   });
 
@@ -439,6 +452,31 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(/no incoming tasks since startup/i)).toBeNull();
   });
 
+  it('does not render the AlertBand get-started CTA — no_solvernets_joined notice handles it globally', async () => {
+    // Render Overview in the no-solvernets-joined state (same payload shape as
+    // the "shows the prompt" test above). After AlertBand is retired, neither
+    // the "Get started" lead nor the "Pick a SolverNet" body should appear in
+    // the Overview page — the global NotificationsList in AppShell handles it.
+    getStatusMock.mockResolvedValue({
+      predictionV1: {
+        operator: {
+          ok: true,
+          solverNet: { name: 'prediction', enabled: false },
+          diagnostics: [],
+        },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    render(withProviders(<OverviewPage />));
+
+    // Wait for async data to settle then assert absence.
+    await screen.findByText(/network/i);
+    expect(screen.queryByText(/pick a solvernet/i)).toBeNull();
+    expect(screen.queryByText(/get started/i)).toBeNull();
+  });
+
   it('shows the OperatorCard from the predictionV1 status as a back-compat signal', async () => {
     // No bootstrap.solverNets at all; predictionV1.solverNet.enabled wins.
     getStatusMock.mockResolvedValue({
@@ -461,24 +499,16 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
   });
 
-  it('shows the prompt when both payloads are empty', async () => {
+  it('shows no joined-net card when both payloads are empty', async () => {
+    // AlertBand retired (Task 1.6): Overview shows nothing in the joined-net
+    // slot when no net is configured — the global notification handles the CTA.
     getStatusMock.mockResolvedValue({ fleet: { services: [] } });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
+    await screen.findByText(/network/i);
+    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-  });
-
-  it('CTA on empty-state deep-links into /operator#solvernets', async () => {
-    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    const cta = await screen.findByText(/configure\s*→/i);
-    expect(cta.closest('a')?.getAttribute('href')).toBe(
-      '/operator#solvernets',
-    );
   });
 
   it('shows compact live status in the HeroStats row', async () => {
@@ -520,14 +550,19 @@ describe('OverviewPage empty-state gating', () => {
     });
     const { history } = renderOverviewWithMemory();
 
-    expect(await screen.findByText(/jinn claimable/i)).toBeTruthy();
+    // Funds + Rewards now live in FundsCard + RewardsCard (Task 3.3).
+    expect(await screen.findByText(/funds/i)).toBeTruthy();
+    expect(await screen.findByText(/rewards/i)).toBeTruthy();
     expect(screen.queryByText(/quick actions/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /manage wallet/i })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /claim now/i }));
+    // RewardsCard "Claim" button (replaces HeroStats "Claim now").
+    // The pending rewards are 1 JINN (1e18 wei) so the button is enabled.
+    fireEvent.click(screen.getByRole('button', { name: /^claim$/i }));
     await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole('button', { name: /top up/i }));
+    // FundsCard "Top up" button (replaces HeroStats "Top up").
+    fireEvent.click(screen.getByRole('button', { name: /^top up$/i }));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
     fireEvent.click(screen.getByRole('button', { name: /restart/i }));
@@ -536,14 +571,64 @@ describe('OverviewPage empty-state gating', () => {
   });
 });
 
-// ── Gas top-up: explicit click, no auto-fire (jinn-mono #336) ───────────────
+// ── Restart notice auto-clears ──────────────────────────────────────────────
 //
-// rvx in the v0.1.6 dogfood: "I hit the button 'Top up' and it just magically
-// increases the number ... can't seem to stop it." The Dashboard Gas top-up
-// must be a single, explicit action: one click → exactly one faucet call, no
-// re-firing while the Dashboard stays mounted, a one-line amount + tx-hash
-// confirmation, and the button disabled while the request is in flight.
-describe('OverviewPage gas top-up (jinn-mono #336)', () => {
+// The restart-requested notice must not stay pinned to the dashboard until the
+// operator triggers some other action. The confirmation is transient, so the
+// Restart action must pass `autoClearMs` (like the gas top-up does) and the
+// notice must disappear on its own.
+describe('OverviewPage restart notice', () => {
+  const restartStatus = {
+    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+    masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
+    fleet: { services: [] },
+    predictionV1: {
+      operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+      totals: { observedTasks: 1, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+    },
+  };
+
+  it('auto-clears the restart-requested notice after its autoClearMs window', async () => {
+    vi.useFakeTimers();
+    try {
+      getStatusMock.mockResolvedValue(restartStatus);
+      getBootstrapMock.mockResolvedValue({ solverNets: {} });
+      restartDaemonMock.mockResolvedValue({ ok: true });
+      render(withProviders(<OverviewPage />));
+
+      const restartButton = await vi.waitFor(() =>
+        screen.getByRole('button', { name: /restart/i }),
+      );
+      fireEvent.click(restartButton);
+
+      // The confirmation surfaces first.
+      const notice = await vi.waitFor(() => screen.getByTestId('dashboard-action-notice'));
+      expect(notice.textContent).toMatch(/restart requested/i);
+
+      // Before the auto-clear window elapses the notice is still present.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9_000);
+      });
+      expect(screen.queryByTestId('dashboard-action-notice')).not.toBeNull();
+
+      // Past the 10s window the notice clears itself — no other action needed.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(screen.queryByTestId('dashboard-action-notice')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── Gas top-up: explicit click, no auto-fire ────────────────────────────────
+//
+// The Dashboard Gas top-up must be a single, explicit action: one click →
+// exactly one faucet call, no re-firing while the Dashboard stays mounted, a
+// one-line amount + tx-hash confirmation, and the button disabled while the
+// request is in flight.
+describe('OverviewPage gas top-up', () => {
   const gasStatus = {
     rewards: { pendingStakingRewardsWei: '1000000000000000000' },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
@@ -566,7 +651,7 @@ describe('OverviewPage gas top-up (jinn-mono #336)', () => {
     });
     render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
     fireEvent.click(topUpButton);
 
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
@@ -587,7 +672,7 @@ describe('OverviewPage gas top-up (jinn-mono #336)', () => {
     });
     const { rerender } = render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
     fireEvent.click(topUpButton);
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
@@ -631,12 +716,13 @@ describe('OverviewPage gas top-up (jinn-mono #336)', () => {
     );
     render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
     fireEvent.click(topUpButton);
 
     // While the faucet call is unresolved the button must be disabled.
+    // FundsCard disables the button (via actionsDisabled) rather than relabelling it.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /working/i })).toHaveProperty('disabled', true),
+      expect(screen.getByRole('button', { name: /^top up$/i })).toHaveProperty('disabled', true),
     );
 
     resolveDrip({
@@ -668,5 +754,210 @@ describe('OverviewPage gas top-up (jinn-mono #336)', () => {
 
     const notice = await screen.findByRole('alert');
     expect(notice.textContent).toMatch(/rate limited/i);
+  });
+});
+
+/**
+ * Issue #219: the live activity surface is a PRIMARY section on /overview
+ * (the Dashboard). An operator who runs `jinn run` and lands on the
+ * dashboard must see live task/event activity without navigating to
+ * /operator (Settings). These tests assert the In-flight + Recent cards
+ * render inline on Overview, with all card states operable.
+ */
+describe('OverviewPage activity surface (issue #219)', () => {
+  it('renders the In-flight and Recent activity sections inline on the Dashboard', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      taskRuns: { totals: { activeTaskRuns: 0 }, inFlight: [], recentTasks: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-in-flight')).toBeTruthy();
+    });
+    expect(screen.getByTestId('overview-activity-recent')).toBeTruthy();
+  });
+
+  it('shows in-flight task rows from generic taskRuns without leaving /overview', async () => {
+    const now = Date.now();
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      taskRuns: {
+        totals: { activeTaskRuns: 1 },
+        inFlight: [
+          {
+            requestId: 'req-abc12345',
+            taskId: 'task-1',
+            taskCid: 'bafkre...',
+            solverType: 'swe-rebench-v2.v1',
+            state: 'RUNNING',
+            taskRole: 'restoration',
+            stateUpdatedAt: now - 60_000,
+            deliveryTxHash: null,
+          },
+        ],
+      },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 1, activeTaskRuns: 1, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('overview-activity-in-flight-row')).toHaveLength(1);
+    });
+    expect(screen.getByText('RUNNING')).toBeTruthy();
+    expect(screen.queryByTestId('overview-activity-in-flight-empty')).toBeNull();
+  });
+
+  it('shows recent activity rows on the Dashboard', async () => {
+    // Recent section sources from SSE — mock the hook to return an event.
+    const { useEventStream } = await import('../api/events.js');
+    vi.mocked(useEventStream).mockReturnValue({
+      events: [
+        {
+          schemaVersion: 1,
+          id: 'evt-dash-1',
+          ts: '2026-05-07T13:46:45.710Z',
+          kind: 'intent',
+          message: 'request claimed',
+          requestId: 'req-aaa',
+          txHash: '0xabcdefabcdefabcdef',
+        },
+      ],
+      connected: true,
+    });
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-recent-list')).toBeTruthy();
+    });
+    expect(screen.getByText(/request claimed/i)).toBeTruthy();
+  });
+
+  it('shows the empty / "no recent activity" states on the Dashboard', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      taskRuns: { totals: { activeTaskRuns: 0 }, inFlight: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-in-flight-empty')).toBeTruthy();
+    });
+    const recentEmpty = screen.getByTestId('overview-activity-recent-empty');
+    expect(recentEmpty.textContent).toMatch(/no recent activity/i);
+  });
+
+  it('shows an operable error state on the Dashboard when /v1/status fails', async () => {
+    getStatusMock.mockRejectedValue(new Error('status unavailable'));
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-error')).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+  });
+});
+
+// ── HarnessStatusPanel promotion — spec §2.9 ───────────────────────────────
+//
+// HarnessStatusPanel is a first-class harness-readiness surface (spec §2.9).
+// It must render above the fold on /overview without requiring the operator
+// to expand the "Advanced details" disclosure. This test fails before the
+// promotion and passes after HarnessStatusPanel is moved out of <AdvancedDetails>.
+describe('OverviewPage HarnessStatusPanel (spec §2.9)', () => {
+  it('renders HarnessStatusPanel above the fold (not buried under Advanced details) — spec §2.9', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    // HarnessStatusPanel renders "Harness Status" (its section header) in the
+    // loading/unavailable state ("Harness status unavailable") or after data loads.
+    // We wait for the harness panel — its unavailable state renders without data.
+    await waitFor(() => {
+      expect(screen.getByText(/harness status/i)).toBeTruthy();
+    });
+
+    // Confirm HarnessStatusPanel is NOT a descendant of the AdvancedDetails toggle.
+    const harnessEl = screen.getByText(/harness status/i);
+    const advancedToggle = screen.getByRole('button', { name: /advanced details/i });
+    expect(advancedToggle.parentElement?.contains(harnessEl)).toBe(false);
+  });
+});
+
+// ── IdentityCard promotion — spec §2.2 ─────────────────────────────────────
+//
+// IdentityCard is a first-class identity surface (spec §2.2). It must render
+// above the fold on /overview without requiring the operator to expand the
+// "Advanced details" disclosure. This test fails before the promotion and
+// passes after IdentityCard is moved out of <AdvancedDetails>.
+describe('OverviewPage IdentityCard (spec §2.2)', () => {
+  it('renders IdentityCard above the fold (not buried under Advanced details) — spec §2.2', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: {
+        services: [
+          {
+            index: 0,
+            step: 'complete',
+            agentId: 42,
+            safeAddress: '0xSafe0000000000000000000000000000000000AA',
+            safeBoundToAgent: true,
+          },
+        ],
+      },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    // IdentityCard section header "Identity" must be in the DOM without
+    // expanding the Advanced details disclosure.
+    await waitFor(() => {
+      expect(screen.getByText('Identity')).toBeTruthy();
+    });
+
+    // Confirm IdentityCard is NOT a descendant of the AdvancedDetails toggle.
+    const identityEl = screen.getByText('Identity');
+    const advancedToggle = screen.getByRole('button', { name: /advanced details/i });
+    expect(advancedToggle.parentElement?.contains(identityEl)).toBe(false);
   });
 });

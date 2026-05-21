@@ -15,11 +15,12 @@ The "what does this scenario actually exercise" contracts live in `testing-jinn-
 **Wall-clock budget:** 5 minutes
 
 **Prerequisites:**
-- Substrate workspace via Plan A's `substrate-copy`.
-- Local Ponder indexer (helper at `client/test/_support/indexer/ponder.ts`).
-- Daemon endpoints: `/v1/corpus/produce`, `/v1/corpus/:cid`, `/v1/corpus/:cid/pay`, `/v1/discovery/corpus`.
+- Substrate workspace via `substrate-copy` (gold operator homes under `~/jinn-dev/operators/`).
+- `BASE_SEPOLIA_RPC_URL` set (the scenario forks Base Sepolia; absent → clean `skip`).
+- Built `dist/bin/jinn.js` (the operator daemons are spawned subprocesses).
+- Real corpus surface: `GET /v1/artifacts/:sha256/content` (x402-gated serving), the `Corpus` library's `DiscoveryAPI` for envelope discovery, and `acquireArtifactWithPayment` for the buyer-side x402 dance — all proven by `client/test/e2e/corpus-x402.ts`.
 
-**Current status (v0.1.6):** Returns `verdict=skip` because the producer-side HTTP surface (`/v1/corpus/produce`) is not present in the daemon today. See GH issue [#349](https://github.com/Jinn-Network/mono/issues/349). The probe is forward-compatible: when the endpoint ships, T2.1 transitions to the happy path.
+**Status:** Drives the real producer → on-chain attribution → consumer → x402-pay → retrieve → ERC-8128-verify flow. The speculative `/v1/corpus/*` REST endpoints in the original scenario plan were never built — corpus production is a side effect of task execution, not a REST call. T2.1 is `corpus-x402.ts` re-hosted into the Tier 2 substrate-workspace shape; it uses the on-chain `DiscoveryAPI` floor (no Ponder indexer) and hosts the producer's x402-configured `ApiServer` inside the workspace (the production daemon does not wire x402 onto its own `ApiServer`). See GH issue [#349](https://github.com/Jinn-Network/mono/issues/349).
 
 ## T2.2 — producer-evaluator-anvil-fork
 
@@ -69,7 +70,7 @@ The substrate multi-op workspace from `setupTier2Scenario` is **not** used: thos
 All three scenarios run in parallel via `client/scripts/release/run-tier-2.ts`. Each gets its own:
 - Substrate workspace (port-isolated daemons)
 - Anvil fork
-- Ponder indexer (T2.1, T2.3; T2.2 doesn't need it)
+- Ponder indexer (T2.3 only; T2.1 uses the on-chain DiscoveryAPI floor and T2.2 doesn't need it)
 
 Total wall-clock at full parallelism ≈ max(scenario wall-clocks) ≈ 5 minutes.
 

@@ -21,6 +21,7 @@ Other canonical docs:
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
+- [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md) — read before designing, extending, or reasoning about the operator app's data model, actions, or notification taxonomy (referenced from `SPEC.md` Roles → Operator)
 
 ## Engineering handbook
 

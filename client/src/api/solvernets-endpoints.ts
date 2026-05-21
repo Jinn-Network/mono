@@ -1488,7 +1488,14 @@ export function registerSolverNetsEndpoints(
       lastError:
         lastError === null
           ? null
-          : { message: lastError.message, at: lastError.at.toISOString() },
+          : {
+              message: lastError.message,
+              at: lastError.at.toISOString(),
+              // Forward the typed reason (currently only `rpc_rate_limited`)
+              // so the SPA can render an operator-actionable message rather
+              // than a generic "catalog failed" string. See jinn-mono #325.
+              ...(lastError.code !== undefined ? { code: lastError.code } : {}),
+            },
     });
   });
 

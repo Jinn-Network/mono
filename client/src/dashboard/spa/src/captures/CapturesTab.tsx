@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { CaptureDrillIn } from './CaptureDrillIn.js';
+import { OperatorDataMarket } from '../pages/operator/OperatorDataMarket.js';
 import type {
   CaptureSummary,
   OperatorArtifact,
@@ -248,7 +249,9 @@ export function CapturesTab(): JSX.Element {
   });
 
   return (
-    <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '360px 1fr', gap: 24 }}>
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <OperatorDataMarket defaultExpanded={true} />
+      <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 24 }}>
       <aside>
         <h1 style={{ margin: '0 0 12px', fontSize: 24 }}>Execution data</h1>
         {listError ? (
@@ -324,6 +327,7 @@ export function CapturesTab(): JSX.Element {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }

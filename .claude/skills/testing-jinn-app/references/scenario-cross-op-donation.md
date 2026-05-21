@@ -4,14 +4,9 @@
 **Wall-clock budget:** 5 minutes
 **Catches:** x402 + ERC-8128 handshake regressions, corpus indexer attribution bugs, payment-gated artifact access bugs.
 
-> **Prerequisite: Plan A's `substrate-copy.ts`.** This scenario imports
-> `copyWorkspace` from `client/scripts/release/substrate-copy.ts`, a Plan A
-> artifact. It does not exist on the Plan B branch — this scenario is not
-> runnable until Plan A lands.
-
 ## Goal
 
-op-a produces a corpus artifact, indexer picks it up, op-b queries Discovery API for the artifact, op-b pays x402 USDC, op-b retrieves the artifact, signature + payload validate end-to-end.
+op-a produces a corpus artifact, the indexer attributes it on-chain, op-b discovers the envelope via the `Corpus` library, op-b pays x402 USDC, op-b retrieves the artifact bytes, and the ERC-8128 signature + payload validate end-to-end with USDC balance deltas confirmed on both operators.
 
 This is the gate that should have caught the #310 silent breakage (donation-consumption gate was passing because op-a wasn't producing, so consumption couldn't verify).
 
@@ -19,91 +14,51 @@ This is the gate that should have caught the #310 silent breakage (donation-cons
 
 `client/test/release/tier-2/T2.1-cross-op-donation.ts`
 
+## Real API surface
+
+There is **no `/v1/corpus/*` REST surface** — corpus production is a side effect of task execution, not a REST call. T2.1 drives the surface operators actually use, proven by `client/test/e2e/corpus-x402.ts`:
+
+- `GET /v1/artifacts/:sha256/content` — x402-gated artifact serving (`client/src/x402/handler.ts`). Keyed by sha256, dynamic per-row price, real 402 → verify → settle → 200 + `PAYMENT-RESPONSE` header.
+- The `Corpus` library (`client/src/corpus/index.ts`) — envelope discovery via the injected `DiscoveryAPI` (Ponder HTTP primary + on-chain `MetadataSet`-log floor via `withFallback`).
+- `acquireArtifactWithPayment` (`client/src/x402/acquire.ts`) — the buyer-side x402 dance.
+
+Note the production daemon does **not** wire x402 onto its own `ApiServer` (`DaemonConfig.x402` is never set in `main.ts`), so the x402-gated serving route only exists on an `ApiServer` started with an explicit `x402` config. T2.1 hosts the producer's `ApiServer` + served-artifact store inside the substrate workspace, exactly as `corpus-x402.ts` does.
+
 ## Setup
 
-- substrate workspace via `copyWorkspace({ ops: ['op-a', 'op-b'] })`
-- both daemons spawned with substrate-derived HOMEs, distinct apiPorts (7732, 7733)
-- Anvil-fork RPC (forks Base Sepolia); both daemons' configs point at this fork URL
-- op-a config: `solverNets.<name>.roles = ['solving']` for the chosen SolverNet
-- op-b config: joined to the same SolverNet via `joinedSolverNets[<manifestCid>]`
+- substrate workspace + Anvil fork of Base Sepolia + op-a/op-b daemons via `setupTier2Scenario({ scenarioId: 'T2.1', portBase: 7750 })` (`client/test/release/tier-2/tier-2-helpers.ts`)
+- producer (op-a) and consumer (op-b) are deterministic test keys funded on the fork via anvil cheatcodes — `anvil_setBalance` for producer gas, USDC storage-slot manipulation for consumer USDC
+- the producer's served-artifact store is seeded directly (`saveServedArtifact` + a hand-built `SignedEnvelope`) rather than by driving a full task execution — the latter adds Anvil task-lifecycle flakiness for no extra coverage of the donation handshake
 
 ## Steps
 
-```typescript
-// 1. Spawn daemons + workspace (see multi-op-playwright.md template)
-const workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-const daemons = await spawnMultiOpDaemons({
-  ops: [
-    { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
-    { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
-  ],
-});
-
-// 2. op-a produces a corpus artifact
-//    Either: trigger via daemon API (POST /v1/corpus/produce) or wait for natural production tick
-const opARes = await fetch(`http://127.0.0.1:7732/v1/corpus/produce`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ solverNetManifestCid: KNOWN_MANIFEST_CID, payload: SAMPLE_PAYLOAD }),
-});
-const { artifactCid } = await opARes.json();
-
-// 3. Wait for indexer to pick it up (poll Discovery API)
-const indexedCid = await waitFor(async () => {
-  const res = await fetch(`http://127.0.0.1:7733/v1/discovery/corpus?cid=${artifactCid}`);
-  if (!res.ok) return null;
-  const body = await res.json();
-  return body.cid === artifactCid ? body : null;
-}, { timeoutMs: 60000, intervalMs: 2000 });
-expect(indexedCid).toBeTruthy();
-
-// 4. op-b queries Discovery API for the artifact (no payment yet — gated)
-const previewRes = await fetch(`http://127.0.0.1:7733/v1/corpus/${artifactCid}`);
-expect(previewRes.status).toBe(402);   // Payment required
-
-// 5. op-b initiates x402 payment
-const paymentRes = await fetch(`http://127.0.0.1:7733/v1/corpus/${artifactCid}/pay`, {
-  method: 'POST',
-});
-const { paymentTx } = await paymentRes.json();
-expect(paymentTx).toMatch(/^0x[a-fA-F0-9]{64}$/);
-
-// 6. op-b retrieves the artifact (with payment proof)
-const retrievedRes = await fetch(`http://127.0.0.1:7733/v1/corpus/${artifactCid}`, {
-  headers: { 'x-x402-payment': paymentTx },
-});
-expect(retrievedRes.status).toBe(200);
-const retrieved = await retrievedRes.json();
-expect(retrieved.payload).toEqual(SAMPLE_PAYLOAD);
-
-// 7. Verify the ERC-8128 signature on the artifact
-const sigValid = await verifyErc8128Signature(retrieved);
-expect(sigValid).toBe(true);
-
-// 8. Cleanup
-await daemons.teardown();
-await workspace.teardown();
-```
+1. `setupTier2Scenario` — substrate workspace copy + Anvil fork of Base Sepolia + two booted operator daemons.
+2. Fund producer ETH + consumer USDC on the fork.
+3. op-a produces a corpus artifact: seed `served_artifacts`, build the ERC-8128-signed envelope, start an x402-configured `ApiServer` for op-a.
+4. Publish an on-chain `MetadataSet` attribution event; the `DiscoveryAPI` on-chain floor indexes it.
+5. op-b discovers the envelope through the `Corpus` library, pays x402, retrieves + sha256-verifies the bytes.
+6. Verify USDC balance deltas (producer +price, consumer −price) and the producer's `paid_served` access event.
 
 ## Assertions (summary)
 
 | # | Assertion | Why |
 |---|---|---|
-| A1 | op-a produces an artifact with a valid CID | producer side works |
-| A2 | indexer attributes the artifact to op-a within 60s | indexer cross-op visibility |
-| A3 | op-b's unpaid query returns 402 | gating works |
-| A4 | op-b's payment tx is mined | x402 payment side works |
-| A5 | op-b's paid retrieval returns 200 + correct payload | gating releases after payment |
-| A6 | ERC-8128 signature on retrieved artifact validates | end-to-end provenance |
+| A1 | op-a's served artifact + signed envelope are produced | producer side works |
+| A2 | the `DiscoveryAPI` floor attributes the envelope to op-a | indexer cross-op visibility |
+| A3 | op-b's unpaid `GET /v1/artifacts/:sha256/content` returns 402 | gating works |
+| A4 | op-b's x402 payment settles on-chain | x402 payment side works |
+| A5 | op-b's paid retrieval returns 200 + sha256-correct bytes | gating releases after payment |
+| A6 | the discovered envelope's secp256k1 signature validates to op-a | end-to-end provenance |
+| A7 | USDC deltas: producer +price, consumer −price; `paid_served` event recorded | settlement is real |
 
 ## Failure modes
 
 | Failure | Class | Triage |
 |---|---|---|
 | op-a never produces artifact | real-bug | BLOCKING — producer side broken |
-| indexer never sees artifact within 60s | flake-timing first attempt; real-bug on second | retry; if persistent, blocking |
-| op-b's preview returns 200 (no gate) | real-bug | BLOCKING — gate bypass |
-| Payment tx fails | flake-infra or real-bug | retry; if persistent, check x402 contract |
+| indexer never attributes the envelope | flake-timing first attempt; real-bug on second | retry; if persistent, blocking |
+| op-b's unpaid read returns 200 (no gate) | real-bug | BLOCKING — gate bypass |
+| x402 settlement fails | flake-infra or real-bug | retry; if persistent, check x402/USDC |
 | Paid retrieval returns 402 | real-bug | BLOCKING — payment not honored |
 | Signature mismatch | real-bug | BLOCKING — provenance broken |
 | RPC saturation mid-test | flake-infra | retry once with jittered delay |
@@ -111,22 +66,22 @@ await workspace.teardown();
 ## Wall-clock
 
 ~5 minutes:
-- 30s daemon spawn
-- 60s artifact production + indexer
-- 60s payment + retrieval
-- 30s signature verification
+- ~60s substrate copy + Anvil fork + daemon boot
+- ~30s artifact production + on-chain attribution
+- ~60s x402 payment + retrieval
+- ~30s signature + balance-delta verification
 - ~30s setup/teardown overhead
 
 ## Dependencies
 
-- Substrate workspace via Plan A's `substrate-copy`
-- Daemon HTTP API endpoints: `/v1/corpus/produce`, `/v1/corpus/:cid`, `/v1/corpus/:cid/pay`, `/v1/discovery/corpus` (these mostly exist in v0.1.6; verify shape at implementation time)
-- Anvil-fork-of-Base-Sepolia RPC (existing pattern in client/test/e2e/)
-- KNOWN_MANIFEST_CID — the substrate-pinned SolverNet manifest that both ops are joined to (read from op-a's manifest.json or config.json)
-- Existing helper: `verifyErc8128Signature` (or implement inline using the existing ERC-8128 module)
+- Substrate workspace via `substrate-copy` (`client/scripts/release/substrate-copy.ts`) — needs the gold operator homes under `~/jinn-dev/operators/`
+- `BASE_SEPOLIA_RPC_URL` set to a Base Sepolia RPC endpoint (the scenario forks it; absent → clean `skip`)
+- Built `dist/bin/jinn.js` (the daemons are spawned subprocesses)
+- The x402-gated serving route, `Corpus` library, and `acquireArtifactWithPayment` — all proven by `client/test/e2e/corpus-x402.ts`
 
 ## What this scenario does NOT catch
 
 - Real-network token economics (use Tier 3 for that)
 - Indexer behavior under high write load (this scenario is one writer, one reader)
 - Cross-chain donation scenarios
+- Corpus production via real task execution (driven directly here; Tier 3 exercises the full lifecycle)

@@ -182,6 +182,37 @@ export interface DiscoveryAPI {
   getLifecycleStatus(manifestCid: string): Promise<SolverNetLifecycleStatus | undefined>;
 
   /**
+   * Returns the number of distinct operators that have *ever* claimed a task
+   * on the SolverNet identified by `manifestCid` — i.e. the count of unique
+   * `attempt.operator` Safe addresses across every task whose
+   * `manifestDigest === keccak256(manifestCid)`, **including tasks that are
+   * now finalized or refunded**.
+   *
+   * This is an *ever-participated* signal, not a "currently active" one. The
+   * count never filters on task lifecycle state: the on-chain backing reads
+   * raw `TaskAttemptCreated` logs, which carry no finalized/refunded flag, so
+   * the only count consistent across all three backings (HTTP / embedded /
+   * on-chain) is the all-time distinct-operator total. Treat it as "operators
+   * who have participated at least once", not "operators participating today".
+   *
+   * It is the protocol-observable participation signal: a "join" in the
+   * operator app is purely a local config write (`joinedSolverNets[<cid>]`,
+   * see `spec/2026-05-05-solvernet-creation-and-launch.md` §12) and leaves no
+   * on-chain footprint. An operator only becomes visible to the network once
+   * they claim a task — `TaskAttemptCreated` is the first on-chain event tied
+   * to (operator, SolverNet). This method therefore counts *participating*
+   * operators (operators who have claimed at least one task), which is the
+   * only honest cross-operator count derivable from the indexer / chain.
+   *
+   * Task pagination is hard-capped (`MAX_OPERATOR_COUNT_TASK_PAGES` in each
+   * backing) so a pathological task volume cannot turn this into an unbounded
+   * scan; on a SolverNet beyond the cap the count is a lower bound.
+   *
+   * Returns `0` when no operator has attempted a task on the SolverNet yet.
+   */
+  getSolverNetOperatorCount(manifestCid: string): Promise<number>;
+
+  /**
    * Returns envelope refs matching the query. Refs only — byte retrieval is
    * done by the corpus library on demand.
    *
@@ -242,12 +273,28 @@ export interface DiscoveryAPI {
  * The `withFallback` wrapper catches this class (plus network-shaped errors)
  * and routes to the floor implementation for the duration of the outage.
  */
+/**
+ * Machine-readable reason a discovery read failed. `rpc_rate_limited` is the
+ * one branch callers act on distinctly: it means the configured RPC endpoint
+ * returned a 429 (or otherwise rate-limited the daemon), which — on the shared
+ * default RPC — is an operator-actionable condition ("add your own key"), not
+ * an indexer outage. Any other transport failure is left untyped (`undefined`).
+ */
+export type DiscoveryUnavailableCode = 'rpc_rate_limited';
+
 export class DiscoveryUnavailableError extends Error {
   override readonly cause?: unknown;
+  /**
+   * Typed reason, when one can be classified — currently only
+   * `rpc_rate_limited`, surfaced end-to-end so the operator UI can render a
+   * distinct "your RPC is throttled" message instead of a generic failure.
+   */
+  readonly code?: DiscoveryUnavailableCode;
 
-  constructor(message: string, cause?: unknown) {
+  constructor(message: string, cause?: unknown, code?: DiscoveryUnavailableCode) {
     super(message);
     this.name = 'DiscoveryUnavailableError';
     this.cause = cause;
+    this.code = code;
   }
 }

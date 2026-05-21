@@ -574,6 +574,46 @@ export class TaskRunPersistence {
     return rows.map(rowToTaskRun);
   }
 
+  /**
+   * Fetch all terminal tasks (COMPLETE or FAILED).
+   * Used by the working-dir reaper (issue #320) to decide which on-disk
+   * scratch directories are safe to delete.
+   */
+  getTerminal(): PersistedTaskRun[] {
+    const terminalList = [...TERMINAL_STATES];
+    const placeholders = terminalList.map(() => '?').join(', ');
+    const sql = `SELECT * FROM task_runs WHERE state IN (${placeholders}) ORDER BY state_updated_at ASC`;
+    const rows = this.db.prepare(sql).all(...terminalList) as RawRow[];
+    return rows.map(rowToTaskRun);
+  }
+
+  /**
+   * Atomic snapshot for the working-dir reaper (issue #320): every task run's
+   * request ID partitioned into terminal (COMPLETE / FAILED) vs in-flight.
+   *
+   * The reaper must NOT read in-flight and terminal sets as two separate
+   * queries — a task transitioning DELIVERING → COMPLETE between the two reads
+   * could be seen by neither (or, worse, classified terminal) and have its
+   * working directory deleted while `deliver()` still references files in it.
+   * A single `SELECT` is a single statement, so the snapshot is internally
+   * consistent: every row is observed at exactly one state.
+   */
+  getReaperPartition(): { terminal: Set<string>; inFlight: Set<string> } {
+    const rows = this.db
+      .prepare('SELECT request_id, state FROM task_runs')
+      .all() as Array<{ request_id: string; state: string }>;
+    const terminal = new Set<string>();
+    const inFlight = new Set<string>();
+    for (const r of rows) {
+      if (TERMINAL_STATES.has(r.state as TaskRunState)) {
+        terminal.add(r.request_id);
+      } else {
+        inFlight.add(r.request_id);
+      }
+    }
+    return { terminal, inFlight };
+  }
+
   hasInFlightFor(args: {
     solverType: string;
     taskRole: 'restoration' | 'evaluation';

@@ -643,6 +643,117 @@ describe('getLifecycleStatus', () => {
   });
 });
 
+// ── getSolverNetOperatorCount (#351) ──────────────────────────────────────────
+
+describe('getSolverNetOperatorCount', () => {
+  /**
+   * Mock a two-leg GraphQL exchange: `OperatorCountTasks` returns the task
+   * page, `OperatorCountAttempts` returns the attempts page. `/ready` probes
+   * resolve 200 so the GraphQL path is reached.
+   */
+  function mockTwoLeg(tasksData: unknown, attemptsData: unknown) {
+    const queries: string[] = [];
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      const body = JSON.parse(init?.body as string) as { query: string };
+      queries.push(body.query);
+      const payload = body.query.includes('query OperatorCountTasks(')
+        ? tasksData
+        : attemptsData;
+      return new Response(JSON.stringify({ data: payload }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    return { impl, queries };
+  }
+
+  it('counts distinct operators across the SolverNet attempts', async () => {
+    const { impl } = mockTwoLeg(
+      {
+        tasks: {
+          items: [
+            { id: '1', chainId: 84532 },
+            { id: '2', chainId: 84532 },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+      {
+        attempts: {
+          items: [
+            // op-a attempts twice, op-b once → 2 distinct operators.
+            { operator: '0xAAAA000000000000000000000000000000000000' },
+            { operator: '0xaaaa000000000000000000000000000000000000' },
+            { operator: '0xBBBB000000000000000000000000000000000000' },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    );
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const count = await client.getSolverNetOperatorCount('bafkreitestcid');
+    expect(count).toBe(2);
+  });
+
+  it('returns 0 when the SolverNet has no tasks', async () => {
+    const { impl, queries } = mockTwoLeg(
+      { tasks: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+      { attempts: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    );
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const count = await client.getSolverNetOperatorCount('bafkreiempty');
+    expect(count).toBe(0);
+    // Short-circuit: no attempt query is issued when there are no tasks.
+    expect(queries.some((q) => q.includes('query OperatorCountAttempts('))).toBe(false);
+  });
+
+  it('returns 0 when tasks exist but no operator has attempted any', async () => {
+    const { impl } = mockTwoLeg(
+      {
+        tasks: {
+          items: [{ id: '1', chainId: 84532 }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+      { attempts: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    );
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const count = await client.getSolverNetOperatorCount('bafkreinoattempts');
+    expect(count).toBe(0);
+  });
+
+  it('filters tasks by the keccak256 manifest digest of the cid', async () => {
+    const { impl, queries } = mockTwoLeg(
+      { tasks: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+      { attempts: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    );
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await client.getSolverNetOperatorCount('bafkreitestcid');
+    // The tasks query is keyed by manifestDigest (a 0x-prefixed keccak hash),
+    // not by the raw cid string.
+    expect(queries[0]).toContain('query OperatorCountTasks(');
+  });
+
+  it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
+    const { impl } = mockFetch({ errors: [{ message: 'indexer 500' }] });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await expect(
+      client.getSolverNetOperatorCount('bafkreitestcid'),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
+  it('throws DiscoveryUnavailableError on network failure', async () => {
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: networkErrorFetch() as unknown as typeof fetch,
+    });
+    await expect(
+      client.getSolverNetOperatorCount('bafkreitestcid'),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+});
+
 // ── queryEnvelopes ────────────────────────────────────────────────────────────
 
 describe('queryEnvelopes', () => {

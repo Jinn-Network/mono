@@ -28,7 +28,7 @@ A Jinn attestation is therefore not "someone wrote this to the canonical registr
 
 **Launcher.** Specifies a *solvernet*: an objective, an evaluation function, and a training mechanism. Locks JINN against the solvernet's gauge to direct emissions and bears the convergence bet.
 
-**Operator.** Runs a node that executes whatever solvernet it is staked on, stores and serves the executions it produces, posts execution bonds, and writes attestations. Operators are infrastructure — interchangeable, paid by emissions.
+**Operator.** Runs a node that executes whatever solvernet it is staked on, stores and serves the executions it produces, posts execution bonds, and writes attestations. Operators are infrastructure — interchangeable, paid by emissions. The user-facing surface an operator interacts with to run a node is canonical in [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md).
 
 **Evaluator.** Scores executions under the launcher-defined eval, under bond.
 

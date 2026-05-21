@@ -1,0 +1,36 @@
+# Example configuration for @jinn-network/broadcast-bot.
+#
+# Copy to broadcast-bot.toml and edit. Secrets are read from environment
+# variables, never from this file. See README for the full set.
+
+[github]
+repo = "Jinn-Network/mono"
+sources = ["releases", "prs", "discussions"]
+
+[github.prs]
+base_branches = ["next", "main"]
+exclude_authors = ["dependabot[bot]", "github-actions[bot]"]
+exclude_prefixes = ["chore(deps)"]
+
+[github.discussions]
+categories = ["Announcements", "RFCs"]
+
+# Enable on-chain broadcasting by setting `enabled = true` and filling rpc_url +
+# chain_id + identity_registry. Set `JINN_RPC_URL` in the environment to
+# override the file value with a private RPC.
+[onchain]
+enabled = false
+# rpc_url = "https://sepolia.base.org"
+# chain_id = 84532
+sources = ["solvernet-manifests", "plugins"]
+
+[onchain.contracts]
+# identity_registry = "0x8004A818BFB912233c491871b3d84c89A494BD9e"  # Base Sepolia
+
+[composer]
+model = "claude-sonnet-4-6"
+max_chars = 240
+
+[poster]
+backend = "x"   # "stdout" for dry-run
+dry_run = false

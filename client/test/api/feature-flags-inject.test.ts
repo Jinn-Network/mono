@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { injectFeatureFlags } from '../../src/api/server.js';
+import { injectFeatureFlags, isEmbeddedAgentEnabled } from '../../src/api/server.js';
 
 /**
  * Issue #327: the daemon injects `window.__JINN_FEATURES__` into the served
@@ -56,5 +56,34 @@ describe('injectFeatureFlags', () => {
     const out = injectFeatureFlags(noHead, { pluginBuilderUi: false });
     expect(out).toContain('__JINN_FEATURES__');
     expect(out.indexOf('__JINN_FEATURES__')).toBeLessThan(out.indexOf('</body>'));
+  });
+});
+
+/**
+ * Issue #326 / #367: the embedded Claude agent chat surface is gated behind
+ * `JINN_ENABLE_EMBEDDED_AGENT`. Per #367 this flag converged onto the same
+ * `window.__JINN_FEATURES__` channel as the builder UI flag — `resolveFeatureFlags`
+ * derives `embeddedAgent` from it. `isEmbeddedAgentEnabled` stays a standalone
+ * helper because the daemon also reads it directly to gate the `/api/agent/ws`
+ * bridge.
+ */
+describe('isEmbeddedAgentEnabled', () => {
+  it('defaults to false when the env var is unset', () => {
+    expect(isEmbeddedAgentEnabled({})).toBe(false);
+  });
+
+  it('is true for "1"', () => {
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '1' })).toBe(true);
+  });
+
+  it('is true for "true" (case-insensitive, trimmed)', () => {
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: 'true' })).toBe(true);
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: ' TRUE ' })).toBe(true);
+  });
+
+  it('is false for any other value', () => {
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '0' })).toBe(false);
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: 'yes' })).toBe(false);
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '' })).toBe(false);
   });
 });

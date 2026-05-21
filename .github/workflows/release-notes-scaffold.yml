@@ -28,7 +28,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write  # open-or-update the standing release-review PR (issue #307)
   issues: read
 
 jobs:
@@ -223,6 +223,7 @@ jobs:
           echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create or update the Release draft
+        id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SUGGESTED: ${{ steps.version.outputs.suggested }}
@@ -249,4 +250,96 @@ jobs:
               --target next
             echo "Created new draft: $TAG"
           fi
+          # `gh release view --json url` returns the canonical /releases/tag/<tag> URL.
+          # While the release is still a draft this URL 404s for anyone but a repo
+          # collaborator (the git tag does not exist yet) — it resolves publicly only
+          # once Captain publishes. The release-review PR body links it as the eventual
+          # destination. Fall back to the releases index if the lookup fails.
+          RELEASE_URL="$(gh release view "$TAG" --json url --jq '.url' 2>/dev/null \
+            || echo "https://github.com/${{ github.repository }}/releases")"
+          {
+            echo "tag=$TAG"
+            echo "release_url=$RELEASE_URL"
+          } >> "$GITHUB_OUTPUT"
           echo "::notice::Release draft v$SUGGESTED ready for Captain review at https://github.com/${{ github.repository }}/releases"
+
+      - name: Open or update the release-review PR (holistic-review gate — issue #307)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUGGESTED: ${{ steps.version.outputs.suggested }}
+          PREV_TAG: ${{ steps.window.outputs.prev_tag }}
+          RELEASE_URL: ${{ steps.draft.outputs.release_url }}
+        shell: bash
+        run: |
+          # Holistic-review gate (issue #307): the per-PR review surface and the release-notes
+          # title list both miss bugs that are only visible in the *cumulative* main...next diff
+          # (v0.1.6 shipped #301 silently shadowed by hardcoded values in main.ts — invisible
+          # per-PR, invisible in the title list, visible only in the whole-window diff).
+          #
+          # This step opens-or-updates a single standing PR with base:main head:next. GitHub
+          # keeps exactly one open PR per base/head pair and auto-refreshes its diff as `next`
+          # advances, so the idempotency contract is: create only if absent, otherwise
+          # refresh the existing PR's title + body.
+          #
+          # Soft convention (DR-2026-05-20): nothing mechanically blocks publish. The value is
+          # the whole-window diff existing and being looked at before Captain clicks Publish.
+          # promote-main.yml's fast-forward of `main` to `next` auto-closes this PR as merged.
+          TITLE="release-review: v${SUGGESTED} window (${PREV_TAG} → next)"
+          BODY_FILE="/tmp/release-review-pr-body.md"
+          {
+            echo "## Holistic release-window review"
+            echo ""
+            echo "This PR is the **holistic-review surface** for the v${SUGGESTED} release window."
+            echo "Its diff is the entire \`${PREV_TAG} → next\` window (\`main...next\`) in one"
+            echo "reviewable view — the diff that per-PR review and the release-notes title list"
+            echo "both miss."
+            echo ""
+            echo "- Release draft: ${RELEASE_URL}"
+            echo "- Before publishing the release, review **this diff as a whole**, not just the"
+            echo "  list of merged PR titles. Cross-PR interactions (a later PR silently shadowing"
+            echo "  an earlier one) are only visible here."
+            echo ""
+            echo "### How this PR closes"
+            echo ""
+            echo "Do **not** merge this PR by hand. When Captain publishes the release,"
+            echo "\`promote-main.yml\` fast-forwards \`main\` to \`next\`, which auto-closes this PR"
+            echo "as merged. A new release-review PR is opened by the next Monday scaffold run."
+            echo ""
+            echo "### Soft gate"
+            echo ""
+            echo "This is a **soft convention** (DR-2026-05-20): nothing mechanically blocks"
+            echo "\`npm-publish.yml\`. The gate is the diff existing and being looked at."
+            echo ""
+            echo "Hotfixes do not open a release-review PR — their diff review is the hotfix"
+            echo "PR-to-\`main\` itself (see \`docs/runbooks/hotfix.md\`)."
+            echo ""
+            echo "_Opened automatically by \`release-notes-scaffold.yml\` — issue #307._"
+          } > "$BODY_FILE"
+
+          # GitHub keeps at most one open PR per base/head pair. Query first; create only if
+          # absent. If one already exists, refresh its title + body (the window version may
+          # have advanced since it was opened) — the diff itself auto-tracks `next`.
+          EXISTING_PR="$(gh pr list --repo "${{ github.repository }}" \
+            --base main --head next --state open \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [ -n "$EXISTING_PR" ]; then
+            gh pr edit "$EXISTING_PR" --repo "${{ github.repository }}" \
+              --title "$TITLE" --body-file "$BODY_FILE"
+            echo "::notice::Updated existing release-review PR #$EXISTING_PR (base:main head:next)"
+          else
+            # `gh pr create` errors if there are no commits between base and head. This
+            # happens right after a promotion (main == next) before any new work merges.
+            # Skip cleanly with a notice rather than failing the scaffold run. Fetch both
+            # refs first — checkout only materialises the workflow's own branch.
+            git fetch --quiet origin main next 2>/dev/null || true
+            AHEAD="$(git rev-list --count origin/main..origin/next 2>/dev/null || echo 0)"
+            if [ "${AHEAD:-0}" -eq 0 ]; then
+              echo "::notice::next has no commits ahead of main — skipping release-review PR creation (nothing to review yet)"
+            else
+              gh pr create --repo "${{ github.repository }}" \
+                --base main --head next \
+                --title "$TITLE" --body-file "$BODY_FILE" \
+                || echo "::notice::could not open release-review PR (base:main head:next) — non-fatal"
+              echo "::notice::Opened release-review PR (base:main head:next) for v$SUGGESTED"
+            fi
+          fi

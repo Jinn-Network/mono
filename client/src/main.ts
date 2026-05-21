@@ -27,7 +27,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
-import { startApiServer, type ApiServer } from './api/server.js';
+import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 // addHarnessReadinessRoutes is wired through startApiServer's holder ref now
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
@@ -36,7 +36,6 @@ import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
-import { isEmbeddedAgentEnabled } from './api/bootstrap-endpoint.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { requestDaemonRestart } from './restart-daemon.js';
@@ -63,6 +62,10 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildJinnClaimLoopConfig,
+  shouldWireJinnClaimL1Signer,
+} from './daemon/jinn-claim-loop-wiring.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
@@ -177,6 +180,11 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
 // action-authority / plugin-scope shape is still in design. Set
 // `JINN_ENABLE_EMBEDDED_AGENT=1` to re-enable it for development. This does
 // NOT affect Claude-Code-as-a-solver-harness — that path is independent.
+//
+// Issue #367: the SPA reads this flag via the injected `window.__JINN_FEATURES__`
+// (`resolveFeatureFlags` in api/server.ts) like every other operator-app flag.
+// This `embeddedAgentEnabled` const is the daemon-side consumer only — it gates
+// whether the `/api/agent/ws` bridge is mounted below.
 const embeddedAgentEnabled = isEmbeddedAgentEnabled();
 
 let activeClaudePath = config.claudePath ?? 'claude';
@@ -1048,9 +1056,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           solverNets: config.solverNets as Record<string, unknown> | undefined,
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
         }),
-        // Issue #326: gate the embedded agent chat surface. Off by default;
-        // `JINN_ENABLE_EMBEDDED_AGENT=1` re-enables it for development.
-        embeddedAgentEnabled: embeddedAgentEnabled,
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
       // Once the daemon's harness/plugin registry is loaded, swap this for a
@@ -1749,8 +1754,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
   // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
   // Same key as L2; only the chain differs.
+  const shouldWireJinnClaimL1 = shouldWireJinnClaimL1Signer({
+    enabled: config.jinnClaimLoopEnabled,
+    intervalMs: config.jinnClaimLoopIntervalMs,
+    submissionMode: config.jinnClaimSubmissionMode,
+    distributorAddress: JINN_MVI_CONFIG.distributor,
+    ethereumRpcUrl: config.ethereumRpcUrl,
+  });
   const l1ClientsForJinnClaim =
-    JINN_MVI_CONFIG.distributor && config.ethereumRpcUrl
+    shouldWireJinnClaimL1 && config.ethereumRpcUrl
       ? {
           public: createJinnL1PublicClient(config.ethereumRpcUrl, config.jinnL1Network),
           wallet: createJinnL1WalletClient(
@@ -1760,15 +1772,33 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ),
         }
       : undefined;
-  if (l1ClientsForJinnClaim) {
+  const jinnClaimLoopConfig = buildJinnClaimLoopConfig({
+    enabled: config.jinnClaimLoopEnabled,
+    intervalMs: config.jinnClaimLoopIntervalMs,
+    submissionMode: config.jinnClaimSubmissionMode,
+    messengerMode: JINN_CLAIM_MESSENGER_MODE,
+    mvi: JINN_MVI_CONFIG,
+    l2Client: agentClients.publicClient,
+    l2ProofClient,
+    l2Wallet: agentClients.walletClient,
+    l1Clients: l1ClientsForJinnClaim,
+    store: earningStore,
+    chain: NETWORK_CHAIN,
+    optimismPortalAddress,
+    disputeGameFactoryAddress,
+  });
+  if (jinnClaimLoopConfig) {
     console.log(
-      `[main] JinnClaimLoop: enabled (mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
+      `[main] JinnClaimLoop: enabled (submission=${config.jinnClaimSubmissionMode}, ` +
+      `mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
       `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${JINN_MVI_CONFIG.distributor}, ` +
       `emitter=${JINN_MVI_CONFIG.claimEmitter})`,
     );
+  } else if (!config.jinnClaimLoopEnabled) {
+    console.log('[main] JinnClaimLoop: disabled (jinnClaimLoopEnabled=false)');
   } else {
     console.log(
-      `[main] JinnClaimLoop: disabled (JinnDistributor artifact/override or JINN_ETHEREUM_RPC_URL not set)`,
+      `[main] JinnClaimLoop: disabled (missing claim-loop artifacts, interval disabled, or L1 submit wiring)`,
     );
   }
 
@@ -2357,29 +2387,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    jinnClaim:
-      l1ClientsForJinnClaim &&
-      JINN_MVI_CONFIG.claimEmitter &&
-      JINN_MVI_CONFIG.messenger &&
-      JINN_MVI_CONFIG.distributor &&
-      config.jinnClaimLoopIntervalMs > 0
-        ? {
-            intervalMs: config.jinnClaimLoopIntervalMs,
-            l2Client: agentClients.publicClient,
-            l2ProofClient,
-            l2Wallet: agentClients.walletClient,
-            l1Client: l1ClientsForJinnClaim.public,
-            l1Wallet: l1ClientsForJinnClaim.wallet,
-            store: earningStore,
-            chain: NETWORK_CHAIN,
-            claimEmitterAddress: JINN_MVI_CONFIG.claimEmitter as `0x${string}`,
-            distributorAddress: JINN_MVI_CONFIG.distributor as `0x${string}`,
-            messengerAddress: JINN_MVI_CONFIG.messenger as `0x${string}`,
-            messengerMode: JINN_CLAIM_MESSENGER_MODE,
-            optimismPortalAddress,
-            disputeGameFactoryAddress,
-          }
-        : undefined,
+    jinnClaim: jinnClaimLoopConfig,
     restorationEngine: {
       paths: {
         workingDirRoot: config.engine.workingDirRoot,

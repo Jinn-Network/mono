@@ -45,6 +45,10 @@ export interface BootstrapState {
   }>;
   master_address?: string;
   chain?: string;
+  /** Operator-configured RPC URL (absent when the default is in use). */
+  rpcUrl?: string;
+  /** Chain default RPC URL — the shared, rate-limited trial endpoint. */
+  defaultRpcUrl?: string;
   fleet_agent_id?: string;
   fleet_safe_address?: string;
   funding?: {
@@ -80,14 +84,9 @@ export interface BootstrapState {
   }>;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
-  /**
-   * Issue #326: whether the embedded Claude agent chat surface should render.
-   * Driven by the daemon's `JINN_ENABLE_EMBEDDED_AGENT` env var; false by
-   * default. When false the SPA hides the agent rail and the onboarding
-   * "Ask Claude" panel, and the daemon does not mount `/api/agent/ws`.
-   * Absent on responses from older daemons — treat absent as false.
-   */
-  embeddedAgentEnabled?: boolean;
+  // Issue #367: the embedded-agent feature flag is no longer carried in this
+  // response. The operator app reads it (and every other feature flag) via the
+  // injected `window.__JINN_FEATURES__` — see `lib/features.ts` `getFeatures()`.
 }
 
 export interface ClaudeAuthState {
@@ -654,10 +653,18 @@ export interface LaunchAction {
 /** Response shape for `PATCH /v1/solvernets/launched/:id/lifecycle`. */
 export type LifecycleTransition = LaunchedSolverNetRecord;
 
+/**
+ * Typed reason a registry catalog refresh failed. Currently only
+ * `rpc_rate_limited` — the configured RPC endpoint returned a 429. The SPA
+ * branches on this to show an operator-actionable message ("add your own RPC
+ * key") instead of a generic failure string. See jinn-mono #325.
+ */
+export type RegistryErrorCode = 'rpc_rate_limited';
+
 export interface RegistryListResponse {
   summaries: SolverNetManifestSummary[];
   lastRefreshedAt: Iso8601 | null;
-  lastError: { message: string; at: Iso8601 } | null;
+  lastError: { message: string; at: Iso8601; code?: RegistryErrorCode } | null;
 }
 
 export interface RegistryManifestResponse {
@@ -761,6 +768,18 @@ export interface DiscoveryBuilderArtifactsResponse {
 
 export interface DiscoveryPluginScoresResponse {
   scores: PluginScoreHistoryRowDto[];
+}
+
+/**
+ * Response from `GET /v1/discovery/solvernet-operator-count?cid=<manifestCid>`.
+ * `operatorCount` is the number of distinct operators with on-chain activity
+ * (claimed tasks) on the SolverNet — see the daemon's
+ * `DiscoveryAPI.getSolverNetOperatorCount` for why this counts participating
+ * operators rather than config-level joins. Issue #351.
+ */
+export interface DiscoverySolverNetOperatorCountResponse {
+  manifestCid: string;
+  operatorCount: number;
 }
 
 // ── Per-harness readiness (vh74.2 Stage A — #248 / #332) ─────────────────────

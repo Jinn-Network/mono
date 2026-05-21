@@ -445,27 +445,46 @@ export class Daemon {
    */
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
+    // Yield to the macrotask queue every N announcements so even the first full
+    // scan of a large backlog hands control back to the HTTP server (so /health
+    // doesn't spike) instead of running as one uninterruptible contiguous block.
+    const YIELD_EVERY = 10;
+    let scanned = 0;
 
     for await (const taskAnnouncement of this.adapter.watchForTasks()) {
       if (this.engineStopped) break;
       if (!taskAnnouncement.taskId) continue;
 
+      if (++scanned % YIELD_EVERY === 0) {
+        // setImmediate schedules a macrotask: the event loop drains pending I/O
+        // callbacks (HTTP requests) before resuming this loop.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        if (this.engineStopped) break;
+      }
+
+      // canAcceptTask() resolves manifests, validates schemas, and probes
+      // impl.isReady() — expensive enough that re-running it for every
+      // persistently-unacceptable task each pass starves the HTTP API. Fast-skip
+      // tasks skipped within the bounded SKIP_RECHECK_TTL_MS; once the TTL
+      // elapses we fall through so a now-acceptable task is still picked up.
+      if (!this.skipLogDeduper.shouldRecheck(taskAnnouncement.taskId)) {
+        continue;
+      }
+
       const solverType = taskAnnouncement.task.solverType ?? undefined;
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
       const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
-        // Dedupe per (taskId, reason): on a single-slot daemon the engine-watcher
-        // re-observes every pending task each pass, so the original `console.log`
-        // here produced hundreds of identical "another … task is already in flight"
-        // lines per minute. We log once per (taskId, reason) and stay quiet until
-        // the reason for skipping changes (jinn-mono-kzan).
+        this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason);
+        // Log once per (taskId, reason) — the engine-watcher re-observes every
+        // pending task each pass, so an unguarded log here floods the console.
         if (this.skipLogDeduper.shouldLog(taskAnnouncement.taskId, accept.reason)) {
           console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         }
         continue;
       }
-      // Task is acceptable now; reset dedupe state so a future skip (e.g. after
-      // this slot fills again) logs once instead of being silently swallowed.
+      // Task is acceptable now; reset skip state so a future skip logs once and
+      // is re-checked immediately rather than fast-skipped.
       this.skipLogDeduper.forget(taskAnnouncement.taskId);
 
       // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),

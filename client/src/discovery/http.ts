@@ -25,6 +25,7 @@ import type {
   PublishedArtifact,
 } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
+import { manifestDigestForCid } from '../adapters/mech/digest.js';
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
 
@@ -89,6 +90,15 @@ query Tasks(
  */
 const ATTEMPTS_PAGE_LIMIT = 1000;
 
+/**
+ * Hard cap on `OPERATOR_COUNT_TASKS_QUERY` pages (leg 1 of the operator-count
+ * query). At `ATTEMPTS_PAGE_LIMIT` rows per page that is 50_000 tasks — far
+ * beyond any realistic SolverNet — and bounds the scan so the dashboard's
+ * recurring poll cannot trigger an unbounded walk. On a SolverNet past the cap
+ * the resulting count is a lower bound; see `getSolverNetOperatorCount`.
+ */
+const MAX_OPERATOR_COUNT_TASK_PAGES = 50;
+
 const ATTEMPTS_FOR_TASKS_QUERY = `
 query AttemptsForTasks($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $after: String) {
   attempts(
@@ -146,6 +156,64 @@ query GetLifecycleStatus($manifestCid: String!) {
     statusUpdatedAt
     anchorBlock
     manifestHash
+  }
+}
+`;
+
+/**
+ * Per-SolverNet attempt fetch for the operator-count query. Pages through every
+ * `attempt` row whose `taskId` belongs to a task with the given
+ * `manifestDigest`. The caller de-duplicates `operator` client-side to derive
+ * the distinct-operator count.
+ *
+ * There is no single GraphQL field joining `attempt` to `task.manifestDigest`,
+ * so this runs in two legs: first `OPERATOR_COUNT_TASKS_QUERY` (task ids for
+ * the digest), then `OPERATOR_COUNT_ATTEMPTS_QUERY` batched over those ids via
+ * the `_in` operator — the same pattern `findClaimableTasks` already uses.
+ *
+ * The task query intentionally does NOT filter `finalized` / `refunded`: the
+ * on-chain backing reads raw `TaskAttemptCreated` logs and cannot see lifecycle
+ * state, so adding the filter here would make HTTP and on-chain disagree. The
+ * count is an *ever-participated* signal across all task lifecycle states — see
+ * `DiscoveryAPI.getSolverNetOperatorCount`.
+ */
+const OPERATOR_COUNT_TASKS_QUERY = `
+query OperatorCountTasks($manifestDigest: String!, $limit: Int!, $after: String) {
+  tasks(
+    where: { manifestDigest: $manifestDigest },
+    limit: $limit,
+    after: $after,
+    orderBy: "id",
+    orderDirection: "asc"
+  ) {
+    items {
+      id
+      chainId
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
+const OPERATOR_COUNT_ATTEMPTS_QUERY = `
+query OperatorCountAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $after: String) {
+  attempts(
+    where: { taskId_in: $taskIds, chainId: $chainId },
+    limit: $limit,
+    after: $after,
+    orderBy: "attemptIndex",
+    orderDirection: "asc"
+  ) {
+    items {
+      operator
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
   }
 }
 `;
@@ -241,6 +309,22 @@ interface EnvelopeRow {
 
 interface EnvelopePage {
   envelopes: { items: EnvelopeRow[] };
+}
+
+// ── Operator-count query response types (issue #351) ─────────────────────────
+
+interface OperatorCountTasksPage {
+  tasks: {
+    items: Array<{ id: string; chainId: number }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface OperatorCountAttemptsPage {
+  attempts: {
+    items: Array<{ operator: string }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
 }
 
 // ── Plug-in publication queries (attd) ───────────────────────────────────────
@@ -641,6 +725,67 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     };
   }
 
+  // ── getSolverNetOperatorCount ─────────────────────────────────────────────
+
+  async function getSolverNetOperatorCount(manifestCid: string): Promise<number> {
+    await ensureReady();
+
+    // The indexer keys tasks by `manifestDigest = keccak256(toBytes(cid))`,
+    // not by the cid string. Compute the digest so the task filter matches.
+    const manifestDigest = manifestDigestForCid(manifestCid).toLowerCase();
+
+    // Leg 1: page every task id for this SolverNet. Single-chain query, so all
+    // rows share a chainId — captured for the leg-2 attempt filter. Capped at
+    // MAX_OPERATOR_COUNT_TASK_PAGES so the dashboard's recurring poll cannot
+    // trigger an unbounded scan.
+    const taskIds: string[] = [];
+    let chainId: number | undefined;
+    let taskCursor: string | null = null;
+    for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
+      const data: OperatorCountTasksPage = await postGql<OperatorCountTasksPage>(
+        gqlUrl,
+        fetchImpl,
+        OPERATOR_COUNT_TASKS_QUERY,
+        { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
+      );
+      const items = data.tasks?.items ?? [];
+      for (const row of items) {
+        taskIds.push(row.id);
+        if (chainId === undefined) chainId = row.chainId;
+      }
+      const pageInfo: OperatorCountTasksPage['tasks']['pageInfo'] = data.tasks?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      taskCursor = pageInfo.endCursor;
+    }
+
+    // No tasks → no attempts → no participating operators.
+    if (taskIds.length === 0 || chainId === undefined) return 0;
+
+    // Leg 2: page every attempt for those task ids, collecting distinct
+    // operators. Batched over the id set via the `_in` operator (Ponder caps
+    // plural-query limit at 1000, hence ATTEMPTS_PAGE_LIMIT paging).
+    const operators = new Set<string>();
+    let attemptCursor: string | null = null;
+    for (;;) {
+      const data: OperatorCountAttemptsPage = await postGql<OperatorCountAttemptsPage>(
+        gqlUrl,
+        fetchImpl,
+        OPERATOR_COUNT_ATTEMPTS_QUERY,
+        { taskIds, chainId, limit: ATTEMPTS_PAGE_LIMIT, after: attemptCursor },
+      );
+      for (const row of data.attempts?.items ?? []) {
+        if (typeof row.operator === 'string' && row.operator.length > 0) {
+          operators.add(row.operator.toLowerCase());
+        }
+      }
+      const pageInfo: OperatorCountAttemptsPage['attempts']['pageInfo'] = data.attempts?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      attemptCursor = pageInfo.endCursor;
+    }
+
+    return operators.size;
+  }
+
   // ── queryEnvelopes ────────────────────────────────────────────────────────
 
   async function queryEnvelopes(query: CorpusQuery): Promise<EnvelopeRef[]> {
@@ -792,6 +937,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     findClaimableTasks,
     listLaunchedSolverNets,
     getLifecycleStatus,
+    getSolverNetOperatorCount,
     queryEnvelopes,
     listPluginPublications,
     getPluginScores,
