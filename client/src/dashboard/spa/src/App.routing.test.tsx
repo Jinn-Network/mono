@@ -10,6 +10,11 @@ import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { getFeatures } from './lib/features.js';
+import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { MembershipsTab } from './pages/operator/MembershipsTab.js';
+import { RegistryTab } from './pages/operator/RegistryTab.js';
+import { NetworkTab } from './pages/operator/NetworkTab.js';
+import { SecurityTab } from './pages/operator/SecurityTab.js';
 
 // Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
@@ -304,6 +309,72 @@ describe('App routes', () => {
           screen.queryByTestId('launcher-launched-error') ??
           screen.queryByTestId('launcher-launched'),
       ).toBeTruthy(),
+    );
+  });
+
+  // ── Operator sub-routes (Task 5.1) ──
+  // The four new sub-routes resolve to their stub tabs wrapped in OperatorShell.
+  // Bare /operator redirects to /operator/memberships.
+
+  function OperatorSubSwitch(): JSX.Element {
+    return (
+      <Switch>
+        <Route path="/operator/memberships">
+          <OperatorShell><MembershipsTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/registry">
+          <OperatorShell><RegistryTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/network">
+          <OperatorShell><NetworkTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/security">
+          <OperatorShell><SecurityTab /></OperatorShell>
+        </Route>
+        <Route path="/operator">
+          <Redirect to="/operator/memberships" />
+        </Route>
+        <Route path="/overview"><LocationProbe /></Route>
+      </Switch>
+    );
+  }
+
+  it('renders MembershipsTab on /operator/memberships', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/memberships'));
+    expect(screen.getByTestId('memberships-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders RegistryTab on /operator/registry', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/registry'));
+    expect(screen.getByTestId('registry-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders NetworkTab on /operator/network', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/network'));
+    expect(screen.getByTestId('network-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders SecurityTab on /operator/security', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/security'));
+    expect(screen.getByTestId('security-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('redirects bare /operator to /operator/memberships', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/operator/memberships"><LocationProbe /></Route>
+          <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+        </Switch>,
+        '/operator',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/operator/memberships'),
     );
   });
 });
