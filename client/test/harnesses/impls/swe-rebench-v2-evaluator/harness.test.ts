@@ -552,11 +552,11 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     await expect(harness.run(ctx)).rejects.toThrow(/not enabled/);
   });
 
-  it('reuses a single EvalRunner across run() calls so the LRU image cache accumulates (jinn-mono-uy6v.11)', async () => {
+  it('reuses a single EvalRunner across run() calls so per-round pruning fires on the shared runner (jinn-mono-uy6v.11)', async () => {
     // Regression: pre-fix, `new PythonEvalRunner(...)` was constructed inside
-    // each `run()` call, so the in-process LRU image cache was rebuilt empty
-    // every invocation and `cleanupImage` never fired in production. The
-    // existing LRU-eviction tests didn't catch this because they exercise
+    // each `run()` call, so the in-process runner was rebuilt empty every
+    // invocation and per-round pruning never fired in production. The
+    // existing pruning tests didn't catch this because they exercise
     // PythonEvalRunner directly. This test pins the harness→runner wiring:
     // the runner factory must be invoked exactly once across multiple run()
     // calls, regardless of how many distinct tasks the harness grades.

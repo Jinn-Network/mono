@@ -278,7 +278,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
-| _(none — env-only)_  | JINN_EVAL_IMAGE_CACHE_MAX | 20 (cap on the swe-rebench-v2 per-instance Docker image LRU) |
+| _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 
 `JINN_PASSWORD` is env-only — never in config files.
 
