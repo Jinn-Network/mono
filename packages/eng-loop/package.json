@@ -1,0 +1,15 @@
+{
+  "name": "@jinn-network/eng-loop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.9"
+  }
+}
