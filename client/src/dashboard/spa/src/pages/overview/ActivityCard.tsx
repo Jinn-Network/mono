@@ -46,8 +46,19 @@ export interface ActivityJoinedNet {
   harness?: string;
   /** Model identifier the harness runs against (e.g. "minimax-m2.7"). */
   model?: string;
-  /** Plugin specifiers active for this membership (e.g. "@jinn-network/network-tools@0.1.0"). */
-  plugins?: string[];
+  /**
+   * Effective plugins for this membership — bundled defaults +
+   * catalog-default-included + explicit, minus operator-disabled. See
+   * `computeEffectivePlugins`. Each entry knows whether it came from the
+   * defaults (`defaultIncluded: true`) so the dashboard can mark it.
+   */
+  plugins?: ActivityPlugin[];
+}
+
+export interface ActivityPlugin {
+  name: string;
+  displayName: string;
+  defaultIncluded: boolean;
 }
 
 export interface ActivityCardProps {
@@ -76,6 +87,14 @@ const COLUMN_BG: React.CSSProperties = {
   minWidth: 0,
 };
 
+/**
+ * Shared grid template for the tasks table header + rows. Splitting header
+ * and rows into separate grids (so active rows can carry a background +
+ * left border) means both have to reference the same template to stay
+ * column-aligned.
+ */
+const TABLE_GRID_COLUMNS = 'minmax(110px, 1fr) 90px 110px 130px';
+
 function trunc(s: string, head = 6, tail = 4): string {
   if (s.length <= head + tail + 1) return s;
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
@@ -87,23 +106,45 @@ function formatRole(role: ActivityTask['taskRole']): string {
   return '—';
 }
 
-function formatState(state: string): { label: string; tone: 'good' | 'bad' | 'neutral' } {
-  switch (state) {
-    case 'COMPLETE':
-      return { label: 'Complete', tone: 'good' };
-    case 'FAILED':
-      return { label: 'Failed', tone: 'bad' };
-    case 'DISCOVERED':
-    case 'CLAIMED':
-    case 'WAITING':
-    case 'PRE_SNAPSHOT':
-    case 'RUNNING':
-    case 'POST_SNAPSHOT':
-    case 'PACKAGING':
-    case 'DELIVERING':
-      return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'neutral' };
+type StateTone = 'good' | 'bad' | 'active' | 'neutral';
+
+/**
+ * The in-flight subset of the harness state machine. Active rows in the
+ * Activity table get a left-border accent + sky-blue state text so the
+ * operator can tell at a glance which tasks the daemon is still working
+ * on, versus the wall of historical Failed/Complete rows.
+ */
+const ACTIVE_STATES: ReadonlySet<string> = new Set([
+  'DISCOVERED',
+  'CLAIMED',
+  'WAITING',
+  'PRE_SNAPSHOT',
+  'RUNNING',
+  'POST_SNAPSHOT',
+  'PACKAGING',
+  'DELIVERING',
+]);
+
+function formatState(state: string): { label: string; tone: StateTone } {
+  if (state === 'COMPLETE') return { label: 'Complete', tone: 'good' };
+  if (state === 'FAILED') return { label: 'Failed', tone: 'bad' };
+  if (ACTIVE_STATES.has(state)) {
+    return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'active' };
+  }
+  return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'neutral' };
+}
+
+function stateToneColor(tone: StateTone): string {
+  switch (tone) {
+    case 'good':
+      return 'var(--vow-green)';
+    case 'bad':
+      return 'var(--break-red)';
+    case 'active':
+      return 'var(--accent-sky)';
+    case 'neutral':
     default:
-      return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'neutral' };
+      return 'var(--fg-muted)';
   }
 }
 
@@ -250,38 +291,59 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
               role="table"
               data-testid="activity-tasks-table"
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(110px, 1fr) 90px 110px 130px',
-                rowGap: 'var(--space-2)',
-                columnGap: 'var(--space-3)',
                 fontFamily: 'var(--mono)',
                 fontSize: 'var(--text-sm)',
                 color: 'var(--fg)',
-                alignItems: 'baseline',
               }}
             >
-              {/* header */}
-              {(['Task', 'Role', 'State', 'Started'] as const).map((label) => (
-                <span key={label} role="columnheader" style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>
-                  {label}
-                </span>
-              ))}
-              {/* rows */}
+              {/* header — uses the same grid template as each row so columns align */}
+              <div
+                role="row"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: TABLE_GRID_COLUMNS,
+                  columnGap: 'var(--space-3)',
+                  padding: 'var(--space-1) var(--space-3)',
+                  borderLeft: '2px solid transparent',
+                }}
+              >
+                {(['Task', 'Role', 'State', 'Started'] as const).map((label) => (
+                  <span key={label} role="columnheader" style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>
+                    {label}
+                  </span>
+                ))}
+              </div>
+              {/* rows — each its own grid so active rows can carry a background tint + left border */}
               {filtered.map((t) => {
                 const stateInfo = formatState(t.state);
-                const stateColor =
-                  stateInfo.tone === 'good'
-                    ? 'var(--vow-green)'
-                    : stateInfo.tone === 'bad'
-                      ? 'var(--break-red)'
-                      : 'var(--fg-muted)';
+                const stateColor = stateToneColor(stateInfo.tone);
+                const isActive = stateInfo.tone === 'active';
                 return (
-                  <RowFragment key={t.requestId}>
-                    <span role="cell" title={t.requestId}>{trunc(t.requestId)}</span>
+                  <div
+                    key={t.requestId}
+                    role="row"
+                    data-active={isActive ? 'true' : undefined}
+                    data-testid={`activity-task-row-${t.requestId}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: TABLE_GRID_COLUMNS,
+                      columnGap: 'var(--space-3)',
+                      padding: 'var(--space-1) var(--space-3)',
+                      alignItems: 'baseline',
+                      // Active rows lift visually with the sky-blue tint +
+                      // a 2px left border. Historical rows stay quiet.
+                      background: isActive ? 'rgba(122, 167, 220, 0.06)' : 'transparent',
+                      borderLeft: `2px solid ${isActive ? 'var(--accent-sky)' : 'transparent'}`,
+                      borderRadius: 'var(--radius-1)',
+                    }}
+                  >
+                    <span role="cell" title={t.requestId} style={{ color: isActive ? 'var(--fg)' : 'var(--fg)' }}>
+                      {trunc(t.requestId)}
+                    </span>
                     <span role="cell" style={{ color: 'var(--fg-muted)' }}>{formatRole(t.taskRole)}</span>
-                    <span role="cell" style={{ color: stateColor }}>{stateInfo.label}</span>
+                    <span role="cell" style={{ color: stateColor, fontWeight: isActive ? 500 : 400 }}>{stateInfo.label}</span>
                     <span role="cell" style={{ color: 'var(--fg-muted)' }}>{formatRelative(t.windowStartTs || t.stateUpdatedAt)}</span>
-                  </RowFragment>
+                  </div>
                 );
               })}
             </div>
@@ -371,18 +433,34 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
                     {selected.plugins.map((p) => (
                       <span
-                        key={p}
-                        title={p}
+                        key={p.name}
+                        title={p.name}
+                        data-testid={`activity-plugin-${p.name}`}
                         style={{
                           fontFamily: 'var(--mono)',
                           fontSize: 'var(--text-sm)',
                           color: 'var(--fg)',
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          gap: 'var(--space-2)',
                           overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
                         }}
                       >
-                        {p}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.displayName}
+                        </span>
+                        {p.defaultIncluded && (
+                          <span
+                            style={{
+                              fontSize: 'var(--text-2xs)',
+                              letterSpacing: '0.12em',
+                              textTransform: 'uppercase',
+                              color: 'var(--fg-dim)',
+                            }}
+                          >
+                            default
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>
@@ -396,10 +474,3 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
   );
 }
 
-// React doesn't render fragments as direct grid children consistently across
-// browsers (Safari has historically struggled). For grid rows, we need the
-// children flat — this wrapper avoids a stray <div> per row that would
-// break the columns.
-function RowFragment({ children }: { children: React.ReactNode }): JSX.Element {
-  return <>{children}</>;
-}

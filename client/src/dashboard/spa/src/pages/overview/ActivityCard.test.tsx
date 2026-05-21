@@ -20,7 +20,14 @@ const joined: ActivityJoinedNet[] = [
     roles: ['solver', 'evaluator'],
     harness: 'hermes-agent',
     model: 'minimax-m2.7',
-    plugins: ['@jinn-network/network-tools@0.1.0', 'swe-rebench-v2-runtime@0.1.0'],
+    plugins: [
+      { name: 'network-tools', displayName: 'Network Tools', defaultIncluded: true },
+      {
+        name: 'swe-rebench-v2-runtime',
+        displayName: 'SWE-rebench v2 Runtime',
+        defaultIncluded: true,
+      },
+    ],
   },
 ];
 
@@ -105,8 +112,12 @@ describe('ActivityCard', () => {
     expect(settings.textContent).toMatch(/model/i);
     expect(settings.textContent).toContain('minimax-m2.7');
     expect(settings.textContent).toMatch(/plugins/i);
-    expect(settings.textContent).toContain('@jinn-network/network-tools@0.1.0');
-    expect(settings.textContent).toContain('swe-rebench-v2-runtime@0.1.0');
+    // Display names, not raw plugin specifiers — and each default plugin
+    // shows a small "default" qualifier so the operator knows whether it
+    // came from manifest defaults or explicit config.
+    expect(settings.textContent).toContain('Network Tools');
+    expect(settings.textContent).toContain('SWE-rebench v2 Runtime');
+    expect(settings.textContent).toMatch(/default/i);
   });
 
   it('renders model/plugins placeholders when the selected net is missing them', () => {
