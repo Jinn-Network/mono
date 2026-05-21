@@ -57,23 +57,40 @@ test('T2.3 — op-a launches, op-b joins, both observe each other', async ({ bro
     // ===== op-a sees op-b's join =====
     await opAPage.goto(`${opAUrl}/launcher/launched`);
     await opAPage.getByText(solverNetName).click();
-    // The assertion below is known-broken: the SPA does not yet surface operator
-    // join counts. `LaunchedSolverNetRecord`
-    // (client/src/dashboard/spa/src/api/types.ts:466) has no operatorsJoined field
-    // and the launched dashboard has no element with data-testid="operator-count".
-    // A daemon endpoint + SPA surface must land first.
-    // Tracked in: https://github.com/Jinn-Network/mono/issues/351
-    // See docs/superpowers/plans/2026-05-19-tier-2-scenarios-plan.md Task 9.
+
+    // The launched dashboard now surfaces an `operator-count` element
+    // (issue #351 — StatusHeader "Operators" field, fed by
+    // `GET /v1/discovery/solvernet-operator-count`). The element exists and
+    // renders a real, indexer-derived number — so this assertion is now live:
+    // T2.3 verifies the surface unconditionally.
+    await expect(opAPage.getByTestId('operator-count')).toHaveText(/\d+/, {
+      timeout: 60000,
+    });
+
+    // The "exactly 1 operator joined" magnitude assertion stays gated.
+    // #351 surfaced that an operator "join" is purely a local config write to
+    // `joinedSolverNets[<cid>]` on the joining operator's daemon
+    // (spec/2026-05-05-solvernet-creation-and-launch.md §12) — it leaves NO
+    // on-chain footprint. The only protocol-observable signal is
+    // `TaskAttemptCreated`: an operator becomes visible network-wide once they
+    // *claim a task*. So `operator-count` counts *participating* operators, and
+    // in this scenario op-b joins but never claims a task — the honest count is
+    // 0, not 1.
     //
-    // Until #351 ships, this assertion is gated behind JINN_T23_OPERATOR_COUNT_READY
-    // so the rest of T2.3 can pass and run-tier-2 does not exit 1 every run. Set
-    // JINN_T23_OPERATOR_COUNT_READY=1 once the SPA surface exists to re-enable it.
+    // Asserting `/1/` unconditionally requires either (a) extending this
+    // scenario so op-b restarts + claims a task, or (b) a new on-chain
+    // operator-registration event + indexer entity so config-level joins
+    // become observable. Both are out of scope for #351; tracked as follow-up.
+    // Set JINN_T23_OPERATOR_COUNT_READY=1 once op-b also produces an on-chain
+    // operator footprint.
     if (process.env['JINN_T23_OPERATOR_COUNT_READY'] === '1') {
       await expect(opAPage.getByTestId('operator-count')).toHaveText(/1/, { timeout: 60000 });
     } else {
       console.warn(
-        'T2.3: skipping operator-count assertion — SPA does not yet surface operator ' +
-          'join counts (GH #351). Set JINN_T23_OPERATOR_COUNT_READY=1 once it ships.',
+        'T2.3: operator-count element is present and indexer-wired (GH #351); the ' +
+          '"1 operator joined" magnitude assertion stays gated — a config-level join has no ' +
+          'on-chain footprint, so a join-only scenario yields 0. Set ' +
+          'JINN_T23_OPERATOR_COUNT_READY=1 once op-b also claims a task on-chain.',
       );
     }
   } finally {

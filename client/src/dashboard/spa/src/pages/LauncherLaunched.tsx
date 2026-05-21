@@ -38,6 +38,13 @@ import {
 
 const POLL_INTERVAL_MS = 2_500;
 
+/**
+ * Operator count changes slowly (a new operator appears only when one claims a
+ * task) and each poll fans out to a paginated discovery scan, so it polls far
+ * less often than the 2.5s record poll. Tests override it via `pollIntervalMs`.
+ */
+const OPERATOR_COUNT_POLL_INTERVAL_MS = 30_000;
+
 export interface LauncherLaunchedPageProps {
   /** Override poll interval (tests). */
   pollIntervalMs?: number;
@@ -71,6 +78,22 @@ export function LauncherLaunchedPage({
     queryFn: () => api.solvernets.getManifest(manifestCid!),
     enabled: Boolean(manifestCid),
     staleTime: Infinity,
+  });
+
+  // Distinct operators with on-chain activity on this SolverNet (issue #351).
+  // Polls on its own slower cadence (OPERATOR_COUNT_POLL_INTERVAL_MS) rather
+  // than the 2.5s record poll: the count changes only when an operator claims
+  // a task, and each poll fans out to a paginated discovery scan. A discovery
+  // outage / pre-bootstrap 503 leaves the query in error; StatusHeader renders
+  // nothing in that case rather than a stale 0.
+  const operatorCountQuery = useQuery<number>({
+    queryKey: ['solvernets', 'operator-count', manifestCid],
+    queryFn: async () => {
+      const res = await api.discovery.getSolverNetOperatorCount(manifestCid!);
+      return res.operatorCount;
+    },
+    enabled: Boolean(manifestCid),
+    refetchInterval: OPERATOR_COUNT_POLL_INTERVAL_MS,
   });
 
   const [dialogTarget, setDialogTarget] = useState<LifecycleTarget | null>(null);
@@ -163,6 +186,7 @@ export function LauncherLaunchedPage({
       <StatusHeader
         record={record}
         manifest={manifest}
+        operatorCount={operatorCountQuery.data}
         onAction={(target) => {
           setDialogError(null);
           setDialogTarget(target);
