@@ -930,10 +930,6 @@ export async function gatherGatheredStatusRaw(
     transport: http(status.rpcUrl),
   });
 
-  // The tJINN read started above (overlapping the Base-RPC fan-out). It never
-  // rejects, so a plain await is safe here.
-  raw.tJinn = await tJinnPromise;
-
   try {
     const [blockNumber, chainId] = await Promise.all([
       client.getBlockNumber(),
@@ -1043,6 +1039,12 @@ export async function gatherGatheredStatusRaw(
       raw.serviceBalanceErrors = bal.errorsByDisplay;
     }
   }
+
+  // The tJINN read started up front (overlapping the Base-RPC fan-out). It is
+  // awaited here, as late as possible — after ALL other awaited Base-chain work
+  // — so the up-to-4s tJINN timeout never serializes the Base fan-out behind it.
+  // `gatherTjinnStatus` is internally error-safe, so a plain await is safe.
+  raw.tJinn = await tJinnPromise;
 
   return raw;
 }

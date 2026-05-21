@@ -92,10 +92,15 @@ export interface GatheredStatusRaw {
    * tJINN ERC-20 token address — resolved from the bundled JINN MVI L1
    * deployment artifact (single source of truth) and threaded through from
    * `main.ts`. Used to build the fallback pending status when `tJinn` is absent.
+   * Optional: not meaningfully present on mainnet/older paths and absent in
+   * many test fixtures — callers must handle `undefined`.
    */
-  tjinnTokenAddress: string;
-  /** tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`. */
-  tjinnChainId: number;
+  tjinnTokenAddress?: string;
+  /**
+   * tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`.
+   * Optional for the same reasons as `tjinnTokenAddress`.
+   */
+  tjinnChainId?: number;
   /** ISO timestamp when the staking contract will next accept a checkpoint. */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
@@ -297,16 +302,21 @@ function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
  * gather-status and the status assembler would otherwise hand-roll. Pass
  * `overrides` to set `safeCount`, `services`, `error`, etc. while keeping the
  * token/chain/`pending` defaults.
+ *
+ * `tokenAddress`/`chainId` are optional: on mainnet/older paths (and many test
+ * fixtures) the tJINN identity is not resolved. When absent, a sane empty
+ * pending status is produced — empty token address and chain id `0` — rather
+ * than a bogus address.
  */
 export function pendingTjinnStatus(
-  tokenAddress: string,
-  chainId: number,
+  tokenAddress: string | undefined,
+  chainId: number | undefined,
   overrides?: Partial<TjinnStatus>,
 ): TjinnStatus {
   return {
     state: 'pending',
-    chainId,
-    tokenAddress,
+    chainId: chainId ?? 0,
+    tokenAddress: tokenAddress ?? '',
     safeBalanceWei: null,
     safeCount: 0,
     services: [],
@@ -321,8 +331,8 @@ function publicTjinnError(error: string): string {
 
 function publicTjinnStatus(
   status: TjinnStatus | undefined,
-  tokenAddress: string,
-  chainId: number,
+  tokenAddress: string | undefined,
+  chainId: number | undefined,
 ): TjinnStatus {
   if (!status) return pendingTjinnStatus(tokenAddress, chainId);
   return {
