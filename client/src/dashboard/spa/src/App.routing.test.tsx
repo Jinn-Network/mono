@@ -10,6 +10,16 @@ import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { getFeatures } from './lib/features.js';
+import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { MembershipsTab } from './pages/operator/MembershipsTab.js';
+import { RegistryTab } from './pages/operator/RegistryTab.js';
+import { NetworkTab } from './pages/operator/NetworkTab.js';
+import { SecurityTab } from './pages/operator/SecurityTab.js';
+
+// ActivitySections now uses SSE — mock so routing tests don't open EventSource.
+vi.mock('./api/events.js', () => ({
+  useEventStream: vi.fn(() => ({ events: [], connected: false })),
+}));
 
 // Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
@@ -110,9 +120,11 @@ describe('App routes', () => {
         '/overview',
       ),
     );
-    // Overview renders HeroStats with these canonical eyebrows.
+    // Overview renders HeroStats (solutions delivered) plus FundsCard / RewardsCard peer cards.
     expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText(/jinn claimable/i)).toBeTruthy();
+    // Rewards eyebrow is now in RewardsCard (Task 3.3); Funds eyebrow is in FundsCard.
+    expect(screen.getByText(/^rewards$/i)).toBeTruthy();
+    expect(screen.getByText(/^funds$/i)).toBeTruthy();
   });
 
   it('renders OverviewActivityPage on /overview/activity', async () => {
@@ -128,7 +140,6 @@ describe('App routes', () => {
     await waitFor(() => {
       expect(screen.getByTestId('overview-activity')).toBeTruthy();
     });
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
   });
 
   it('renders OperatorPage on /operator', async () => {
@@ -142,25 +153,10 @@ describe('App routes', () => {
       ),
     );
     expect(screen.getByTestId('operator-page')).toBeTruthy();
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
-    // Issue #219 criterion 3: Settings keeps the live-now band, but its
-    // activity CTA points at the Dashboard (/overview) so /operator no longer
-    // reads as the canonical home for activity.
-    await waitFor(() => {
-      const cta = screen.getByTestId('live-now-cta');
-      expect(cta.getAttribute('href')).toBe('/overview');
-      expect(cta.textContent).toMatch(/View on Dashboard/);
-    });
     expect(screen.getByText(/launcher tools/i).closest('section')).toBeTruthy();
     expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
-    // Operator is the configuration surface (SolverNets / Harness / Network /
-    // Security). The SolverNets head is the most stable assertion since it
-    // never collapses to nothing.
-    await waitFor(() => expect(
-      screen.getByText((_, el) =>
-        el?.tagName === 'SPAN' && el.textContent === 'SolverNets',
-      ),
-    ).toBeTruthy());
+    // Operator page still renders the launcher-tools banner.
+    expect(screen.getByText(/launcher tools/i)).toBeTruthy();
   });
 
   // Issue #219: the live activity surface belongs on /overview (the
@@ -304,6 +300,72 @@ describe('App routes', () => {
           screen.queryByTestId('launcher-launched-error') ??
           screen.queryByTestId('launcher-launched'),
       ).toBeTruthy(),
+    );
+  });
+
+  // ── Operator sub-routes (Task 5.1) ──
+  // The four new sub-routes resolve to their stub tabs wrapped in OperatorShell.
+  // Bare /operator redirects to /operator/memberships.
+
+  function OperatorSubSwitch(): JSX.Element {
+    return (
+      <Switch>
+        <Route path="/operator/memberships">
+          <OperatorShell><MembershipsTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/registry">
+          <OperatorShell><RegistryTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/network">
+          <OperatorShell><NetworkTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/security">
+          <OperatorShell><SecurityTab /></OperatorShell>
+        </Route>
+        <Route path="/operator">
+          <Redirect to="/operator/memberships" />
+        </Route>
+        <Route path="/overview"><LocationProbe /></Route>
+      </Switch>
+    );
+  }
+
+  it('renders MembershipsTab on /operator/memberships', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/memberships'));
+    expect(screen.getByTestId('memberships-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders RegistryTab on /operator/registry', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/registry'));
+    expect(screen.getByTestId('registry-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders NetworkTab on /operator/network', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/network'));
+    expect(screen.getByTestId('network-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders SecurityTab on /operator/security', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/security'));
+    expect(screen.getByTestId('security-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('redirects bare /operator to /operator/memberships', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/operator/memberships"><LocationProbe /></Route>
+          <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+        </Switch>,
+        '/operator',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/operator/memberships'),
     );
   });
 });

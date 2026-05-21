@@ -1,30 +1,73 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { SectionCard } from '../../components/SectionCard.js';
 import { ConfigField } from '../../components/ConfigField.js';
 import { api } from '../../api/client.js';
 
 /**
+ * /operator/network — RPC + chain config (§2.11).
+ * Code moved from pages/configuration/NetworkSection.tsx (Task 5.5).
+ *
  * Network section: chain is read-only (changing chains is a state-reset
  * flow handled outside the dashboard); RPC URL is a free-text input that
  * can be reverted to the chain default by clearing it.
  */
-export interface NetworkSectionProps {
+
+interface BootstrapWithChain {
+  chain?: 'base' | 'base-sepolia';
+  rpcUrl?: string;
+  defaultRpcUrl?: string;
+}
+
+export interface NetworkTabProps {
+  onRestartPending?: () => void;
+}
+
+export function NetworkTab({
+  onRestartPending = () => undefined,
+}: NetworkTabProps = {}): JSX.Element {
+  const { data } = useQuery<BootstrapWithChain>({
+    queryKey: ['bootstrap'],
+    queryFn: () => api.getBootstrap() as Promise<BootstrapWithChain>,
+    refetchInterval: 1500,
+  });
+
+  const chain = data?.chain ?? 'base-sepolia';
+  const rpcUrl = data?.rpcUrl ?? '';
+  const defaultRpcUrl =
+    data?.defaultRpcUrl ??
+    (chain === 'base'
+      ? 'https://mainnet.base.org'
+      : 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu');
+
+  return (
+    <div data-testid="network-tab">
+      <NetworkSectionContent
+        chain={chain}
+        rpcUrl={rpcUrl}
+        defaultRpcUrl={defaultRpcUrl}
+        rpcHealthy={true}
+        onRestartPending={onRestartPending}
+      />
+    </div>
+  );
+}
+
+interface NetworkSectionContentProps {
   chain: 'base' | 'base-sepolia';
   rpcUrl: string;
   defaultRpcUrl: string;
   rpcHealthy: boolean;
   onRestartPending: () => void;
-  defaultExpanded?: boolean;
 }
 
-export function NetworkSection({
+function NetworkSectionContent({
   chain,
   rpcUrl,
   defaultRpcUrl,
   rpcHealthy,
   onRestartPending,
-  defaultExpanded = false,
-}: NetworkSectionProps): JSX.Element {
+}: NetworkSectionContentProps): JSX.Element {
   const [draft, setDraft] = useState(rpcUrl);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +102,7 @@ export function NetworkSection({
         label: rpcHealthy ? 'Healthy' : 'Unreachable',
         tone: rpcHealthy ? 'live' : 'danger',
       }}
-      defaultExpanded={defaultExpanded || onSharedDefault}
+      defaultExpanded={true}
       dirty={
         dirty
           ? {

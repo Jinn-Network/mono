@@ -1,20 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
+import { useEventStream } from '../../api/events.js';
+import { EventStreamList } from '../../components/EventStreamList.js';
 
 /**
  * Live activity surface — the operator's view of what their daemon has been
  * doing. Two sections:
  *
- *   • In flight — per-task list of currently-active task runs across SolverNets.
- *   • Recent — full activity event stream (activity.recent from /v1/status).
+ *   • In flight — per-task list of currently-active task runs across SolverNets
+ *     (read from polled /v1/status, since task state isn't an "event" per se).
+ *   • Recent — live event stream from /v1/events via `useEventStream()`, rendered
+ *     through the shared <EventStreamList> component. Per OPERATOR-APP-SPEC §3.3,
+ *     all event-based surfaces consume the same SSE vocabulary.
  *
  * Rendered as a primary section on /overview (the Dashboard) so an operator
  * who runs `jinn run` and lands on the dashboard sees live task/event
  * activity without navigating away (issue #219). Also reused by the dedicated
  * /overview/activity drilldown page.
- *
- * v1 limitations (see plan §"Out of scope"):
- *   • activity.recent is capped at 12 events. Pagination is a follow-up.
  */
 
 const TERMINAL_STATES = new Set(['COMPLETE', 'FAILED']);
@@ -70,41 +72,9 @@ function formatElapsed(ms: number): string {
   return `${Math.round(ms / 3_600_000)}h`;
 }
 
-function formatTimestamp(ts: string | null): string {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-}
-
-function formatKind(kind: string): string {
-  return kind.replace(/_/g, ' ');
-}
-
 function truncateRequestId(requestId: string): string {
   if (requestId.length <= 14) return requestId;
   return `${requestId.slice(0, 8)}…${requestId.slice(-4)}`;
-}
-
-function txDisplay(txHash: string | null | undefined): string {
-  if (!txHash) return '—';
-  return txHash.length > 12 ? `${txHash.slice(0, 6)}…${txHash.slice(-4)}` : txHash;
-}
-
-const KIND_TONE: Record<string, string> = {
-  task_posted: 'var(--accent-sky)',
-  request_claimed: 'var(--accent-sky)',
-  delivery_submitted: 'var(--vow-green)',
-  evaluation_submitted: 'var(--vow-green)',
-  reward_claimed: 'var(--accent-gold)',
-  tick_error: 'var(--break-red)',
-  intent_registry_failed: 'var(--break-red)',
-  error: 'var(--break-red)',
-};
-
-function kindColor(kind: string, outcome: string | null): string {
-  if (outcome === 'failed') return 'var(--break-red)';
-  return KIND_TONE[kind] ?? 'var(--accent-sky)';
 }
 
 export interface ActivitySectionsProps {
@@ -128,7 +98,10 @@ export function ActivitySections({
   const inFlight = data?.taskRuns?.inFlight ?? (data?.predictionV1?.recentTasks ?? []).filter(
     (t) => !TERMINAL_STATES.has(t.state),
   );
-  const events = data?.activity?.recent ?? [];
+
+  // Recent section uses the live SSE stream rather than the polled snapshot.
+  // The polled snapshot (data?.activity?.recent) is no longer read here.
+  const { events: sseEvents, connected: sseConnected } = useEventStream();
 
   return (
     <>
@@ -165,6 +138,45 @@ export function ActivitySections({
           >
             Loading…
           </p>
+        )}
+        {isError && (
+          <div
+            role="alert"
+            data-testid="overview-activity-error"
+            style={{
+              border: '1px solid var(--break-red)',
+              borderRadius: '6px',
+              padding: '12px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '12px',
+            }}
+          >
+            <span style={{ color: 'var(--break-red)', fontSize: '12px' }}>
+              {error instanceof Error ? error.message : 'Failed to load activity.'}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                void refetch();
+              }}
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '11px',
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '4px',
+                color: 'var(--fg)',
+                padding: '6px 10px',
+                cursor: 'pointer',
+              }}
+            >
+              Retry
+            </button>
+          </div>
         )}
         {!isLoading && !isError && inFlight.length === 0 && (
           <p
@@ -247,49 +259,29 @@ export function ActivitySections({
               color: 'var(--fg-muted)',
             }}
           >
-            Recent · {events.length}
+            Recent · {sseEvents.length}
           </span>
-        </div>
-        {isError && (
-          <div
-            role="alert"
-            data-testid="overview-activity-error"
+          <span
             style={{
-              border: '1px solid var(--break-red)',
-              borderRadius: '6px',
-              padding: '12px',
+              fontSize: '11px',
+              color: sseConnected ? 'var(--vow-green)' : 'var(--fg-dim)',
               display: 'flex',
-              justifyContent: 'space-between',
+              gap: '5px',
               alignItems: 'center',
-              gap: '12px',
             }}
           >
-            <span style={{ color: 'var(--break-red)', fontSize: '12px' }}>
-              {error instanceof Error ? error.message : 'Failed to load activity.'}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                void refetch();
-              }}
+            <span
               style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                background: 'transparent',
-                border: '1px solid var(--border)',
-                borderRadius: '4px',
-                color: 'var(--fg)',
-                padding: '6px 10px',
-                cursor: 'pointer',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: sseConnected ? 'var(--vow-green)' : 'var(--fg-dim)',
               }}
-            >
-              Retry
-            </button>
-          </div>
-        )}
-        {!isLoading && !isError && events.length === 0 && (
+            />
+            {sseConnected ? 'live' : 'disconnected'}
+          </span>
+        </div>
+        {sseEvents.length === 0 && (
           <p
             data-testid="overview-activity-recent-empty"
             style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px' }}
@@ -297,67 +289,11 @@ export function ActivitySections({
             No recent activity yet.
           </p>
         )}
-        {events.length > 0 && (
-          <ul
-            data-testid="overview-activity-recent-list"
-            style={{
-              listStyle: 'none',
-              padding: 0,
-              margin: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0',
-            }}
-          >
-            {events.map((row) => (
-              <li
-                key={row.id}
-                data-testid="overview-activity-recent-row"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '160px 110px 1fr 110px',
-                  gap: '12px',
-                  padding: '10px 0',
-                  borderTop: '1px solid var(--border)',
-                  fontSize: '12px',
-                }}
-              >
-                <span style={{ color: 'var(--fg-dim)' }}>{formatTimestamp(row.ts)}</span>
-                <span
-                  style={{
-                    color: kindColor(row.kind, row.outcome),
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.12em',
-                    fontSize: '11px',
-                  }}
-                >
-                  {formatKind(row.kind)}
-                </span>
-                <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {row.requestId ?? row.solverType ?? '—'}
-                </span>
-                <span
-                  style={{
-                    color: row.txHash ? 'var(--accent-gold)' : 'var(--fg-dim)',
-                    textAlign: 'right',
-                  }}
-                >
-                  {txDisplay(row.txHash)}
-                </span>
-              </li>
-            ))}
-          </ul>
+        {sseEvents.length > 0 && (
+          <div data-testid="overview-activity-recent-list">
+            <EventStreamList events={sseEvents} />
+          </div>
         )}
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--fg-dim)',
-            fontSize: '11px',
-            fontStyle: 'italic',
-          }}
-        >
-          Older events: see on-chain via the operator's safe address. Pagination here is a follow-up.
-        </p>
       </section>
     </>
   );

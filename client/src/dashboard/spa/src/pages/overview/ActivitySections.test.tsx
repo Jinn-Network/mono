@@ -9,11 +9,20 @@ import { api } from '../../api/client.js';
  * can render both as a primary section on /overview (the Dashboard) and on
  * the dedicated /overview/activity drilldown. These tests cover the unit's
  * card states directly.
+ *
+ * The Recent section uses the SSE stream via useEventStream (§3.3). The
+ * In-flight section remains polled via /v1/status.
  */
 vi.mock('../../api/client.js', () => ({
   api: {
     getStatus: vi.fn(),
   },
+}));
+
+// Default: empty SSE stream, not connected. Individual tests override via
+// vi.mocked(useEventStream).mockReturnValue(...) before rendering.
+vi.mock('../../api/events.js', () => ({
+  useEventStream: vi.fn(() => ({ events: [], connected: false })),
 }));
 
 function wrap(ui: JSX.Element): void {
@@ -60,8 +69,23 @@ describe('<ActivitySections />', () => {
     expect(recentEmpty.textContent).toMatch(/no recent activity/i);
   });
 
-  it('renders in-flight rows and recent rows when present', async () => {
+  it('renders in-flight rows from polled status and recent rows from SSE', async () => {
+    const { useEventStream } = await import('../../api/events.js');
     const now = Date.now();
+    vi.mocked(useEventStream).mockReturnValue({
+      events: [
+        {
+          schemaVersion: 1,
+          id: 'evt-1',
+          ts: '2026-05-07T13:46:45.710Z',
+          kind: 'intent',
+          message: 'REQUEST CLAIMED',
+          requestId: 'req-aaa',
+          txHash: '0xabcdefabcdefabcdef',
+        },
+      ],
+      connected: true,
+    });
     vi.mocked(api.getStatus).mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       taskRuns: {
@@ -78,28 +102,15 @@ describe('<ActivitySections />', () => {
           },
         ],
       },
-      activity: {
-        recent: [
-          {
-            id: 1,
-            ts: '2026-05-07T13:46:45.710Z',
-            kind: 'request_claimed',
-            requestId: 'req-aaa',
-            txHash: '0xabcdefabcdefabcdef',
-            serviceIndex: 1,
-            solverType: 'prediction.v1',
-            outcome: 'ok',
-          },
-        ],
-      },
+      // polled activity.recent intentionally absent — SSE is the source now
+      activity: { recent: [] },
     });
     wrap(<ActivitySections pollIntervalMs={60_000} />);
     await waitFor(() =>
       expect(screen.getAllByTestId('overview-activity-in-flight-row')).toHaveLength(1),
     );
     expect(screen.getByText('RUNNING')).toBeTruthy();
-    expect(screen.getAllByTestId('overview-activity-recent-row')).toHaveLength(1);
-    expect(screen.getByText(/request claimed/i)).toBeTruthy();
+    expect(screen.getByText(/REQUEST CLAIMED/i)).toBeTruthy();
   });
 
   it('shows an operable error state with a working retry', async () => {
