@@ -32,11 +32,16 @@ vi.mock('../api/client.js', () => ({
   },
 }));
 
+// ActivitySections now uses SSE — mock so these tests don't open EventSource.
+vi.mock('../api/events.js', () => ({
+  useEventStream: vi.fn(() => ({ events: [], connected: false })),
+}));
+
 // Import after the mock so the page picks up the mocked client.
 const { OverviewPage } = await import('./Overview.js');
 const { detectJoinedSolverNet, operatorWaitingMessage } = await import('./overview/joined-solver-net.js');
 
-beforeEach(() => {
+beforeEach(async () => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
   claimRewardsMock.mockReset();
@@ -45,6 +50,9 @@ beforeEach(() => {
   claimRewardsMock.mockResolvedValue({ ok: true });
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
+  // Reset SSE mock to empty default between tests.
+  const { useEventStream } = await import('../api/events.js');
+  vi.mocked(useEventStream).mockReturnValue({ events: [], connected: false });
 });
 
 function withProviders(node: JSX.Element): JSX.Element {
@@ -814,22 +822,25 @@ describe('OverviewPage activity surface (issue #219)', () => {
   });
 
   it('shows recent activity rows on the Dashboard', async () => {
+    // Recent section sources from SSE — mock the hook to return an event.
+    const { useEventStream } = await import('../api/events.js');
+    vi.mocked(useEventStream).mockReturnValue({
+      events: [
+        {
+          schemaVersion: 1,
+          id: 'evt-dash-1',
+          ts: '2026-05-07T13:46:45.710Z',
+          kind: 'intent',
+          message: 'request claimed',
+          requestId: 'req-aaa',
+          txHash: '0xabcdefabcdefabcdef',
+        },
+      ],
+      connected: true,
+    });
     getStatusMock.mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
-      activity: {
-        recent: [
-          {
-            id: 1,
-            ts: '2026-05-07T13:46:45.710Z',
-            kind: 'request_claimed',
-            requestId: 'req-aaa',
-            txHash: '0xabcdefabcdefabcdef',
-            serviceIndex: 1,
-            solverType: 'prediction.v1',
-            outcome: 'ok',
-          },
-        ],
-      },
+      activity: { recent: [] },
       predictionV1: {
         operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
         totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
@@ -840,7 +851,7 @@ describe('OverviewPage activity surface (issue #219)', () => {
     render(withProviders(<OverviewPage />));
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('overview-activity-recent-row')).toHaveLength(1);
+      expect(screen.getByTestId('overview-activity-recent-list')).toBeTruthy();
     });
     expect(screen.getByText(/request claimed/i)).toBeTruthy();
   });

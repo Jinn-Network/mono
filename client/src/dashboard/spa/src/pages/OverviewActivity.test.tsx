@@ -12,6 +12,13 @@ vi.mock('../api/client.js', () => ({
   },
 }));
 
+vi.mock('../api/events.js', () => ({
+  useEventStream: vi.fn(() => ({
+    events: [],
+    connected: false,
+  })),
+}));
+
 function wrap(ui: JSX.Element, path = '/overview/activity'): void {
   const nav = memoryLocation({ path, record: true });
   const qc = new QueryClient({
@@ -24,8 +31,11 @@ function wrap(ui: JSX.Element, path = '/overview/activity'): void {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  // Restore default SSE mock after clearAllMocks resets the implementation.
+  const { useEventStream } = await import('../api/events.js');
+  vi.mocked(useEventStream).mockReturnValue({ events: [], connected: false });
 });
 
 afterEach(() => {
@@ -121,28 +131,30 @@ describe('<OverviewActivityPage />', () => {
     });
   });
 
-  it('renders recent activity rows when events are present', async () => {
+  it('renders recent activity rows from SSE events when present', async () => {
+    const { useEventStream } = await import('../api/events.js');
+    vi.mocked(useEventStream).mockReturnValue({
+      events: [
+        {
+          schemaVersion: 1,
+          id: 'evt-2',
+          ts: '2026-05-07T13:46:45.710Z',
+          kind: 'intent',
+          message: 'request claimed',
+          requestId: 'req-aaa',
+          txHash: '0xabcdefabcdefabcdef',
+        },
+      ],
+      connected: true,
+    });
     vi.mocked(api.getStatus).mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
-      activity: {
-        recent: [
-          {
-            id: 1,
-            ts: '2026-05-07T13:46:45.710Z',
-            kind: 'request_claimed',
-            requestId: 'req-aaa',
-            txHash: '0xabcdefabcdefabcdef',
-            serviceIndex: 1,
-            solverType: 'prediction.v1',
-            outcome: 'ok',
-          },
-        ],
-      },
+      activity: { recent: [] },
       predictionV1: { totals: { activeTaskRuns: 0 }, recentTasks: [] },
     });
     wrap(<OverviewActivityPage pollIntervalMs={60_000} />);
     await waitFor(() => {
-      expect(screen.getAllByTestId('overview-activity-recent-row')).toHaveLength(1);
+      expect(screen.getByTestId('overview-activity-recent-list')).toBeTruthy();
     });
     expect(screen.getByText(/request claimed/i)).toBeTruthy();
   });
@@ -159,5 +171,32 @@ describe('<OverviewActivityPage />', () => {
       expect(empty).toBeTruthy();
       expect(empty.textContent).toMatch(/no recent activity/i);
     });
+  });
+
+  it('renders recent events from useEventStream (SSE), not the polled snapshot', async () => {
+    const { useEventStream } = await import('../api/events.js');
+    vi.mocked(useEventStream).mockReturnValue({
+      events: [
+        {
+          schemaVersion: 1,
+          id: 'evt-1',
+          ts: '2026-05-20T11:45:38Z',
+          kind: 'intent',
+          message: 'CLAIMED',
+          details: { requestId: '0xabc' },
+        },
+      ],
+      connected: true,
+    });
+
+    vi.mocked(api.getStatus).mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      // polled snapshot intentionally empty — SSE should supply the event
+      activity: { recent: [] },
+      predictionV1: { totals: { activeTaskRuns: 0 }, recentTasks: [] },
+    });
+
+    wrap(<OverviewActivityPage pollIntervalMs={60_000} />);
+    expect(await screen.findByText(/CLAIMED/i)).toBeTruthy();
   });
 });
