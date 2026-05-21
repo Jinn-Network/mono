@@ -17,6 +17,9 @@ function defaultProps(): WalletCardProps {
     perRole: { master: '0.0088', agent: '—', safe: '—' },
     claimableJinn: '0.0000',
     claimedJinnLifetime: '0',
+    tjinnEarned: '0.0000',
+    tjinnState: 'ready',
+    tjinnError: null,
     lastClaimAt: null,
     agentId: 5879,
     masterAddress: '0x53e25264C86db85b6168F7824f5c39abd5281787',
@@ -75,6 +78,65 @@ describe('WalletCard', () => {
     expect(claim.disabled).toBe(false);
     // "last claim" line is commented out.
     expect(rewards.textContent).not.toMatch(/last claim/i);
+  });
+
+  it('shows the tJINN-earned stat in the Rewards section when the read is ready', () => {
+    const { ui } = wrap(
+      <WalletCard
+        {...defaultProps()}
+        tjinnEarned="1.5000"
+        tjinnState="ready"
+        claimableJinn="999.0000"
+      />,
+    );
+    render(ui);
+    const rewards = screen.getByTestId('wallet-section-rewards');
+    expect(rewards.textContent).toMatch(/tJINN earned/i);
+    // The tJINN-earned value renders the real Safe balance, not the staking
+    // reward — it is a distinct element from the 999 claimable JINN stat.
+    const tjinnValue = screen.getByTestId('tjinn-earned-value');
+    expect(tjinnValue.textContent).toBe('1.5000');
+    const claimable = screen.getByText('999.0000');
+    expect(claimable).not.toBe(tjinnValue);
+    expect(tjinnValue.contains(claimable)).toBe(false);
+    // Ready state shows the unit and emits no state copy.
+    expect(rewards.textContent).toContain('tJINN');
+    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
+  });
+
+  it('shows pending copy and no value while the tJINN read is unresolved', () => {
+    const { ui } = wrap(
+      <WalletCard {...defaultProps()} tjinnEarned="—" tjinnState="pending" />,
+    );
+    render(ui);
+    expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending');
+    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
+      /waiting for sepolia balance/i,
+    );
+  });
+
+  it('shows the error string when the tJINN read failed', () => {
+    const { ui } = wrap(
+      <WalletCard
+        {...defaultProps()}
+        tjinnEarned="—"
+        tjinnState="error"
+        tjinnError="Sepolia tJINN balance temporarily unavailable."
+      />,
+    );
+    render(ui);
+    expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
+      /temporarily unavailable/i,
+    );
+  });
+
+  it('wraps the tJINN-earned row in a polite live region', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} />);
+    render(ui);
+    const region = screen.getByTestId('tjinn-earned-region');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region.getAttribute('aria-atomic')).toBe('true');
   });
 
   it('disables Claim when claimable is zero', () => {

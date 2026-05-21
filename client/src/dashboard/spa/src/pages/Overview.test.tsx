@@ -199,6 +199,74 @@ describe('OverviewPage Wallet wiring', () => {
     await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
   });
 
+  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei, not pending staking rewards', async () => {
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      rewards: { pendingStakingRewardsWei: '999000000000000000000' },
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '1500000000000000000',
+        safeCount: 1,
+        services: [],
+        error: null,
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    // The tJINN-earned value derives from status.tJinn.safeBalanceWei
+    // (1.5 tJINN) — NOT from rewards.pendingStakingRewardsWei (999 JINN).
+    await waitFor(() =>
+      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
+    );
+    expect(screen.getByText(/tJINN earned/i)).toBeTruthy();
+    const tjinnValue = screen.getByTestId('tjinn-earned-value');
+    expect(tjinnValue.textContent).not.toBe('999.0000');
+    // The 999 figure still renders, but as the claimable staking-reward stat
+    // row — a distinct element from the tJINN-earned value.
+    const claimable999 = screen.getByText('999.0000');
+    expect(claimable999).not.toBe(tjinnValue);
+    expect(tjinnValue.contains(claimable999)).toBe(false);
+  });
+
+  it('renders a confirmed-empty tJINN balance (ready + null) as 0', async () => {
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: null,
+        safeCount: 1,
+        services: [],
+        error: null,
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('0.0000'),
+    );
+    // A confirmed-empty balance is distinguishable from loading — no state copy.
+    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
+  });
+
+  it('shows pending tJINN copy when status.tJinn is absent (older daemon)', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending'),
+    );
+    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
+      /waiting for sepolia balance/i,
+    );
+  });
+
   it('surfaces a one-line gas top-up confirmation with the tx hash + amount', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});

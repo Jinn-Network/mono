@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from '../../components/ui/tooltip.js';
 import { Alert, AlertDescription } from '../../components/ui/alert.js';
+import type { TjinnStatusState } from '../../api/types.js';
 
 /**
  * Wallet — single consolidated card on /overview that absorbed the
@@ -48,6 +49,16 @@ export interface WalletCardProps {
   claimableJinn: string;
   /** JINN claimed lifetime, formatted as decimal string */
   claimedJinnLifetime: string;
+  /**
+   * Real Sepolia tJINN ERC-20 Safe balance, formatted as a decimal string
+   * (#406). Only meaningful when `tjinnState === 'ready'`; `pending`/`error`
+   * render state copy from `tjinnDisplay` instead.
+   */
+  tjinnEarned: string;
+  /** Read state for the Sepolia tJINN balance. */
+  tjinnState: TjinnStatusState;
+  /** Public read error string, if the Sepolia balance is unavailable. */
+  tjinnError?: string | null;
   // lastClaimAt stays in the props so re-enabling the "last claim" row is
   // a one-block restore.
   /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
@@ -77,11 +88,38 @@ function trunc(addr: string | null | undefined): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+/**
+ * Display value + supporting copy for the tJINN-earned row, keyed on the read
+ * state. A single lookup keeps `value` and `copy` in lockstep — `ready` shows
+ * the formatted balance with no copy; `pending`/`error` show placeholder copy
+ * instead of a misleading bare zero while the Sepolia read is unresolved.
+ */
+function tjinnDisplay(
+  state: TjinnStatusState,
+  tjinnEarned: string,
+  tjinnError: string | null | undefined,
+): { value: string; copy: string | null } {
+  switch (state) {
+    case 'ready':
+      return { value: tjinnEarned, copy: null };
+    case 'error':
+      return {
+        value: 'unavailable',
+        copy: tjinnError ?? 'Sepolia tJINN balance temporarily unavailable.',
+      };
+    case 'pending':
+      return { value: 'pending', copy: 'Waiting for Sepolia balance.' };
+  }
+}
+
 export function WalletCard({
   totalEth,
   runwayDays,
   claimableJinn,
   claimedJinnLifetime,
+  tjinnEarned,
+  tjinnState,
+  tjinnError,
   agentId,
   masterAddress,
   safeAddress,
@@ -94,6 +132,11 @@ export function WalletCard({
 }: WalletCardProps): JSX.Element {
   const [, navigate] = useLocation();
   const canClaim = parseFloat(claimableJinn) > 0;
+  const { value: tjinnValue, copy: tjinnStateCopy } = tjinnDisplay(
+    tjinnState,
+    tjinnEarned,
+    tjinnError,
+  );
 
   // ── Identity binding-pending retry — preserved from IdentityCard ──
   const pendingBinding = services.find((s) => s.agentId !== null && !s.safeBoundToAgent);
@@ -162,6 +205,37 @@ export function WalletCard({
         {/* ── REWARDS ───────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3" data-testid="wallet-section-rewards">
           <span className={sectionLabel}>Rewards</span>
+
+          {/*
+            tJINN earned — the real Sepolia tJINN ERC-20 Safe balance (#406).
+            Distinct from the JINN staking rewards below: this is the token
+            minted by JinnDistributor, not the OLAS staking-proxy pending
+            surface. Wrapped in a polite live region so screen readers
+            announce when the ~5s poll resolves pending → ready.
+          */}
+          <div
+            className="flex flex-col gap-1"
+            data-testid="tjinn-earned-region"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className={sectionLabel}>tJINN earned</span>
+            <div className="flex items-baseline gap-2">
+              <span
+                className={statBig}
+                data-testid="tjinn-earned-value"
+                style={tjinnState === 'error' ? { color: 'var(--break-red)' } : undefined}
+              >
+                {tjinnValue}
+              </span>
+              {tjinnState === 'ready' && <span className={statUnit}>tJINN</span>}
+            </div>
+            {tjinnStateCopy && (
+              <span className={statAux} data-testid="tjinn-earned-state">
+                {tjinnStateCopy}
+              </span>
+            )}
+          </div>
 
           <div className="flex flex-col gap-1">
             <span className={sectionLabel}>Claimable</span>
