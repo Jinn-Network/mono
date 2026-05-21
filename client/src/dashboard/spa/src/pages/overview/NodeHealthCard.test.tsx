@@ -88,7 +88,13 @@ describe('NodeHealthCard', () => {
     );
     fireEvent.click(screen.getByTestId('node-health-restart'));
     await waitFor(() => expect(onRestart).toHaveBeenCalledOnce());
-    expect(screen.getByTestId('node-health-restart').textContent).toMatch(/restarting/i);
+    // The busy state ("Restarting...") clears as soon as the admin
+    // endpoint resolves (which it does before the daemon actually exits),
+    // since the browser keeps its JS context across the respawn — leaving
+    // the button pinned to "Restarting..." would strand it there forever.
+    await waitFor(() =>
+      expect(screen.getByTestId('node-health-restart').textContent).toMatch(/^restart$/i),
+    );
   });
 
   it('exposes a Manage RPC button that points at /operator/network', () => {

@@ -151,14 +151,15 @@ export function NodeHealthCard({
     Promise.resolve()
       .then(action)
       .catch((err) => console.error(`[node-health] ${label} failed:`, err))
-      // Don't clear `activeAction` on success — the daemon is about to
-      // exit, so the in-flight UI state should persist until the dashboard
-      // reconnects (which remounts the whole tree).
       .finally(() => {
-        // The endpoint returns { ok: true, scheduled: true } before the
-        // process exits. We keep the button busy while the dashboard
-        // reconnects; if anything went wrong we'll still see the error in
-        // the console.
+        // The admin endpoint returns {ok: true, scheduled: true} *before*
+        // the process exits, so the promise resolves while the daemon is
+        // still mid-respawn. Clear the busy state now — the browser keeps
+        // its JS context across the daemon swap, so leaving the button
+        // pinned to "Restarting..." would strand it there forever. The
+        // status query is what tells the rest of the page the daemon is
+        // back.
+        setActiveAction(null);
       });
   }
 

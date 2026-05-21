@@ -5,7 +5,6 @@ import { api } from '../api/client.js';
 import { FundsCard } from './overview/FundsCard.js';
 import { RewardsCard } from './overview/RewardsCard.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
-import { deriveLiveNow } from './overview/liveNowState.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard } from './overview/OperatorCard.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
@@ -289,11 +288,6 @@ export function OverviewPage(): JSX.Element {
   const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
-  // Gate the LiveNow attention banner on the freshly-polled join map so a
-  // stale `prediction_solvernet_missing` diagnostic (the daemon only
-  // re-reads `joinedSolverNets` on restart) does not contradict the joined
-  // SolverNet shown below (#333).
-  const liveNow = deriveLiveNow(status, bootstrap?.joinedSolverNets);
   const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
 
   // Node Health derivation. Daemon status is "running" as long as the most
@@ -303,10 +297,12 @@ export function OverviewPage(): JSX.Element {
   // backend ships it (currently hardcoded `rpcHealthy={true}` in App.tsx).
   const daemonStatus: DaemonStatus = statusIsError && status === undefined ? 'stopped' : 'running';
   const rpcStatus: RpcStatus = 'healthy';
-  // Daemon state message — re-use `liveNow.line`, which is the human-
-  // readable reason (the first error diagnostic, "N tasks restoring",
-  // "waiting for next task", etc.) the old Status tile rendered.
-  const daemonStateMessage = liveNow.line || undefined;
+  // No daemon state-message line under "Running" — the prior `liveNow.line`
+  // text was idle copy like "waiting for next task" that added nothing.
+  // Attention-worthy state (harness mismatch, eviction) surfaces through
+  // the notifications row (spec §2.10) and the eviction banner above;
+  // Node Health stays a glance-level health card.
+  const daemonStateMessage: string | undefined = undefined;
 
   // Auto-clear timer for transient success notices (e.g. the gas top-up
   // confirmation, which should surface the amount + tx hash for ~5s then
