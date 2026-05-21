@@ -97,7 +97,7 @@ Three Project fields route the issue to the right queue. Set all three — an is
 **Blocked on** — choose one:
 - `Nothing` (default — almost all fresh dogfooding issues)
 - `Human` — only if a product or design decision is needed before any work can start
-- `Another issue #N` — only if the person names a prerequisite issue number
+- `Another issue` — only if the person names a prerequisite issue (the Project option is named `Another issue`; put the specific issue number in the issue body)
 
 **Effort** — estimate from the drafted scope, then confirm with the person:
 - `Low` — a localized change in one or two files
@@ -111,8 +111,9 @@ Offer your estimate: "I'd estimate this as **Low** effort — a change to one or
 - `P1` — important, next sprint
 - `P2` — good to have, when bandwidth allows
 - `P3` — nice to have, no commitment
+- `P4` — backlog, someday / maybe
 
-Ask: "What priority would you give this? P0 (blocking), P1 (next sprint), P2 (good to have), or P3 (nice to have)?"
+Ask: "What priority would you give this? P0 (blocking), P1 (next sprint), P2 (good to have), P3 (nice to have), or P4 (backlog)?"
 
 ## Step 6 — Confirm, then file
 
