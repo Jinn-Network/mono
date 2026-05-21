@@ -11,6 +11,11 @@ import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { getFeatures } from './lib/features.js';
 
+// ActivitySections now uses SSE — mock so routing tests don't open EventSource.
+vi.mock('./api/events.js', () => ({
+  useEventStream: vi.fn(() => ({ events: [], connected: false })),
+}));
+
 // Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
 vi.mock('./api/client.js', () => ({
