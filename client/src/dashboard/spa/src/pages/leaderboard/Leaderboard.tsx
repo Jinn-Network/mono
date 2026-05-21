@@ -1,60 +1,37 @@
 import { useState } from 'react';
+import { Card, CardContent } from '../../components/ui/card.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs.js';
 import { TrainLeaderboardTable } from './TrainLeaderboardTable.js';
 import { FrozenLeaderboardTable } from './FrozenLeaderboardTable.js';
 
 type LeaderboardTab = 'train' | 'frozen';
 
-function tabButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    padding: '8px 16px',
-    background: 'none',
-    border: 'none',
-    borderBottom: `2px solid ${active ? 'var(--accent-sky)' : 'transparent'}`,
-    fontFamily: "'JetBrains Mono', ui-monospace, SF Mono, Menlo, monospace",
-    fontSize: '11px',
-    fontWeight: 500,
-    textTransform: 'uppercase',
-    letterSpacing: '0.14em',
-    color: active ? 'var(--fg)' : 'var(--fg-muted)',
-    cursor: 'pointer',
-    marginBottom: '-1px',
-  };
-}
-
+/**
+ * Leaderboard page — switches between Train and Frozen rollups for the
+ * named SolverNet. Built on shadcn `<Tabs>` (Radix-backed, so the
+ * `role="tab"` and `aria-selected` semantics asserted by the tests come
+ * for free) inside a `<Card>` shell.
+ */
 export function LeaderboardPage({ solverNet }: { solverNet: string }): JSX.Element {
   const [tab, setTab] = useState<LeaderboardTab>('train');
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div
-        role="tablist"
-        style={{
-          display: 'flex',
-          borderBottom: '1px solid var(--border)',
-          gap: '4px',
-        }}
-      >
-        <button
-          role="tab"
-          aria-selected={tab === 'train'}
-          style={tabButtonStyle(tab === 'train')}
-          onClick={() => { setTab('train'); }}
-        >
-          Train
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'frozen'}
-          style={tabButtonStyle(tab === 'frozen')}
-          onClick={() => { setTab('frozen'); }}
-        >
-          Frozen
-        </button>
-      </div>
-      {tab === 'train' ? (
-        <TrainLeaderboardTable solverNet={solverNet} />
-      ) : (
-        <FrozenLeaderboardTable solverNet={solverNet} />
-      )}
+    <div className="p-6">
+      <Card>
+        <CardContent className="p-4">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as LeaderboardTab)}>
+            <TabsList>
+              <TabsTrigger value="train">Train</TabsTrigger>
+              <TabsTrigger value="frozen">Frozen</TabsTrigger>
+            </TabsList>
+            <TabsContent value="train">
+              <TrainLeaderboardTable solverNet={solverNet} />
+            </TabsContent>
+            <TabsContent value="frozen">
+              <FrozenLeaderboardTable solverNet={solverNet} />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
     </div>
   );
 }

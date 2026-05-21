@@ -1,3 +1,5 @@
+import { Button } from '../../components/ui/button.js';
+
 export type ArtifactTypeFilter = 'plugin';
 
 export interface ArtifactTypeFilterChipProps {
@@ -5,55 +7,42 @@ export interface ArtifactTypeFilterChipProps {
   onChange: (v: ArtifactTypeFilter) => void;
 }
 
-const chipStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
-  padding: '6px 14px',
-  borderRadius: 'var(--radius-pill)',
-  border: `1px solid ${active ? 'var(--accent-sky)' : 'var(--border)'}`,
-  background: 'transparent',
-  fontFamily: 'var(--mono)',
-  fontSize: '11px',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.14em',
-  color: disabled ? 'var(--fg-dim)' : active ? 'var(--accent-sky)' : 'var(--fg-muted)',
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  opacity: disabled ? 0.6 : 1,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '8px',
-});
-
-const soonStyle: React.CSSProperties = {
-  fontSize: '9px',
-  letterSpacing: '0.14em',
-  color: 'var(--fg-dim)',
-  paddingLeft: '6px',
-  borderLeft: '1px solid var(--border)',
-  marginLeft: '2px',
-};
-
+/**
+ * Two-state filter for the /build registry. Renders Plug-ins (active by
+ * default) and Harnesses (disabled placeholder). Built on shadcn `<Button>`
+ * with `outline` / `ghost` variants and pill-rounded shape; the
+ * `aria-pressed` semantics survive the migration so the existing tests and
+ * screen readers keep working.
+ */
 export function ArtifactTypeFilterChip({ value, onChange }: ArtifactTypeFilterChipProps): JSX.Element {
+  const pluginActive = value === 'plugin';
   return (
-    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-      <button
+    <div className="flex items-center gap-2">
+      <Button
         type="button"
-        aria-pressed={value === 'plugin' ? 'true' : 'false'}
-        style={chipStyle(value === 'plugin', false)}
+        variant={pluginActive ? 'outline' : 'ghost'}
+        size="sm"
+        aria-pressed={pluginActive ? 'true' : 'false'}
+        className="rounded-full"
         onClick={() => {
-          if (value !== 'plugin') onChange('plugin');
+          if (!pluginActive) onChange('plugin');
         }}
       >
         Plug-ins
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         disabled
         aria-pressed="false"
-        style={chipStyle(false, true)}
+        className="rounded-full opacity-60"
       >
         Harnesses
-        <span style={soonStyle}>Coming soon</span>
-      </button>
+        <span className="ml-1 border-l border-border pl-2 text-[9px] tracking-[0.14em] text-[var(--fg-dim)]">
+          Coming soon
+        </span>
+      </Button>
     </div>
   );
 }

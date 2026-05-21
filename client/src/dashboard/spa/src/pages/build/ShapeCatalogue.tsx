@@ -1,174 +1,100 @@
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from '../../components/ui/card.js';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Separator } from '../../components/ui/separator.js';
 import { PLUGIN_SHAPE_FIELDS, PLUGIN_MODES } from './shape-fields.js';
-import { PanelCard } from '../../components/PanelCard.js';
 
-const headStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '10px 12px',
-  borderBottom: '1px solid var(--border)',
-  fontFamily: 'var(--mono)',
-  fontSize: '11px',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.14em',
-  color: 'var(--fg-dim)',
-};
+const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
 
-const cellStyle: React.CSSProperties = {
-  padding: '12px',
-  borderBottom: '1px solid var(--border)',
-  fontFamily: 'var(--mono)',
-  fontSize: '13px',
-  lineHeight: 1.6,
-  color: 'var(--fg)',
-  verticalAlign: 'top',
-};
-
-const cellMuted: React.CSSProperties = {
-  ...cellStyle,
-  color: 'var(--fg-muted)',
-};
-
-const requiredChip = (required: boolean): React.CSSProperties => ({
-  display: 'inline-block',
-  fontFamily: 'var(--mono)',
-  fontSize: '10px',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.14em',
-  padding: '2px 8px',
-  borderRadius: 'var(--radius-1)',
-  border: `1px solid ${required ? 'var(--accent-sky)' : 'var(--border)'}`,
-  color: required ? 'var(--accent-sky)' : 'var(--fg-dim)',
-});
-
+/**
+ * ShapeCatalogue — reference card on the /build page enumerating the
+ * `SolverPluginManifest` fields (driven by `PLUGIN_SHAPE_FIELDS`) and the
+ * two exclusive modes (`PLUGIN_MODES`).
+ *
+ * Migrated to shadcn primitives: outer `<Card>` wraps the surface, the
+ * field grid is a `<Table>` with required/optional shown via `<Badge>`
+ * (default for required, outline for optional), and each mode is its own
+ * inner `<Card>` rendered in a two-column grid.
+ *
+ * The `data-field-required` attribute on each row is preserved verbatim
+ * for the existing snapshot test.
+ */
 export function ShapeCatalogue(): JSX.Element {
   return (
-    <PanelCard>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '20px' }}>
-        <span className="j-label">Reference</span>
-        <h2
-          className="j-display"
-          style={{
-            fontSize: '28px',
-            lineHeight: 1.2,
-            color: 'var(--fg)',
-            margin: 0,
-          }}
-        >
+    <Card className="p-6">
+      <CardHeader className="mb-5 flex flex-col gap-1 p-0">
+        <span className={eyebrow}>Reference</span>
+        <h2 className="m-0 font-serif text-[28px] leading-[1.2] text-foreground">
           Plug-in shape
         </h2>
-      </div>
+      </CardHeader>
 
-      <div style={{ overflowX: 'auto', marginBottom: '32px' }}>
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            borderTop: '1px solid var(--border)',
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={headStyle}>Field</th>
-              <th style={headStyle}>Type</th>
-              <th style={headStyle}>Required</th>
-              <th style={headStyle}>Description</th>
-            </tr>
-          </thead>
-          <tbody>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Field</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Required</TableHead>
+              <TableHead>Description</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {PLUGIN_SHAPE_FIELDS.map((f) => (
-              <tr key={f.name} data-field-required={f.required ? 'true' : 'false'}>
-                <td style={{ ...cellStyle, color: 'var(--accent-sky)' }}>{f.name}</td>
-                <td style={cellMuted}>{f.type}</td>
-                <td style={cellStyle}>
-                  <span style={requiredChip(f.required)}>{f.required ? 'yes' : 'no'}</span>
-                </td>
-                <td style={cellMuted}>{f.description}</td>
-              </tr>
+              <TableRow key={f.name} data-field-required={f.required ? 'true' : 'false'}>
+                <TableCell className="font-mono text-[13px] text-primary">{f.name}</TableCell>
+                <TableCell className="font-mono text-[13px] text-muted-foreground">{f.type}</TableCell>
+                <TableCell>
+                  <Badge variant={f.required ? 'default' : 'outline'}>
+                    {f.required ? 'yes' : 'no'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="font-mono text-[13px] text-muted-foreground">{f.description}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '16px' }}>
-        <span className="j-label">Modes</span>
-        <h3
-          className="j-display"
-          style={{ fontSize: '22px', lineHeight: 1.25, color: 'var(--fg)', margin: 0 }}
-        >
-          Two modes
-        </h3>
-        <p
-          className="j-mono"
-          style={{
-            color: 'var(--fg-muted)',
-            fontSize: '13px',
-            lineHeight: 1.7,
-            margin: '4px 0 0',
-            maxWidth: '72ch',
-          }}
-        >
-          The validator enforces exactly two exclusive modes. Mixing is rejected.
-        </p>
-      </div>
+        <Separator className="my-8" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-        {PLUGIN_MODES.map((m) => (
-          <div
-            key={m.id}
-            style={{
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-2)',
-              padding: '16px',
-              background: 'var(--bg-sunken)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            <span className="j-label">{m.id === 'runtime' ? 'Mode · 01' : 'Mode · 02'}</span>
-            <h4
-              className="j-mono"
-              style={{
-                fontSize: '15px',
-                fontWeight: 500,
-                color: 'var(--fg)',
-                margin: 0,
-                letterSpacing: '-0.01em',
-              }}
-            >
-              {m.label}
-            </h4>
-            <p
-              className="j-mono"
-              style={{
-                color: 'var(--fg-muted)',
-                fontSize: '12px',
-                lineHeight: 1.6,
-                margin: 0,
-              }}
-            >
-              {m.requires}
-            </p>
-            <pre
-              style={{
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-1)',
-                padding: '10px 12px',
-                fontFamily: 'var(--mono)',
-                fontSize: '12px',
-                lineHeight: 1.5,
-                color: 'var(--accent-sky)',
-                margin: 0,
-                overflowX: 'auto',
-              }}
-            >
-              <code>{m.example}</code>
-            </pre>
-          </div>
-        ))}
-      </div>
-    </PanelCard>
+        <div className="mb-4 flex flex-col gap-1">
+          <span className={eyebrow}>Modes</span>
+          <h3 className="m-0 font-serif text-[22px] leading-[1.25] text-foreground">
+            Two modes
+          </h3>
+          <p className="m-0 mt-1 max-w-[72ch] font-mono text-[13px] leading-[1.7] text-muted-foreground">
+            The validator enforces exactly two exclusive modes. Mixing is rejected.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {PLUGIN_MODES.map((m, idx) => (
+            <Card key={m.id} className="flex flex-col gap-2.5 bg-[var(--bg-sunken)] p-4">
+              <span className={eyebrow}>{idx === 0 ? 'Mode · 01' : 'Mode · 02'}</span>
+              <h4 className="m-0 font-mono text-[15px] font-medium tracking-[-0.01em] text-foreground">
+                {m.label}
+              </h4>
+              <p className="m-0 font-mono text-[12px] leading-[1.6] text-muted-foreground">
+                {m.requires}
+              </p>
+              <pre className="m-0 overflow-x-auto rounded-sm border border-border bg-background px-3 py-2.5 font-mono text-[12px] leading-[1.5] text-primary">
+                <code>{m.example}</code>
+              </pre>
+            </Card>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

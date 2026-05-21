@@ -1,40 +1,24 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type { DiscoveryPluginPublicationsResponse, PluginPublicationDto } from '../../api/types.js';
-import { PanelCard } from '../../components/PanelCard.js';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from '../../components/ui/card.js';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Skeleton } from '../../components/ui/skeleton.js';
+import { Alert, AlertDescription } from '../../components/ui/alert.js';
 
-const cellStyle: React.CSSProperties = {
-  padding: '12px',
-  borderBottom: '1px solid var(--border)',
-  fontFamily: 'var(--mono)',
-  fontSize: '12px',
-  lineHeight: 1.6,
-  color: 'var(--fg)',
-  verticalAlign: 'top',
-};
-
-const headCellStyle: React.CSSProperties = {
-  ...cellStyle,
-  color: 'var(--fg-dim)',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.14em',
-  fontSize: '11px',
-  textAlign: 'left',
-};
-
-const statusChip = (color: string): React.CSSProperties => ({
-  display: 'inline-block',
-  fontFamily: 'var(--mono)',
-  fontSize: '10px',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.14em',
-  padding: '2px 10px',
-  borderRadius: 'var(--radius-pill)',
-  border: `1px solid ${color}`,
-  color,
-});
+const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
 
 function truncate(cid: string): string {
   return cid.length > 14 ? `${cid.slice(0, 8)}…${cid.slice(-4)}` : cid;
@@ -43,23 +27,30 @@ function truncate(cid: string): string {
 /**
  * Render the panel header — eyebrow + serif title — preserving the
  * literal phrase "Published plug-ins for <solverType>" so the BuildPage
- * test's `getByText` matcher still resolves. The eyebrow / title pair
- * replaces the old <h3> rendered by PanelCard's `title` prop.
+ * test's `getByText` matcher still resolves.
  */
 function PanelHeader({ solverType }: { solverType: string }): JSX.Element {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '20px' }}>
-      <span className="j-label">Registry</span>
-      <h3
-        className="j-display"
-        style={{ fontSize: '22px', lineHeight: 1.25, color: 'var(--fg)', margin: 0 }}
-      >
+    <CardHeader className="mb-5 flex flex-col gap-1 p-0">
+      <span className={eyebrow}>Registry</span>
+      <h3 className="m-0 font-serif text-[22px] leading-[1.25] text-foreground">
         Published plug-ins for {solverType}
       </h3>
-    </div>
+    </CardHeader>
   );
 }
 
+/**
+ * PublishedPluginsPanel — registry browse view for a single SolverType.
+ * Queries `/v1/discovery/plugin-publications?solverType=<solverType>` via
+ * react-query and renders one row per published plug-in. Revoked rows
+ * show a wane-toned outline `<Badge>`; active rows show a success Badge.
+ *
+ * Loading state renders a small block of `<Skeleton>` lines so the surface
+ * doesn't flash blank; the error state lands in an `<Alert variant="blocking">`
+ * with the underlying message preserved. Empty state keeps the original
+ * dashed-border affordance pointing operators at `jinn solver-plugins publish`.
+ */
 export function PublishedPluginsPanel({ solverType }: { solverType: string }): JSX.Element {
   const { data, isLoading, error } = useQuery<DiscoveryPluginPublicationsResponse>({
     queryKey: ['discovery', 'plugin-publications', solverType],
@@ -69,26 +60,29 @@ export function PublishedPluginsPanel({ solverType }: { solverType: string }): J
 
   if (isLoading) {
     return (
-      <PanelCard>
+      <Card className="p-6">
         <PanelHeader solverType={solverType} />
-        <p className="j-mono" style={{ color: 'var(--fg-muted)', fontSize: '13px', margin: 0 }}>
-          Loading published plug-ins…
-        </p>
-      </PanelCard>
+        <CardContent className="flex flex-col gap-2 p-0">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-4/6" />
+        </CardContent>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <PanelCard>
+      <Card className="p-6">
         <PanelHeader solverType={solverType} />
-        <p
-          className="j-mono"
-          style={{ color: 'var(--break-red)', fontSize: '13px', margin: 0, lineHeight: 1.7 }}
-        >
-          Discovery unavailable. {(error as Error).message}
-        </p>
-      </PanelCard>
+        <CardContent className="p-0">
+          <Alert variant="blocking">
+            <AlertDescription>
+              Discovery unavailable. {(error as Error).message}
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -96,104 +90,64 @@ export function PublishedPluginsPanel({ solverType }: { solverType: string }): J
 
   if (rows.length === 0) {
     return (
-      <PanelCard>
+      <Card className="p-6">
         <PanelHeader solverType={solverType} />
-        <div
-          style={{
-            border: '1px dashed var(--border)',
-            borderRadius: 'var(--radius-2)',
-            padding: '24px',
-            background: 'var(--bg-sunken)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-          }}
-        >
-          <span className="j-label">Empty registry</span>
-          <p
-            className="j-mono"
-            style={{
-              color: 'var(--fg)',
-              fontSize: '13px',
-              lineHeight: 1.7,
-              margin: 0,
-              maxWidth: '64ch',
-            }}
-          >
-            No plug-ins published yet. Be the first.
-          </p>
-          <p
-            className="j-mono"
-            style={{
-              color: 'var(--fg-muted)',
-              fontSize: '13px',
-              lineHeight: 1.7,
-              margin: 0,
-              maxWidth: '64ch',
-            }}
-          >
-            Run{' '}
-            <code
-              style={{
-                fontFamily: 'var(--mono)',
-                fontSize: '12px',
-                color: 'var(--accent-sky)',
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-1)',
-                padding: '1px 6px',
-              }}
-            >
-              jinn solver-plugins publish
-            </code>{' '}
-            and your plug-in appears here under your builder agentId.
-          </p>
-        </div>
-      </PanelCard>
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-2 rounded-md border border-dashed border-border bg-[var(--bg-sunken)] p-6">
+            <span className={eyebrow}>Empty registry</span>
+            <p className="m-0 max-w-[64ch] font-mono text-[13px] leading-[1.7] text-foreground">
+              No plug-ins published yet. Be the first.
+            </p>
+            <p className="m-0 max-w-[64ch] font-mono text-[13px] leading-[1.7] text-muted-foreground">
+              Run{' '}
+              <code className="rounded-sm border border-border bg-background px-1.5 py-px font-mono text-[12px] text-primary">
+                jinn solver-plugins publish
+              </code>{' '}
+              and your plug-in appears here under your builder agentId.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <PanelCard>
+    <Card className="p-6">
       <PanelHeader solverType={solverType} />
-      <div style={{ overflowX: 'auto' }}>
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            borderTop: '1px solid var(--border)',
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={headCellStyle}>Plug-in</th>
-              <th style={headCellStyle}>Version</th>
-              <th style={headCellStyle}>Builder agentId</th>
-              <th style={headCellStyle}>CID</th>
-              <th style={headCellStyle}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Plug-in</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Builder agentId</TableHead>
+              <TableHead>CID</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((r: PluginPublicationDto) => (
-              <tr key={`${r.builderAgentId}:${r.cid}`}>
-                <td style={cellStyle}>{r.name}</td>
-                <td style={{ ...cellStyle, color: 'var(--fg-muted)' }}>{r.version}</td>
-                <td style={{ ...cellStyle, color: 'var(--fg-muted)' }}>{r.builderAgentId}</td>
-                <td style={{ ...cellStyle, color: 'var(--fg-muted)' }}>{truncate(r.cid)}</td>
-                <td style={cellStyle}>
+              <TableRow key={`${r.builderAgentId}:${r.cid}`}>
+                <TableCell className="font-mono text-[12px] text-foreground">{r.name}</TableCell>
+                <TableCell className="font-mono text-[12px] text-muted-foreground">{r.version}</TableCell>
+                <TableCell className="font-mono text-[12px] text-muted-foreground">{r.builderAgentId}</TableCell>
+                <TableCell className="font-mono text-[12px] text-muted-foreground">{truncate(r.cid)}</TableCell>
+                <TableCell>
                   {r.revoked ? (
-                    <span style={statusChip('var(--wane)')}>
+                    <Badge variant="outline" className="rounded-full border-[var(--wane)] text-[var(--wane)]">
                       Revoked{r.revokedReason ? ` · ${r.revokedReason}` : ''}
-                    </span>
+                    </Badge>
                   ) : (
-                    <span style={statusChip('var(--vow-green)')}>Active</span>
+                    <Badge variant="success" className="rounded-full">
+                      Active
+                    </Badge>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </PanelCard>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }
