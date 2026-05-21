@@ -12,7 +12,6 @@ import { AgentRail } from './shell/AgentRail.js';
 import { RestartPendingContext } from './shell/RestartPendingContext.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
-import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
@@ -112,9 +111,7 @@ export default function App(): JSX.Element {
                 <SecurityTab />
               </OperatorShell>
             </Route>
-            <Route path="/operator">
-              <OperatorPage onRestartPending={() => setRestartPending(true)} />
-            </Route>
+            <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
             <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
             <Route path="/configuration"><ConfigurationRedirect /></Route>
             <Route path="/launcher/create"><LauncherCreatePage /></Route>
