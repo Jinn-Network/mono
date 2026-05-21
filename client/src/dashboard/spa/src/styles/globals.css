@@ -37,6 +37,59 @@
 
   --serif: 'Instrument Serif', 'Times New Roman', serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Typography sizes — mirror DESIGN.md `typography.*.fontSize`. The SPA
+     historically hardcoded these as inline px strings (`fontSize: '11px'`
+     etc.) on every label, eyebrow, and body element. Naming them lets the
+     dashboard share rhythm with the rest of the brand without each
+     component re-stating the scale. */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 26px;
+  --text-display: 64px;
+  --text-display-xl: 88px;
+
+  /* Spacing scale — mirror DESIGN.md `spacing.1..10`. Same rationale as the
+     typography tokens: the SPA had been writing `gap: '12px'` etc. inline
+     across components. The named scale lets section-level layout decisions
+     compose without restating values. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Motion. Currently unused by inline-styled components; available for
+     CSS transitions on hover / focus / state changes introduced by the
+     UI/IA reshuffle. */
+  --dur-fast: 80ms;
+  --dur-base: 140ms;
+  --dur-slow: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Severity surfaces — derived from existing color tokens. These let
+     cards and notifications signal severity without each call site
+     restating the color recipe. The 6% alpha tints are calibrated to be
+     legible on `--bg` without overpowering text. */
+  --severity-blocking-fg: var(--break-red);
+  --severity-blocking-border: rgba(168, 90, 90, 0.6);
+  --severity-blocking-bg: rgba(168, 90, 90, 0.06);
+  --severity-warning-fg: var(--wane);
+  --severity-warning-border: rgba(184, 128, 47, 0.6);
+  --severity-warning-bg: rgba(184, 128, 47, 0.06);
+  --severity-info-fg: var(--accent-sky);
+  --severity-info-border: rgba(122, 167, 220, 0.4);
+  --severity-info-bg: transparent;
+  --severity-success-fg: var(--vow-green);
 }
 
 html,
@@ -87,6 +140,113 @@ body {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-2);
+}
+
+/* Surface primitives — three weights so a single page can read with
+   rhythm instead of as ten equal-weight tiles. Primary uses the strong
+   sky border to draw attention; secondary is the default card recipe;
+   reference is unfilled and recedes into the page. Severity modifiers
+   tint border + background without changing the surface weight. */
+.j-surface-primary {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-3);
+  padding: var(--space-5);
+}
+
+.j-surface-secondary {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  padding: var(--space-5);
+}
+
+.j-surface-reference {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-4) var(--space-5);
+}
+
+.j-surface--blocking {
+  border-color: var(--severity-blocking-border);
+  background: var(--severity-blocking-bg);
+}
+
+.j-surface--warning {
+  border-color: var(--severity-warning-border);
+  background: var(--severity-warning-bg);
+}
+
+.j-surface--info {
+  border-color: var(--severity-info-border);
+}
+
+/* Notification rows — `.j-notification--{severity}` tints the left
+   border and severity word per spec §3.5. The shared shell lays out the
+   row; per-severity rules add color only. */
+.j-notification {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-4);
+  border-left: 2px solid transparent;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.j-notification__severity {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  min-width: 64px;
+  color: var(--fg-muted);
+}
+
+.j-notification__message {
+  flex: 1;
+}
+
+.j-notification__jump {
+  color: var(--accent-sky);
+  text-decoration: none;
+}
+
+.j-notification__jump:hover {
+  color: var(--accent-sky-hover);
+}
+
+.j-notification--blocking {
+  border-left-color: var(--severity-blocking-fg);
+  background: var(--severity-blocking-bg);
+}
+.j-notification--blocking .j-notification__severity {
+  color: var(--severity-blocking-fg);
+}
+
+.j-notification--warning {
+  border-left-color: var(--severity-warning-fg);
+  background: var(--severity-warning-bg);
+}
+.j-notification--warning .j-notification__severity {
+  color: var(--severity-warning-fg);
+}
+
+.j-notification--info {
+  border-left-color: var(--severity-info-fg);
+}
+.j-notification--info .j-notification__severity {
+  color: var(--severity-info-fg);
+}
+
+.j-notification--empty {
+  color: var(--fg-dim);
+  font-style: normal;
+}
+.j-notification--empty .j-notification__message {
+  color: var(--fg-dim);
 }
 
 button:focus-visible,

@@ -70,4 +70,24 @@ describe('NotificationItem', () => {
     expect(li?.getAttribute('data-kind')).toBe('rpc_unreachable');
     expect(li?.getAttribute('data-severity')).toBe('blocking');
   });
+
+  it('applies the severity-specific CSS class so the row tints correctly (closes #444)', () => {
+    const cases: Array<{ severity: OperatorNotification['severity']; expected: string }> = [
+      { severity: 'blocking', expected: 'j-notification--blocking' },
+      { severity: 'warning', expected: 'j-notification--warning' },
+      { severity: 'info', expected: 'j-notification--info' },
+    ];
+    for (const { severity, expected } of cases) {
+      const notice: OperatorNotification = {
+        kind: 'restart_required',
+        severity,
+        message: 'severity test',
+      };
+      const { container, unmount } = render(wrap(<NotificationItem notice={notice} />));
+      const li = container.querySelector('li');
+      expect(li?.className).toMatch(/\bj-notification\b/);
+      expect(li?.className).toMatch(new RegExp(`\\b${expected}\\b`));
+      unmount();
+    }
+  });
 });
