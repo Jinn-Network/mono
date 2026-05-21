@@ -12,12 +12,16 @@ import { AgentRail } from './shell/AgentRail.js';
 import { RestartPendingContext } from './shell/RestartPendingContext.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
-import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 import { CapturesTab } from './captures/CapturesTab.js';
+import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { MembershipsTab } from './pages/operator/MembershipsTab.js';
+import { RegistryTab } from './pages/operator/RegistryTab.js';
+import { NetworkTab } from './pages/operator/NetworkTab.js';
+import { SecurityTab } from './pages/operator/SecurityTab.js';
 import { BuildPage } from './pages/Build.js';
 import { getFeatures } from './lib/features.js';
 
@@ -87,9 +91,27 @@ export default function App(): JSX.Element {
             <Route path="/overview" component={OverviewPage} />
             <Route path="/operator/join/:cid"><JoinFlow /></Route>
             <Route path="/operator/execution-data"><CapturesTab /></Route>
-            <Route path="/operator">
-              <OperatorPage onRestartPending={() => setRestartPending(true)} />
+            <Route path="/operator/memberships">
+              <OperatorShell>
+                <MembershipsTab onRestartPending={() => setRestartPending(true)} />
+              </OperatorShell>
             </Route>
+            <Route path="/operator/registry">
+              <OperatorShell>
+                <RegistryTab />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator/network">
+              <OperatorShell>
+                <NetworkTab onRestartPending={() => setRestartPending(true)} />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator/security">
+              <OperatorShell>
+                <SecurityTab />
+              </OperatorShell>
+            </Route>
+            <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
             <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
             <Route path="/configuration"><ConfigurationRedirect /></Route>
             <Route path="/launcher/create"><LauncherCreatePage /></Route>
