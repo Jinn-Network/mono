@@ -72,8 +72,13 @@ export class InsufficientDiskError extends Error {
   }
 }
 
-/** Default free-disk floor required before an eval round: 10 GB. */
-export const DEFAULT_EVAL_DISK_FLOOR_BYTES = 10_000_000_000;
+/**
+ * Default free-disk floor required before an eval round: 20 GB. A single
+ * SWE-rebench eval image was observed to peak transiently at ~12.6 GB, so the
+ * floor clears the worst observed instance with real margin. Override with
+ * `JINN_EVAL_DISK_FLOOR_GB` on constrained hosts.
+ */
+export const DEFAULT_EVAL_DISK_FLOOR_BYTES = 20_000_000_000;
 
 /** Resolve the disk floor: explicit option > `JINN_EVAL_DISK_FLOOR_GB` env > default. */
 export function resolveDiskFloorBytes(opt: number | undefined): number {
