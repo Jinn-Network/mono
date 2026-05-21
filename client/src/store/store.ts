@@ -1197,6 +1197,22 @@ export class Store {
     }));
   }
 
+  /**
+   * Total cost in micro-dollars recorded against a credential since the most
+   * recent UTC midnight. Backs the daily spend cap.
+   */
+  spentTodayMicros(credentialId: string, now: Date = new Date()): number {
+    const midnight = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    ).toISOString();
+    const row = this.db.prepare(
+      `SELECT COALESCE(SUM(cost_usd_micros), 0) AS total
+       FROM activity_events
+       WHERE credential_id = @cid AND ts IS NOT NULL AND ts >= @midnight`,
+    ).get({ cid: credentialId, midnight }) as { total: number };
+    return row.total;
+  }
+
   /** Newer events first, then ascending id for `jinn logs --follow` (oldest in batch printed first in caller). */
   getActivityEventsAfterId(afterId: number, limit: number): ActivityEventRow[] {
     const effectiveLimit = Math.max(0, Math.min(limit, 1000));
