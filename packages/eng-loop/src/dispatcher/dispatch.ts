@@ -180,8 +180,13 @@ function loadCanon(): string {
  * Dispatch one ready issue:
  *
  * 1. Derive the branch name: `<shape>/<N>-<slug>`
- * 2. Create a git worktree at `cargo/.tasks/<N>` off `origin/next`
- * 3. Set the issue's Project Status to "In Progress"
+ * 2. Set the issue's Project Status to "In Progress" FIRST — so any subsequent
+ *    partial failure leaves the issue In Progress (not Todo), which prevents
+ *    selectReady from re-queuing it into an infinite retry loop.
+ * 3. Create a git worktree at `cargo/.tasks/<N>` off `origin/next`.
+ *    Idempotent: if the worktree path already exists, reuse it rather than
+ *    failing (handles the case where a previous run created the worktree but
+ *    then crashed before spawning).
  * 4. Assemble the coordinating-session prompt:
  *    canon (CLAUDE.md + handbook) + headless-override block + implement-issue task
  * 5. Spawn `claude -p <prompt>` in the worktree, detached, no plan-posture flags
@@ -198,17 +203,13 @@ export async function dispatchIssue(
   // 1. Branch name
   const slug = titleSlug(title);
   const branch = `${shape}/${number}-${slug}`;
-  const worktreePath = `cargo/.tasks/${number}`;
+  // Absolute path so git resolves correctly regardless of process cwd.
+  const worktreePath = join(REPO_ROOT, 'cargo', '.tasks', String(number));
 
-  // 2. Create the worktree
-  await runner('git', [
-    'worktree', 'add',
-    worktreePath,
-    '-b', branch,
-    'origin/next',
-  ]);
-
-  // 3. Set Status → In Progress
+  // 2. Set Status → In Progress FIRST.
+  //    This must happen before the worktree is created. If anything fails
+  //    after this point, the issue stays In Progress (not Todo), so
+  //    selectReady skips it — no infinite retry loop.
   //    a) discover field id + option id
   const fieldListRaw = await runner('gh', [
     'project', 'field-list', PROJECT_NUMBER,
@@ -230,14 +231,36 @@ export async function dispatchIssue(
     '--single-select-option-id', inProgressOptionId,
   ]);
 
-  // 4. Assemble the prompt
+  // 3. Create the worktree — idempotent.
+  //    If the path already exists (e.g. a pre-created worktree from the
+  //    dispatcher, or a previous partial run), reuse it instead of throwing.
+  //    We detect this by running `git worktree list --porcelain` and checking
+  //    whether any entry's path ends with the expected suffix.
+  const worktreeListRaw = await runner('git', ['worktree', 'list', '--porcelain']);
+  const worktreeAlreadyExists = worktreeListRaw
+    .split('\n')
+    .some((line) => line.startsWith('worktree ') && line.trim() === `worktree ${worktreePath}`);
+
+  if (!worktreeAlreadyExists) {
+    await runner('git', [
+      'worktree', 'add',
+      worktreePath,
+      '-b', branch,
+      'origin/next',
+    ]);
+  }
+
+  // 4. Assemble the prompt.
   //    Canon is prepended because -p mode does not auto-load CLAUDE.md (spec Appendix).
+  //    The scenario explicitly tells the session that the worktree is pre-created
+  //    so the implement-issue skill's Step 2 skips worktree creation.
   const canon = loadCanon();
   const implementer = cfg.defaultImplementer;
   const scenario = [
     `Use the implement-issue skill on issue #${number}.`,
     `The default implementer for the inner pipeline is: ${implementer}.`,
     `Issue: #${number} — ${title}`,
+    `A git worktree for this issue already exists at \`${worktreePath}\` on branch \`${branch}\` — use it; do not create a new worktree.`,
   ].join('\n');
   const headlessPart = buildHeadlessPrompt('implement-issue', scenario);
   const fullPrompt = [canon, '', headlessPart].join('\n');

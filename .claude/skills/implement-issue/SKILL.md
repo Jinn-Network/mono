@@ -51,19 +51,31 @@ Both failures are **stop** — do not proceed past precondition checks.
 
 ## Step 2 — Create the worktree and branch
 
-Per handbook workflow rule 1, all implementation work happens in a dedicated git worktree:
+Per handbook workflow rule 1, all implementation work happens in a dedicated git worktree.
+
+**When dispatched by the eng-loop dispatcher:** the dispatcher pre-creates the worktree and explicitly states the path and branch in the session prompt (look for the sentence "A git worktree for this issue already exists at `<path>` on branch `<branch>` — use it; do not create a new worktree."). If that sentence is present, skip directly to the "All subagents..." paragraph below — do not run `git worktree add`.
+
+**When invoked by a human (interactive mode):** create the worktree yourself. First check whether one already exists for this issue number — if it does, use it:
+
+```bash
+# Check whether a worktree already exists for cargo/.tasks/<issue-number>
+git worktree list --porcelain | grep "worktree.*cargo/.tasks/<issue-number>"
+```
+
+If the grep finds an entry, use that worktree path and branch (read them from the porcelain output). If not, create it:
 
 ```bash
 # Derive a branch name from the issue number and title slug
 BRANCH="<shape>/<issue-number>-<title-slug>"
 
-# Create the worktree from next
-git worktree add "cargo/.tasks/<issue-number>" -b "$BRANCH" origin/next
+# Create the worktree from next (absolute path avoids cwd ambiguity)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+git worktree add "${REPO_ROOT}/cargo/.tasks/<issue-number>" -b "$BRANCH" origin/next
 ```
 
 All subagents dispatched in subsequent stages work in this worktree. Pass the worktree path and branch name in each subagent prompt.
 
-Set the issue `Status` to `In Progress` on the Project board. `Status` is a single-select field — discover the Status field id and the `In Progress` option id with `gh project field-list 1 --owner Jinn-Network --format json` (the `file-issue` skill's `references/gh-taxonomy.md` documents this discovery), then:
+Set the issue `Status` to `In Progress` on the Project board (skip if the dispatcher has already done this — the issue will already be `In Progress` in that case). `Status` is a single-select field — discover the Status field id and the `In Progress` option id with `gh project field-list 1 --owner Jinn-Network --format json` (the `file-issue` skill's `references/gh-taxonomy.md` documents this discovery), then:
 
 ```bash
 gh project item-edit --id <item-id> --project-id <project-id> \
