@@ -2438,6 +2438,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       engine: config.engine,
       config,
       configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+      spendCaps: spendCap?.caps,
     },
     rewardClaim:
       config.rewardClaimIntervalMs > 0

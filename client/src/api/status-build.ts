@@ -60,6 +60,20 @@ export interface ServiceBalanceErrorEntry {
   multisig?: string;
 }
 
+/** Per-credential daily spend row exposed on /v1/status. */
+export interface SpendCredentialRow {
+  credentialId: string;
+  capUsd: number;
+  spentTodayUsd: number;
+  paused: boolean;
+  resetsAt: string;
+}
+
+/** Per-credential daily spend block; present on /v1/status when caps are configured. */
+export interface SpendStatus {
+  credentials: SpendCredentialRow[];
+}
+
 export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
@@ -214,6 +228,8 @@ export interface StatusV1Response {
   predictionV1?: PredictionV1Status;
   /** Generic task-run lifecycle data across all SolverNets. */
   taskRuns?: TaskRunsStatus;
+  /** Per-credential daily spend block — present when caps are configured. */
+  spend?: SpendStatus;
 }
 
 /**

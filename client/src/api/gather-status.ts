@@ -231,6 +231,8 @@ export interface StatusGatherConfig {
   /** Full config enables SolverNet/plugin/Harness diagnostics in /v1/status. */
   config?: JinnConfig;
   configPath?: string;
+  /** Per-credential daily caps; when present, /v1/status carries a `spend` block. */
+  spendCaps?: Record<string, number>;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -1259,5 +1261,19 @@ export async function gatherStatusForApi(
   status: StatusGatherConfig | undefined,
 ): Promise<StatusV1Response> {
   const raw = await gatherGatheredStatusRaw(store, status);
-  return assembleStatusV1(raw);
+  const body = assembleStatusV1(raw);
+  const caps = status?.spendCaps;
+  if (caps && Object.keys(caps).length > 0) {
+    const now = new Date();
+    const resetsAt = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
+    ).toISOString();
+    body.spend = {
+      credentials: Object.entries(caps).map(([credentialId, capUsd]) => {
+        const spentTodayUsd = store.spentTodayMicros(credentialId, now) / 1_000_000;
+        return { credentialId, capUsd, spentTodayUsd, paused: spentTodayUsd >= capUsd, resetsAt };
+      }),
+    };
+  }
+  return body;
 }
