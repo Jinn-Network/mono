@@ -832,6 +832,7 @@ __metadata:
     node-pty: "npm:^1.1.0"
     protobufjs: "npm:^8.0.3"
     semver: "npm:^7.7.4"
+    tokenlens: "npm:^1.3.1"
     tsx: "npm:^4.0.0"
     typescript: "npm:^5.5.0"
     viem: "npm:^2.0.0"
@@ -3482,6 +3483,41 @@ __metadata:
     "@types/react-dom":
       optional: true
   checksum: 10c0/f9c7f0915e1b5f7b750e6c7d8b51f091b8ae7ea99bacb761d7b8505ba25de9cfcb749a0f779f1650fb268b499dd79165dc7e1ee0b8b4cb63430d3ddc81ffe044
+  languageName: node
+  linkType: hard
+
+"@tokenlens/core@npm:1.3.0":
+  version: 1.3.0
+  resolution: "@tokenlens/core@npm:1.3.0"
+  checksum: 10c0/f7c2afd386c7b0573f0d0fed90120f0c89526dd67a92e0d55de7ca2307601175d3321a657c7682b30d33af866a4c717f58a47053c16528c877ad5b3cc8ebc834
+  languageName: node
+  linkType: hard
+
+"@tokenlens/fetch@npm:1.3.0":
+  version: 1.3.0
+  resolution: "@tokenlens/fetch@npm:1.3.0"
+  dependencies:
+    "@tokenlens/core": "npm:1.3.0"
+  checksum: 10c0/902ddff1985970a9d38bbeed10f60dce34d4779a003bc18b5ecd957667adce565f18a23bb69afc42f1ff053910cc6acbb0a07923ff9c507a8e8f41b9ae7c7200
+  languageName: node
+  linkType: hard
+
+"@tokenlens/helpers@npm:1.3.1":
+  version: 1.3.1
+  resolution: "@tokenlens/helpers@npm:1.3.1"
+  dependencies:
+    "@tokenlens/core": "npm:1.3.0"
+    "@tokenlens/fetch": "npm:1.3.0"
+  checksum: 10c0/ac78023c06efbc0bba5819d4d948d689721fa6a537581fb351b27fdd39fd325d468f253072f94ce9cec9950c0839dd04892167ceeb1758dcd356d5793cc0c757
+  languageName: node
+  linkType: hard
+
+"@tokenlens/models@npm:1.3.0":
+  version: 1.3.0
+  resolution: "@tokenlens/models@npm:1.3.0"
+  dependencies:
+    "@tokenlens/core": "npm:1.3.0"
+  checksum: 10c0/015a4a4bc532509d907da4be5d1c7bc21a10e61da5ae3a80ae28b70cc7b8b4cbb1cd407259ad12d1382cea33f5c419a71ab36cf028962c732b1b201d45283b14
   languageName: node
   linkType: hard
 
@@ -7494,6 +7530,18 @@ __metadata:
   version: 1.0.1
   resolution: "toidentifier@npm:1.0.1"
   checksum: 10c0/93937279934bd66cc3270016dd8d0afec14fb7c94a05c72dc57321f8bd1fa97e5bea6d1f7c89e728d077ca31ea125b78320a616a6c6cd0e6b9cb94cb864381c1
+  languageName: node
+  linkType: hard
+
+"tokenlens@npm:^1.3.1":
+  version: 1.3.1
+  resolution: "tokenlens@npm:1.3.1"
+  dependencies:
+    "@tokenlens/core": "npm:1.3.0"
+    "@tokenlens/fetch": "npm:1.3.0"
+    "@tokenlens/helpers": "npm:1.3.1"
+    "@tokenlens/models": "npm:1.3.0"
+  checksum: 10c0/d2a76adafeb7aa3fe712073fc5bfc9bd00b552e375af2d7bd706ec1246c36f9a48b212f24ae3f283ecb5e14431d5885f3bdb664fd0673b1c41e73eebb9f699f3
   languageName: node
   linkType: hard
 
