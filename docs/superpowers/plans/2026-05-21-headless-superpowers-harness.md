@@ -6,19 +6,24 @@
 
 **Architecture:** Global injection, no vendoring. One canonical headless-override block is injected into every headless (`claude -p`) session's prompt; it situationally overrides the interactive HARD-GATEs of all superpowers skills at once. A pressure-test harness spawns a headless skill run against a scenario fixture and classifies the result as `completed` / `interactive-block` / `error`. Scenarios cover each chain skill. This is unit 1 of Phase 1 of `docs/superpowers/specs/2026-05-21-automated-eng-flow-design.md` (§7) — it de-risks the whole pipeline before the in-session pipeline skill is built.
 
-**Tech Stack:** TypeScript (Node 22, ESM), vitest, the `claude` CLI, yarn 4 workspaces.
+**Tech Stack:** TypeScript (Node 22, ESM), vitest, the `claude` CLI, yarn 4 (standalone package — jinn-mono is *not* a yarn-workspaces monorepo; `client/`, `packages/sdk`, `packages/indexer` are each independent yarn projects, so `eng-loop` is too).
 
 **Out of scope:** the in-session pipeline skill, `file-issue`, the merge skill, the dispatcher — each gets its own plan.
 
 ---
 
-### Task 1: Scaffold the `packages/eng-loop` workspace package
+### Task 1: Scaffold the `packages/eng-loop` standalone package
+
+`packages/eng-loop` is a **standalone** yarn 4 package — its own `package.json`, `.yarnrc.yml`, and `yarn.lock`, with no repo-root `package.json`. jinn-mono is *not* a yarn-workspaces monorepo: `client/`, `packages/sdk`, and `packages/indexer` are each independent yarn projects. Match the `packages/sdk` layout.
 
 **Files:**
 - Create: `packages/eng-loop/package.json`
+- Create: `packages/eng-loop/.yarnrc.yml`
+- Create: `packages/eng-loop/.gitignore`
 - Create: `packages/eng-loop/tsconfig.json`
 - Create: `packages/eng-loop/vitest.config.ts`
 - Create: `packages/eng-loop/src/index.ts`
+- Generate: `packages/eng-loop/yarn.lock` (via `yarn install`)
 
 - [ ] **Step 1: Create `package.json`**
 
@@ -28,6 +33,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "yarn@4.13.0",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -70,22 +76,42 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Create `src/index.ts` placeholder export**
+- [ ] **Step 4: Create `.yarnrc.yml`**
+
+```yaml
+nodeLinker: node-modules
+```
+
+- [ ] **Step 5: Create `.gitignore`**
+
+```gitignore
+node_modules/
+dist/
+.yarn/cache/
+.yarn/install-state.gz
+.pnp.*
+```
+
+- [ ] **Step 6: Create `src/index.ts` placeholder export**
 
 ```typescript
 export const ENG_LOOP_PACKAGE = '@jinn-network/eng-loop';
 ```
 
-- [ ] **Step 5: Verify the workspace picks it up**
+- [ ] **Step 7: Generate the lockfile and verify**
 
-Run: `yarn install` then `yarn workspaces list`
-Expected: the output lists `packages/eng-loop`.
+The repo has no root `package.json`, so yarn must treat `packages/eng-loop` as its own project root. Bootstrap an empty lockfile first so yarn does not walk up the directory tree:
 
-- [ ] **Step 6: Commit**
+```bash
+cd packages/eng-loop && touch yarn.lock && yarn install && yarn typecheck
+```
+Expected: `yarn install` resolves `typescript` + `vitest` into `packages/eng-loop/yarn.lock`; `yarn typecheck` reports no errors.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/eng-loop
-git commit -m "chore(eng-loop): scaffold the eng-loop workspace package"
+git commit -m "chore(eng-loop): scaffold eng-loop as a standalone package"
 ```
 
 ---
@@ -160,7 +186,7 @@ describe('buildHeadlessPrompt', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/headless.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/headless.test.ts)`
 Expected: FAIL — `Cannot find module '../src/headless.js'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -193,7 +219,7 @@ export function buildHeadlessPrompt(skill: string, scenario: string): string {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/headless.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/headless.test.ts)`
 Expected: PASS — 3 tests.
 
 - [ ] **Step 5: Commit**
@@ -241,7 +267,7 @@ describe('classifyRun', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/detect-block.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/detect-block.test.ts)`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the implementation**
@@ -278,7 +304,7 @@ export function classifyRun(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/detect-block.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/detect-block.test.ts)`
 Expected: PASS — 4 tests.
 
 - [ ] **Step 5: Commit**
@@ -334,7 +360,7 @@ export function runSkillHeadless(
 
 - [ ] **Step 2: Verify it typechecks**
 
-Run: `yarn workspace @jinn-network/eng-loop typecheck`
+Run: `(cd packages/eng-loop && yarn typecheck)`
 Expected: no errors.
 
 - [ ] **Step 3: Commit**
@@ -399,7 +425,7 @@ describe('pressureTest', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/harness.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/harness.test.ts)`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the implementation**
@@ -445,7 +471,7 @@ export async function pressureTest(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/harness.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/harness.test.ts)`
 Expected: PASS — 3 tests.
 
 - [ ] **Step 5: Commit**
@@ -582,7 +608,7 @@ describe('discoverCases', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/suite.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/suite.test.ts)`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `suite.ts`**
@@ -644,7 +670,7 @@ function deliverableExists(scenario: string, cwd: string): boolean {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace @jinn-network/eng-loop test test/suite.test.ts`
+Run: `(cd packages/eng-loop && yarn test test/suite.test.ts)`
 Expected: PASS.
 
 - [ ] **Step 5: Write the runner script**
@@ -705,7 +731,7 @@ This task is the actual experiment — the point of the whole plan. It needs an 
 
 - [ ] **Step 1: Run the full suite**
 
-Run: `yarn install && yarn workspace @jinn-network/eng-loop pressure`
+Run: `cd packages/eng-loop && yarn install && yarn pressure`
 Expected: each case prints `completed` / `interactive-block` / `error`; a summary line.
 
 - [ ] **Step 2: Triage any non-`completed` result**
