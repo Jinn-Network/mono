@@ -2,16 +2,16 @@ import { Link } from 'wouter';
 
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
-  rpcHealthy: boolean;
-  masterAddress?: string;
 }
 
-function trunc(addr?: string): string {
-  if (!addr || addr.length < 10) return addr ?? '—';
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
-export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX.Element {
+/**
+ * Top-of-page chrome. The RPC health pill that used to live here moved into
+ * the Node Health card on /overview where the operator can act on a degraded
+ * RPC. The master-address pill moved into the Wallet Identity row alongside
+ * Agent and Safe — it belongs with the rest of the operator's on-chain
+ * identity, not next to the network indicator.
+ */
+export function Header({ network }: HeaderProps): JSX.Element {
   return (
     <header
       style={{
@@ -55,18 +55,6 @@ export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX
         >
           {network}
         </span>
-        <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: rpcHealthy ? 'var(--vow-green)' : 'var(--break-red)',
-            }}
-          />
-          {rpcHealthy ? 'rpc healthy' : 'rpc unreachable'}
-        </span>
-        <span style={{ color: 'var(--fg-dim)' }}>master {trunc(masterAddress)}</span>
       </div>
     </header>
   );

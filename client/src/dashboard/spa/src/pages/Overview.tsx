@@ -1,23 +1,59 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'wouter';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { FundsCard } from './overview/FundsCard.js';
-import { HeroStats } from './overview/HeroStats.js';
-import { RewardsCard } from './overview/RewardsCard.js';
-import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/liveNowState.js';
-import { NetworkCard } from './overview/NetworkCard.js';
-import { OperatorCard } from './overview/OperatorCard.js';
-import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
-import { AdvancedDetails } from './overview/AdvancedDetails.js';
-import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
-import {
-  detectJoinedSolverNet,
-  operatorWaitingMessage,
-  type BootstrapWithSolverNets,
-} from './overview/joined-solver-net.js';
-import { ActivitySections } from './overview/ActivitySections.js';
-import { useRestartPending } from '../shell/RestartPendingContext.js';
+import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
+import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
+import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
+
+/**
+ * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
+ * payload has fleet/service/keystore plumbing we don't need here; this
+ * type captures the joined-SolverNet shapes per spec §12 — both the new
+ * `joinedSolverNets[<manifestCid>]` shape and the legacy `solverNets`
+ * fallback during the Tasks 21/22 migration window.
+ */
+interface BootstrapWithSolverNets {
+  /** Operator's master EOA (the address that holds custody and seeds the node). */
+  master_address?: string;
+  solverNets?: Record<
+    string,
+    {
+      name?: string;
+      manifestCid?: string;
+      enabled?: boolean;
+      roles?: string[];
+      harness?: string;
+    }
+  >;
+  joinedSolverNets?: Record<
+    string,
+    {
+      name?: string;
+      manifestCid?: string;
+      roles?: string[];
+      harness?: string;
+      model?: string;
+      plugins?: string[];
+      disabledDefaultPlugins?: string[];
+    }
+  >;
+}
+
+interface TaskRunRow {
+  requestId: string;
+  taskId?: string | null;
+  taskCid?: string;
+  solverType?: string | null;
+  state: string;
+  taskRole: 'restoration' | 'evaluation' | null;
+  implName?: string | null;
+  windowStartTs?: number;
+  windowEndTs?: number;
+  stateUpdatedAt: number;
+  manifestCid?: string | null;
+  deliveryTxHash?: string | null;
+  failureReason?: string | null;
+}
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -66,8 +102,15 @@ interface OverviewStatusV1 {
       settledFailed?: number;
       localErrors?: number;
     };
-    inFlight?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
-    recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
+    /**
+     * Full TaskRunSummary as served by the daemon ({@link
+     * client/src/api/task-runs-build.ts}). The Activity card uses
+     * manifestCid + role + state + harness + window timestamps; older
+     * surfaces that only need state/role/stateUpdatedAt still work via
+     * the wider shape.
+     */
+    inFlight?: TaskRunRow[];
+    recentTasks?: TaskRunRow[];
   };
   predictionV1?: {
     /**
@@ -99,7 +142,7 @@ interface OverviewStatusV1 {
       settledFailed?: number;
       localErrors?: number;
     };
-    recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
+    recentTasks?: TaskRunRow[];
   };
 }
 
@@ -135,16 +178,85 @@ function truncTx(hash?: string): string | null {
   return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
 }
 
+/**
+ * Inline blocking banner that surfaces when a service has been evicted from
+ * staking. Lives in the main column above everything else so the operator
+ * sees the Re-stake action without scrolling. The `service_evicted`
+ * notification covers operators who land elsewhere; this banner covers the
+ * operator who's already on /overview.
+ */
+function EvictionBanner({
+  serviceId,
+  onRestake,
+}: {
+  serviceId: number | null;
+  onRestake: (serviceId: number) => Promise<void>;
+}): JSX.Element {
+  const [restaking, setRestaking] = useState(false);
+  return (
+    <section
+      data-testid="overview-eviction-banner"
+      className="j-surface-primary j-surface--blocking"
+      aria-live="polite"
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+    >
+      <span
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 'var(--text-xs)',
+          fontWeight: 500,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--severity-blocking-fg)',
+        }}
+      >
+        Service evicted
+      </span>
+      <p style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)' }}>
+        A service has been evicted from staking. Re-stake to resume earning.
+      </p>
+      {serviceId != null && (
+        <button
+          type="button"
+          data-testid="overview-eviction-restake"
+          disabled={restaking}
+          onClick={async () => {
+            if (restaking) return;
+            setRestaking(true);
+            try {
+              await onRestake(serviceId);
+            } finally {
+              setRestaking(false);
+            }
+          }}
+          style={{
+            alignSelf: 'flex-start',
+            marginTop: 'var(--space-2)',
+            background: 'transparent',
+            border: '1px solid var(--severity-blocking-fg)',
+            borderRadius: 'var(--radius-2)',
+            color: 'var(--severity-blocking-fg)',
+            cursor: restaking ? 'wait' : 'pointer',
+            fontFamily: 'var(--mono)',
+            fontSize: 'var(--text-xs)',
+            letterSpacing: '0.14em',
+            opacity: restaking ? 0.55 : 1,
+            padding: '6px 10px',
+            textTransform: 'uppercase',
+          }}
+        >
+          {restaking ? 'Working...' : 'Re-stake now'}
+        </button>
+      )}
+    </section>
+  );
+}
+
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
-  const [, navigate] = useLocation();
   const queryClient = useQueryClient();
-  // Pulled in so the Restart action can auto-clear the restart-required
-  // notification when the operator clicks "Restart node" from this page.
-  // Without this, the notice lingers forever (Ritsu's review of #426).
-  const { setRestartPending } = useRestartPending();
-  const { data: status } = useQuery<OverviewStatusV1>({
+  const { data: status, isError: statusIsError } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
     refetchInterval: 5_000,
@@ -155,54 +267,6 @@ export function OverviewPage(): JSX.Element {
     refetchInterval: 30_000,
   });
 
-  const operator = status?.predictionV1?.operator;
-  // Spec §12: surface the operator's joined SolverNets from the
-  // `solverNets[manifestCid]` config block. Until Task 22 retires the
-  // legacy short-name-keyed shape, we accept both shapes in
-  // `detectJoinedSolverNet`. Falling back to the predictionV1 status payload
-  // covers the current Phase-1 single-net world where the daemon writes
-  // `solverNets.prediction.enabled` rather than a manifestCid entry.
-  const joined = detectJoinedSolverNet(
-    bootstrap?.joinedSolverNets,
-    bootstrap?.solverNets,
-    operator?.solverNet?.enabled === true,
-    operator?.solverNet?.roles,
-  );
-  const taskRunTotals = status?.taskRuns?.totals;
-  const predictionTotals = status?.predictionV1?.totals;
-  // Per jinn-mono-0t6p: the NetworkCard's counters must be scoped to the
-  // joined SolverNet. `predictionV1.totals` is filtered to prediction task
-  // runs in the build layer, while
-  // `taskRuns.totals` is global across every solver type the operator's
-  // SQLite has ever observed. The discriminator is the joined net's scoped
-  // status key (see `detectJoinedSolverNet`): both the legacy short-name
-  // `solverNets.prediction` path AND the manifest-keyed
-  // `joinedSolverNets[<cid>]` path route to `predictionV1` via the bound
-  // harness, so users on either shape get scoped counters. For any other
-  // joined net we fall back to taskRunTotals (no scoped payload exists for
-  // those SolverNets today — captured as a follow-up risk).
-  const preferPredictionTotals =
-    joined?.scopedStatusKey === 'predictionV1' && predictionTotals !== undefined;
-  const primaryTotals = preferPredictionTotals ? predictionTotals : taskRunTotals;
-  const fallbackTotals = preferPredictionTotals ? taskRunTotals : predictionTotals;
-  // Old daemons only ship `failed`; surface it under `localErrors` so the
-  // operator's debugging signal isn't lost during the rollout window —
-  // anything that reaches `localErrors` here pre-dates the on-chain split.
-  const legacyFailedFallback =
-    primaryTotals?.failed ?? fallbackTotals?.failed ?? 0;
-  const settledFailed =
-    primaryTotals?.settledFailed ?? fallbackTotals?.settledFailed;
-  const localErrors =
-    primaryTotals?.localErrors ?? fallbackTotals?.localErrors;
-  const totals = {
-    tasks: primaryTotals?.observedTasks ?? fallbackTotals?.observedTasks ?? 0,
-    active: primaryTotals?.activeTaskRuns ?? fallbackTotals?.activeTaskRuns ?? 0,
-    solutions: primaryTotals?.solutions ?? fallbackTotals?.solutions ?? 0,
-    verdicts: primaryTotals?.verdicts ?? fallbackTotals?.verdicts ?? 0,
-    settledFailed: settledFailed ?? 0,
-    localErrors:
-      localErrors ?? (settledFailed === undefined ? legacyFailedFallback : 0),
-  };
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,
     safeAddress: s.safeAddress ?? '',
@@ -211,20 +275,101 @@ export function OverviewPage(): JSX.Element {
   }));
 
   // Eviction state — derived from the first evicted service in the fleet.
+  // Surfaces as an inline blocking banner above the main column rather than
+  // a hidden stat-tile child. The `service_evicted` notification handles the
+  // operator-came-from-elsewhere case.
   const firstEvictedService = (status?.fleet?.services ?? []).find((s) => s.evicted === true);
   const isEvicted = firstEvictedService != null;
   const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
-  const tasksDelivered = totals.solutions;
   const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
-  // Gate the LiveNow attention banner on the freshly-polled join map so a
-  // stale `prediction_solvernet_missing` diagnostic (the daemon only
-  // re-reads `joinedSolverNets` on restart) does not contradict the joined
-  // SolverNet shown below (#333).
-  const liveNow = deriveLiveNow(status, bootstrap?.joinedSolverNets);
-  const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
+
+  // ── Activity card inputs ────────────────────────────────────────────
+  //
+  // Joined: project `bootstrap.joinedSolverNets` into the ActivityCard
+  // shape. The legacy short-name `solverNets` shape (a relic of pre-spec-§12
+  // configs) is accepted as a fallback so operators who haven't restarted
+  // since the migration still see their net.
+  const joinedNets: ActivityJoinedNet[] = useMemo(() => {
+    const out: ActivityJoinedNet[] = [];
+    const j = bootstrap?.joinedSolverNets;
+    if (j) {
+      for (const [key, entry] of Object.entries(j)) {
+        if (!entry) continue;
+        out.push({
+          name: entry.name ?? entry.manifestCid ?? key,
+          manifestCid: entry.manifestCid ?? key,
+          roles: Array.isArray(entry.roles) ? entry.roles : [],
+          harness: entry.harness,
+          model: entry.model,
+          plugins: Array.isArray(entry.plugins) ? entry.plugins : undefined,
+        });
+      }
+    }
+    if (out.length > 0) return out;
+    // Fallback: legacy shape.
+    const legacy = bootstrap?.solverNets;
+    if (legacy) {
+      for (const [key, entry] of Object.entries(legacy)) {
+        if (!entry) continue;
+        const roles = Array.isArray(entry.roles) ? entry.roles : [];
+        if (entry.enabled !== true && roles.length === 0) continue;
+        out.push({
+          name: entry.name ?? key,
+          manifestCid: entry.manifestCid ?? key,
+          roles,
+          harness: entry.harness,
+        });
+      }
+    }
+    return out;
+  }, [bootstrap]);
+
+  // Tasks: union of `taskRuns.recentTasks` and (when present)
+  // `predictionV1.recentTasks`, deduplicated by requestId. The daemon emits
+  // the same task into both arrays for prediction.v1 runs; we take the
+  // taskRuns shape (which carries manifestCid + harness) as canonical.
+  const activityTasks: ActivityTask[] = useMemo(() => {
+    const out = new Map<string, ActivityTask>();
+    const ingest = (rows: TaskRunRow[] | undefined): void => {
+      if (!rows) return;
+      for (const r of rows) {
+        if (!r.requestId) continue;
+        if (out.has(r.requestId)) continue;
+        out.set(r.requestId, {
+          requestId: r.requestId,
+          manifestCid: r.manifestCid ?? null,
+          taskRole: r.taskRole,
+          state: r.state,
+          implName: r.implName ?? null,
+          windowStartTs: r.windowStartTs ?? 0,
+          stateUpdatedAt: r.stateUpdatedAt,
+          deliveryTxHash: r.deliveryTxHash ?? null,
+        });
+      }
+    };
+    ingest(status?.taskRuns?.recentTasks);
+    ingest(status?.taskRuns?.inFlight);
+    ingest(status?.predictionV1?.recentTasks);
+    return Array.from(out.values()).sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
+  }, [status]);
+
+  // Node Health derivation. Daemon status is "running" as long as the most
+  // recent /v1/status fetch succeeded — useQuery keeps stale data across a
+  // failure window, so we read `isError` to detect a hard drop. RPC health
+  // is not yet surfaced by the daemon; we render "healthy" until the
+  // backend ships it (currently hardcoded `rpcHealthy={true}` in App.tsx).
+  const daemonStatus: DaemonStatus = statusIsError && status === undefined ? 'stopped' : 'running';
+  const rpcStatus: RpcStatus = 'healthy';
+  // No daemon state-message line under "Running" — the prior `liveNow.line`
+  // text was idle copy like "waiting for next task" that added nothing.
+  // Attention-worthy state (harness mismatch, eviction) surfaces through
+  // the notifications row (spec §2.10) and the eviction banner above;
+  // Node Health stays a glance-level health card.
+  const daemonStateMessage: string | undefined = undefined;
+
   // Auto-clear timer for transient success notices (e.g. the gas top-up
   // confirmation, which should surface the amount + tx hash for ~5s then
   // fade — issue #336).
@@ -271,166 +416,151 @@ export function OverviewPage(): JSX.Element {
   };
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <HeroStats
-        tasksDelivered={tasksDelivered}
-        statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
-        statusState={liveNow.state}
-        statusDot={LIVE_NOW_TONE[liveNow.state].dot}
-        // `liveNow.line` is the human-readable why — the first error
-        // diagnostic's message, "N tasks restoring", "waiting for next task",
-        // etc. — surfaced under the label in the STATUS tile.
-        statusReason={liveNow.line}
-        activeAction={activeAction}
-        evicted={isEvicted}
-        evictedServiceId={evictedServiceId}
-        onRestart={() =>
-          runAction(
-            'Restart node',
-            async () => {
-              const res = await api.restartDaemon();
+    <div
+      data-testid="overview-page-grid"
+      style={{
+        padding: 'var(--space-5)',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 380px)',
+        gap: 'var(--space-5)',
+        alignItems: 'start',
+      }}
+    >
+      {/* ── MAIN COLUMN ──────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', minWidth: 0 }}>
+        {isEvicted && (
+          <EvictionBanner
+            serviceId={evictedServiceId}
+            onRestake={async (serviceId) => {
+              const res = await api.restake(serviceId);
               if (!res.ok) {
-                throw new Error('Restart request failed.');
+                throw new Error(res.error ?? 'Re-stake failed.');
               }
-              // Auto-clear the restart-required notification once the operator
-              // has actually triggered the restart. Without this clear the
-              // `restart_required` notice would linger for the SPA session even
-              // after the daemon is back — the regression Ritsu flagged on #426
-              // (undoes the dogfood fix in 14680bdf).
-              setRestartPending(false);
-              return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
-            },
-            // Restart confirmation is transient — surface it, then fade after
-            // ~10s so it doesn't linger until the next action. The dashboard
-            // reconnects on its own when the daemon is back.
-            { autoClearMs: 10_000 },
-          )}
-        onRestake={async (serviceId) => {
-          const res = await api.restake(serviceId);
-          if (!res.ok) {
-            throw new Error(res.error ?? 'Re-stake failed.');
-          }
-          // Optimistically refetch status so the eviction notice clears.
-          await queryClient.invalidateQueries({ queryKey: ['status'] });
+              await queryClient.invalidateQueries({ queryKey: ['status'] });
+            }}
+          />
+        )}
+
+        {notice && (
+          <div
+            role={notice.tone === 'error' ? 'alert' : 'status'}
+            data-testid="dashboard-action-notice"
+            style={{
+              border: `1px solid ${notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)'}`,
+              color: notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)',
+              borderRadius: 'var(--radius-2)',
+              padding: '10px 12px',
+              fontFamily: 'var(--mono)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            {notice.text}
+          </div>
+        )}
+
+        {/*
+         * Activity — the operator's view of their node's work. One surface
+         * replaces the prior Network · counters / Solving on / In-flight /
+         * Recent / Harness Status quintet. The aggregate counters are gone
+         * (the marketplace explorer is the right place for those); the
+         * detailed per-task table is here so the operator sees *what
+         * happened* on each task. Spec §2.4 Memberships + §2.6 Tasks.
+         */}
+        <ActivityCard joined={joinedNets} tasks={activityTasks} />
+      </div>
+
+      {/* ── RIGHT RAIL ───────────────────────────────────────────────── */}
+      {/*
+        Sticky is gone — Node Health + Wallet combined is too tall to
+        stick on a normal-height viewport, and a sticky overflow makes
+        the column un-scrollable. The aside flows with the page now.
+      */}
+      <aside
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-5)',
         }}
-      />
-      <FundsCard
-        totalEth={gasBalanceEth}
-        runwayDays={gasRunwayDays}
-        actionsDisabled={activeAction !== null}
-        perRole={{
-          // Only masterGas is currently exposed by /v1/status.
-          // Agent + Safe balances are not yet surfaced by the daemon —
-          // tracked as a follow-up task. Show "—" until wired.
-          master: gasBalanceEth,
-          agent: '—',
-          safe: '—',
-        }}
-        lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
-        onTopUp={() =>
-          runAction(
-            'Top up gas',
-            async () => {
-              // Issue #336: one explicit click → exactly one faucet drip.
-              // `singleDrip: true` makes the daemon fire the faucet once and
-              // return immediately — no server-side loop, so the gas number
-              // never "magically" keeps climbing while the Dashboard is open.
-              const res = await api.triggerDrip({ singleDrip: true });
-              if (!res.ok) {
-                throw new Error(res.reason ?? 'Gas top-up failed.');
-              }
-              const txHash = res.txHash ?? res.txHashes?.at(-1);
-              if (!txHash) {
-                return { message: 'Gas top-up checked; the faucet sent no funds.' };
-              }
-              const amount = formatDripEth(res.deltaWei);
-              const txLabel = truncTx(txHash);
-              return {
-                message: amount
-                  ? `Gas topped up: +${amount} · tx ${txLabel}`
-                  : `Gas top-up sent · tx ${txLabel}`,
-              };
-            },
-            // Confirmation is transient — surface it, then fade after ~5s.
-            { autoClearMs: 5_000 },
-          )}
-        onChangePassword={() => {
-          // TODO: wire real password-change flow when the daemon exposes
-          // POST /v1/security/change-password. For now, navigate to the
-          // security settings section (spec §2.3 / §3 security tab).
-          navigate('/operator/security');
-        }}
-      />
-      <RewardsCard
-        claimableJinn={jinnClaimable}
-        // claimedJinnLifetime + lastClaimAt are not yet surfaced by the daemon.
-        // Pass safe defaults — RewardsCard renders "never" for null lastClaimAt
-        // and "0" for empty lifetime. Tracked as a follow-up task.
-        claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
-        lastClaimAt={status?.rewards?.lastClaimAt ?? null}
-        onClaim={() =>
-          runAction('Claim JINN', async () => {
-            const res = await api.claimRewards();
+      >
+        <NodeHealthCard
+          daemonStatus={daemonStatus}
+          daemonStateMessage={daemonStateMessage}
+          rpcStatus={rpcStatus}
+          onStop={async () => {
+            const res = await api.stopDaemon();
             if (!res.ok) {
-              throw new Error(res.error ?? 'Reward claim failed.');
+              throw new Error('Stop request failed.');
             }
-            return { message: 'JINN claim command completed.' };
-          })}
-      />
-      {notice && (
-        <div
-          role={notice.tone === 'error' ? 'alert' : 'status'}
-          data-testid="dashboard-action-notice"
-          style={{
-            border: `1px solid ${notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)'}`,
-            color: notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)',
-            borderRadius: '6px',
-            padding: '10px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
           }}
-        >
-          {notice.text}
-        </div>
-      )}
-
-      {/* Public counters for the active SolverNet surfaced by this operator. */}
-      <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
-
-      {/*
-       * Operator-side state — shown when the operator has joined a SolverNet.
-       * The empty-state ("no SolverNets joined") is handled globally via the
-       * `no_solvernets_joined` notification kind in AppShell's NotificationsList
-       * (Task 1.5 / Task 1.6). No local empty-state rendering here.
-       * Spec §12: `detectJoinedSolverNet` accepts the legacy short-name shape
-       * and the new manifestCid-keyed shape during the Tasks 21/22 migration window.
-       */}
-      {joined && (
-        <OperatorCard
-          name={joined.name}
-          configId={joined.configId}
-          roles={joined.roles}
-          state="live"
-          waitingMessage={waitingMessage}
+          onRestart={async () => {
+            // Pass `forceRespawn: true` so the daemon respawns even when
+            // launched with `--no-ui` (`JINN_NO_UI=1`) — without it the
+            // operator clicks Restart in headless mode and the daemon just
+            // stops. See client/src/restart-daemon.ts.
+            const res = await api.restartDaemon({ forceRespawn: true });
+            if (!res.ok) {
+              throw new Error('Restart request failed.');
+            }
+          }}
         />
-      )}
 
-      {/*
-       * Live activity is a primary Dashboard section (issue #219): an
-       * operator who runs `jinn run` and lands on /overview must see what
-       * their daemon is doing right now without navigating to Settings.
-       * The same surface renders on the dedicated /overview/activity page.
-       */}
-      <ActivitySections />
-
-      <IdentityCard
-        agentId={services[0]?.agentId ?? null}
-        chain="Base Sepolia"
-        safeAddress={services[0]?.safeAddress ?? null}
-        services={services}
-      />
-      <HarnessStatusPanel />
-      <AdvancedDetails />
+        <WalletCard
+          totalEth={gasBalanceEth}
+          runwayDays={gasRunwayDays}
+          actionsDisabled={activeAction !== null}
+          perRole={{
+            // Only masterGas is currently exposed by /v1/status; per-role
+            // drill-down is commented out inside WalletCard. Keep the
+            // values flowing so re-enabling is a one-block restore.
+            master: gasBalanceEth,
+            agent: '—',
+            safe: '—',
+          }}
+          claimableJinn={jinnClaimable}
+          claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
+          lastClaimAt={status?.rewards?.lastClaimAt ?? null}
+          agentId={services[0]?.agentId ?? null}
+          masterAddress={bootstrap?.master_address ?? null}
+          safeAddress={services[0]?.safeAddress ?? null}
+          services={services}
+          lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
+          onTopUp={() =>
+            runAction(
+              'Top up gas',
+              async () => {
+                // Issue #336: one explicit click → exactly one faucet drip.
+                // `singleDrip: true` makes the daemon fire the faucet once and
+                // return immediately — no server-side loop, so the gas number
+                // never "magically" keeps climbing while the Dashboard is open.
+                const res = await api.triggerDrip({ singleDrip: true });
+                if (!res.ok) {
+                  throw new Error(res.reason ?? 'Gas top-up failed.');
+                }
+                const txHash = res.txHash ?? res.txHashes?.at(-1);
+                if (!txHash) {
+                  return { message: 'Gas top-up checked; the faucet sent no funds.' };
+                }
+                const amount = formatDripEth(res.deltaWei);
+                const txLabel = truncTx(txHash);
+                return {
+                  message: amount
+                    ? `Gas topped up: +${amount} · tx ${txLabel}`
+                    : `Gas top-up sent · tx ${txLabel}`,
+                };
+              },
+              // Confirmation is transient — surface it, then fade after ~5s.
+              { autoClearMs: 5_000 },
+            )}
+          onClaim={() =>
+            runAction('Claim JINN', async () => {
+              const res = await api.claimRewards();
+              if (!res.ok) {
+                throw new Error(res.error ?? 'Reward claim failed.');
+              }
+              return { message: 'JINN claim command completed.' };
+            })}
+        />
+      </aside>
     </div>
   );
 }

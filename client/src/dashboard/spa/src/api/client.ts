@@ -134,8 +134,26 @@ export const api = {
       '/api/admin/claim-rewards',
       { method: 'POST' },
     ),
-  restartDaemon: () =>
+  /**
+   * Trigger a daemon restart. The Node Health card's Restart button passes
+   * `forceRespawn: true` so the daemon comes back even under a supervisor
+   * (`JINN_NO_UI=1`) — without it the operator clicks Restart in `--no-ui`
+   * mode and the daemon stops dead. Other callers (MCP tools, config-change
+   * flows) leave `forceRespawn` unset so the supervisor keeps its contract.
+   */
+  restartDaemon: (opts?: { forceRespawn?: boolean }) =>
     jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/restart', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(opts ?? {}),
+    }),
+  /**
+   * Stop the daemon process. The operator clicked Stop; the daemon exits and
+   * stays down until they explicitly start it again (from the terminal,
+   * since there's no out-of-band Start endpoint by design).
+   */
+  stopDaemon: () =>
+    jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/stop', {
       method: 'POST',
     }),
   getSolverNets: () => jfetch<SolverNetsCatalogResponse>('/v1/solvernets'),

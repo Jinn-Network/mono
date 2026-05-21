@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { Router } from 'wouter';
+import { memoryLocation } from 'wouter/memory-location';
+import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './ActivityCard.js';
+
+function wrap(ui: JSX.Element, initial = '/overview'): {
+  hook: ReturnType<typeof memoryLocation>['hook'];
+  history: string[];
+  ui: JSX.Element;
+} {
+  const memory = memoryLocation({ path: initial, record: true });
+  return { hook: memory.hook, history: memory.history, ui: <Router hook={memory.hook}>{ui}</Router> };
+}
+
+const joined: ActivityJoinedNet[] = [
+  {
+    name: 'SWE-rebench v2',
+    manifestCid: 'bafkreiswe',
+    roles: ['solver', 'evaluator'],
+    harness: 'hermes-agent',
+    model: 'minimax-m2.7',
+    plugins: ['@jinn-network/network-tools@0.1.0', 'swe-rebench-v2-runtime@0.1.0'],
+  },
+];
+
+const baseTask: ActivityTask = {
+  requestId: '0xabc1234567890abcdef',
+  manifestCid: 'bafkreiswe',
+  taskRole: 'restoration',
+  state: 'COMPLETE',
+  implName: 'hermes-agent',
+  windowStartTs: Date.now() - 120_000,
+  stateUpdatedAt: Date.now() - 60_000,
+  deliveryTxHash: null,
+};
+
+describe('ActivityCard', () => {
+  it('renders the three regions: joined list, tasks table, settings', () => {
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={[baseTask]} />);
+    render(ui);
+    expect(screen.getByText(/^activity$/i)).toBeTruthy();
+    expect(screen.getByTestId('activity-joined')).toBeTruthy();
+    expect(screen.getByTestId('activity-tasks')).toBeTruthy();
+    expect(screen.getByTestId('activity-settings')).toBeTruthy();
+  });
+
+  it('lists joined SolverNets and selects the first one by default', () => {
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
+    render(ui);
+    const row = screen.getByTestId('activity-joined-row-bafkreiswe');
+    expect(row.getAttribute('aria-current')).toBe('true');
+    expect(row.textContent).toBe('SWE-rebench v2');
+  });
+
+  it('navigates to /operator/registry when "Join more SolverNets" is clicked', () => {
+    const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
+    render(ui);
+    fireEvent.click(screen.getByTestId('activity-join-more'));
+    expect(history.at(-1)).toBe('/operator/registry');
+  });
+
+  it('navigates to /operator/memberships when Settings · Edit is clicked', () => {
+    const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
+    render(ui);
+    fireEvent.click(screen.getByTestId('activity-settings-edit'));
+    expect(history.at(-1)).toBe('/operator/memberships');
+  });
+
+  it('renders task rows from the input, showing role + state + relative time', () => {
+    const tasks: ActivityTask[] = [
+      { ...baseTask, requestId: 'task-a', state: 'COMPLETE', taskRole: 'restoration' },
+      { ...baseTask, requestId: 'task-b', state: 'FAILED', taskRole: 'evaluation' },
+      { ...baseTask, requestId: 'task-c', state: 'RUNNING', taskRole: 'restoration' },
+    ];
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
+    render(ui);
+    const table = screen.getByTestId('activity-tasks-table');
+    expect(table.textContent).toContain('task-a');
+    expect(table.textContent).toContain('task-b');
+    expect(table.textContent).toContain('task-c');
+    expect(table.textContent).toMatch(/complete/i);
+    expect(table.textContent).toMatch(/failed/i);
+    expect(table.textContent).toMatch(/running/i);
+    expect(table.textContent).toMatch(/solver/i);
+    expect(table.textContent).toMatch(/evaluator/i);
+  });
+
+  it('renders the empty-tasks state when there are no task runs', () => {
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
+    render(ui);
+    expect(screen.queryByTestId('activity-tasks-table')).toBeNull();
+    expect(screen.getByTestId('activity-tasks').textContent).toMatch(/no task runs/i);
+  });
+
+  it('renders the settings panel with roles, harness, model, and plugins for the selected SolverNet', () => {
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
+    render(ui);
+    const settings = screen.getByTestId('activity-settings');
+    expect(settings.textContent).toMatch(/roles/i);
+    expect(settings.textContent).toMatch(/solver/i);
+    expect(settings.textContent).toMatch(/evaluator/i);
+    expect(settings.textContent).toMatch(/harness/i);
+    expect(settings.textContent).toContain('hermes-agent');
+    expect(settings.textContent).toMatch(/model/i);
+    expect(settings.textContent).toContain('minimax-m2.7');
+    expect(settings.textContent).toMatch(/plugins/i);
+    expect(settings.textContent).toContain('@jinn-network/network-tools@0.1.0');
+    expect(settings.textContent).toContain('swe-rebench-v2-runtime@0.1.0');
+  });
+
+  it('renders model/plugins placeholders when the selected net is missing them', () => {
+    const minimal: ActivityJoinedNet[] = [
+      { name: 'SparseNet', manifestCid: 'bafsparse', roles: ['solver'] },
+    ];
+    const { ui } = wrap(<ActivityCard joined={minimal} tasks={[]} />);
+    render(ui);
+    const settings = screen.getByTestId('activity-settings');
+    // Model line still renders, just dimmed with the em-dash placeholder.
+    expect(settings.textContent).toContain('—');
+    // Plugins section reports "None" when the array is empty/undefined.
+    expect(settings.textContent).toMatch(/plugins/i);
+    expect(settings.textContent).toMatch(/none/i);
+  });
+
+  it('handles the no-SolverNets-joined state gracefully', () => {
+    const { ui } = wrap(<ActivityCard joined={[]} tasks={[]} />);
+    render(ui);
+    expect(screen.getByTestId('activity-joined').textContent).toMatch(/no solvernets joined/i);
+    expect(screen.getByTestId('activity-settings').textContent).toMatch(/no solvernet selected/i);
+    // The "Join more SolverNets" button is still available so the operator can act.
+    expect(screen.getByTestId('activity-join-more')).toBeTruthy();
+  });
+});

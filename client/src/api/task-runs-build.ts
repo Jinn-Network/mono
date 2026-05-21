@@ -1,7 +1,15 @@
 import type { Store } from '../store/store.js';
 import { TaskRunPersistence, type PersistedTaskRun } from '../harnesses/engine/persistence.js';
 
-const RECENT_LIMIT = 10;
+/**
+ * Cap on how many task runs the /v1/status payload carries. The operator
+ * dashboard's Activity table reads this slice; 10 was too tight (an operator
+ * with 20+ tasks on the SolverNet would see 6 after dedup against
+ * `predictionV1.recentTasks` + filtering by manifestCid). 50 gives enough
+ * runway for normal browsing without paginating. Bump when this becomes
+ * the bottleneck again — pagination is the eventual right answer.
+ */
+const RECENT_LIMIT = 50;
 
 export interface TaskRunSummary {
   requestId: string;

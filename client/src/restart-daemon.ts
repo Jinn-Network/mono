@@ -53,6 +53,14 @@ export interface RequestDaemonRestartOptions {
    * Defaults to 250ms per the issue body. Tests can pass 0 for synchrony.
    */
   exitDelayMs?: number;
+  /**
+   * Bypass the headless gate. The operator-dashboard Restart button passes
+   * this — when the operator clicks Restart, they explicitly want the
+   * daemon to come back, even under a supervisor. Supervisor-driven
+   * restart flows (MCP tools, signals) leave this `false` so the
+   * supervisor stays in charge.
+   */
+  forceRespawn?: boolean;
 }
 
 /**
@@ -85,7 +93,7 @@ export function requestDaemonRestart(
   const log = opts.log ?? ((message: string) => console.log(message));
   const exitDelayMs = opts.exitDelayMs ?? 250;
 
-  if (isHeadless(env)) {
+  if (isHeadless(env) && !opts.forceRespawn) {
     log(
       '[main] Restart requested via operator MCP, but JINN_NO_UI=1 — exiting without respawn (let the supervisor decide).',
     );

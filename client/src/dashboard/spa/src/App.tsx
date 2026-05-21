@@ -11,7 +11,6 @@ import { TopTabs } from './shell/TopTabs.js';
 import { AgentRail } from './shell/AgentRail.js';
 import { RestartPendingContext } from './shell/RestartPendingContext.js';
 import { OverviewPage } from './pages/Overview.js';
-import { OverviewActivityPage } from './pages/OverviewActivity.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
@@ -66,7 +65,6 @@ export default function App(): JSX.Element {
   }
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
-  const masterAddress = data.master_address ?? '';
 
   // Issue #327: the builder surfaces (/build route + Build top-tab) are hidden
   // until the operator-app first-run UX is solid. The plug-in substrate stays
@@ -82,12 +80,11 @@ export default function App(): JSX.Element {
     <RestartPendingContext.Provider value={restartCtx}>
       <Router>
         <AppShell
-          header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
+          header={<Header network={network} />}
           tabs={<TopTabs />}
           rail={embeddedAgent ? <AgentRail /> : undefined}
         >
           <Switch>
-            <Route path="/overview/activity"><OverviewActivityPage /></Route>
             <Route path="/overview" component={OverviewPage} />
             <Route path="/operator/join/:cid"><JoinFlow /></Route>
             <Route path="/operator/execution-data"><CapturesTab /></Route>
