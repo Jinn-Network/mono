@@ -120,11 +120,12 @@ describe('App routes', () => {
         '/overview',
       ),
     );
-    // Overview renders the Node Health card in the right rail plus FundsCard / RewardsCard peer cards.
+    // Overview renders the Node Health card in the right rail and the
+    // consolidated Wallet card (Gas + Rewards + Identity + Password) in
+    // the main column.
     expect(screen.getByText(/^node health$/i)).toBeTruthy();
-    // Rewards eyebrow is now in RewardsCard (Task 3.3); Funds eyebrow is in FundsCard.
+    expect(screen.getByText(/^wallet$/i)).toBeTruthy();
     expect(screen.getByText(/^rewards$/i)).toBeTruthy();
-    expect(screen.getByText(/^funds$/i)).toBeTruthy();
   });
 
   it('renders OverviewActivityPage on /overview/activity', async () => {

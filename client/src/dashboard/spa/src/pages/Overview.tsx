@@ -1,13 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'wouter';
 import { api } from '../api/client.js';
-import { FundsCard } from './overview/FundsCard.js';
-import { RewardsCard } from './overview/RewardsCard.js';
+import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard } from './overview/OperatorCard.js';
-import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
 import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
 import {
   detectJoinedSolverNet,
@@ -209,7 +206,6 @@ function EvictionBanner({
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
-  const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { data: status, isError: statusIsError } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
@@ -375,18 +371,25 @@ export function OverviewPage(): JSX.Element {
           />
         )}
 
-        <FundsCard
+        <WalletCard
           totalEth={gasBalanceEth}
           runwayDays={gasRunwayDays}
           actionsDisabled={activeAction !== null}
           perRole={{
-            // Only masterGas is currently exposed by /v1/status.
-            // Agent + Safe balances are not yet surfaced by the daemon —
-            // tracked as a follow-up task. Show "—" until wired.
+            // Only masterGas is currently exposed by /v1/status; per-role
+            // drill-down is commented out inside WalletCard. Keep the
+            // values flowing so re-enabling is a one-block restore.
             master: gasBalanceEth,
             agent: '—',
             safe: '—',
           }}
+          claimableJinn={jinnClaimable}
+          claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
+          lastClaimAt={status?.rewards?.lastClaimAt ?? null}
+          agentId={services[0]?.agentId ?? null}
+          chain="Base Sepolia"
+          safeAddress={services[0]?.safeAddress ?? null}
+          services={services}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
           onTopUp={() =>
             runAction(
@@ -415,20 +418,6 @@ export function OverviewPage(): JSX.Element {
               // Confirmation is transient — surface it, then fade after ~5s.
               { autoClearMs: 5_000 },
             )}
-          onChangePassword={() => {
-            // TODO: wire real password-change flow when the daemon exposes
-            // POST /v1/security/change-password. For now, navigate to the
-            // security settings section (spec §2.3 / §3 security tab).
-            navigate('/operator/security');
-          }}
-        />
-        <RewardsCard
-          claimableJinn={jinnClaimable}
-          // claimedJinnLifetime + lastClaimAt are not yet surfaced by the daemon.
-          // Pass safe defaults — RewardsCard renders "never" for null lastClaimAt
-          // and "0" for empty lifetime. Tracked as a follow-up task.
-          claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
-          lastClaimAt={status?.rewards?.lastClaimAt ?? null}
           onClaim={() =>
             runAction('Claim JINN', async () => {
               const res = await api.claimRewards();
@@ -482,12 +471,6 @@ export function OverviewPage(): JSX.Element {
          */}
         <ActivitySections />
 
-        <IdentityCard
-          agentId={services[0]?.agentId ?? null}
-          chain="Base Sepolia"
-          safeAddress={services[0]?.safeAddress ?? null}
-          services={services}
-        />
         <HarnessStatusPanel />
       </div>
 

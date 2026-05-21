@@ -557,19 +557,26 @@ describe('OverviewPage empty-state gating', () => {
     });
     const { history } = renderOverviewWithMemory();
 
-    // Funds + Rewards now live in FundsCard + RewardsCard (Task 3.3).
-    expect(await screen.findByText(/funds/i)).toBeTruthy();
-    expect(await screen.findByText(/rewards/i)).toBeTruthy();
+    // Funds + Rewards + Identity were consolidated into the single Wallet card.
+    expect(await screen.findByText(/^wallet$/i)).toBeTruthy();
+    expect(screen.getByTestId('wallet-section-gas')).toBeTruthy();
+    expect(screen.getByTestId('wallet-section-rewards')).toBeTruthy();
     expect(screen.queryByText(/quick actions/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /manage wallet/i })).toBeNull();
 
-    // RewardsCard "Claim" button (replaces HeroStats "Claim now").
-    // The pending rewards are 1 JINN (1e18 wei) so the button is enabled.
-    fireEvent.click(screen.getByRole('button', { name: /^claim$/i }));
+    // Claim button inside the Wallet card. Wait for the status fetch to
+    // populate the rewards balance — the button starts disabled while
+    // claimableJinn is "—" (pre-fetch) and enables once it parses > 0.
+    await waitFor(() =>
+      expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(screen.getByTestId('wallet-claim'));
     await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
 
-    // FundsCard "Top up" button (replaces HeroStats "Top up").
-    fireEvent.click(screen.getByRole('button', { name: /^top up$/i }));
+    // Top up button inside the Wallet card. The full label is
+    // "Top up from faucet (free)" — we target by testId to avoid coupling
+    // to copy.
+    fireEvent.click(screen.getByTestId('wallet-topup'));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
     // Restart-from-Overview was retired with the HeroStats Status tile.
@@ -609,7 +616,7 @@ describe('OverviewPage gas top-up', () => {
     });
     render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
+    const topUpButton = await screen.findByTestId('wallet-topup');
     fireEvent.click(topUpButton);
 
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
@@ -630,7 +637,7 @@ describe('OverviewPage gas top-up', () => {
     });
     const { rerender } = render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
+    const topUpButton = await screen.findByTestId('wallet-topup');
     fireEvent.click(topUpButton);
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
@@ -656,7 +663,7 @@ describe('OverviewPage gas top-up', () => {
     });
     render(withProviders(<OverviewPage />));
 
-    fireEvent.click(await screen.findByRole('button', { name: /top up/i }));
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
 
     const notice = await screen.findByTestId('dashboard-action-notice');
     expect(notice.textContent).toMatch(/0\.005000 ETH/);
@@ -674,13 +681,13 @@ describe('OverviewPage gas top-up', () => {
     );
     render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
+    const topUpButton = await screen.findByTestId('wallet-topup');
     fireEvent.click(topUpButton);
 
     // While the faucet call is unresolved the button must be disabled.
     // FundsCard disables the button (via actionsDisabled) rather than relabelling it.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /^top up$/i })).toHaveProperty('disabled', true),
+      expect(screen.getByTestId('wallet-topup')).toHaveProperty('disabled', true),
     );
 
     resolveDrip({
@@ -693,7 +700,7 @@ describe('OverviewPage gas top-up', () => {
 
     // After resolution the button re-enables and the confirmation shows.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /top up/i })).toHaveProperty('disabled', false),
+      expect(screen.getByTestId('wallet-topup')).toHaveProperty('disabled', false),
     );
     expect((await screen.findByTestId('dashboard-action-notice')).textContent).toMatch(/tx 0xabc0…1234/);
   });
@@ -708,7 +715,7 @@ describe('OverviewPage gas top-up', () => {
     });
     render(withProviders(<OverviewPage />));
 
-    fireEvent.click(await screen.findByRole('button', { name: /top up/i }));
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
 
     const notice = await screen.findByRole('alert');
     expect(notice.textContent).toMatch(/rate limited/i);
