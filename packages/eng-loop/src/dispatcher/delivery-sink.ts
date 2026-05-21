@@ -1,14 +1,5 @@
 import type { SessionResult } from './types.js';
-import type { CommandRunner } from './issue-source.js';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-
-const defaultRunner: CommandRunner = async (cmd, args) => {
-  const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 10 * 1024 * 1024 });
-  return stdout;
-};
+import { type CommandRunner, defaultRunner } from './issue-source.js';
 
 /**
  * SEAM: what happens to finished work.

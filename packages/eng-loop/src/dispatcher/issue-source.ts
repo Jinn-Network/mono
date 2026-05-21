@@ -123,7 +123,7 @@ function parseStatus(val: string | undefined): ProjectStatus | null {
 // Default real CommandRunner
 // ---------------------------------------------------------------------------
 
-const defaultRunner: CommandRunner = async (cmd, args) => {
+export const defaultRunner: CommandRunner = async (cmd, args) => {
   const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 10 * 1024 * 1024 });
   return stdout;
 };

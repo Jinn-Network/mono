@@ -6,9 +6,7 @@
  *   yarn eng:loop --dry-run   # one cycle, no mutations, prints the CycleReport
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { GhIssueSource } from '../src/dispatcher/issue-source.js';
+import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
 import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
@@ -18,23 +16,12 @@ import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { ReadyIssue } from '../src/dispatcher/types.js';
 import { spawn } from 'node:child_process';
 
-const execFileAsync = promisify(execFile);
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const INTERVAL_MS = 60_000; // 1 minute between cycles
 const REPO = 'Jinn-Network/mono';
-
-// ---------------------------------------------------------------------------
-// Real CommandRunner (shared across all real gh/git calls)
-// ---------------------------------------------------------------------------
-
-async function realRunner(cmd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 10 * 1024 * 1024 });
-  return stdout;
-}
 
 // ---------------------------------------------------------------------------
 // countOpenReadyPrs — count open PRs awaiting merge ("In Review" on the board)
