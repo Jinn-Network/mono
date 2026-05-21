@@ -30,7 +30,7 @@ import { SECRET_NAME_PATTERNS } from '../trajectory/secret-scrub.js';
  * stripped. Recorded in `bundle-meta.json` so a bundle can be read against
  * the redaction rules that produced it.
  */
-export const REDACTION_VERSION = '1';
+export const REDACTION_VERSION = '2';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -162,6 +162,22 @@ function isRpcUrlKey(key: string): boolean {
   return /rpc[_-]?url$/i.test(key) || /(^|[._-])rpcurl$/i.test(key);
 }
 
+/**
+ * Keys whose values are public on-chain identifiers — request IDs, transaction
+ * hashes, task IDs, block / manifest hashes. These are `0x`-64-hex shaped, so
+ * the string-shape `hex64` redactor (which cannot tell a private key from a
+ * public hash by shape) would otherwise strip them. They are public and
+ * load-bearing for debugging — the bundle keeps them so events correlate to
+ * on-chain state. A private key is never legitimately stored under one of
+ * these names; `isSecretName` still catches `privateKey` / `mnemonic` / etc.
+ */
+const PUBLIC_IDENTIFIER_KEY_RE =
+  /(^|\.)(request\.id|tx\.hash|task\.id|block\.hash|manifest\.(digest|hash)|hash)$/;
+
+function isPublicIdentifierKey(key: string): boolean {
+  return PUBLIC_IDENTIFIER_KEY_RE.test(canonicalizeKey(key));
+}
+
 // ── Deep value redaction ─────────────────────────────────────────────────────
 
 /**
@@ -170,7 +186,9 @@ function isRpcUrlKey(key: string): boolean {
  *
  * - Object keys matching a secret-name pattern -> value replaced with a marker.
  * - Object keys holding an RPC URL -> value run through `redactRpcUrl`.
- * - Any string value -> secret-shaped substrings stripped.
+ * - Object keys holding a public on-chain identifier (request id / tx hash) ->
+ *   value kept verbatim, exempt from string-shape `hex64` redaction.
+ * - Any other string value -> secret-shaped substrings stripped.
  * - Arrays and nested objects are walked recursively.
  */
 export function redactValue(value: unknown): unknown {
@@ -187,6 +205,14 @@ export function redactValue(value: unknown): unknown {
       }
       if (typeof v === 'string' && isRpcUrlKey(k)) {
         out[k] = redactRpcUrl(v);
+        continue;
+      }
+      if (typeof v === 'string' && isPublicIdentifierKey(k)) {
+        // Public on-chain identifier (request id / tx hash / ...). Kept
+        // verbatim — the string-shape hex64 pass cannot tell it from a
+        // private key, and stripping it would break event-to-chain
+        // correlation in the debug bundle.
+        out[k] = v;
         continue;
       }
       out[k] = redactValue(v);
@@ -243,6 +269,9 @@ export function buildRedactionReport(): string {
     '',
     '- Wallet addresses (`0x` + 40 hex) — public on-chain identifiers.',
     '- Contract and deployment addresses — public.',
+    '- Request IDs, transaction hashes, and other public on-chain identifiers',
+    '  held in structured `requestId` / `txHash`-style fields — kept so bundle',
+    '  events can be correlated to on-chain state.',
     '- RPC hostnames and coarse path shape — needed to reproduce a network',
     '  or connectivity problem. Only the credential portion is removed.',
     '- File paths (database, earning directory, config) — needed to locate',

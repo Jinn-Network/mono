@@ -129,6 +129,49 @@ describe('redactValue — secret-shaped string values regardless of key name', (
   });
 });
 
+describe('redactValue — public on-chain identifiers kept (issue #420 over-redaction fix)', () => {
+  it('keeps a 0x-64 hex requestId verbatim', () => {
+    const reqId = '0x' + '12'.repeat(32);
+    const out = redactValue({ requestId: reqId, kind: 'claimed' }) as Record<string, unknown>;
+    expect(out['requestId']).toBe(reqId);
+  });
+
+  it('keeps txHash and deliveryTxHash verbatim', () => {
+    const tx = '0x' + '34'.repeat(32);
+    const out = redactValue({ txHash: tx, deliveryTxHash: tx }) as Record<string, unknown>;
+    expect(out['txHash']).toBe(tx);
+    expect(out['deliveryTxHash']).toBe(tx);
+  });
+
+  it('keeps request_id / tx_hash snake_case variants verbatim', () => {
+    const h = '0x' + '56'.repeat(32);
+    const out = redactValue({ request_id: h, tx_hash: h }) as Record<string, unknown>;
+    expect(out['request_id']).toBe(h);
+    expect(out['tx_hash']).toBe(h);
+  });
+
+  it('keeps public identifiers verbatim inside arrays of event objects', () => {
+    const reqId = '0x' + '78'.repeat(32);
+    const out = redactValue({
+      events: [{ id: 1, requestId: reqId, txHash: null }],
+    }) as { events: Array<{ requestId: unknown }> };
+    expect(out.events[0]?.requestId).toBe(reqId);
+  });
+
+  it('still redacts a 0x-64 hex value in a free-text detail field', () => {
+    const planted = '0x' + 'ef'.repeat(32);
+    const out = redactValue({ detail: `delivered with key ${planted}` }) as Record<string, unknown>;
+    expect(String(out['detail'])).not.toContain(planted);
+    expect(String(out['detail'])).toMatch(/redacted/i);
+  });
+
+  it('still redacts a 0x-64 hex value under a non-identifier key', () => {
+    const planted = '0x' + 'ab'.repeat(32);
+    const out = redactValue({ note: planted }) as Record<string, unknown>;
+    expect(String(out['note'])).toMatch(/redacted/i);
+  });
+});
+
 describe('redactValue — recursion into nested structures and arrays', () => {
   it('redacts secrets inside nested objects', () => {
     const out = redactValue({
