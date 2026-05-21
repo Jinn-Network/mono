@@ -24,21 +24,29 @@ The "what does this scenario actually exercise" contracts live in `testing-jinn-
 
 ## T2.2 — producer-evaluator-anvil-fork
 
-**Catches:** Claim → solve → deliver → evaluate loop regressions; activity-counter incorrectness; verdict pipeline mechanics.
+**Catches:** producer → solve → deliver → evaluate → verdict loop regressions; on-chain activity-counter incorrectness; the verdict pipeline end-to-end through a real daemon.
 
 **Contract:** [`testing-jinn-app/references/scenario-producer-evaluator.md`](../../testing-jinn-app/references/scenario-producer-evaluator.md)
 
 **Implementation:** `client/test/release/tier-2/T2.2-producer-evaluator.ts`
 
-**Wall-clock budget:** 5 minutes
+**Wall-clock budget:** ~18 minutes
+
+**Approach (real on-chain loop, per GH issue [#350](https://github.com/Jinn-Network/mono/issues/350)):** T2.2 drives the producer/evaluator loop the way the protocol actually works — there is no HTTP task-control plane and none should exist. It composes the `yarn e2e:daemon-harness` helpers (`client/test/e2e/_daemon-harness-helpers.ts`):
+
+- Forks Base into Anvil and deploys a fresh JinnRouter V3 task stack (`deployMinimalV3Stack`) — the production V1 router has no `createTask` interface.
+- Bootstraps two staked operators via the real `FleetBootstrapper` — op-a (producer/solver) and op-b (evaluator); `deployOperatorMech` gives op-b its own mock mech so the V3 `claimEvaluation` operator check passes.
+- Posts a `prediction.v1` task on-chain via `createTask` (`postPredictionV1Task`). prediction.v1 is used because its baseline solver and `PredictionV1Evaluator` are deterministic and need no Docker/LLM key — keeping the gate deterministic and cheap.
+- op-a's daemon claims + solves + delivers on-chain (`waitForDaemonClaim`, `waitForDelivery`); op-b's daemon discovers the on-chain solution, claims the evaluation request, runs the real evaluator, and settles a verdict on-chain (`waitForVerdict`, the genuinely-new leg).
+- The evaluator resolves the fixture market against an in-process mock Polymarket Gamma server (`startMockPolymarketGammaServer`), so the verdict is deterministic and offline — the market resolves YES → `verdictCode === 1` (Pass).
+- Asserts the on-chain `verdictCode` and that `eligibleActivityWeight` incremented for both operators (the on-chain source of truth, not the `GET /v1/status` mirror).
 
 **Prerequisites:**
-- Substrate workspace via Plan A's `substrate-copy`.
-- Stubbed harness via `JINN_HARNESS_STUB_INSTANCE` env (Task 3).
-- SWE-rebench v2 fixture at `client/test/release/tier-2/fixtures/` (Task 4).
-- Daemon endpoints: `/v1/tasks`, `/v1/tasks/:id`, `/v1/verdicts`, `/v1/activity`.
+- Foundry (`anvil`, `forge`) on PATH.
+- An Anvil-forkable Base RPC (`BASE_RPC_URL`, defaults to the public `https://mainnet.base.org`).
+- Compiled `contracts/` artifacts — `compileContracts` builds them at runtime.
 
-**Current status (v0.1.6):** Returns `verdict=skip` because `POST /v1/tasks` is not present (real task posting goes via on-chain Mech Marketplace, not HTTP). Activity surfaces via `GET /v1/status` rather than a standalone `/v1/activity`. See GH issue [#350](https://github.com/Jinn-Network/mono/issues/350).
+The substrate multi-op workspace from `setupTier2Scenario` is **not** used: those production daemons are pinned to the already-deployed Base Sepolia contracts and cannot be redirected at a freshly-deployed V3 router. The two in-process daemon-harness daemons can be, and the two-operator shape preserves the producer/evaluator contract. T2.2 returns `pass`/`fail` only — the missing-endpoint skip path is removed.
 
 ## T2.3 — multi-op-spa-flow
 
@@ -84,7 +92,8 @@ This should keep one Tier 2 run under the per-key rate limit. Concurrent Tier 2 
 | Ponder spawn timeout | flake-infra (env) or real-bug (Ponder config) | Inspect Ponder logs |
 | Daemon endpoint 4xx/5xx unrelated to scenario | real-bug | BLOCKING — API surface regression |
 | Cross-op visibility lag exceeds budget | flake-timing | Retry once with extended timeout |
-| Verdict mismatch in T2.2 | real-bug | BLOCKING — substrate/scoring regression |
+| On-chain `verdictCode` not 1 in T2.2 | real-bug | BLOCKING — `PredictionV1Evaluator` scoring regression |
+| T2.2 op never claims/delivers/settles within budget | real-bug or flake-timing | inspect evidence log; flake on first, real-bug on retry |
 | Playwright selector miss in T2.3 | real-bug | UI changed without test-id update |
 
 ## Invocation
