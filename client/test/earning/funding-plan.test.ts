@@ -129,7 +129,9 @@ describe('planFleetFunding (read-only funding plan)', () => {
     await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'pw'));
     await store.save({ ...createDefaultFleetState('base'), master_address: masterAddress });
 
-    const getBalance = vi.fn(async () => 10_000_000_000_000_000n); // 0.01 ETH > 0.005
+    // Pre-Stage-1 (fleet_stage === 'none') the gate is
+    // STAGE1_AGENT_ETH (0.01) + minEoaGasEth (0.005) = 0.015 ETH (jinn-mono-u34i).
+    const getBalance = vi.fn(async () => 15_000_000_000_000_000n); // 0.015 ETH
     const plan = await planFleetFunding({
       earningDir,
       chain: 'base',
@@ -153,7 +155,7 @@ describe('planFleetFunding (read-only funding plan)', () => {
     await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'pw'));
     await store.save({ ...createDefaultFleetState('base'), master_address: masterAddress });
 
-    const getBalance = vi.fn(async () => 1_000_000_000_000_000n); // 0.001 ETH < 0.010
+    const getBalance = vi.fn(async () => 1_000_000_000_000_000n); // 0.001 ETH < 0.015
     const plan = await planFleetFunding({
       earningDir,
       chain: 'base',
@@ -166,8 +168,9 @@ describe('planFleetFunding (read-only funding plan)', () => {
     expect(plan.partial).toBe(false);
     expect(plan.master?.master_address).toBe(masterAddress);
     expect(plan.master?.eth_balance).toBe('1000000000000000');
-    // shortfall = 0.010 - 0.001 = 0.009 ETH
-    expect(plan.master?.eth_required).toBe('9000000000000000');
+    // Pre-Stage-1 gate is STAGE1_AGENT_ETH (0.01) + minEoaGasEth (0.005) =
+    // 0.015 ETH (jinn-mono-u34i). shortfall = 0.015 - 0.001 = 0.014 ETH.
+    expect(plan.master?.eth_required).toBe('14000000000000000');
   });
 
   it('does not call any mutating method on the fleet store', async () => {

@@ -4,8 +4,8 @@ import type { PredictionV1Task } from '../../../src/types/prediction-v1.js';
 import type { Task } from '../../../src/types/task.js';
 import { signCanonical } from '../../../src/harnesses/engine/signing.js';
 import {
-  RESTORATION_ENVELOPE_CID_CONTEXT_KEY,
-  RESTORATION_TASK_CID_CONTEXT_KEY,
+  SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
+  SOLUTION_TASK_CID_CONTEXT_KEY,
 } from '../../../src/harnesses/impls/evaluation-context.js';
 
 /** A deterministic test CID stand-in. Real CIDs are 46+ chars; this is fine
@@ -106,10 +106,10 @@ export async function makeSignedSolutionEnvelope(
   const unsigned = {
     schemaVersion: 'jinn.execution.v1' as const,
     solverType: 'prediction.v1',
-    role: 'restoration' as const,
+    role: 'solution' as const,
     generatedAt: Date.parse('2026-05-02T01:00:00.000Z'),
     task: {
-      cid: 'bafy-restoration-task',
+      cid: 'bafy-solution-task',
       onchainCreationTx: `0x${'0'.repeat(64)}` as `0x${string}`,
       onchainCreationBlock: 1,
       requestId: `0x${'1'.repeat(64)}` as `0x${string}`,
@@ -154,8 +154,8 @@ export function makeEvalTask(task: PredictionV1Task, envelope: SignedEnvelope): 
     restorationRequestId: `0x${'9'.repeat(64)}`,
     context: {
       restorationResult: JSON.stringify(envelope),
-      [RESTORATION_TASK_CID_CONTEXT_KEY]: envelope.task.cid,
-      [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-solution-envelope',
+      [SOLUTION_TASK_CID_CONTEXT_KEY]: envelope.task.cid,
+      [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-solution-envelope',
     },
   } as Task;
 }

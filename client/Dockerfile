@@ -33,9 +33,14 @@ RUN corepack enable && cd client && yarn install --immutable
 COPY packages/sdk/tsconfig.json ./packages/sdk/
 COPY packages/sdk/src/ ./packages/sdk/src/
 
-# Copy source and bundled deployment artifacts
+# Copy source and bundled deployment artifacts. `client/docs/` is needed at
+# build time because the /build SPA page (hfmf) embeds `quickstart.md` via a
+# Vite `?raw` import — `client/src/dashboard/spa/src/pages/build/IntroCard.tsx`
+# resolves `../../../../../../docs/build/quickstart.md` relative to itself,
+# which lands at `/app/client/docs/build/quickstart.md` inside the build stage.
 COPY client/src/ ./client/src/
 COPY client/deployments/ ./client/deployments/
+COPY client/docs/ ./client/docs/
 COPY client/plugins/ ./client/plugins/
 COPY client/scripts/ ./client/scripts/
 COPY client/templates/ ./client/templates/

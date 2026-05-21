@@ -1051,3 +1051,51 @@ describe('capture config', () => {
     expect(cfg.captures.llmProxy).toEqual({ enabled: true, port: 7451 });
   });
 });
+
+describe('hermes config keys', () => {
+  const dirs: string[] = [];
+  const HERMES_ENV_KEYS = [
+    'JINN_HERMES_PATH',
+    'JINN_HERMES_MODEL',
+    'JINN_HERMES_PROVIDER',
+    'JINN_HERMES_DOCTOR_TIMEOUT_MS',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+  for (const k of HERMES_ENV_KEYS) saved[k] = process.env[k];
+
+  afterEach(async () => {
+    for (const k of HERMES_ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-hermes-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('loads hermesPath / hermesModel / hermesProvider from config file', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      hermesPath: '/usr/local/bin/hermes',
+      hermesModel: 'anthropic/claude-opus-4.6',
+      hermesProvider: 'anthropic',
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.hermesPath).toBe('/usr/local/bin/hermes');
+    expect(cfg.hermesModel).toBe('anthropic/claude-opus-4.6');
+    expect(cfg.hermesProvider).toBe('anthropic');
+  });
+
+  it('env vars override hermes config values', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    process.env['JINN_HERMES_PATH'] = '/opt/hermes/bin/hermes';
+    const cfg = loadConfig(configPath);
+    expect(cfg.hermesPath).toBe('/opt/hermes/bin/hermes');
+  });
+});

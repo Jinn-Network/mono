@@ -28,6 +28,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
+// addHarnessReadinessRoutes is wired through startApiServer's holder ref now
+// (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiToken } from './api/ui-token.js';
@@ -44,8 +46,6 @@ import {
 import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
-import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
-import { configRequiresClaudeAuth } from './preflight/claude-required.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
@@ -72,8 +72,10 @@ import {
 import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, harnessStateDirName } from './harnesses/names.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import type { Harness } from './harnesses/types.js';
+import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
+import type { JinnConfig } from './config.js';
 import { createClients } from './adapters/mech/safe.js';
 import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
@@ -498,10 +500,10 @@ async function bootstrap(): Promise<{
   });
 
   const fundingStartedAt = Date.now();
-  let result: Awaited<ReturnType<typeof bootstrapper.bootstrap>>;
+  let result: Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>;
   let lastFundingMessage = '';
   const fundingGatePath = join(config.earningDir, 'bootstrap-funding.json');
-  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.bootstrap>>['funding']>): void => {
+  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>['funding']>): void => {
     mkdirSync(config.earningDir, { recursive: true, mode: 0o700 });
     writeFileSyncMain(fundingGatePath, `${JSON.stringify({
       schemaVersion: 1,
@@ -519,7 +521,7 @@ async function bootstrap(): Promise<{
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    result = await bootstrapper.bootstrap(PASSWORD);
+    result = await bootstrapper.ensureStage1And2(PASSWORD);
     if (!result.funding) {
       clearFundingGate();
       break;
@@ -906,6 +908,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./api/solvernets-endpoints.js').SolverNetsEndpointsDeps | undefined;
   } = { current: undefined };
 
+  // jinn-mono-u34i: same pattern for the harness readiness registry. The
+  // registry is built post-bootstrap (depends on the keystore being
+  // available), but the routes must be registered at server start to land in
+  // Hono's matcher before the panel's first poll. Late-mounting via
+  // `addHarnessReadinessRoutes(setupApiServer.app, ...)` after the panel had
+  // been polling for minutes threw "Can not add a route since the matcher is
+  // already built" and crashed the daemon on the running-mode transition.
+  const harnessReadinessRegistryHolder: {
+    current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
+  } = { current: undefined };
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -915,6 +928,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       bindHost: apiBindHost,
       corpus: () => corpusForApi,
       ui: { token: uiToken, handshakeKey },
+      hermesDoctor: {
+        hermesPath: config.hermesPath,
+        hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
+      },
       admin: {
         onRestartRequested: () => {
           console.log('[main] Restart requested via operator MCP. Exiting...');
@@ -1003,7 +1020,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               contract: { id: 'swe-rebench-v2', version: 'v1' },
               state: 'live' as const,
               supportedRoles: ['solving' as const, 'evaluating' as const],
+              // Order matters: the dashboard pre-selects compatibleHarnesses[0]
+              // as the default solver harness. Hermes Agent is the SWE-rebench v2
+              // default per the 2026-05-12 decision (jinn-mono-8psp.2 / spec §10);
+              // operators may switch to Claude Code or Codex.
               compatibleHarnesses: [
+                { name: HERMES_AGENT_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },
@@ -1019,6 +1041,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // eagerly here; deps are populated by main.ts post-bootstrap via the
       // holder, and each route handler reads `holder.current` per-request.
       solverNetsLauncher: { holder: solverNetEndpointsDepsHolder },
+      // jinn-mono-u34i: same eager-register / late-populate pattern for the
+      // harness readiness routes. Until main.ts sets the holder, requests
+      // return 503 subsystem_not_ready (the panel handles that gracefully).
+      harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1069,7 +1095,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         earningDir: config.earningDir,
         chain: NETWORK_CHAIN,
         rpcUrl: config.rpcUrl,
-        minEoaGasWei: (CHAIN_CONFIG.minEoaGasEth * 2n).toString(),
+        // Note: do NOT pass minEoaGasWei here. setup-endpoints.ts derives
+        // its faucet target from stage1MinMasterEth(getChainConfig(chain)) —
+        // the same helper the daemon's ensureStage1 gate uses. Passing a
+        // computed value from here would re-introduce the drift seam that
+        // hit operators in the 2026-05-18 canary (jinn-mono-u34i): faucet
+        // dripped to one target while the daemon waited for a different one.
+        // The override field remains for tests that want a custom target.
         claudePath: activeClaudePath,
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -1395,36 +1427,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     });
   }
 
-  const claudeAuthRequired = configRequiresClaudeAuth(config);
-  if (claudeAuthRequired) {
-    const preflight = await checkClaudeBinary(activeClaudePath);
-    if (!preflight.ok) {
-      emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
-    }
-
-    const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
-    const authProbe = probeClaudeAuth({
-      context: authContext,
-      cwd: process.cwd(),
-      claudePath: activeClaudePath,
-    });
-    if (!authProbe.authenticated) {
-      emitEnvelope({
-        code: 'invalid_invocation',
-        message: 'Claude is not authenticated. Complete Claude setup in the operator app, then restart the daemon.',
-        hint: `Detected context: ${authContext}. Run \`jinn run\` to open the app-guided setup flow.`,
-        exampleCli: 'jinn run',
-        details: {
-          field: 'claude_auth',
-          context: authContext,
-          authenticated: false,
-        },
-      });
-    }
-  } else {
-    console.log('[main] Claude auth preflight skipped; Claude-backed harnesses are disabled.');
-  }
-
   const runner = new ClaudeRunner({
     claudePath: activeClaudePath,
     model: config.claudeModel,
@@ -1664,11 +1666,41 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     externalImpls,
     disabledNames: config.harnesses?.disabled,
     corpusEnv,
+    hermesPath: config.hermesPath,
+    hermesModel: config.hermesModel,
+    hermesProvider: config.hermesProvider,
   })) {
     implRegistry.register(impl);
   }
 
   console.log(`[main] HarnessRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
+
+  // ── Harness readiness registry ─────────────────────────────────────────────
+  // Composes per-harness isReady() probes into a cached snapshot consumed by
+  // claim loops (A5) and /v1/harnesses/readiness (A3).
+  //
+  // The registry is constructed here, after buildHarnesses() has run, which
+  // is necessarily after bootstrap (bootstrap needs the keystore). The HTTP
+  // server was started before bootstrap so it could show setup progress — we
+  // mount the readiness routes on the already-running app via setupApiServer.app
+  // (same pattern used by registerSolverNetsEndpoints). Routes are registered
+  // before the first operator request that cares about harness readiness.
+  //
+  // A2 carry-over: start() only schedules the 4s tick; refreshNow() is called
+  // immediately so the snapshot is populated before the first claim-loop tick.
+  const harnessReadinessRegistry = buildHarnessReadinessRegistry({
+    harnesses: implRegistry.list(),
+    config,
+  });
+  harnessReadinessRegistry.start();
+  await harnessReadinessRegistry.refreshNow();
+  // Routes were registered eagerly at startApiServer time via the holder
+  // ref pattern (jinn-mono-u34i). Populate the holder now and the already-
+  // mounted /v1/harnesses/readiness routes start returning real data.
+  // Late-mounting via addHarnessReadinessRoutes(setupApiServer.app, ...)
+  // is no longer needed and would throw on Hono's locked matcher.
+  harnessReadinessRegistryHolder.current = harnessReadinessRegistry;
+  console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
@@ -2092,6 +2124,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
     corpusFactory,
+    harnessReadinessRegistry,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
@@ -2211,6 +2244,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       let exitCode = 0;
       console.log(`\n[main] Received ${signal}, shutting down...`);
       try {
+        harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
         await closeCaptureReceiver();
@@ -2275,4 +2309,37 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     serviceIndex,
     serviceId,
   };
+}
+
+// ── Harness readiness registry factory ───────────────────────────────────────
+// Exported so tests can construct a registry without booting the full daemon.
+
+/**
+ * Builds a HarnessReadinessRegistry from the harness list returned by
+ * buildHarnesses() and the operator's joinedSolverNets config block.
+ *
+ * Per A2 carry-over: start() only schedules the background tick; callers that
+ * need the snapshot populated immediately must call refreshNow() after start().
+ */
+export function buildHarnessReadinessRegistry(args: {
+  harnesses: Harness[];
+  config: Pick<JinnConfig, 'joinedSolverNets'>;
+}): HarnessReadinessRegistry {
+  const harnessesByName: Record<string, Harness> = {};
+  for (const h of args.harnesses) {
+    harnessesByName[h.name] = h;
+  }
+  const joinedHarnessesByCid: Record<string, { harnessName: string; roles: Array<'solver' | 'evaluator'> }> = {};
+  for (const [cid, entry] of Object.entries(args.config.joinedSolverNets ?? {})) {
+    if (entry.harness) {
+      joinedHarnessesByCid[cid] = {
+        harnessName: entry.harness,
+        roles: entry.roles,
+      };
+    }
+  }
+  return new HarnessReadinessRegistry({
+    harnessesByName,
+    joinedHarnessesByCid,
+  });
 }

@@ -34,7 +34,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, SolverNetManifestSummary, SolverNetLifecycleStatus } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
@@ -728,10 +728,23 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     }
   }
 
+  // ── Builder discovery stubs (attd) ────────────────────────────────────────
+  // Builder discovery requires the indexer's `pluginPublication` entity; the
+  // on-chain RPC floor does not enumerate it (would require a getLogs sweep +
+  // payload decode that the floor is not designed for). When falling back to the
+  // on-chain floor, builder browsing is unavailable until the indexer recovers.
+
+  async function listPluginPublications(): Promise<PluginPublication[]> { return []; }
+  async function getPluginScores(): Promise<PluginScoreHistoryRow[]> { return []; }
+  async function listBuilderArtifacts(): Promise<PublishedArtifact[]> { return []; }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
     getLifecycleStatus,
     queryEnvelopes,
+    listPluginPublications,
+    getPluginScores,
+    listBuilderArtifacts,
   };
 }

@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 const TABS = [
   { path: '/overview', label: 'Dashboard' },
   { path: '/operator', label: 'Settings' },
+  { path: '/build', label: 'Build' },
 ] as const;
 
 export function TopTabs(): JSX.Element {

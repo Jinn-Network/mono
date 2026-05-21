@@ -1,0 +1,27 @@
+Jinn Network — `Jinn-Network/mono`
+Copyright 2026 The Jinn Network contributors
+
+This product is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use the contents of this repository except in
+compliance with the License. A copy of the License is included in the
+file `LICENSE` and is also available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied.
+
+------------------------------------------------------------------------
+
+Per-file SPDX identifiers are authoritative for files that declare one.
+Apache-2.0 is the repository default for newly authored source. Some
+files inherit the licence of their upstream (notably MIT-licensed code
+authored before this licence was adopted, and vendored third-party code
+under its original licence). See `THIRD_PARTY_LICENSES.md` for the
+third-party inventory.
+
+The names "Jinn" and "Jinn Network", the Jinn sigils, and the Jinn
+wordmark are not licensed under the Apache License. See `TRADEMARKS.md`
+for the trademark policy.

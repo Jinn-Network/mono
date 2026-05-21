@@ -12,6 +12,10 @@ Jinn is a training protocol for agentic intents. It defines a loop (Creation →
 
 Canonical docs are the repo's stable sources of truth. They change only via approved PRs (see `spec/2026-04-28-canonical-docs.md`). Always prefer canonical docs over restated information found elsewhere in the repo, and never redefine canonical content locally — link instead.
 
+[`PRINCIPLES.md`](PRINCIPLES.md) — This document should be read by agents at the beginning of all new sessions. All decision-making should run through these principles. Agents should keep their thinking and actions, as well as attempt to keep their human users' thinking and actions, in line with the principles stated herein.
+
+Other canonical docs:
+
 - `SPEC.md` — read before reasoning about the protocol loop, roles, contracts, or phase boundaries
 - `THESIS.md` — read before writing positioning, pitch, strategic copy, or any "why Jinn" framing
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
@@ -353,6 +357,15 @@ yarn test            # vitest run
 yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
 node dist/bin/jinn.js run    # contributor daemon launch (after `yarn build`)
+
+# Daemon + real harness + Anvil settlement loop e2e (jinn-mono-wyy6)
+yarn e2e:daemon-harness   # production Daemon + real harness + Anvil settlement loop
+                          # JINN_E2E_HARNESS=prediction-v1-baseline (default) | hermes-agent | claude-code | codex
+                          # skips cleanly when the harness's API key is absent
+                          # exercises: Anvil fork of Base, real FleetBootstrapper,
+                          # locally-deployed JinnRouterV3 stack + mock IPFS,
+                          # production Daemon class, claim → execute → deliver →
+                          # activity-counter increment
 
 # Contracts
 cd contracts

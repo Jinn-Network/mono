@@ -245,6 +245,32 @@ export async function withRecoverableRetry<T>(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/**
+ * Poll publicClient.getCode until bytecode is present at `address`, or give up.
+ *
+ * Absorbs the RPC eventual-consistency race where a deployment tx receipt
+ * returns success but a getCode call against a (possibly different,
+ * load-balanced) node has not yet seen the block. Same shape as the post-bind
+ * retry added in jinn-mono-h74p, applied to post-deploy verification.
+ */
+export async function waitForContractCode(
+  publicClient: PublicClient,
+  address: Address,
+  options: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number } = {},
+): Promise<Hex> {
+  const maxAttempts = options.maxAttempts ?? 6;
+  const baseDelayMs = options.baseDelayMs ?? 400;
+  const maxDelayMs = options.maxDelayMs ?? 4_000;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const code = await publicClient.getCode({ address });
+    if (code !== undefined && code !== '0x') return code;
+    if (attempt === maxAttempts - 1) break;
+    await backoffDelay(attempt, baseDelayMs, maxDelayMs);
+  }
+  throw new Error(`No contract code at ${address} after ${maxAttempts} getCode attempts`);
+}
+
 /** EIP-1559 or legacy gas overrides for viem, increasingly aggressive on later attempts. */
 export async function viemFeeOverridesForAttempt(
   publicClient: PublicClient,

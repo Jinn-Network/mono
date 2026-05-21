@@ -2,6 +2,7 @@
   "name": "jinn-contracts",
   "version": "0.1.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "packageManager": "yarn@4.13.0",
   "scripts": {
     "compile": "hardhat compile",

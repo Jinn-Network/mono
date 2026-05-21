@@ -22,6 +22,7 @@
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import type { ReadyStatus } from '../harnesses/types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -183,10 +184,59 @@ function _spawnAuthStatus(context: AuthContext, cwd: string, claudePath = 'claud
   }
 
   const result = spawnSync(command, args, { encoding: 'utf8' });
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+    return {
+      status: -1,
+      stdout: '',
+      stderr: `claude binary ${claudePath} not found on PATH`,
+    };
+  }
   return {
     status: result.status,
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// buildClaudeIsReady — factory to dedupe per-harness isReady() impls
+// ---------------------------------------------------------------------------
+
+export const CLAUDE_INSTALL_URL = '/v1/setup/claude/install';
+export const CLAUDE_AUTH_SPAWN_URL = '/v1/auth/claude/spawn';
+
+export interface BuildClaudeIsReadyOpts {
+  getClaudePath: () => string;
+  getContext: () => AuthContext;
+}
+
+/**
+ * Build a `isReady()` implementation that probes claude auth status and
+ * returns the appropriate ReadyStatus with nextStep URLs.
+ *
+ * Callers that need a stub short-circuit (e.g. stub mode) should check
+ * their stub flag BEFORE calling the returned function and return early.
+ */
+export function buildClaudeIsReady(
+  opts: BuildClaudeIsReadyOpts,
+): (_ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }) => Promise<ReadyStatus> {
+  return async (
+    _ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
+  ): Promise<ReadyStatus> => {
+    const result = probeClaudeAuth({
+      context: opts.getContext(),
+      cwd: process.cwd(),
+      claudePath: opts.getClaudePath(),
+    });
+    if (result.authenticated) return { ready: true, reason: result.detail };
+    const binaryMissing = result.detail.includes('not found on PATH');
+    return {
+      ready: false,
+      reason: result.detail,
+      nextStep: binaryMissing
+        ? { description: 'Install Claude Code from the operator app', url: CLAUDE_INSTALL_URL }
+        : { description: 'Sign in to Claude from the operator app', url: CLAUDE_AUTH_SPAWN_URL },
+    };
   };
 }
 

@@ -1,0 +1,12 @@
+{
+  "name": "swe-rebench-v2-diffmin",
+  "version": "0.1.0",
+  "jinn": {
+    "supports": ["swe-rebench-v2.v1"],
+    "skills": [
+      "skills/diffmin/SKILL.md",
+      "skills/test-map/SKILL.md"
+    ],
+    "description": "Minimal-diff discipline + PASS_TO_PASS test-mapping skills for swe-rebench-v2.v1. Complementary to swe-rebench-v2-runtime's orient/plan skills; the two stack."
+  }
+}

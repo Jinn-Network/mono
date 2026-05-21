@@ -4,7 +4,7 @@
  * Scope: docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md
  * §3.1 (D5 + K1 knowledge tree), §3.2 (K3 executor provenance), §3.4 migration.
  *
- * One envelope shape covers restoration manifests (role='restoration') and
+ * One envelope shape covers solution manifests (role='solution') and
  * verdict manifests (role='verdict'). Payload is typed per (solverType, role) via
  * the registry in `./payloads/`.
  */
@@ -22,8 +22,20 @@ export const EvidenceTierSchema = z.enum([
 ]);
 export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
 
-export const RoleSchema = z.enum(['restoration', 'verdict', 'capture']);
-export type Role = z.infer<typeof RoleSchema>;
+export const CanonicalRoleSchema = z.enum(['solution', 'verdict', 'capture']);
+export type CanonicalRole = z.infer<typeof CanonicalRoleSchema>;
+export type LegacyEnvelopeRole = 'restoration';
+export type RawEnvelopeRole = CanonicalRole | LegacyEnvelopeRole;
+export type Role = CanonicalRole;
+export const RawRoleSchema = z.union([CanonicalRoleSchema, z.literal('restoration')]);
+
+export function normalizeEnvelopeRole(role: RawEnvelopeRole): CanonicalRole;
+export function normalizeEnvelopeRole(role: unknown): unknown;
+export function normalizeEnvelopeRole(role: unknown): unknown {
+  return role === 'restoration' ? 'solution' : role;
+}
+
+export const RoleSchema = z.preprocess(normalizeEnvelopeRole, CanonicalRoleSchema);
 
 const TaskProvenanceSchema = z.object({
   cid: z.string().min(1),
@@ -182,7 +194,7 @@ export const UnsignedEnvelopeSchema = z
 export type UnsignedEnvelope = z.infer<typeof UnsignedEnvelopeSchema>;
 
 export const SignedEnvelopeSchema = z
-  .object({ ...BaseEnvelopeFields, signature: SignatureSchema })
+  .object({ ...BaseEnvelopeFields, role: RawRoleSchema, signature: SignatureSchema })
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.executor.source !== undefined,
     { message: 'attested tier requires executor.source', path: ['executor', 'source'] },

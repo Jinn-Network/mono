@@ -19,6 +19,7 @@ import {
   getChainConfig,
 } from './contracts.js';
 import { FleetStateStore } from './store.js';
+import { stage1MinMasterEth } from './bootstrap.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
 import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
@@ -226,12 +227,19 @@ export async function planFleetFunding(
   const standardFleetAlreadyComplete = stakingMode === 'standard' && completedCount >= targetServices;
   const standardFleetHasInProgressServices =
     stakingMode === 'standard' && (fleetState?.services.length ?? 0) > 0;
+  // Pre-Stage-1: fleet state missing or fleet_stage === 'none' (no fleet
+  // identity yet). The Stage 1 gate must cover the master → agent transfer
+  // (STAGE1_AGENT_ETH = 0.01 ETH) plus the master's own gas reserve
+  // (minEoaGasEth). See jinn-mono-u34i.
+  const isPreStage1 = !fleetState || fleetState.fleet_stage === 'none';
   const requiredMasterEth =
     stakingMode === 'standard'
       ? (
           standardFleetAlreadyComplete
             ? 0n
-            : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+            : isPreStage1
+              ? stage1MinMasterEth(config)
+              : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
         )
       : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
 

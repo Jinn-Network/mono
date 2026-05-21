@@ -208,5 +208,26 @@ export function withFallback(
         () => floor.queryEnvelopes(query),
       );
     },
+
+    listPluginPublications(args) {
+      return dispatch(
+        () => primary.listPluginPublications(args),
+        () => floor.listPluginPublications(args),
+      );
+    },
+
+    getPluginScores(args) {
+      return dispatch(
+        () => primary.getPluginScores(args),
+        () => floor.getPluginScores(args),
+      );
+    },
+
+    listBuilderArtifacts(args) {
+      return dispatch(
+        () => primary.listBuilderArtifacts(args),
+        () => floor.listBuilderArtifacts(args),
+      );
+    },
   };
 }

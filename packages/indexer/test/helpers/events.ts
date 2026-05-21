@@ -10,10 +10,13 @@ import { encodeAbiParameters, toHex } from 'viem';
 import {
   PAYLOAD_TUPLE_V1,
   PAYLOAD_TUPLE_V2,
+  type ClaimedEvent,
   type MetadataSetEvent,
   type SolutionDeliveryClaimedEvent,
   type TaskAttemptCreatedEvent,
+  type TaskBudgetRefundedEvent,
   type TaskCreatedEvent,
+  type VerdictDeliveryClaimedEvent,
 } from '../../src/handlers.js';
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
@@ -37,6 +40,7 @@ export function taskCreatedEvent(
       manifestDigest: ZERO_BYTES32,
       taskCidDigest: ZERO_BYTES32,
       maxClaims: 1,
+      requiredVerdicts: 1,
       ...args,
     },
     block: { number: o.block ?? 100n },
@@ -97,6 +101,61 @@ export function metadataSetEvent(
   };
 }
 
+export function verdictDeliveryClaimedEvent(
+  args: Partial<VerdictDeliveryClaimedEvent['args']> & { taskId: bigint },
+  o: EnvelopeOverrides = {},
+): VerdictDeliveryClaimedEvent {
+  return {
+    args: {
+      evaluator: SOME_ADDR,
+      requestId: ZERO_BYTES32,
+      attemptIndex: 0,
+      verdictIndex: 0,
+      verdictCode: 1,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'fe'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function taskBudgetRefundedEvent(
+  args: Partial<TaskBudgetRefundedEvent['args']> & { taskId: bigint },
+  o: EnvelopeOverrides = {},
+): TaskBudgetRefundedEvent {
+  return {
+    args: {
+      creator: SOME_ADDR,
+      solutionAmount: 0n,
+      verdictAmount: 0n,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'a1'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function claimedEvent(
+  args: Partial<ClaimedEvent['args']> & { serviceId: bigint },
+  o: EnvelopeOverrides = {},
+): ClaimedEvent {
+  return {
+    args: {
+      multisig: SOME_ADDR,
+      operatorMinted: 0n,
+      daoMinted: 0n,
+      totalEntitledOperator: 0n,
+      totalEntitledDao: 0n,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'b2'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
 // ── Payload encoders ──────────────────────────────────────────────────────────
 
 /** JSON-encoded SolverNet lifecycle payload (the most-recent-wins shape). */
@@ -146,5 +205,58 @@ export function envelopePayloadV1(opts: {
     opts.manifestHash,
     opts.attestationQuoteCid ?? '0x',
     opts.sourceMeasurement ?? ZERO_BYTES32,
+  ]);
+}
+
+// ── Plug-in publication payloads (attd) ───────────────────────────────────────
+
+/**
+ * Byte-identical to PLUGIN_PAYLOAD_TUPLE in client/src/erc8004/abis.ts. Re-stated
+ * here so tests are self-contained — the indexer package cannot import from
+ * client/. A drift-guard test in handlers.plugin.test.ts compares this tuple to
+ * the canonical one via a hex-encoded fixture.
+ */
+export const PLUGIN_PAYLOAD_TUPLE_TEST = [
+  { name: 'version', type: 'uint8' },
+  { name: 'pluginName', type: 'string' },
+  { name: 'pluginVersion', type: 'string' },
+  { name: 'pluginSha256', type: 'bytes32' },
+  { name: 'supports', type: 'string[]' },
+  { name: 'publishedAt', type: 'uint64' },
+] as const;
+
+export const REVOCATION_PAYLOAD_TUPLE_TEST = [
+  { name: 'version', type: 'uint8' },
+  { name: 'revoked', type: 'bool' },
+  { name: 'reason', type: 'string' },
+] as const;
+
+export function pluginPayload(opts: {
+  version?: number;
+  pluginName: string;
+  pluginVersion: string;
+  pluginSha256: `0x${string}`;
+  supports: string[];
+  publishedAt: bigint;
+}): `0x${string}` {
+  return encodeAbiParameters(PLUGIN_PAYLOAD_TUPLE_TEST, [
+    opts.version ?? 1,
+    opts.pluginName,
+    opts.pluginVersion,
+    opts.pluginSha256,
+    opts.supports,
+    opts.publishedAt,
+  ]);
+}
+
+export function revocationPayload(opts: {
+  version?: number;
+  revoked?: boolean;
+  reason: string;
+}): `0x${string}` {
+  return encodeAbiParameters(REVOCATION_PAYLOAD_TUPLE_TEST, [
+    opts.version ?? 2,
+    opts.revoked ?? true,
+    opts.reason,
   ]);
 }

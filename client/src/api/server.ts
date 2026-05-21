@@ -42,6 +42,9 @@ import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
+import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
+import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
+import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
@@ -49,6 +52,8 @@ import {
 } from './operator-artifacts-endpoint.js';
 import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
 import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
+import { addDiscoveryRoutes } from './discovery-endpoint.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -126,12 +131,38 @@ export interface ApiServerConfig {
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
    */
   harnessStatus?: HarnessStatusDeps;
+  /**
+   * When set, mounts `GET /v1/harnesses/readiness` and
+   * `GET /v1/harnesses/:name/readiness` under the UI token gate.
+   * SPA polls the composed endpoint; the join flow uses the per-harness one.
+   *
+   * Accepts either a direct registry or a holder ref (same pattern as
+   * solverNetsLauncher). main.ts uses the holder shape because the registry is
+   * constructed post-bootstrap; routes register eagerly at server start so
+   * Hono's matcher includes them before the first request — adding routes
+   * after the matcher is built throws (jinn-mono-u34i field repro).
+   */
+  harnessReadinessRegistry?:
+    | HarnessReadinessRegistry
+    | { holder: { current: HarnessReadinessRegistry | undefined } };
+  /**
+   * When set, mounts `GET /api/hermes/doctor` under the UI token gate.
+   * Powers the dashboard's Hermes install precheck panel in the join flow.
+   */
+  hermesDoctor?: HermesDoctorConfig;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
   stopHook?: StopHookRoutesDeps;
   /** Operator review API for pending captures. */
   captures?: CapturesRoutesDeps;
+  /**
+   * Discovery API instance. When set, mounts GET /v1/discovery/* routes
+   * that proxy DiscoveryAPI methods (listPluginPublications, listBuilderArtifacts,
+   * getPluginScores) so the SPA's /build route can fetch them without direct
+   * GraphQL or RPC access.
+   */
+  discovery?: DiscoveryAPI;
 }
 
 export interface ApiServer {
@@ -330,9 +361,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/operator/*', requireUiToken(config.ui.token));
     app.use('/v1/launcher', requireUiToken(config.ui.token));
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
+    app.use('/v1/discovery', requireUiToken(config.ui.token));
+    app.use('/v1/discovery/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
+    app.use('/api/hermes/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
+    app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
   }
 
   addEventsRoutes(app);
@@ -347,6 +382,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.bootstrap) {
     addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.discovery) {
+    const discoveryInstance = config.discovery;
+    addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
   }
 
   if (config.solverNets) {
@@ -391,6 +431,24 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessStatus) {
     addHarnessStatusRoutes(app, config.harnessStatus);
+  }
+
+  if (config.harnessReadinessRegistry) {
+    const reg = config.harnessReadinessRegistry;
+    if ('holder' in reg) {
+      // Lazy holder shape: register routes eagerly with a getter; main.ts
+      // populates holder.current post-bootstrap. Until then, the routes
+      // return 503 subsystem_not_ready (panel handles this gracefully).
+      addHarnessReadinessRoutes(app, {
+        getRegistry: () => reg.holder.current ?? null,
+      });
+    } else {
+      addHarnessReadinessRoutes(app, { registry: reg });
+    }
+  }
+
+  if (config.ui) {
+    addHermesDoctorRoutes(app, config.hermesDoctor ?? {});
   }
 
   if (config.ui) {

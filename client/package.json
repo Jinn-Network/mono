@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/client",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Jinn protocol client — headless daemon for the restoration training loop",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -40,11 +40,12 @@
   },
   "scripts": {
     "postinstall": "node dist/scripts/fix-node-pty.mjs 2>/dev/null || node scripts/fix-node-pty.mjs 2>/dev/null || true",
-    "e2e:full-cycle": "tsx test/e2e/claude-code-learner-full-cycle.ts",
+    "e2e:cold-start-builder": "vitest run --config vitest.acceptance.config.ts",
+    "e2e:full-cycle": "tsx test/e2e/learner-full-cycle.ts",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",
-    "build": "yarn build:sdk && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs dist/scripts/ && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
+    "build": "yarn build:sdk && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json dist/scripts/ && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
     "typecheck": "yarn build:sdk && tsc --noEmit",
     "test": "yarn build:sdk && vitest run",
     "test:watch": "vitest",
@@ -68,9 +69,12 @@
     "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",
     "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
     "e2e:prediction": "tsx test/e2e/prediction-v1.ts",
+    "e2e:corpus": "yarn build:sdk && tsx test/e2e/corpus-x402.ts",
     "e2e:freeze-mode": "tsx test/e2e/freeze-mode.test.ts",
     "e2e:checkpoint-flow": "tsx test/e2e/checkpoint-flow.test.ts",
     "e2e:swe-rebench-v2": "tsx test/e2e/swe-rebench-v2.test.ts",
+    "e2e:hermes": "tsx test/e2e/hermes-agent-full-cycle.ts",
+    "e2e:daemon-harness": "tsx test/e2e/daemon-harness-cycle.ts",
     "e2e:capture": "tsx scripts/e2e-capture-validate.ts",
     "staking": "tsx test/e2e/staking.ts",
     "stolas": "tsx test/e2e/stolas.ts",
@@ -118,6 +122,7 @@
     "semver": "^7.7.4",
     "viem": "^2.0.0",
     "ws": "^8.20.0",
+    "yaml": "^2.8.4",
     "zod": "^3.22.0"
   },
   "optionalDependencies": {

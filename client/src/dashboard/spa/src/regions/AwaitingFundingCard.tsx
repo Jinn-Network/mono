@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 
 interface Props {
@@ -15,6 +15,14 @@ export function AwaitingFundingCard({
   const [copied, setCopied] = useState(false);
   const [fundingStartedAt, setFundingStartedAt] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // jinn-mono-u34i: once the operator clicks FUND FROM FAUCET, treat subsequent
+  // funding gaps in this session as "operator already opted into faucet help"
+  // and auto-continue drip sessions when a new gate appears (e.g. Stage 1 →
+  // Stage 2). Without this, after the first session lands on the Stage 1 gate
+  // the button gets stuck in "FAUCET FUNDED" disabled and the operator must
+  // manually reload the panel to continue — violating the never-leave-the-app
+  // principle.
+  const hasOptedInRef = useRef(false);
   const [dripStatus, setDripStatus] = useState<
     | { state: 'idle' }
     | { state: 'requesting' }
@@ -46,6 +54,7 @@ export function AwaitingFundingCard({
   };
 
   const requestDrip = async (): Promise<void> => {
+    hasOptedInRef.current = true;
     setFundingStartedAt(Date.now());
     setElapsedSeconds(0);
     setDripStatus({ state: 'requesting' });
@@ -74,6 +83,21 @@ export function AwaitingFundingCard({
       });
     }
   };
+
+  // jinn-mono-u34i: when the daemon advances to a new gate (Stage 1 → Stage 2,
+  // etc.) the panel re-renders with a new `minimumWei`. The local dripStatus is
+  // still 'sent' from the prior session and the button stays disabled, leaving
+  // the operator stuck. Reset the session on any minimumWei change; if the
+  // operator already opted into faucet help, auto-fire the next drip.
+  const lastMinimumRef = useRef<string>(minimumWei);
+  useEffect(() => {
+    if (lastMinimumRef.current === minimumWei) return;
+    lastMinimumRef.current = minimumWei;
+    setDripStatus({ state: 'idle' });
+    if (hasOptedInRef.current) {
+      void requestDrip();
+    }
+  }, [minimumWei]);
 
   const formatEth = (wei?: string): string => {
     if (!wei) return 'unknown';

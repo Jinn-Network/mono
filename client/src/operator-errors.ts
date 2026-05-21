@@ -112,13 +112,26 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
     };
   }
 
+  // Geth-specific: `gas required exceeds allowance (0)` from eth_estimateGas
+  // means sender balance ÷ gasPrice rounded to zero — i.e. the account cannot
+  // pay for even 1 wei of gas. That's an insufficient-balance error, not an
+  // OOG. Must come before the broader OOG matcher below so it doesn't fall
+  // through. See jinn-mono-u34i.
+  if (lower.includes('gas required exceeds allowance (0)')) {
+    return {
+      summary: 'Not enough ETH on the paying account to cover gas (and value, if any).',
+      hint: 'Send ETH to the master wallet, agent EOA, or Safe depending on which step failed.',
+      rawMessage: msg,
+    };
+  }
+
   // Gas-supply shortage (gas limit < execution gas, intrinsic floor, etc.).
   // Match before the funds branch so OOG errors that incidentally mention
   // "insufficient" do not get mislabeled as a balance problem.
   if (
     lower.includes('out of gas') ||
     lower.includes('intrinsic gas too low') ||
-    lower.includes('gas required exceeds allowance') ||
+    lower.includes('gas required exceeds allowance') || // (N>0) — true gas-limit shortfall; the (0) case is handled above
     lower.includes('contract creation code storage out of gas') ||
     lower.includes('exceeds block gas limit')
   ) {

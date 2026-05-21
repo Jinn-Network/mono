@@ -12,6 +12,12 @@ The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapte
 
 Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
 
+## Network explorer
+
+This package also serves the Jinn network explorer SPA at `/` — a React/Vite app in `explorer/` that builds to `public/` (run as part of `yarn build` and in the Dockerfile; a minimal placeholder is served if no build is present; deep links like `/solvernet/<cid>`, `/operators`, `/operator/<addr>` are SPA-fallback-served `index.html`). Aggregation JSON routes are at `/explorer/*` (network KPIs + composition, per-SolverNet learning curves + leaderboards, operator leaderboards, operator detail). Anyone running `@jinn-network/indexer` serves an explorer for free — no separate deployment needed. See `docs/superpowers/specs/2026-05-12-network-explorer-design.md` for the full design and `deploy/README.md` for the deployment guide including the `PONDER_RPC_URL_11155111` env var (required for the JinnDistributor / Sepolia-L1 source).
+
+The schema includes `harnessCheckpoint` (on-chain checkpoint anchors keyed by `harness.checkpoint:<cid>` MetadataSet events) and `attemptEnvelopeMeta` (envelope-sourced harness/mode/plugin/model per attempt, populated by an IPFS-enrichment step). The `/explorer/*` routes expose harness/mode composition, train/frozen leaderboard splits, a checkpoint timeline, and freeze-integrity diagnostics. Enrichment is gated by `JINN_INDEXER_ENRICH_ENVELOPES` (default on) and uses `JINN_IPFS_GATEWAY_URL` — see `deploy/README.md` for details.
+
 ## Running locally (PGlite, no external database)
 
 ```bash
@@ -64,20 +70,24 @@ do not require a re-sync — Ponder handles them automatically.
 
 ## Known limitations (v0.1)
 
+### Builder attribution requires `attemptEnvelopeMeta` (ebu7)
+
+The `/builders/:agentId/runs` route and `DiscoveryAPI.getPluginScores` return empty arrays until the `attemptEnvelopeMeta` entity from ebu7 is present in the deployed schema. The `pluginPublication` rows exist in the indexer once attd is deployed, but without ebu7's attempt envelope joins there is no way to attribute which runs used which plugins. The route is safe to call before ebu7; it returns HTTP 200 with `[]` and automatically picks up data when ebu7 lands without code changes.
+
 ### No TaskFinalized / TaskRefunded events
 
-JinnRouter V3 does not emit standalone `TaskFinalized` or `TaskRefunded` events.
+JinnRouter V3 does not emit a standalone `TaskFinalized` event.
 The indexer sets `task.finalized = true` when a `SolutionDeliveryClaimed` event
-is received for that task (the terminal success state in V3). `task.refunded`
-always starts as `false`; no on-chain refund event exists at v0.1.
+is received for that task (the terminal success state in V3).
+
+`task.refunded` is populated from `JinnRouter.TaskBudgetRefunded` (wired in
+`ebu7.2`). `TaskBudgetRefunded` does exist on V3 — the prior comment claiming
+it did not was stale.
 
 The daemon compensates: its `canClaimTask` simulation (in
 `client/src/adapters/mech/contracts.ts`) is the correctness gate before any
 claim is attempted. The indexer is an acceleration path; the simulation is the
 truth.
-
-A future JinnRouter version may add explicit finalization events. When they
-land, add a handler in `src/index.ts` and update this limitation note.
 
 ### claimWindowStart / claimWindowEnd not indexed
 
@@ -124,6 +134,36 @@ fetching and decoding the IPFS manifests referenced by the returned
 `EnvelopeRef` rows. Passing `solverType` in a `CorpusQuery` to
 `queryEnvelopes` is accepted at the interface level but is silently ignored by
 the indexer adapter.
+
+## Schema
+
+### Task
+
+One JinnRouter task (created on `TaskCreated`, marked finalized on `SolutionDeliveryClaimed`). Primary key: `id` (taskId as decimal string). Supports `findClaimableTasks` filtering by manifest digest, finalized flag, refunded flag, and joining with `Attempt` for attempt counts.
+
+### Attempt
+
+One task attempt (created on `TaskAttemptCreated`). Composite primary key: `(taskId, attemptIndex, chainId)`. Multiple attempts per task. Indexed by `taskId` and `operator` for filtering.
+
+### SolverNetManifest
+
+Current lifecycle state of a launched SolverNet (populated from `IdentityRegistry.MetadataSet` where key starts with `solvernet-manifest:`). Primary key: `id` (manifestCid). Most-recent-wins semantics; each upsert overwrites status fields if the new event is from the same or later block (using `(block, transactionIndex, logIndex)` tiebreak). Payload tuple: `(version, status, at, manifestHash, ...)` per `client/src/erc8004/abis.ts::MANIFEST_LIFECYCLE_TUPLE`.
+
+### Envelope
+
+Corpus envelope reference (populated from `IdentityRegistry.MetadataSet` where key matches `envelope:<manifestCid>`, `evaluation:<manifestCid>`, or `capture:<manifestCid>`). Primary key: composite `(agentId, metadataKey, chainId)`. Stores evidence tier (0=self-signed, 1=committed, 3=attested), manifest hash, and block provenance for recency ordering.
+
+### PluginPublication
+
+A published plug-in record (populated from `IdentityRegistry.MetadataSet` where key starts with `plugin:` per `spec/2026-05-13-plug-in-builder-entry-point-design.md` §5.2/§5.6). Primary key: composite `<builderAgentId>:<pluginCid>`. Payload tuple format: v1 (publication, 6 fields) or v2 (revocation marker, 3 fields) per `client/src/erc8004/abis.ts::PLUGIN_PAYLOAD_TUPLE` and `REVOCATION_PAYLOAD_TUPLE`. Most-recent-wins semantics with `(blockNumber, txIndex, logIndex)` tiebreak. Version updates ship a new tarball (new CID, new row); revocations overwrite the same key with v2 payload setting `revoked: true`. Stores builder attribution via `pluginSha256` (fork-attribution join key against `envelope.plugins[].sha256`).
+
+## Custom routes
+
+### `/builders/:agentId/runs`
+
+Returns attributed run summaries for the builder identified by `agentId`. The response is `[]` until the `attemptEnvelopeMeta` and `verdict` entities from ebu7 land in the deployed schema. Once ebu7 is present, the route joins `pluginPublication` against `attemptEnvelopeMeta` and `verdict` to produce builder-attributed task runs with plugin usage metadata.
+
+The route is safe to call before ebu7 — it returns `[]` and succeeds with HTTP 200. When ebu7 is deployed, no changes to this file are required; the route automatically picks up the new entities via the schema import.
 
 ## Development commands
 

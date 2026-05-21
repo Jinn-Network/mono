@@ -20,9 +20,11 @@ import type { ArtifactSource } from '../types/envelope.js';
  * vs network_error. We accept either shape so test fakes that still return
  * `Buffer | null` keep working.
  */
-type AcquireFnLegacy = (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
-type AcquireFnNew = (endpoint: string, sha256: string, privateKey: string) => Promise<AcquireWithPaymentResult>;
-type AcquireFn = AcquireFnLegacy | AcquireFnNew;
+type AcquireFn = (
+  endpoint: string,
+  sha256: string,
+  privateKey: string,
+) => Promise<Buffer | null | AcquireWithPaymentResult>;
 type FetchFromIpfsFn = (gatewayUrl: string, cid: string) => Promise<unknown>;
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1';

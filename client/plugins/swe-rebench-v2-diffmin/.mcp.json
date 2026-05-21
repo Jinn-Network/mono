@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "diff-stats": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/diff-stats-server.mjs"]
+    }
+  }
+}

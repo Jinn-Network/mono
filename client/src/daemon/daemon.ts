@@ -18,12 +18,21 @@ import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
 import type { Task } from '../types/index.js';
+import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
+import { gateClaimByReadiness } from './readiness-gate.js';
 
 const DEFAULT_API_PORT = 7331;
 
 export interface DaemonConfig {
   adapter: ExecutionAdapter;
-  runner: Runner;
+  /**
+   * Legacy Runner only consumed by `LegacyClaudeImpl` via `buildHarnesses`.
+   * Daemon itself never reads this field; it's declared here only so that
+   * production wiring in main.ts can fail loudly when LegacyClaudeImpl
+   * needs a runner the caller forgot to supply. Tests and Phase-1+ harness
+   * callers that don't construct LegacyClaudeImpl can omit it.
+   */
+  runner?: Runner;
   dbPath: string;
   shutdownTimeoutMs?: number;
   /** Engine tick interval (ms) for re-driving in-flight tasks. Defaults to 5000. */
@@ -131,6 +140,15 @@ export interface DaemonConfig {
      */
     packagingDeps?: Omit<NonNullable<TaskEngineOptions['packagingDeps']>, 'store'>;
   };
+
+  /**
+   * Per-harness readiness registry for pre-claim gating.
+   * When present, the engine-watcher loop checks harness readiness before
+   * claiming each task and skips tasks whose harness reports not-ready.
+   * Constructed and started by main.ts; omitted in unit-test contexts that
+   * don't exercise the cost-mutating claim path.
+   */
+  harnessReadinessRegistry?: HarnessReadinessRegistry;
 }
 
 export class Daemon {
@@ -410,6 +428,20 @@ export class Daemon {
       if (!accept.ok) {
         console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         continue;
+      }
+
+      // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
+      // skip this task without blocking other loops. Logs once per ready↔not-ready transition.
+      if (this.config.harnessReadinessRegistry) {
+        const manifestCid = taskAnnouncement.task.solverNetManifestCid;
+        if (manifestCid) {
+          const gate = gateClaimByReadiness({
+            manifestCid,
+            registry: this.config.harnessReadinessRegistry,
+            logger: { warn: (msg) => console.warn(msg), info: (msg) => console.log(msg) },
+          });
+          if (!gate.proceed) continue;
+        }
       }
 
       let request;

@@ -14,53 +14,55 @@
  *
  * Once bootstrap reaches 'complete' the daemon flips mode to 'running' and
  * App.tsx routes to <Operating>. Silent transition, no Phase 4.
+ *
+ * Per-harness auth (formerly Phase 1 "Sign in to Claude") moved to the
+ * /operator join flow in Stage B (vh74.2). Onboarding now covers only the
+ * phases that genuinely require pre-running-mode completion.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { api } from '../api/client.js';
 import type {
   BootstrapErrorEnvelope,
   BootstrapState,
-  ClaudeAuthState,
 } from '../api/types.js';
 import { AwaitingFundingCard } from './AwaitingFundingCard.js';
 import { Agent } from './Agent.js';
 
-type Phase = 1 | 2 | 3 | 4;
+type Phase = 1 | 2 | 3;
 type PhaseStatus = 'done' | 'active' | 'queued' | 'error';
 
 interface BootstrapPhaseDescriptor {
-  /** The bootstrap-specific phase (one of 2,3,4 in the new numbering). */
-  phase: Exclude<Phase, 1>;
-  /** Sub-state hint shown in the active row in Phase 4. Null otherwise. */
+  /** The bootstrap-specific phase (1, 2, or 3). */
+  phase: Phase;
+  /** Sub-state hint shown in the active row in Phase 3. Null otherwise. */
   subState: string | null;
 }
 
 const PHASE_FOR_STEP: Record<string, BootstrapPhaseDescriptor> = {
-  wallet: { phase: 2, subState: null },
-  safe_predicted: { phase: 2, subState: null },
-  awaiting_funding: { phase: 3, subState: null },
-  safe_deployed: { phase: 4, subState: 'Deploying' },
-  service_created: { phase: 4, subState: 'Deploying' },
-  service_activated: { phase: 4, subState: 'Deploying' },
-  agents_registered: { phase: 4, subState: 'Deploying' },
-  service_deployed: { phase: 4, subState: 'Deploying' },
-  service_staked: { phase: 4, subState: 'Deploying' },
-  staked: { phase: 4, subState: 'Deploying' },
-  mech_deployed: { phase: 4, subState: 'Joining the network' },
-  agent_registered: { phase: 4, subState: 'Joining the network' },
-  safe_binding_pending: { phase: 4, subState: 'Binding identity' },
+  wallet: { phase: 1, subState: null },
+  safe_predicted: { phase: 1, subState: null },
+  awaiting_funding: { phase: 2, subState: null },
+  safe_deployed: { phase: 3, subState: 'Deploying' },
+  service_created: { phase: 3, subState: 'Deploying' },
+  service_activated: { phase: 3, subState: 'Deploying' },
+  agents_registered: { phase: 3, subState: 'Deploying' },
+  service_deployed: { phase: 3, subState: 'Deploying' },
+  service_staked: { phase: 3, subState: 'Deploying' },
+  staked: { phase: 3, subState: 'Deploying' },
+  mech_deployed: { phase: 3, subState: 'Joining the network' },
+  agent_registered: { phase: 3, subState: 'Joining the network' },
+  safe_binding_pending: { phase: 3, subState: 'Binding identity' },
 };
 
 const PHASE_TITLES: Record<Phase, string> = {
-  1: 'Sign in to Claude',
-  2: 'Provisioning your wallet',
-  3: 'Fund your wallet',
-  4: 'Joining Jinn',
+  1: 'Provisioning your wallet',
+  2: 'Fund your wallet',
+  3: 'Joining Jinn',
 };
 
 function bootstrapPhaseFor(step: string): BootstrapPhaseDescriptor {
-  return PHASE_FOR_STEP[step] ?? { phase: 2, subState: null };
+  return PHASE_FOR_STEP[step] ?? { phase: 1, subState: null };
 }
 
 function statusFor(rowPhase: Phase, currentPhase: Phase): PhaseStatus {
@@ -74,11 +76,6 @@ export function Onboarding(): JSX.Element {
     queryKey: ['bootstrap'],
     queryFn: () => api.getBootstrap(),
     refetchInterval: 2000,
-  });
-  const { data: claudeAuth, refetch: refetchClaudeAuth } = useQuery<ClaudeAuthState>({
-    queryKey: ['claude-auth'],
-    queryFn: () => api.getClaudeAuth(),
-    refetchInterval: 4000,
   });
 
   if (isLoading || !bootstrap) {
@@ -95,15 +92,10 @@ export function Onboarding(): JSX.Element {
   const explorer =
     bootstrap.chain === 'base' ? 'https://basescan.org' : 'https://sepolia.basescan.org';
   const masterAddress = bootstrap.master_address ?? '';
-  const { phase: bootstrapPhase, subState } = bootstrapPhaseFor(bootstrap.currentStep);
+  const { phase: currentPhase, subState } = bootstrapPhaseFor(bootstrap.currentStep);
   const bootstrapError = bootstrap.error;
   const activeService = bootstrap.services.find((svc) => svc.step === bootstrap.currentStep)
     ?? bootstrap.services[0];
-
-  // Current phase is the FIRST not-done phase. Phase 1 (auth) is done once
-  // claude reports authenticated:true. Phases 2/3/4 are bootstrap-driven.
-  const authDone = claudeAuth?.authenticated === true;
-  const currentPhase: Phase = !authDone ? 1 : bootstrapPhase;
 
   return (
     <div
@@ -129,23 +121,20 @@ export function Onboarding(): JSX.Element {
           </h1>
 
           <ol className="flex flex-col">
-            {([1, 2, 3, 4] as Phase[]).map((p) => {
+            {([1, 2, 3] as Phase[]).map((p) => {
               const status = statusFor(p, currentPhase);
-              const showError = bootstrapError && p === currentPhase && p !== 1;
+              const showError = bootstrapError && p === currentPhase;
               return (
                 <PhaseRow key={p} phase={p} status={showError ? 'error' : status}>
                   {showError && <BootstrapErrorCard envelope={bootstrapError} />}
-                  {!showError && p === 1 && status === 'active' && claudeAuth && (
-                    <SignInRowContent auth={claudeAuth} onAuthChanged={() => { void refetchClaudeAuth(); }} />
-                  )}
-                  {!showError && p === 3 && status === 'active' && masterAddress && (
+                  {!showError && p === 2 && status === 'active' && masterAddress && (
                     <AwaitingFundingCard
                       address={masterAddress}
                       minimumWei={bootstrap.funding?.targetWei ?? '10000000000000000'}
                       chainExplorerBase={explorer}
                     />
                   )}
-                  {!showError && p === 4 && status === 'active' && (
+                  {!showError && p === 3 && status === 'active' && (
                     <SubStateLine
                       label={subState ?? 'Working'}
                       step={bootstrap.currentStep}
@@ -153,6 +142,7 @@ export function Onboarding(): JSX.Element {
                       serviceId={activeService?.service_id}
                       safeAddress={activeService?.safe_address}
                       explorer={explorer}
+                      contractRevertReason={activeService?.error_revert_reason ?? null}
                     />
                   )}
                 </PhaseRow>
@@ -167,7 +157,7 @@ export function Onboarding(): JSX.Element {
             className="j-card overflow-hidden"
             style={{ height: 'calc(100vh - 220px)', minHeight: '520px' }}
           >
-            <Agent agentGated={!authDone} />
+            <Agent agentGated={false} />
           </div>
         </aside>
       </div>
@@ -203,116 +193,6 @@ function NetworkBadge({ chain }: { chain?: string }): JSX.Element {
       >
         Mainnet · soon
       </span>
-    </div>
-  );
-}
-
-function SignInRowContent({
-  auth,
-  onAuthChanged,
-}: {
-  auth: ClaudeAuthState;
-  onAuthChanged: () => void;
-}): JSX.Element {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const isContainer = auth.context !== 'bare';
-  const binaryMissing = auth.binary.ok === false;
-
-  const onClick = async (): Promise<void> => {
-    setErr(null);
-    setBusy(true);
-    try {
-      const res = await api.signInClaude();
-      if (!res.ok) {
-        setErr(res.reason ?? 'Failed to start sign-in');
-      }
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to start sign-in');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onInstall = async (): Promise<void> => {
-    setErr(null);
-    setBusy(true);
-    try {
-      const res = await api.installClaudeCode();
-      if (!res.ok) {
-        setErr(res.detail || 'Failed to install Claude Code');
-        return;
-      }
-      onAuthChanged();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to install Claude Code');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div
-      className="px-5 py-4 flex flex-col gap-3"
-      style={{
-        border: '1px solid var(--seer-violet)',
-        background: 'rgba(122, 109, 176, 0.05)',
-        borderRadius: 'var(--radius-2)',
-      }}
-    >
-      {binaryMissing ? (
-        <>
-          <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
-            Jinn needs the Claude Code CLI to run the operator agent and complete
-            work.
-          </p>
-          <button
-            type="button"
-            onClick={onInstall}
-            disabled={busy}
-            className="self-start px-4 py-2 j-label hover:opacity-90 disabled:opacity-50"
-            style={{
-              background: 'var(--seer-violet)',
-              color: 'var(--fg)',
-              borderRadius: 'var(--radius-1)',
-            }}
-          >
-            {busy ? 'Installing…' : 'Install Claude Code'}
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
-            Claude runs the agent panel and the daemon's restorations. One sign-in
-            covers both — this is the only auth step you'll take.
-          </p>
-          <button
-            type="button"
-            onClick={onClick}
-            disabled={busy}
-            className="self-start px-4 py-2 j-label hover:opacity-90 disabled:opacity-50"
-            style={{
-              background: 'var(--seer-violet)',
-              color: 'var(--fg)',
-              borderRadius: 'var(--radius-1)',
-            }}
-          >
-            {busy ? 'Opening…' : 'Sign in with Claude →'}
-          </button>
-          {isContainer && (
-            <p className="j-mono text-[11px]" style={{ color: 'var(--fg-dim)' }}>
-              Container mode: after you sign in, copy the OAuth code from the auth
-              page and paste it into the agent terminal where claude is waiting at
-              'Paste code here'.
-            </p>
-          )}
-        </>
-      )}
-      {err && (
-        <p className="j-mono text-xs" style={{ color: 'var(--break-red)' }}>
-          {err}
-        </p>
-      )}
     </div>
   );
 }
@@ -535,6 +415,7 @@ function SubStateLine({
   serviceId,
   safeAddress,
   explorer,
+  contractRevertReason,
 }: {
   label: string;
   step: string;
@@ -542,12 +423,15 @@ function SubStateLine({
   serviceId?: number;
   safeAddress?: string;
   explorer: string;
+  /** Decoded contract revert reason from a failed setAgentWallet call, if any. */
+  contractRevertReason?: string | null;
 }): JSX.Element {
+  const hasRevertReason = Boolean(contractRevertReason);
   return (
     <div
       className="px-4 py-3 flex flex-col gap-3"
       style={{
-        border: '1px solid var(--border)',
+        border: hasRevertReason ? '1px solid var(--break-red)' : '1px solid var(--border)',
         borderRadius: 'var(--radius-2)',
         background: 'var(--bg-elevated)',
       }}
@@ -559,8 +443,10 @@ function SubStateLine({
             width: '6px',
             height: '6px',
             borderRadius: '50%',
-            background: 'var(--accent-sky)',
-            boxShadow: '0 0 0 0 rgba(122, 167, 220, 0.6)',
+            background: hasRevertReason ? 'var(--break-red)' : 'var(--accent-sky)',
+            boxShadow: hasRevertReason
+              ? '0 0 0 0 rgba(168, 90, 90, 0.6)'
+              : '0 0 0 0 rgba(122, 167, 220, 0.6)',
             animation: 'jinnPulse 1.6s ease-out infinite',
           }}
         />
@@ -569,9 +455,9 @@ function SubStateLine({
         </span>
         <span
           className="j-mono text-[10px] ml-auto"
-          style={{ color: 'var(--fg-dim)' }}
+          style={{ color: hasRevertReason ? 'var(--break-red)' : 'var(--fg-dim)' }}
         >
-          running · no action needed
+          {hasRevertReason ? 'binding failed · will retry' : 'running · no action needed'}
         </span>
       </div>
       <div
@@ -600,6 +486,14 @@ function SubStateLine({
             >
               {safeAddress}
             </a>
+          </>
+        )}
+        {contractRevertReason && (
+          <>
+            <span style={{ color: 'var(--fg-dim)' }}>Contract revert reason</span>
+            <code className="text-xs break-words" style={{ color: 'var(--break-red)' }}>
+              {contractRevertReason}
+            </code>
           </>
         )}
       </div>

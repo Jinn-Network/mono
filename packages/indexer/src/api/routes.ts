@@ -1,0 +1,277 @@
+/**
+ * Pure route-logic functions for the five Discovery API REST routes added by
+ * ttz8 (spec §6.5).
+ *
+ * These are extracted from the Hono route handlers so they can be unit-tested
+ * without the Ponder `db` / `ponder:api` virtual module, following the same
+ * pattern used for the builder-attribution join in `src/builder-attribution.ts`.
+ *
+ * The Hono handlers in `src/api/index.ts` query the Ponder db, then delegate
+ * to these functions for the JSON-shape logic.
+ *
+ * ebu7 dependency:
+ *   Routes 3 (/plugins/:cid/scores) and 5 (/builders/:address/scores) require
+ *   the `attemptEnvelopeMeta` and `verdict` indexer entities shipped by
+ *   jinn-mono-ebu7. Until ebu7 merges, callers pass empty arrays for both and
+ *   these functions return [] gracefully. The routes are additive — calling
+ *   them from day one means the SPA picks up live data automatically when
+ *   ebu7 lands, without changes to this file.
+ *
+ * JSON serialisation note:
+ *   `publishedAt` is stored as bigint in the schema (unix seconds from the
+ *   on-chain payload). This module converts it to a plain JS number so
+ *   responses are valid JSON without `BigInt.prototype.toJSON` patches.
+ *   Values beyond Number.MAX_SAFE_INTEGER (year ~292471) are not a practical
+ *   concern for a unix-seconds timestamp.
+ */
+
+// ── Row types ─────────────────────────────────────────────────────────────────
+// Minimal structural types matching the Ponder schema columns the handlers
+// read. Must stay in sync with ponder.schema.ts pluginPublication columns.
+
+export interface PluginPublicationRow {
+  id: string;
+  builderAgentId: string;
+  pluginCid: string;
+  pluginName: string;
+  pluginVersion: string;
+  pluginSha256: string;
+  supports: readonly string[];
+  publishedAt: bigint;
+  revoked: boolean;
+  revokedReason: string | null;
+  blockNumber: bigint;
+  txIndex: number;
+  logIndex: number;
+  txHash: `0x${string}`;
+  chainId: number;
+}
+
+/** Row type for ebu7's `attemptEnvelopeMeta` entity (not yet in schema). */
+export interface AttemptEnvelopeMetaRow {
+  requestId: `0x${string}`;
+  manifestCid: string;
+  /** JSON.stringify(executor.plugins) — array of {name,version,cid?,sha256}. */
+  pluginsJson: string;
+  enrichedAtBlock: bigint;
+  chainId: number;
+}
+
+/** Row type for ebu7's `verdict` entity (not yet in schema). */
+export interface VerdictRow {
+  requestId: `0x${string}`;
+  taskId: string;
+  operatorAgentId: string;
+  verdict: string;
+  score?: number;
+  ts: number;
+}
+
+// ── Shared output types ───────────────────────────────────────────────────────
+// These mirror client/src/discovery/types.ts PluginPublication /
+// PublishedArtifact / PluginScoreHistoryRow exactly so the SPA and SDK get
+// the same shape from both the indexer HTTP endpoints and the DiscoveryAPI.
+
+export interface PluginPublicationOutput {
+  artifactType: 'plugin';
+  builderAgentId: string;
+  cid: string;
+  name: string;
+  version: string;
+  supports: readonly string[];
+  publishedAt: number;
+  revoked: boolean;
+  revokedReason?: string;
+  pluginSha256: string;
+}
+
+export interface PluginScoreHistoryOutput {
+  pluginCid: string;
+  taskId: string;
+  operatorAgentId: string;
+  verdict: string;
+  score?: number;
+  ts: number;
+  forkSuspected: boolean;
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+interface EnvelopePluginEntry {
+  name: string;
+  version: string;
+  cid?: string;
+  sha256: string;
+}
+
+function normaliseSha(sha: string): string {
+  return sha.replace(/^0x/i, '').toLowerCase();
+}
+
+function sha256Matches(pubSha: string, envSha: string): boolean {
+  const a = normaliseSha(pubSha);
+  const b = normaliseSha(envSha);
+  return a.length === 64 && b.length === 64 && a === b;
+}
+
+function rowToOutput(row: PluginPublicationRow): PluginPublicationOutput {
+  const out: PluginPublicationOutput = {
+    artifactType: 'plugin',
+    builderAgentId: row.builderAgentId,
+    cid: row.pluginCid,
+    name: row.pluginName,
+    version: row.pluginVersion,
+    supports: row.supports,
+    publishedAt: Number(row.publishedAt),
+    revoked: row.revoked,
+    pluginSha256: row.pluginSha256,
+  };
+  if (row.revokedReason != null) out.revokedReason = row.revokedReason;
+  return out;
+}
+
+/**
+ * Build per-plugin score rows by joining plug-in publications against
+ * envelope meta + verdict rows (ebu7 data). Returns [] when either
+ * of the ebu7 lists is empty.
+ */
+function buildScoreRows(
+  publications: PluginPublicationRow[],
+  attemptEnvelopeMetas: AttemptEnvelopeMetaRow[],
+  verdicts: VerdictRow[],
+): PluginScoreHistoryOutput[] {
+  if (attemptEnvelopeMetas.length === 0 || verdicts.length === 0) return [];
+
+  const pubByCid = new Map<string, PluginPublicationRow>();
+  for (const p of publications) pubByCid.set(p.pluginCid, p);
+
+  const verdictByReq = new Map<string, VerdictRow>();
+  for (const v of verdicts) verdictByReq.set(v.requestId.toLowerCase(), v);
+
+  const out: PluginScoreHistoryOutput[] = [];
+  for (const meta of attemptEnvelopeMetas) {
+    let plugins: EnvelopePluginEntry[] = [];
+    try {
+      plugins = JSON.parse(meta.pluginsJson) as EnvelopePluginEntry[];
+    } catch {
+      continue;
+    }
+    const verdict = verdictByReq.get(meta.requestId.toLowerCase());
+    if (!verdict) continue;
+
+    for (const entry of plugins) {
+      if (!entry.cid) continue;
+      const pub = pubByCid.get(entry.cid);
+      if (!pub) continue;
+      const forkSuspected = !sha256Matches(pub.pluginSha256, entry.sha256);
+      const row: PluginScoreHistoryOutput = {
+        pluginCid: pub.pluginCid,
+        taskId: verdict.taskId,
+        operatorAgentId: verdict.operatorAgentId,
+        verdict: verdict.verdict,
+        ts: verdict.ts,
+        forkSuspected,
+      };
+      if (typeof verdict.score === 'number') row.score = verdict.score;
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+// ── Route 1: GET /plugins?solverNet=<id>[&includeRevoked=false] ───────────────
+
+/**
+ * Returns published plug-ins whose `supports` array includes `solverNet`.
+ * Revoked rows are excluded by default (includeRevoked=false).
+ */
+export function listPluginsByNetwork(args: {
+  publications: PluginPublicationRow[];
+  solverNet: string;
+  includeRevoked?: boolean;
+}): PluginPublicationOutput[] {
+  const { publications, solverNet, includeRevoked = false } = args;
+  return publications
+    .filter((p) => {
+      if (!includeRevoked && p.revoked) return false;
+      return (p.supports as string[]).includes(solverNet);
+    })
+    .map(rowToOutput);
+}
+
+// ── Route 2: GET /plugins?builder=<address> ───────────────────────────────────
+
+/**
+ * Returns published plug-ins by a given builder agentId.
+ * Revoked rows are excluded by default (includeRevoked=false).
+ */
+export function listPluginsByBuilder(args: {
+  publications: PluginPublicationRow[];
+  builderAgentId: string;
+  includeRevoked?: boolean;
+}): PluginPublicationOutput[] {
+  const { publications, builderAgentId, includeRevoked = false } = args;
+  return publications
+    .filter((p) => {
+      if (!includeRevoked && p.revoked) return false;
+      return p.builderAgentId === builderAgentId;
+    })
+    .map(rowToOutput);
+}
+
+// ── Route 3: GET /plugins/:cid/scores ─────────────────────────────────────────
+
+/**
+ * Returns score history for a single plug-in CID.
+ *
+ * ebu7 dependency: pass `attemptEnvelopeMetas: []` and `verdicts: []` until
+ * ebu7 merges — the function returns [] gracefully.
+ */
+export function getPluginScores(args: {
+  publications: PluginPublicationRow[];
+  pluginCid: string;
+  attemptEnvelopeMetas: AttemptEnvelopeMetaRow[];
+  verdicts: VerdictRow[];
+}): PluginScoreHistoryOutput[] {
+  const { publications, pluginCid, attemptEnvelopeMetas, verdicts } = args;
+  const pub = publications.find((p) => p.pluginCid === pluginCid);
+  if (!pub) return [];
+
+  return buildScoreRows([pub], attemptEnvelopeMetas, verdicts);
+}
+
+// ── Route 4: GET /builders/:address/artifacts ─────────────────────────────────
+
+/**
+ * Returns all published artifacts for a given builder agentId.
+ * Includes revoked rows so the SPA can render them with a "revoked" badge.
+ * The `artifactType` discriminator is future-proofed for harness kind.
+ */
+export function listBuilderArtifacts(args: {
+  publications: PluginPublicationRow[];
+  builderAgentId: string;
+}): PluginPublicationOutput[] {
+  const { publications, builderAgentId } = args;
+  return publications
+    .filter((p) => p.builderAgentId === builderAgentId)
+    .map(rowToOutput);
+}
+
+// ── Route 5: GET /builders/:address/scores ────────────────────────────────────
+
+/**
+ * Returns per-artifact score history for all plug-ins published by a builder.
+ *
+ * ebu7 dependency: pass `attemptEnvelopeMetas: []` and `verdicts: []` until
+ * ebu7 merges — the function returns [] gracefully.
+ */
+export function listBuilderScores(args: {
+  publications: PluginPublicationRow[];
+  builderAgentId: string;
+  attemptEnvelopeMetas: AttemptEnvelopeMetaRow[];
+  verdicts: VerdictRow[];
+}): PluginScoreHistoryOutput[] {
+  const { publications, builderAgentId, attemptEnvelopeMetas, verdicts } = args;
+  const builderPubs = publications.filter((p) => p.builderAgentId === builderAgentId);
+  return buildScoreRows(builderPubs, attemptEnvelopeMetas, verdicts);
+}

@@ -1191,6 +1191,26 @@ export class TaskEngine {
       }
     }
 
+    // jinn-mono-4tfq: SkippableError caught in RUNNING leaves a skip-marker
+    // Solution with no payload; short-circuit before envelope assembly.
+    // Runs BEFORE the deps guard — skipping needs nothing wired.
+    const earlyImplOutput = this.solutionOutputs.get(task.requestId);
+    const gatingClaim = earlyImplOutput?.gating as Record<string, unknown> | undefined;
+    if (gatingClaim?.['skipped'] === true) {
+      const reason = String(gatingClaim['reason'] ?? 'unknown');
+      const detail = String(
+        (earlyImplOutput?.informational as Record<string, unknown> | undefined)?.['detail'] ?? '',
+      );
+      console.log(
+        `[harness-engine] ${task.requestId}: PACKAGING short-circuited — impl was skipped (${reason})${detail ? `: ${detail}` : ''}`,
+      );
+      this.persistence.markFailed(
+        task.requestId,
+        `impl skipped: ${reason}${detail ? ` — ${detail}` : ''}`,
+      );
+      return;
+    }
+
     if (!this.packagingDeps || !this.envelopeDeps) {
       throw new NotImplementedError('pack');
     }
@@ -1302,9 +1322,9 @@ export class TaskEngine {
     const solverType = task.solverType ?? 'legacy.v0';
 
     // Derive role from Task.role. Evaluator tasks produce 'verdict' envelopes;
-    // all other tasks produce 'restoration' envelopes.
+    // all other tasks produce 'solution' envelopes.
     const isEvaluation = task.taskRole === 'evaluation';
-    const role: Role = isEvaluation ? 'verdict' : 'restoration';
+    const role: Role = isEvaluation ? 'verdict' : 'solution';
 
     let envelopePayload: Record<string, unknown>;
 
@@ -1319,7 +1339,7 @@ export class TaskEngine {
       // with a wrong shape — validatePayload will catch schema mismatches.
       //
       // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
-      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      // solutionEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
       const verdictPayload = implOutput?.verdictPayload;
       if (!verdictPayload) {
         throw new Error(

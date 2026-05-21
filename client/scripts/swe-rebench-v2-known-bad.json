@@ -1,0 +1,12 @@
+{
+  "comment": "Instance IDs known unscorable per the 2026-05-14 triage (jinn-mono-xw6i, jinn-mono-y4ah). validate-pool --known-bad records every entry below as scorable:false under the current semanticsVersion.",
+  "source": "spike jinn-mono-fufn",
+  "instance_ids": [
+    "basicmachines-co__basic-memory-341",
+    "basicmachines-co__basic-memory-484",
+    "BerriAI__litellm-13868",
+    "beeware__briefcase-2114",
+    "beeware__briefcase-2302",
+    "beeware__briefcase-2401"
+  ]
+}
