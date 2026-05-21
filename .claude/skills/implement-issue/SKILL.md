@@ -208,6 +208,8 @@ gh pr list --head "$BRANCH" --json number,url,isDraft
 
 If the PR does not exist, dispatch a fix subagent.
 
+**Move the issue to `In Review`.** Once the draft PR is confirmed, set the issue's Project `Status` to `In Review` — the pipeline's work is done and the issue now awaits the human's batch-merge. This also removes the issue from the dispatcher's in-flight set (`deriveInFlight` keys on `In Progress`), freeing the concurrency slot; without it a completed session lingers as in-flight. `Status` is single-select — discover the `In Review` option id via `gh project field-list` (Step 2), then `gh project item-edit ... --single-select-option-id <in-review-option-id>`.
+
 ---
 
 ## Step 4 — Subagent-dispatch discipline
