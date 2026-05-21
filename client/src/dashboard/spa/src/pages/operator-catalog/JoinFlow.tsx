@@ -9,6 +9,12 @@ import type {
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
 } from '../../api/types.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
+import { Label } from '../../components/ui/label.js';
+import { cn } from '../../lib/utils.js';
 import {
   defaultModelForHarness,
   modelOptionsForHarness,
@@ -53,6 +59,14 @@ const JOIN_FORM_CONTEXT_DOC =
  */
 
 const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
+
+const pageClass = 'mx-auto flex max-w-[880px] flex-col gap-4 p-6';
+const cardLabelClass =
+  'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
+const fieldLabelClass = cardLabelClass;
+const labelRowClass = 'flex items-start gap-2';
+const selectClass =
+  'rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[14px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
 
 export interface JoinFlowProps {
   /** Override the manifest cid for tests (skips wouter route param lookup). */
@@ -276,7 +290,7 @@ export function JoinFlow({
 
   if (!cid) {
     return (
-      <main data-testid="join-flow-missing-cid" style={pageStyle}>
+      <main data-testid="join-flow-missing-cid" className={pageClass}>
         <ErrorBanner
           message="No manifest cid supplied."
           onBack={() => navigate('/operator#solvernets')}
@@ -287,8 +301,10 @@ export function JoinFlow({
 
   if (manifestQuery.isLoading) {
     return (
-      <main data-testid="join-flow-loading" style={pageStyle}>
-        <p style={mutedTextStyle}>Loading manifest…</p>
+      <main data-testid="join-flow-loading" className={pageClass}>
+        <p className="m-0 font-mono text-[13px] text-[var(--fg-muted)]">
+          Loading manifest…
+        </p>
       </main>
     );
   }
@@ -299,7 +315,7 @@ export function JoinFlow({
         ? manifestQuery.error.message
         : 'Unknown error';
     return (
-      <main data-testid="join-flow-error" style={pageStyle}>
+      <main data-testid="join-flow-error" className={pageClass}>
         <ErrorBanner
           message={`Failed to load manifest: ${message}`}
           onBack={() => navigate('/operator#solvernets')}
@@ -316,7 +332,7 @@ export function JoinFlow({
   // they just joined, the restart hint, and clear next-step CTAs.
   if (joinSuccess) {
     return (
-      <main data-testid="join-flow-success" style={pageStyle}>
+      <main data-testid="join-flow-success" className={pageClass}>
         <JoinSuccessCard success={joinSuccess} navigate={navigate} />
       </main>
     );
@@ -362,84 +378,60 @@ export function JoinFlow({
     !harnessReadinessBlocked;
 
   return (
-    <main data-testid="join-flow" data-manifest-cid={cid} style={pageStyle}>
-      <header style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <main
+      data-testid="join-flow"
+      data-manifest-cid={cid}
+      className={pageClass}
+    >
+      <header className="flex flex-col gap-1.5">
         <span
           data-testid="join-flow-title"
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '20px',
-            fontWeight: 500,
-            color: 'var(--fg)',
-          }}
+          className="font-mono text-[20px] font-medium text-foreground"
         >
           Join {manifest.name}
         </span>
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-          }}
-        >
+        <span className="font-mono text-[12px] text-[var(--fg-muted)]">
           {manifest.description}
         </span>
       </header>
 
-      <section
-        data-testid="join-flow-summary"
-        style={cardStyle}
-      >
-        <span style={cardLabelStyle}>Manifest</span>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'auto 1fr',
-            gap: '6px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-          }}
-        >
+      <Card data-testid="join-flow-summary" className="flex flex-col gap-3 p-4">
+        <span className={cardLabelClass}>Manifest</span>
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[12px] text-[var(--fg-muted)]">
           <span>Contract</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {manifest.contract.id} · {manifest.contract.version}
           </span>
           <span>Solution price</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {formatWeiAmount(manifest.solutionPriceWei)}
           </span>
           <span>Verdict price</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {formatWeiAmount(manifest.verdictPriceWei)}
           </span>
           <span>Open roles</span>
-          <span data-testid="join-flow-open-roles" style={{ color: 'var(--fg)' }}>
+          <span data-testid="join-flow-open-roles" className="text-foreground">
             {openRoles.join(', ') || 'none'}
           </span>
           <span>Launcher</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {truncateAddress(manifest.launcher.safeAddress)} · agentId{' '}
             {manifest.launcher.agentId}
           </span>
           <span>Manifest CID</span>
           <span
             data-testid="join-flow-manifest-cid"
-            style={{
-              color: 'var(--fg-dim)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="truncate text-[var(--fg-dim)]"
           >
             {cid}
           </span>
         </div>
-      </section>
+      </Card>
 
-      <section style={cardStyle}>
-        <span style={labelRowStyle}>
-          <span style={cardLabelStyle}>Roles</span>
+      <Card className="flex flex-col gap-3 p-4">
+        <span className={labelRowClass}>
+          <span className={cardLabelClass}>Roles</span>
           <InlineHelp
             label="Roles help"
             docHref={`${JOIN_FORM_CONTEXT_DOC}#solver-vs-evaluator`}
@@ -455,15 +447,7 @@ export function JoinFlow({
             one SolverNet, using a model you already pay for.
           </InlineHelp>
         </span>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${openRoles.length || 1}, 1fr)`,
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
-            overflow: 'hidden',
-          }}
-        >
+        <div className="flex overflow-hidden rounded-md border border-border">
           {openRoles.map((role, idx) => {
             const active = form.roles.includes(role);
             const checkboxId = `join-role-${role}`;
@@ -474,40 +458,30 @@ export function JoinFlow({
                 data-testid="join-role-option"
                 data-role={role}
                 data-role-active={active ? 'true' : 'false'}
-                style={{
-                  padding: '12px 16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px',
-                  background: active ? 'var(--bg)' : 'transparent',
-                  color: active ? 'var(--fg)' : 'var(--fg-muted)',
-                  borderRight:
-                    idx < openRoles.length - 1
-                      ? '1px solid var(--border)'
-                      : 'none',
-                  cursor: 'pointer',
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}
+                className={cn(
+                  'flex flex-1 cursor-pointer flex-col gap-1.5 p-3 font-mono',
+                  active ? 'bg-[var(--bg)] text-foreground' : 'bg-transparent text-[var(--fg-muted)]',
+                  idx < openRoles.length - 1 && 'border-r border-border',
+                )}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="flex items-center gap-2">
                   <input
                     id={checkboxId}
                     type="checkbox"
                     checked={active}
                     onChange={() => toggleRole(role)}
                     aria-label={role === 'solver' ? 'Solver' : 'Evaluator'}
-                    style={{ accentColor: 'var(--accent-sky)', width: '14px', height: '14px' }}
+                    className="size-3.5 accent-primary"
                   />
-                  <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                  <span className="text-[14px] font-medium">
                     {role === 'solver' ? 'Solver' : 'Evaluator'}
                   </span>
                 </span>
                 <span
-                  style={{
-                    fontSize: '11px',
-                    color: active ? 'var(--fg-muted)' : 'var(--fg-dim)',
-                    paddingLeft: '22px',
-                  }}
+                  className={cn(
+                    'pl-[22px] text-[11px]',
+                    active ? 'text-[var(--fg-muted)]' : 'text-[var(--fg-dim)]',
+                  )}
                 >
                   {role === 'solver'
                     ? 'attempt tasks; submit solutions'
@@ -517,21 +491,20 @@ export function JoinFlow({
             );
           })}
         </div>
-      </section>
+      </Card>
 
       {showSolverFields && (
-        <section data-testid="join-flow-solver-fields" style={cardStyle}>
-          <span style={cardLabelStyle}>Solver configuration</span>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '16px',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={labelRowStyle}>
-                <span style={fieldLabelStyle}>Harness</span>
+        <Card
+          data-testid="join-flow-solver-fields"
+          className="flex flex-col gap-3 p-4"
+        >
+          <span className={cardLabelClass}>Solver configuration</span>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <span className={labelRowClass}>
+                <Label htmlFor="join-harness-select" className={fieldLabelClass}>
+                  Harness
+                </Label>
                 <InlineHelp
                   label="Harness help"
                   docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
@@ -550,6 +523,7 @@ export function JoinFlow({
                 </InlineHelp>
               </span>
               <select
+                id="join-harness-select"
                 aria-label="Harness"
                 data-testid="join-harness-select"
                 value={form.harness}
@@ -566,7 +540,7 @@ export function JoinFlow({
                   });
                   setHighCostAcknowledged(false);
                 }}
-                style={selectStyle}
+                className={selectClass}
               >
                 {solverCompatibleHarnesses.map((h) => {
                   const entry = readiness.get(h.name);
@@ -594,11 +568,7 @@ export function JoinFlow({
               {form.harness === HERMES_AGENT_HARNESS && (
                 <span
                   data-testid="join-harness-hermes-description"
-                  style={{
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '11px',
-                    color: 'var(--fg-muted)',
-                  }}
+                  className="font-mono text-[11px] text-[var(--fg-muted)]"
                 >
                   {HERMES_AGENT_DESCRIPTION}
                 </span>
@@ -608,20 +578,9 @@ export function JoinFlow({
                   data-testid="join-harness-not-ready"
                   data-harness={form.harness}
                   role="status"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    padding: '10px 12px',
-                    border: '1px solid var(--break-red)',
-                    borderRadius: 'var(--radius-2)',
-                    background: 'var(--bg)',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '11px',
-                    color: 'var(--fg)',
-                  }}
+                  className="flex flex-col gap-1 rounded-md border border-destructive bg-[var(--bg)] p-2.5 font-mono text-[11px] text-foreground"
                 >
-                  <span style={{ color: 'var(--break-red)' }}>
+                  <span className="text-destructive">
                     {harnessDisplayName(form.harness)} is not ready
                     {selectedHarnessReadiness.reason
                       ? `: ${selectedHarnessReadiness.reason}`
@@ -630,7 +589,7 @@ export function JoinFlow({
                   {selectedHarnessReadiness.nextStep && (
                     <span
                       data-testid="join-harness-not-ready-next-step"
-                      style={{ color: 'var(--fg-muted)' }}
+                      className="text-[var(--fg-muted)]"
                     >
                       {selectedHarnessReadiness.nextStep.description}
                       {selectedHarnessReadiness.nextStep.cli
@@ -642,9 +601,11 @@ export function JoinFlow({
               )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={labelRowStyle}>
-                <span style={fieldLabelStyle}>Model</span>
+            <div className="flex flex-col gap-1.5">
+              <span className={labelRowClass}>
+                <Label htmlFor="join-model-select" className={fieldLabelClass}>
+                  Model
+                </Label>
                 <InlineHelp
                   label="Model help"
                   docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
@@ -662,6 +623,7 @@ export function JoinFlow({
                 </InlineHelp>
               </span>
               <select
+                id="join-model-select"
                 aria-label="Model"
                 data-testid="join-model-select"
                 value={form.model}
@@ -669,7 +631,7 @@ export function JoinFlow({
                   setForm({ ...form, model: e.target.value });
                   setHighCostAcknowledged(false);
                 }}
-                style={selectStyle}
+                className={selectClass}
               >
                 {modelOptions.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -701,26 +663,14 @@ export function JoinFlow({
             <label
               data-testid="join-flow-cost-confirmation"
               data-cost-confirmation-checked={highCostAcknowledged ? 'true' : 'false'}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '10px',
-                padding: '12px 14px',
-                border: '1px solid var(--break-red)',
-                borderRadius: 'var(--radius-2)',
-                background: 'var(--bg)',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                color: 'var(--fg)',
-                cursor: 'pointer',
-              }}
+              className="flex cursor-pointer items-start gap-2.5 rounded-md border border-destructive bg-[var(--bg)] p-3 font-mono text-[12px] text-foreground"
             >
               <input
                 type="checkbox"
                 data-testid="join-flow-cost-confirmation-checkbox"
                 checked={highCostAcknowledged}
                 onChange={(e) => setHighCostAcknowledged(e.target.checked)}
-                style={{ accentColor: 'var(--break-red)', marginTop: '2px', width: '14px', height: '14px' }}
+                className="mt-0.5 size-3.5 accent-destructive"
                 aria-label="I understand the per-task cost and have a budget for this"
               />
               <span>
@@ -730,9 +680,9 @@ export function JoinFlow({
             </label>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span style={labelRowStyle}>
-              <span style={fieldLabelStyle}>Plugins</span>
+          <div className="flex flex-col gap-2">
+            <span className={labelRowClass}>
+              <span className={fieldLabelClass}>Plugins</span>
               <InlineHelp
                 label="Plugins help"
                 docHref={`${JOIN_FORM_CONTEXT_DOC}#plug-ins`}
@@ -761,13 +711,16 @@ export function JoinFlow({
               harness={form.harness}
             />
           </div>
-        </section>
+        </Card>
       )}
 
       {showEvaluatorInfo && !showSolverFields && (
-        <section data-testid="join-flow-evaluator-info" style={cardStyle}>
-          <span style={labelRowStyle}>
-            <span style={cardLabelStyle}>Evaluator configuration</span>
+        <Card
+          data-testid="join-flow-evaluator-info"
+          className="flex flex-col gap-3 p-4"
+        >
+          <span className={labelRowClass}>
+            <span className={cardLabelClass}>Evaluator configuration</span>
             <InlineHelp
               label="Evaluator configuration help"
               docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
@@ -783,27 +736,23 @@ export function JoinFlow({
               model at all.
             </InlineHelp>
           </span>
-          <p
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              margin: 0,
-            }}
-          >
+          <p className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
             The evaluator harness is bound to{' '}
-            <code style={{ color: 'var(--fg)' }}>
+            <code className="text-foreground">
               {manifest.contract.evaluationFunction.implementation}
             </code>{' '}
             by the manifest's contract; no operator selection required.
           </p>
-        </section>
+        </Card>
       )}
 
       {showEvaluatorInfo && showSolverFields && (
-        <section data-testid="join-flow-evaluator-info" style={cardStyle}>
-          <span style={labelRowStyle}>
-            <span style={cardLabelStyle}>Evaluator binding</span>
+        <Card
+          data-testid="join-flow-evaluator-info"
+          className="flex flex-col gap-3 p-4"
+        >
+          <span className={labelRowClass}>
+            <span className={cardLabelClass}>Evaluator binding</span>
             <InlineHelp
               label="Evaluator binding help"
               docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
@@ -816,21 +765,14 @@ export function JoinFlow({
               The harness and model fields above apply only to the solver role.
             </InlineHelp>
           </span>
-          <p
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              margin: 0,
-            }}
-          >
+          <p className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
             Evaluator harness is bound to{' '}
-            <code style={{ color: 'var(--fg)' }}>
+            <code className="text-foreground">
               {manifest.contract.evaluationFunction.implementation}
             </code>{' '}
             by the manifest. The fields above only configure the solver role.
           </p>
-        </section>
+        </Card>
       )}
 
       {showHermesPrecheck && (
@@ -849,35 +791,24 @@ export function JoinFlow({
         <p
           data-testid="join-flow-submit-error"
           role="alert"
-          style={{
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            margin: 0,
-          }}
+          className="m-0 font-mono text-[13px] text-destructive"
         >
           {submitError}
         </p>
       )}
 
-      <footer
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: '12px',
-        }}
-      >
-        <button
+      <footer className="flex items-center justify-end gap-3">
+        <Button
           type="button"
+          variant="secondary"
           data-testid="join-flow-cancel"
           onClick={() => navigate('/operator#solvernets')}
-          style={ghostButtonStyle}
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="default"
           data-testid="join-flow-submit"
           disabled={!canSubmit}
           onClick={() => {
@@ -890,16 +821,9 @@ export function JoinFlow({
             }
             submitMutation.mutate();
           }}
-          style={{
-            ...ghostButtonStyle,
-            background: canSubmit ? 'var(--accent-sky)' : 'transparent',
-            color: canSubmit ? 'var(--bg-sunken)' : 'var(--fg-dim)',
-            border: `1px solid ${canSubmit ? 'var(--accent-sky)' : 'var(--border)'}`,
-            cursor: canSubmit ? 'pointer' : 'not-allowed',
-          }}
         >
           {submitMutation.isPending ? 'Joining…' : 'Join SolverNet'}
-        </button>
+        </Button>
       </footer>
     </main>
   );
@@ -915,48 +839,36 @@ function ErrorBanner({
   onRetry?: () => void;
 }): JSX.Element {
   return (
-    <div
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--break-red)',
-        borderRadius: 'var(--radius-2)',
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: '16px',
-      }}
+    <Alert
+      variant="blocking"
+      className="flex items-center justify-between gap-4 border-l-0 border border-destructive p-4"
     >
-      <span
-        style={{
-          color: 'var(--break-red)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-        }}
-      >
+      <AlertDescription className="font-mono text-[13px] text-destructive">
         {message}
-      </span>
-      <div style={{ display: 'flex', gap: '8px' }}>
+      </AlertDescription>
+      <div className="flex gap-2">
         {onRetry && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             data-testid="join-flow-retry"
             onClick={onRetry}
-            style={ghostButtonStyle}
           >
             Retry
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           data-testid="join-flow-back"
           onClick={onBack}
-          style={ghostButtonStyle}
         >
           Back
-        </button>
+        </Button>
       </div>
-    </div>
+    </Alert>
   );
 }
 
@@ -1000,197 +912,80 @@ function JoinSuccessCard({
   };
   return (
     <>
-      <div
+      <Card
         data-testid="join-flow-success-card"
         role="status"
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--vow-green)',
-          borderRadius: 'var(--radius-3)',
-          padding: '20px 24px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '10px',
-        }}
+        // var(--vow-green) is unmapped in tailwind config (no shadcn
+        // equivalent for the protocol "vow" tone); used to signal a
+        // successful join visually distinct from default green.
+        className="flex flex-col gap-2.5 border-[var(--vow-green)] p-5"
       >
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            fontWeight: 500,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--vow-green)',
-          }}
-        >
+        <Badge variant="success" className="self-start">
           Joined
-        </span>
+        </Badge>
         <span
           data-testid="join-flow-success-name"
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '18px',
-            fontWeight: 500,
-            color: 'var(--fg)',
-          }}
+          className="font-mono text-[18px] font-medium text-foreground"
         >
           You joined {success.name}
         </span>
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-            lineHeight: 1.5,
-          }}
-        >
+        <span className="font-mono text-[12px] leading-relaxed text-[var(--fg-muted)]">
           You're in as {roleLabel || 'an operator'}. This SolverNet now shows in
           your joined list.
         </span>
         {success.restartRequired && (
           <span
             data-testid="join-flow-success-restart"
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--accent-gold)',
-              lineHeight: 1.5,
-            }}
+            // var(--accent-gold) is unmapped in tailwind config; used here as
+            // the canonical "attention required" tone (matches the design
+            // system's wane/gold ramp for advisory messaging).
+            className="font-mono text-[12px] leading-relaxed text-[var(--accent-gold)]"
           >
             Restart the node to start participating — the daemon picks up
             SolverNet config on restart.
           </span>
         )}
-      </div>
+      </Card>
       {restartError && (
-        <div
+        <AlertTitle
           role="alert"
           data-testid="join-flow-success-restart-error"
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--break-red)',
-            lineHeight: 1.5,
-          }}
+          className="font-mono text-[12px] leading-relaxed text-destructive"
         >
           {restartError}
-        </div>
+        </AlertTitle>
       )}
-      <footer
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: '12px',
-        }}
-      >
-        <button
+      <footer className="flex items-center justify-end gap-3">
+        <Button
           type="button"
+          variant="secondary"
           data-testid="join-flow-success-browse"
           onClick={() => navigate('/operator#solvernets')}
-          style={ghostButtonStyle}
         >
           Browse SolverNets
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
           data-testid="join-flow-success-view"
           onClick={() =>
             navigate(`/operator#solvernets/${success.manifestCid}`)
           }
-          style={ghostButtonStyle}
         >
           View joined SolverNet
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="default"
           data-testid="join-flow-success-restart-button"
-          onClick={handleRestart}
-          disabled={restarting}
-          style={{
-            ...ghostButtonStyle,
-            background: 'var(--accent-sky)',
-            color: 'var(--bg-sunken)',
-            border: '1px solid var(--accent-sky)',
-            cursor: restarting ? 'wait' : 'pointer',
-            opacity: restarting ? 0.7 : 1,
+          onClick={() => {
+            void handleRestart();
           }}
+          disabled={restarting}
         >
           {restarting ? 'Restarting…' : 'Restart node now'}
-        </button>
+        </Button>
       </footer>
     </>
   );
 }
-
-const pageStyle: React.CSSProperties = {
-  padding: '24px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '16px',
-  maxWidth: '880px',
-  margin: '0 auto',
-};
-
-const mutedTextStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg-muted)',
-  margin: 0,
-};
-
-const cardStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '16px 20px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-};
-
-const cardLabelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const fieldLabelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-// Row that pairs a section / field label with its InlineHelp trigger.
-const labelRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: '8px',
-};
-
-const selectStyle: React.CSSProperties = {
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '10px 12px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '14px',
-  color: 'var(--fg)',
-};
-
-const ghostButtonStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  padding: '8px 16px',
-  background: 'transparent',
-  color: 'var(--fg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  cursor: 'pointer',
-};

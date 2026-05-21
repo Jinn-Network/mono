@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../api/client.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
 
 /**
  * Runs `GET /api/hermes/doctor` and presents three states:
@@ -13,7 +16,12 @@ import { api } from '../../api/client.js';
  * `onCancel` returns the user to the harness selector.
  */
 
-export type HermesPrecheckState = 'checking' | 'not-installed' | 'config-issue' | 'network-error' | 'ok';
+export type HermesPrecheckState =
+  | 'checking'
+  | 'not-installed'
+  | 'config-issue'
+  | 'network-error'
+  | 'ok';
 
 export interface HermesPrecheckPanelProps {
   onSuccess: () => void;
@@ -23,61 +31,8 @@ export interface HermesPrecheckPanelProps {
 const INSTALL_COMMAND =
   'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash';
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '16px 20px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-};
-
-const monoStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg)',
-};
-
-const mutedStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  color: 'var(--fg-muted)',
-};
-
-const codeBlockStyle: React.CSSProperties = {
-  background: 'var(--bg-sunken)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-1)',
-  padding: '10px 12px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  color: 'var(--fg)',
-  overflowX: 'auto',
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-all',
-  margin: 0,
-};
-
-const ghostButtonStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  padding: '8px 16px',
-  background: 'transparent',
-  color: 'var(--fg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  cursor: 'pointer',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
+const codeBlockClass =
+  'm-0 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-[var(--bg-sunken)] p-2.5 font-mono text-[12px] text-foreground';
 
 export function HermesPrecheckPanel({
   onSuccess,
@@ -129,117 +84,142 @@ export function HermesPrecheckPanel({
 
   if (state === 'checking') {
     return (
-      <div data-testid="hermes-precheck-checking" style={cardStyle}>
-        <span style={labelStyle}>Hermes install check</span>
-        <p style={mutedStyle}>Checking hermes install…</p>
-      </div>
+      <Card
+        data-testid="hermes-precheck-checking"
+        className="flex flex-col gap-3 p-4"
+      >
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+          Hermes install check
+        </span>
+        <p className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
+          Checking hermes install…
+        </p>
+      </Card>
     );
   }
 
   if (state === 'not-installed') {
     return (
-      <div data-testid="hermes-precheck-not-installed" style={cardStyle}>
-        <span style={labelStyle}>Hermes Agent not installed</span>
-        <p style={monoStyle}>
-          Hermes Agent is not installed on this machine.
-          Run this command in your terminal, then click Retry:
+      <Card
+        data-testid="hermes-precheck-not-installed"
+        className="flex flex-col gap-3 p-4"
+      >
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+          Hermes Agent not installed
+        </span>
+        <p className="m-0 font-mono text-[13px] text-foreground">
+          Hermes Agent is not installed on this machine. Run this command in
+          your terminal, then click Retry:
         </p>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-          <pre style={{ ...codeBlockStyle, flex: 1 }}>{INSTALL_COMMAND}</pre>
-          <button
+        <div className="flex items-start gap-2">
+          <pre className={`${codeBlockClass} flex-1`}>{INSTALL_COMMAND}</pre>
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             data-testid="hermes-precheck-copy-install"
             aria-label="Copy install command"
             onClick={copyInstallCommand}
-            style={{ ...ghostButtonStyle, padding: '6px 10px', fontSize: '11px' }}
           >
             Copy
-          </button>
+          </Button>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
+        <div className="flex gap-2">
+          <Button
             type="button"
+            variant="outline"
             data-testid="hermes-precheck-retry"
             onClick={runPrecheck}
-            style={{ ...ghostButtonStyle, borderColor: 'var(--accent-sky)', color: 'var(--accent-sky)' }}
           >
             I&apos;ve installed Hermes — retry precheck
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
             data-testid="hermes-precheck-cancel"
             onClick={onCancel}
-            style={ghostButtonStyle}
           >
             Cancel
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
     );
   }
 
   if (state === 'network-error') {
     return (
-      <div data-testid="hermes-precheck-network-error" style={cardStyle}>
-        <span style={labelStyle}>Hermes precheck failed</span>
-        <p style={monoStyle}>
+      <Alert
+        data-testid="hermes-precheck-network-error"
+        variant="blocking"
+        className="flex flex-col gap-3 border-l-0 border border-destructive p-4"
+      >
+        <AlertTitle className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+          Hermes precheck failed
+        </AlertTitle>
+        <AlertDescription className="font-mono text-[13px] text-foreground">
           Could not reach the daemon API to run <code>hermes doctor</code>.
           Check that the daemon is running and the UI token is valid.
-        </p>
-        {networkError ? <pre style={codeBlockStyle}>{networkError}</pre> : null}
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
+        </AlertDescription>
+        {networkError ? <pre className={codeBlockClass}>{networkError}</pre> : null}
+        <div className="flex gap-2">
+          <Button
             type="button"
+            variant="outline"
             data-testid="hermes-precheck-retry"
             onClick={runPrecheck}
-            style={{ ...ghostButtonStyle, borderColor: 'var(--accent-sky)', color: 'var(--accent-sky)' }}
           >
             Retry precheck
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
             data-testid="hermes-precheck-cancel"
             onClick={onCancel}
-            style={ghostButtonStyle}
           >
             Cancel
-          </button>
+          </Button>
         </div>
-      </div>
+      </Alert>
     );
   }
 
   if (state === 'config-issue') {
     return (
-      <div data-testid="hermes-precheck-config-issue" style={cardStyle}>
-        <span style={labelStyle}>Hermes Agent configuration issue</span>
-        <p style={monoStyle}>
+      <Alert
+        data-testid="hermes-precheck-config-issue"
+        variant="warning"
+        className="flex flex-col gap-3 border-l-0 border border-[var(--severity-warning-fg)] p-4"
+      >
+        <AlertTitle className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+          Hermes Agent configuration issue
+        </AlertTitle>
+        <AlertDescription className="font-mono text-[13px] text-foreground">
           Hermes is installed but reports configuration issues:
+        </AlertDescription>
+        <pre className={codeBlockClass}>{stderr || '(no diagnostic output)'}</pre>
+        <p className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
+          Run <code>hermes model</code> or <code>hermes setup</code> to
+          configure a provider, then retry.
         </p>
-        <pre style={codeBlockStyle}>{stderr || '(no diagnostic output)'}</pre>
-        <p style={mutedStyle}>
-          Run <code>hermes model</code> or <code>hermes setup</code> to configure
-          a provider, then retry.
-        </p>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
+        <div className="flex gap-2">
+          <Button
             type="button"
+            variant="outline"
             data-testid="hermes-precheck-retry"
             onClick={runPrecheck}
-            style={{ ...ghostButtonStyle, borderColor: 'var(--accent-sky)', color: 'var(--accent-sky)' }}
           >
             Retry precheck
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
             data-testid="hermes-precheck-cancel"
             onClick={onCancel}
-            style={ghostButtonStyle}
           >
             Cancel
-          </button>
+          </Button>
         </div>
-      </div>
+      </Alert>
     );
   }
 
