@@ -3,6 +3,9 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import 'xterm/css/xterm.css';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
+import { Badge } from '../components/ui/badge.js';
+import { cn } from '../lib/utils.js';
 
 interface SpawnError {
   message: string;
@@ -154,98 +157,67 @@ export function Agent({ agentGated = false }: AgentProps = {}): JSX.Element {
     };
   }, []);
 
+  const xtermHidden = agentGated && !agentReady;
+
   return (
-    <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-sunken)' }}>
-      <div
-        className="px-4 py-2 flex items-center justify-between"
-        style={{
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--bg-elevated)',
-        }}
-      >
+    <div className="flex h-full w-full flex-col bg-[var(--bg-sunken)]">
+      <div className="flex items-center justify-between border-b border-border bg-[var(--bg-elevated)] px-4 py-2">
         <span
-          className="j-mono text-[11px]"
-          style={{
-            color: connected ? 'var(--vow-green)' : 'var(--fg-dim)',
-            letterSpacing: '0.05em',
-          }}
+          className={cn(
+            'font-mono text-[11px] tracking-[0.05em]',
+            connected ? 'text-[var(--vow-green)]' : 'text-[var(--fg-dim)]',
+          )}
         >
           {connected ? '● connected' : '○ disconnected'}
         </span>
         {autoMode && (
-          <span
-            className="j-label"
-            style={{
-              color: autoMode.active ? 'var(--accent-gold)' : 'var(--fg-dim)',
-              fontSize: '10px',
-            }}
+          <Badge
+            variant={autoMode.active ? 'warning' : 'secondary'}
             title={autoMode.active ? 'Claude Code Auto Mode is active' : autoMode.reason}
           >
             {autoMode.active ? 'Auto Mode' : 'Default permissions'}
-          </span>
+          </Badge>
         )}
       </div>
       {spawnError && (
-        <div
-          className="px-5 py-4 m-3 flex flex-col gap-2"
-          style={{
-            border: '1px solid var(--break-red)',
-            background: 'rgba(168, 90, 90, 0.06)',
-            borderRadius: 'var(--radius-2)',
-          }}
-        >
-          <span className="j-label" style={{ color: 'var(--break-red)' }}>
-            Agent panel unavailable
-          </span>
-          <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+        <Alert variant="blocking" className="m-3 flex flex-col gap-2">
+          <AlertTitle className="text-[var(--break-red)]">Agent panel unavailable</AlertTitle>
+          <AlertDescription className="font-mono text-xs text-[var(--fg-muted)]">
             {spawnError.message}
-          </p>
+          </AlertDescription>
           {spawnError.remediation && (
-            <p className="j-mono text-xs" style={{ color: 'var(--fg-dim)' }}>
-              <span style={{ color: 'var(--fg-muted)' }}>Fix · </span>
+            <p className="font-mono text-xs text-[var(--fg-dim)]">
+              <span className="text-[var(--fg-muted)]">Fix · </span>
               {spawnError.remediation}
             </p>
           )}
-        </div>
+        </Alert>
       )}
       <div
         ref={ref}
-        className="flex-1 w-full"
-        style={{
-          background: 'var(--bg-sunken)',
-          padding: '12px',
-          minHeight: '400px',
+        className={cn(
+          'w-full flex-1 bg-[var(--bg-sunken)] p-3',
+          'min-h-[400px]',
           // Hide the xterm visually while gated. We keep it mounted (so the
           // WS / xterm setup persists across the gate flip) but cover it
           // with the placeholder.
-          visibility: agentGated && !agentReady ? 'hidden' : 'visible',
-          display: agentGated && !agentReady ? 'none' : 'block',
-        }}
+          xtermHidden && 'invisible hidden',
+        )}
       />
-      {agentGated && !agentReady && !spawnError && <AgentGatedPlaceholder />}
+      {xtermHidden && !spawnError && <AgentGatedPlaceholder />}
     </div>
   );
 }
 
 function AgentGatedPlaceholder(): JSX.Element {
   return (
-    <div
-      className="flex-1 w-full flex items-center justify-center px-6"
-      style={{ background: 'var(--bg-sunken)' }}
-    >
-      <div className="flex flex-col items-center gap-4 max-w-[34ch] text-center">
+    <div className="flex w-full flex-1 items-center justify-center bg-[var(--bg-sunken)] px-6">
+      <div className="flex max-w-[34ch] flex-col items-center gap-4 text-center">
         <span
           aria-hidden="true"
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            background: 'var(--seer-violet)',
-            boxShadow: '0 0 0 0 rgba(122, 109, 176, 0.6)',
-            animation: 'jinnPulse 1.6s ease-out infinite',
-          }}
+          className="jinn-anim-pulse h-2 w-2 rounded-full bg-[var(--seer-violet)]"
         />
-        <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+        <p className="font-mono text-xs text-[var(--fg-muted)]">
           The agent will come online once harness setup is complete.
         </p>
       </div>

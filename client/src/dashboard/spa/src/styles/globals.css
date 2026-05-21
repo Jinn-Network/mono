@@ -280,6 +280,36 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+/* Onboarding animations — pulled out of the previous in-Onboarding
+   `<style>` block so JSX can carry zero `style={{}}` and references the
+   keyframes by class name (see Onboarding region + Agent placeholder). */
+@keyframes jinnPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(220, 184, 102, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(220, 184, 102, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 184, 102, 0); }
+}
+
+@keyframes jinnFadeSlide {
+  0%   { opacity: 0; transform: translateY(-4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.jinn-anim-pulse {
+  animation: jinnPulse 1.6s ease-out infinite;
+}
+
+.jinn-anim-fade-slide {
+  animation: jinnFadeSlide 320ms ease-out both;
+}
+
+/* `data-status="active"` row treatment for the Onboarding phase list —
+   the active phase row gets a subtle gold gradient wash. Co-located with
+   the keyframes since they share the same surface. */
+.phase-row[data-status='active'] {
+  background: linear-gradient(90deg, rgba(220, 184, 102, 0.04) 0%, transparent 60%);
+  transition: background 320ms ease;
+}
+
 /* xterm wrapping — force the agent panel terminal to fill its box so
    claude's TUI doesn't overflow the column. */
 .xterm,

@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../api/client.js';
+import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert.js';
+import { Button } from '../components/ui/button.js';
+import { Progress } from '../components/ui/progress.js';
+import { cn } from '../lib/utils.js';
 
 interface Props {
   address: string;
@@ -20,6 +25,9 @@ const CHAIN_DISPLAY_NAME: Record<string, string> = {
   base: 'Base',
   'base-sepolia': 'Base Sepolia',
 };
+
+const eyebrow =
+  'font-mono text-[11px] font-medium uppercase tracking-[0.14em]';
 
 export function AwaitingFundingCard({
   address,
@@ -156,41 +164,27 @@ export function AwaitingFundingCard({
   const partialDrip = dripStatus.state === 'sent' && !targetReached;
 
   return (
-    <div
-      className="px-6 py-5 flex flex-col gap-4"
-      style={{
-        border: '1px solid var(--accent-gold)',
-        background: 'rgba(220, 184, 102, 0.04)',
-        borderRadius: 'var(--radius-2)',
-      }}
-    >
+    <Alert variant="warning" className="flex flex-col gap-4 border-l-2 px-6 py-5">
       <div className="flex items-baseline justify-between">
-        <span className="j-label" style={{ color: 'var(--accent-gold)' }}>
+        <AlertTitle className={cn(eyebrow, 'text-[var(--accent-gold)]')}>
           Action needed · fund the master EOA
-        </span>
-        <span className="j-mono text-[10px]" style={{ color: 'var(--fg-dim)' }}>
+        </AlertTitle>
+        <span className="font-mono text-[10px] text-[var(--fg-dim)]">
           auto-detected on chain
         </span>
       </div>
-      <div className="flex flex-col gap-1">
-        <span className="j-mono text-xs break-all" style={{ color: 'var(--fg)' }}>
-          {address}
-        </span>
-        <span className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+      <AlertDescription className="flex flex-col gap-1">
+        <span className="break-all font-mono text-xs text-foreground">{address}</span>
+        <span className="font-mono text-xs text-[var(--fg-muted)]">
           send at least {minimumEth} on {CHAIN_DISPLAY_NAME[chain ?? ''] ?? 'this chain'}
         </span>
-      </div>
+      </AlertDescription>
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={requestDrip}
+        <Button
           type="button"
+          onClick={requestDrip}
           disabled={dripStatus.state === 'requesting' || targetReached}
-          className="px-3 py-1.5 j-label hover:opacity-90 disabled:opacity-50"
-          style={{
-            background: 'var(--accent-gold)',
-            color: 'var(--bg)',
-            borderRadius: 'var(--radius-1)',
-          }}
+          className="bg-[var(--accent-gold)] text-[var(--bg)] hover:bg-[var(--accent-gold-hover)]"
         >
           {dripStatus.state === 'requesting'
             ? 'Funding...'
@@ -199,38 +193,27 @@ export function AwaitingFundingCard({
               : partialDrip
                 ? 'Fund more'
                 : 'Fund from faucet'}
-        </button>
-        <button
-          onClick={copy}
-          type="button"
-          className="px-3 py-1.5 j-label hover:opacity-90"
-          style={{
-            border: '1px solid var(--border-strong)',
-            color: 'var(--fg)',
-            borderRadius: 'var(--radius-1)',
-            background: 'transparent',
-          }}
-        >
+        </Button>
+        <Button type="button" variant="secondary" onClick={copy}>
           {copied ? 'Copied' : 'Copy address'}
-        </button>
-        <a
-          href={`${chainExplorerBase}/address/${address}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-3 py-1.5 j-label hover:opacity-90"
-          style={{
-            border: '1px solid var(--border)',
-            color: 'var(--fg-muted)',
-            borderRadius: 'var(--radius-1)',
-          }}
-        >
-          View on explorer
-        </a>
+        </Button>
+        <Button asChild variant="ghost">
+          <a
+            href={`${chainExplorerBase}/address/${address}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink />
+            View on explorer
+          </a>
+        </Button>
       </div>
       {dripStatus.state === 'sent' && (
         <p
-          className="j-mono text-[11px]"
-          style={{ color: targetReached ? 'var(--vow-green)' : 'var(--accent-gold)' }}
+          className={cn(
+            'font-mono text-[11px]',
+            targetReached ? 'text-[var(--vow-green)]' : 'text-[var(--accent-gold)]',
+          )}
         >
           {targetReached ? 'Faucet funding complete' : 'Faucet funding partial'}
           {sentTxCount > 0 ? ` (${sentTxCount} drip${sentTxCount === 1 ? '' : 's'})` : ''}.
@@ -245,8 +228,7 @@ export function AwaitingFundingCard({
                 href={`${chainExplorerBase}/tx/${dripStatus.txHash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:underline"
-                style={{ color: 'var(--accent-sky)' }}
+                className="text-[var(--accent-sky)] hover:underline"
               >
                 view latest tx
               </a>
@@ -256,46 +238,34 @@ export function AwaitingFundingCard({
       )}
       {dripStatus.state === 'requesting' && (
         <div className="flex flex-col gap-2">
-          <div
-            className="h-1.5 overflow-hidden"
-            style={{ background: 'var(--bg-sunken)', borderRadius: '999px' }}
-          >
-            <div
-              className="h-full transition-all"
-              style={{
-                width: `${fundingProgress}%`,
-                background: 'var(--accent-gold)',
-                borderRadius: '999px',
-              }}
-            />
-          </div>
-          <p className="j-mono text-[11px]" style={{ color: 'var(--fg-muted)' }}>
-            Requesting faucet drips for {trunc(address)}. Elapsed {elapsedSeconds}s; this can take about a
-            minute on a fresh wallet.
+          <Progress
+            value={fundingProgress}
+            className="h-1.5 rounded-full [&>div]:bg-[var(--accent-gold)]"
+          />
+          <p className="font-mono text-[11px] text-[var(--fg-muted)]">
+            Requesting faucet drips for {trunc(address)}. Elapsed {elapsedSeconds}s; this can take
+            about a minute on a fresh wallet.
           </p>
         </div>
       )}
       {dripStatus.state === 'rate_limited' && (
-        <p className="j-mono text-[11px]" style={{ color: 'var(--wane)' }}>
+        <p className="font-mono text-[11px] text-[var(--wane)]">
           Faucet rate-limited. Send manually or wait before trying again.
         </p>
       )}
       {dripStatus.state === 'failed' && (
-        <p className="j-mono text-[11px]" style={{ color: 'var(--break-red)' }}>
-          {dripStatus.reason}
-        </p>
+        <p className="font-mono text-[11px] text-[var(--break-red)]">{dripStatus.reason}</p>
       )}
       {onSharedDefaultRpc && (
         <p
           data-testid="onboarding-shared-rpc-nudge"
-          className="j-mono text-[11px]"
-          style={{ color: 'var(--fg-dim)' }}
+          className="font-mono text-[11px] text-[var(--fg-dim)]"
         >
           Using a shared trial RPC — add your own key in the Network section
           for reliable operation.
         </p>
       )}
-    </div>
+    </Alert>
   );
 }
 
