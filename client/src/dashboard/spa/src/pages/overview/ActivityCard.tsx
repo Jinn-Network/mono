@@ -44,6 +44,10 @@ export interface ActivityJoinedNet {
   roles: string[];
   /** Harness bound to this membership. */
   harness?: string;
+  /** Model identifier the harness runs against (e.g. "minimax-m2.7"). */
+  model?: string;
+  /** Plugin specifiers active for this membership (e.g. "@jinn-network/network-tools@0.1.0"). */
+  plugins?: string[];
 }
 
 export interface ActivityCardProps {
@@ -348,6 +352,41 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg)' }}>
                   {selected.harness ?? '—'}
                 </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Model</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: selected.model ? 'var(--fg)' : 'var(--fg-dim)' }}>
+                  {selected.model ?? '—'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Plugins</span>
+                {!selected.plugins || selected.plugins.length === 0 ? (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-dim)' }}>
+                    None
+                  </span>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                    {selected.plugins.map((p) => (
+                      <span
+                        key={p}
+                        title={p}
+                        style={{
+                          fontFamily: 'var(--mono)',
+                          fontSize: 'var(--text-sm)',
+                          color: 'var(--fg)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}

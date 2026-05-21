@@ -30,6 +30,9 @@ interface BootstrapWithSolverNets {
       manifestCid?: string;
       roles?: string[];
       harness?: string;
+      model?: string;
+      plugins?: string[];
+      disabledDefaultPlugins?: string[];
     }
   >;
 }
@@ -298,6 +301,8 @@ export function OverviewPage(): JSX.Element {
           manifestCid: entry.manifestCid ?? key,
           roles: Array.isArray(entry.roles) ? entry.roles : [],
           harness: entry.harness,
+          model: entry.model,
+          plugins: Array.isArray(entry.plugins) ? entry.plugins : undefined,
         });
       }
     }

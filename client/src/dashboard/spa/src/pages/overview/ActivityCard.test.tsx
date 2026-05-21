@@ -19,6 +19,8 @@ const joined: ActivityJoinedNet[] = [
     manifestCid: 'bafkreiswe',
     roles: ['solver', 'evaluator'],
     harness: 'hermes-agent',
+    model: 'minimax-m2.7',
+    plugins: ['@jinn-network/network-tools@0.1.0', 'swe-rebench-v2-runtime@0.1.0'],
   },
 ];
 
@@ -91,7 +93,7 @@ describe('ActivityCard', () => {
     expect(screen.getByTestId('activity-tasks').textContent).toMatch(/no task runs/i);
   });
 
-  it('renders the settings panel with roles + harness for the selected SolverNet', () => {
+  it('renders the settings panel with roles, harness, model, and plugins for the selected SolverNet', () => {
     const { ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
     render(ui);
     const settings = screen.getByTestId('activity-settings');
@@ -100,6 +102,25 @@ describe('ActivityCard', () => {
     expect(settings.textContent).toMatch(/evaluator/i);
     expect(settings.textContent).toMatch(/harness/i);
     expect(settings.textContent).toContain('hermes-agent');
+    expect(settings.textContent).toMatch(/model/i);
+    expect(settings.textContent).toContain('minimax-m2.7');
+    expect(settings.textContent).toMatch(/plugins/i);
+    expect(settings.textContent).toContain('@jinn-network/network-tools@0.1.0');
+    expect(settings.textContent).toContain('swe-rebench-v2-runtime@0.1.0');
+  });
+
+  it('renders model/plugins placeholders when the selected net is missing them', () => {
+    const minimal: ActivityJoinedNet[] = [
+      { name: 'SparseNet', manifestCid: 'bafsparse', roles: ['solver'] },
+    ];
+    const { ui } = wrap(<ActivityCard joined={minimal} tasks={[]} />);
+    render(ui);
+    const settings = screen.getByTestId('activity-settings');
+    // Model line still renders, just dimmed with the em-dash placeholder.
+    expect(settings.textContent).toContain('—');
+    // Plugins section reports "None" when the array is empty/undefined.
+    expect(settings.textContent).toMatch(/plugins/i);
+    expect(settings.textContent).toMatch(/none/i);
   });
 
   it('handles the no-SolverNets-joined state gracefully', () => {
