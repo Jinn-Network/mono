@@ -5,9 +5,12 @@
  *
  * Codex has no `codex doctor` subcommand, so install detection shells
  * `codex --version`. Codex also exposes no auth-status subcommand, so auth
- * liveness is derived by parsing + expiry-checking the `auth.json` it
- * persists — existence alone is not enough (#366): a stale OAuth session
- * reads as logged-in to a naive existence check, false-gating the daemon.
+ * liveness is derived by parsing the `auth.json` it persists. The live-ness
+ * signal is the `refresh_token` (#464): codex mints fresh id/access tokens
+ * from it on demand, so the short-lived id_token (~1h) and access_token
+ * routinely lapse between runs on a perfectly healthy login. A genuinely
+ * dead session has no refresh_token and no usable credential (#366) — that
+ * must still read as not-live.
  *
  * We mock spawnSync (install probe) and readFileSync (auth-file read) so the
  * tests run without a real codex binary or a real `~/.codex/auth.json`.
@@ -68,7 +71,11 @@ function jwtWithExp(expSeconds: number | undefined): string {
   return `${header}.${payload}.signature`;
 }
 
-/** A well-formed OAuth (`chatgpt`-mode) auth.json whose id_token expires at `expSeconds`. */
+/**
+ * A well-formed OAuth (`chatgpt`-mode) auth.json — id_token + access_token both
+ * expire at `expSeconds`; a `refresh_token` is always present (as on a real
+ * logged-in `auth.json`).
+ */
 function oauthAuthJson(expSeconds: number): string {
   return JSON.stringify({
     auth_mode: 'chatgpt',
@@ -370,7 +377,7 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
   });
 });
 
-describe('probeCodexDoctor — auth liveness (#366)', () => {
+describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
   function okSpawn() {
     spawnSyncMock.mockReturnValue({
       status: 0,
@@ -396,16 +403,71 @@ describe('probeCodexDoctor — auth liveness (#366)', () => {
     expect(result.authStatus).toBe('ok');
   });
 
-  it('authStatus:expired for a stale OAuth auth.json whose id_token has expired', () => {
+  // #464 regression: a healthy `codex login` whose short-lived id_token AND
+  // access_token have lapsed is NOT a dead session — codex mints fresh tokens
+  // from the refresh_token on its next run. `oauthAuthJson` always carries a
+  // refresh_token, so this is a live login. Gating it 'expired' deadlocked the
+  // readiness gate: the probe shells `codex --version`, which never refreshes,
+  // so the daemon never claims, never runs codex, and the tokens never rotate.
+  it('authStatus:ok for a healthy login whose id_token + access_token have lapsed but a refresh_token is present (#464)', () => {
     okSpawn();
-    const pastExp = Math.floor(NOW_MS / 1000) - 3600; // expired an hour ago
+    const pastExp = Math.floor(NOW_MS / 1000) - 3600; // both short-lived tokens expired an hour ago
 
     const result = probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () => oauthAuthJson(pastExp),
     });
-    // The bug: existence-only detection read this as authenticated:true.
+    expect(result.authenticated).toBe(true);
+    expect(result.authStatus).toBe('ok');
+  });
+
+  // #464: the precise live failure — the ~1h OIDC id_token has rotated out,
+  // the access_token is still valid, the refresh_token is present.
+  it('authStatus:ok when only the short-lived id_token has expired (#464)', () => {
+    okSpawn();
+    const past = Math.floor(NOW_MS / 1000) - 3600;
+    const future = Math.floor(NOW_MS / 1000) + 7 * 86_400;
+
+    const result = probeCodexDoctor({
+      env: {},
+      now: NOW_MS,
+      readAuthFile: () =>
+        JSON.stringify({
+          auth_mode: 'chatgpt',
+          OPENAI_API_KEY: null,
+          tokens: {
+            id_token: jwtWithExp(past),
+            access_token: jwtWithExp(future),
+            refresh_token: 'rt_live',
+          },
+        }),
+    });
+    expect(result.authStatus).toBe('ok');
+  });
+
+  // #366 (corrected model): a genuinely dead session — short-lived tokens
+  // expired AND no refresh_token to renew them — must still read 'expired'.
+  // #464 corrected the prior model, which mislabelled a healthy login (tokens
+  // lapsed but refresh_token present) as 'stale'.
+  it('authStatus:expired for a dead session — tokens expired and no refresh_token', () => {
+    okSpawn();
+    const pastExp = Math.floor(NOW_MS / 1000) - 3600;
+
+    const result = probeCodexDoctor({
+      env: {},
+      now: NOW_MS,
+      readAuthFile: () =>
+        JSON.stringify({
+          auth_mode: 'chatgpt',
+          OPENAI_API_KEY: null,
+          tokens: {
+            id_token: jwtWithExp(pastExp),
+            access_token: jwtWithExp(pastExp),
+            // no refresh_token — nothing can renew this session
+          },
+        }),
+    });
     expect(result.authenticated).toBe(false);
     expect(result.authStatus).toBe('expired');
   });
@@ -449,7 +511,9 @@ describe('probeCodexDoctor — auth liveness (#366)', () => {
     expect(result.authStatus).toBe('expired');
   });
 
-  it('falls back to access_token expiry when id_token carries no exp', () => {
+  // With no refresh_token the classifier falls back to a bearer-token expiry
+  // check — access_token first, id_token only as a last resort.
+  it('authStatus:ok via the access_token bearer check when there is no refresh_token', () => {
     okSpawn();
     const futureExp = Math.floor(NOW_MS / 1000) + 3600;
 

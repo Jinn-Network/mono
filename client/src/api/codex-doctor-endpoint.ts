@@ -110,11 +110,22 @@ function jwtExpiry(token: string | null | undefined): number | undefined {
  *
  *   - A non-empty `OPENAI_API_KEY` in the file is API-key mode — there is no
  *     expiry, so presence is acceptable (`'ok'`).
- *   - Otherwise it is OAuth (`codex login`) mode: expiry-check the JWT `exp`
- *     of `id_token` (falling back to `access_token`). An expired token, or
- *     tokens we cannot expiry-check at all (no JWT / no `exp`), is treated as
- *     `'expired'` — the safe direction for a claim gate: a logged-out operator
- *     with a leftover file must not read as live (#366).
+ *   - Otherwise it is OAuth (`codex login`) mode. The live-ness signal is the
+ *     `refresh_token`: codex transparently mints fresh `id_token` /
+ *     `access_token` from it on its next run, so a present refresh_token means
+ *     the session is live (`'ok'`). The `id_token` is a ~1h OIDC token and the
+ *     `access_token` only lasts days — both routinely lapse between codex runs
+ *     on a perfectly healthy login, so gating on their `exp` false-fails the
+ *     readiness check and deadlocks the claim loop: the probe shells
+ *     `codex --version`, which never refreshes, so the daemon never claims,
+ *     never runs codex, and the tokens never rotate (#464).
+ *   - With no refresh_token, fall back to a best-effort bearer-token expiry
+ *     check (`access_token` first, `id_token` last). An expired or
+ *     un-checkable bearer token is `'expired'` — the safe direction for a
+ *     claim gate: a logged-out operator with a leftover file must not read as
+ *     live (#366). `codex logout` deletes `auth.json` outright, so a
+ *     structurally-valid file that still carries a refresh_token is a live
+ *     session.
  */
 function classifyAuthFile(auth: CodexAuthFile, nowMs: number): CodexAuthStatus {
   const fileApiKey = auth.OPENAI_API_KEY;
@@ -127,7 +138,15 @@ function classifyAuthFile(auth: CodexAuthFile, nowMs: number): CodexAuthStatus {
     // credential — treat as stale rather than live.
     return 'expired';
   }
-  const exp = jwtExpiry(tokens.id_token) ?? jwtExpiry(tokens.access_token);
+  // A present refresh_token is the live-ness signal: codex renews the
+  // short-lived id_token / access_token from it on demand (#464).
+  const refreshToken = tokens.refresh_token;
+  if (typeof refreshToken === 'string' && refreshToken.trim().length > 0) {
+    return 'ok';
+  }
+  // No refresh_token — best-effort bearer-token expiry check (access_token
+  // first, id_token only as a last resort).
+  const exp = jwtExpiry(tokens.access_token) ?? jwtExpiry(tokens.id_token);
   if (exp === undefined) {
     // Tokens present but not expiry-checkable — cannot prove liveness.
     return 'expired';
