@@ -7,6 +7,11 @@ import type {
   LaunchActionPhase,
   LaunchedSolverNetRecord,
 } from '../../api/types.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
+import { Button } from '../../components/ui/button.js';
+import { Card, CardContent } from '../../components/ui/card.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 import { ensureCompletedStep, formatEthFromWei } from './draft-helpers.js';
 import { FieldShell, StepNav, StepShell } from './StepShell.js';
 import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.js';
@@ -215,10 +220,11 @@ export function Step5ReviewLaunch({
       <FieldShell
         label="Open roles"
         helperText="Operators can opt in to any role you open here. Most launchers want both."
+        asLabel={false}
       >
         <div
           data-testid="launcher-create-openRoles"
-          style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
+          className="flex flex-col gap-2.5"
         >
           <RoleCheckbox
             role="solver"
@@ -236,11 +242,7 @@ export function Step5ReviewLaunch({
         {openRoles.length === 0 && (
           <span
             data-testid="launcher-create-openRoles-error"
-            style={{
-              fontSize: '12px',
-              color: 'var(--break-red)',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
+            className="font-mono text-[12px] text-break-red"
           >
             At least one role must be open.
           </span>
@@ -248,72 +250,37 @@ export function Step5ReviewLaunch({
       </FieldShell>
 
       {launchState.kind === 'failed' && (
-        <div
-          data-testid="launcher-create-launch-failure"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--break-red)',
-            borderRadius: 'var(--radius-2)',
-            padding: '14px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-          }}
-        >
-          <span
-            style={{
-              color: 'var(--break-red)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              fontWeight: 500,
-            }}
-          >
+        <Alert variant="blocking" data-testid="launcher-create-launch-failure">
+          <AlertTitle className="font-mono text-[13px] font-medium text-break-red">
             Launch failed.
-          </span>
-          <span style={{ color: 'var(--fg-muted)', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace" }}>
+          </AlertTitle>
+          <AlertDescription className="font-mono text-[12px] text-fg-muted">
             {launchState.message}
-          </span>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
+          </AlertDescription>
+          <div className="mt-2.5 flex gap-2">
+            <Button
               type="button"
+              size="sm"
               data-testid="launcher-create-launch-retry"
               onClick={() => {
                 void launch();
               }}
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '13px',
-                padding: '8px 14px',
-                background: 'var(--accent-sky)',
-                color: 'var(--bg-sunken)',
-                border: '1px solid var(--accent-sky)',
-                borderRadius: 'var(--radius-2)',
-                cursor: 'pointer',
-              }}
             >
               Retry
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               data-testid="launcher-create-launch-abandon"
               onClick={() => {
                 navigate('/launcher');
               }}
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '13px',
-                padding: '8px 14px',
-                background: 'transparent',
-                color: 'var(--fg)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-2)',
-                cursor: 'pointer',
-              }}
             >
               Abandon
-            </button>
+            </Button>
           </div>
-        </div>
+        </Alert>
       )}
     </StepShell>
   );
@@ -325,31 +292,21 @@ function PhaseStrip({ current }: { current: LaunchActionPhase }): JSX.Element {
     <div
       data-testid="launcher-create-launch-progress"
       data-phase={current}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-        color: 'var(--fg-muted)',
-        letterSpacing: '0.06em',
-      }}
+      className="flex items-center gap-1.5 font-mono text-[11px] tracking-[0.06em] text-fg-muted"
     >
       <span data-testid="launcher-create-launch-phase">
         {PHASE_LABELS[current]}
       </span>
-      <div style={{ display: 'flex', gap: '3px' }}>
+      <div className="flex gap-[3px]">
         {LAUNCH_PHASES.map((phase, idx) => (
           <span
             key={phase}
             data-testid={`launcher-create-launch-phase-pip-${phase}`}
             data-active={idx <= currentIdx ? 'true' : 'false'}
-            style={{
-              width: '8px',
-              height: '3px',
-              background: idx <= currentIdx ? 'var(--accent-sky)' : 'var(--border)',
-              borderRadius: 'var(--radius-1)',
-            }}
+            className={cn(
+              'h-[3px] w-2 rounded-sm',
+              idx <= currentIdx ? 'bg-accent-sky' : 'bg-border',
+            )}
           />
         ))}
       </div>
@@ -371,57 +328,33 @@ function ManifestSummary({
   const displayVersion = draft.templateContractVersion ?? template.version;
 
   return (
-    <article
-      data-testid="launcher-create-manifest-summary"
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-3)',
-        padding: '20px 22px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-      }}
-    >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-dim)',
-          }}
-        >
-          {displayId}.{displayVersion}
-        </span>
-        <h2
-          style={{
-            margin: 0,
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '24px',
-            fontWeight: 400,
-            color: 'var(--fg)',
-          }}
-        >
-          {draft.name ?? '— unnamed'}
-        </h2>
-        {draft.description && (
-          <p style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px', lineHeight: 1.5 }}>
-            {draft.description}
-          </p>
-        )}
-      </header>
-      <SummaryGrid>
-        <SummaryItem label="Solution price" value={priceString(draft.solutionPriceWei)} />
-        <SummaryItem label="Verdict price" value={priceString(draft.verdictPriceWei)} />
-        {template.id === 'prediction' ? (
-          <PredictionGeneratorSummary generator={generator} />
-        ) : (
-          <SweRebenchV2GeneratorSummary generator={generator} />
-        )}
-      </SummaryGrid>
-    </article>
+    <Card data-testid="launcher-create-manifest-summary">
+      <CardContent className="flex flex-col gap-3 p-6">
+        <header className="flex flex-col gap-1">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-fg-dim">
+            {displayId}.{displayVersion}
+          </span>
+          <h2 className="m-0 font-serif text-[24px] font-normal text-foreground">
+            {draft.name ?? '— unnamed'}
+          </h2>
+          {draft.description && (
+            <p className="m-0 text-[13px] leading-relaxed text-fg-muted">
+              {draft.description}
+            </p>
+          )}
+        </header>
+        <Separator />
+        <SummaryGrid>
+          <SummaryItem label="Solution price" value={priceString(draft.solutionPriceWei)} />
+          <SummaryItem label="Verdict price" value={priceString(draft.verdictPriceWei)} />
+          {template.id === 'prediction' ? (
+            <PredictionGeneratorSummary generator={generator} />
+          ) : (
+            <SweRebenchV2GeneratorSummary generator={generator} />
+          )}
+        </SummaryGrid>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -485,15 +418,7 @@ function lengthDescriptor(v: unknown): string {
 
 function SummaryGrid({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: '8px 16px',
-        paddingTop: '8px',
-        borderTop: '1px solid var(--border)',
-      }}
-    >
+    <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
       {children}
     </div>
   );
@@ -501,21 +426,11 @@ function SummaryGrid({ children }: { children: React.ReactNode }): JSX.Element {
 
 function SummaryItem({ label, value }: { label: string; value: string }): JSX.Element {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '10px',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-dim)',
-        }}
-      >
+    <div className="flex flex-col gap-0.5">
+      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-fg-dim">
         {label}
       </span>
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'var(--fg)' }}>
-        {value}
-      </span>
+      <span className="font-mono text-[13px] text-foreground">{value}</span>
     </div>
   );
 }
@@ -533,13 +448,10 @@ function RoleCheckbox({
 }): JSX.Element {
   return (
     <label
-      style={{
-        display: 'flex',
-        gap: '10px',
-        alignItems: 'center',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.6 : 1,
-      }}
+      className={cn(
+        'flex items-center gap-2.5',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+      )}
     >
       <input
         data-testid={`launcher-create-openRoles-${role}`}
@@ -547,10 +459,9 @@ function RoleCheckbox({
         checked={checked}
         onChange={onChange}
         disabled={disabled}
+        className="h-4 w-4 cursor-pointer accent-accent-sky"
       />
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'var(--fg)' }}>
-        {role}
-      </span>
+      <span className="font-mono text-[13px] text-foreground">{role}</span>
     </label>
   );
 }

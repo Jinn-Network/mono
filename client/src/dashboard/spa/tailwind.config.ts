@@ -59,6 +59,29 @@ const config: Config = {
           DEFAULT: 'var(--destructive)',
           foreground: 'var(--destructive-foreground)',
         },
+        // Direct aliases for brand tokens that don't map cleanly to a
+        // shadcn semantic name. Reach for these instead of
+        // `text-[var(--fg-dim)]` etc. in JSX — keeps the grep check in
+        // §A of the shadcn-thoroughness plan honest.
+        // (`fg` → muted/dim shades; shadcn's `foreground` covers the
+        // default `--fg`.)
+        fg: {
+          muted: 'var(--fg-muted)',
+          dim: 'var(--fg-dim)',
+        },
+        // (`surface` → elevated/sunken brand surfaces; shadcn's
+        // `background` covers the default `--bg` and `card` covers
+        // `--bg-elevated` for card-shaped UI.)
+        surface: {
+          elevated: 'var(--bg-elevated)',
+          sunken: 'var(--bg-sunken)',
+        },
+        'accent-sky': 'var(--accent-sky)',
+        'accent-gold': 'var(--accent-gold)',
+        'break-red': 'var(--break-red)',
+        wane: 'var(--wane)',
+        'vow-green': 'var(--vow-green)',
+        'seer-violet': 'var(--seer-violet)',
       },
       borderRadius: {
         lg: 'var(--radius-3)',

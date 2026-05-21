@@ -3,8 +3,11 @@ import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
 } from '../../api/types.js';
+import { Button } from '../../components/ui/button.js';
+import { Input } from '../../components/ui/input.js';
+import { cn } from '../../lib/utils.js';
 import { ensureCompletedStep } from './draft-helpers.js';
-import { FieldShell, StepNav, StepShell, inputErrorStyle, inputStyle } from './StepShell.js';
+import { FieldShell, StepNav, StepShell } from './StepShell.js';
 
 /**
  * Step 1 of the Create wizard — name + description.
@@ -27,6 +30,9 @@ export interface Step1DefineProps {
   busy?: boolean;
   error?: string | null;
 }
+
+const textareaBase =
+  'flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[13px] text-foreground placeholder:text-fg-dim focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
 
 export function Step1Define({
   draft,
@@ -75,20 +81,20 @@ export function Step1Define({
         onSubmit={(e) => {
           void submit(e);
         }}
-        style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
+        className="flex flex-col gap-4"
       >
         <FieldShell
           label="Name"
           error={nameError}
           helperText="Shown in the registry catalog and the operator opt-in cards."
         >
-          <input
+          <Input
             data-testid="launcher-create-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Polymarket forecasts"
-            style={nameError ? inputErrorStyle : inputStyle}
+            className={cn(nameError && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -104,20 +110,18 @@ export function Step1Define({
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
             placeholder="Forecast resolved Polymarket outcomes; rewarded by Brier score on verified resolutions."
-            style={{
-              ...(descriptionError ? inputErrorStyle : inputStyle),
-              resize: 'vertical',
-              minHeight: '96px',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
+            className={cn(
+              textareaBase,
+              'min-h-[96px] resize-y',
+              descriptionError && 'border-break-red',
+            )}
             disabled={busy}
           />
         </FieldShell>
 
         {/* Hidden submit so Enter inside an input fires the form */}
-        <button type="submit" hidden aria-hidden tabIndex={-1} />
+        <Button type="submit" className="hidden" aria-hidden tabIndex={-1} />
       </form>
     </StepShell>
   );
 }
-

@@ -2,6 +2,10 @@ import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
 } from '../../api/types.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Card, CardContent } from '../../components/ui/card.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 import { ensureCompletedStep } from './draft-helpers.js';
 import { StepNav, StepShell } from './StepShell.js';
 import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.js';
@@ -31,6 +35,9 @@ export interface Step2ReviewContractProps {
   error?: string | null;
 }
 
+const eyebrow =
+  'font-mono text-[11px] uppercase tracking-[0.14em] text-fg-dim';
+
 export function Step2ReviewContract({
   draft,
   template = PREDICTION_V1_TEMPLATE,
@@ -55,106 +62,93 @@ export function Step2ReviewContract({
       error={error}
       footer={<StepNav onBack={onBack} onNext={advance} busy={busy} />}
     >
-      <article
+      <Card
         data-testid="launcher-create-template"
         data-template-id={`${template.id}.${template.version}`}
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-3)',
-          padding: '20px 22px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-        }}
       >
-        <header style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--fg-dim)',
-            }}
-          >
-            {template.id}.{template.version}
-          </span>
-          <h2
-            style={{
-              margin: 0,
-              fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-              fontSize: '24px',
-              fontWeight: 400,
-              color: 'var(--fg)',
-            }}
-          >
-            {template.name}
-          </h2>
-          <p style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px', lineHeight: 1.5 }}>
-            {template.description}
-          </p>
-        </header>
+        <CardContent className="flex flex-col gap-4 p-6">
+          <header className="flex flex-col gap-1">
+            <span className={eyebrow}>
+              {template.id}.{template.version}
+            </span>
+            <h2 className="m-0 font-serif text-[24px] font-normal text-foreground">
+              {template.name}
+            </h2>
+            <p className="m-0 text-[13px] leading-relaxed text-fg-muted">
+              {template.description}
+            </p>
+          </header>
 
-        <SectionBlock title="Schemas">
-          <ReadonlyRow label="Task" value={template.schemas.task.name} hint={template.schemas.task.description} />
-          <ReadonlyRow
-            label="Solution"
-            value={template.schemas.solution.name}
-            hint={template.schemas.solution.description}
-          />
-          <ReadonlyRow
-            label="Verdict"
-            value={template.schemas.verdict.name}
-            hint={template.schemas.verdict.description}
-          />
-        </SectionBlock>
+          <SectionBlock title="Schemas">
+            <ReadonlyRow
+              label="Task"
+              value={template.schemas.task.name}
+              hint={template.schemas.task.description}
+            />
+            <ReadonlyRow
+              label="Solution"
+              value={template.schemas.solution.name}
+              hint={template.schemas.solution.description}
+            />
+            <ReadonlyRow
+              label="Verdict"
+              value={template.schemas.verdict.name}
+              hint={template.schemas.verdict.description}
+            />
+          </SectionBlock>
 
-        <SectionBlock title="Evaluation function">
-          <ReadonlyRow label="Id" value={template.evaluationFunction.id} mono />
-          <ReadonlyRow
-            label="Deterministic"
-            value={template.evaluationFunction.deterministic ? 'yes' : 'no'}
-          />
-          <ReadonlyRow label="Inputs" value={template.evaluationFunction.inputs.join(', ')} />
-          <ReadonlyRow label="Output" value={template.evaluationFunction.output} />
-        </SectionBlock>
+          <SectionBlock title="Evaluation function">
+            <ReadonlyRow label="Id" value={template.evaluationFunction.id} mono />
+            <ReadonlyRow
+              label="Deterministic"
+              value={template.evaluationFunction.deterministic ? 'yes' : 'no'}
+            />
+            <ReadonlyRow
+              label="Inputs"
+              value={template.evaluationFunction.inputs.join(', ')}
+            />
+            <ReadonlyRow label="Output" value={template.evaluationFunction.output} />
+          </SectionBlock>
 
-        <SectionBlock title="Aggregation function">
-          <ReadonlyRow label="Id" value={template.aggregationFunction.id} mono />
-          <ReadonlyRow
-            label="Window"
-            value={
-              template.aggregationFunction.windowDays !== undefined
-                ? `${template.aggregationFunction.windowDays} days`
-                : '—'
-            }
-          />
-          <ReadonlyRow label="Output" value={template.aggregationFunction.output} />
-        </SectionBlock>
+          <SectionBlock title="Aggregation function">
+            <ReadonlyRow label="Id" value={template.aggregationFunction.id} mono />
+            <ReadonlyRow
+              label="Window"
+              value={
+                template.aggregationFunction.windowDays !== undefined
+                  ? `${template.aggregationFunction.windowDays} days`
+                  : '—'
+              }
+            />
+            <ReadonlyRow label="Output" value={template.aggregationFunction.output} />
+          </SectionBlock>
 
-        <SectionBlock title="Claim policy defaults">
-          <ReadonlyRow label="Mode" value={template.claimPolicyDefaults.mode} />
-          <ReadonlyRow
-            label="Max claims"
-            value={String(template.claimPolicyDefaults.maxClaims)}
-          />
-          <ReadonlyRow
-            label="Per operator"
-            value={String(template.claimPolicyDefaults.maxClaimsPerOperator)}
-          />
-          <ReadonlyRow
-            label="Lease TTL"
-            value={`${template.claimPolicyDefaults.claimLeaseTtlSeconds}s`}
-          />
-        </SectionBlock>
+          <SectionBlock title="Claim policy defaults">
+            <ReadonlyRow label="Mode" value={template.claimPolicyDefaults.mode} />
+            <ReadonlyRow
+              label="Max claims"
+              value={String(template.claimPolicyDefaults.maxClaims)}
+            />
+            <ReadonlyRow
+              label="Per operator"
+              value={String(template.claimPolicyDefaults.maxClaimsPerOperator)}
+            />
+            <ReadonlyRow
+              label="Lease TTL"
+              value={`${template.claimPolicyDefaults.claimLeaseTtlSeconds}s`}
+            />
+          </SectionBlock>
 
-        <SectionBlock title="Credential requirements">
-          <CredentialList role="creator" creds={template.credentialRequirements.creator} />
-          <CredentialList role="solver" creds={template.credentialRequirements.solver} />
-          <CredentialList role="evaluator" creds={template.credentialRequirements.evaluator} />
-        </SectionBlock>
-      </article>
+          <SectionBlock title="Credential requirements">
+            <CredentialList role="creator" creds={template.credentialRequirements.creator} />
+            <CredentialList role="solver" creds={template.credentialRequirements.solver} />
+            <CredentialList
+              role="evaluator"
+              creds={template.credentialRequirements.evaluator}
+            />
+          </SectionBlock>
+        </CardContent>
+      </Card>
     </StepShell>
   );
 }
@@ -167,28 +161,16 @@ function SectionBlock({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <section
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        paddingTop: '12px',
-        borderTop: '1px solid var(--border)',
-      }}
-    >
+    <section className="flex flex-col gap-2">
+      <Separator />
       <h3
-        style={{
-          margin: 0,
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-muted)',
-        }}
+        className={cn(
+          'm-0 pt-2 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-fg-muted',
+        )}
       >
         {title}
       </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>{children}</div>
+      <div className="flex flex-col gap-1.5">{children}</div>
     </section>
   );
 }
@@ -205,43 +187,21 @@ function ReadonlyRow({
   mono?: boolean;
 }): JSX.Element {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '140px 1fr',
-        gap: '12px',
-        alignItems: 'baseline',
-      }}
-    >
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          color: 'var(--fg-dim)',
-          letterSpacing: '0.06em',
-        }}
-      >
+    <div className="grid grid-cols-[140px_1fr] items-baseline gap-3">
+      <span className="font-mono text-[11px] tracking-[0.06em] text-fg-dim">
         {label}
       </span>
-      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+      <span className="flex flex-col gap-0.5">
         <span
-          style={{
-            fontFamily: mono ? "'JetBrains Mono', monospace" : 'inherit',
-            fontSize: '13px',
-            color: 'var(--fg)',
-          }}
+          className={cn(
+            'text-[13px] text-foreground',
+            mono ? 'font-mono' : 'font-sans',
+          )}
         >
           {value}
         </span>
         {hint && (
-          <span
-            style={{
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              fontFamily: "'JetBrains Mono', monospace",
-              lineHeight: 1.5,
-            }}
-          >
+          <span className="font-mono text-[12px] leading-relaxed text-fg-muted">
             {hint}
           </span>
         )}
@@ -260,36 +220,25 @@ function CredentialList({
   return (
     <div
       data-testid={`launcher-create-credentials-${role}`}
-      style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
+      className="flex flex-col gap-1.5"
     >
-      <div
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          color: 'var(--fg-dim)',
-          letterSpacing: '0.06em',
-          textTransform: 'capitalize',
-        }}
-      >
+      <div className="font-mono text-[11px] capitalize tracking-[0.06em] text-fg-dim">
         {role}
       </div>
       {creds.length === 0 ? (
-        <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>None.</div>
+        <div className="text-[12px] text-fg-muted">None.</div>
       ) : (
         creds.map((cred) => (
           <div
             key={cred.id}
-            style={{
-              fontSize: '12px',
-              color: 'var(--fg)',
-              fontFamily: "'JetBrains Mono', monospace",
-              lineHeight: 1.5,
-            }}
+            className="flex flex-col gap-0.5 font-mono text-[12px] leading-relaxed"
           >
-            <span style={{ color: 'var(--accent-sky)' }}>{cred.id}</span>
-            <span style={{ color: 'var(--fg-dim)' }}> · {cred.kind}</span>
-            {cred.required && <span style={{ color: 'var(--wane)' }}> · required</span>}
-            <div style={{ color: 'var(--fg-muted)' }}>{cred.description}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-accent-sky">{cred.id}</span>
+              <Badge variant="secondary">{cred.kind}</Badge>
+              {cred.required && <Badge variant="warning">required</Badge>}
+            </div>
+            <div className="text-fg-muted">{cred.description}</div>
           </div>
         ))
       )}

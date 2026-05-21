@@ -6,6 +6,7 @@ import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
 } from '../api/types.js';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { Step1Define } from './launcher-create/Step1Define.js';
 import { Step2ReviewContract } from './launcher-create/Step2ReviewContract.js';
 import { Step3ConfigureGenerator } from './launcher-create/Step3ConfigureGenerator.js';
@@ -208,30 +209,20 @@ export function LauncherCreatePage({ templateKey }: LauncherCreatePageProps = {}
       <main
         data-testid="launcher-create-unknown-template"
         data-template-key={resolvedTemplateKey}
-        style={{
-          padding: '24px',
-          color: 'var(--fg)',
-          fontFamily: "'JetBrains Mono', monospace",
-        }}
+        className="mx-auto flex max-w-[720px] flex-col gap-4 p-6"
       >
-        <h1
-          style={{
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '28px',
-            margin: 0,
-            color: 'var(--fg)',
-            fontWeight: 400,
-          }}
-        >
+        <h1 className="m-0 font-serif text-[28px] font-normal text-foreground">
           Unknown SolverNet template
         </h1>
-        <p style={{ marginTop: '12px', color: 'var(--break-red)', fontSize: '13px' }}>
-          No template registered for <code>{resolvedTemplateKey}</code>. Available keys:{' '}
-          {Object.keys(TEMPLATES_BY_KEY)
-            .map((k) => `?template=${k}`)
-            .join(', ')}
-          .
-        </p>
+        <Alert variant="blocking">
+          <AlertDescription className="font-mono text-[13px]">
+            No template registered for <code>{resolvedTemplateKey}</code>. Available keys:{' '}
+            {Object.keys(TEMPLATES_BY_KEY)
+              .map((k) => `?template=${k}`)
+              .join(', ')}
+            .
+          </AlertDescription>
+        </Alert>
       </main>
     );
   }
@@ -240,26 +231,17 @@ export function LauncherCreatePage({ templateKey }: LauncherCreatePageProps = {}
     return (
       <main
         data-testid="launcher-create-bootstrap-error"
-        style={{
-          padding: '24px',
-          color: 'var(--fg)',
-          fontFamily: "'JetBrains Mono', monospace",
-        }}
+        className="mx-auto flex max-w-[720px] flex-col gap-4 p-6"
       >
-        <h1
-          style={{
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '28px',
-            margin: 0,
-            color: 'var(--fg)',
-            fontWeight: 400,
-          }}
-        >
+        <h1 className="m-0 font-serif text-[28px] font-normal text-foreground">
           Couldn't start a new draft
         </h1>
-        <p style={{ marginTop: '12px', color: 'var(--break-red)', fontSize: '13px' }}>
-          {bootstrapError}
-        </p>
+        <Alert variant="blocking">
+          <AlertTitle className="font-mono text-[12px]">Bootstrap error</AlertTitle>
+          <AlertDescription className="font-mono text-[13px]">
+            {bootstrapError}
+          </AlertDescription>
+        </Alert>
       </main>
     );
   }
@@ -268,12 +250,7 @@ export function LauncherCreatePage({ templateKey }: LauncherCreatePageProps = {}
     return (
       <main
         data-testid="launcher-create-loading"
-        style={{
-          padding: '24px',
-          color: 'var(--fg-muted)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-        }}
+        className="p-6 font-mono text-[13px] text-fg-muted"
       >
         Loading draft…
       </main>
