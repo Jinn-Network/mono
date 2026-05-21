@@ -105,7 +105,9 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
       kind: 'restart_required',
       severity: 'warning',
       message: 'A configuration change is pending — restart to apply.',
-      jumpTo: '/operator',
+      // The Restart button lives on Overview (HeroStats's status tile). Per Ritsu's
+      // review of #426, /operator is the wrong target — no restart UI lives there.
+      jumpTo: '/overview',
     });
   }
 
