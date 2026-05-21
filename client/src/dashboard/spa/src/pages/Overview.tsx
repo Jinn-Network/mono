@@ -13,6 +13,8 @@ import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overv
  * fallback during the Tasks 21/22 migration window.
  */
 interface BootstrapWithSolverNets {
+  /** Operator's master EOA (the address that holds custody and seeds the node). */
+  master_address?: string;
   solverNets?: Record<
     string,
     {
@@ -518,7 +520,7 @@ export function OverviewPage(): JSX.Element {
           claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
           lastClaimAt={status?.rewards?.lastClaimAt ?? null}
           agentId={services[0]?.agentId ?? null}
-          chain="Base Sepolia"
+          masterAddress={bootstrap?.master_address ?? null}
           safeAddress={services[0]?.safeAddress ?? null}
           services={services}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}

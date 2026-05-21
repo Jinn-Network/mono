@@ -19,7 +19,7 @@ function defaultProps(): WalletCardProps {
     claimedJinnLifetime: '0',
     lastClaimAt: null,
     agentId: 5879,
-    chain: 'Base Sepolia',
+    masterAddress: '0x53e25264C86db85b6168F7824f5c39abd5281787',
     safeAddress: '0x26e90000000000000000000000000000000000638',
     services: [],
     lastPasswordRotationAt: null,
@@ -83,17 +83,20 @@ describe('WalletCard', () => {
     expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('shows Identity labels (Agent / Chain / Safe) with truncated Safe address', () => {
+  it('shows Identity labels (Agent / Master / Safe) with truncated addresses', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} />);
     render(ui);
     const id = screen.getByTestId('wallet-section-identity');
     expect(id.textContent).toMatch(/agent/i);
     expect(id.textContent).toContain('#5879');
-    expect(id.textContent).toMatch(/chain/i);
-    expect(id.textContent).toContain('Base Sepolia');
+    expect(id.textContent).toMatch(/master/i);
+    expect(id.textContent).toContain('0x53e2');
+    expect(id.textContent).toContain('1787');
     expect(id.textContent).toMatch(/safe/i);
     expect(id.textContent).toContain('0x26e9');
     expect(id.textContent).toContain('0638');
+    // Chain is no longer in Wallet — it lives in the header pill.
+    expect(id.textContent).not.toMatch(/base sepolia/i);
   });
 
   it('surfaces a binding-pending chip when a service is unbound', () => {

@@ -5,26 +5,26 @@ import { memoryLocation } from 'wouter/memory-location';
 import { Header } from './Header.js';
 
 describe('Header', () => {
-  it('renders brand, network chip, and master address', () => {
+  it('renders the brand and network chip', () => {
     const { hook } = memoryLocation({ path: '/overview' });
     render(
       <Router hook={hook}>
-        <Header network="testnet" masterAddress="0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF" />
+        <Header network="testnet" />
       </Router>,
     );
     expect(screen.getByText(/jinn operator/i)).toBeTruthy();
     expect(screen.getByText(/testnet/i)).toBeTruthy();
-    expect(screen.getByText(/0xE64b…B5CF/)).toBeTruthy();
   });
 
-  it('does not surface RPC health — that has moved to the Node Health card on /overview', () => {
+  it('does not surface RPC health or the master address — both moved into the right rail cards', () => {
     const { hook } = memoryLocation({ path: '/overview' });
     render(
       <Router hook={hook}>
-        <Header network="testnet" masterAddress="0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF" />
+        <Header network="testnet" />
       </Router>,
     );
     expect(screen.queryByText(/rpc healthy/i)).toBeNull();
     expect(screen.queryByText(/rpc unreachable/i)).toBeNull();
+    expect(screen.queryByText(/master /i)).toBeNull();
   });
 });

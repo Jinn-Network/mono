@@ -2,22 +2,16 @@ import { Link } from 'wouter';
 
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
-  masterAddress?: string;
-}
-
-function trunc(addr?: string): string {
-  if (!addr || addr.length < 10) return addr ?? '—';
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 /**
- * Top-of-page chrome. The RPC health pill that used to live here has moved
- * into the Node Health card on /overview, where the operator can act on a
- * degraded RPC (Manage RPC → /operator/network) without hunting through the
- * header. Master address stays in the chrome because there's nowhere else
- * to surface it without making the IdentityCard chase the viewport.
+ * Top-of-page chrome. The RPC health pill that used to live here moved into
+ * the Node Health card on /overview where the operator can act on a degraded
+ * RPC. The master-address pill moved into the Wallet Identity row alongside
+ * Agent and Safe — it belongs with the rest of the operator's on-chain
+ * identity, not next to the network indicator.
  */
-export function Header({ network, masterAddress }: HeaderProps): JSX.Element {
+export function Header({ network }: HeaderProps): JSX.Element {
   return (
     <header
       style={{
@@ -61,7 +55,6 @@ export function Header({ network, masterAddress }: HeaderProps): JSX.Element {
         >
           {network}
         </span>
-        <span style={{ color: 'var(--fg-dim)' }}>master {trunc(masterAddress)}</span>
       </div>
     </header>
   );

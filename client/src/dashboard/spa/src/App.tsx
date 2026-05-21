@@ -65,7 +65,6 @@ export default function App(): JSX.Element {
   }
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
-  const masterAddress = data.master_address ?? '';
 
   // Issue #327: the builder surfaces (/build route + Build top-tab) are hidden
   // until the operator-app first-run UX is solid. The plug-in substrate stays
@@ -81,7 +80,7 @@ export default function App(): JSX.Element {
     <RestartPendingContext.Provider value={restartCtx}>
       <Router>
         <AppShell
-          header={<Header network={network} masterAddress={masterAddress} />}
+          header={<Header network={network} />}
           tabs={<TopTabs />}
           rail={embeddedAgent ? <AgentRail /> : undefined}
         >

@@ -11,8 +11,9 @@ import { api } from '../../api/client.js';
  * Sections:
  *   - Gas       — ETH balance + runway as the headline stat, Top up faucet button
  *   - Rewards   — Claimable + Claimed as paired headline stats, Claim button
- *   - Identity  — Agent / Chain / Safe labelled triplet, preserves the
- *                 binding-pending inline retry flow from IdentityCard
+ *   - Identity  — Agent / Master / Safe labelled triplet (chain lives in
+ *                 the header pill, so it's not duplicated here). Preserves
+ *                 the binding-pending inline retry flow from IdentityCard.
  *   - Password  — Last rotated timestamp + Change Password button
  *                 (jumps to /operator/security)
  *
@@ -51,8 +52,9 @@ export interface WalletCardProps {
   // surface it (tracked as a follow-up).
   /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
   lastClaimAt?: string | null;
+  /** Operator's master EOA. Moved out of the page header into Identity. */
+  masterAddress: string | null;
   agentId: number | null;
-  chain: string;
   safeAddress: string | null;
   services?: ServiceIdentity[];
   bindingError?: string;
@@ -142,7 +144,7 @@ export function WalletCard({
   claimableJinn,
   claimedJinnLifetime,
   agentId,
-  chain,
+  masterAddress,
   safeAddress,
   services = [],
   bindingError,
@@ -331,8 +333,14 @@ export function WalletCard({
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Chain</span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)' }}>{chain}</span>
+            <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Master</span>
+            <span
+              data-testid="wallet-master-address"
+              title={masterAddress ?? undefined}
+              style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)' }}
+            >
+              {trunc(masterAddress)}
+            </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
             <span style={{ ...EYEBROW, color: 'var(--fg-dim)' }}>Safe</span>
