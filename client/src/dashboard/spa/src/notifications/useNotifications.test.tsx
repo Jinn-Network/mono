@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ConnectionState } from '../api/connection-state.js';
 import { useNotifications } from './useNotifications.js';
+
+// Default to connected; individual tests override via the exported setter.
+let connectionState: ConnectionState = {
+  status: 'connected',
+  lastConnectedAt: Date.now(),
+};
+
+vi.mock('../api/connection-state.js', () => ({
+  useConnectionState: () => connectionState,
+}));
+
+vi.mock('../shell/RestartPendingContext.js', () => ({
+  useRestartPending: () => ({ restartPending: false, setRestartPending: vi.fn() }),
+}));
 
 vi.mock('../api/client.js', () => ({
   api: {
@@ -28,6 +43,7 @@ function makeWrapper() {
 
 describe('useNotifications', () => {
   it('returns derived notifications, ordered blocking-first then warning then info', async () => {
+    connectionState = { status: 'connected', lastConnectedAt: Date.now() };
     const { result } = renderHook(() => useNotifications(), {
       wrapper: makeWrapper(),
     });
@@ -38,5 +54,21 @@ describe('useNotifications', () => {
       return order[a] - order[b];
     });
     expect(severities).toEqual(expected);
+  });
+
+  it('emits rpc_unreachable immediately when the SPA is disconnected from the daemon', () => {
+    connectionState = {
+      status: 'disconnected',
+      since: Date.now(),
+      lastError: 'network down',
+      attempts: 2,
+    };
+    const { result } = renderHook(() => useNotifications(), {
+      wrapper: makeWrapper(),
+    });
+    // No async wait needed — the disconnected branch is synchronous.
+    expect(result.current).toHaveLength(1);
+    expect(result.current[0].kind).toBe('rpc_unreachable');
+    expect(result.current[0].severity).toBe('blocking');
   });
 });
