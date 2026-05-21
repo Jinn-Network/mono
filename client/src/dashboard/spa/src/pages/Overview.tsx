@@ -215,7 +215,6 @@ export function OverviewPage(): JSX.Element {
   const isEvicted = firstEvictedService != null;
   const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
-  const tasksDelivered = totals.solutions;
   const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
@@ -273,7 +272,6 @@ export function OverviewPage(): JSX.Element {
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <HeroStats
-        tasksDelivered={tasksDelivered}
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}

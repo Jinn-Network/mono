@@ -4,7 +4,6 @@ import { HeroStats } from './HeroStats.js';
 
 function defaultProps() {
   return {
-    tasksDelivered: 42,
     statusLabel: 'WORKING',
     statusState: 'working' as const,
     statusDot: 'var(--vow-green)',
@@ -16,10 +15,12 @@ function defaultProps() {
 }
 
 describe('HeroStats', () => {
-  it('renders solutions delivered stat and compact status tile', () => {
+  it('renders the compact status tile', () => {
     render(<HeroStats {...defaultProps()} />);
-    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText('42')).toBeTruthy();
+    // Solutions-delivered stat retired — that count still appears scoped
+    // to the joined SolverNet inside NetworkCard, so duplicating it at the
+    // top added nothing but vertical space.
+    expect(screen.queryByText(/solutions delivered/i)).toBeNull();
     expect(screen.getByText('WORKING')).toBeTruthy();
     expect(screen.getByRole('button', { name: /restart/i })).toBeTruthy();
     expect(screen.getByTestId('overview-status-stat').getAttribute('data-state')).toBe('working');

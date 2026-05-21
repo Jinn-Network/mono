@@ -447,7 +447,10 @@ describe('OverviewPage empty-state gating', () => {
     expect(within(network as HTMLElement).getByText('42')).toBeTruthy();
     expect(within(network as HTMLElement).getByText('63')).toBeTruthy();
     expect(within(network as HTMLElement).queryByText('10')).toBeNull();
-    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
+    // "Solutions delivered" hero stat retired — the count still shows up
+    // scoped to the joined SolverNet inside NetworkCard (asserted above as
+    // `45` within the network section).
+    expect(screen.queryByText(/solutions delivered/i)).toBeNull();
     expect(screen.getByText(/working on current run/i)).toBeTruthy();
     expect(screen.queryByText(/no incoming tasks since startup/i)).toBeNull();
   });
