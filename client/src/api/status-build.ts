@@ -16,6 +16,37 @@ import type { TaskRunsStatus } from './task-runs-build.js';
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
+export type TjinnStatusState = 'pending' | 'ready' | 'error';
+
+export const TJINN_CHAIN_ID = 11155111;
+export const TJINN_TOKEN_ADDRESS = '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A';
+export const TJINN_PUBLIC_READ_ERROR = 'Sepolia tJINN balance temporarily unavailable.';
+export const TJINN_PUBLIC_PARTIAL_ERROR = 'Some Safe tJINN balances are temporarily unavailable.';
+export const TJINN_PUBLIC_INVALID_SAFE_ERROR = 'One or more Safe addresses are invalid.';
+
+const TJINN_PUBLIC_ERRORS = new Set([
+  TJINN_PUBLIC_READ_ERROR,
+  TJINN_PUBLIC_PARTIAL_ERROR,
+  TJINN_PUBLIC_INVALID_SAFE_ERROR,
+]);
+
+export interface TjinnServiceStatus {
+  index: number;
+  safeAddress: string | null;
+  balanceWei: string | null;
+  state: TjinnStatusState;
+  error: string | null;
+}
+
+export interface TjinnStatus {
+  state: TjinnStatusState;
+  chainId: number;
+  tokenAddress: string;
+  safeBalanceWei: string | null;
+  safeCount: number;
+  services: TjinnServiceStatus[];
+  error: string | null;
+}
 
 export interface ServiceBalanceErrorEntry {
   agent?: string;
@@ -57,6 +88,8 @@ export interface GatheredStatusRaw {
   };
   pendingStakingRewardsWei?: string;
   pendingRewardsError?: string;
+  /** Sepolia tJINN ERC-20 balances across fleet Safes. */
+  tJinn?: TjinnStatus;
   /** ISO timestamp when the staking contract will next accept a checkpoint. */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
@@ -136,6 +169,7 @@ export interface StatusV1Response {
     totalStakingRewardsWei?: string;
     pendingRewardsError?: string;
   };
+  tJinn: TjinnStatus;
   masterGas: {
     address: string | null;
     balanceWei?: string;
@@ -248,6 +282,34 @@ function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
     }
   }
   return total;
+}
+
+function defaultTjinnStatus(): TjinnStatus {
+  return {
+    state: 'pending',
+    chainId: TJINN_CHAIN_ID,
+    tokenAddress: TJINN_TOKEN_ADDRESS,
+    safeBalanceWei: null,
+    safeCount: 0,
+    services: [],
+    error: null,
+  };
+}
+
+function publicTjinnError(error: string): string {
+  return TJINN_PUBLIC_ERRORS.has(error) ? error : TJINN_PUBLIC_READ_ERROR;
+}
+
+function publicTjinnStatus(status: TjinnStatus | undefined): TjinnStatus {
+  if (!status) return defaultTjinnStatus();
+  return {
+    ...status,
+    error: status.error ? publicTjinnError(status.error) : null,
+    services: status.services.map((service) => ({
+      ...service,
+      error: service.error ? publicTjinnError(service.error) : null,
+    })),
+  };
 }
 
 function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string {
@@ -378,6 +440,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
           : claimedRewardsWei.toString(),
       pendingRewardsError: raw.pendingRewardsError,
     },
+    tJinn: publicTjinnStatus(raw.tJinn),
     masterGas: {
       address: raw.master.address,
       balanceWei: raw.master.balanceWei,

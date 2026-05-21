@@ -56,6 +56,7 @@ export async function gatherIntrospectionRaw(opts?: {
   const status: StatusGatherConfig = {
     earningDir: config.earningDir,
     rpcUrl: config.rpcUrl,
+    ethereumRpcUrl: config.ethereumRpcUrl,
     network: config.network,
     pollIntervalMs: config.pollIntervalMs,
     masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,

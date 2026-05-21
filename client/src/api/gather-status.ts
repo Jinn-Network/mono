@@ -2,13 +2,13 @@
  * Best-effort status collection for GET /v1/status (RPC + earning store + SQLite).
  */
 
-import { createPublicClient, http, type PublicClient } from 'viem';
+import { createPublicClient, getAddress, http, type PublicClient } from 'viem';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
@@ -22,6 +22,13 @@ import {
   type GatheredStatusRaw,
   type ServiceBalanceErrorEntry,
   type StatusV1Response,
+  TJINN_CHAIN_ID,
+  TJINN_PUBLIC_INVALID_SAFE_ERROR,
+  TJINN_PUBLIC_PARTIAL_ERROR,
+  TJINN_PUBLIC_READ_ERROR,
+  TJINN_TOKEN_ADDRESS,
+  type TjinnServiceStatus,
+  type TjinnStatus,
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
@@ -50,6 +57,20 @@ const ERC20_BALANCE_OF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
+
+const TJINN_BALANCE_CACHE_TTL_MS = 30_000;
+const TJINN_BALANCE_TIMEOUT_MS = 4_000;
+
+interface TjinnBalanceSnapshot {
+  chainId: number;
+  balances: Map<string, string>;
+  errors: Map<string, string>;
+}
+
+const tjinnBalanceCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<TjinnBalanceSnapshot> }
+>();
 
 function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
   if (!earningDir) return undefined;
@@ -89,6 +110,8 @@ export function invalidatePredictionOperatorStatusCache(config: JinnConfig): voi
 export interface StatusGatherConfig {
   earningDir: string;
   rpcUrl: string;
+  /** Sepolia RPC endpoint for reading the real tJINN ERC-20 balance. */
+  ethereumRpcUrl?: string;
   network: 'mainnet' | 'testnet';
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
@@ -278,6 +301,111 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function tJinnBalanceCacheKey(
+  ethereumRpcUrl: string,
+  safeKeys: readonly string[],
+): string {
+  return `${ethereumRpcUrl}\0${[...safeKeys].sort().join(',')}`;
+}
+
+function timeoutError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'TimeoutError';
+  return error;
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(timeoutError(message)), timeoutMs);
+    promise
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
+async function readTjinnBalances(
+  ethereumRpcUrl: string,
+  safeToAddress: Map<string, `0x${string}`>,
+): Promise<TjinnBalanceSnapshot> {
+  const safeEntries = [...safeToAddress.entries()];
+  const client = createPublicClient({
+    chain: sepolia,
+    transport: http(ethereumRpcUrl, { timeout: TJINN_BALANCE_TIMEOUT_MS }),
+  });
+  const chainId = await client.getChainId();
+  const balances = new Map<string, string>();
+  const errors = new Map<string, string>();
+
+  if (chainId !== TJINN_CHAIN_ID) {
+    for (const [key] of safeEntries) {
+      errors.set(key, TJINN_PUBLIC_READ_ERROR);
+    }
+    return { chainId, balances, errors };
+  }
+
+  const settled = await Promise.allSettled(
+    safeEntries.map(async ([key, safeAddress]) => {
+      const balance = await client.readContract({
+        address: TJINN_TOKEN_ADDRESS as `0x${string}`,
+        abi: ERC20_BALANCE_OF_ABI,
+        functionName: 'balanceOf',
+        args: [safeAddress],
+      });
+      return { key, balanceWei: balance.toString() };
+    }),
+  );
+
+  for (let i = 0; i < settled.length; i++) {
+    const result = settled[i]!;
+    if (result.status === 'fulfilled') {
+      balances.set(result.value.key, result.value.balanceWei);
+    } else {
+      const key = safeEntries[i]?.[0];
+      if (key) errors.set(key, TJINN_PUBLIC_READ_ERROR);
+    }
+  }
+
+  return { chainId, balances, errors };
+}
+
+async function getCachedTjinnBalances(
+  ethereumRpcUrl: string,
+  safeToAddress: Map<string, `0x${string}`>,
+): Promise<TjinnBalanceSnapshot> {
+  const safeKeys = [...safeToAddress.keys()].sort();
+  const cacheKey = tJinnBalanceCacheKey(ethereumRpcUrl, safeKeys);
+  const now = Date.now();
+  const cached = tjinnBalanceCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
+  const promise = withTimeout(
+    readTjinnBalances(ethereumRpcUrl, safeToAddress),
+    TJINN_BALANCE_TIMEOUT_MS,
+    'tJINN balance collection timed out',
+  ).catch((): TjinnBalanceSnapshot => {
+    const errors = new Map<string, string>();
+    for (const key of safeKeys) {
+      errors.set(key, TJINN_PUBLIC_READ_ERROR);
+    }
+    return {
+      chainId: TJINN_CHAIN_ID,
+      balances: new Map<string, string>(),
+      errors,
+    };
+  });
+  tjinnBalanceCache.set(cacheKey, {
+    expiresAt: now + TJINN_BALANCE_CACHE_TTL_MS,
+    promise,
+  });
+  return promise;
+}
+
 async function sumPendingStakingRewards(
   rpcUrl: string,
   network: 'mainnet' | 'testnet',
@@ -332,6 +460,128 @@ async function sumPendingStakingRewards(
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+async function gatherTjinnStatus(
+  ethereumRpcUrl: string | undefined,
+  fleet: FleetState | null,
+): Promise<TjinnStatus> {
+  const baseStatus = {
+    chainId: TJINN_CHAIN_ID,
+    tokenAddress: TJINN_TOKEN_ADDRESS,
+  };
+  if (!fleet) {
+    return {
+      ...baseStatus,
+      state: 'pending',
+      safeBalanceWei: null,
+      safeCount: 0,
+      services: [],
+      error: null,
+    };
+  }
+
+  const services: TjinnServiceStatus[] = [];
+  const safeToAddress = new Map<string, `0x${string}`>();
+
+  for (const svc of fleet.services) {
+    const index = displayFleetServiceIndex(svc);
+    const safeAddress = svc.safe_address;
+    if (!safeAddress) {
+      services.push({
+        index,
+        safeAddress: null,
+        balanceWei: null,
+        state: 'pending',
+        error: null,
+      });
+      continue;
+    }
+    try {
+      const checksum = getAddress(safeAddress);
+      const key = checksum.toLowerCase();
+      services.push({
+        index,
+        safeAddress: checksum,
+        balanceWei: null,
+        state: 'pending',
+        error: null,
+      });
+      safeToAddress.set(key, checksum as `0x${string}`);
+    } catch {
+      services.push({
+        index,
+        safeAddress,
+        balanceWei: null,
+        state: 'error',
+        error: TJINN_PUBLIC_INVALID_SAFE_ERROR,
+      });
+    }
+  }
+
+  const safeCount = safeToAddress.size;
+  if (safeCount === 0) {
+    const invalid = services.find((svc) => svc.state === 'error')?.error;
+    return {
+      ...baseStatus,
+      state: invalid ? 'error' : 'pending',
+      safeBalanceWei: null,
+      safeCount,
+      services,
+      error: invalid ?? null,
+    };
+  }
+
+  if (!ethereumRpcUrl) {
+    return {
+      ...baseStatus,
+      state: 'pending',
+      safeBalanceWei: null,
+      safeCount,
+      services,
+      error: null,
+    };
+  }
+
+  const snapshot = await getCachedTjinnBalances(ethereumRpcUrl, safeToAddress);
+  let total = 0n;
+  for (const balance of snapshot.balances.values()) {
+    total += BigInt(balance);
+  }
+  const hasInvalidSafe = services.some((svc) => svc.error === TJINN_PUBLIC_INVALID_SAFE_ERROR);
+  const hasReadError = snapshot.errors.size > 0;
+  const hasAnyError = hasInvalidSafe || hasReadError;
+  const hasAnyBalance = snapshot.balances.size > 0;
+  const publicError = hasAnyError
+    ? hasAnyBalance
+      ? TJINN_PUBLIC_PARTIAL_ERROR
+      : hasInvalidSafe && !hasReadError
+        ? TJINN_PUBLIC_INVALID_SAFE_ERROR
+        : TJINN_PUBLIC_READ_ERROR
+    : null;
+
+  return {
+    ...baseStatus,
+    chainId: snapshot.chainId,
+    state: hasAnyError ? 'error' : 'ready',
+    safeBalanceWei: hasAnyBalance ? total.toString() : null,
+    safeCount,
+    services: services.map((svc) => {
+      if (!svc.safeAddress) return svc;
+      if (svc.state === 'error') return svc;
+      const key = svc.safeAddress.toLowerCase();
+      const balance = snapshot.balances.get(key);
+      if (balance !== undefined) {
+        return { ...svc, state: 'ready', balanceWei: balance, error: null };
+      }
+      return {
+        ...svc,
+        state: 'error',
+        error: snapshot.errors.get(key) ?? TJINN_PUBLIC_READ_ERROR,
+      };
+    }),
+    error: publicError,
+  };
 }
 
 function hasUsefulCacheValues(entry: BalanceCacheEntry, isAgentRole: boolean): boolean {
@@ -602,6 +852,12 @@ export async function gatherGatheredStatusRaw(
     master: {
       address: fleet?.master_address ?? null,
     },
+    tJinn: await gatherTjinnStatus(
+      status.network === 'testnet'
+        ? (status.ethereumRpcUrl ?? status.config?.ethereumRpcUrl)
+        : undefined,
+      fleet,
+    ),
     rewardClaimIntervalMs: status.rewardClaimIntervalMs,
   };
 
