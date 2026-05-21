@@ -38,11 +38,11 @@
  *   JINN_MVI_L2_CHECKER             override TaskActivityCheckerV3 address
  *   JINN_MVI_L2_REGISTRY            override OLAS ServiceRegistry address
  *   JINN_MVI_L2_ARTIFACT_PATH       path to the V3 TaskCoordinator deploy artifact
- *                                   (default: alongside this script's
- *                                   working directory)
+ *                                   (default: deployment-task-coordinator-router-v3-{network}.json,
+ *                                   except Base Sepolia defaults to the bundled -fast artifact)
  *   JINN_MVI_ALLOW_CHAIN            opt in to a non-whitelisted chainId
  *   PHASE1A_TIMING_PROFILE          "canonical" | "fast-test" — selects the
- *                                   V3 artifact suffix
+ *                                   V3 artifact suffix when explicitly set
  */
 
 import { ethers } from "hardhat";
@@ -79,6 +79,7 @@ interface JinnMviL2DeployResult {
   emitter: string;
   wiring: JinnMviL2Wiring;
   txHash: string;
+  deployBlock: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +162,57 @@ function getTaskV3ArtifactPath(networkName: string, fastSuffix: boolean): string
   );
 }
 
+function isFastTimingProfile(profile: string | undefined): boolean {
+  return profile === "fast-test";
+}
+
+function shouldUseFastTaskV3Artifact(args: {
+  chainId: number;
+  env?: Record<string, string | undefined>;
+}): boolean {
+  const env = args.env ?? process.env;
+  if (env.PHASE1A_TIMING_PROFILE !== undefined) {
+    return isFastTimingProfile(env.PHASE1A_TIMING_PROFILE);
+  }
+  return args.chainId === CHAIN_ID_BASE_SEPOLIA;
+}
+
+export function resolveTaskV3ArtifactPath(args: {
+  networkName: string;
+  chainId: number;
+  env?: Record<string, string | undefined>;
+}): string {
+  const env = args.env ?? process.env;
+  return (
+    env.JINN_MVI_L2_ARTIFACT_PATH ??
+    getTaskV3ArtifactPath(
+      args.networkName,
+      shouldUseFastTaskV3Artifact({ chainId: args.chainId, env }),
+    )
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryRead<T>(label: string, read: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+      await sleep(1_000);
+    }
+  }
+  throw new Error(
+    `[deployJinnMviL2] ${label} read failed after deploy: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`,
+  );
+}
+
 /**
  * Deploy `TaskClaimEmitter(checker, registry)`. Reads back
  * the immutable wiring from chain and asserts that each field lands
@@ -181,14 +233,17 @@ export async function deployJinnMviL2(
   );
   const tx = emitter.deploymentTransaction();
   await emitter.waitForDeployment();
+  const receipt = tx ? await tx.wait() : null;
   const address = await emitter.getAddress();
 
   // Sanity: the constructor's slot-pinning assembly already fired. Read
   // back the immutables and assert they round-trip — this catches the
   // unlikely case where the wrong factory is deployed (wrong artifact)
-  // and gives the operator a single point of confidence.
-  const checkerOnChain: string = await emitter.checker();
-  const registryOnChain: string = await emitter.serviceRegistry();
+  // and gives the operator a single point of confidence. Some public
+  // RPCs briefly return empty code after a successful receipt, so retry
+  // these post-deploy reads before failing the script.
+  const checkerOnChain: string = await retryRead("checker()", () => emitter.checker());
+  const registryOnChain: string = await retryRead("serviceRegistry()", () => emitter.serviceRegistry());
   if (checkerOnChain.toLowerCase() !== wiring.checker.toLowerCase()) {
     throw new Error(
       `[deployJinnMviL2] checker mismatch: expected ${wiring.checker}, got ${checkerOnChain}`,
@@ -204,6 +259,7 @@ export async function deployJinnMviL2(
     emitter: address,
     wiring,
     txHash: tx?.hash ?? "(unknown — already mined)",
+    deployBlock: receipt?.blockNumber ?? null,
   };
 }
 
@@ -221,7 +277,7 @@ async function main() {
     scriptName: "Jinn MVI L2 emitter",
   });
 
-  const fastSuffix = (process.env.PHASE1A_TIMING_PROFILE ?? "canonical") === "fast-test";
+  const outputFastSuffix = isFastTimingProfile(process.env.PHASE1A_TIMING_PROFILE);
 
   // Resolve wiring. On Hardhat tests we tolerate fully-mocked wiring
   // because both the V3 artifact and the ServiceRegistry are
@@ -254,9 +310,10 @@ async function main() {
     // Live / testnet path. Read the V3 artifact + chain-pinned
     // service registry, allow env overrides for any of the three.
     const normalizedNetwork = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-    const v3Path =
-      process.env.JINN_MVI_L2_ARTIFACT_PATH
-        ?? getTaskV3ArtifactPath(normalizedNetwork, fastSuffix);
+    const v3Path = resolveTaskV3ArtifactPath({
+      networkName: normalizedNetwork,
+      chainId,
+    });
     const checker = resolveChecker({ artifactPath: v3Path });
     const registry = resolveServiceRegistry({ chainId });
     wiring = {
@@ -280,15 +337,18 @@ async function main() {
   console.log("=== Deployment Summary ===");
   console.log(`  TaskClaimEmitter   ${result.emitter}`);
   console.log(`  tx                 ${result.txHash}`);
+  console.log(`  deployBlock        ${result.deployBlock ?? "(unknown)"}`);
   console.log();
 
   const normalizedNetwork = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-  const artifactName = getJinnMviL2ArtifactName(normalizedNetwork, fastSuffix);
+  const artifactName = getJinnMviL2ArtifactName(normalizedNetwork, outputFastSuffix);
   const output = {
     network: normalizedNetwork,
     chainId,
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
+    deployBlock: result.deployBlock,
+    txHash: result.txHash,
     contracts: {
       TaskClaimEmitter: result.emitter,
       TaskActivityCheckerV3: wiring.checker,
