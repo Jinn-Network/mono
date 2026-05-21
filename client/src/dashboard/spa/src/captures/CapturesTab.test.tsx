@@ -150,8 +150,15 @@ describe('CapturesTab', () => {
     renderTab();
 
     expect(screen.getByText('Execution data')).toBeTruthy();
+    // Both list rows render in the Card.
     expect(await screen.findByText('swe-rebench-v2_v1_solution')).toBeTruthy();
-    expect(await screen.findByText('sess-1')).toBeTruthy();
+    expect(await screen.findByText('execution-capture.v1')).toBeTruthy();
+
+    // Detail surface is now a Sheet drawer — opens on row activation.
+    fireEvent.click(screen.getByText('execution-capture.v1'));
+
+    // sess-1 appears in both the Sheet title and the drill-in h1.
+    expect((await screen.findAllByText('sess-1')).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText('user-message').length).toBeGreaterThan(0));
     expect(screen.getByText('http.request.header.authorization')).toBeTruthy();
 

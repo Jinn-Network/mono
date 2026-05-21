@@ -1,4 +1,7 @@
 import type { CaptureDetailResponse } from '../api/types.js';
+import { Button } from '../components/ui/button.js';
+import { Card, CardContent } from '../components/ui/card.js';
+import { Separator } from '../components/ui/separator.js';
 import { HarnessIdCard } from './HarnessIdCard.js';
 import { RedactionDiff } from './RedactionDiff.js';
 
@@ -11,6 +14,16 @@ export interface CaptureDrillInProps {
   onTrustRepo: (trusted: boolean) => void;
 }
 
+/**
+ * CaptureDrillIn — the detail surface for a single capture.
+ *
+ * Rendered inside the CapturesTab `<Sheet>`. Composed top-to-bottom:
+ *   - Header (session id, when + span count, action `<Button>`s)
+ *   - Executor facts (HarnessIdCard)
+ *   - Redactions list (RedactionDiff)
+ *   - Trajectory: one `<Card>` containing the span rows, divided by
+ *     `<Separator>` instead of per-row borders.
+ */
 export function CaptureDrillIn({
   detail,
   approving = false,
@@ -21,54 +34,59 @@ export function CaptureDrillIn({
 }: CaptureDrillInProps): JSX.Element {
   const { capture, spans } = detail;
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22 }}>{capture.sessionId}</h1>
-          <div style={{ marginTop: 6, color: 'var(--fg-muted)' }}>
+    <div className="flex flex-col gap-5">
+      <header className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="m-0 break-all font-serif text-[22px] font-normal leading-tight text-foreground">
+            {capture.sessionId}
+          </h1>
+          <div className="mt-1.5 font-mono text-[12px] text-muted-foreground">
             {new Date(capture.capturedAt).toLocaleString()} · {spans.length} spans
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
+        <div className="flex shrink-0 items-start gap-2">
           {capture.repoRemoteUrl ? (
-            <button type="button" onClick={() => onTrustRepo(true)}>
+            <Button variant="secondary" size="sm" onClick={() => onTrustRepo(true)}>
               Trust repo
-            </button>
+            </Button>
           ) : null}
-          <button type="button" disabled={skipping} onClick={onSkip}>
+          <Button variant="secondary" size="sm" disabled={skipping} onClick={onSkip}>
             {skipping ? 'Skipping' : 'Skip'}
-          </button>
-          <button type="button" disabled={approving} onClick={onApprove}>
+          </Button>
+          <Button variant="default" size="sm" disabled={approving} onClick={onApprove}>
             {approving ? 'Approving' : 'Approve'}
-          </button>
+          </Button>
         </div>
       </header>
 
       <HarnessIdCard capture={capture} />
       <RedactionDiff spans={spans} />
 
-      <section style={{ display: 'grid', gap: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 14 }}>Trajectory</h2>
-        <div style={{ display: 'grid', gap: 6 }}>
-          {spans.map((span) => (
-            <div
-              key={span.spanId}
-              style={{
-                padding: '10px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                background: 'var(--panel)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <strong>{span.name}</strong>
-                <span style={{ color: 'var(--fg-muted)', fontFamily: 'monospace', fontSize: 12 }}>
-                  {span.spanId}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+      <section className="flex flex-col gap-2">
+        <h2 className="m-0 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Trajectory
+        </h2>
+        {spans.length === 0 ? (
+          <div className="font-mono text-[12px] text-muted-foreground">No spans recorded.</div>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col p-0">
+              {spans.map((span, idx) => (
+                <div key={span.spanId}>
+                  {idx > 0 && <Separator />}
+                  <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                    <strong className="min-w-0 truncate font-mono text-[12px] font-medium text-foreground">
+                      {span.name}
+                    </strong>
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                      {span.spanId}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       </section>
     </div>
   );

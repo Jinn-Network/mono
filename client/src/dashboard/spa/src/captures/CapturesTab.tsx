@@ -3,6 +3,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { CaptureDrillIn } from './CaptureDrillIn.js';
 import { OperatorDataMarket } from '../pages/operator/OperatorDataMarket.js';
+import { Alert, AlertDescription } from '../components/ui/alert.js';
+import { Badge } from '../components/ui/badge.js';
+import { Button } from '../components/ui/button.js';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.js';
+import { ScrollArea } from '../components/ui/scroll-area.js';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '../components/ui/sheet.js';
+import { cn } from '../lib/utils.js';
 import type {
   CaptureSummary,
   OperatorArtifact,
@@ -72,25 +85,24 @@ function isPermissionError(error: unknown): boolean {
   return /\b(401|403)\b|unauthorized|forbidden/i.test(queryErrorMessage(error));
 }
 
-function ExecutionDataNotice({ kind, message }: { kind: 'permission' | 'error'; message?: string }): JSX.Element {
-  const copy = kind === 'permission'
-    ? 'Permission required to view execution data. Open the dashboard from the daemon handshake URL or refresh an authenticated session.'
-    : `Execution data could not be loaded${message ? `: ${message}` : '.'}`;
+function ExecutionDataNotice({
+  kind,
+  message,
+}: {
+  kind: 'permission' | 'error';
+  message?: string;
+}): JSX.Element {
+  const copy =
+    kind === 'permission'
+      ? 'Permission required to view execution data. Open the dashboard from the daemon handshake URL or refresh an authenticated session.'
+      : `Execution data could not be loaded${message ? `: ${message}` : '.'}`;
   return (
-    <div
-      role="alert"
+    <Alert
+      variant={kind === 'permission' ? 'warning' : 'blocking'}
       data-testid={kind === 'permission' ? 'execution-data-permission' : 'execution-data-error'}
-      style={{
-        marginBottom: 12,
-        padding: '12px 14px',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        background: 'var(--panel)',
-        color: kind === 'permission' ? 'var(--accent-warn)' : 'var(--accent-danger)',
-      }}
     >
-      {copy}
-    </div>
+      <AlertDescription>{copy}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -112,7 +124,9 @@ function artifactRow(artifact: OperatorArtifact): ExecutionDataRow {
     selection: { kind: 'artifact', source: artifact.source, sha256: artifact.sha256 },
     title: artifact.artifactType,
     state,
-    meta: `${artifact.source === 'served' ? 'produced' : 'peer'} · ${formatBytes(artifact.contentSize)} · ${shortSha(artifact.sha256)}`,
+    meta: `${artifact.source === 'served' ? 'produced' : 'peer'} · ${formatBytes(
+      artifact.contentSize,
+    )} · ${shortSha(artifact.sha256)}`,
     at: artifactTime(artifact),
   };
 }
@@ -120,55 +134,61 @@ function artifactRow(artifact: OperatorArtifact): ExecutionDataRow {
 function ExecutionArtifactDetail({ artifact }: { artifact: OperatorArtifact }): JSX.Element {
   const when = artifactTime(artifact);
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22 }}>{artifact.artifactType}</h1>
-          <div style={{ marginTop: 6, color: 'var(--fg-muted)' }}>
+    <div className="flex flex-col gap-5">
+      <header className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="m-0 break-all font-serif text-[22px] font-normal leading-tight text-foreground">
+            {artifact.artifactType}
+          </h1>
+          <div className="mt-1.5 font-mono text-[12px] text-muted-foreground">
             {artifactState(artifact)} · {formatBytes(artifact.contentSize)} · {formatTime(when)}
           </div>
         </div>
       </header>
 
-      <dl
-        style={{
-          margin: 0,
-          padding: '14px 16px',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          display: 'grid',
-          gridTemplateColumns: '140px minmax(0, 1fr)',
-          gap: '10px 14px',
-        }}
-      >
-        <dt style={{ color: 'var(--fg-muted)' }}>type</dt>
-        <dd style={{ margin: 0 }}>{artifact.artifactType}</dd>
-        <dt style={{ color: 'var(--fg-muted)' }}>state</dt>
-        <dd style={{ margin: 0 }}>{artifactState(artifact)}</dd>
-        <dt style={{ color: 'var(--fg-muted)' }}>sha256</dt>
-        <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{artifact.sha256}</dd>
-        <dt style={{ color: 'var(--fg-muted)' }}>envelope</dt>
-        <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{artifact.envelopeCid ?? '—'}</dd>
-        <dt style={{ color: 'var(--fg-muted)' }}>recorded</dt>
-        <dd style={{ margin: 0 }}>{formatTime(when)}</dd>
-        {artifact.source === 'served' ? (
-          <>
-            <dt style={{ color: 'var(--fg-muted)' }}>request</dt>
-            <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{artifact.requestId ?? '—'}</dd>
-            <dt style={{ color: 'var(--fg-muted)' }}>accesses</dt>
-            <dd style={{ margin: 0 }}>
-              {artifact.access.accessCount} total · {artifact.access.failedPaymentCount} failed
+      <Card>
+        <CardContent className="p-4">
+          <dl className="m-0 grid gap-x-3.5 gap-y-2.5 [grid-template-columns:140px_minmax(0,1fr)]">
+            <dt className="font-mono text-[12px] text-muted-foreground">type</dt>
+            <dd className="m-0 font-mono text-[12px] text-foreground">{artifact.artifactType}</dd>
+            <dt className="font-mono text-[12px] text-muted-foreground">state</dt>
+            <dd className="m-0 font-mono text-[12px] text-foreground">{artifactState(artifact)}</dd>
+            <dt className="font-mono text-[12px] text-muted-foreground">sha256</dt>
+            <dd className="m-0 break-all font-mono text-[12px] text-foreground">
+              {artifact.sha256}
             </dd>
-          </>
-        ) : (
-          <>
-            <dt style={{ color: 'var(--fg-muted)' }}>operator</dt>
-            <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{artifact.sourceOperator ?? '—'}</dd>
-            <dt style={{ color: 'var(--fg-muted)' }}>source</dt>
-            <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{artifact.sourceEndpoint ?? '—'}</dd>
-          </>
-        )}
-      </dl>
+            <dt className="font-mono text-[12px] text-muted-foreground">envelope</dt>
+            <dd className="m-0 break-all font-mono text-[12px] text-foreground">
+              {artifact.envelopeCid ?? '—'}
+            </dd>
+            <dt className="font-mono text-[12px] text-muted-foreground">recorded</dt>
+            <dd className="m-0 font-mono text-[12px] text-foreground">{formatTime(when)}</dd>
+            {artifact.source === 'served' ? (
+              <>
+                <dt className="font-mono text-[12px] text-muted-foreground">request</dt>
+                <dd className="m-0 break-all font-mono text-[12px] text-foreground">
+                  {artifact.requestId ?? '—'}
+                </dd>
+                <dt className="font-mono text-[12px] text-muted-foreground">accesses</dt>
+                <dd className="m-0 font-mono text-[12px] text-foreground">
+                  {artifact.access.accessCount} total · {artifact.access.failedPaymentCount} failed
+                </dd>
+              </>
+            ) : (
+              <>
+                <dt className="font-mono text-[12px] text-muted-foreground">operator</dt>
+                <dd className="m-0 break-all font-mono text-[12px] text-foreground">
+                  {artifact.sourceOperator ?? '—'}
+                </dd>
+                <dt className="font-mono text-[12px] text-muted-foreground">source</dt>
+                <dd className="m-0 break-all font-mono text-[12px] text-foreground">
+                  {artifact.sourceEndpoint ?? '—'}
+                </dd>
+              </>
+            )}
+          </dl>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -176,6 +196,7 @@ function ExecutionArtifactDetail({ artifact }: { artifact: OperatorArtifact }): 
 export function CapturesTab(): JSX.Element {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<ExecutionDataSelection | undefined>();
+  const [sheetOpen, setSheetOpen] = useState(false);
   const listQuery = useQuery({
     queryKey: ['captures', 'pending'],
     queryFn: () => api.captures.listPending(),
@@ -196,14 +217,16 @@ export function CapturesTab(): JSX.Element {
     ...(servedQuery.data?.artifacts ?? []),
     ...(networkQuery.data?.artifacts ?? []),
   ].sort((a, b) => artifactTime(b).localeCompare(artifactTime(a)));
-  const rows = [
-    ...captures.map(captureRow),
-    ...artifacts.map(artifactRow),
-  ].sort((a, b) => b.at.localeCompare(a.at));
+  const rows = [...captures.map(captureRow), ...artifacts.map(artifactRow)].sort((a, b) =>
+    b.at.localeCompare(a.at),
+  );
   const selectedCaptureId = selected?.kind === 'capture' ? selected.id : undefined;
-  const selectedArtifact = selected?.kind === 'artifact'
-    ? artifacts.find((artifact) => artifact.source === selected.source && artifact.sha256 === selected.sha256)
-    : undefined;
+  const selectedArtifact =
+    selected?.kind === 'artifact'
+      ? artifacts.find(
+          (artifact) => artifact.source === selected.source && artifact.sha256 === selected.sha256,
+        )
+      : undefined;
   const loading = listQuery.isLoading || servedQuery.isLoading || networkQuery.isLoading;
   const listErrors = [
     listQuery.isError ? listQuery.error : listQuery.failureReason,
@@ -213,15 +236,19 @@ export function CapturesTab(): JSX.Element {
   const listPermissionError = listErrors.find(isPermissionError);
   const listError = listPermissionError ?? listErrors[0];
 
+  // Keep `selected` in sync with the row set so navigation never points at
+  // a stale id. The Sheet auto-opens when the operator activates a row;
+  // it does NOT auto-open just because a default selection exists.
   useEffect(() => {
     if (rows.length === 0) {
       if (selected) setSelected(undefined);
+      if (sheetOpen) setSheetOpen(false);
       return;
     }
     if (!selected || !rows.some((row) => sameSelection(selected, row.selection))) {
       setSelected(rows[0].selection);
     }
-  }, [rows, selected]);
+  }, [rows, selected, sheetOpen]);
 
   const detailQuery = useQuery({
     queryKey: ['captures', selectedCaptureId],
@@ -248,86 +275,131 @@ export function CapturesTab(): JSX.Element {
     mutationFn: (repoRemoteUrl: string) => api.captures.trustRepo(repoRemoteUrl, true),
   });
 
+  const handleRowActivate = (selection: ExecutionDataSelection): void => {
+    setSelected(selection);
+    setSheetOpen(true);
+  };
+
+  const sheetTitle =
+    selected?.kind === 'capture'
+      ? detailQuery.data?.capture.sessionId ?? 'Capture'
+      : selectedArtifact?.artifactType ?? 'Artifact';
+
+  const sheetDescription =
+    selected?.kind === 'capture' && detailQuery.data
+      ? `${new Date(detailQuery.data.capture.capturedAt).toLocaleString()} · ${
+          detailQuery.data.spans.length
+        } spans`
+      : selected?.kind === 'artifact' && selectedArtifact
+        ? `${artifactState(selectedArtifact)} · ${formatBytes(selectedArtifact.contentSize)}`
+        : 'Execution data detail.';
+
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div className="flex flex-col gap-6 p-6">
       <OperatorDataMarket defaultExpanded={true} />
-      <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 24 }}>
-      <aside>
-        <h1 style={{ margin: '0 0 12px', fontSize: 24 }}>Execution data</h1>
-        {listError ? (
-          <ExecutionDataNotice
-            kind={listPermissionError ? 'permission' : 'error'}
-            message={listPermissionError ? undefined : queryErrorMessage(listError)}
-          />
-        ) : null}
-        {loading && rows.length === 0 ? (
-          <div style={{ padding: 24, color: 'var(--fg-muted)' }}>
-            Loading execution data.
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Execution data</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {listError ? (
+            <div className="mb-3">
+              <ExecutionDataNotice
+                kind={listPermissionError ? 'permission' : 'error'}
+                message={listPermissionError ? undefined : queryErrorMessage(listError)}
+              />
+            </div>
+          ) : null}
+
+          {loading && rows.length === 0 ? (
+            <div className="p-6 font-mono text-[12px] text-muted-foreground">
+              Loading execution data.
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-6 font-mono text-[12px] text-muted-foreground">
+              No execution data yet.
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[560px]">
+              <div className="flex flex-col gap-2 pr-2">
+                {rows.map((row) => {
+                  const active = sameSelection(selected, row.selection);
+                  return (
+                    <Button
+                      key={row.id}
+                      variant="ghost"
+                      data-testid="execution-data-row"
+                      data-state={active ? 'active' : undefined}
+                      aria-current={active ? 'true' : undefined}
+                      onClick={() => handleRowActivate(row.selection)}
+                      className={cn(
+                        'flex h-auto w-full flex-col items-stretch gap-1.5 rounded-md border border-border bg-card px-4 py-3 text-left font-mono text-[12px] normal-case tracking-normal hover:bg-accent',
+                        active && 'border-primary bg-primary/[0.06]',
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <strong className="min-w-0 truncate font-medium text-foreground">
+                          {row.title}
+                        </strong>
+                        <Badge variant="outline" className="shrink-0">
+                          {row.state}
+                        </Badge>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {row.meta} · {formatTime(row.at)}
+                      </div>
+                    </Button>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent
+          side="right"
+          className="w-full overflow-y-auto sm:max-w-xl"
+          data-testid="execution-data-sheet"
+        >
+          <SheetHeader>
+            <SheetTitle className="break-all">{sheetTitle}</SheetTitle>
+            <SheetDescription>{sheetDescription}</SheetDescription>
+          </SheetHeader>
+          <div className="mt-4">
+            {detailQuery.error ? (
+              <ExecutionDataNotice
+                kind={isPermissionError(detailQuery.error) ? 'permission' : 'error'}
+                message={
+                  isPermissionError(detailQuery.error)
+                    ? undefined
+                    : queryErrorMessage(detailQuery.error)
+                }
+              />
+            ) : selected?.kind === 'capture' && detailQuery.data ? (
+              <CaptureDrillIn
+                detail={detailQuery.data}
+                approving={approve.isPending}
+                skipping={skip.isPending}
+                onApprove={() => selectedCaptureId && approve.mutate(selectedCaptureId)}
+                onSkip={() => selectedCaptureId && skip.mutate(selectedCaptureId)}
+                onTrustRepo={() => {
+                  const repo = detailQuery.data.capture.repoRemoteUrl;
+                  if (repo) trustRepo.mutate(repo);
+                }}
+              />
+            ) : selected?.kind === 'artifact' && selectedArtifact ? (
+              <ExecutionArtifactDetail artifact={selectedArtifact} />
+            ) : (
+              <div className="p-6 font-mono text-[12px] text-muted-foreground">
+                {loading ? 'Loading execution data.' : 'Select execution data.'}
+              </div>
+            )}
           </div>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: 24, color: 'var(--fg-muted)' }}>
-            No execution data yet.
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {rows.map((row) => {
-              const active = sameSelection(selected, row.selection);
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  data-testid="execution-data-row"
-                  onClick={() => setSelected(row.selection)}
-                  style={{
-                    textAlign: 'left',
-                    padding: '14px 16px',
-                    border: `1px solid ${active ? 'var(--accent-sky)' : 'var(--border)'}`,
-                    borderRadius: 8,
-                    background: active ? 'rgba(56, 189, 248, 0.08)' : 'var(--panel)',
-                    color: 'var(--fg)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                    <strong>{row.title}</strong>
-                    <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>{row.state}</span>
-                  </div>
-                  <div style={{ marginTop: 6, color: 'var(--fg-muted)', fontSize: 12 }}>
-                    {row.meta} · {formatTime(row.at)}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </aside>
-      <main>
-        {detailQuery.error ? (
-          <ExecutionDataNotice
-            kind={isPermissionError(detailQuery.error) ? 'permission' : 'error'}
-            message={isPermissionError(detailQuery.error) ? undefined : queryErrorMessage(detailQuery.error)}
-          />
-        ) : selected?.kind === 'capture' && detailQuery.data ? (
-          <CaptureDrillIn
-            detail={detailQuery.data}
-            approving={approve.isPending}
-            skipping={skip.isPending}
-            onApprove={() => selectedCaptureId && approve.mutate(selectedCaptureId)}
-            onSkip={() => selectedCaptureId && skip.mutate(selectedCaptureId)}
-            onTrustRepo={() => {
-              const repo = detailQuery.data.capture.repoRemoteUrl;
-              if (repo) trustRepo.mutate(repo);
-            }}
-          />
-        ) : selected?.kind === 'artifact' && selectedArtifact ? (
-          <ExecutionArtifactDetail artifact={selectedArtifact} />
-        ) : (
-          <div style={{ padding: 24, color: 'var(--fg-muted)' }}>
-            {loading ? 'Loading execution data.' : 'Select execution data.'}
-          </div>
-        )}
-      </main>
-      </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
