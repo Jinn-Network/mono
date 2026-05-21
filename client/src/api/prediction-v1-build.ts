@@ -42,6 +42,7 @@ export interface PredictionV1TaskRunSummary {
   implName: string | null;
   windowStartTs: number;
   windowEndTs: number;
+  runStartedAt: number | null;
   stateUpdatedAt: number;
   manifestCid: string | null;
   deliveryTxHash: string | null;
@@ -151,6 +152,7 @@ function toSummary(run: PersistedTaskRun): PredictionV1TaskRunSummary {
     implName: run.implName,
     windowStartTs: run.windowStartTs,
     windowEndTs: run.windowEndTs,
+    runStartedAt: run.runStartedAt,
     stateUpdatedAt: run.stateUpdatedAt,
     manifestCid: run.manifestCid,
     deliveryTxHash: run.deliveryTxHash,

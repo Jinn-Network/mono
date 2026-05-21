@@ -51,8 +51,10 @@ export interface ActivityTask {
   state: string;
   /** Harness/impl name the task ran under. */
   implName: string | null;
-  /** Unix ms timestamp the run claimed (window-start). */
+  /** Unix ms timestamp for the task's execution window start. */
   windowStartTs: number;
+  /** Unix ms timestamp captured when this operator successfully claimed the run. */
+  runStartedAt: number | null;
   /** Unix ms timestamp of the last state update. */
   stateUpdatedAt: number;
   /** Optional on-chain delivery tx for explorer linking. */
@@ -332,9 +334,7 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-muted-foreground">
-                                {formatRelative(
-                                  t.windowStartTs || t.stateUpdatedAt,
-                                )}
+                                {formatRelative(t.runStartedAt ?? t.stateUpdatedAt)}
                               </TableCell>
                             </TableRow>
                           );

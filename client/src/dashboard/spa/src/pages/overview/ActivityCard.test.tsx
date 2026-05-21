@@ -38,6 +38,7 @@ const baseTask: ActivityTask = {
   state: 'COMPLETE',
   implName: 'hermes-agent',
   windowStartTs: Date.now() - 120_000,
+  runStartedAt: Date.now() - 120_000,
   stateUpdatedAt: Date.now() - 60_000,
   deliveryTxHash: null,
 };
@@ -91,6 +92,32 @@ describe('ActivityCard', () => {
     expect(table.textContent).toMatch(/running/i);
     expect(table.textContent).toMatch(/solver/i);
     expect(table.textContent).toMatch(/evaluator/i);
+  });
+
+  it('shows STARTED from runStartedAt instead of an old task window start', () => {
+    const now = Date.now();
+    const sixDaysAgo = now - 6 * 86_400_000;
+    const twoMinutesAgo = now - 120_000;
+    const { ui } = wrap(
+      <ActivityCard
+        joined={joined}
+        tasks={[
+          {
+            ...baseTask,
+            requestId: 'fresh-claim',
+            windowStartTs: sixDaysAgo,
+            runStartedAt: twoMinutesAgo,
+            stateUpdatedAt: twoMinutesAgo,
+          },
+        ]}
+      />,
+    );
+
+    render(ui);
+
+    const row = screen.getByTestId('activity-task-row-fresh-claim');
+    expect(row.textContent).toMatch(/2m ago/);
+    expect(row.textContent).not.toMatch(/6d ago/);
   });
 
   it('renders the empty-tasks state when there are no task runs', () => {
