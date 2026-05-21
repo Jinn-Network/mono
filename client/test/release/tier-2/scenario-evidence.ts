@@ -5,8 +5,7 @@
  * This module factors out the pure boilerplate the callables have in common —
  * timestamped line collection, best-effort flush to the evidence file, and
  * ScenarioVerdict construction — so the callables themselves are left holding
- * only their scenario-specific logic (notably the deliberate skip-on-prereq
- * endpoint probes, which stay inline so they remain visible).
+ * only their scenario-specific logic.
  */
 
 import * as fs from 'node:fs/promises';
@@ -38,6 +37,22 @@ export class EvidenceLog {
       // best-effort; don't mask the primary error
     }
   }
+}
+
+/** Build a `pass` verdict — used when the scenario's happy path completed. */
+export function passVerdict(args: {
+  scenarioId: string;
+  startedAt: number;
+  evidencePath: string;
+}): ScenarioVerdict {
+  return {
+    scenarioId: args.scenarioId,
+    verdict: 'pass',
+    wallClockMs: Date.now() - args.startedAt,
+    evidencePath: args.evidencePath,
+    failClass: null,
+    failNotes: null,
+  };
 }
 
 /** Build a `skip` verdict — used for missing-prerequisite / missing-endpoint paths. */

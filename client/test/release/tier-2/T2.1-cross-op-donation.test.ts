@@ -3,7 +3,12 @@
  *
  * Invokes the callable exported by T2.1-cross-op-donation.ts and asserts only
  * the structural contract (valid ScenarioVerdict shape). The callable handles
- * all skip/pass/fail logic itself.
+ * all pass/fail/skip logic itself.
+ *
+ * The scenario forks Base Sepolia and boots two operator daemons, so the full
+ * run needs `BASE_SEPOLIA_RPC_URL` and the built `dist/bin/jinn.js`. Without the
+ * RPC env var the callable returns a clean `skip` — the structural assertions
+ * below still hold.
  */
 
 import { describe, it, expect } from 'vitest';
