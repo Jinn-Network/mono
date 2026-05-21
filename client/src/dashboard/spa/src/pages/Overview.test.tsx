@@ -75,7 +75,7 @@ function operatorCardName(name: string): (_: string, el: Element | null) => bool
 }
 
 describe('OverviewPage empty-state gating', () => {
-  it('shows the "Pick a SolverNet" prompt when the operator has joined nothing', async () => {
+  it('does not show the OperatorCard when the operator has joined nothing', async () => {
     getStatusMock.mockResolvedValue({
       predictionV1: {
         operator: {
@@ -91,7 +91,11 @@ describe('OverviewPage empty-state gating', () => {
     getBootstrapMock.mockResolvedValue({ solverNets: {} });
     render(withProviders(<OverviewPage />));
 
-    expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
+    // AlertBand retired (Task 1.6): the no_solvernets_joined notification
+    // kind in AppShell handles the empty state globally. Overview shows nothing
+    // in the joined-net slot when no net is configured.
+    await screen.findByText(/network/i);
+    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
   });
 
@@ -439,6 +443,31 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(/no incoming tasks since startup/i)).toBeNull();
   });
 
+  it('does not render the AlertBand get-started CTA — no_solvernets_joined notice handles it globally', async () => {
+    // Render Overview in the no-solvernets-joined state (same payload shape as
+    // the "shows the prompt" test above). After AlertBand is retired, neither
+    // the "Get started" lead nor the "Pick a SolverNet" body should appear in
+    // the Overview page — the global NotificationsList in AppShell handles it.
+    getStatusMock.mockResolvedValue({
+      predictionV1: {
+        operator: {
+          ok: true,
+          solverNet: { name: 'prediction', enabled: false },
+          diagnostics: [],
+        },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
+    render(withProviders(<OverviewPage />));
+
+    // Wait for async data to settle then assert absence.
+    await screen.findByText(/network/i);
+    expect(screen.queryByText(/pick a solvernet/i)).toBeNull();
+    expect(screen.queryByText(/get started/i)).toBeNull();
+  });
+
   it('shows the OperatorCard from the predictionV1 status as a back-compat signal', async () => {
     // No bootstrap.solverNets at all; predictionV1.solverNet.enabled wins.
     getStatusMock.mockResolvedValue({
@@ -461,24 +490,16 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
   });
 
-  it('shows the prompt when both payloads are empty', async () => {
+  it('shows no joined-net card when both payloads are empty', async () => {
+    // AlertBand retired (Task 1.6): Overview shows nothing in the joined-net
+    // slot when no net is configured — the global notification handles the CTA.
     getStatusMock.mockResolvedValue({ fleet: { services: [] } });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
+    await screen.findByText(/network/i);
+    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-  });
-
-  it('CTA on empty-state deep-links into /operator#solvernets', async () => {
-    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    const cta = await screen.findByText(/configure\s*→/i);
-    expect(cta.closest('a')?.getAttribute('href')).toBe(
-      '/operator#solvernets',
-    );
   });
 
   it('shows compact live status in the HeroStats row', async () => {

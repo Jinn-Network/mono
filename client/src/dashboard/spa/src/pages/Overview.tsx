@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
-import { AlertBand } from './overview/AlertBand.js';
 import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard } from './overview/OperatorCard.js';
@@ -350,30 +349,20 @@ export function OverviewPage(): JSX.Element {
       <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
 
       {/*
-       * Operator-side state vs. empty-state — strictly mutually exclusive.
-       * Spec §12: the OperatorCard surfaces the operator's joined SolverNet
-       * from `bootstrap.solverNets`. The empty state ("Pick a SolverNet")
-       * deep-links to `/operator#solvernets` where the registry catalog
-       * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
-       * shape and the new manifestCid-keyed shape during the Tasks 21/22
-       * migration window. The diagnostic-attention state is represented in
-       * the compact status tile above and the full live card on /operator;
-       * this Get-Started AlertBand stays.
+       * Operator-side state — shown when the operator has joined a SolverNet.
+       * The empty-state ("no SolverNets joined") is handled globally via the
+       * `no_solvernets_joined` notification kind in AppShell's NotificationsList
+       * (Task 1.5 / Task 1.6). No local empty-state rendering here.
+       * Spec §12: `detectJoinedSolverNet` accepts the legacy short-name shape
+       * and the new manifestCid-keyed shape during the Tasks 21/22 migration window.
        */}
-      {joined ? (
+      {joined && (
         <OperatorCard
           name={joined.name}
           configId={joined.configId}
           roles={joined.roles}
           state="live"
           waitingMessage={waitingMessage}
-        />
-      ) : (
-        <AlertBand
-          lead="Get started"
-          body="Pick a SolverNet to participate in"
-          ctaLabel="Configure"
-          ctaHref="/operator#solvernets"
         />
       )}
 
