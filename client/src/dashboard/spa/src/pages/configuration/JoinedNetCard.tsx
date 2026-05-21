@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { api } from '../../api/client.js';
 import type {
   RegistryManifestResponse,
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
 } from '../../api/types.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Label } from '../../components/ui/label.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 import {
   defaultModelForHarness,
   modelOptionsForHarness,
@@ -22,8 +28,6 @@ import { CostEstimatePanel, useCostSurfaceDecision } from './CostEstimatePanel.j
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
- *
- * Spec: brainstorm + plan in `/Users/adrianobradley/.claude/plans/`.
  *
  * Edit surface for `joinedSolverNets[<manifestCid>] = { roles, harness,
  * plugins, model }`. Roles are immutable post-join (set by `JoinFlow` and
@@ -94,6 +98,9 @@ function isDirty(form: FormState, joined: JoinedNetEntry): boolean {
   for (let i = 0; i < disabledA.length; i += 1) if (disabledA[i] !== disabledB[i]) return true;
   return false;
 }
+
+const MONO_SELECT_CLASSES =
+  'flex h-9 w-full rounded-sm border border-border bg-sunken px-2.5 py-1 font-mono text-[13px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
 
 export function JoinedNetCard({
   joined,
@@ -236,132 +243,95 @@ export function JoinedNetCard({
       data-testid="joined-net-card"
       data-manifest-cid={joined.manifestCid}
       data-expanded={expanded ? 'true' : 'false'}
-      style={{
-        background: 'var(--bg)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-2)',
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-      }}
+      className="flex flex-col gap-2.5 rounded-md border border-border bg-background px-4 py-3.5"
     >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) auto',
-          alignItems: 'flex-start',
-          gap: '12px',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
           <span
             data-testid="joined-net-card-name"
-            style={{
-              fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-              fontSize: '20px',
-              color: 'var(--fg)',
-              letterSpacing: '-0.01em',
-              lineHeight: 1.2,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
+            className="truncate font-serif text-[20px] leading-tight text-foreground tracking-[-0.01em]"
           >
             {displayName}
           </span>
-          <div
-            style={{
-              display: 'flex',
-              gap: '8px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--fg-muted)',
-              flexWrap: 'wrap',
-            }}
-          >
+          <div className="flex flex-wrap gap-2 font-mono text-[11px] text-muted-foreground">
             {joined.roles.map((role) => (
               <RoleChip key={role} label={role} />
             ))}
-            <span style={{ color: 'var(--fg-dim)' }}>cid {cidShort}</span>
+            <span className="text-dim">cid {cidShort}</span>
           </div>
         </div>
         {orphaned ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+          <div className="flex flex-col items-end gap-1.5">
             {!confirmingLeave ? (
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="sm"
                 data-testid="joined-net-card-leave"
                 onClick={() => setConfirmingLeave(true)}
-                style={destructiveButtonStyle(true)}
               >
-                ✕ Leave
-              </button>
+                <X aria-hidden="true" className="!size-3" />
+                Leave
+              </Button>
             ) : (
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
+              <div className="flex gap-1.5">
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   data-testid="joined-net-card-leave-cancel"
                   disabled={leaveMutation.isPending}
                   onClick={() => setConfirmingLeave(false)}
-                  style={ghostButtonStyle(!leaveMutation.isPending)}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="destructive"
+                  size="sm"
                   data-testid="joined-net-card-leave-confirm"
                   disabled={leaveMutation.isPending}
                   onClick={() => leaveMutation.mutate()}
-                  style={destructiveButtonStyle(!leaveMutation.isPending, true)}
                 >
                   {leaveMutation.isPending ? 'Leaving…' : 'Confirm leave'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
         ) : (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             data-testid="joined-net-card-toggle"
             onClick={() => setExpanded((e) => !e)}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-1)',
-              padding: '6px 10px',
-              cursor: 'pointer',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--fg)',
-            }}
           >
-            {expanded ? '▾ Close' : '▸ Edit'}
-          </button>
+            {expanded ? (
+              <>
+                <ChevronDown aria-hidden="true" className="!size-3.5" />
+                Close
+              </>
+            ) : (
+              <>
+                <ChevronRight aria-hidden="true" className="!size-3.5" />
+                Edit
+              </>
+            )}
+          </Button>
         )}
       </div>
 
       {orphaned && (
         <div
           data-testid="joined-net-card-orphaned"
-          style={{
-            border: '1px solid var(--wane)',
-            borderRadius: 'var(--radius-1)',
-            padding: '10px 14px',
-            background: 'transparent',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-            lineHeight: 1.5,
-          }}
+          className="rounded-sm border border-wane bg-transparent px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-muted-foreground"
         >
-          <span style={{ color: 'var(--wane)', textTransform: 'uppercase', letterSpacing: '0.14em', fontSize: '10px', marginRight: '8px' }}>
+          <Badge variant="pill" className="mr-2 align-baseline">
             Retired
-          </span>
+          </Badge>
           Manifest no longer in the registry. This SolverNet is not claiming on-chain anymore — leaving it removes the entry from your config. Restart the daemon afterwards so it stops looking for this manifest at startup.
           {leaveMutation.isError && (
-            <div role="alert" style={{ marginTop: '6px', color: 'var(--break-red)', fontSize: '11px' }}>
+            <div role="alert" className="mt-1.5 text-[11px] text-destructive">
               {leaveMutation.error instanceof Error ? leaveMutation.error.message : 'Leave failed.'}
             </div>
           )}
@@ -369,87 +339,34 @@ export function JoinedNetCard({
       )}
 
       {!expanded && !orphaned && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '90px 1fr',
-            gap: '6px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-          }}
-        >
-          <span>harness</span>
-          <span style={{ color: 'var(--fg)' }}>
-            {joined.harness ? harnessDisplayName(joined.harness) : <span style={{ color: 'var(--fg-dim)' }}>—</span>}
-            {harnessIncompatible && (
-              <span data-testid="joined-net-card-warn-collapsed" style={{ marginLeft: '10px', color: 'var(--break-red)' }}>
-                ⚠ does not support {contractLabel}
-              </span>
-            )}
-          </span>
-          <span>plugins</span>
-          <span style={{ color: 'var(--fg)' }}>
-            {(joined.plugins ?? []).length === 0 ? (
-              <span style={{ color: 'var(--fg-dim)' }}>—</span>
-            ) : (
-              `${joined.plugins!.length} active`
-            )}
-          </span>
-          <span>model</span>
-          <span style={{ color: 'var(--fg)' }}>
-            {joined.model ? (
-              resolveModelOption(joined.model, canonicalHarnessName(joined.harness)).label
-            ) : (
-              <span style={{ color: 'var(--fg-dim)' }}>—</span>
-            )}
-          </span>
-        </div>
+        <SummaryGrid
+          harness={joined.harness}
+          plugins={joined.plugins}
+          model={joined.model}
+          harnessWarning={harnessIncompatible ? `does not support ${contractLabel}` : null}
+          warningTestId="joined-net-card-warn-collapsed"
+        />
       )}
 
       {orphaned && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '90px 1fr',
-            gap: '6px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-          }}
-        >
-          <span>harness</span>
-          <span style={{ color: 'var(--fg)' }}>
-            {joined.harness ? harnessDisplayName(joined.harness) : <span style={{ color: 'var(--fg-dim)' }}>—</span>}
-          </span>
-          <span>plugins</span>
-          <span style={{ color: 'var(--fg)' }}>
-            {(joined.plugins ?? []).length === 0 ? (
-              <span style={{ color: 'var(--fg-dim)' }}>—</span>
-            ) : (
-              `${joined.plugins!.length} active`
-            )}
-          </span>
-          <span>model</span>
-          <span style={{ color: 'var(--fg)' }}>
-            {joined.model ? (
-              resolveModelOption(joined.model, canonicalHarnessName(joined.harness)).label
-            ) : (
-              <span style={{ color: 'var(--fg-dim)' }}>—</span>
-            )}
-          </span>
-        </div>
+        <SummaryGrid
+          harness={joined.harness}
+          plugins={joined.plugins}
+          model={joined.model}
+          harnessWarning={null}
+        />
       )}
 
       {expanded && !orphaned && (
         <div
           data-testid="joined-net-card-form"
-          style={{ display: 'flex', flexDirection: 'column', gap: '14px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}
+          className="flex flex-col gap-3.5 border-t border-border pt-3"
         >
-          <div ref={harnessFieldRef} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={fieldLabelStyle}>Harness</span>
+          <div ref={harnessFieldRef} className="flex flex-col gap-1.5">
+            <Label htmlFor="joined-net-card-harness-select">Harness</Label>
             <select
               ref={harnessSelectRef}
+              id="joined-net-card-harness-select"
               aria-label="Harness implementation"
               data-testid="joined-net-card-harness-select"
               value={form.harness}
@@ -462,10 +379,10 @@ export function JoinedNetCard({
                 }));
                 setHighCostAcknowledged(false);
               }}
-              style={{
-                ...selectStyle,
-                borderColor: harnessIncompatible ? 'var(--break-red)' : 'var(--border)',
-              }}
+              className={cn(
+                MONO_SELECT_CLASSES,
+                harnessIncompatible && 'border-destructive',
+              )}
             >
               {form.harness === '' && <option value="">—</option>}
               {compatible.map((h) => (
@@ -487,20 +404,16 @@ export function JoinedNetCard({
             {harnessIncompatible && (
               <span
                 data-testid="joined-net-card-warn-expanded"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '11px',
-                  color: 'var(--break-red)',
-                  lineHeight: 1.5,
-                }}
+                className="font-mono text-[11px] leading-relaxed text-destructive"
               >
-                ⚠ This harness does not support <span style={{ color: 'var(--fg)' }}>{contractLabel}</span>.
+                ⚠ This harness does not support <span className="text-foreground">{contractLabel}</span>.
                 {compatible.length > 0 && (
                   <>
                     {' Compatible: '}
                     {compatible.map((h, i) => (
-                      <span key={h.name} style={{ color: 'var(--accent-sky)' }}>
-                        {harnessDisplayName(h.name)}{i < compatible.length - 1 ? ' · ' : ''}
+                      <span key={h.name} className="text-primary">
+                        {harnessDisplayName(h.name)}
+                        {i < compatible.length - 1 ? ' · ' : ''}
                       </span>
                     ))}
                   </>
@@ -509,30 +422,21 @@ export function JoinedNetCard({
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={fieldLabelStyle}>Plugins</span>
+          <div className="flex flex-col gap-1.5">
+            <Label>Plugins</Label>
             {catalogResolving ? (
               <span
                 data-testid="joined-net-card-catalog-loading"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '12px',
-                  color: 'var(--fg-dim)',
-                }}
+                className="font-mono text-[12px] text-dim"
               >
                 Loading registry catalog…
               </span>
             ) : !catalogEntry ? (
               <span
                 data-testid="joined-net-card-catalog-missing"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '12px',
-                  color: 'var(--fg-dim)',
-                  fontStyle: 'italic',
-                }}
+                className="font-mono text-[12px] italic text-dim"
               >
-                Registry catalog has no template for this SolverNet's contract — plugins can't be verified.
+                Registry catalog has no template for this SolverNet&apos;s contract — plugins can&apos;t be verified.
               </span>
             ) : (catalogEntry.compatiblePlugins ?? []).length === 0 ? (
               <PluginPicker
@@ -561,9 +465,10 @@ export function JoinedNetCard({
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={fieldLabelStyle}>Model</span>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="joined-net-card-model-select">Model</Label>
             <select
+              id="joined-net-card-model-select"
               aria-label="Model"
               data-testid="joined-net-card-model-select"
               value={form.model}
@@ -571,7 +476,7 @@ export function JoinedNetCard({
                 setForm({ ...form, model: e.target.value });
                 setHighCostAcknowledged(false);
               }}
-              style={selectStyle}
+              className={MONO_SELECT_CLASSES}
             >
               {modelOptions.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -605,26 +510,14 @@ export function JoinedNetCard({
             <label
               data-testid="joined-net-card-cost-confirmation"
               data-cost-confirmation-checked={highCostAcknowledged ? 'true' : 'false'}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '8px',
-                padding: '10px 12px',
-                border: '1px solid var(--break-red)',
-                borderRadius: 'var(--radius-2)',
-                background: 'var(--bg)',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                color: 'var(--fg)',
-                cursor: 'pointer',
-              }}
+              className="flex cursor-pointer items-start gap-2 rounded-md border border-destructive bg-background px-3 py-2.5 font-mono text-[12px] text-foreground"
             >
               <input
                 type="checkbox"
                 data-testid="joined-net-card-cost-confirmation-checkbox"
                 checked={highCostAcknowledged}
                 onChange={(e) => setHighCostAcknowledged(e.target.checked)}
-                style={{ accentColor: 'var(--break-red)', marginTop: '2px', width: '14px', height: '14px' }}
+                className="mt-0.5 size-3.5 accent-destructive"
                 aria-label="I understand the per-task cost and have a budget for this"
               />
               <span>
@@ -638,69 +531,46 @@ export function JoinedNetCard({
             <span
               role="alert"
               data-testid="joined-net-card-error"
-              style={{ color: 'var(--break-red)', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}
+              className="font-mono text-[12px] text-destructive"
             >
               {saveMutation.error instanceof Error ? saveMutation.error.message : 'Save failed.'}
             </span>
           )}
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderTop: '1px solid var(--border)',
-              paddingTop: '10px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--fg-dim)',
-            }}
-          >
+          <Separator />
+
+          <div className="flex items-center justify-between font-mono text-[11px] text-dim">
             <span>{dirty ? 'Restart required to apply.' : 'No unsaved changes.'}</span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
+            <div className="flex gap-2">
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 data-testid="joined-net-card-cancel"
                 disabled={!dirty || saveMutation.isPending}
                 onClick={() => setForm(snapshot(joined))}
-                style={ghostButtonStyle(dirty && !saveMutation.isPending)}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                size="sm"
                 data-testid="joined-net-card-save"
                 disabled={!dirty || saveMutation.isPending || costGateBlocked}
                 onClick={() => saveMutation.mutate()}
-                style={primaryButtonStyle(dirty && !saveMutation.isPending && !costGateBlocked)}
               >
                 {saveMutation.isPending ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </div>
           </div>
 
           <div
             data-testid="joined-net-card-leave-zone"
-            style={{
-              marginTop: '4px',
-              paddingTop: '12px',
-              borderTop: '1px dashed var(--border)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              gap: '12px',
-              flexWrap: 'wrap',
-            }}
+            className="mt-1 flex flex-wrap items-start justify-between gap-3 border-t border-dashed border-border pt-3"
           >
             <span
               data-testid="joined-net-card-leave-explainer"
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                color: 'var(--fg-dim)',
-                lineHeight: 1.5,
-                maxWidth: '440px',
-              }}
+              className="max-w-[440px] font-mono text-[11px] leading-relaxed text-dim"
             >
               Leave removes this SolverNet from your config right away. The
               running daemon keeps its loaded copy in memory, so it will go on
@@ -710,34 +580,38 @@ export function JoinedNetCard({
               catalog later.
             </span>
             {!confirmingLeave ? (
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="sm"
                 data-testid="joined-net-card-leave"
                 onClick={() => setConfirmingLeave(true)}
-                style={destructiveButtonStyle(true)}
               >
-                ✕ Leave SolverNet
-              </button>
+                <X aria-hidden="true" className="!size-3" />
+                Leave SolverNet
+              </Button>
             ) : (
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
+              <div className="flex gap-1.5">
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   data-testid="joined-net-card-leave-cancel"
                   disabled={leaveMutation.isPending}
                   onClick={() => setConfirmingLeave(false)}
-                  style={ghostButtonStyle(!leaveMutation.isPending)}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="destructive"
+                  size="sm"
                   data-testid="joined-net-card-leave-confirm"
                   disabled={leaveMutation.isPending}
                   onClick={() => leaveMutation.mutate()}
-                  style={destructiveButtonStyle(!leaveMutation.isPending, true)}
                 >
                   {leaveMutation.isPending ? 'Leaving…' : 'Confirm leave'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -747,86 +621,56 @@ export function JoinedNetCard({
   );
 }
 
-function RoleChip({ label }: { label: string }): JSX.Element {
+interface SummaryGridProps {
+  harness: string | undefined;
+  plugins: string[] | undefined;
+  model: string | undefined;
+  harnessWarning: string | null;
+  warningTestId?: string;
+}
+
+function SummaryGrid({
+  harness,
+  plugins,
+  model,
+  harnessWarning,
+  warningTestId,
+}: SummaryGridProps): JSX.Element {
   return (
-    <span
-      data-testid="joined-net-card-role"
-      style={{
-        fontSize: '10px',
-        letterSpacing: '0.14em',
-        textTransform: 'uppercase',
-        color: 'var(--fg-muted)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-1)',
-        padding: '1px 6px',
-      }}
-    >
-      {label}
-    </span>
+    <div className="grid grid-cols-[90px_1fr] gap-x-3 gap-y-1.5 font-mono text-[12px] text-muted-foreground">
+      <span>harness</span>
+      <span className="text-foreground">
+        {harness ? harnessDisplayName(harness) : <span className="text-dim">—</span>}
+        {harnessWarning && warningTestId && (
+          <span data-testid={warningTestId} className="ml-2.5 text-destructive">
+            ⚠ {harnessWarning}
+          </span>
+        )}
+      </span>
+      <span>plugins</span>
+      <span className="text-foreground">
+        {(plugins ?? []).length === 0 ? (
+          <span className="text-dim">—</span>
+        ) : (
+          `${plugins!.length} active`
+        )}
+      </span>
+      <span>model</span>
+      <span className="text-foreground">
+        {model ? (
+          resolveModelOption(model, canonicalHarnessName(harness)).label
+        ) : (
+          <span className="text-dim">—</span>
+        )}
+      </span>
+    </div>
   );
 }
 
-const fieldLabelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const selectStyle: React.CSSProperties = {
-  background: 'var(--bg-sunken)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-1)',
-  padding: '8px 10px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg)',
-};
-
-function ghostButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '12px',
-    letterSpacing: '0.12em',
-    textTransform: 'uppercase',
-    padding: '7px 12px',
-    background: 'transparent',
-    color: active ? 'var(--fg)' : 'var(--fg-dim)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-1)',
-    cursor: active ? 'pointer' : 'not-allowed',
-  };
-}
-
-function primaryButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '12px',
-    letterSpacing: '0.12em',
-    textTransform: 'uppercase',
-    padding: '7px 14px',
-    background: active ? 'var(--accent-sky)' : 'transparent',
-    color: active ? 'var(--bg-sunken)' : 'var(--fg-dim)',
-    border: `1px solid ${active ? 'var(--accent-sky)' : 'var(--border)'}`,
-    borderRadius: 'var(--radius-1)',
-    cursor: active ? 'pointer' : 'not-allowed',
-  };
-}
-
-function destructiveButtonStyle(active: boolean, filled = false): React.CSSProperties {
-  const tone = active ? 'var(--break-red)' : 'var(--fg-dim)';
-  return {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '11px',
-    letterSpacing: '0.14em',
-    textTransform: 'uppercase',
-    padding: '7px 12px',
-    background: filled && active ? 'var(--break-red)' : 'transparent',
-    color: filled && active ? 'var(--bg-sunken)' : tone,
-    border: `1px solid ${tone}`,
-    borderRadius: 'var(--radius-1)',
-    cursor: active ? 'pointer' : 'not-allowed',
-  };
+function RoleChip({ label }: { label: string }): JSX.Element {
+  return (
+    <Badge variant="outline" data-testid="joined-net-card-role" className="px-1.5 py-px text-[10px]">
+      {label}
+    </Badge>
+  );
 }

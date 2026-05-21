@@ -3,7 +3,11 @@ import type {
   SolverNetCatalogEntry,
   SolverNetManifestV1,
 } from '../../api/types.js';
-import { ConfigField } from '../../components/ConfigField.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Label } from '../../components/ui/label.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 import { api } from '../../api/client.js';
 import { SolverNetSigil } from './solverNetSigils.js';
 import {
@@ -88,10 +92,51 @@ function isJoinedProps(props: NetCardProps): props is NetCardJoinedProps {
 
 export function NetCard(props: NetCardProps): JSX.Element {
   if (isJoinedProps(props)) {
-    return <JoinedNetCard {...props} />;
+    return <ManifestJoinedCard {...props} />;
   }
   return <LegacyNetCard {...props} />;
 }
+
+// ── Reusable mono select that matches shadcn Input styling ────────────────
+
+interface MonoSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  dirty?: boolean;
+  invalid?: boolean;
+}
+
+function MonoSelect({ className, dirty, invalid, ...props }: MonoSelectProps): JSX.Element {
+  return (
+    <select
+      {...props}
+      className={cn(
+        'flex h-9 w-full rounded-md border bg-background px-3 py-1 font-mono text-[13px] text-foreground transition-colors',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        invalid ? 'border-destructive' : dirty ? 'border-primary' : 'border-input',
+        className,
+      )}
+    />
+  );
+}
+
+// ── Reusable field label + optional Restart badge ─────────────────────────
+
+interface FieldLabelProps {
+  children: React.ReactNode;
+  htmlFor?: string;
+  restartRequired?: boolean;
+}
+
+function FieldLabel({ children, htmlFor, restartRequired }: FieldLabelProps): JSX.Element {
+  return (
+    <Label htmlFor={htmlFor} className="flex items-center gap-1.5">
+      {children}
+      {restartRequired && <Badge variant="pill">restart</Badge>}
+    </Label>
+  );
+}
+
+// ── Legacy mode ───────────────────────────────────────────────────────────
 
 function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLegacyProps): JSX.Element {
   const [draft, setDraft] = useState<NetCardConfig>({
@@ -111,10 +156,10 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
 
   const rolesValid = draft.roles.length > 0;
 
-  const stateLabel: { label: string; color: string } = (() => {
-    if (catalog.state === 'coming_soon') return { label: 'Coming soon', color: 'var(--fg-dim)' };
-    if (config.enabled) return { label: 'Live', color: 'var(--vow-green)' };
-    return { label: 'Available', color: 'var(--fg-muted)' };
+  const stateBadge: { label: string; variant: 'secondary' | 'outline' | 'success' } = (() => {
+    if (catalog.state === 'coming_soon') return { label: 'Coming soon', variant: 'secondary' };
+    if (config.enabled) return { label: 'Live', variant: 'success' };
+    return { label: 'Available', variant: 'outline' };
   })();
 
   const toggle = (): void => {
@@ -186,101 +231,58 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
     setDraft({ ...draft, roles: ordered });
   };
 
+  const harnessDirty = draft.harness !== canonicalHarnessName(config.harness);
+  const modelDirty = draft.model !== config.model;
+
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg)', overflow: 'hidden' }}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'auto 1fr auto auto',
-          gap: '16px',
-          alignItems: 'center',
-          padding: '14px 18px',
-        }}
-      >
+    <div className="overflow-hidden rounded-md border border-border bg-background">
+      <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-4 py-3.5">
         <SolverNetSigil name={catalog.name} />
         <span>
-          <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--fg)' }}>{catalog.name}</span>
-          <span style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+          <span className="text-[15px] font-medium text-foreground">{catalog.name}</span>
+          <span className="mt-0.5 block text-[12px] text-muted-foreground">
             {catalog.description}
           </span>
         </span>
-        <span
-          style={{
-            fontSize: '11px',
-            fontWeight: 500,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: stateLabel.color,
-            border: `1px solid ${stateLabel.color}`,
-            borderRadius: '999px',
-            padding: '2px 10px',
-          }}
-        >
-          {stateLabel.label}
-        </span>
-        <button
+        <Badge variant={stateBadge.variant} className="rounded-full px-2.5 py-0.5">
+          {stateBadge.label}
+        </Badge>
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={toggle}
           disabled={catalog.state === 'coming_soon'}
           aria-label={draft.enabled ? `Disable ${catalog.name}` : `Enable ${catalog.name}`}
-          style={{
-            background: 'var(--bg-elevated)',
-            border: `1px solid ${draft.enabled ? 'var(--accent-sky)' : 'var(--border)'}`,
-            borderRadius: '999px',
-            width: '36px',
-            height: '18px',
-            position: 'relative',
-            cursor: catalog.state === 'coming_soon' ? 'not-allowed' : 'pointer',
-            opacity: catalog.state === 'coming_soon' ? 0.5 : 1,
-          }}
+          className={cn(
+            'relative h-[18px] w-9 rounded-full border bg-elevated p-0 hover:bg-elevated',
+            draft.enabled ? 'border-primary' : 'border-border',
+            catalog.state === 'coming_soon' && 'cursor-not-allowed opacity-50',
+          )}
         >
           <span
-            style={{
-              position: 'absolute',
-              top: '2px',
-              left: draft.enabled ? 'auto' : '3px',
-              right: draft.enabled ? '3px' : 'auto',
-              width: '12px',
-              height: '12px',
-              borderRadius: '50%',
-              background: draft.enabled ? 'var(--accent-sky)' : 'var(--fg-muted)',
-            }}
+            aria-hidden="true"
+            className={cn(
+              'absolute top-[2px] block h-3 w-3 rounded-full transition-all',
+              draft.enabled ? 'right-[3px] bg-primary' : 'left-[3px] bg-muted-foreground',
+            )}
           />
-        </button>
+        </Button>
       </div>
 
       {draft.enabled && (
-        <div
-          style={{
-            borderTop: '1px solid var(--border)',
-            padding: '18px 20px',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '16px',
-            background: 'var(--bg-sunken)',
-          }}
-        >
-          <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                fontWeight: 500,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                color: 'var(--fg-muted)',
-              }}
-            >
-              Roles
-            </span>
+        <div className="grid grid-cols-2 gap-4 border-t border-border bg-sunken px-5 py-4">
+          <div className="col-span-2 flex flex-col gap-1.5">
+            <Label>Roles</Label>
             <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: `repeat(${catalog.supportedRoles.length}, 1fr)`,
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                overflow: 'hidden',
-              }}
+              className={cn(
+                'grid overflow-hidden rounded-md border border-border',
+                catalog.supportedRoles.length === 1
+                  ? 'grid-cols-1'
+                  : catalog.supportedRoles.length === 2
+                    ? 'grid-cols-2'
+                    : 'grid-cols-3',
+              )}
             >
               {catalog.supportedRoles.map((role, idx) => {
                 const active = draft.roles.includes(role);
@@ -291,38 +293,30 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
                     htmlFor={checkboxId}
                     data-role={role}
                     data-role-active={active ? 'true' : 'false'}
-                    style={{
-                      padding: '10px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-start',
-                      gap: '6px',
-                      color: active ? 'var(--fg)' : 'var(--fg-muted)',
-                      background: active ? 'var(--bg)' : 'transparent',
-                      borderRight: idx < catalog.supportedRoles.length - 1 ? '1px solid var(--border)' : 'none',
-                      cursor: 'pointer',
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}
+                    className={cn(
+                      'flex cursor-pointer flex-col items-start gap-1.5 px-3.5 py-2.5 font-mono',
+                      active ? 'bg-background text-foreground' : 'bg-transparent text-muted-foreground',
+                      idx < catalog.supportedRoles.length - 1 && 'border-r border-border',
+                    )}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="flex items-center gap-2">
                       <input
                         id={checkboxId}
                         type="checkbox"
                         checked={active}
                         onChange={() => toggleRole(role)}
                         aria-label={role === 'solving' ? 'Solver' : 'Evaluator'}
-                        style={{ accentColor: 'var(--accent-sky)', width: '14px', height: '14px' }}
+                        className="size-3.5 accent-primary"
                       />
-                      <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                      <span className="text-[14px] font-medium">
                         {role === 'solving' ? 'Solver' : 'Evaluator'}
                       </span>
                     </span>
                     <span
-                      style={{
-                        fontSize: '11px',
-                        color: active ? 'var(--fg-muted)' : 'var(--fg-dim)',
-                        paddingLeft: '22px',
-                      }}
+                      className={cn(
+                        'pl-[22px] text-[11px]',
+                        active ? 'text-muted-foreground' : 'text-dim',
+                      )}
                     >
                       {role === 'solving' ? 'attempt forecasts' : "verify others' forecasts"}
                     </span>
@@ -331,148 +325,49 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
               })}
             </div>
             {!rolesValid && (
-              <span
-                role="alert"
-                style={{
-                  fontSize: '12px',
-                  color: 'var(--break-red)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}
-              >
+              <span role="alert" className="font-mono text-[12px] text-destructive">
                 At least one role required
               </span>
             )}
           </div>
 
-          <ConfigField label="Harness" restartRequired>
-            <select
-              value={draft.harness}
-              onChange={(e) => {
-                const harness = e.target.value;
-                setDraft({
-                  ...draft,
-                  harness,
-                  model: defaultModelForHarness(harness),
-                });
-              }}
-              style={{
-                background: 'var(--bg)',
-                border: `1px solid ${draft.harness !== canonicalHarnessName(config.harness) ? 'var(--accent-sky)' : 'var(--border)'}`,
-                borderRadius: '6px',
-                padding: '10px 12px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '14px',
-                color: 'var(--fg)',
-              }}
-            >
-              {catalog.compatibleHarnesses
-                // Show every harness that supports at least one currently-active role.
-                // The daemon picks the right harness per-role at task-acceptance time;
-                // a single Harness is allowed to cover both roles or only one.
-                .filter((h) =>
-                  draft.roles.length === 0
-                    ? true
-                    : draft.roles.some((r) => h.supportsRoles.includes(r)),
-                )
-                .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
-                .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index)
-                .map((h) => (
-                  <option key={h.name} value={h.name}>
-                    {harnessOptionLabel(h.name, h.version)}
-                  </option>
-                ))}
-            </select>
-          </ConfigField>
+          <FieldHarness
+            catalog={catalog}
+            draft={draft}
+            setDraft={setDraft}
+            dirty={harnessDirty}
+            config={config}
+          />
 
-          <ConfigField label="Model" restartRequired>
-            {(() => {
-              const modelOptions = modelOptionsForHarness(draft.harness);
-              const resolved = resolveModelOption(draft.model, draft.harness);
-              return (
-                <select
-                  aria-label="Model"
-                  value={draft.model}
-                  onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-                  style={{
-                    background: 'var(--bg)',
-                    border: `1px solid ${draft.model !== config.model ? 'var(--accent-sky)' : 'var(--border)'}`,
-                    borderRadius: '6px',
-                    padding: '10px 12px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '14px',
-                    color: 'var(--fg)',
-                  }}
-                >
-                  {modelOptions.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                  {resolved.isCustom && (
-                    <option key={draft.model} value={draft.model}>
-                      {resolved.label}
-                    </option>
-                  )}
-                </select>
-              );
-            })()}
-          </ConfigField>
+          <FieldModel
+            draft={draft}
+            setDraft={setDraft}
+            dirty={modelDirty}
+          />
 
-          <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                fontWeight: 500,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                color: 'var(--fg-muted)',
-              }}
-            >
-              Plugins
-            </span>
+          <div className="col-span-2 flex flex-col gap-2">
+            <Label>Plugins</Label>
             {draft.plugins.map((p) => {
               const meta = catalog.compatiblePlugins.find((cp) => cp.name === p);
               return (
                 <div
                   key={p}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px 14px',
-                    border: '1px solid var(--border)',
-                    borderRadius: '6px',
-                    background: 'var(--bg)',
-                    fontFamily: "'JetBrains Mono', monospace",
-                  }}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3.5 py-2.5 font-mono"
                 >
-                  <span style={{ fontSize: '14px' }}>{p}</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ color: 'var(--fg-dim)', fontSize: '12px' }}>
+                  <span className="text-[14px]">{p}</span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-[12px] text-dim">
                       {meta ? `${meta.source} · ${meta.version}` : '—'}
                     </span>
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setDraft({ ...draft, plugins: draft.plugins.filter((x) => x !== p) })}
                       aria-label={`Remove ${p}`}
-                      style={{
-                        border: '1px solid var(--border)',
-                        borderRadius: '6px',
-                        padding: '4px 10px',
-                        background: 'transparent',
-                        color: 'var(--fg-muted)',
-                        fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        letterSpacing: '0.14em',
-                        textTransform: 'uppercase',
-                        cursor: 'pointer',
-                      }}
                     >
                       Remove
-                    </button>
+                    </Button>
                   </span>
                 </div>
               );
@@ -483,14 +378,7 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
               );
               if (catalog.compatiblePlugins.length === 0) {
                 return (
-                  <span
-                    style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: '12px',
-                      color: 'var(--fg-dim)',
-                      padding: '4px 2px',
-                    }}
-                  >
+                  <span className="px-0.5 py-1 font-mono text-[12px] text-dim">
                     No plugins available for this SolverNet
                   </span>
                 );
@@ -505,15 +393,7 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
                     setDraft({ ...draft, plugins: [...draft.plugins, picked] });
                   }}
                   aria-label="Add plugin"
-                  style={{
-                    background: 'var(--bg)',
-                    border: '1px dashed var(--border)',
-                    borderRadius: '6px',
-                    padding: '10px 12px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '14px',
-                    color: 'var(--fg)',
-                  }}
+                  className="flex h-9 w-full rounded-md border border-dashed border-border bg-background px-3 py-1 font-mono text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="" disabled>
                     + Add plugin
@@ -531,79 +411,51 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
       )}
 
       {confirmDisable && (
-        <div
-          style={{
-            padding: '14px 20px',
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg-elevated)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            color: 'var(--fg)',
-          }}
-        >
+        <div className="flex items-center justify-between border-t border-border bg-elevated px-5 py-3.5 font-mono text-[13px] text-foreground">
           <span>Discard pending changes and disable {catalog.name}?</span>
-          <span style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={() => setConfirmDisable(false)}
-              style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 14px', background: 'transparent', color: 'var(--fg)', fontFamily: 'inherit', fontSize: '12px' }}
-            >
+          <span className="flex gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setConfirmDisable(false)}>
               Keep
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              onClick={() => { setDraft({ ...config, enabled: false }); setConfirmDisable(false); }}
-              style={{ border: '1px solid var(--break-red)', borderRadius: '6px', padding: '6px 14px', background: 'var(--break-red)', color: 'var(--fg)', fontFamily: 'inherit', fontSize: '12px' }}
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setDraft({ ...config, enabled: false });
+                setConfirmDisable(false);
+              }}
             >
               Discard + disable
-            </button>
+            </Button>
           </span>
         </div>
       )}
 
       {dirty && !confirmDisable && (
-        <div
-          style={{
-            padding: '14px 20px',
-            borderTop: '1px solid var(--border)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontFamily: "'JetBrains Mono', monospace",
-          }}
-        >
-          <span style={{ fontSize: '12px', color: error || !rolesValid ? 'var(--break-red)' : 'var(--accent-sky)' }}>
+        <div className="flex items-center justify-between border-t border-border px-5 py-3.5 font-mono">
+          <span
+            className={cn(
+              'text-[12px]',
+              error || !rolesValid ? 'text-destructive' : 'text-primary',
+            )}
+          >
             {error ?? (!rolesValid ? 'At least one role required' : saving ? 'Saving…' : 'Changes pending')}
           </span>
-          <span style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={cancel}
-              disabled={saving}
-              style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '10px 20px', background: 'transparent', color: 'var(--fg)', fontFamily: 'inherit', fontSize: '14px' }}
-            >
+          <span className="flex gap-2">
+            <Button type="button" variant="secondary" size="lg" onClick={cancel} disabled={saving}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              onClick={() => { void save(); }}
-              disabled={saving || !rolesValid}
-              style={{
-                border: `1px solid ${rolesValid ? 'var(--accent-sky)' : 'var(--border)'}`,
-                borderRadius: '6px',
-                padding: '10px 20px',
-                background: rolesValid ? 'var(--accent-sky)' : 'transparent',
-                color: rolesValid ? 'var(--bg-sunken)' : 'var(--fg-dim)',
-                fontFamily: 'inherit',
-                fontSize: '14px',
-                cursor: rolesValid ? 'pointer' : 'not-allowed',
+              size="lg"
+              onClick={() => {
+                void save();
               }}
+              disabled={saving || !rolesValid}
             >
               Save changes
-            </button>
+            </Button>
           </span>
         </div>
       )}
@@ -611,9 +463,86 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
   );
 }
 
-// ── Manifest-keyed (joined) variant ─────────────────────────────────────────
+// ── Field components for the legacy editor ────────────────────────────────
 
-function JoinedNetCard({
+interface FieldHarnessProps {
+  catalog: SolverNetCatalogEntry;
+  draft: NetCardConfig;
+  setDraft: React.Dispatch<React.SetStateAction<NetCardConfig>>;
+  dirty: boolean;
+  config: NetCardConfig;
+}
+
+function FieldHarness({ catalog, draft, setDraft, dirty }: FieldHarnessProps): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel restartRequired>Harness</FieldLabel>
+      <MonoSelect
+        dirty={dirty}
+        value={draft.harness}
+        onChange={(e) => {
+          const harness = e.target.value;
+          setDraft({
+            ...draft,
+            harness,
+            model: defaultModelForHarness(harness),
+          });
+        }}
+      >
+        {catalog.compatibleHarnesses
+          .filter((h) =>
+            draft.roles.length === 0
+              ? true
+              : draft.roles.some((r) => h.supportsRoles.includes(r)),
+          )
+          .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
+          .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index)
+          .map((h) => (
+            <option key={h.name} value={h.name}>
+              {harnessOptionLabel(h.name, h.version)}
+            </option>
+          ))}
+      </MonoSelect>
+    </div>
+  );
+}
+
+interface FieldModelProps {
+  draft: NetCardConfig;
+  setDraft: React.Dispatch<React.SetStateAction<NetCardConfig>>;
+  dirty: boolean;
+}
+
+function FieldModel({ draft, setDraft, dirty }: FieldModelProps): JSX.Element {
+  const modelOptions = modelOptionsForHarness(draft.harness);
+  const resolved = resolveModelOption(draft.model, draft.harness);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel restartRequired>Model</FieldLabel>
+      <MonoSelect
+        dirty={dirty}
+        aria-label="Model"
+        value={draft.model}
+        onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+      >
+        {modelOptions.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+        {resolved.isCustom && (
+          <option key={draft.model} value={draft.model}>
+            {resolved.label}
+          </option>
+        )}
+      </MonoSelect>
+    </div>
+  );
+}
+
+// ── Manifest-keyed (joined) variant ───────────────────────────────────────
+
+function ManifestJoinedCard({
   manifestCid,
   manifest,
   joined,
@@ -642,91 +571,41 @@ function JoinedNetCard({
     <div
       data-testid="netcard-joined"
       data-manifest-cid={manifestCid}
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: '6px',
-        background: 'var(--bg)',
-        overflow: 'hidden',
-      }}
+      className="overflow-hidden rounded-md border border-border bg-background"
     >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'auto 1fr auto',
-          gap: '16px',
-          alignItems: 'center',
-          padding: '14px 18px',
-        }}
-      >
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-3.5">
         <SolverNetSigil name={manifest.contract.id} />
         <span>
-          <span
-            style={{ fontSize: '15px', fontWeight: 500, color: 'var(--fg)' }}
-          >
-            {manifest.name}
-          </span>
-          <span
-            style={{
-              display: 'block',
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              marginTop: '2px',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
-          >
+          <span className="text-[15px] font-medium text-foreground">{manifest.name}</span>
+          <span className="mt-0.5 block font-mono text-[12px] text-muted-foreground">
             {manifest.contract.id}@{manifest.contract.version} · launched by{' '}
             agentId {manifest.launcher.agentId}
           </span>
         </span>
-        <span
+        <Badge
+          variant="success"
           data-testid="netcard-joined-state"
-          style={{
-            fontSize: '11px',
-            fontWeight: 500,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--vow-green)',
-            border: '1px solid var(--vow-green)',
-            borderRadius: '999px',
-            padding: '2px 10px',
-          }}
+          className="rounded-full px-2.5 py-0.5"
         >
           Joined
-        </span>
+        </Badge>
       </div>
 
-      <div
-        style={{
-          borderTop: '1px solid var(--border)',
-          padding: '14px 20px',
-          display: 'grid',
-          gridTemplateColumns: 'auto 1fr',
-          gap: '6px 12px',
-          background: 'var(--bg-sunken)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          color: 'var(--fg-muted)',
-        }}
-      >
+      <Separator />
+
+      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 bg-sunken px-5 py-3.5 font-mono text-[12px] text-muted-foreground">
         <span>Roles</span>
-        <span data-testid="netcard-joined-roles" style={{ color: 'var(--fg)' }}>
+        <span data-testid="netcard-joined-roles" className="text-foreground">
           {joined.roles.length === 0 ? '—' : joined.roles.join(', ')}
         </span>
         <span>Solution price</span>
-        <span style={{ color: 'var(--fg)' }}>
-          {formatWeiAmount(manifest.solutionPriceWei)}
-        </span>
+        <span className="text-foreground">{formatWeiAmount(manifest.solutionPriceWei)}</span>
         <span>Verdict price</span>
-        <span style={{ color: 'var(--fg)' }}>
-          {formatWeiAmount(manifest.verdictPriceWei)}
-        </span>
+        <span className="text-foreground">{formatWeiAmount(manifest.verdictPriceWei)}</span>
         {joined.roles.includes('solver') && joined.harness && (
           <>
             <span>Harness</span>
-            <span
-              data-testid="netcard-joined-harness"
-              style={{ color: 'var(--fg)' }}
-            >
+            <span data-testid="netcard-joined-harness" className="text-foreground">
               {harnessDisplayName(joined.harness)}
             </span>
           </>
@@ -734,24 +613,19 @@ function JoinedNetCard({
         {joined.roles.includes('solver') && joined.model && (
           <>
             <span>Model</span>
-            <span style={{ color: 'var(--fg)' }}>{joined.model}</span>
+            <span className="text-foreground">{joined.model}</span>
           </>
         )}
         {joined.roles.includes('solver') && (joined.plugins?.length ?? 0) > 0 && (
           <>
             <span>Plugins</span>
-            <span style={{ color: 'var(--fg)' }}>
-              {joined.plugins!.join(', ')}
-            </span>
+            <span className="text-foreground">{joined.plugins!.join(', ')}</span>
           </>
         )}
         {joined.roles.includes('evaluator') && (
           <>
             <span>Evaluator harness</span>
-            <span
-              data-testid="netcard-joined-evaluator-binding"
-              style={{ color: 'var(--fg-dim)' }}
-            >
+            <span data-testid="netcard-joined-evaluator-binding" className="text-dim">
               {manifest.contract.evaluationFunction.implementation} (manifest-bound)
             </span>
           </>
@@ -759,12 +633,7 @@ function JoinedNetCard({
         <span>Manifest CID</span>
         <span
           data-testid="netcard-joined-manifest-cid"
-          style={{
-            color: 'var(--fg-dim)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
+          className="truncate text-dim"
         >
           {manifestCid}
         </span>
@@ -773,90 +642,49 @@ function JoinedNetCard({
       {error && (
         <div
           role="alert"
-          style={{
-            padding: '10px 18px',
-            borderTop: '1px solid var(--border)',
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-          }}
+          className="border-t border-border px-5 py-2.5 font-mono text-[12px] text-destructive"
         >
           {error}
         </div>
       )}
 
-      <div
-        style={{
-          padding: '12px 20px',
-          borderTop: '1px solid var(--border)',
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: '8px',
-          fontFamily: "'JetBrains Mono', monospace",
-        }}
-      >
+      <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3 font-mono">
         {confirm ? (
           <>
-            <span
-              style={{ color: 'var(--fg)', fontSize: '12px', marginRight: 'auto' }}
-            >
+            <span className="mr-auto text-[12px] text-foreground">
               Leave {manifest.name}? Restart required.
             </span>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setConfirm(false)}
               disabled={leaving}
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                padding: '6px 14px',
-                background: 'transparent',
-                color: 'var(--fg)',
-                fontFamily: 'inherit',
-                fontSize: '12px',
-              }}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
               data-testid="netcard-joined-leave-confirm"
               onClick={() => {
                 void leave();
               }}
               disabled={leaving}
-              style={{
-                border: '1px solid var(--break-red)',
-                borderRadius: '6px',
-                padding: '6px 14px',
-                background: 'var(--break-red)',
-                color: 'var(--fg)',
-                fontFamily: 'inherit',
-                fontSize: '12px',
-              }}
             >
               {leaving ? 'Leaving…' : 'Leave'}
-            </button>
+            </Button>
           </>
         ) : (
-          <button
+          <Button
             type="button"
+            variant="secondary"
             data-testid="netcard-joined-leave"
             onClick={() => setConfirm(true)}
-            style={{
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              padding: '8px 16px',
-              background: 'transparent',
-              color: 'var(--fg)',
-              fontFamily: 'inherit',
-              fontSize: '13px',
-              cursor: 'pointer',
-            }}
           >
             Leave
-          </button>
+          </Button>
         )}
       </div>
     </div>

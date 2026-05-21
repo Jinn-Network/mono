@@ -18,12 +18,14 @@
  */
 
 import type { JSX } from 'react';
+import { Diamond } from 'lucide-react';
 import {
   decideCostSurface,
   DEFAULT_HIGH_COST_THRESHOLD_USD,
   formatUsd,
   type CostSurfaceDecision,
 } from '../../../../../harnesses/cost-estimates.js';
+import { cn } from '../../lib/utils.js';
 
 export interface CostEstimatePanelProps {
   harness: string | undefined;
@@ -64,12 +66,18 @@ export function CostEstimatePanel({
       <div
         data-testid={`${testIdPrefix}-subscription`}
         data-cost-mode="subscription"
-        style={variant === 'card' ? subscriptionCardStyle : subscriptionInlineStyle}
+        className={cn(
+          'flex items-center gap-2.5 font-mono',
+          variant === 'card'
+            ? 'rounded-md border border-border bg-card px-3.5 py-2.5'
+            : 'py-1.5',
+        )}
       >
-        <span style={iconStyle} aria-hidden="true">
-          ◆
-        </span>
-        <span style={subscriptionTextStyle}>
+        <Diamond
+          aria-hidden="true"
+          className="size-3 shrink-0 text-primary"
+        />
+        <span className="text-[12px] text-muted-foreground">
           {decision.suppressedReason ?? 'Included in subscription, no per-task API cost.'}
         </span>
       </div>
@@ -86,18 +94,23 @@ export function CostEstimatePanel({
       data-cost-mode="paid-api"
       data-cost-usd={usd !== null ? usd.toFixed(4) : 'unknown'}
       data-cost-high-cost={isHighCost ? 'true' : 'false'}
-      style={variant === 'card' ? paidCardStyle(isHighCost) : paidInlineStyle(isHighCost)}
+      className={cn(
+        'flex flex-col gap-2 rounded-md border bg-card',
+        isHighCost ? 'border-destructive' : 'border-border',
+        variant === 'card' ? 'px-4 py-3.5' : 'gap-1 px-2.5 py-2',
+      )}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
-        <span style={labelStyle}>Estimated cost per task</span>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Estimated cost per task
+        </span>
         <span
           data-testid={`${testIdPrefix}-amount`}
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: variant === 'card' ? '18px' : '14px',
-            fontWeight: 500,
-            color: isHighCost ? 'var(--break-red)' : 'var(--fg)',
-          }}
+          className={cn(
+            'font-mono font-medium',
+            variant === 'card' ? 'text-[18px]' : 'text-[14px]',
+            isHighCost ? 'text-destructive' : 'text-foreground',
+          )}
         >
           {usd !== null ? `~${formatUsd(usd)}` : 'unavailable'}
         </span>
@@ -105,11 +118,7 @@ export function CostEstimatePanel({
       {estimate && (
         <span
           data-testid={`${testIdPrefix}-heuristic`}
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            color: 'var(--fg-muted)',
-          }}
+          className="font-mono text-[11px] text-muted-foreground"
         >
           Rough estimate — actual cost varies.
         </span>
@@ -117,11 +126,7 @@ export function CostEstimatePanel({
       {usd === null && (
         <span
           data-testid={`${testIdPrefix}-unknown`}
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            color: 'var(--fg-muted)',
-          }}
+          className="font-mono text-[11px] text-muted-foreground"
         >
           No pricing entry for this model id — confirm rates with your provider before joining.
         </span>
@@ -129,75 +134,11 @@ export function CostEstimatePanel({
       {isHighCost && (
         <span
           data-testid={`${testIdPrefix}-warning`}
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            color: 'var(--break-red)',
-          }}
+          className="font-mono text-[11px] text-destructive"
         >
           This model is above ${thresholdUsd.toFixed(2)}/task. You will be asked to confirm before joining.
         </span>
       )}
     </div>
   );
-}
-
-const labelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const iconStyle: React.CSSProperties = {
-  color: 'var(--accent-sky)',
-  fontSize: '12px',
-};
-
-const subscriptionTextStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  color: 'var(--fg-muted)',
-};
-
-const subscriptionCardStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '10px 14px',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-};
-
-const subscriptionInlineStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '6px 0',
-};
-
-function paidCardStyle(highCost: boolean): React.CSSProperties {
-  return {
-    background: 'var(--bg-elevated)',
-    border: `1px solid ${highCost ? 'var(--break-red)' : 'var(--border)'}`,
-    borderRadius: 'var(--radius-2)',
-    padding: '14px 16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  };
-}
-
-function paidInlineStyle(highCost: boolean): React.CSSProperties {
-  return {
-    border: `1px solid ${highCost ? 'var(--break-red)' : 'var(--border)'}`,
-    borderRadius: 'var(--radius-2)',
-    padding: '8px 10px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  };
 }

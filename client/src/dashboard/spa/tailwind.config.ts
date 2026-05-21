@@ -22,6 +22,15 @@ const config: Config = {
         ring: 'var(--ring)',
         background: 'var(--background)',
         foreground: 'var(--foreground)',
+        // Brand-only tones with no shadcn equivalent. Exposed as tailwind
+        // utilities (e.g. `bg-sunken`, `text-dim`, `border-wane`,
+        // `text-vow`) so JSX never needs raw `var(--*)` references.
+        sunken: 'var(--bg-sunken)',
+        elevated: 'var(--bg-elevated)',
+        dim: 'var(--fg-dim)',
+        wane: 'var(--wane)',
+        vow: 'var(--vow-green)',
+        gold: 'var(--accent-gold)',
         card: {
           DEFAULT: 'var(--card)',
           foreground: 'var(--card-foreground)',
