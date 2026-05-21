@@ -38,6 +38,7 @@ import {
   listMonthlyPartitions,
   type PoolTask,
 } from './_swe-rebench-v2-pool.js';
+import { PoolCacheStore, loadPoolWithCacheFallback } from './_swe-rebench-v2-pool-cache.js';
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
@@ -282,8 +283,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   const stateStore = new GeneratorStateStore({ stateDir: config.stateDir });
   const validatedPoolStore = new ValidatedPoolStore({ stateDir: config.stateDir });
 
+  const poolCache = new PoolCacheStore({ stateDir: config.stateDir });
   let pool: PoolTask[] = [];
   let poolLoadedAt = 0;
+  let poolFromCache = false;
   let floorWarned = false;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
@@ -293,18 +296,26 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let lastPostedInstanceId: string | undefined;
 
   async function refreshPool(): Promise<void> {
-    try {
-      pool = await loadSweRebenchV2Pool();
+    const result = await loadPoolWithCacheFallback({
+      loadPool: loadSweRebenchV2Pool,
+      cache: poolCache,
+      currentPool: pool,
+    });
+    pool = result.pool;
+    poolFromCache = result.fromCache;
+    lastError = result.error;
+    if (!result.error) {
+      // Fresh HF load — hold it for the full POOL_REFRESH_MS window.
       poolLoadedAt = Date.now();
-    } catch (err) {
-      // Non-fatal: keep the existing pool if already loaded
-      lastError = {
-        message: err instanceof Error ? err.message : String(err),
-        at: new Date().toISOString(),
-      };
+    }
+    if (result.fromCache) {
       console.warn(
-        `[swe-rebench-v2-gen] pool refresh failed (using ${pool.length} cached tasks):`,
-        err instanceof Error ? err.message : String(err),
+        `[swe-rebench-v2-gen] HF pool refresh failed; serving ${pool.length} tasks from disk cache — ` +
+        `generator stays live, will retry HF next poll: ${result.error?.message}`,
+      );
+    } else if (result.error) {
+      console.warn(
+        `[swe-rebench-v2-gen] pool refresh failed (pool size ${pool.length}): ${result.error.message}`,
       );
     }
   }
@@ -317,8 +328,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     const genConfig = normalizeGeneratorConfig(runtimeConfig);
     const claimPolicy = normalizeClaimPolicy(runtimeConfig);
 
-    // Refresh pool if stale or empty
-    if (pool.length === 0 || now - poolLoadedAt > POOL_REFRESH_MS) {
+    // Refresh pool if stale, empty, or currently served from the disk cache
+    // (a cache-served pool retries HF every poll so the generator self-heals
+    // as soon as HF recovers — #466).
+    if (pool.length === 0 || poolFromCache || now - poolLoadedAt > POOL_REFRESH_MS) {
       await refreshPool();
     }
     if (pool.length === 0) {
