@@ -16,12 +16,15 @@ export function runSkillHeadless(
   opts: { cwd: string; timeoutMs: number },
 ): Promise<SkillRunResult> {
   return new Promise((resolve) => {
-    const proc = spawn('claude', ['-p', '--model', HEADLESS_MODEL, prompt], { cwd: opts.cwd });
+    const proc = spawn('claude', ['-p', '--model', HEADLESS_MODEL, prompt], {
+      cwd: opts.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
     const timer = setTimeout(() => { timedOut = true; proc.kill('SIGTERM'); }, opts.timeoutMs);
     proc.on('close', (code) => {
       clearTimeout(timer);
