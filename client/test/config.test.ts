@@ -1200,6 +1200,34 @@ describe('capture config', () => {
   });
 });
 
+describe('spendCaps config', () => {
+  it('accepts a per-credential spendCaps map', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-cfg-spend-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ spendCaps: { 'anthropic:api-key': 20 } }));
+    const cfg = loadConfig(configPath);
+    expect(cfg.spendCaps).toEqual({ 'anthropic:api-key': 20 });
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejects a non-positive cap', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-cfg-spend-bad-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ spendCaps: { 'anthropic:api-key': 0 } }));
+    expect(() => loadConfig(configPath)).toThrow();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('defaults spendCaps to undefined', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-cfg-spend-none-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({}));
+    const cfg = loadConfig(configPath);
+    expect(cfg.spendCaps).toBeUndefined();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('hermes config keys', () => {
   const dirs: string[] = [];
   const HERMES_ENV_KEYS = [

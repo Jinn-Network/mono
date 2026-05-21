@@ -706,6 +706,17 @@ export const JinnConfigSchema = z.object({
    * Env: JINN_REPUTATION_ENABLED
    */
   reputationEnabled: z.boolean().default(false),
+
+  /**
+   * Per-credential daily spend caps (USD). Keys are credential identifiers
+   * (e.g. `'anthropic:api-key'`); values are positive numbers representing
+   * the maximum USD spend per day for that credential.
+   *
+   * `JINN_SPEND_CAP_USD` (env-only, consumed directly by the spend-budget
+   * subsystem in Task 9) is tracked for provenance in TRACKED_ENV_VARS below
+   * but is NOT a config-file field and has no entry in this schema.
+   */
+  spendCaps: z.record(z.string(), z.number().positive()).optional(),
 }).refine(
   (cfg) =>
     cfg.jinnClaimSubmissionMode !== 'submit' ||
@@ -1214,6 +1225,7 @@ const TRACKED_ENV_VARS = [
   'JINN_CAPTURES_LLM_PROXY_ENABLED',
   'JINN_CAPTURES_LLM_PROXY_PORT',
   'JINN_BUILD_COMMIT',
+  'JINN_SPEND_CAP_USD',
 ] as const;
 
 export interface ConfigProvenance {
