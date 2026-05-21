@@ -6,11 +6,14 @@ The handbook is **Jinn-flavored**, not generic. Per [`BRAND.md`](../../BRAND.md)
 
 Canonical references:
 - Design that ratified this handbook: [`docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md`](../superpowers/specs/2026-05-11-engineering-handbook-codesign.md)
+- DR-2026-05-20-b — Issue taxonomy redesign (one canonical surface per axis; shape → Issue Type; Blocked on / Effort / Priority Project fields): [`log/decisions/2026-05-20-issue-taxonomy-redesign.md`](../../log/decisions/2026-05-20-issue-taxonomy-redesign.md)
 - DR-2026-05-18 — Issue tracking substrate (retire `bd`, single-track on GitHub): [`log/decisions/2026-05-18-bd-vs-gh-substrate.md`](../../log/decisions/2026-05-18-bd-vs-gh-substrate.md)
 - DR-2026-05-11-b — Engineering substrate (superseded for the internal-SoR claim by DR-2026-05-18; sprint-surface claim survives): [`log/decisions/2026-05-11-engineering-substrate.md`](../../log/decisions/2026-05-11-engineering-substrate.md)
 - DR-2026-05-11-a — Prediction freeze: [`log/decisions/2026-05-11-freeze-prediction-solvernet.md`](../../log/decisions/2026-05-11-freeze-prediction-solvernet.md)
 
 **Note on `bd` retirement (2026-05-18):** Per DR-2026-05-18, `bd` is retired as the issue-tracking substrate. GitHub Issues + native sub-issues + the "Jinn engineering" Project (v2) are the single source of truth for engineering work going forward. The Dolt remote that backed `bd` is frozen as a read-only archive (`bd-archive-2026-05-18`, see `scripts/freeze-beads.sh`); the `bd` CLI on operator machines continues to resolve historical `jinn-mono-<id>` references via `bd show <id>` after a one-time `bd dolt pull`. The local `.beads/` directory is gitignored — historical-lookup state is per-operator, sourced from the Dolt remote. Sections below reflect the new substrate; the prior `bd ↔ GitHub Issue mirror` from DR-2026-05-11-b is retired.
+
+**Note on the issue taxonomy redesign (2026-05-20):** Per DR-2026-05-20-b, the issue taxonomy is redesigned on a first-principles basis — every issue carries a fixed set of orthogonal axes, and each axis has exactly one canonical surface. Native GitHub primitives are preferred wherever one fits; labels are reserved for flat tags with no native equivalent; the body holds narrative only. The load-bearing changes: **work shape moves from the free-text `## Run-mode` body section to a native GitHub Issue Type** (`## Run-mode` is kept but slimmed to a one-line handbook pointer); three Project (v2) single-select fields — **Blocked on**, **Effort**, **Priority** — are added; **Epic** moves fully to native sub-issues (the Epic Project field is retired); and the `sprint:*`, `agent:*`, `priority:*`, and redundant GitHub default labels (`bug`, `enhancement`, `documentation`) retire. Area labels and `release:*` stay. The nine work shapes, their SOPs, their skill chains, and the Conventional-Commit PR-title prefix convention are **unchanged** — only the surface that shape is declared on changes. Sections below reflect the redesigned taxonomy.
 
 ## Cadence
 
@@ -51,9 +54,9 @@ claude
 
 then:
 
-1. **Orient.** Invoke `eng-day` skill (or fallback: `gh issue list --search 'is:open' --json number,title,labels,assignees` + `gh pr list --search 'is:open draft:false'`). Brief reports sprint progress, yesterday's shipped, today's top-3 guidance, drift flags.
+1. **Orient.** Invoke `eng-day` skill (or fallback: `gh issue list --search 'is:open' --json number,title,labels,assignees,type` + `gh pr list --search 'is:open draft:false'`). Brief reports sprint progress, yesterday's shipped, today's top-3 guidance, drift flags.
 2. **Pick one piece of work** — a GitHub Issue, a stale PR, or a design conversation. Run `gh issue view <N>` to read the work.
-3. **Execute according to shape** — the Issue body's `## Run-mode` section declares the shape; the shape determines the skill chain, test discipline, design ceremony, and stacking policy (see §The shapes of work below).
+3. **Execute according to shape** — the Issue's **Issue Type** (`feat` / `fix` / `refactor` / `spike` / `chore` / `docs` / `test` / `incident` / `design`) declares the shape; the shape determines the skill chain, test discipline, design ceremony, and stacking policy (see §The shapes of work below). The Project fields **Blocked on**, **Effort**, and **Priority** govern routing — skip an issue whose Blocked on is `Human` or `Another issue`.
 4. **Open PR(s).** PR title format: `<shape>(<optional scope>): <one-line summary>` (Conventional Commits). The PR template (`.github/PULL_REQUEST_TEMPLATE.md`) prompts for problem-not-solution body, test plan, agent identity, Co-Authored-By trailer.
 5. **Review.** Human eyes on every PR (rule 4). No agent self-merge. Exception: `fix(incident)` allows reviewer relaxation with documented justification.
 6. **Merge to `next` → auto-canary.** `npm-publish.yml` fires on push to `next`, publishes `<v>-canary.<sha>` under `canary`. `main` advances only on the Monday cut's release publish (or via the hotfix sub-flow).
@@ -61,7 +64,7 @@ then:
 
 ### Weekly retrace
 
-**Friday afternoon — triage.** Captain walks the open GitHub Issue queue, picks candidates for the upcoming Monday sprint, and adds them to the "Jinn engineering" Project (v2) board with the upcoming-Monday Iteration value on the `Sprint` field. The pre-DR-2026-05-18 Friday triage cron + `scripts/bd-mirror` helper are retired. If a labeling pass surfaces value (e.g. flagging top-priority unsprinted Issues), the cron may be reintroduced as a label-only pass over open Issues — file a follow-up Issue if so. Default flow stays *select, not auto-promote*.
+**Friday afternoon — triage.** Captain walks the open GitHub Issue queue, picks candidates for the upcoming Monday sprint, and adds them to the "Jinn engineering" Project (v2) board with the upcoming-Monday Iteration value on the `Sprint` field. Triage is also when the routing axes get set on a sprint candidate: confirm the Issue Type, and set the **Blocked on**, **Effort**, and **Priority** Project fields. The pre-DR-2026-05-18 Friday triage cron + `scripts/bd-mirror` helper are retired. If a pass over the routing fields surfaces value (e.g. flagging top-priority unsprinted Issues), the cron may be reintroduced as a field-only pass over open Issues — file a follow-up Issue if so. Default flow stays *select, not auto-promote*.
 
 **Monday morning — cut.** The Monday cron (`cargo/.github/workflows/release-notes-scaffold.yml`, currently `workflow_dispatch` only) creates a GitHub Release **draft** at 09:00 UTC and opens-or-updates the standing release-review PR (`base: main`, `head: next` — see §Cadence). Captain reviews the release-review PR's whole-window diff, edits build-name + highlights + known-issues on the draft, then clicks Publish. Publish triggers:
 
@@ -73,7 +76,7 @@ The Project board's Sprint view resets to the new Monday; shipped items move to 
 
 ## The shapes of work
 
-The handbook recognises seven shapes plus one emergency sub-flow, plus one meta-shape (`INTERACTIVE DESIGN`) used when the Issue's job is to *produce a design doc* (spec or DR) rather than ship implementation. Each shape declares a **disposition** — when it applies, what discipline its container demands, what ceremony fits. The shape is declared in the GitHub Issue body's `## Run-mode` section and replicated in the PR title prefix (Conventional Commits). If an Issue does not fit one of these shapes, it is mis-scoped — split it or reshape it.
+The handbook recognises seven shapes plus one emergency sub-flow, plus one meta-shape (the `design` Issue Type) used when the Issue's job is to *produce a design doc* (spec or DR) rather than ship implementation. Each shape declares a **disposition** — when it applies, what discipline its container demands, what ceremony fits. The shape is declared on the **Issue Type** (see §How shape is declared below) and replicated in the PR title prefix (Conventional Commits). If an Issue does not fit one of these shapes, it is mis-scoped — split it or reshape it.
 
 The taxonomy is keyed to Conventional Commits prefixes so it composes with existing tooling: PR title → Release section grouping → CHANGELOG entry.
 
@@ -93,9 +96,28 @@ The taxonomy is keyed to Conventional Commits prefixes so it composes with exist
 
 `fix(incident)` — used when canary is broken, production is incident-mode, or a security disclosure lands. SOP: acknowledge in the incident thread; diagnose (revert is the default); ship the smallest possible patch with **relaxed review** (one reviewer, justification noted in PR body); the post-hoc regression test and proper-fix are **required follow-up Issues** filed before the incident is closed. Rule 4 (review parity) explicitly allows relaxation here; rule 7 (regression test) defers but does not waive.
 
-**`Run-mode` values** used in Issue bodies: `BUG-FIX` / `FEATURE` / `REFACTOR` / `SPIKE` / `CHORE` / `DOCS` / `TEST` / `INCIDENT` / `INTERACTIVE DESIGN`. The `INTERACTIVE DESIGN` value is the meta-shape used when the Issue's job is to *produce a design doc* — its skill chain is `brainstorming` → spec → DR(s) → Issue restructure, with no implementation in the same session.
+### How shape is declared — Issue Type
 
-**Every work-unit Issue declares a `Run-mode`.** Add a `## Run-mode` section to the Issue body at create-time. Epics (containers) are exempt; only work-unit Issues need it. The `eng-day` daily-brief skill reads `Run-mode` to apply the right skill chain when surfacing a task. If you create an Issue without `Run-mode`, a reviewer will infer one from the title and labels — `gh issue edit <N> --body-file -` adds the section retroactively, but declaring it up front is cheaper. Captain may amend a previously-declared `Run-mode` if the shape changes (e.g. a `feat` that reveals a deeper architectural problem becomes a `refactor`).
+Per DR-2026-05-20-b, the canonical surface for work shape is the **Issue Type** — a native GitHub primitive, single-select-enforced, rendered as a badge on the Issue, and queryable with the `type:` search qualifier (`gh issue list --search 'type:fix'`; the standalone `--type` flag does not exist in gh 2.78). The nine work shapes map one-to-one to nine org-level Issue Types on `Jinn-Network`:
+
+`feat` / `fix` / `refactor` / `spike` / `chore` / `docs` / `test` / `incident` / `design`.
+
+- `incident` is the Issue Type for the `fix(incident)` emergency sub-flow.
+- `design` is the meta-shape used when the Issue's job is to *produce a design doc* (spec or DR) — its skill chain is `brainstorming` → spec → DR(s) → Issue restructure, with no implementation in the same session.
+
+**Every work-unit Issue sets an Issue Type at create-time.** The work-unit Issue template prompts for it. Epics (containers) are themselves Issues but are exempt from the work-shape Types — they are pure umbrellas. The `eng-day` daily-brief skill reads the Issue Type to apply the right skill chain when surfacing a task. If you create an Issue without a Type, a reviewer will set one inferred from the title and body — set it from the Issue's **Type** control in the GitHub UI, or via the GraphQL `updateIssue(input: {id, issueTypeId})` mutation (gh 2.78 has no `--type` flag), but declaring it up front is cheaper. Captain may amend a previously-set Issue Type if the shape changes (e.g. a `feat` that reveals a deeper architectural problem becomes a `refactor`).
+
+The `## Run-mode` body section is **kept but slimmed**: it is no longer the canonical declaration of shape (the Issue Type is), so it cannot drift from it. The section now holds a one-line pointer to the handbook SOP for the declared type — e.g. `Type: fix — see handbook §The shapes of work for the skill chain`. The PR-title Conventional-Commit prefix convention is unchanged.
+
+### Routing axes — Project fields
+
+Three Project (v2) single-select fields, set at Friday triage (see §Weekly retrace), drive routing alongside the Issue Type:
+
+- **Blocked on** — `Nothing` / `Human` / `Another issue`. The readiness signal. When the value is `Another issue`, the specific blocker is named with a native issue-dependency / tracked-by link; the field is the queryable tri-state, the link is the specific edge.
+- **Effort** — `Low` / `Medium` / `High`. The model-routing signal — `Low` routes to a cheap/fast model, `High` to a strong one.
+- **Priority** — `P0` … `P4`. How urgent.
+
+These fields live on the "Jinn engineering" Project board and are queryable via the Projects API (`gh project item-list`), not via plain `gh issue list`. `eng-day` reads them; the documented `gh issue list` fallback does not see them, which is acceptable for a fallback.
 
 ### Iterative refinement of shape flows
 
@@ -114,8 +136,8 @@ For v0 the refinement mechanism is intentionally lightweight: file an Issue unde
 The ten rules below land in this handbook + [`CLAUDE.md`](../../CLAUDE.md) immediately. Rule 5 is a placeholder pending the self-modifying learner design.
 
 1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`), not the primary checkout.
-2. **Issues frame problems, not solutions.** GitHub Issue bodies = context + impact + needs-design-session or testable acceptance criteria. Solutions live in design sessions (`INTERACTIVE DESIGN` shape) or implementation plans, not in the Issue body.
-3. **GitHub Issues are the single SoR for engineering work.** Per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Parent/child use native sub-issues; `Sprint`/`Epic`/`Status` live on the "Jinn engineering" Project (v2). The Dolt remote that backed `bd` is frozen as `bd-archive-2026-05-18` (per `scripts/freeze-beads.sh`); the `bd` CLI continues to resolve historical `jinn-mono-<id>` references via `bd show <id>` against the operator's local `.beads/` (gitignored, sourced from the frozen Dolt remote).
+2. **Issues frame problems, not solutions.** GitHub Issue bodies = context + impact + needs-design-session or testable acceptance criteria. Solutions live in design sessions (`design` Issue Type) or implementation plans, not in the Issue body.
+3. **GitHub Issues are the single SoR for engineering work.** Per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Per DR-2026-05-20-b, each issue's orthogonal axes each have exactly one canonical surface: **work shape** is the native **Issue Type**; **epic / parent** and the parent/child tree are native **sub-issues** (the Epic Project field is retired); **Status** and **Sprint** live on the "Jinn engineering" Project (v2) Status and Iteration fields; **Blocked on**, **Effort**, and **Priority** are Project (v2) single-select fields; **area** and **release impact** are labels. The retired `sprint:*`, `agent:*`, `priority:*`, and redundant GitHub default labels (`bug`, `enhancement`, `documentation`) are not live mechanism. The Dolt remote that backed `bd` is frozen as `bd-archive-2026-05-18` (per `scripts/freeze-beads.sh`); the `bd` CLI continues to resolve historical `jinn-mono-<id>` references via `bd show <id>` against the operator's local `.beads/` (gitignored, sourced from the frozen Dolt remote).
 4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs go through the same review gate as human PRs. No agent self-merge. Exception: `fix(incident)` allows reviewer relaxation with documented justification.
 5. **(Deferred — open)** Supervised-diff for the self-modifying learner. Phase A.5+ learner ships proposed changes as PRs against the repo; designated reviewer approves before merge. Concrete mechanism is open. **Status: open.**
 6. **Integration tests > mocks for migration / contract surfaces.** Mock policy stays for the unit-test pyramid; migration tests must hit a real database or a forked chain (per `superpowers:test-driven-development`'s position on the test pyramid).
@@ -133,12 +155,12 @@ The canonical sprint board is a GitHub Project (v2) on `Jinn-Network/mono` named
 
 - **Status columns**: Todo / In Progress / In Review / Done.
 - **Sprint field** (Iteration): keyed to the current Monday week.
-- **Epic field** (single select): human option names such as `Engineering handbook`, `Discovery API`, and `v1 public testnet`. (Option descriptions no longer carry the legacy `jinn-mono-<id>` mapping, which served the retired mirror.)
-- **Parent/child**: native GitHub sub-issues (`addSubIssue` mutation / native UI). Epics are Issues with sub-issues attached.
+- **Blocked on / Effort / Priority** (single-select): the routing fields — see §Routing axes above.
+- **Epic / parent**: native GitHub sub-issues (`addSubIssue` mutation / native UI). Epics are Issues with sub-issues attached; the sub-issue tree is the canonical hierarchy. Per DR-2026-05-20-b the predecessor Epic Project single-select field is retired in favour of native sub-issues.
 - **Default view**: current sprint Status board.
-- **Roadmap view**: grouped by Epic in Now / Next / Later.
+- **Roadmap view**: grouped by sub-issue parent in Now / Next / Later.
 
-**Workflow**: All new engineering work originates as a GitHub Issue. To put work into a sprint, add the Issue to the "Jinn engineering" Project board and set the `Sprint` Iteration to the upcoming Monday. PR merges that include `Closes #<N>` auto-close the Issue; Project automation moves it to Done.
+**Workflow**: All new engineering work originates as a GitHub Issue with an Issue Type set. To put work into a sprint, add the Issue to the "Jinn engineering" Project board, set the `Sprint` Iteration to the upcoming Monday, and set the Blocked on / Effort / Priority fields. PR merges that include `Closes #<N>` auto-close the Issue; Project automation moves it to Done.
 
 Backlog Issues live un-sprinted on the Project board (or off-board entirely until Captain reviews). Captain's Friday triage walks the open queue and pulls candidates onto the upcoming-Monday Iteration — see §Weekly retrace above. The pre-DR-2026-05-18 `bd-mirror` helper and Friday triage cron are retired.
 
@@ -164,7 +186,7 @@ Tooling: `gh-stack` (GitHub-native CLI extension, April 2026) is the canonical r
 ## Doc ladder
 
 - `cargo/spec/` — stable proposal-style ADRs.
-- `cargo/docs/superpowers/specs/` — in-progress design specs (output of `INTERACTIVE DESIGN` shape).
+- `cargo/docs/superpowers/specs/` — in-progress design specs (output of the `design` Issue Type).
 - `cargo/docs/superpowers/plans/` — implementation plans (output of `writing-plans` skill).
 - `cargo/docs/runbooks/` — operational SOPs.
 - `cargo/log/decisions/` — ratified Decision Records (DRs).
@@ -174,5 +196,5 @@ Tooling: `gh-stack` (GitHub-native CLI extension, April 2026) is the canonical r
 ## Open
 
 - **Rule 5 concrete mechanism.** Waits on the self-modifying learner design.
-- **Friday triage cron form (post DR-2026-05-18).** The pre-retirement Friday triage cron + `bd-mirror` workflow retire under DR-2026-05-18. If a label-only pass over open Issues turns out to add value, file a follow-up GitHub Issue under the engineering handbook umbrella.
+- **Friday triage cron form (post DR-2026-05-18).** The pre-retirement Friday triage cron + `bd-mirror` workflow retire under DR-2026-05-18. If an automated pass over open Issues' routing fields (Issue Type, Blocked on / Effort / Priority) turns out to add value, file a follow-up GitHub Issue under the engineering handbook umbrella.
 - **GitHub Project (v2) board** is live ("Jinn engineering"). No open work here; documented for context.

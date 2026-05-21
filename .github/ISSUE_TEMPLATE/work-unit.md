@@ -1,17 +1,23 @@
 ---
 name: Work unit (default)
-about: Engineering work unit — bug, feature, refactor, spike, chore, docs, test. Default template per the engineering handbook.
+about: Engineering work unit — bug, feature, refactor, spike, chore, docs, test, design. Default template per the engineering handbook.
 title: "<shape>: <one-line summary>"
 labels: []
 assignees: []
 ---
 
 <!--
-Per docs/engineering/handbook.md §The shapes of work + DR-2026-05-18, every
-work-unit Issue declares a shape via the `## Run-mode` section below and via
-a Conventional Commits prefix in the title. Epics (containers) are exempt;
-they use the EPIC template. The canonical list of shapes + Run-mode values
-lives in the handbook — see the link above.
+Per docs/engineering/handbook.md §The shapes of work + DR-2026-05-20-b, every
+work-unit Issue declares a shape via the native GitHub Issue Type. SET THE
+ISSUE TYPE when you create this Issue (the "Type" control next to the title) —
+pick ONE of: feat / fix / refactor / spike / chore / docs / test / incident /
+design. The Issue Type is the canonical declaration of shape; replicate it as a
+Conventional Commits prefix in the PR title. Epics (containers) use the EPIC
+template and are exempt from the work-shape Types.
+
+Routing fields live on the "Jinn engineering" Project (v2), set at Friday
+triage: Blocked on (Nothing / Human / Another issue), Effort (Low / Medium /
+High), Priority (P0..P4). Add this Issue to the board to set them.
 
 Title prefix examples:
   fix: SWE typed payload fallback validation
@@ -24,7 +30,11 @@ Title prefix examples:
 
 ## Run-mode
 
-<!-- Pick ONE: BUG-FIX / FEATURE / REFACTOR / SPIKE / CHORE / DOCS / TEST / INCIDENT / INTERACTIVE DESIGN -->
+<!--
+One-line pointer only — the canonical shape is the Issue Type set above.
+Format: `Type: <type> — see handbook §The shapes of work for the skill chain`.
+e.g. `Type: fix — see handbook §The shapes of work for the skill chain`
+-->
 
 ## Context
 

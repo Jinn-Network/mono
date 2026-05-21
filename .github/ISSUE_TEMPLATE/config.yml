@@ -6,6 +6,9 @@ contact_links:
   - name: DR-2026-05-18 — Issue substrate
     url: https://github.com/Jinn-Network/mono/blob/main/log/decisions/2026-05-18-bd-vs-gh-substrate.md
     about: Why we track engineering work as GitHub Issues + sub-issues + Project (v2), not `bd`.
+  - name: DR-2026-05-20-b — Issue taxonomy
+    url: https://github.com/Jinn-Network/mono/blob/main/log/decisions/2026-05-20-issue-taxonomy-redesign.md
+    about: Work shape is the native Issue Type; Blocked on / Effort / Priority are Project fields. One canonical surface per axis.
   - name: GitHub Discussions
     url: https://github.com/Jinn-Network/mono/discussions
     about: For RFCs, Q&A, or non-issue conversations. File an Issue only when there's an acceptance-shaped outcome.

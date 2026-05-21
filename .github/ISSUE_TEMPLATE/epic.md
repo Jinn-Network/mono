@@ -1,16 +1,18 @@
 ---
 name: Epic (container)
-about: Multi-work-unit umbrella with sub-issues. Per the engineering handbook §The shapes of work, epics are exempt from the `Run-mode` requirement.
+about: Multi-work-unit umbrella with sub-issues. Per the engineering handbook §The shapes of work, epics are exempt from the work-shape Issue Types.
 title: "EPIC: <one-line summary>"
 labels: []
 assignees: []
 ---
 
 <!--
-Per DR-2026-05-18, epics are tracked as GitHub Issues with child work-units
-attached via native sub-issues (the "Sub-issues" panel on the Issue page,
-or the `addSubIssue` GraphQL mutation). The umbrella for the bd retirement
-itself is an example: see #261.
+Per DR-2026-05-18 and DR-2026-05-20-b, epics are tracked as GitHub Issues with
+child work-units attached via native sub-issues (the "Sub-issues" panel on the
+Issue page, or the `addSubIssue` GraphQL mutation). The sub-issue tree is the
+canonical hierarchy — there is no Epic Project field. Epics are pure umbrellas
+and do not carry one of the work-shape Issue Types. The umbrella for the bd
+retirement itself is an example: see #261.
 -->
 
 ## Context
