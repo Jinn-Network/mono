@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe('<OverviewActivityPage />', () => {
-  it('renders the page header and embeds the LiveNowBand', async () => {
+  it('renders the page header', async () => {
     vi.mocked(api.getStatus).mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       activity: { recent: [] },
@@ -44,7 +44,6 @@ describe('<OverviewActivityPage />', () => {
       expect(screen.getByTestId('overview-activity')).toBeTruthy();
     });
     expect(screen.getByRole('heading', { name: /Activity/i })).toBeTruthy();
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
     expect(screen.getByTestId('overview-activity-back')).toBeTruthy();
   });
 

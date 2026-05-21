@@ -1,10 +1,8 @@
 import { Link } from 'wouter';
-import { LiveNowBand } from './overview/LiveNowBand.js';
 import { ActivitySections } from './overview/ActivitySections.js';
 
 /**
- * /overview/activity — the dedicated activity drilldown page. Reached from
- * the "View activity →" link on the LiveNowBand.
+ * /overview/activity — the dedicated activity drilldown page.
  *
  * The activity surface itself (In flight + Recent) also renders inline as a
  * primary section on /overview (the Dashboard) — see `ActivitySections`,
@@ -66,8 +64,6 @@ export function OverviewActivityPage({
           ← Overview
         </Link>
       </header>
-
-      <LiveNowBand />
 
       <ActivitySections pollIntervalMs={pollIntervalMs} />
     </main>

@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
-import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
+import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/liveNowState.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard } from './overview/OperatorCard.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
