@@ -22,6 +22,8 @@ import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js
 import type { Task } from '../types/index.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { gateClaimByReadiness } from './readiness-gate.js';
+import { gateClaimBySpendCap } from './spend-cap-gate.js';
+import type { SpendCapDaemonConfig } from '../spend/daemon-config.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 
 const DEFAULT_API_PORT = 7331;
@@ -168,6 +170,9 @@ export interface DaemonConfig {
    * don't exercise the cost-mutating claim path.
    */
   harnessReadinessRegistry?: HarnessReadinessRegistry;
+
+  /** Per-credential daily spend caps. Omitted -> no spend gating. */
+  spendCap?: SpendCapDaemonConfig;
 }
 
 export class Daemon {
@@ -526,6 +531,36 @@ export class Daemon {
             logger: { warn: (msg) => console.warn(msg), info: (msg) => console.log(msg) },
           });
           if (!gate.proceed) continue;
+        }
+      }
+
+      // Spend-cap gate: skip claims for a credential that has hit its daily budget.
+      if (this.config.spendCap) {
+        const spendManifestCid = taskAnnouncement.task.solverNetManifestCid;
+        // No manifest CID -> no credential to attribute -> task is not spend-gated.
+        const credentialId = spendManifestCid
+          ? this.config.spendCap.manifestCredentials[spendManifestCid]
+          : undefined;
+        const capUsd = credentialId ? this.config.spendCap.caps[credentialId] : undefined;
+        if (credentialId && capUsd != null) {
+          const spentTodayUsd = this.store.spentTodayMicros(credentialId) / 1_000_000;
+          const spendGate = gateClaimBySpendCap({
+            credentialId,
+            capUsd,
+            spentTodayUsd,
+            logger: { warn: (m) => console.warn(m), info: (m) => console.log(m) },
+          });
+          if (!spendGate.proceed) {
+            if (spendGate.newlyPaused) {
+              emitEvent(this.store, {
+                kind: 'spend_cap_reached',
+                requestId: taskAnnouncement.taskId,
+                outcome: 'paused',
+                detail: spendGate.reason,
+              }, 'daemon');
+            }
+            continue;
+          }
         }
       }
 

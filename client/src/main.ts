@@ -64,6 +64,7 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import { buildSpendCapConfig } from './spend/daemon-config.js';
 import {
   buildJinnClaimLoopConfig,
   shouldWireJinnClaimL1Signer,
@@ -2398,6 +2399,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  const spendCap = buildSpendCapConfig(config, process.env);
+
   const daemon = new Daemon({
     adapter,
     runner,
@@ -2414,6 +2417,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     creatorSafeAddress: safeAddress,
     corpusFactory,
     harnessReadinessRegistry,
+    spendCap,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,

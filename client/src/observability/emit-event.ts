@@ -14,6 +14,7 @@ export const ALLOWED_LIFECYCLE_KINDS = [
   'jinn_claim_canonical_skip',
   'engine_transition',
   'tick_error',
+  'spend_cap_reached',
   'startup',
   'shutdown',
 ] as const;
@@ -26,7 +27,7 @@ export interface LifecycleEvent {
   serviceIndex?: number;
   txHash?: string;
   solverType?: string;
-  outcome?: 'ok' | 'failed' | 'warn';
+  outcome?: 'ok' | 'failed' | 'warn' | 'paused';
   detail?: string;
 }
 
@@ -49,7 +50,9 @@ export function emitEvent(
 
   const payload = {
     ts,
-    level: event.outcome === 'failed' ? 'error' : event.outcome === 'warn' ? 'warn' : 'info',
+    level: event.outcome === 'failed' ? 'error'
+      : (event.outcome === 'warn' || event.outcome === 'paused') ? 'warn'
+      : 'info',
     component,
     msg: event.detail ?? event.kind,
     requestId: event.requestId ?? null,
