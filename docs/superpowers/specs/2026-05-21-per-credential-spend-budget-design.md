@@ -163,27 +163,28 @@ No reserve, no settle, no two-phase ledger. The running total is the **real comp
 - `JinnConfigSchema` (Zod, `client/src/config.ts`) gains `spendCaps: z.record(z.string(), z.number().positive()).optional()`. Add `JINN_SPEND_CAP_USD` to `TRACKED_ENV_VARS`.
 - The unknown-model fallback cost (§8) is a documented code constant, not config.
 
-## 7. Operator-facing surface
+## 7. Operator-facing surface — a new OPERATOR-APP-SPEC component
 
-### 7.1 Settings — extend #345's cost-protection panel
+`client/OPERATOR-APP-SPEC.md` models the operator app as **components**, each on four axes (Static / Streams / Actions / State messages), with the discipline that *a field belongs to exactly one component*. The spend budget cross-cuts §2.4 Network Memberships — one credential bills the work of every SolverNet on that harness — so, exactly as §2.9 Harness Readiness is surfaced component-level "so the operator fixes it once, not per SolverNet," the spend budget is **its own component**: not a per-SolverNet field, and not a §2.11 Settings value (the cap is inseparable from live spend telemetry, which Settings does not hold).
 
-The cost-protection section (`client/src/dashboard/spa/src/pages/configuration/`, `CostEstimatePanel` and its host cards) gains, per credential the daemon is using:
+### 7.1 The Spend component
 
-- credential id, today's spend, configured cap, an editable cap field, paused state.
-- **API-key credentials** — the cap field is presented as a meaningful control.
-- **Subscription credentials** — spend is shown (USD-equivalent, informational); the cap field is optional and labelled as a throttle guard, not pre-populated. Same mechanism, honest framing.
+A new component, sibling of §2.3 Funds — Funds models the ETH the node consumes and its runway; Spend models the fiat it consumes and its headroom. Keyed **per credential**:
 
-### 7.2 Running-mode status
+- **Static (per credential)** — credential (`provider:authMethod`); kind (paid API key / subscription); spent today (USD; subscription = USD-equivalent, informational); daily cap (USD; unset = none); claims-paused; resets-at (next UTC midnight).
+- **Actions** — set / change / clear daily cap. Restart-required → raises `restart_required` (§3.2); §2.1 Daemon exposes the satisfying restart.
+- **Streams** — none new. Per-task cost is added as `cost` + `model` fields on the **shared event vocabulary** (OPERATOR-APP-SPEC §3.3), annotating the existing §2.4 action stream — this is #346's "per-task breakdown."
+- **State messages** — `daily spend cap reached` (warning — this credential's claims paused until UTC reset); `provider spend limit not set` (info — the provider-cap nudge, paid-API-key credentials only). `spend_cap_reached` joins the §2.10 canonical notification taxonomy.
 
-`/v1/status` (`client/src/api/server.ts`) gains a `spend` block: per-credential `{ credentialId, capUsd, spentTodayUsd, paused, resetsAt }`. The dashboard's running-mode surface renders a "claims paused — daily spend cap reached for `<credential>`, resumes 00:00 UTC" banner when `paused`. The per-task breakdown reuses the existing activity-events feed (rows now carry `model` + cost). No new endpoint is required.
+API-key credentials present the cap as a meaningful control; subscription credentials show spend as informational USD-equivalent with the cap optional and labelled a throttle guard (§3). Same mechanism, framing differs.
 
-### 7.3 Provider-cap nudge (new — §2)
+### 7.2 Implementation feed
 
-When the daemon resolves an **API-key** credential and the operator has not acknowledged a provider-side limit, the cost-protection panel shows a one-time dismissible notice:
+`/v1/status` (`client/src/api/server.ts`) gains a `spend` block — per-credential `{ credentialId, kind, capUsd, spentTodayUsd, paused, resetsAt }` — backing the component's Static. The per-task breakdown reuses the existing activity-events feed (rows now carry `cost` + `model`, §4.4). No new endpoint. The provider-cap nudge's acknowledgement persists in config or local SPA state; its copy: *"Set a monthly spend limit in your [Anthropic / OpenAI / OpenRouter] console — that is your hard safety net. Jinn's daily cap stops the daemon cleanly before you reach it,"* deep-linked to the provider console.
 
-> Set a monthly spend limit in your **[Anthropic / OpenAI / OpenRouter]** console — that is your hard safety net. Jinn's daily cap stops the daemon cleanly before you reach it.
+### 7.3 Canonical-doc dependency — issue #453
 
-with a deep link to the relevant provider console. Acknowledgement persists (config or local SPA state).
+`OPERATOR-APP-SPEC.md` is a canonical doc; adding the Spend component is a canonical-doc amendment requiring a linked GitHub Discussion + CODEOWNERS approval (handbook, `docs` shape). It is tracked as a **separate `docs` issue, [#453](https://github.com/Jinn-Network/mono/issues/453)** — a blocked-by dependency for #346's UI work only. The daemon-side work (§4–§6; §11 steps 1–8 and 10) does not depend on it and proceeds in parallel. The amendment also gives PR #345's per-task cost surface — shipped with no spec component — its spec home, resolving that drift.
 
 ## 8. Edge cases & error handling
 
@@ -211,7 +212,7 @@ Per `docs/runbooks/testing.md` (feat shape = TDD; integration over mocks for sto
 
 ## 11. Build sequence
 
-For the implementation plan to expand:
+For the implementation plan to expand. Steps 1–8 and 10 are daemon-side and do not depend on the canonical-doc amendment; step 9 (UI) is blocked-by #453.
 
 1. `tokenlens` dependency + `priceTokens` helper.
 2. `CredentialId` type + `resolveCredentialId`.
@@ -221,7 +222,7 @@ For the implementation plan to expand:
 6. `spend-cap-gate.ts` + wire into `_runEngineWatcherLoop`; `spend_cap_reached` event.
 7. Config `spendCaps` + `JINN_SPEND_CAP_USD`.
 8. `/v1/status` `spend` block.
-9. SPA cost-protection panel extension + provider-cap nudge.
+9. **Spend component UI** (blocked-by #453) — renders the component's four axes; provider-cap nudge.
 10. Rewire #345's cost-surface decision to `resolveCredentialId` (§9).
 
 ## 12. Deviations from #346 as written
