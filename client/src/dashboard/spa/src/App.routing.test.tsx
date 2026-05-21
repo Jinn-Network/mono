@@ -110,9 +110,11 @@ describe('App routes', () => {
         '/overview',
       ),
     );
-    // Overview renders HeroStats with these canonical eyebrows.
+    // Overview renders HeroStats (solutions delivered) plus FundsCard / RewardsCard peer cards.
     expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText(/jinn claimable/i)).toBeTruthy();
+    // Rewards eyebrow is now in RewardsCard (Task 3.3); Funds eyebrow is in FundsCard.
+    expect(screen.getByText(/^rewards$/i)).toBeTruthy();
+    expect(screen.getByText(/^funds$/i)).toBeTruthy();
   });
 
   it('renders OverviewActivityPage on /overview/activity', async () => {

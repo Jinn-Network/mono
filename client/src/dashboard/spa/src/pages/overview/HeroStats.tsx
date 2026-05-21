@@ -2,15 +2,16 @@
  * Overview stat hero. Numbers are mono (data = doing, per the two-voices
  * rule); labels are ALL-CAPS-MONO eyebrows. The full live activity surface
  * lives on /operator; Overview keeps only a compact status tile.
+ *
+ * Funds (gasBalanceEth, gasRunwayDays, onTopUp) and Rewards (jinnClaimable,
+ * onClaim) were removed in Task 3.3 — those concerns now live in FundsCard
+ * and RewardsCard, which Overview renders as peer cards.
  */
 import { useState } from 'react';
 import type { LiveNowState } from './LiveNowBand.js';
 
 export interface HeroStatsProps {
   tasksDelivered: number;
-  jinnClaimable: string;
-  gasBalanceEth: string;
-  gasRunwayDays: number | string;
   statusLabel: string;
   statusState: LiveNowState;
   statusDot: string;
@@ -26,8 +27,6 @@ export interface HeroStatsProps {
   evicted?: boolean;
   /** Service ID of the evicted service. Required when evicted=true to wire the Re-stake CTA. */
   evictedServiceId?: number | null;
-  onClaim: () => void;
-  onTopUp: () => void;
   onRestart: () => void;
   /** Called when the operator clicks "Re-stake now". Should POST to /v1/setup/restake/:serviceId. */
   onRestake?: (serviceId: number) => Promise<void> | void;
@@ -216,12 +215,18 @@ function StatusStat({
   dot,
   reason,
   action,
+  evicted,
+  evictedServiceId,
+  onRestake,
 }: {
   label: string;
   state: LiveNowState;
   dot: string;
   reason: string;
   action: JSX.Element;
+  evicted?: boolean;
+  evictedServiceId?: number | null;
+  onRestake?: (serviceId: number) => Promise<void> | void;
 }): JSX.Element {
   return (
     <div
@@ -283,6 +288,7 @@ function StatusStat({
           {reason}
         </span>
       )}
+      {evicted ? <EvictionNotice serviceId={evictedServiceId} onRestake={onRestake} /> : null}
       {action}
     </div>
   );
@@ -290,9 +296,6 @@ function StatusStat({
 
 export function HeroStats({
   tasksDelivered,
-  jinnClaimable,
-  gasBalanceEth,
-  gasRunwayDays,
   statusLabel,
   statusState,
   statusDot,
@@ -300,8 +303,6 @@ export function HeroStats({
   activeAction,
   evicted = false,
   evictedServiceId,
-  onClaim,
-  onTopUp,
   onRestart,
   onRestake,
 }: HeroStatsProps): JSX.Element {
@@ -314,40 +315,14 @@ export function HeroStats({
       }}
     >
       <Stat label="Solutions delivered" value={tasksDelivered} />
-      <Stat
-        label="JINN claimable"
-        value={jinnClaimable}
-        unit="JINN"
-        action={(
-          <>
-            <ActionButton
-              action="Claim JINN"
-              activeAction={activeAction}
-              onClick={onClaim}
-              forceDisabled={evicted}
-            >
-              Claim now
-            </ActionButton>
-            {evicted ? <EvictionNotice serviceId={evictedServiceId} onRestake={onRestake} /> : null}
-          </>
-        )}
-      />
-      <Stat
-        label="Gas"
-        value={gasBalanceEth}
-        unit="ETH"
-        sub={`${gasRunwayDays} days runway`}
-        action={(
-          <ActionButton action="Top up gas" activeAction={activeAction} onClick={onTopUp}>
-            Top up
-          </ActionButton>
-        )}
-      />
       <StatusStat
         label={statusLabel}
         state={statusState}
         dot={statusDot}
         reason={statusReason}
+        evicted={evicted}
+        evictedServiceId={evictedServiceId}
+        onRestake={onRestake}
         action={(
           <ActionButton action="Restart node" activeAction={activeAction} onClick={onRestart}>
             Restart

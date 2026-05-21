@@ -3,8 +3,8 @@ import { useState } from 'react';
 export interface FundsCardProps {
   /** Sum of ETH across master / agent / Safe, formatted as decimal string */
   totalEth: string;
-  /** Estimated days of runway at current burn rate */
-  runwayDays: number;
+  /** Estimated days of runway at current burn rate. Accept string to allow "—" when unknown. */
+  runwayDays: number | string;
   /** Per-role ETH balances, formatted as decimal strings */
   perRole: {
     master: string;
@@ -15,6 +15,8 @@ export interface FundsCardProps {
   lastPasswordRotationAt: string | null;
   onTopUp: () => void;
   onChangePassword: () => void;
+  /** When true, action buttons are disabled (e.g. another action is in flight). */
+  actionsDisabled?: boolean;
 }
 
 export function FundsCard({
@@ -24,6 +26,7 @@ export function FundsCard({
   lastPasswordRotationAt,
   onTopUp,
   onChangePassword,
+  actionsDisabled = false,
 }: FundsCardProps): JSX.Element {
   const [open, setOpen] = useState(false);
 
@@ -193,9 +196,10 @@ export function FundsCard({
             type="button"
             aria-label="Top up"
             onClick={onTopUp}
+            disabled={actionsDisabled}
             style={{
-              border: '1px solid var(--accent-sky)',
-              color: 'var(--accent-sky)',
+              border: `1px solid ${actionsDisabled ? 'var(--border)' : 'var(--accent-sky)'}`,
+              color: actionsDisabled ? 'var(--fg-dim)' : 'var(--accent-sky)',
               background: 'transparent',
               borderRadius: '6px',
               padding: '6px 12px',
@@ -203,7 +207,8 @@ export function FundsCard({
               fontSize: '11px',
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
-              cursor: 'pointer',
+              cursor: actionsDisabled ? 'not-allowed' : 'pointer',
+              opacity: actionsDisabled ? 0.55 : 1,
             }}
           >
             Top up

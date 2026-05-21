@@ -248,7 +248,8 @@ describe('OverviewPage empty-state gating', () => {
     );
     expect(screen.getByText(/network · swe-rebench v2/i)).toBeTruthy();
     expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-    const change = screen.getByText(/change/i).closest('a');
+    // Find the "Change →" link in the OperatorCard (not "Change password" in FundsCard).
+    const change = screen.getByText(/change\s*→/i).closest('a');
     expect(change?.getAttribute('href')).toBe('/operator#solvernets');
   });
 
@@ -541,14 +542,19 @@ describe('OverviewPage empty-state gating', () => {
     });
     const { history } = renderOverviewWithMemory();
 
-    expect(await screen.findByText(/jinn claimable/i)).toBeTruthy();
+    // Funds + Rewards now live in FundsCard + RewardsCard (Task 3.3).
+    expect(await screen.findByText(/funds/i)).toBeTruthy();
+    expect(await screen.findByText(/rewards/i)).toBeTruthy();
     expect(screen.queryByText(/quick actions/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /manage wallet/i })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /claim now/i }));
+    // RewardsCard "Claim" button (replaces HeroStats "Claim now").
+    // The pending rewards are 1 JINN (1e18 wei) so the button is enabled.
+    fireEvent.click(screen.getByRole('button', { name: /^claim$/i }));
     await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole('button', { name: /top up/i }));
+    // FundsCard "Top up" button (replaces HeroStats "Top up").
+    fireEvent.click(screen.getByRole('button', { name: /^top up$/i }));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
     fireEvent.click(screen.getByRole('button', { name: /restart/i }));
@@ -637,7 +643,7 @@ describe('OverviewPage gas top-up', () => {
     });
     render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
     fireEvent.click(topUpButton);
 
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
@@ -658,7 +664,7 @@ describe('OverviewPage gas top-up', () => {
     });
     const { rerender } = render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
     fireEvent.click(topUpButton);
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
@@ -702,12 +708,13 @@ describe('OverviewPage gas top-up', () => {
     );
     render(withProviders(<OverviewPage />));
 
-    const topUpButton = await screen.findByRole('button', { name: /top up/i });
+    const topUpButton = await screen.findByRole('button', { name: /^top up$/i });
     fireEvent.click(topUpButton);
 
     // While the faucet call is unresolved the button must be disabled.
+    // FundsCard disables the button (via actionsDisabled) rather than relabelling it.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /working/i })).toHaveProperty('disabled', true),
+      expect(screen.getByRole('button', { name: /^top up$/i })).toHaveProperty('disabled', true),
     );
 
     resolveDrip({

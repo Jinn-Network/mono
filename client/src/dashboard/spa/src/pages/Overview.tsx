@@ -1,7 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'wouter';
 import { api } from '../api/client.js';
+import { FundsCard } from './overview/FundsCard.js';
 import { HeroStats } from './overview/HeroStats.js';
+import { RewardsCard } from './overview/RewardsCard.js';
 import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard } from './overview/OperatorCard.js';
@@ -29,6 +32,14 @@ interface OverviewStatusV1 {
   };
   rewards?: {
     pendingStakingRewardsWei?: string;
+    /** Lifetime JINN claimed. Not yet surfaced by the daemon — null until added. */
+    claimedJinnLifetime?: string;
+    /** ISO timestamp of last claim. Not yet surfaced by the daemon — null until added. */
+    lastClaimAt?: string | null;
+  };
+  /** Security metadata. Not yet surfaced by the daemon — field absent until added. */
+  security?: {
+    lastPasswordRotationAt?: string | null;
   };
   masterGas?: {
     balanceWei?: string;
@@ -126,6 +137,7 @@ function truncTx(hash?: string): string | null {
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
@@ -257,9 +269,6 @@ export function OverviewPage(): JSX.Element {
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <HeroStats
         tasksDelivered={tasksDelivered}
-        jinnClaimable={jinnClaimable}
-        gasBalanceEth={gasBalanceEth}
-        gasRunwayDays={gasRunwayDays}
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}
@@ -270,14 +279,43 @@ export function OverviewPage(): JSX.Element {
         activeAction={activeAction}
         evicted={isEvicted}
         evictedServiceId={evictedServiceId}
-        onClaim={() =>
-          runAction('Claim JINN', async () => {
-            const res = await api.claimRewards();
-            if (!res.ok) {
-              throw new Error(res.error ?? 'Reward claim failed.');
-            }
-            return { message: 'JINN claim command completed.' };
-          })}
+        onRestart={() =>
+          runAction(
+            'Restart node',
+            async () => {
+              const res = await api.restartDaemon();
+              if (!res.ok) {
+                throw new Error('Restart request failed.');
+              }
+              return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
+            },
+            // Restart confirmation is transient — surface it, then fade after
+            // ~10s so it doesn't linger until the next action. The dashboard
+            // reconnects on its own when the daemon is back.
+            { autoClearMs: 10_000 },
+          )}
+        onRestake={async (serviceId) => {
+          const res = await api.restake(serviceId);
+          if (!res.ok) {
+            throw new Error(res.error ?? 'Re-stake failed.');
+          }
+          // Optimistically refetch status so the eviction notice clears.
+          await queryClient.invalidateQueries({ queryKey: ['status'] });
+        }}
+      />
+      <FundsCard
+        totalEth={gasBalanceEth}
+        runwayDays={gasRunwayDays}
+        actionsDisabled={activeAction !== null}
+        perRole={{
+          // Only masterGas is currently exposed by /v1/status.
+          // Agent + Safe balances are not yet surfaced by the daemon —
+          // tracked as a follow-up task. Show "—" until wired.
+          master: gasBalanceEth,
+          agent: '—',
+          safe: '—',
+        }}
+        lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
         onTopUp={() =>
           runAction(
             'Top up gas',
@@ -305,29 +343,28 @@ export function OverviewPage(): JSX.Element {
             // Confirmation is transient — surface it, then fade after ~5s.
             { autoClearMs: 5_000 },
           )}
-        onRestart={() =>
-          runAction(
-            'Restart node',
-            async () => {
-              const res = await api.restartDaemon();
-              if (!res.ok) {
-                throw new Error('Restart request failed.');
-              }
-              return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
-            },
-            // Restart confirmation is transient — surface it, then fade after
-            // ~10s so it doesn't linger until the next action. The dashboard
-            // reconnects on its own when the daemon is back.
-            { autoClearMs: 10_000 },
-          )}
-        onRestake={async (serviceId) => {
-          const res = await api.restake(serviceId);
-          if (!res.ok) {
-            throw new Error(res.error ?? 'Re-stake failed.');
-          }
-          // Optimistically refetch status so the eviction notice clears.
-          await queryClient.invalidateQueries({ queryKey: ['status'] });
+        onChangePassword={() => {
+          // TODO: wire real password-change flow when the daemon exposes
+          // POST /v1/security/change-password. For now, navigate to the
+          // security settings section (spec §2.3 / §3 security tab).
+          navigate('/operator/security');
         }}
+      />
+      <RewardsCard
+        claimableJinn={jinnClaimable}
+        // claimedJinnLifetime + lastClaimAt are not yet surfaced by the daemon.
+        // Pass safe defaults — RewardsCard renders "never" for null lastClaimAt
+        // and "0" for empty lifetime. Tracked as a follow-up task.
+        claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
+        lastClaimAt={status?.rewards?.lastClaimAt ?? null}
+        onClaim={() =>
+          runAction('Claim JINN', async () => {
+            const res = await api.claimRewards();
+            if (!res.ok) {
+              throw new Error(res.error ?? 'Reward claim failed.');
+            }
+            return { message: 'JINN claim command completed.' };
+          })}
       />
       {notice && (
         <div
