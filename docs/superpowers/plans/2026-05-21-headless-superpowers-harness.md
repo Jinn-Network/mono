@@ -714,7 +714,7 @@ In `packages/eng-loop/package.json`, add to `scripts`:
 "pressure": "tsx scripts/run-pressure-suite.ts"
 ```
 
-Add `tsx` to `devDependencies`: `"tsx": "^4.19.0"`.
+Add `tsx` to `devDependencies`: `"tsx": "^4.19.0"`. Then run `(cd packages/eng-loop && yarn install)` so `tsx` is resolved into `yarn.lock` before the commit.
 
 - [ ] **Step 7: Commit**
 
