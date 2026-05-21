@@ -3,7 +3,12 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
-import { deriveLiveNow, LiveNowBand, type LiveNowStatusInput } from './LiveNowBand.js';
+import {
+  ACTIVITY_TARGET_DASHBOARD,
+  deriveLiveNow,
+  LiveNowBand,
+  type LiveNowStatusInput,
+} from './LiveNowBand.js';
 import { api } from '../../api/client.js';
 
 vi.mock('../../api/client.js', () => ({
@@ -47,6 +52,22 @@ describe('deriveLiveNow', () => {
     expect(result.line).toBe('waiting for next task');
     expect(result.meta).toContain('idle since');
     expect(result.cta.href).toBe('/overview/activity');
+  });
+
+  it('points the non-attention CTA at the supplied activity target', () => {
+    // #219: on /operator the band points at the Dashboard, not at itself.
+    // The activity target is the third arg — the second is the
+    // joinedSolverNets gating map (#333).
+    const result = deriveLiveNow(
+      {
+        fleet: { services: [{ index: 0, step: 'complete' }] },
+        predictionV1: { totals: { activeTaskRuns: 0 }, recentTasks: [] },
+      },
+      undefined,
+      ACTIVITY_TARGET_DASHBOARD,
+    );
+    expect(result.state).toBe('idle');
+    expect(result.cta).toEqual({ label: 'View on Dashboard', href: '/overview' });
   });
 
   it('returns working when activeTaskRuns > 0, with restoration verb summary', () => {
@@ -445,6 +466,24 @@ describe('<LiveNowBand />', () => {
     expect(screen.getByTestId('live-now-line').textContent).toContain(
       'No active SolverNet',
     );
+  });
+
+  it('points the activity CTA at the Dashboard when given the Dashboard target', async () => {
+    // #219: on /operator (Settings) the band's CTA must point at /overview so
+    // Settings does not read as the home for activity.
+    const status: LiveNowStatusInput = {
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      predictionV1: { totals: { activeTaskRuns: 0 }, recentTasks: [] },
+    };
+    vi.mocked(api.getStatus).mockResolvedValue(status);
+
+    wrap(<LiveNowBand activity={ACTIVITY_TARGET_DASHBOARD} />);
+
+    await waitFor(() => {
+      const cta = screen.getByTestId('live-now-cta');
+      expect(cta.textContent).toMatch(/View on Dashboard/);
+      expect(cta.getAttribute('href')).toBe('/overview');
+    });
   });
 
   it('renders the "N more" pill when multiple attention diagnostics exist', async () => {

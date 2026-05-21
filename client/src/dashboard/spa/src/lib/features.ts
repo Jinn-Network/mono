@@ -16,14 +16,24 @@
  * only the operator-app promotion of `/build` is hidden until the
  * first-run UX is solid. Set `JINN_ENABLE_PLUGIN_BUILDER_UI=1` on the daemon
  * to re-enable the full surface for development and design work.
+ *
+ * Issue #326 / #367: `embeddedAgent` gates the embedded Claude agent chat
+ * surface (the operating-shell right rail + the onboarding "Ask Claude"
+ * panel). Driven by `JINN_ENABLE_EMBEDDED_AGENT`; off by default while the
+ * surface's action-authority / plugin-scope shape is still in design. This
+ * flag migrated here from the `/v1/bootstrap` response — see #367 (converge
+ * the two client feature-flag channels onto `window.__JINN_FEATURES__`).
  */
 export interface JinnFeatures {
   /** Builder UI surfaces: the `/build` route + the Build top-tab. */
   pluginBuilderUi: boolean;
+  /** Embedded Claude agent chat surface: operating-shell rail + onboarding panel. */
+  embeddedAgent: boolean;
 }
 
 const DEFAULT_FEATURES: JinnFeatures = {
   pluginBuilderUi: false,
+  embeddedAgent: false,
 };
 
 declare global {
@@ -46,5 +56,6 @@ export function getFeatures(): JinnFeatures {
   }
   return {
     pluginBuilderUi: injected['pluginBuilderUi'] === true,
+    embeddedAgent: injected['embeddedAgent'] === true,
   };
 }

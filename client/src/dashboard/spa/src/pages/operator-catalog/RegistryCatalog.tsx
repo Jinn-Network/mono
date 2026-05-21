@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { api } from '../../api/client.js';
 import type {
+  RegistryErrorCode,
   RegistryListResponse,
   SolverNetManifestSummary,
 } from '../../api/types.js';
@@ -53,11 +54,35 @@ function errorCode(error: unknown): string | null {
     if (typeof code === 'string') return code;
     if (error.message.includes('subsystem_not_ready')) return 'subsystem_not_ready';
     if (error.message.includes('registry_unavailable')) return 'registry_unavailable';
+    if (error.message.includes('rpc_rate_limited')) return 'rpc_rate_limited';
   }
   return null;
 }
 
-function registryErrorCopy(error: unknown): { title: string; detail: string } {
+interface RegistryErrorCopy {
+  title: string;
+  detail: string;
+  /** When set, render an in-app link to this route (e.g. `/operator#network`). */
+  actionHref?: string;
+  /** Link text for `actionHref`. */
+  actionLabel?: string;
+}
+
+/**
+ * Operator-facing copy for a rate-limited RPC. The default Base Sepolia RPC is
+ * shared across the whole operator pool, so a 429 here is an operator-actionable
+ * condition — point them at the Network section to add their own free key
+ * rather than leaving them with a generic "catalog not found". See
+ * jinn-mono #325.
+ */
+const RPC_RATE_LIMITED_COPY: RegistryErrorCopy = {
+  title: 'Your RPC endpoint is rate-limited.',
+  detail: 'Open the Network section and add your own free key.',
+  actionHref: '/operator#network',
+  actionLabel: 'Open Network settings →',
+};
+
+function registryErrorCopy(error: unknown): RegistryErrorCopy {
   switch (errorCode(error)) {
     case 'subsystem_not_ready':
       return {
@@ -69,12 +94,54 @@ function registryErrorCopy(error: unknown): { title: string; detail: string } {
         title: 'Registry cache is unavailable.',
         detail: 'The daemon could not read the SolverNet registry cache. Retry after startup finishes; check daemon logs if it keeps failing.',
       };
+    case 'rpc_rate_limited':
+      return RPC_RATE_LIMITED_COPY;
     default:
       return {
         title: 'Failed to load registry catalog.',
         detail: error instanceof Error ? error.message : 'Unknown error',
       };
   }
+}
+
+/**
+ * Stale-catalog indicator shown in the meta row. A registry refresh can fail
+ * without the HTTP query itself erroring (the endpoint returns 200 with a
+ * populated `lastError`), so this is where a rate-limited RPC actually
+ * surfaces in the steady-state UI. The `rpc_rate_limited` branch swaps the
+ * generic "stale" text for an operator-actionable line + a deep-link to the
+ * Network settings section. See jinn-mono #325.
+ */
+function RegistryStaleWarning({
+  code,
+  message,
+}: {
+  code?: RegistryErrorCode;
+  message: string;
+}): JSX.Element {
+  if (code === 'rpc_rate_limited') {
+    return (
+      <span
+        data-testid="registry-catalog-warn"
+        data-error-code="rpc_rate_limited"
+        style={{ color: 'var(--wane)', display: 'inline-flex', gap: '8px' }}
+      >
+        <span>RPC rate-limited — add your own key</span>
+        <Link
+          href="/operator#network"
+          data-testid="registry-catalog-warn-action"
+          style={{ color: 'var(--accent-sky)', textDecoration: 'none' }}
+        >
+          Network settings →
+        </Link>
+      </span>
+    );
+  }
+  return (
+    <span data-testid="registry-catalog-warn" style={{ color: 'var(--wane)' }}>
+      stale ({message})
+    </span>
+  );
 }
 
 function StatusBadge({
@@ -356,6 +423,21 @@ export function RegistryCatalog({
           <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
             {copy.detail}
           </span>
+          {copy.actionHref && copy.actionLabel && (
+            <Link
+              href={copy.actionHref}
+              data-testid="registry-catalog-error-action"
+              style={{
+                color: 'var(--accent-sky)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '12px',
+                textDecoration: 'none',
+                marginTop: '2px',
+              }}
+            >
+              {copy.actionLabel}
+            </Link>
+          )}
         </div>
         <button
           type="button"
@@ -407,12 +489,10 @@ export function RegistryCatalog({
           {lastRefreshed ?? 'never'}
         </span>
         {lastError && (
-          <span
-            data-testid="registry-catalog-warn"
-            style={{ color: 'var(--wane)' }}
-          >
-            stale ({lastError.message})
-          </span>
+          <RegistryStaleWarning
+            code={lastError.code}
+            message={lastError.message}
+          />
         )}
       </div>
 

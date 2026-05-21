@@ -741,3 +741,132 @@ describe('OverviewPage gas top-up', () => {
     expect(notice.textContent).toMatch(/rate limited/i);
   });
 });
+
+/**
+ * Issue #219: the live activity surface is a PRIMARY section on /overview
+ * (the Dashboard). An operator who runs `jinn run` and lands on the
+ * dashboard must see live task/event activity without navigating to
+ * /operator (Settings). These tests assert the In-flight + Recent cards
+ * render inline on Overview, with all card states operable.
+ */
+describe('OverviewPage activity surface (issue #219)', () => {
+  it('renders the In-flight and Recent activity sections inline on the Dashboard', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      taskRuns: { totals: { activeTaskRuns: 0 }, inFlight: [], recentTasks: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-in-flight')).toBeTruthy();
+    });
+    expect(screen.getByTestId('overview-activity-recent')).toBeTruthy();
+  });
+
+  it('shows in-flight task rows from generic taskRuns without leaving /overview', async () => {
+    const now = Date.now();
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      taskRuns: {
+        totals: { activeTaskRuns: 1 },
+        inFlight: [
+          {
+            requestId: 'req-abc12345',
+            taskId: 'task-1',
+            taskCid: 'bafkre...',
+            solverType: 'swe-rebench-v2.v1',
+            state: 'RUNNING',
+            taskRole: 'restoration',
+            stateUpdatedAt: now - 60_000,
+            deliveryTxHash: null,
+          },
+        ],
+      },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 1, activeTaskRuns: 1, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('overview-activity-in-flight-row')).toHaveLength(1);
+    });
+    expect(screen.getByText('RUNNING')).toBeTruthy();
+    expect(screen.queryByTestId('overview-activity-in-flight-empty')).toBeNull();
+  });
+
+  it('shows recent activity rows on the Dashboard', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: {
+        recent: [
+          {
+            id: 1,
+            ts: '2026-05-07T13:46:45.710Z',
+            kind: 'request_claimed',
+            requestId: 'req-aaa',
+            txHash: '0xabcdefabcdefabcdef',
+            serviceIndex: 1,
+            solverType: 'prediction.v1',
+            outcome: 'ok',
+          },
+        ],
+      },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('overview-activity-recent-row')).toHaveLength(1);
+    });
+    expect(screen.getByText(/request claimed/i)).toBeTruthy();
+  });
+
+  it('shows the empty / "no recent activity" states on the Dashboard', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      taskRuns: { totals: { activeTaskRuns: 0 }, inFlight: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-in-flight-empty')).toBeTruthy();
+    });
+    const recentEmpty = screen.getByTestId('overview-activity-recent-empty');
+    expect(recentEmpty.textContent).toMatch(/no recent activity/i);
+  });
+
+  it('shows an operable error state on the Dashboard when /v1/status fails', async () => {
+    getStatusMock.mockRejectedValue(new Error('status unavailable'));
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-error')).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+  });
+});

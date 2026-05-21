@@ -63,15 +63,16 @@ export default function App(): JSX.Element {
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
   const masterAddress = data.master_address ?? '';
-  // Issue #326: the embedded agent rail renders only when the daemon reports
-  // the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
-  const embeddedAgentEnabled = data.embeddedAgentEnabled === true;
 
   // Issue #327: the builder surfaces (/build route + Build top-tab) are hidden
   // until the operator-app first-run UX is solid. The plug-in substrate stays
   // live for direct-CLI builders; only the operator-app promotion is gated.
   // Set JINN_ENABLE_PLUGIN_BUILDER_UI=1 on the daemon to re-enable.
-  const pluginBuilderUi = getFeatures().pluginBuilderUi;
+  //
+  // Issue #326 / #367: the embedded agent rail renders only when the daemon
+  // reports the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
+  // Read via the same `window.__JINN_FEATURES__` channel as every other flag.
+  const { pluginBuilderUi, embeddedAgent } = getFeatures();
 
   return (
     <RestartPendingContext.Provider value={restartCtx}>
@@ -79,7 +80,7 @@ export default function App(): JSX.Element {
         <AppShell
           header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
           tabs={<TopTabs />}
-          rail={embeddedAgentEnabled ? <AgentRail /> : undefined}
+          rail={embeddedAgent ? <AgentRail /> : undefined}
         >
           <Switch>
             <Route path="/overview/activity"><OverviewActivityPage /></Route>

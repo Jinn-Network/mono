@@ -36,6 +36,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
     vi.mocked(probeCodexDoctor).mockReturnValue({
       installed: true,
       authenticated: true,
+      authStatus: 'ok',
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
@@ -50,6 +51,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
     vi.mocked(probeCodexDoctor).mockReturnValue({
       installed: false,
       authenticated: false,
+      authStatus: 'not_configured',
       exitCode: null,
       stdout: '',
       stderr: '',
@@ -66,6 +68,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
     vi.mocked(probeCodexDoctor).mockReturnValue({
       installed: true,
       authenticated: false,
+      authStatus: 'not_configured',
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
@@ -73,7 +76,29 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
     const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
     const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
     expect(result.ready).toBe(false);
-    expect(result.reason).toMatch(/auth/i);
+    expect(result.reason).toMatch(/not configured/i);
     expect(result.nextStep?.description).toMatch(/sign in|OPENAI_API_KEY|codex login/i);
+  });
+
+  // #366: a stale/expired auth.json must not read as ready. The reason MUST
+  // be distinct from the not-configured case so the operator sees a
+  // re-login hint rather than a first-time sign-in hint.
+  it('returns ready=false with a distinct re-login reason when codex auth is expired', async () => {
+    vi.mocked(probeCodexDoctor).mockReturnValue({
+      installed: true,
+      authenticated: false,
+      authStatus: 'expired',
+      exitCode: 0,
+      stdout: 'codex 1.2.3',
+      stderr: '',
+    });
+    const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
+    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toMatch(/expired/i);
+    // Distinct from the not-configured reason.
+    expect(result.reason).not.toMatch(/not configured/i);
+    expect(result.nextStep?.description).toMatch(/codex login|expired/i);
+    expect(result.nextStep?.url).toBe('/api/codex/doctor');
   });
 });

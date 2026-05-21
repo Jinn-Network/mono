@@ -48,8 +48,27 @@ import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
 import { canClaimTask } from '../adapters/mech/contracts.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
+import { isRateLimitedEthReadError } from '../chain-read-errors.js';
 import { PLUGIN_PAYLOAD_TUPLE, REVOCATION_PAYLOAD_TUPLE } from '../erc8004/abis.js';
 import { PLUGIN_METADATA_KEY_PREFIX } from '../erc8004/plugin-registry.js';
+
+/**
+ * Wrap an RPC read failure into a `DiscoveryUnavailableError`, preserving a
+ * typed `rpc_rate_limited` code when the underlying error is a 429 / "too many
+ * requests". The shared default RPC throttles the whole operator pool; without
+ * this signal a throttle is indistinguishable from any other transport failure
+ * and the operator UI cannot tell them to add their own key. See jinn-mono #325.
+ */
+function discoveryUnavailableFromReadError(
+  message: string,
+  cause: unknown,
+): DiscoveryUnavailableError {
+  return new DiscoveryUnavailableError(
+    message,
+    cause,
+    isRateLimitedEthReadError(cause) ? 'rpc_rate_limited' : undefined,
+  );
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -575,7 +594,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     try {
       currentBlock = await (client as PublicClient).getBlockNumber();
     } catch (err) {
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI.findClaimableTasks: failed to get block number`,
         err,
       );
@@ -645,7 +664,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) throw err;
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI.findClaimableTasks: getLogs for TaskCreated failed`,
         err,
       );
@@ -734,7 +753,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) throw err;
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI.findClaimableTasks: getLogs for TaskAttemptCreated failed`,
         err,
       );
@@ -803,7 +822,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     try {
       currentBlock = await (client as PublicClient).getBlockNumber();
     } catch (err) {
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI: failed to get block number`,
         err,
       );
@@ -838,7 +857,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) throw err;
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI: getLogs for MetadataSet failed`,
         err,
       );
@@ -963,7 +982,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       });
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) throw err;
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI.queryEnvelopes: onchain query failed`,
         err,
       );
@@ -986,7 +1005,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     try {
       currentBlock = await (client as PublicClient).getBlockNumber();
     } catch (err) {
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI.listPluginPublications: failed to get block number`,
         err,
       );
@@ -1029,7 +1048,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) throw err;
-      throw new DiscoveryUnavailableError(
+      throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI.listPluginPublications: getLogs for MetadataSet failed`,
         err,
       );

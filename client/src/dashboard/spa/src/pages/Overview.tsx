@@ -13,6 +13,7 @@ import {
   operatorWaitingMessage,
   type BootstrapWithSolverNets,
 } from './overview/joined-solver-net.js';
+import { ActivitySections } from './overview/ActivitySections.js';
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -365,6 +366,14 @@ export function OverviewPage(): JSX.Element {
           waitingMessage={waitingMessage}
         />
       )}
+
+      {/*
+       * Live activity is a primary Dashboard section (issue #219): an
+       * operator who runs `jinn run` and lands on /overview must see what
+       * their daemon is doing right now without navigating to Settings.
+       * The same surface renders on the dedicated /overview/activity page.
+       */}
+      <ActivitySections />
 
       <AdvancedDetails>
         <IdentityCard

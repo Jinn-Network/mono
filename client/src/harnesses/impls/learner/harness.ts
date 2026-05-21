@@ -80,8 +80,12 @@ export class LearnerHarness implements Harness {
    *     failed claims (#348).
    *   - `exitCode !== 0` → binary exists but `codex --version` failed →
    *     ready=false pointing at the Codex precheck panel.
-   *   - `authenticated: false` → binary runs but no `OPENAI_API_KEY` /
-   *     `codex login` session → ready=false with a sign-in nextStep.
+   *   - `authStatus: 'not_configured'` → binary runs but no `OPENAI_API_KEY`
+   *     and no `codex login` session → ready=false with a sign-in nextStep.
+   *   - `authStatus: 'expired'` → an `auth.json` is present but its OAuth
+   *     session has expired (or the file is malformed) → ready=false with a
+   *     re-login nextStep. Distinct from `not_configured` so a logged-out
+   *     operator with a leftover file is not treated as ready (#366).
    *   - otherwise → ready=true.
    */
   private codexIsReady(): ReadyStatus {
@@ -116,7 +120,18 @@ export class LearnerHarness implements Harness {
         },
       };
     }
-    if (!result.authenticated) {
+    if (result.authStatus === 'expired') {
+      return {
+        ready: false,
+        reason: 'codex auth expired',
+        nextStep: {
+          description:
+            'Codex sign-in has expired — run `codex login` to refresh the session (or set OPENAI_API_KEY), then re-check the Codex precheck panel in the operator dashboard.',
+          url: '/api/codex/doctor',
+        },
+      };
+    }
+    if (result.authStatus !== 'ok') {
       return {
         ready: false,
         reason: 'codex auth not configured',

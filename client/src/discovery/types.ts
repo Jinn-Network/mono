@@ -242,12 +242,28 @@ export interface DiscoveryAPI {
  * The `withFallback` wrapper catches this class (plus network-shaped errors)
  * and routes to the floor implementation for the duration of the outage.
  */
+/**
+ * Machine-readable reason a discovery read failed. `rpc_rate_limited` is the
+ * one branch callers act on distinctly: it means the configured RPC endpoint
+ * returned a 429 (or otherwise rate-limited the daemon), which — on the shared
+ * default RPC — is an operator-actionable condition ("add your own key"), not
+ * an indexer outage. Any other transport failure is left untyped (`undefined`).
+ */
+export type DiscoveryUnavailableCode = 'rpc_rate_limited';
+
 export class DiscoveryUnavailableError extends Error {
   override readonly cause?: unknown;
+  /**
+   * Typed reason, when one can be classified — currently only
+   * `rpc_rate_limited`, surfaced end-to-end so the operator UI can render a
+   * distinct "your RPC is throttled" message instead of a generic failure.
+   */
+  readonly code?: DiscoveryUnavailableCode;
 
-  constructor(message: string, cause?: unknown) {
+  constructor(message: string, cause?: unknown, code?: DiscoveryUnavailableCode) {
     super(message);
     this.name = 'DiscoveryUnavailableError';
     this.cause = cause;
+    this.code = code;
   }
 }
