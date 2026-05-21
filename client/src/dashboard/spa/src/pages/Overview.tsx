@@ -351,7 +351,7 @@ export function OverviewPage(): JSX.Element {
       style={{
         padding: 'var(--space-5)',
         display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 320px)',
+        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 380px)',
         gap: 'var(--space-5)',
         alignItems: 'start',
       }}
@@ -370,6 +370,88 @@ export function OverviewPage(): JSX.Element {
             }}
           />
         )}
+
+        {notice && (
+          <div
+            role={notice.tone === 'error' ? 'alert' : 'status'}
+            data-testid="dashboard-action-notice"
+            style={{
+              border: `1px solid ${notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)'}`,
+              color: notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)',
+              borderRadius: 'var(--radius-2)',
+              padding: '10px 12px',
+              fontFamily: 'var(--mono)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            {notice.text}
+          </div>
+        )}
+
+        {/* Public counters for the active SolverNet surfaced by this operator. */}
+        <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
+
+        {/*
+         * Operator-side state — shown when the operator has joined a SolverNet.
+         * The empty-state ("no SolverNets joined") is handled globally via the
+         * `no_solvernets_joined` notification kind in AppShell's NotificationsList
+         * (Task 1.5 / Task 1.6). No local empty-state rendering here.
+         */}
+        {joined && (
+          <OperatorCard
+            name={joined.name}
+            configId={joined.configId}
+            roles={joined.roles}
+            state="live"
+            waitingMessage={waitingMessage}
+          />
+        )}
+
+        {/*
+         * Live activity is a primary Dashboard section (issue #219): an
+         * operator who runs `jinn run` and lands on /overview must see what
+         * their daemon is doing right now without navigating to Settings.
+         * The same surface renders on the dedicated /overview/activity page.
+         */}
+        <ActivitySections />
+
+        <HarnessStatusPanel />
+      </div>
+
+      {/* ── RIGHT RAIL ───────────────────────────────────────────────── */}
+      {/*
+        Sticky is gone — Node Health + Wallet combined is too tall to
+        stick on a normal-height viewport, and a sticky overflow makes
+        the column un-scrollable. The aside flows with the page now.
+      */}
+      <aside
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-5)',
+        }}
+      >
+        <NodeHealthCard
+          daemonStatus={daemonStatus}
+          daemonStateMessage={daemonStateMessage}
+          rpcStatus={rpcStatus}
+          onStop={async () => {
+            const res = await api.stopDaemon();
+            if (!res.ok) {
+              throw new Error('Stop request failed.');
+            }
+          }}
+          onRestart={async () => {
+            // Pass `forceRespawn: true` so the daemon respawns even when
+            // launched with `--no-ui` (`JINN_NO_UI=1`) — without it the
+            // operator clicks Restart in headless mode and the daemon just
+            // stops. See client/src/restart-daemon.ts.
+            const res = await api.restartDaemon({ forceRespawn: true });
+            if (!res.ok) {
+              throw new Error('Restart request failed.');
+            }
+          }}
+        />
 
         <WalletCard
           totalEth={gasBalanceEth}
@@ -426,84 +508,6 @@ export function OverviewPage(): JSX.Element {
               }
               return { message: 'JINN claim command completed.' };
             })}
-        />
-        {notice && (
-          <div
-            role={notice.tone === 'error' ? 'alert' : 'status'}
-            data-testid="dashboard-action-notice"
-            style={{
-              border: `1px solid ${notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)'}`,
-              color: notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)',
-              borderRadius: 'var(--radius-2)',
-              padding: '10px 12px',
-              fontFamily: 'var(--mono)',
-              fontSize: 'var(--text-sm)',
-            }}
-          >
-            {notice.text}
-          </div>
-        )}
-
-        {/* Public counters for the active SolverNet surfaced by this operator. */}
-        <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
-
-        {/*
-         * Operator-side state — shown when the operator has joined a SolverNet.
-         * The empty-state ("no SolverNets joined") is handled globally via the
-         * `no_solvernets_joined` notification kind in AppShell's NotificationsList
-         * (Task 1.5 / Task 1.6). No local empty-state rendering here.
-         */}
-        {joined && (
-          <OperatorCard
-            name={joined.name}
-            configId={joined.configId}
-            roles={joined.roles}
-            state="live"
-            waitingMessage={waitingMessage}
-          />
-        )}
-
-        {/*
-         * Live activity is a primary Dashboard section (issue #219): an
-         * operator who runs `jinn run` and lands on /overview must see what
-         * their daemon is doing right now without navigating to Settings.
-         * The same surface renders on the dedicated /overview/activity page.
-         */}
-        <ActivitySections />
-
-        <HarnessStatusPanel />
-      </div>
-
-      {/* ── RIGHT RAIL ───────────────────────────────────────────────── */}
-      <aside
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-5)',
-          position: 'sticky',
-          top: 'var(--space-5)',
-        }}
-      >
-        <NodeHealthCard
-          daemonStatus={daemonStatus}
-          daemonStateMessage={daemonStateMessage}
-          rpcStatus={rpcStatus}
-          onStop={async () => {
-            const res = await api.stopDaemon();
-            if (!res.ok) {
-              throw new Error('Stop request failed.');
-            }
-          }}
-          onRestart={async () => {
-            // Pass `forceRespawn: true` so the daemon respawns even when
-            // launched with `--no-ui` (`JINN_NO_UI=1`) — without it the
-            // operator clicks Restart in headless mode and the daemon just
-            // stops. See client/src/restart-daemon.ts.
-            const res = await api.restartDaemon({ forceRespawn: true });
-            if (!res.ok) {
-              throw new Error('Restart request failed.');
-            }
-          }}
         />
       </aside>
     </div>
