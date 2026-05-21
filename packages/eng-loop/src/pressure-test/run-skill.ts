@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 
+/** Model the spawned headless sessions run under — haiku keeps the pressure suite cheap. */
+const HEADLESS_MODEL = 'haiku';
+
 export interface SkillRunResult {
   exitCode: number;
   stdout: string;
@@ -13,7 +16,7 @@ export function runSkillHeadless(
   opts: { cwd: string; timeoutMs: number },
 ): Promise<SkillRunResult> {
   return new Promise((resolve) => {
-    const proc = spawn('claude', ['-p', prompt], { cwd: opts.cwd });
+    const proc = spawn('claude', ['-p', '--model', HEADLESS_MODEL, prompt], { cwd: opts.cwd });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
