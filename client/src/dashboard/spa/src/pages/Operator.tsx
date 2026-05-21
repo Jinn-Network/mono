@@ -1,7 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
-import { api } from '../api/client.js';
-import { NetworkSection } from './configuration/NetworkSection.js';
 import { SecuritySection } from './configuration/SecuritySection.js';
 import { useHashSection } from './configuration/useHashSection.js';
 import { OperatorDataMarket } from './operator/OperatorDataMarket.js';
@@ -11,28 +8,10 @@ export interface OperatorPageProps {
   onRestartPending?: () => void;
 }
 
-interface BootstrapWithChain {
-  chain?: 'base' | 'base-sepolia';
-  rpcUrl?: string;
-  defaultRpcUrl?: string;
-}
-
 export function OperatorPage({ onRestartPending = () => undefined }: OperatorPageProps): JSX.Element {
-  const { data } = useQuery<BootstrapWithChain>({
-    queryKey: ['bootstrap'],
-    queryFn: () => api.getBootstrap() as Promise<BootstrapWithChain>,
-    refetchInterval: 1500,
-  });
-
   const hash = useHashSection();
   const hashParts = hash?.split('/') ?? [];
   const expandedSection = hashParts[0];
-
-  const chain = data?.chain ?? 'base-sepolia';
-  const rpcUrl = data?.rpcUrl ?? '';
-  const defaultRpcUrl = data?.defaultRpcUrl ?? (chain === 'base'
-    ? 'https://mainnet.base.org'
-    : 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu');
 
   return (
     <div
@@ -92,14 +71,6 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
       <OperatorDataMarket
         defaultExpanded={expandedSection === 'data-market'}
         onRestartPending={onRestartPending}
-      />
-      <NetworkSection
-        chain={chain}
-        rpcUrl={rpcUrl}
-        defaultRpcUrl={defaultRpcUrl}
-        rpcHealthy={true}
-        onRestartPending={onRestartPending}
-        defaultExpanded={expandedSection === 'network'}
       />
       <SecuritySection defaultExpanded={expandedSection === 'security'} />
     </div>
