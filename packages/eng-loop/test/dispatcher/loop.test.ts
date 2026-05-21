@@ -233,11 +233,13 @@ describe('runCycle', () => {
   });
 
   it('pauses an in-flight session whose wall-clock ceiling is exceeded', async () => {
-    // Issue 201 has been running since the epoch (startedAt=0), clock is now
-    // past the wallClockMs — wall clock expired → pauseSession called.
+    // Issue 201 started at t=1ms (a real, known start time). The clock's nowFn
+    // returns WALL_CLOCK_MS + 1001ms — elapsed is 4h+1s, past the ceiling.
+    // NOTE: startedAt=0 is the *unknown-age sentinel* (Bug 2b fix) and is
+    // never treated as expired. Use startedAt=1 to represent a known old start.
     const WALL_CLOCK_MS = 4 * 60 * 60 * 1000; // 4 hours
-    const expiredSession = makeInFlight(201, 0); // started at epoch
-    const nowMs = WALL_CLOCK_MS + 1000; // just past the ceiling
+    const expiredSession = makeInFlight(201, 1); // started at 1ms (known, old)
+    const nowMs = WALL_CLOCK_MS + 1001; // elapsed = WALL_CLOCK_MS+1000ms ≥ ceiling
 
     // A WallClock whose nowFn returns nowMs — session 201 is expired
     const wallClock = new WallClock(WALL_CLOCK_MS, () => nowMs);

@@ -18,16 +18,26 @@ export class WallClock {
     return this.nowFn() - session.startedAt;
   }
 
-  /** True once the session has run past its wall-clock ceiling. */
+  /**
+   * True once the session has run past its wall-clock ceiling.
+   *
+   * Guards against re-derived sessions where `startedAt` is unknown (≤ 0):
+   * an unknown-age session is never force-paused — the wall-clock is a runaway
+   * guard, not a guess.
+   */
   expired(session: InFlightSession): boolean {
+    if (session.startedAt <= 0) return false;
     return this.elapsed(session) >= this.wallClockMs;
   }
 
   /**
    * True in the final 10% of the window — a soft warning before the hard
    * stop, so the session can write its "where I am" note (spec §4).
+   *
+   * Also returns false when `startedAt` is unknown (≤ 0).
    */
   softWarningDue(session: InFlightSession): boolean {
+    if (session.startedAt <= 0) return false;
     return this.elapsed(session) >= this.wallClockMs * 0.9;
   }
 }

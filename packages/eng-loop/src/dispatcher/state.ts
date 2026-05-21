@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import type { CommandRunner } from './issue-source.js';
 import type { InFlightSession } from './types.js';
 
@@ -124,6 +125,25 @@ function shortBranch(branchRef: string): string {
   return branchRef.startsWith(prefix) ? branchRef.slice(prefix.length) : branchRef;
 }
 
+/**
+ * Recover the best-available proxy for when a worktree session was started.
+ *
+ * Uses the worktree directory's creation time (`birthtimeMs`) as a proxy for
+ * the session's `startedAt`. Falls back to `mtimeMs` when `birthtimeMs` is 0
+ * (common on Linux where birthtime is not tracked by the filesystem). Returns 0
+ * (unknown-age sentinel) if the path cannot be stat-ed — the WallClock guards
+ * against `startedAt <= 0` and will not force-pause an unknown-age session.
+ */
+function recoverStartedAt(worktreePath: string): number {
+  try {
+    const st = statSync(worktreePath);
+    const birth = st.birthtimeMs;
+    return birth > 0 ? birth : st.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -191,7 +211,7 @@ export async function deriveInFlight(
         branch: branchRef != null ? shortBranch(branchRef) : '',
         worktreePath: wt.worktreePath,
         pid: null,
-        startedAt: 0,
+        startedAt: recoverStartedAt(wt.worktreePath),
       });
     } else {
       drift.push(

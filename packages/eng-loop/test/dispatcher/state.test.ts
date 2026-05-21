@@ -153,6 +153,10 @@ describe('deriveInFlight', () => {
     expect(session.worktreePath).toBe(`${REPO_ROOT}/cargo/.tasks/${ISSUE_IN_PROGRESS_WITH_WORKTREE}`);
     expect(session.branch).toBe('feat/418-something-useful');
     expect(session.pid).toBeNull();
+    // startedAt is either a real timestamp recovered from the worktree directory (> 0)
+    // or the unknown-age sentinel (0) when the fixture path does not exist on disk.
+    // Both are valid — the WallClock guards against startedAt <= 0.
+    expect(typeof session.startedAt).toBe('number');
   });
 
   it('surfaces an In Progress issue with no matching worktree as a drift warning', async () => {
@@ -195,6 +199,9 @@ describe('deriveInFlight', () => {
     expect(session!.worktreePath).toContain('cargo/.tasks/418');
     expect(session!.branch).toBe('feat/418-something-useful');
     expect(session!.pid).toBeNull();
+    // startedAt: either recovered from the directory (> 0) or the unknown-age
+    // sentinel (0) when the fixture path does not exist on disk. Both are valid.
+    expect(typeof session!.startedAt).toBe('number');
 
     // The drift entries are the two mismatches (501 and 399), not 418
     expect(drift).toHaveLength(2);

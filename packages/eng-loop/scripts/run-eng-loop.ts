@@ -164,6 +164,12 @@ async function main(): Promise<void> {
       };
     };
 
+    // Dry-run stub for pauseSession — logs the intent but makes NO gh mutation,
+    // honouring the banner promise "will NOT dispatch, mutate board, or create worktrees".
+    const dryPauseSession = async (issueNumber: number): Promise<void> => {
+      console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
+    };
+
     const report = await runCycle({
       source,
       cfg,
@@ -171,7 +177,7 @@ async function main(): Promise<void> {
       dispatchIssue: dryDispatch,
       countOpenReadyPrs,
       wallClock,
-      pauseSession,
+      pauseSession: dryPauseSession,
     });
 
     printReport(report, 'Cycle report (DRY RUN — no mutations)');
