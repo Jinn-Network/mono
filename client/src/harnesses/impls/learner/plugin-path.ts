@@ -31,5 +31,15 @@ export function resolvePluginRoot(): string {
       `learner plugin at ${pluginRoot} is missing skills/learn/SKILL.md`,
     );
   }
+  if (!existsSync(join(pluginRoot, 'hooks', 'session-start'))) {
+    throw new Error(
+      `learner plugin at ${pluginRoot} is missing hooks/session-start — plugin assets may be stale or incomplete; rebuild the plugin`,
+    );
+  }
+  if (!existsSync(join(pluginRoot, 'hooks', 'hooks.json'))) {
+    throw new Error(
+      `learner plugin at ${pluginRoot} is missing hooks/hooks.json — plugin assets may be stale or incomplete; rebuild the plugin`,
+    );
+  }
   return pluginRoot;
 }
