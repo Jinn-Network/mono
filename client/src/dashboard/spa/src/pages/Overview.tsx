@@ -4,6 +4,8 @@ import { api } from '../api/client.js';
 import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
+import { computeEffectivePlugins } from './configuration/effective-plugins.js';
+import type { SolverNetsCatalogResponse } from '../api/types.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -30,6 +32,8 @@ interface BootstrapWithSolverNets {
     {
       name?: string;
       manifestCid?: string;
+      /** Catalog contract identity — used to match this membership against the SolverNet catalog entry. */
+      contract?: { id: string; version: string };
       roles?: string[];
       harness?: string;
       model?: string;
@@ -266,6 +270,16 @@ export function OverviewPage(): JSX.Element {
     queryFn: () => api.getBootstrap() as Promise<BootstrapWithSolverNets>,
     refetchInterval: 30_000,
   });
+  // SolverNet catalog — supplies `compatiblePlugins` per contract, which the
+  // effective-plugin computation overlays on top of the harness defaults so
+  // catalog defaults (e.g. swe-rebench-v2-runtime) show up on the dashboard
+  // even when the operator's explicit `plugins` array is empty.
+  const { data: catalog } = useQuery<SolverNetsCatalogResponse>({
+    queryKey: ['solvernets', 'catalog'],
+    queryFn: () => api.getSolverNets(),
+    // Catalog rarely changes; revalidating every few minutes is plenty.
+    refetchInterval: 5 * 60_000,
+  });
 
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,
@@ -298,34 +312,59 @@ export function OverviewPage(): JSX.Element {
     if (j) {
       for (const [key, entry] of Object.entries(j)) {
         if (!entry) continue;
+        // Match the catalog entry by contract identity. The daemon's
+        // bootstrap stores only the operator's explicit overrides; the
+        // catalog supplies the default-on plugins (e.g. swe-rebench-v2-runtime).
+        const catalogEntry = entry.contract
+          ? catalog?.nets.find(
+              (n) =>
+                n.contract.id === entry.contract?.id &&
+                n.contract.version === entry.contract?.version,
+            )
+          : undefined;
+        const plugins = computeEffectivePlugins({
+          harness: entry.harness,
+          explicit: Array.isArray(entry.plugins) ? entry.plugins : [],
+          disabledDefaults: Array.isArray(entry.disabledDefaultPlugins)
+            ? entry.disabledDefaultPlugins
+            : [],
+          catalogCompatible: catalogEntry?.compatiblePlugins,
+        });
         out.push({
           name: entry.name ?? entry.manifestCid ?? key,
           manifestCid: entry.manifestCid ?? key,
           roles: Array.isArray(entry.roles) ? entry.roles : [],
           harness: entry.harness,
           model: entry.model,
-          plugins: Array.isArray(entry.plugins) ? entry.plugins : undefined,
+          plugins,
         });
       }
     }
     if (out.length > 0) return out;
-    // Fallback: legacy shape.
+    // Fallback: legacy shape. No `contract` field here, so we can't look up
+    // the catalog entry — compute plugins from harness defaults only.
     const legacy = bootstrap?.solverNets;
     if (legacy) {
       for (const [key, entry] of Object.entries(legacy)) {
         if (!entry) continue;
         const roles = Array.isArray(entry.roles) ? entry.roles : [];
         if (entry.enabled !== true && roles.length === 0) continue;
+        const plugins = computeEffectivePlugins({
+          harness: entry.harness,
+          explicit: [],
+          disabledDefaults: [],
+        });
         out.push({
           name: entry.name ?? key,
           manifestCid: entry.manifestCid ?? key,
           roles,
           harness: entry.harness,
+          plugins,
         });
       }
     }
     return out;
-  }, [bootstrap]);
+  }, [bootstrap, catalog]);
 
   // Tasks: union of `taskRuns.recentTasks` and (when present)
   // `predictionV1.recentTasks`, deduplicated by requestId. The daemon emits
