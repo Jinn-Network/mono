@@ -2,6 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import { api } from '../api/client.js';
 import type { LaunchedSolverNetRecord, LaunchedStatus } from '../api/types.js';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
+import { Badge } from '../components/ui/badge.js';
+import { Button } from '../components/ui/button.js';
+import { Card } from '../components/ui/card.js';
+import { cn } from '../lib/utils.js';
 import { formatEthFromWei } from './launcher-create/draft-helpers.js';
 
 /**
@@ -26,15 +31,14 @@ import { formatEthFromWei } from './launcher-create/draft-helpers.js';
  *      (`/launcher/launched/:solverNetId`, Task 19).
  */
 
-const STATUS_TONE: Record<
-  LaunchedStatus,
-  { fg: string; border: string; label: string }
-> = {
-  launching: { fg: 'var(--accent-sky)', border: 'var(--accent-sky)', label: 'Launching' },
-  launched: { fg: 'var(--vow-green)', border: 'var(--vow-green)', label: 'Launched' },
-  paused: { fg: 'var(--wane)', border: 'var(--wane)', label: 'Paused' },
-  retired: { fg: 'var(--fg-dim)', border: 'var(--border)', label: 'Retired' },
-  failed: { fg: 'var(--break-red)', border: 'var(--break-red)', label: 'Failed' },
+type BadgeVariant = NonNullable<Parameters<typeof Badge>[0]['variant']>;
+
+const STATUS_BADGE: Record<LaunchedStatus, { variant: BadgeVariant; label: string }> = {
+  launching: { variant: 'default', label: 'Launching' },
+  launched: { variant: 'success', label: 'Launched' },
+  paused: { variant: 'pill', label: 'Paused' },
+  retired: { variant: 'outline', label: 'Retired' },
+  failed: { variant: 'destructive', label: 'Failed' },
 };
 
 function truncateCid(cid: string): string {
@@ -53,24 +57,11 @@ function formatTimestamp(iso: string): string {
 }
 
 function StatusBadge({ status }: { status: LaunchedStatus }): JSX.Element {
-  const tone = STATUS_TONE[status] ?? STATUS_TONE.launching;
+  const badge = STATUS_BADGE[status] ?? STATUS_BADGE.launching;
   return (
-    <span
-      style={{
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-        fontWeight: 500,
-        textTransform: 'uppercase',
-        letterSpacing: '0.14em',
-        color: tone.fg,
-        border: `1px solid ${tone.border}`,
-        borderRadius: 'var(--radius-1)',
-        padding: '2px 8px',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {tone.label}
-    </span>
+    <Badge variant={badge.variant} className="whitespace-nowrap">
+      {badge.label}
+    </Badge>
   );
 }
 
@@ -80,21 +71,13 @@ interface RecordRowProps {
 
 function RoleChip({ label }: { label: string }): JSX.Element {
   return (
-    <span
+    <Badge
       data-testid="launcher-owned-row-role"
-      style={{
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-        textTransform: 'uppercase',
-        letterSpacing: '0.12em',
-        color: 'var(--fg-muted)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-1)',
-        padding: '1px 6px',
-      }}
+      variant="outline"
+      className="normal-case tracking-[0.12em] text-[var(--fg-muted)]"
     >
       {label}
-    </span>
+    </Badge>
   );
 }
 
@@ -121,156 +104,87 @@ function RecordRow({ record }: RecordRowProps): JSX.Element {
         e.preventDefault();
         navigate(href);
       }}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr auto',
-        alignItems: 'center',
-        gap: '16px',
-        padding: '16px 20px',
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-2)',
-        textDecoration: 'none',
-        color: 'inherit',
-        cursor: 'pointer',
-      }}
+      className="block text-inherit no-underline"
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
-        <div
-          data-testid="launcher-owned-row-primary"
-          style={{
-            fontFamily: summary !== undefined
-              ? "'Instrument Serif', 'Times New Roman', serif"
-              : "'JetBrains Mono', monospace",
-            fontSize: summary !== undefined ? '18px' : '14px',
-            fontWeight: summary !== undefined ? 400 : 500,
-            color: 'var(--fg)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            letterSpacing: summary !== undefined ? '-0.01em' : undefined,
-          }}
-        >
-          {primary}
+      <Card
+        className={cn(
+          'grid grid-cols-[1fr_auto] items-center gap-4 p-4',
+          'transition-colors hover:bg-[var(--bg-sunken)]/40 cursor-pointer',
+        )}
+      >
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div
+            data-testid="launcher-owned-row-primary"
+            className={cn(
+              'truncate text-foreground',
+              summary !== undefined
+                ? 'font-serif text-[18px] font-normal tracking-[-0.01em]'
+                : 'font-mono text-[14px] font-medium',
+            )}
+          >
+            {primary}
+          </div>
+
+          {contractLabel !== null && (
+            <div
+              data-testid="launcher-owned-row-contract"
+              className="font-mono text-[12px] text-[var(--fg-muted)]"
+            >
+              {contractLabel}
+            </div>
+          )}
+
+          {summary !== undefined && (
+            <div
+              data-testid="launcher-owned-row-prices"
+              className="flex flex-wrap gap-x-3.5 font-mono text-[12px] text-[var(--fg-muted)]"
+            >
+              <span>solution {formatEthFromWei(summary.solutionPriceWei)}</span>
+              <span>verdict {formatEthFromWei(summary.verdictPriceWei)}</span>
+            </div>
+          )}
+
+          {summary !== undefined && summary.openRoles.length > 0 && (
+            <div
+              data-testid="launcher-owned-row-roles"
+              className="flex flex-wrap gap-1.5"
+            >
+              {summary.openRoles.map((role) => (
+                <RoleChip key={role} label={role} />
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-x-3.5 font-mono text-[12px] text-[var(--fg-muted)]">
+            <span>cid {truncateCid(record.manifestCid)}</span>
+            <span>launched {formatTimestamp(record.launchedAt)}</span>
+          </div>
         </div>
-
-        {contractLabel !== null && (
-          <div
-            data-testid="launcher-owned-row-contract"
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-            }}
-          >
-            {contractLabel}
-          </div>
-        )}
-
-        {summary !== undefined && (
-          <div
-            data-testid="launcher-owned-row-prices"
-            style={{
-              display: 'flex',
-              gap: '14px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              flexWrap: 'wrap',
-            }}
-          >
-            <span>solution {formatEthFromWei(summary.solutionPriceWei)}</span>
-            <span>verdict {formatEthFromWei(summary.verdictPriceWei)}</span>
-          </div>
-        )}
-
-        {summary !== undefined && summary.openRoles.length > 0 && (
-          <div
-            data-testid="launcher-owned-row-roles"
-            style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}
-          >
-            {summary.openRoles.map((role) => (
-              <RoleChip key={role} label={role} />
-            ))}
-          </div>
-        )}
-
-        <div
-          style={{
-            display: 'flex',
-            gap: '14px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-            flexWrap: 'wrap',
-          }}
-        >
-          <span>cid {truncateCid(record.manifestCid)}</span>
-          <span>launched {formatTimestamp(record.launchedAt)}</span>
-        </div>
-      </div>
-      <StatusBadge status={record.status} />
+        <StatusBadge status={record.status} />
+      </Card>
     </a>
   );
 }
 
 function EmptyState(): JSX.Element {
   return (
-    <div
+    <Card
       data-testid="launcher-empty-state"
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-3)',
-        padding: '32px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '14px',
-      }}
+      className="flex flex-col gap-3.5 p-8"
     >
-      <h2
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '18px',
-          fontWeight: 500,
-          color: 'var(--fg)',
-          margin: 0,
-          letterSpacing: '-0.01em',
-        }}
-      >
+      <h2 className="m-0 font-mono text-[18px] font-medium tracking-[-0.01em] text-foreground">
         No SolverNets created yet.
       </h2>
-      <p
-        style={{
-          color: 'var(--fg-muted)',
-          fontSize: '14px',
-          lineHeight: 1.5,
-          margin: 0,
-        }}
-      >
+      <p className="m-0 text-[14px] leading-relaxed text-[var(--fg-muted)]">
         Create a SolverNet to direct operators toward a specific kind of
         knowledge work.
       </p>
       <div>
-        <Link
-          href="/launcher/create"
-          style={{
-            display: 'inline-block',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '14px',
-            padding: '12px 20px',
-            background: 'var(--accent-sky)',
-            color: 'var(--bg-sunken)',
-            border: '1px solid var(--accent-sky)',
-            borderRadius: 'var(--radius-2)',
-            textDecoration: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          Create SolverNet
-        </Link>
+        <Button asChild variant="default" size="lg">
+          <Link href="/launcher/create">Create SolverNet</Link>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -282,110 +196,58 @@ export function LauncherPage(): JSX.Element {
   });
 
   return (
-    <div
-      style={{
-        padding: '24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '16px',
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <h1
-          style={{
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '32px',
-            margin: 0,
-            color: 'var(--fg)',
-            fontWeight: 400,
-          }}
-        >
+    <div className="flex flex-col gap-4 p-6">
+      <div className="flex items-end justify-between">
+        <h1 className="m-0 font-serif text-[32px] font-normal text-foreground">
           Your SolverNets
         </h1>
         {(data?.records.length ?? 0) > 0 && (
-          <Link
-            href="/launcher/create"
-            data-testid="launcher-create-cta"
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '10px 16px',
-              background: 'var(--accent-sky)',
-              color: 'var(--bg-sunken)',
-              border: '1px solid var(--accent-sky)',
-              borderRadius: 'var(--radius-2)',
-              textDecoration: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            Create SolverNet
-          </Link>
+          <Button asChild variant="default" data-testid="launcher-create-cta">
+            <Link href="/launcher/create">Create SolverNet</Link>
+          </Button>
         )}
       </div>
 
       {isLoading && (
         <p
           data-testid="launcher-loading"
-          style={{ color: 'var(--fg-muted)', fontSize: '13px', margin: 0 }}
+          className="m-0 font-mono text-[13px] text-[var(--fg-muted)]"
         >
           Loading…
         </p>
       )}
 
       {isError && (
-        <div
+        <Alert
           data-testid="launcher-error"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--break-red)',
-            borderRadius: 'var(--radius-2)',
-            padding: '16px 20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '16px',
-          }}
+          variant="blocking"
+          className="flex items-center justify-between gap-4 border-l-0 border border-destructive p-4"
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span
-              style={{
-                color: 'var(--break-red)',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '13px',
-                fontWeight: 500,
-              }}
-            >
+          <div className="flex flex-col gap-1">
+            <AlertTitle className="font-mono text-[13px] font-medium text-destructive">
               Failed to load your SolverNets.
-            </span>
-            <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
+            </AlertTitle>
+            <AlertDescription className="text-[12px] text-[var(--fg-muted)]">
               {error instanceof Error ? error.message : 'Unknown error'}
-            </span>
+            </AlertDescription>
           </div>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => {
               void refetch();
             }}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '8px 14px',
-              background: 'transparent',
-              color: 'var(--fg)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-2)',
-              cursor: 'pointer',
-            }}
           >
             Retry
-          </button>
-        </div>
+          </Button>
+        </Alert>
       )}
 
       {!isLoading && !isError && data && data.records.length === 0 && <EmptyState />}
 
       {!isLoading && !isError && data && data.records.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div className="flex flex-col gap-2">
           {data.records.map((record) => (
             <RecordRow key={record.solverNetId} record={record} />
           ))}

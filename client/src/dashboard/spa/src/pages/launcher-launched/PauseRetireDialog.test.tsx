@@ -111,7 +111,10 @@ describe('PauseRetireDialog', () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it('clicking the backdrop fires onCancel', () => {
+  it('pressing Escape fires onCancel', () => {
+    // shadcn AlertDialog (Radix) routes backdrop click + Escape through
+    // `onOpenChange`. We assert the keyboard path here; the backdrop-click
+    // path is exercised by Radix itself.
     const onCancel = vi.fn();
     render(
       <PauseRetireDialog
@@ -122,7 +125,10 @@ describe('PauseRetireDialog', () => {
         onCancel={onCancel}
       />,
     );
-    fireEvent.click(screen.getByTestId('launcher-launched-dialog'));
+    fireEvent.keyDown(screen.getByTestId('launcher-launched-dialog'), {
+      key: 'Escape',
+      code: 'Escape',
+    });
     expect(onCancel).toHaveBeenCalled();
   });
 
@@ -191,7 +197,7 @@ describe('PauseRetireDialog', () => {
     expect(typed.value).toBe('');
   });
 
-  it('backdrop click is ignored when pending=true', () => {
+  it('Escape is ignored when pending=true', () => {
     const onCancel = vi.fn();
     render(
       <PauseRetireDialog
@@ -203,7 +209,10 @@ describe('PauseRetireDialog', () => {
         pending
       />,
     );
-    fireEvent.click(screen.getByTestId('launcher-launched-dialog'));
+    fireEvent.keyDown(screen.getByTestId('launcher-launched-dialog'), {
+      key: 'Escape',
+      code: 'Escape',
+    });
     expect(onCancel).not.toHaveBeenCalled();
   });
 });

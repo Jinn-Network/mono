@@ -1,11 +1,21 @@
 import type {
   LaunchedSolverNetRecord,
+  LaunchedStatus,
   LifecycleTarget,
   SolverNetManifestV1,
 } from '../../api/types.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
+import { Separator } from '../../components/ui/separator.js';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip.js';
 import {
   ALLOWED_TRANSITIONS,
-  STATUS_TONE,
   truncateAddress,
   truncateCid,
 } from './helpers.js';
@@ -54,6 +64,16 @@ const ACTION_LABELS: Record<LifecycleTarget, string> = {
   retired: 'Retire',
 };
 
+type BadgeVariant = NonNullable<Parameters<typeof Badge>[0]['variant']>;
+
+const STATUS_BADGE: Record<LaunchedStatus, { variant: BadgeVariant; label: string }> = {
+  launching: { variant: 'default', label: 'Launching' },
+  launched: { variant: 'success', label: 'Launched' },
+  paused: { variant: 'pill', label: 'Paused' },
+  retired: { variant: 'outline', label: 'Retired' },
+  failed: { variant: 'destructive', label: 'Failed' },
+};
+
 export function StatusHeader({
   record,
   manifest,
@@ -61,138 +81,89 @@ export function StatusHeader({
   onAction,
   pending,
 }: StatusHeaderProps): JSX.Element {
-  const tone = STATUS_TONE[record.status] ?? STATUS_TONE.launching;
+  const badge = STATUS_BADGE[record.status] ?? STATUS_BADGE.launching;
   const allowed = ALLOWED_TRANSITIONS[record.status] ?? [];
   const name = manifest?.name ?? record.summary?.name ?? record.solverNetId;
 
   return (
-    <header
-      data-testid="launcher-launched-status-header"
-      data-status={record.status}
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-3)',
-        padding: '24px 26px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '14px',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: '16px',
-          flexWrap: 'wrap',
-        }}
+    <TooltipProvider delayDuration={150}>
+      <Card
+        data-testid="launcher-launched-status-header"
+        data-status={record.status}
+        role="region"
+        aria-label="SolverNet status header"
+        className="flex flex-col gap-4 p-6"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <h1
-              data-testid="launcher-launched-name"
-              style={{
-                fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-                fontSize: '32px',
-                margin: 0,
-                color: 'var(--fg)',
-                fontWeight: 400,
-                letterSpacing: '-0.01em',
-              }}
-            >
-              {name}
-            </h1>
-            <span
-              data-testid="launcher-launched-status-badge"
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                fontWeight: 500,
-                textTransform: 'uppercase',
-                letterSpacing: '0.14em',
-                color: tone.fg,
-                border: `1px solid ${tone.border}`,
-                borderRadius: 'var(--radius-1)',
-                padding: '3px 10px',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {tone.label}
-            </span>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1
+                data-testid="launcher-launched-name"
+                className="m-0 font-serif text-[32px] font-normal tracking-[-0.01em] text-foreground"
+              >
+                {name}
+              </h1>
+              <Badge
+                data-testid="launcher-launched-status-badge"
+                variant={badge.variant}
+                className="whitespace-nowrap"
+              >
+                {badge.label}
+              </Badge>
+            </div>
+            {manifest?.description && (
+              <p className="m-0 max-w-[720px] text-[13px] leading-relaxed text-[var(--fg-muted)]">
+                {manifest.description}
+              </p>
+            )}
           </div>
-          {manifest?.description && (
-            <p
-              style={{
-                margin: 0,
-                color: 'var(--fg-muted)',
-                fontSize: '13px',
-                lineHeight: 1.5,
-                maxWidth: '720px',
-              }}
-            >
-              {manifest.description}
-            </p>
-          )}
-        </div>
-        <ActionButtons
-          allowed={allowed}
-          onAction={onAction}
-          pending={pending ?? null}
-          terminal={record.status === 'retired'}
-          launching={record.status === 'launching'}
-        />
-      </div>
-
-      <dl
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '8px 18px',
-          margin: 0,
-          paddingTop: '12px',
-          borderTop: '1px solid var(--border)',
-        }}
-      >
-        <IdentityField
-          label="SolverNet id"
-          value={record.solverNetId}
-          testid="launcher-launched-solvernet-id"
-          mono
-        />
-        <IdentityField
-          label="Manifest cid"
-          value={truncateCid(record.manifestCid)}
-          testid="launcher-launched-manifest-cid"
-          additionalTestIds={['manifest-cid']}
-          mono
-          title={record.manifestCid}
-        />
-        <IdentityField
-          label="Launcher Safe"
-          value={truncateAddress(record.launcherSafeAddress)}
-          testid="launcher-launched-safe"
-          mono
-          title={record.launcherSafeAddress}
-        />
-        <IdentityField
-          label="Launcher agent"
-          value={record.launcherAgentId}
-          testid="launcher-launched-agent"
-          mono
-        />
-        {operatorCount !== undefined && (
-          <IdentityField
-            label="Operators"
-            value={String(operatorCount)}
-            testid="launcher-launched-operator-count"
-            additionalTestIds={['operator-count']}
-            mono
-            title="Distinct operators that have ever claimed a task on this SolverNet, including on finalized or refunded tasks"
+          <ActionButtons
+            allowed={allowed}
+            onAction={onAction}
+            pending={pending ?? null}
+            terminal={record.status === 'retired'}
+            launching={record.status === 'launching'}
           />
-        )}
-      </dl>
-    </header>
+        </div>
+
+        <Separator />
+
+        <dl className="m-0 grid gap-y-2 gap-x-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+          <IdentityField
+            label="SolverNet id"
+            value={record.solverNetId}
+            testid="launcher-launched-solvernet-id"
+          />
+          <IdentityField
+            label="Manifest cid"
+            value={truncateCid(record.manifestCid)}
+            testid="launcher-launched-manifest-cid"
+            additionalTestIds={['manifest-cid']}
+            tooltip={record.manifestCid}
+          />
+          <IdentityField
+            label="Launcher Safe"
+            value={truncateAddress(record.launcherSafeAddress)}
+            testid="launcher-launched-safe"
+            tooltip={record.launcherSafeAddress}
+          />
+          <IdentityField
+            label="Launcher agent"
+            value={record.launcherAgentId}
+            testid="launcher-launched-agent"
+          />
+          {operatorCount !== undefined && (
+            <IdentityField
+              label="Operators"
+              value={String(operatorCount)}
+              testid="launcher-launched-operator-count"
+              additionalTestIds={['operator-count']}
+              tooltip="Distinct operators that have ever claimed a task on this SolverNet, including on finalized or refunded tasks"
+            />
+          )}
+        </dl>
+      </Card>
+    </TooltipProvider>
   );
 }
 
@@ -202,8 +173,7 @@ interface IdentityFieldProps {
   testid?: string;
   /** Extra test-ids to alias this field's value — rendered as hidden spans. */
   additionalTestIds?: string[];
-  mono?: boolean;
-  title?: string;
+  tooltip?: string;
 }
 
 function IdentityField({
@@ -211,42 +181,35 @@ function IdentityField({
   value,
   testid,
   additionalTestIds,
-  mono = false,
-  title,
+  tooltip,
 }: IdentityFieldProps): JSX.Element {
+  const valueNode = (
+    <dd
+      data-testid={testid}
+      className="m-0 truncate font-mono text-[13px] text-foreground"
+      tabIndex={tooltip ? 0 : undefined}
+    >
+      {value}
+      {additionalTestIds?.map((id) => (
+        <span key={id} data-testid={id} className="hidden" aria-hidden="true">
+          {value}
+        </span>
+      ))}
+    </dd>
+  );
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-      <dt
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '10px',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-dim)',
-        }}
-      >
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-dim)]">
         {label}
       </dt>
-      <dd
-        data-testid={testid}
-        title={title}
-        style={{
-          margin: 0,
-          fontFamily: mono ? "'JetBrains Mono', monospace" : undefined,
-          fontSize: '13px',
-          color: 'var(--fg)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {value}
-        {additionalTestIds?.map((id) => (
-          <span key={id} data-testid={id} style={{ display: 'none' }} aria-hidden="true">
-            {value}
-          </span>
-        ))}
-      </dd>
+      {tooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{valueNode}</TooltipTrigger>
+          <TooltipContent>{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        valueNode
+      )}
     </div>
   );
 }
@@ -268,78 +231,48 @@ function ActionButtons({
 }: ActionButtonsProps): JSX.Element | null {
   if (terminal) {
     return (
-      <span
+      <Badge
         data-testid="launcher-launched-terminal-pill"
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-muted)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-1)',
-          padding: '6px 12px',
-          alignSelf: 'flex-start',
-          whiteSpace: 'nowrap',
-        }}
+        variant="outline"
+        className="self-start whitespace-nowrap"
       >
         Retired — no further actions
-      </span>
+      </Badge>
     );
   }
   if (launching) {
     return (
-      <span
+      <Badge
         data-testid="launcher-launched-launching-pill"
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--accent-sky)',
-          border: '1px solid var(--accent-sky)',
-          borderRadius: 'var(--radius-1)',
-          padding: '6px 12px',
-          alignSelf: 'flex-start',
-          whiteSpace: 'nowrap',
-        }}
+        variant="outline"
+        className="self-start whitespace-nowrap border-primary text-primary"
       >
         Launching…
-      </span>
+      </Badge>
     );
   }
   if (allowed.length === 0) return null;
   return (
     <div
       data-testid="launcher-launched-actions"
-      style={{ display: 'flex', gap: '8px', alignSelf: 'flex-start', flexWrap: 'wrap' }}
+      className="flex flex-wrap gap-2 self-start"
     >
       {allowed.map((target) => {
         const label = ACTION_LABELS[target];
         const isPending = pending === target;
         const isDanger = target === 'retired';
         return (
-          <button
+          <Button
             key={target}
             type="button"
+            variant={isDanger ? 'destructive' : 'default'}
             data-testid={`launcher-launched-action-${target}`}
             onClick={() => onAction(target)}
             disabled={pending !== null}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '10px 16px',
-              background: isDanger ? 'transparent' : 'var(--accent-sky)',
-              color: isDanger ? 'var(--break-red)' : 'var(--bg-sunken)',
-              border: `1px solid ${isDanger ? 'var(--break-red)' : 'var(--accent-sky)'}`,
-              borderRadius: 'var(--radius-2)',
-              cursor: pending !== null ? 'not-allowed' : 'pointer',
-              opacity: pending !== null && !isPending ? 0.6 : 1,
-              whiteSpace: 'nowrap',
-            }}
+            className={pending !== null && !isPending ? 'opacity-60' : undefined}
           >
             {isPending ? `${label}…` : label}
-          </button>
+          </Button>
         );
       })}
     </div>

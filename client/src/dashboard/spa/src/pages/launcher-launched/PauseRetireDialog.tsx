@@ -1,5 +1,18 @@
 import { useEffect, useState } from 'react';
 import type { LifecycleTarget } from '../../api/types.js';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../components/ui/alert-dialog.js';
+import { Input } from '../../components/ui/input.js';
+import { Label } from '../../components/ui/label.js';
+import { cn } from '../../lib/utils.js';
 
 /**
  * Confirmation dialog for lifecycle transitions.
@@ -18,6 +31,9 @@ import type { LifecycleTarget } from '../../api/types.js';
  * The dialog is a controlled overlay — the parent decides when it's open and
  * supplies the `target` lifecycle action. `onConfirm` is fired only when
  * confirmation passes; the parent handles the actual API call and refetch.
+ *
+ * Built on shadcn `AlertDialog` (radix). Backdrop click + Escape route
+ * through `onOpenChange`, which fires `onCancel` unless an action is pending.
  */
 
 export interface PauseRetireDialogProps {
@@ -64,14 +80,12 @@ export function PauseRetireDialog({
   onCancel,
   pending = false,
   errorMessage,
-}: PauseRetireDialogProps): JSX.Element | null {
+}: PauseRetireDialogProps): JSX.Element {
   const [typed, setTyped] = useState('');
 
   useEffect(() => {
     if (!open) setTyped('');
   }, [open, target]);
-
-  if (!open) return null;
 
   const copy = TARGET_COPY[target];
   const requiresType = target === 'retired';
@@ -79,160 +93,91 @@ export function PauseRetireDialog({
   const confirmDisabled = pending || !typeMatches;
 
   return (
-    <div
-      data-testid="launcher-launched-dialog"
-      data-target={target}
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
-        zIndex: 100,
-      }}
-      onClick={(e) => {
-        // Click outside the dialog body cancels.
-        if (e.target === e.currentTarget && !pending) onCancel();
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !pending) onCancel();
       }}
     >
-      <div
-        style={{
-          background: 'var(--bg-elevated)',
-          border: `1px solid ${copy.danger ? 'var(--break-red)' : 'var(--border)'}`,
-          borderRadius: 'var(--radius-3)',
-          padding: '24px 26px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-          maxWidth: '480px',
-          width: '100%',
-        }}
+      <AlertDialogContent
+        data-testid="launcher-launched-dialog"
+        data-target={target}
+        className={cn('gap-4', copy.danger && 'border-destructive')}
       >
-        <h2
-          style={{
-            margin: 0,
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '24px',
-            color: copy.danger ? 'var(--break-red)' : 'var(--fg)',
-            fontWeight: 400,
-          }}
-        >
-          {copy.title}
-        </h2>
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--fg-muted)',
-            fontSize: '13px',
-            lineHeight: 1.5,
-          }}
-        >
-          {copy.body}
-        </p>
+        <AlertDialogHeader>
+          <AlertDialogTitle
+            className={cn(copy.danger && 'text-destructive')}
+          >
+            {copy.title}
+          </AlertDialogTitle>
+          <AlertDialogDescription>{copy.body}</AlertDialogDescription>
+        </AlertDialogHeader>
 
         {requiresType && (
-          <label
-            style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
-          >
-            <span
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                fontWeight: 500,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                color: 'var(--fg-muted)',
-              }}
+          <div className="flex flex-col gap-1.5">
+            <Label
+              htmlFor="launcher-launched-dialog-typed"
+              className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]"
             >
-              Type <span style={{ color: 'var(--fg)' }}>{solverNetName}</span> to confirm
-            </span>
-            <input
+              Type{' '}
+              <span className="text-foreground">{solverNetName}</span> to
+              confirm
+            </Label>
+            <Input
+              id="launcher-launched-dialog-typed"
               data-testid="launcher-launched-dialog-typed"
               type="text"
               autoFocus
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               disabled={pending}
-              style={{
-                background: 'var(--bg)',
-                border: `1px solid ${typeMatches ? 'var(--vow-green)' : 'var(--border)'}`,
-                borderRadius: 'var(--radius-2)',
-                padding: '10px 12px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '13px',
-                color: 'var(--fg)',
-              }}
+              // var(--vow-green) is unmapped in tailwind config (no shadcn
+              // equivalent); used here to mark a positive typed-name match.
+              className={cn(typeMatches && 'border-[var(--vow-green)]')}
             />
-          </label>
+          </div>
         )}
 
         {errorMessage && (
           <span
             data-testid="launcher-launched-dialog-error"
-            style={{
-              color: 'var(--break-red)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-            }}
+            className="font-mono text-[12px] text-destructive"
           >
             {errorMessage}
           </span>
         )}
 
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
+        <AlertDialogFooter>
+          <AlertDialogCancel
             data-testid="launcher-launched-dialog-cancel"
-            onClick={onCancel}
-            disabled={pending}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '10px 16px',
-              background: 'transparent',
-              color: 'var(--fg)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-2)',
-              cursor: pending ? 'wait' : 'pointer',
+            onClick={(e) => {
+              e.preventDefault();
+              onCancel();
             }}
+            disabled={pending}
           >
             Cancel
-          </button>
-          <button
-            type="button"
+          </AlertDialogCancel>
+          <AlertDialogAction
             data-testid="launcher-launched-dialog-confirm"
-            onClick={onConfirm}
-            disabled={confirmDisabled}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '10px 18px',
-              background: copy.danger
-                ? confirmDisabled
-                  ? 'var(--bg-elevated)'
-                  : 'var(--break-red)'
-                : confirmDisabled
-                  ? 'var(--bg-elevated)'
-                  : 'var(--accent-sky)',
-              color: confirmDisabled
-                ? 'var(--fg-dim)'
-                : copy.danger
-                  ? 'var(--bg-sunken)'
-                  : 'var(--bg-sunken)',
-              border: `1px solid ${copy.danger ? 'var(--break-red)' : 'var(--accent-sky)'}`,
-              borderRadius: 'var(--radius-2)',
-              cursor: confirmDisabled ? 'not-allowed' : 'pointer',
-              opacity: confirmDisabled ? 0.6 : 1,
+            onClick={(e) => {
+              if (confirmDisabled) {
+                e.preventDefault();
+                return;
+              }
+              e.preventDefault();
+              onConfirm();
             }}
+            disabled={confirmDisabled}
+            className={cn(
+              copy.danger &&
+                'border border-destructive bg-transparent text-destructive hover:bg-[var(--severity-blocking-bg)]',
+            )}
           >
             {pending ? `${copy.confirmLabel}…` : copy.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

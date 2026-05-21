@@ -5,6 +5,13 @@ import type {
   LaunchedSolverNetRecord,
   SolverNetManifestV1,
 } from '../../api/types.js';
+import { Card } from '../../components/ui/card.js';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip.js';
 import { formatWeiAmount, projectRunwayTasks, truncateAddress } from './helpers.js';
 
 /**
@@ -69,97 +76,94 @@ export function SpendPanel({
   );
 
   return (
-    <section data-testid="launcher-launched-spend-panel" style={panelStyle}>
-      <header style={headerStyle}>
-        <h2 style={titleStyle}>Spend & runway</h2>
-      </header>
-
-      <dl style={gridStyle}>
-        <Field
-          label="Safe address"
-          value={truncateAddress(safeAddress)}
-          title={safeAddress}
-          testid="launcher-launched-spend-safe-address"
-        />
-        <Field
-          label="Safe balance"
-          value={
-            isLoading
-              ? '—'
-              : safeBalanceWei
-                ? formatWeiAmount(safeBalanceWei)
-                : 'unavailable'
-          }
-          title={safeBalanceWei ? `${safeBalanceWei} wei` : undefined}
-          testid="launcher-launched-spend-safe-balance"
-        />
-        <Field
-          label="Solution price"
-          value={
-            solutionPriceWei
-              ? formatWeiAmount(solutionPriceWei)
-              : '—'
-          }
-          title={solutionPriceWei ? `${solutionPriceWei} wei` : undefined}
-          testid="launcher-launched-spend-solution-price"
-        />
-        <Field
-          label="Verdict price"
-          value={
-            verdictPriceWei
-              ? formatWeiAmount(verdictPriceWei)
-              : '—'
-          }
-          title={verdictPriceWei ? `${verdictPriceWei} wei` : undefined}
-          testid="launcher-launched-spend-verdict-price"
-        />
-        <Field
-          label="Per-Task cost"
-          value={
-            projection
-              ? formatWeiAmount(projection.perTaskWei.toString())
-              : '—'
-          }
-          title={projection ? `${projection.perTaskWei.toString()} wei` : undefined}
-          testid="launcher-launched-spend-per-task"
-        />
-        <Field
-          label="Projected runway"
-          value={
-            projection
-              ? `${projection.tasks.toLocaleString()} Tasks at current prices`
-              : 'manifest or balance unavailable'
-          }
-          testid="launcher-launched-spend-runway"
-        />
-      </dl>
-
-      {isError && (
-        <span
-          data-testid="launcher-launched-spend-error"
-          style={{
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-          }}
-        >
-          Failed to load Safe balance.
-        </span>
-      )}
-
-      <p
-        style={{
-          margin: 0,
-          color: 'var(--fg-dim)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          lineHeight: 1.5,
-        }}
+    <TooltipProvider delayDuration={150}>
+      <Card
+        data-testid="launcher-launched-spend-panel"
+        role="region"
+        aria-label="Spend and runway"
+        className="flex flex-col gap-3 p-6"
       >
-        Runway projects how many Tasks the Safe can fund at the current
-        manifest prices, before any operator participation cost adjustments.
-      </p>
-    </section>
+        <header className="flex items-center justify-between gap-3">
+          <h2 className="m-0 font-serif text-[22px] font-normal text-foreground">
+            Spend &amp; runway
+          </h2>
+        </header>
+
+        <dl className="m-0 grid gap-y-2 gap-x-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+          <Field
+            label="Safe address"
+            value={truncateAddress(safeAddress)}
+            tooltip={safeAddress}
+            testid="launcher-launched-spend-safe-address"
+          />
+          <Field
+            label="Safe balance"
+            value={
+              isLoading
+                ? '—'
+                : safeBalanceWei
+                  ? formatWeiAmount(safeBalanceWei)
+                  : 'unavailable'
+            }
+            tooltip={safeBalanceWei ? `${safeBalanceWei} wei` : undefined}
+            testid="launcher-launched-spend-safe-balance"
+          />
+          <Field
+            label="Solution price"
+            value={
+              solutionPriceWei
+                ? formatWeiAmount(solutionPriceWei)
+                : '—'
+            }
+            tooltip={solutionPriceWei ? `${solutionPriceWei} wei` : undefined}
+            testid="launcher-launched-spend-solution-price"
+          />
+          <Field
+            label="Verdict price"
+            value={
+              verdictPriceWei
+                ? formatWeiAmount(verdictPriceWei)
+                : '—'
+            }
+            tooltip={verdictPriceWei ? `${verdictPriceWei} wei` : undefined}
+            testid="launcher-launched-spend-verdict-price"
+          />
+          <Field
+            label="Per-Task cost"
+            value={
+              projection
+                ? formatWeiAmount(projection.perTaskWei.toString())
+                : '—'
+            }
+            tooltip={projection ? `${projection.perTaskWei.toString()} wei` : undefined}
+            testid="launcher-launched-spend-per-task"
+          />
+          <Field
+            label="Projected runway"
+            value={
+              projection
+                ? `${projection.tasks.toLocaleString()} Tasks at current prices`
+                : 'manifest or balance unavailable'
+            }
+            testid="launcher-launched-spend-runway"
+          />
+        </dl>
+
+        {isError && (
+          <span
+            data-testid="launcher-launched-spend-error"
+            className="font-mono text-[12px] text-destructive"
+          >
+            Failed to load Safe balance.
+          </span>
+        )}
+
+        <p className="m-0 font-mono text-[11px] leading-relaxed text-[var(--fg-dim)]">
+          Runway projects how many Tasks the Safe can fund at the current
+          manifest prices, before any operator participation cost adjustments.
+        </p>
+      </Card>
+    </TooltipProvider>
   );
 }
 
@@ -167,73 +171,35 @@ function Field({
   label,
   value,
   testid,
-  title,
+  tooltip,
 }: {
   label: string;
   value: string;
   testid?: string;
-  title?: string;
+  tooltip?: string;
 }): JSX.Element {
+  const valueNode = (
+    <dd
+      data-testid={testid}
+      className="m-0 truncate font-mono text-[13px] text-foreground"
+      tabIndex={tooltip ? 0 : undefined}
+    >
+      {value}
+    </dd>
+  );
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-      <dt
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '10px',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-dim)',
-        }}
-      >
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-dim)]">
         {label}
       </dt>
-      <dd
-        data-testid={testid}
-        title={title}
-        style={{
-          margin: 0,
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-          color: 'var(--fg)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {value}
-      </dd>
+      {tooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{valueNode}</TooltipTrigger>
+          <TooltipContent>{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        valueNode
+      )}
     </div>
   );
 }
-
-const panelStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-3)',
-  padding: '20px 22px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-};
-
-const headerStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '12px',
-};
-
-const titleStyle: React.CSSProperties = {
-  margin: 0,
-  fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-  fontSize: '22px',
-  color: 'var(--fg)',
-  fontWeight: 400,
-};
-
-const gridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: '8px 16px',
-  margin: 0,
-};

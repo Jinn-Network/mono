@@ -8,6 +8,8 @@ import type {
   LifecycleTarget,
   RegistryManifestResponse,
 } from '../api/types.js';
+import { Alert, AlertDescription } from '../components/ui/alert.js';
+import { Button } from '../components/ui/button.js';
 import { GeneratorPanel } from './launcher-launched/GeneratorPanel.js';
 import { PauseRetireDialog } from './launcher-launched/PauseRetireDialog.js';
 import { SpendPanel } from './launcher-launched/SpendPanel.js';
@@ -53,6 +55,9 @@ export interface LauncherLaunchedPageProps {
   /** Override solverNetId (tests that don't want to wire up wouter routing). */
   solverNetId?: string;
 }
+
+const pageClass =
+  'mx-auto flex max-w-[960px] flex-col gap-4 p-6';
 
 export function LauncherLaunchedPage({
   pollIntervalMs = POLL_INTERVAL_MS,
@@ -137,19 +142,21 @@ export function LauncherLaunchedPage({
 
   if (!solverNetId) {
     return (
-      <main
-        data-testid="launcher-launched-missing-id"
-        style={pageStyle}
-      >
-        <ErrorBanner message="No solverNetId supplied." onBack={() => navigate('/launcher')} />
+      <main data-testid="launcher-launched-missing-id" className={pageClass}>
+        <ErrorBanner
+          message="No solverNetId supplied."
+          onBack={() => navigate('/launcher')}
+        />
       </main>
     );
   }
 
   if (recordQuery.isLoading) {
     return (
-      <main data-testid="launcher-launched-loading" style={pageStyle}>
-        <p style={mutedTextStyle}>Loading…</p>
+      <main data-testid="launcher-launched-loading" className={pageClass}>
+        <p className="m-0 font-mono text-[13px] text-[var(--fg-muted)]">
+          Loading…
+        </p>
       </main>
     );
   }
@@ -160,7 +167,7 @@ export function LauncherLaunchedPage({
         ? recordQuery.error.message
         : 'Unknown error';
     return (
-      <main data-testid="launcher-launched-error" style={pageStyle}>
+      <main data-testid="launcher-launched-error" className={pageClass}>
         <ErrorBanner
           message={`Failed to load SolverNet: ${message}`}
           onBack={() => navigate('/launcher')}
@@ -181,7 +188,7 @@ export function LauncherLaunchedPage({
     <main
       data-testid="launcher-launched"
       data-solvernet-id={solverNetId}
-      style={pageStyle}
+      className={pageClass}
     >
       <StatusHeader
         record={record}
@@ -210,12 +217,7 @@ export function LauncherLaunchedPage({
       {manifestQuery.isError && (
         <p
           data-testid="launcher-launched-manifest-error"
-          style={{
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            margin: 0,
-          }}
+          className="m-0 font-mono text-[12px] text-destructive"
         >
           Failed to load manifest:{' '}
           {formatManifestLoadError(manifestQuery.error)}
@@ -273,74 +275,35 @@ function ErrorBanner({
   onRetry?: () => void;
 }): JSX.Element {
   return (
-    <div
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--break-red)',
-        borderRadius: 'var(--radius-2)',
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: '16px',
-      }}
+    <Alert
+      variant="blocking"
+      className="flex items-center justify-between gap-4 border-l-0 border border-destructive p-4"
     >
-      <span
-        style={{
-          color: 'var(--break-red)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-        }}
-      >
+      <AlertDescription className="font-mono text-[13px] text-destructive">
         {message}
-      </span>
-      <div style={{ display: 'flex', gap: '8px' }}>
+      </AlertDescription>
+      <div className="flex gap-2">
         {onRetry && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             data-testid="launcher-launched-error-retry"
             onClick={onRetry}
-            style={ghostButtonStyle}
           >
             Retry
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           data-testid="launcher-launched-error-back"
           onClick={onBack}
-          style={ghostButtonStyle}
         >
           Back to launcher
-        </button>
+        </Button>
       </div>
-    </div>
+    </Alert>
   );
 }
-
-const pageStyle: React.CSSProperties = {
-  padding: '24px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '16px',
-  maxWidth: '960px',
-  margin: '0 auto',
-};
-
-const mutedTextStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg-muted)',
-  margin: 0,
-};
-
-const ghostButtonStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  padding: '8px 14px',
-  background: 'transparent',
-  color: 'var(--fg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  cursor: 'pointer',
-};

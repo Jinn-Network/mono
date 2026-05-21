@@ -7,6 +7,23 @@ import type {
   LauncherTaskState,
   LauncherTasksResponse,
 } from '../../api/types.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table.js';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip.js';
+import { Badge } from '../../components/ui/badge.js';
 import { formatTimestamp, truncateCid } from './helpers.js';
 
 /**
@@ -26,12 +43,14 @@ import { formatTimestamp, truncateCid } from './helpers.js';
 
 const PAGE_SIZE = 5;
 
-const STATE_TONE: Record<LauncherTaskState, { fg: string; label: string }> = {
-  open: { fg: 'var(--accent-sky)', label: 'Open' },
-  'claims-in-flight': { fg: 'var(--accent-sky)', label: 'In flight' },
-  'fully-claimed': { fg: 'var(--vow-green)', label: 'Claimed' },
-  settled: { fg: 'var(--vow-green)', label: 'Settled' },
-  failed: { fg: 'var(--break-red)', label: 'Failed' },
+type BadgeVariant = NonNullable<Parameters<typeof Badge>[0]['variant']>;
+
+const STATE_TONE: Record<LauncherTaskState, { variant: BadgeVariant; label: string }> = {
+  open: { variant: 'default', label: 'Open' },
+  'claims-in-flight': { variant: 'default', label: 'In flight' },
+  'fully-claimed': { variant: 'success', label: 'Claimed' },
+  settled: { variant: 'success', label: 'Settled' },
+  failed: { variant: 'destructive', label: 'Failed' },
 };
 
 export interface TasksPanelProps {
@@ -71,183 +90,152 @@ export function TasksPanel({ record, fetchTasks }: TasksPanelProps): JSX.Element
   };
 
   return (
-    <section data-testid="launcher-launched-tasks-panel" style={panelStyle}>
-      <header style={headerStyle}>
-        <h2 style={titleStyle}>Recent posted Tasks</h2>
-        <button
-          type="button"
-          data-testid="launcher-launched-tasks-refresh"
-          onClick={() => {
-            void refetch();
-          }}
-          style={ghostButtonStyle}
-        >
-          Refresh
-        </button>
-      </header>
-
-      {isLoading && (
-        <p
-          data-testid="launcher-launched-tasks-loading"
-          style={mutedTextStyle}
-        >
-          Loading…
-        </p>
-      )}
-
-      {isError && (
-        <div
-          data-testid="launcher-launched-tasks-error"
-          style={{
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-          }}
-        >
-          Failed to load tasks: {error instanceof Error ? error.message : 'unknown error'}
-        </div>
-      )}
-
-      {!isLoading && !isError && data && data.tasks.length === 0 && (
-        <EmptyState />
-      )}
-
-      {!isLoading && !isError && data && data.tasks.length > 0 && (
-        <>
-          <div
-            data-testid="launcher-launched-tasks-list"
-            role="table"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-2)',
-              overflow: 'hidden',
+    <TooltipProvider delayDuration={150}>
+      <Card
+        data-testid="launcher-launched-tasks-panel"
+        role="region"
+        aria-label="Recent posted Tasks"
+        className="flex flex-col gap-3 p-6"
+      >
+        <header className="flex items-center justify-between gap-3">
+          <h2 className="m-0 font-serif text-[22px] font-normal text-foreground">
+            Recent posted Tasks
+          </h2>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            data-testid="launcher-launched-tasks-refresh"
+            onClick={() => {
+              void refetch();
             }}
           >
-            <div role="row" style={tableHeaderStyle}>
-              <span>Task</span>
-              <span>SolverType</span>
-              <span>Posted</span>
-              <span>State</span>
-              <span style={{ textAlign: 'right' }}>Claims</span>
+            Refresh
+          </Button>
+        </header>
+
+        {isLoading && (
+          <p
+            data-testid="launcher-launched-tasks-loading"
+            className="m-0 font-mono text-[12px] text-[var(--fg-muted)]"
+          >
+            Loading…
+          </p>
+        )}
+
+        {isError && (
+          <div
+            data-testid="launcher-launched-tasks-error"
+            className="font-mono text-[12px] text-destructive"
+          >
+            Failed to load tasks: {error instanceof Error ? error.message : 'unknown error'}
+          </div>
+        )}
+
+        {!isLoading && !isError && data && data.tasks.length === 0 && (
+          <EmptyState />
+        )}
+
+        {!isLoading && !isError && data && data.tasks.length > 0 && (
+          <>
+            <div
+              data-testid="launcher-launched-tasks-list"
+              className="overflow-hidden rounded-md border border-border"
+            >
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow className="bg-[var(--bg)] hover:bg-[var(--bg)]">
+                    <TableHead className="w-[34%]">Task</TableHead>
+                    <TableHead className="w-[16%]">SolverType</TableHead>
+                    <TableHead className="w-[22%]">Posted</TableHead>
+                    <TableHead className="w-[14%]">State</TableHead>
+                    <TableHead className="w-[14%] text-right">Claims</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.tasks.map((task) => (
+                    <TaskRow key={task.taskId} task={task} />
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-            {data.tasks.map((task) => (
-              <TaskRow key={task.taskId} task={task} />
-            ))}
-          </div>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-            }}
-          >
-            <button
-              type="button"
-              data-testid="launcher-launched-tasks-prev"
-              onClick={onBack}
-              disabled={cursorStack.length <= 1}
-              style={{
-                ...ghostButtonStyle,
-                opacity: cursorStack.length <= 1 ? 0.5 : 1,
-                cursor: cursorStack.length <= 1 ? 'not-allowed' : 'pointer',
-              }}
-            >
-              ← Newer
-            </button>
-            <span style={mutedTextStyle}>
-              Page {cursorStack.length}
-              {data.tasks.length < PAGE_SIZE && data.cursor === undefined ? ' · end' : ''}
-            </span>
-            <button
-              type="button"
-              data-testid="launcher-launched-tasks-next"
-              onClick={onNext}
-              disabled={!data.cursor?.before}
-              style={{
-                ...ghostButtonStyle,
-                opacity: data.cursor?.before ? 1 : 0.5,
-                cursor: data.cursor?.before ? 'pointer' : 'not-allowed',
-              }}
-            >
-              Older →
-            </button>
-          </div>
-        </>
-      )}
-    </section>
+            <div className="flex items-center justify-between gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="launcher-launched-tasks-prev"
+                onClick={onBack}
+                disabled={cursorStack.length <= 1}
+              >
+                ← Newer
+              </Button>
+              <span className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
+                Page {cursorStack.length}
+                {data.tasks.length < PAGE_SIZE && data.cursor === undefined
+                  ? ' · end'
+                  : ''}
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="launcher-launched-tasks-next"
+                onClick={onNext}
+                disabled={!data.cursor?.before}
+              >
+                Older →
+              </Button>
+            </div>
+          </>
+        )}
+      </Card>
+    </TooltipProvider>
   );
 }
 
 function TaskRow({ task }: { task: LauncherTaskEntry }): JSX.Element {
-  const tone = STATE_TONE[task.state] ?? { fg: 'var(--fg-muted)', label: task.state };
+  const tone = STATE_TONE[task.state] ?? { variant: 'secondary' as BadgeVariant, label: task.state };
+  const titleText = task.summary?.title ?? truncateCid(task.taskCid);
+  const solverLabel = task.solverType ?? task.solverNet;
   return (
-    <div
-      role="row"
+    <TableRow
       data-testid="launcher-launched-task-row"
       data-task-id={task.taskId}
-      style={tableRowStyle}
     >
-      <span
-        title={task.taskCid}
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-          color: 'var(--fg)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {task.summary?.title ?? truncateCid(task.taskCid)}
-      </span>
-      <span
-        title={task.solverType ?? task.solverNet}
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          color: 'var(--fg-muted)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {task.solverType ?? task.solverNet}
-      </span>
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          color: 'var(--fg-muted)',
-        }}
-      >
+      <TableCell className="font-mono text-[13px] text-foreground">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="block truncate" tabIndex={0}>
+              {titleText}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{task.taskCid}</TooltipContent>
+        </Tooltip>
+      </TableCell>
+      <TableCell className="font-mono text-[12px] text-[var(--fg-muted)]">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="block truncate" tabIndex={0}>
+              {solverLabel}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{solverLabel}</TooltipContent>
+        </Tooltip>
+      </TableCell>
+      <TableCell className="font-mono text-[12px] text-[var(--fg-muted)]">
         {formatTimestamp(task.postedAt)}
-      </span>
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          color: tone.fg,
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-        }}
-      >
-        {tone.label}
-      </span>
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          color: 'var(--fg-muted)',
-          textAlign: 'right',
-        }}
-      >
+      </TableCell>
+      <TableCell>
+        <Badge variant={tone.variant} className="normal-case tracking-[0.1em]">
+          {tone.label}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-right font-mono text-[12px] text-[var(--fg-muted)]">
         {task.claims.current} / {task.claims.max}
-      </span>
-    </div>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -255,83 +243,9 @@ function EmptyState(): JSX.Element {
   return (
     <div
       data-testid="launcher-launched-tasks-empty"
-      style={{
-        padding: '24px',
-        textAlign: 'center',
-        color: 'var(--fg-muted)',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '13px',
-        border: '1px dashed var(--border)',
-        borderRadius: 'var(--radius-2)',
-      }}
+      className="rounded-md border border-dashed border-border p-6 text-center font-mono text-[13px] text-[var(--fg-muted)]"
     >
       Tasks will appear here after the first generator poll posts a Task.
     </div>
   );
 }
-
-const panelStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-3)',
-  padding: '20px 22px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-};
-
-const headerStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '12px',
-};
-
-const titleStyle: React.CSSProperties = {
-  margin: 0,
-  fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-  fontSize: '22px',
-  color: 'var(--fg)',
-  fontWeight: 400,
-};
-
-const tableHeaderStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '2fr minmax(130px, 0.9fr) 1.4fr 1fr 0.8fr',
-  gap: '12px',
-  padding: '8px 14px',
-  background: 'var(--bg)',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '10px',
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-dim)',
-  borderBottom: '1px solid var(--border)',
-};
-
-const tableRowStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '2fr minmax(130px, 0.9fr) 1.4fr 1fr 0.8fr',
-  gap: '12px',
-  alignItems: 'center',
-  padding: '10px 14px',
-  borderBottom: '1px solid var(--border)',
-};
-
-const ghostButtonStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  padding: '6px 12px',
-  background: 'transparent',
-  color: 'var(--fg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  cursor: 'pointer',
-};
-
-const mutedTextStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  color: 'var(--fg-muted)',
-  margin: 0,
-};
