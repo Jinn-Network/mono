@@ -14,6 +14,7 @@ import {
   type BootstrapWithSolverNets,
 } from './overview/joined-solver-net.js';
 import { ActivitySections } from './overview/ActivitySections.js';
+import { useRestartPending } from '../shell/RestartPendingContext.js';
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -127,6 +128,10 @@ export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const queryClient = useQueryClient();
+  // Pulled in so the Restart action can auto-clear the restart-required
+  // notification when the operator clicks "Restart node" from this page.
+  // Without this, the notice lingers forever (Ritsu's review of #426).
+  const { setRestartPending } = useRestartPending();
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -313,6 +318,12 @@ export function OverviewPage(): JSX.Element {
               if (!res.ok) {
                 throw new Error('Restart request failed.');
               }
+              // Auto-clear the restart-required notification once the operator
+              // has actually triggered the restart. Without this clear the
+              // `restart_required` notice would linger for the SPA session even
+              // after the daemon is back — the regression Ritsu flagged on #426
+              // (undoes the dogfood fix in 14680bdf).
+              setRestartPending(false);
               return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
             },
             // Restart confirmation is transient — surface it, then fade after
