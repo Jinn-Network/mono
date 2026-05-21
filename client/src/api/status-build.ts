@@ -18,8 +18,6 @@ const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 export type StatusHintsScope = 'full' | 'sqlite_only';
 export type TjinnStatusState = 'pending' | 'ready' | 'error';
 
-export const TJINN_CHAIN_ID = 11155111;
-export const TJINN_TOKEN_ADDRESS = '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A';
 export const TJINN_PUBLIC_READ_ERROR = 'Sepolia tJINN balance temporarily unavailable.';
 export const TJINN_PUBLIC_PARTIAL_ERROR = 'Some Safe tJINN balances are temporarily unavailable.';
 export const TJINN_PUBLIC_INVALID_SAFE_ERROR = 'One or more Safe addresses are invalid.';
@@ -90,6 +88,14 @@ export interface GatheredStatusRaw {
   pendingRewardsError?: string;
   /** Sepolia tJINN ERC-20 balances across fleet Safes. */
   tJinn?: TjinnStatus;
+  /**
+   * tJINN ERC-20 token address — resolved from the bundled JINN MVI L1
+   * deployment artifact (single source of truth) and threaded through from
+   * `main.ts`. Used to build the fallback pending status when `tJinn` is absent.
+   */
+  tjinnTokenAddress: string;
+  /** tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`. */
+  tjinnChainId: number;
   /** ISO timestamp when the staking contract will next accept a checkpoint. */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
@@ -284,15 +290,28 @@ function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
   return total;
 }
 
-function defaultTjinnStatus(): TjinnStatus {
+/**
+ * Build a `TjinnStatus` in the `pending` state for a given token/chain.
+ *
+ * Single builder for the near-identical pending `TjinnStatus` literals that
+ * gather-status and the status assembler would otherwise hand-roll. Pass
+ * `overrides` to set `safeCount`, `services`, `error`, etc. while keeping the
+ * token/chain/`pending` defaults.
+ */
+export function pendingTjinnStatus(
+  tokenAddress: string,
+  chainId: number,
+  overrides?: Partial<TjinnStatus>,
+): TjinnStatus {
   return {
     state: 'pending',
-    chainId: TJINN_CHAIN_ID,
-    tokenAddress: TJINN_TOKEN_ADDRESS,
+    chainId,
+    tokenAddress,
     safeBalanceWei: null,
     safeCount: 0,
     services: [],
     error: null,
+    ...overrides,
   };
 }
 
@@ -300,8 +319,12 @@ function publicTjinnError(error: string): string {
   return TJINN_PUBLIC_ERRORS.has(error) ? error : TJINN_PUBLIC_READ_ERROR;
 }
 
-function publicTjinnStatus(status: TjinnStatus | undefined): TjinnStatus {
-  if (!status) return defaultTjinnStatus();
+function publicTjinnStatus(
+  status: TjinnStatus | undefined,
+  tokenAddress: string,
+  chainId: number,
+): TjinnStatus {
+  if (!status) return pendingTjinnStatus(tokenAddress, chainId);
   return {
     ...status,
     error: status.error ? publicTjinnError(status.error) : null,
@@ -440,7 +463,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
           : claimedRewardsWei.toString(),
       pendingRewardsError: raw.pendingRewardsError,
     },
-    tJinn: publicTjinnStatus(raw.tJinn),
+    tJinn: publicTjinnStatus(raw.tJinn, raw.tjinnTokenAddress, raw.tjinnChainId),
     masterGas: {
       address: raw.master.address,
       balanceWei: raw.master.balanceWei,

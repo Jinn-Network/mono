@@ -8,11 +8,16 @@ import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
-import { base, baseSepolia, sepolia } from 'viem/chains';
+import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
-import { getChainConfig } from '../earning/contracts.js';
+import {
+  DEFAULT_TESTNET_ARTIFACTS,
+  getChainConfig,
+  loadJinnMviConfig,
+} from '../earning/contracts.js';
+import { createJinnL1PublicClient } from '../earning/viem-clients.js';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
 import type { FleetState } from '../earning/types.js';
@@ -20,13 +25,12 @@ import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import {
   assembleStatusV1,
   type GatheredStatusRaw,
+  pendingTjinnStatus,
   type ServiceBalanceErrorEntry,
   type StatusV1Response,
-  TJINN_CHAIN_ID,
   TJINN_PUBLIC_INVALID_SAFE_ERROR,
   TJINN_PUBLIC_PARTIAL_ERROR,
   TJINN_PUBLIC_READ_ERROR,
-  TJINN_TOKEN_ADDRESS,
   type TjinnServiceStatus,
   type TjinnStatus,
   resolveMasterDailyEstimateWei,
@@ -61,10 +65,56 @@ const ERC20_BALANCE_OF_ABI = [
 const TJINN_BALANCE_CACHE_TTL_MS = 30_000;
 const TJINN_BALANCE_TIMEOUT_MS = 4_000;
 
+/**
+ * tJINN token address + chain id resolved from the bundled JINN MVI L1
+ * deployment artifact — the single source of truth. Used only when the caller
+ * (`main.ts`) does not thread explicit values through `StatusGatherConfig`
+ * (e.g. test callers, sqlite-only introspection without config). Lazy + cached
+ * so the artifact read happens at most once per process.
+ */
+let cachedTjinnArtifactIdentity: { tokenAddress: string; chainId: number } | undefined;
+function defaultTjinnIdentity(): { tokenAddress: string; chainId: number } {
+  if (!cachedTjinnArtifactIdentity) {
+    let tokenAddress: string | undefined;
+    let chainId: number | undefined;
+    try {
+      const mvi = loadJinnMviConfig({ l1ArtifactPath: DEFAULT_TESTNET_ARTIFACTS.jinnMviL1 });
+      tokenAddress = mvi.jinn;
+      chainId = mvi.l1ChainId;
+    } catch {
+      // Fall through to the hard defaults below if the artifact is unreadable.
+    }
+    cachedTjinnArtifactIdentity = {
+      tokenAddress: tokenAddress ?? '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+      chainId: chainId ?? 11155111,
+    };
+  }
+  return cachedTjinnArtifactIdentity;
+}
+
+function resolveTjinnIdentity(
+  status: StatusGatherConfig | undefined,
+): { tokenAddress: string; chainId: number } {
+  const fallback = defaultTjinnIdentity();
+  return {
+    tokenAddress: status?.tjinnTokenAddress ?? fallback.tokenAddress,
+    chainId: status?.tjinnChainId ?? fallback.chainId,
+  };
+}
+
 interface TjinnBalanceSnapshot {
   chainId: number;
   balances: Map<string, string>;
   errors: Map<string, string>;
+}
+
+/** Fill a fresh errors Map with `TJINN_PUBLIC_READ_ERROR` for every key. */
+function errorsForAllKeys(keys: Iterable<string>): Map<string, string> {
+  const errors = new Map<string, string>();
+  for (const key of keys) {
+    errors.set(key, TJINN_PUBLIC_READ_ERROR);
+  }
+  return errors;
 }
 
 const tjinnBalanceCache = new Map<
@@ -110,8 +160,15 @@ export function invalidatePredictionOperatorStatusCache(config: JinnConfig): voi
 export interface StatusGatherConfig {
   earningDir: string;
   rpcUrl: string;
-  /** Sepolia RPC endpoint for reading the real tJINN ERC-20 balance. */
-  ethereumRpcUrl?: string;
+  /**
+   * tJINN ERC-20 token address — resolved from the bundled JINN MVI L1
+   * deployment artifact in `main.ts` (single source of truth). Optional so
+   * test callers can omit it; gather-status falls back to the artifact-derived
+   * default when absent.
+   */
+  tjinnTokenAddress?: string;
+  /** tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`. */
+  tjinnChainId?: number;
   network: 'mainnet' | 'testnet';
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
@@ -329,43 +386,41 @@ function withTimeout<T>(
 
 async function readTjinnBalances(
   ethereumRpcUrl: string,
+  tokenAddress: string,
+  expectedChainId: number,
   safeToAddress: Map<string, `0x${string}`>,
 ): Promise<TjinnBalanceSnapshot> {
   const safeEntries = [...safeToAddress.entries()];
-  const client = createPublicClient({
-    chain: sepolia,
-    transport: http(ethereumRpcUrl, { timeout: TJINN_BALANCE_TIMEOUT_MS }),
-  });
+  const client = createJinnL1PublicClient(ethereumRpcUrl, 'sepolia');
   const chainId = await client.getChainId();
   const balances = new Map<string, string>();
-  const errors = new Map<string, string>();
 
-  if (chainId !== TJINN_CHAIN_ID) {
-    for (const [key] of safeEntries) {
-      errors.set(key, TJINN_PUBLIC_READ_ERROR);
-    }
-    return { chainId, balances, errors };
+  if (chainId !== expectedChainId) {
+    return { chainId, balances, errors: errorsForAllKeys(safeToAddress.keys()) };
   }
 
-  const settled = await Promise.allSettled(
-    safeEntries.map(async ([key, safeAddress]) => {
-      const balance = await client.readContract({
-        address: TJINN_TOKEN_ADDRESS as `0x${string}`,
-        abi: ERC20_BALANCE_OF_ABI,
-        functionName: 'balanceOf',
-        args: [safeAddress],
-      });
-      return { key, balanceWei: balance.toString() };
-    }),
-  );
+  const errors = new Map<string, string>();
+  // Single multicall3 round-trip (Sepolia has multicall3). `allowFailure: true`
+  // preserves the per-Safe partial-failure handling — a failed entry yields a
+  // `{ status: 'failure' }` result rather than rejecting the whole batch.
+  const results = await client.multicall({
+    allowFailure: true,
+    contracts: safeEntries.map(([, safeAddress]) => ({
+      address: tokenAddress as `0x${string}`,
+      abi: ERC20_BALANCE_OF_ABI,
+      functionName: 'balanceOf',
+      args: [safeAddress],
+    })),
+  });
 
-  for (let i = 0; i < settled.length; i++) {
-    const result = settled[i]!;
-    if (result.status === 'fulfilled') {
-      balances.set(result.value.key, result.value.balanceWei);
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]!;
+    const key = safeEntries[i]?.[0];
+    if (!key) continue;
+    if (result.status === 'success') {
+      balances.set(key, (result.result as bigint).toString());
     } else {
-      const key = safeEntries[i]?.[0];
-      if (key) errors.set(key, TJINN_PUBLIC_READ_ERROR);
+      errors.set(key, TJINN_PUBLIC_READ_ERROR);
     }
   }
 
@@ -374,6 +429,8 @@ async function readTjinnBalances(
 
 async function getCachedTjinnBalances(
   ethereumRpcUrl: string,
+  tokenAddress: string,
+  expectedChainId: number,
   safeToAddress: Map<string, `0x${string}`>,
 ): Promise<TjinnBalanceSnapshot> {
   const safeKeys = [...safeToAddress.keys()].sort();
@@ -385,18 +442,14 @@ async function getCachedTjinnBalances(
   }
 
   const promise = withTimeout(
-    readTjinnBalances(ethereumRpcUrl, safeToAddress),
+    readTjinnBalances(ethereumRpcUrl, tokenAddress, expectedChainId, safeToAddress),
     TJINN_BALANCE_TIMEOUT_MS,
     'tJINN balance collection timed out',
   ).catch((): TjinnBalanceSnapshot => {
-    const errors = new Map<string, string>();
-    for (const key of safeKeys) {
-      errors.set(key, TJINN_PUBLIC_READ_ERROR);
-    }
     return {
-      chainId: TJINN_CHAIN_ID,
+      chainId: expectedChainId,
       balances: new Map<string, string>(),
-      errors,
+      errors: errorsForAllKeys(safeKeys),
     };
   });
   tjinnBalanceCache.set(cacheKey, {
@@ -462,23 +515,34 @@ async function sumPendingStakingRewards(
   }
 }
 
+/**
+ * Resolve the public error string for a tJINN status with at least one error.
+ *
+ * Flattened from a 3-deep nested ternary into guard clauses:
+ *  - partial success (some balances read) → PARTIAL
+ *  - only invalid-Safe errors             → INVALID_SAFE
+ *  - otherwise (RPC read failures)        → READ_ERROR
+ *
+ * Caller must only invoke this when `hasInvalidSafe || hasReadError` is true.
+ */
+function tjinnPublicError(opts: {
+  hasInvalidSafe: boolean;
+  hasReadError: boolean;
+  hasAnyBalance: boolean;
+}): string {
+  if (opts.hasAnyBalance) return TJINN_PUBLIC_PARTIAL_ERROR;
+  if (opts.hasInvalidSafe && !opts.hasReadError) return TJINN_PUBLIC_INVALID_SAFE_ERROR;
+  return TJINN_PUBLIC_READ_ERROR;
+}
+
 async function gatherTjinnStatus(
   ethereumRpcUrl: string | undefined,
+  tokenAddress: string,
+  chainId: number,
   fleet: FleetState | null,
 ): Promise<TjinnStatus> {
-  const baseStatus = {
-    chainId: TJINN_CHAIN_ID,
-    tokenAddress: TJINN_TOKEN_ADDRESS,
-  };
   if (!fleet) {
-    return {
-      ...baseStatus,
-      state: 'pending',
-      safeBalanceWei: null,
-      safeCount: 0,
-      services: [],
-      error: null,
-    };
+    return pendingTjinnStatus(tokenAddress, chainId);
   }
 
   const services: TjinnServiceStatus[] = [];
@@ -522,28 +586,24 @@ async function gatherTjinnStatus(
   const safeCount = safeToAddress.size;
   if (safeCount === 0) {
     const invalid = services.find((svc) => svc.state === 'error')?.error;
-    return {
-      ...baseStatus,
+    return pendingTjinnStatus(tokenAddress, chainId, {
       state: invalid ? 'error' : 'pending',
-      safeBalanceWei: null,
       safeCount,
       services,
       error: invalid ?? null,
-    };
+    });
   }
 
   if (!ethereumRpcUrl) {
-    return {
-      ...baseStatus,
-      state: 'pending',
-      safeBalanceWei: null,
-      safeCount,
-      services,
-      error: null,
-    };
+    return pendingTjinnStatus(tokenAddress, chainId, { safeCount, services });
   }
 
-  const snapshot = await getCachedTjinnBalances(ethereumRpcUrl, safeToAddress);
+  const snapshot = await getCachedTjinnBalances(
+    ethereumRpcUrl,
+    tokenAddress,
+    chainId,
+    safeToAddress,
+  );
   let total = 0n;
   for (const balance of snapshot.balances.values()) {
     total += BigInt(balance);
@@ -553,20 +613,14 @@ async function gatherTjinnStatus(
   const hasAnyError = hasInvalidSafe || hasReadError;
   const hasAnyBalance = snapshot.balances.size > 0;
   const publicError = hasAnyError
-    ? hasAnyBalance
-      ? TJINN_PUBLIC_PARTIAL_ERROR
-      : hasInvalidSafe && !hasReadError
-        ? TJINN_PUBLIC_INVALID_SAFE_ERROR
-        : TJINN_PUBLIC_READ_ERROR
+    ? tjinnPublicError({ hasInvalidSafe, hasReadError, hasAnyBalance })
     : null;
 
-  return {
-    ...baseStatus,
-    chainId: snapshot.chainId,
+  return pendingTjinnStatus(tokenAddress, snapshot.chainId, {
     state: hasAnyError ? 'error' : 'ready',
     safeBalanceWei: hasAnyBalance ? total.toString() : null,
     safeCount,
-    services: services.map((svc) => {
+    services: services.map((svc): TjinnServiceStatus => {
       if (!svc.safeAddress) return svc;
       if (svc.state === 'error') return svc;
       const key = svc.safeAddress.toLowerCase();
@@ -581,7 +635,7 @@ async function gatherTjinnStatus(
       };
     }),
     error: publicError,
-  };
+  });
 }
 
 function hasUsefulCacheValues(entry: BalanceCacheEntry, isAgentRole: boolean): boolean {
@@ -734,6 +788,8 @@ export async function gatherGatheredStatusRaw(
     status?.pollIntervalMs ?? 5000,
   );
 
+  const tjinnIdentity = resolveTjinnIdentity(status);
+
   // portfolio.v0 lifecycle data — best-effort, never throws
   let portfolioV0: ReturnType<typeof gatherPortfolioV0Status> | undefined;
   try {
@@ -805,6 +861,8 @@ export async function gatherGatheredStatusRaw(
     serviceBalances: {},
     pendingByService: {},
     claimedByService: store.getClaimedRewardsByService(),
+    tjinnTokenAddress: tjinnIdentity.tokenAddress,
+    tjinnChainId: tjinnIdentity.chainId,
   };
 
   if (!status) {
@@ -822,6 +880,17 @@ export async function gatherGatheredStatusRaw(
     testnetMechDeploymentPath: status.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: status.testnetStolasDeploymentPath,
   });
+
+  // Start the Sepolia tJINN read up front so it overlaps the Base-RPC fan-out
+  // below for free. `gatherTjinnStatus` is internally error-safe (it catches
+  // and returns a snapshot), so the promise never rejects — it is awaited at
+  // the point its result is assigned to `raw.tJinn`.
+  const tJinnPromise = gatherTjinnStatus(
+    status.network === 'testnet' ? status.config?.ethereumRpcUrl : undefined,
+    tjinnIdentity.tokenAddress,
+    tjinnIdentity.chainId,
+    fleet,
+  );
 
   const raw: GatheredStatusRaw = {
     ...baseRaw,
@@ -852,12 +921,6 @@ export async function gatherGatheredStatusRaw(
     master: {
       address: fleet?.master_address ?? null,
     },
-    tJinn: await gatherTjinnStatus(
-      status.network === 'testnet'
-        ? (status.ethereumRpcUrl ?? status.config?.ethereumRpcUrl)
-        : undefined,
-      fleet,
-    ),
     rewardClaimIntervalMs: status.rewardClaimIntervalMs,
   };
 
@@ -866,6 +929,10 @@ export async function gatherGatheredStatusRaw(
     chain: viemChain,
     transport: http(status.rpcUrl),
   });
+
+  // The tJINN read started above (overlapping the Base-RPC fan-out). It never
+  // rejects, so a plain await is safe here.
+  raw.tJinn = await tJinnPromise;
 
   try {
     const [blockNumber, chainId] = await Promise.all([

@@ -842,6 +842,8 @@ export const STOLAS_STAKING_SLOTS_ABI = [
  */
 export interface JinnMviConfig {
   jinn?: string;
+  /** L1 chain id from the L1 artifact (e.g. 11155111 for Sepolia). */
+  l1ChainId?: number;
   timelock?: string;
   governor?: string;
   distributor?: string;
@@ -897,6 +899,7 @@ export function loadJinnMviConfig(args: {
     }
     const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL1Artifact;
     out.jinn = artifact.contracts?.JINN;
+    if (typeof artifact.chainId === 'number') out.l1ChainId = artifact.chainId;
     out.timelock = artifact.contracts?.TimelockController;
     out.governor = artifact.contracts?.JinnGovernor;
     out.distributor = artifact.contracts?.JinnDistributor;

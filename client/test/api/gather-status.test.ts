@@ -21,6 +21,12 @@ describe('gatherStatusForApi', () => {
     const safeB = '0x4444444444444444444444444444444444444444';
     const stakingProxy = '0x5555555555555555555555555555555555555555';
     const balanceReads: Array<{ token: string; safe: string; chainId: number }> = [];
+    const balanceOf = (token: string, safe: string): bigint => {
+      balanceReads.push({ token, safe, chainId: 11155111 });
+      return safe.toLowerCase() === safeA.toLowerCase()
+        ? 1500000000000000000n
+        : 2000000000000000000n;
+    };
     vi.doMock('viem', async (importOriginal) => {
       const actual = await importOriginal<typeof import('viem')>();
       return {
@@ -29,18 +35,28 @@ describe('gatherStatusForApi', () => {
           getBlockNumber: async () => 123n,
           getChainId: async () => chain.id,
           getBalance: async () => 0n,
+          // tJINN balances are read in one multicall3 round-trip (E2).
+          multicall: async (req: {
+            contracts: ReadonlyArray<{
+              address: string;
+              functionName: string;
+              args?: readonly [`0x${string}`];
+            }>;
+          }) =>
+            req.contracts.map((c) => {
+              if (chain.id === 11155111 && c.functionName === 'balanceOf') {
+                return {
+                  status: 'success' as const,
+                  result: balanceOf(c.address, (c.args?.[0] as string | undefined) ?? '0x'),
+                };
+              }
+              return { status: 'success' as const, result: 0n };
+            }),
           readContract: async (req: {
             address: string;
             functionName: string;
             args?: readonly [`0x${string}`] | readonly [bigint];
           }) => {
-            if (chain.id === 11155111 && req.functionName === 'balanceOf') {
-              const safe = (req.args?.[0] as string | undefined) ?? '0x';
-              balanceReads.push({ token: req.address, safe, chainId: chain.id });
-              return safe.toLowerCase() === safeA.toLowerCase()
-                ? 1500000000000000000n
-                : 2000000000000000000n;
-            }
             if (chain.id === 84532 && req.functionName === 'calculateStakingReward') {
               return 999000000000000000000n;
             }
@@ -99,7 +115,8 @@ describe('gatherStatusForApi', () => {
       const apiStatus = await gatherStatusForApi(store, {
         earningDir,
         rpcUrl: 'http://base-sepolia.example',
-        ethereumRpcUrl: 'http://sepolia.example',
+        // The Sepolia tJINN RPC endpoint is read from config.ethereumRpcUrl.
+        config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
@@ -181,19 +198,30 @@ describe('gatherStatusForApi', () => {
           getBlockNumber: async () => 123n,
           getChainId: async () => chain.id,
           getBalance: async () => 0n,
-          readContract: async (req: {
-            functionName: string;
-            args?: readonly [`0x${string}`];
-          }) => {
-            if (chain.id === 11155111 && req.functionName === 'balanceOf') {
-              const safe = req.args?.[0] ?? '0x';
-              if (safe.toLowerCase() === safeB.toLowerCase()) {
-                throw new Error('HTTP request failed for http://sepolia.example?apikey=secret');
+          // tJINN balances read via multicall3 with allowFailure: true — a
+          // per-Safe failure surfaces as a `{ status: 'failure' }` entry.
+          multicall: async (req: {
+            contracts: ReadonlyArray<{
+              functionName: string;
+              args?: readonly [`0x${string}`];
+            }>;
+          }) =>
+            req.contracts.map((c) => {
+              if (chain.id === 11155111 && c.functionName === 'balanceOf') {
+                const safe = c.args?.[0] ?? '0x';
+                if (safe.toLowerCase() === safeB.toLowerCase()) {
+                  return {
+                    status: 'failure' as const,
+                    error: new Error(
+                      'HTTP request failed for http://sepolia.example?apikey=secret',
+                    ),
+                  };
+                }
+                return { status: 'success' as const, result: 10n };
               }
-              return 10n;
-            }
-            return 0n;
-          },
+              return { status: 'success' as const, result: 0n };
+            }),
+          readContract: async () => 0n,
         }),
         http: () => ({}),
       };
@@ -234,7 +262,8 @@ describe('gatherStatusForApi', () => {
       const apiStatus = await gatherStatusForApi(store, {
         earningDir,
         rpcUrl: 'http://base-sepolia.example',
-        ethereumRpcUrl: 'http://sepolia.example',
+        // The Sepolia tJINN RPC endpoint is read from config.ethereumRpcUrl.
+        config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,

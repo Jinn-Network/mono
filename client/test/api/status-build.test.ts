@@ -7,6 +7,17 @@ import {
 } from '../../src/api/status-build.js';
 import type { FleetState } from '../../src/earning/types.js';
 
+// tJINN identity is resolved from the bundled JINN MVI L1 artifact and threaded
+// onto GatheredStatusRaw. These match deployment-jinn-mvi-l1-sepolia.json.
+const TJINN_TOKEN_ADDRESS = '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A';
+const TJINN_CHAIN_ID = 11155111;
+
+/** The two tJINN-identity fields every GatheredStatusRaw literal must carry. */
+const tjinnIdentityFields = {
+  tjinnTokenAddress: TJINN_TOKEN_ADDRESS,
+  tjinnChainId: TJINN_CHAIN_ID,
+} as const;
+
 function minimalFleet(overrides: Partial<FleetState> = {}): FleetState {
   return {
     master_address: '0x1111111111111111111111111111111111111111',
@@ -43,6 +54,7 @@ describe('resolveMasterDailyEstimateWei', () => {
 describe('assembleStatusV1', () => {
   it('marks sqlite_only mode and short-circuits next actions', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       hintsScope: 'sqlite_only',
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
@@ -74,6 +86,7 @@ describe('assembleStatusV1', () => {
 
   it('reports zero runway excess when balance is already below minimum', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -96,6 +109,7 @@ describe('assembleStatusV1', () => {
 
   it('flags low master balance vs minimum', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -121,6 +135,7 @@ describe('assembleStatusV1', () => {
 
   it('includes RPC failure in next actions when full mode', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -140,6 +155,7 @@ describe('assembleStatusV1', () => {
 
   it('reports total rewards as claimed plus claimable', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -164,6 +180,7 @@ describe('assembleStatusV1', () => {
 
   it('keeps real tJINN balance separate from pending staking rewards', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -200,6 +217,7 @@ describe('assembleStatusV1', () => {
 
   it('redacts raw tJINN read errors at the public status boundary', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -236,6 +254,7 @@ describe('assembleStatusV1', () => {
 
   it('passes prediction.v1 status through when present', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -273,6 +292,7 @@ describe('assembleStatusV1', () => {
 
   it('passes generic task-run status through when present', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},

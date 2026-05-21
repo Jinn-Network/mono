@@ -56,7 +56,6 @@ export async function gatherIntrospectionRaw(opts?: {
   const status: StatusGatherConfig = {
     earningDir: config.earningDir,
     rpcUrl: config.rpcUrl,
-    ethereumRpcUrl: config.ethereumRpcUrl,
     network: config.network,
     pollIntervalMs: config.pollIntervalMs,
     masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -65,6 +64,11 @@ export async function gatherIntrospectionRaw(opts?: {
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    // `config` carries `ethereumRpcUrl` (the Sepolia tJINN read endpoint) —
+    // gather-status reads it via `config?.ethereumRpcUrl`, so threading the
+    // full config is sufficient (no separate top-level field needed).
+    config,
+    configPath,
   };
   const local = await gatherGatheredStatusRaw(store, status);
   return tryMergeStatusFromHttp(config, local);
