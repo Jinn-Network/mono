@@ -13,17 +13,27 @@ const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
 };
 
 /**
- * Translate the real `/v1/status` response into the deriver's `DeriveInput.status`
- * shape. The two shapes don't match — `DeriveInput` is the deriver's *contract*,
- * not the daemon's wire format — so this adapter does best-effort field mapping
- * and defaults every unmapped field to a non-triggering value.
+ * Translate the real `/v1/status` + `/v1/bootstrap` responses into the deriver's
+ * `DeriveInput` shape. The two shapes don't match — `DeriveInput` is the deriver's
+ * *contract*, not the daemon's wire format — so this adapter does best-effort
+ * field mapping and defaults every unmapped field to a non-triggering value.
  *
- * As `/v1/status` grows fields that match deriver inputs (per follow-up issues
- * for per-role balances, harness-readiness rollup, etc.), replace the defaults
- * with the real values one at a time.
+ * Reviewed-by-Ritsu mapping (review of PR #426):
+ * - `s.fleet.services[]` (NOT top-level `services`); per-service `evicted` and
+ *   `safeBoundToAgent` (NOT `safeBound`). See `client/src/api/status-build.ts`.
+ * - `joinedSolverNets` comes from `/v1/bootstrap`, NOT `/v1/status`. See
+ *   `client/src/api/bootstrap-endpoint.ts`.
+ * - `harness` readiness and `password_rotation_due` have no `/v1/status` field
+ *   today — both follow-up Issues are linked in the PR. Defaults below keep
+ *   their notifications silent until the daemon surfaces the inputs.
  */
-function mapStatusToDeriveInput(raw: unknown, restartPending: boolean): DeriveInput['status'] {
-  const s = (raw ?? {}) as Record<string, any>;
+function mapStatusToDeriveInput(
+  rawStatus: unknown,
+  rawBootstrap: unknown,
+  restartPending: boolean,
+): DeriveInput['status'] {
+  const s = (rawStatus ?? {}) as Record<string, any>;
+  const b = (rawBootstrap ?? {}) as Record<string, any>;
 
   const masterEthWei = String(s.masterGas?.balanceWei ?? '0');
   let masterEth = '0';
@@ -39,6 +49,21 @@ function mapStatusToDeriveInput(raw: unknown, restartPending: boolean): DeriveIn
     // Non-numeric balance — leave the safe defaults in place.
   }
 
+  // Map fleet.services → DeriveInput.services. The real field is
+  // `safeBoundToAgent`, not `safeBound`. Default missing flags to non-triggering
+  // values (evicted=false, safeBound=true).
+  const fleetServices: any[] = Array.isArray(s.fleet?.services) ? s.fleet.services : [];
+
+  // joinedSolverNets lives on /v1/bootstrap. If empty AND bootstrap.mode is
+  // 'running', no_solvernets_joined fires. The previous default of
+  // `{ _unknown: {} }` suppressed the notice entirely — replaced by reading the
+  // real bootstrap field, with an empty `{}` default that lets the notice fire
+  // on a genuinely-empty config.
+  const joinedSolverNets =
+    b.joinedSolverNets && typeof b.joinedSolverNets === 'object'
+      ? b.joinedSolverNets
+      : {};
+
   return {
     funds: {
       eth: masterEth,
@@ -49,45 +74,41 @@ function mapStatusToDeriveInput(raw: unknown, restartPending: boolean): DeriveIn
     },
     // Harness readiness is its own endpoint (`/v1/harnesses/readiness`) — not on
     // /v1/status today. Default to ready=true so harness_not_ready doesn't fire
-    // spuriously. A follow-up rollup field on /v1/status would unlock this.
+    // spuriously. Follow-up Issue: surface a rollup field on /v1/status.
     harness: { ready: true, name: 'unknown' },
     // RPC reachability is handled by the connection-state early-return above;
-    // this default keeps rpc_unreachable from double-firing.
+    // this default keeps rpc_unreachable from double-firing through the deriver.
     rpc: { reachable: true },
     restartPending,
     daemonVersion: String(s.version ?? '0.0.0'),
     latestVersion: undefined,
-    services: Array.isArray(s.services)
-      ? s.services.map((svc: any) => ({
-          evicted: Boolean(svc?.evicted),
-          // safeBound defaults to true (no notice) unless the daemon explicitly says false
-          safeBound: svc?.safeBound !== false,
-        }))
-      : [],
-    // If the daemon doesn't surface joinedSolverNets on /v1/status, default to a
-    // non-empty placeholder so no_solvernets_joined doesn't fire on every page load.
-    // The real signal lives in the SolverNets config; surfacing it here is a
-    // separate follow-up.
-    joinedSolverNets:
-      s.joinedSolverNets && typeof s.joinedSolverNets === 'object'
-        ? s.joinedSolverNets
-        : { _unknown: {} },
-    passwordRotatedAt: s.security?.lastPasswordRotationAt,
+    services: fleetServices.map((svc: any) => ({
+      evicted: Boolean(svc?.evicted),
+      // safeBound defaults to true (no notice) unless safeBoundToAgent is explicitly false.
+      safeBound: svc?.safeBoundToAgent !== false,
+    })),
+    joinedSolverNets,
+    // No /v1/status field for last password rotation today; follow-up Issue
+    // tracks adding it. Until then, password_rotation_due never fires.
+    passwordRotatedAt: undefined,
   };
 }
 
 export function useNotifications(): OperatorNotification[] {
   const connection = useConnectionState();
   const { restartPending } = useRestartPending();
+  // Share React Query cache with the existing app-level pollers (Overview's
+  // ['status'] at 5s, App.tsx's ['bootstrap'] at 1.5s). Specifying our own
+  // refetchInterval here would compete with those — react-query deduplicates
+  // in-flight requests but per Ritsu's review of #426, declaring two intervals
+  // on the same key is a latent surprise. Omit and inherit.
   const status = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
-    refetchInterval: 5000,
   });
   const bootstrap = useQuery({
     queryKey: ['bootstrap'],
     queryFn: () => api.getBootstrap(),
-    refetchInterval: 5000,
   });
 
   return useMemo(() => {
@@ -107,7 +128,7 @@ export function useNotifications(): OperatorNotification[] {
 
     const derived = deriveNotifications({
       bootstrap: bootstrap.data as DeriveInput['bootstrap'],
-      status: mapStatusToDeriveInput(status.data, restartPending),
+      status: mapStatusToDeriveInput(status.data, bootstrap.data, restartPending),
     });
     return [...derived].sort(
       (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
