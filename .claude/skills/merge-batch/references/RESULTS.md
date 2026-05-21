@@ -127,3 +127,37 @@ The skill identifies `refactor` stacks by "the `refactor` shape prefix on the PR
 ## Assessment
 
 The ordering reasoning holds for the synthetic batch. All four verification checks pass. The skill correctly applies Tier 1 (dependency ordering, bottom-up), Tier 3 (reactive overlap, adjacent + simpler first + deep-flag), and the independent FIFO rule. The two weaknesses are latent gaps — the inter-group ordering ambiguity (Weakness 1) is the more actionable one and should be addressed in Task 5's skill refinement. The Tier 2 detection gap (Weakness 2) is lower priority but worth a note in the skill's "Read first" section or a future iteration.
+
+---
+
+## Task 5 refinements (2026-05-21)
+
+### Edit 1 — Inter-group ordering rule (Weakness 1, actionable)
+
+**Before:** Step 2's "Independent PRs" section ended with "FIFO by PR number is correct for these." There was no rule governing how groups ordered relative to each other or stating that groups must be consecutive.
+
+**After:** A new "Inter-group ordering" subsection was added between "Independent PRs" and "Output":
+
+> All members of a Tier 1 dependency stack, a Tier 2 refactor stack, or a Tier 3 reactive-overlap group must stay **consecutive** in the merge order — a group is never interleaved with unrelated PRs. Once each group's internal order is fixed, order the groups (and any independent PRs) by each group's or PR's **lowest member number** (FIFO). This makes the full ordering deterministic when multiple groups and independent PRs are present.
+
+### Edit 2 — Tier 2 `gh-stack` authoritative-source note (Weakness 2, lower priority)
+
+**Before:** Tier 2 identified refactor stacks by "the `refactor` shape prefix on the PR title plus overlapping file paths" with no mention of `gh-stack`.
+
+**After:** Added a sentence making `gh-stack` the authoritative source when available, with the heuristic as fallback:
+
+> When `gh-stack` is available it is the authoritative source of the declared stack order; use `gh stack list` to read it. The title-prefix + overlapping-file-paths heuristic is the fallback for when `gh-stack` is not installed (see `references/merge-mechanics.md` — `gh-stack` is currently not installed in this environment).
+
+### Re-verification — synthetic batch
+
+Re-applied the refined Step 2 to the same five PRs:
+
+- Tier 1 stack {#101 → #103}: lowest member = 101. Must be consecutive.
+- Independent {#102}: lowest member = 102.
+- Tier 3 overlap pair {#104 → #105}: lowest member = 104. Must be consecutive.
+
+Inter-group ordering by lowest member: 101 < 102 < 104.
+
+**Result: single unambiguous order — #101, #103, #102, #104, #105.**
+
+The alternative identified in Weakness 1 (inserting #102 between #101 and #103) is now explicitly prohibited by the consecutiveness rule. The ordering is deterministic. Both weaknesses are resolved.

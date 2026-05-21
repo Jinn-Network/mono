@@ -65,7 +65,7 @@ If a stack has multiple levels (A blocks B which blocks C), order them A → B �
 
 ### Tier 2 — `refactor` stacks
 
-A `refactor` shape's PRs form a strangler-fig stack per the handbook mandate. The `refactor` coordinating agent decomposed its work into a stack; integrate those PRs in their declared stack order. Identify `refactor` stacks by the `refactor` shape prefix on the PR title plus overlapping file paths.
+A `refactor` shape's PRs form a strangler-fig stack per the handbook mandate. The `refactor` coordinating agent decomposed its work into a stack; integrate those PRs in their declared stack order. When `gh-stack` is available it is the authoritative source of the declared stack order; use `gh stack list` to read it. The title-prefix + overlapping-file-paths heuristic is the fallback for when `gh-stack` is not installed (see `references/merge-mechanics.md` — `gh-stack` is currently not installed in this environment).
 
 ### Tier 3 — Reactive overlap
 
@@ -77,6 +77,10 @@ Inspect the `files` lists of all remaining (non-stacked) PRs. Two PRs with inter
 ### Independent PRs
 
 PRs with no overlap and no dependency/refactor relationship can be ordered freely. FIFO by PR number is correct for these.
+
+### Inter-group ordering
+
+All members of a Tier 1 dependency stack, a Tier 2 refactor stack, or a Tier 3 reactive-overlap group must stay **consecutive** in the merge order — a group is never interleaved with unrelated PRs. Once each group's internal order is fixed, order the groups (and any independent PRs) by each group's or PR's **lowest member number** (FIFO). This makes the full ordering deterministic when multiple groups and independent PRs are present.
 
 ### Output
 
