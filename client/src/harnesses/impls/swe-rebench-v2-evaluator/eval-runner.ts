@@ -27,7 +27,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
@@ -50,6 +50,52 @@ export class EvalCouldNotGradeError extends Error {
   }
 }
 
+/**
+ * Thrown by `runEval` when the disk cannot be brought above the eval
+ * disk-floor even after a broad prune. A clean abort — the caller stops
+ * gracefully; no instance is graded, nothing is marked. Distinct from
+ * `EvalCouldNotGradeError`: this is operator-environment, retryable, and must
+ * never be turned into a `scorable: false` admission (#476).
+ */
+export class InsufficientDiskError extends Error {
+  readonly freeBytes: number;
+  readonly floorBytes: number;
+  constructor(freeBytes: number, floorBytes: number) {
+    const gb = (n: number): string => (n / 1_000_000_000).toFixed(1);
+    super(
+      `insufficient disk for swe-rebench eval: ${gb(freeBytes)} GB free, ` +
+        `need ≥ ${gb(floorBytes)} GB`,
+    );
+    this.name = 'InsufficientDiskError';
+    this.freeBytes = freeBytes;
+    this.floorBytes = floorBytes;
+  }
+}
+
+/** Default free-disk floor required before an eval round: 10 GB. */
+export const DEFAULT_EVAL_DISK_FLOOR_BYTES = 10_000_000_000;
+
+/** Resolve the disk floor: explicit option > `JINN_EVAL_DISK_FLOOR_GB` env > default. */
+export function resolveDiskFloorBytes(opt: number | undefined): number {
+  if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
+  const envRaw = process.env['JINN_EVAL_DISK_FLOOR_GB'];
+  if (envRaw !== undefined) {
+    const parsed = Number(envRaw);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed * 1_000_000_000);
+    console.warn(
+      `[swe-rebench-v2] JINN_EVAL_DISK_FLOOR_GB=${JSON.stringify(envRaw)} is not a positive ` +
+        `number — using default ${DEFAULT_EVAL_DISK_FLOOR_BYTES / 1_000_000_000} GB`,
+    );
+  }
+  return DEFAULT_EVAL_DISK_FLOOR_BYTES;
+}
+
+/** Production disk probe: free bytes on the filesystem backing the temp dir. */
+async function defaultFreeDiskBytes(): Promise<number> {
+  const s = await statfs(tmpdir());
+  return s.bavail * s.bsize;
+}
+
 export interface PythonEvalRunnerOptions {
   /** Path to the cloned SWE-rebench-V2 repo (cached locally). */
   upstreamRepoDir: string;
@@ -68,6 +114,18 @@ export interface PythonEvalRunnerOptions {
    * (logged elsewhere if desired) so a flaky `docker` never escapes `runEval`.
    */
   pruneRound?: (image: string) => Promise<void>;
+  /**
+   * Required free disk (bytes) before an eval round starts. Explicit value >
+   * `JINN_EVAL_DISK_FLOOR_GB` env > {@link DEFAULT_EVAL_DISK_FLOOR_BYTES}.
+   */
+  diskFloorBytes?: number;
+  /** Probe of free disk (bytes). Defaults to a `statfs` on the temp dir. */
+  freeDiskBytes?: () => Promise<number>;
+  /**
+   * Broad reclaim invoked when free disk is below the floor. Defaults to
+   * `docker system prune -f`. MUST NOT throw.
+   */
+  systemPrune?: () => Promise<void>;
 }
 
 /**
@@ -182,12 +240,36 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
 
 export class PythonEvalRunner implements EvalRunner {
   private readonly pruneRound: (image: string) => Promise<void>;
+  private readonly diskFloorBytes: number;
+  private readonly freeDiskBytes: () => Promise<number>;
+  private readonly systemPrune: () => Promise<void>;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
     this.pruneRound = opts.pruneRound ?? defaultPruneRound;
+    this.diskFloorBytes = resolveDiskFloorBytes(opts.diskFloorBytes);
+    this.freeDiskBytes = opts.freeDiskBytes ?? defaultFreeDiskBytes;
+    this.systemPrune = opts.systemPrune ?? (() => runDocker(['system', 'prune', '-f']));
+  }
+
+  /**
+   * Ensure enough free disk for an eval round. Below the floor → broad prune →
+   * re-probe; still below → `InsufficientDiskError` (clean abort). (#476)
+   */
+  private async ensureDiskHeadroom(): Promise<void> {
+    const free = await this.freeDiskBytes();
+    if (free >= this.diskFloorBytes) return;
+    console.warn(
+      `[swe-rebench-v2] low disk (${(free / 1e9).toFixed(1)} GB) — running docker system prune`,
+    );
+    await this.systemPrune();
+    const afterPrune = await this.freeDiskBytes();
+    if (afterPrune < this.diskFloorBytes) {
+      throw new InsufficientDiskError(afterPrune, this.diskFloorBytes);
+    }
   }
 
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
+    await this.ensureDiskHeadroom();
     try {
       return await this.runEvalImpl(args);
     } finally {

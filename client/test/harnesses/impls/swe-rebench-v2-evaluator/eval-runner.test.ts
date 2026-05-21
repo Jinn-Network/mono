@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   PythonEvalRunner,
   EvalCouldNotGradeError,
+  InsufficientDiskError,
   matchInfraSignature,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
@@ -286,6 +287,61 @@ describe('PythonEvalRunner', () => {
       // runEval must still resolve with the graded result.
       const result = await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-C' });
       expect(result.passed_match).toBe(true);
+    });
+  });
+
+  // #476 — pre-eval disk-floor guard: probe free disk before each eval; if
+  // below the floor, broad-prune and re-probe; if still below, abort cleanly
+  // with InsufficientDiskError (distinct from EvalCouldNotGradeError).
+  describe('disk-floor guard (#476)', () => {
+    const GB = 1_000_000_000;
+
+    it('proceeds without pruning when free disk is above the floor', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      let systemPruneCalled = false;
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        pruneRound: async () => { /* no-op */ },
+        freeDiskBytes: async () => 50 * GB,
+        systemPrune: async () => { systemPruneCalled = true; },
+        diskFloorBytes: 10 * GB,
+      });
+      await runner.runEval(REQUEST);
+      expect(systemPruneCalled).toBe(false);
+    });
+
+    it('prunes and proceeds when a low disk recovers above the floor after system prune', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const diskReadings = [5 * GB, 20 * GB];
+      let systemPruneCalled = false;
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        pruneRound: async () => { /* no-op */ },
+        freeDiskBytes: async () => diskReadings.shift() ?? 20 * GB,
+        systemPrune: async () => { systemPruneCalled = true; },
+        diskFloorBytes: 10 * GB,
+      });
+      const result = await runner.runEval(REQUEST);
+      expect(systemPruneCalled).toBe(true);
+      expect(result.passed_match).toBe(true);
+    });
+
+    it('throws InsufficientDiskError (clean abort) when disk stays below the floor after system prune', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        pruneRound: async () => { /* no-op */ },
+        freeDiskBytes: async () => 2 * GB,
+        systemPrune: async () => { /* no-op */ },
+        diskFloorBytes: 10 * GB,
+      });
+      const err = await runner.runEval(REQUEST).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(InsufficientDiskError);
+      expect((err as InsufficientDiskError).freeBytes).toBe(2 * GB);
+      expect((err as InsufficientDiskError).floorBytes).toBe(10 * GB);
     });
   });
 
