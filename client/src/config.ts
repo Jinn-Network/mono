@@ -254,7 +254,8 @@ export const JinnConfigSchema = z.object({
 
   /**
    * RPC endpoint for the L1 governance chain (Ethereum / Sepolia) where the
-   * JinnDistributor lives. Required when jinnDistributorAddress is set.
+   * JinnDistributor lives. Testnet defaults to a public Sepolia RPC; mainnet
+   * requires an operator override when L1 submit mode is configured.
    * Env: JINN_ETHEREUM_RPC_URL.
    */
   ethereumRpcUrl: z.string().url().optional(),
@@ -274,10 +275,10 @@ export const JinnConfigSchema = z.object({
   jinnL1Network: z.enum(['sepolia', 'ethereum']).default('sepolia'),
 
   /**
-   * JinnDistributor address on the L1 governance chain. Setting this enables
-   * the cross-chain claim loop. When set, ethereumRpcUrl MUST also be set.
-   * Resolved from jinnMviL1DeploymentPath when omitted; otherwise a manual
-   * override. Env: JINN_DISTRIBUTOR_ADDRESS.
+   * JinnDistributor address on the L1 governance chain. Required for
+   * jinnClaimSubmissionMode='submit'. When set for submit mode, ethereumRpcUrl
+   * MUST also be set. Resolved from jinnMviL1DeploymentPath when omitted;
+   * otherwise a manual override. Env: JINN_DISTRIBUTOR_ADDRESS.
    */
   jinnDistributorAddress: z
     .string()
@@ -314,6 +315,21 @@ export const JinnConfigSchema = z.object({
    * Env: JINN_MESSENGER_MODE.
    */
   jinnMessengerMode: z.enum(['canonical', 'mock']).default('canonical'),
+
+  /**
+   * Claim submission mode. `emit-only` only submits TaskClaimEmitter.emitClaim
+   * on L2 and records the resulting ticket. `submit` continues into the L1
+   * messenger/distributor path.
+   * Env: JINN_CLAIM_SUBMISSION_MODE.
+   */
+  jinnClaimSubmissionMode: z.enum(['emit-only', 'submit']).default('emit-only'),
+
+  /**
+   * Explicit operator gate for the cross-chain JINN claim loop. Disabled by
+   * default until the testnet PR1/PR3 dependencies are live.
+   * Env: JINN_CLAIM_LOOP_ENABLED=1|true|yes.
+   */
+  jinnClaimLoopEnabled: z.boolean().default(false),
 
   /**
    * How often the daemon ticks the cross-chain JINN claim loop (ms). Default
@@ -655,10 +671,13 @@ export const JinnConfigSchema = z.object({
    */
   reputationEnabled: z.boolean().default(false),
 }).refine(
-  (cfg) => !cfg.jinnDistributorAddress || !!cfg.ethereumRpcUrl,
+  (cfg) =>
+    cfg.jinnClaimSubmissionMode !== 'submit' ||
+    !cfg.jinnDistributorAddress ||
+    !!cfg.ethereumRpcUrl,
   {
     message:
-      'ethereumRpcUrl must be set when jinnDistributorAddress is configured ' +
+      'ethereumRpcUrl must be set when jinnDistributorAddress is configured in submit mode ' +
       '(env JINN_ETHEREUM_RPC_URL or config field). The cross-chain claim loop ' +
       'cannot reach the L1 governance chain without it.',
     path: ['ethereumRpcUrl'],
@@ -690,6 +709,8 @@ export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
  * historical sync — see ponder.config.ts).
  */
 export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
+
+export const DEFAULT_TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 
 export type ConfigLoadErrorCode =
@@ -815,6 +836,13 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_CLAIM_EMITTER_ADDRESS']) merged.jinnClaimEmitterAddress = env['JINN_CLAIM_EMITTER_ADDRESS'];
   if (env['JINN_MESSENGER_ADDRESS']) merged.jinnMessengerAddress = env['JINN_MESSENGER_ADDRESS'];
   if (env['JINN_MESSENGER_MODE']) merged.jinnMessengerMode = env['JINN_MESSENGER_MODE'];
+  if (env['JINN_CLAIM_SUBMISSION_MODE']) {
+    merged.jinnClaimSubmissionMode = env['JINN_CLAIM_SUBMISSION_MODE'];
+  }
+  if (env['JINN_CLAIM_LOOP_ENABLED'] !== undefined) {
+    const v = env['JINN_CLAIM_LOOP_ENABLED'].trim().toLowerCase();
+    merged.jinnClaimLoopEnabled = v === '1' || v === 'true' || v === 'yes';
+  }
   if (env['JINN_CLAIM_LOOP_INTERVAL_MS'] !== undefined) {
     merged.jinnClaimLoopIntervalMs = parseInt(env['JINN_CLAIM_LOOP_INTERVAL_MS'], 10);
   }
@@ -940,6 +968,10 @@ export function loadConfig(configPath?: string): JinnConfig {
       url: existing?.url ?? DEFAULT_TESTNET_DISCOVERY_URL,
       fallbackToOnchain: existing?.fallbackToOnchain ?? true,
     };
+  }
+
+  if (resolvedNetwork === 'testnet' && !merged.ethereumRpcUrl) {
+    merged.ethereumRpcUrl = DEFAULT_TESTNET_ETHEREUM_RPC_URL;
   }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
@@ -1092,6 +1124,8 @@ const TRACKED_ENV_VARS = [
   'JINN_CLAIM_EMITTER_ADDRESS',
   'JINN_MESSENGER_ADDRESS',
   'JINN_MESSENGER_MODE',
+  'JINN_CLAIM_SUBMISSION_MODE',
+  'JINN_CLAIM_LOOP_ENABLED',
   'JINN_CLAIM_LOOP_INTERVAL_MS',
   'JINN_STAKING_MODE',
   'JINN_TARGET_SERVICES',

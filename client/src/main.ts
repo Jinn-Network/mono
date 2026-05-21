@@ -62,6 +62,10 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildJinnClaimLoopConfig,
+  shouldWireJinnClaimL1Signer,
+} from './daemon/jinn-claim-loop-wiring.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
@@ -1750,8 +1754,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
   // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
   // Same key as L2; only the chain differs.
+  const shouldWireJinnClaimL1 = shouldWireJinnClaimL1Signer({
+    enabled: config.jinnClaimLoopEnabled,
+    intervalMs: config.jinnClaimLoopIntervalMs,
+    submissionMode: config.jinnClaimSubmissionMode,
+    distributorAddress: JINN_MVI_CONFIG.distributor,
+    ethereumRpcUrl: config.ethereumRpcUrl,
+  });
   const l1ClientsForJinnClaim =
-    JINN_MVI_CONFIG.distributor && config.ethereumRpcUrl
+    shouldWireJinnClaimL1 && config.ethereumRpcUrl
       ? {
           public: createJinnL1PublicClient(config.ethereumRpcUrl, config.jinnL1Network),
           wallet: createJinnL1WalletClient(
@@ -1761,15 +1772,33 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ),
         }
       : undefined;
-  if (l1ClientsForJinnClaim) {
+  const jinnClaimLoopConfig = buildJinnClaimLoopConfig({
+    enabled: config.jinnClaimLoopEnabled,
+    intervalMs: config.jinnClaimLoopIntervalMs,
+    submissionMode: config.jinnClaimSubmissionMode,
+    messengerMode: JINN_CLAIM_MESSENGER_MODE,
+    mvi: JINN_MVI_CONFIG,
+    l2Client: agentClients.publicClient,
+    l2ProofClient,
+    l2Wallet: agentClients.walletClient,
+    l1Clients: l1ClientsForJinnClaim,
+    store: earningStore,
+    chain: NETWORK_CHAIN,
+    optimismPortalAddress,
+    disputeGameFactoryAddress,
+  });
+  if (jinnClaimLoopConfig) {
     console.log(
-      `[main] JinnClaimLoop: enabled (mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
+      `[main] JinnClaimLoop: enabled (submission=${config.jinnClaimSubmissionMode}, ` +
+      `mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
       `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${JINN_MVI_CONFIG.distributor}, ` +
       `emitter=${JINN_MVI_CONFIG.claimEmitter})`,
     );
+  } else if (!config.jinnClaimLoopEnabled) {
+    console.log('[main] JinnClaimLoop: disabled (jinnClaimLoopEnabled=false)');
   } else {
     console.log(
-      `[main] JinnClaimLoop: disabled (JinnDistributor artifact/override or JINN_ETHEREUM_RPC_URL not set)`,
+      `[main] JinnClaimLoop: disabled (missing claim-loop artifacts, interval disabled, or L1 submit wiring)`,
     );
   }
 
@@ -2358,29 +2387,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    jinnClaim:
-      l1ClientsForJinnClaim &&
-      JINN_MVI_CONFIG.claimEmitter &&
-      JINN_MVI_CONFIG.messenger &&
-      JINN_MVI_CONFIG.distributor &&
-      config.jinnClaimLoopIntervalMs > 0
-        ? {
-            intervalMs: config.jinnClaimLoopIntervalMs,
-            l2Client: agentClients.publicClient,
-            l2ProofClient,
-            l2Wallet: agentClients.walletClient,
-            l1Client: l1ClientsForJinnClaim.public,
-            l1Wallet: l1ClientsForJinnClaim.wallet,
-            store: earningStore,
-            chain: NETWORK_CHAIN,
-            claimEmitterAddress: JINN_MVI_CONFIG.claimEmitter as `0x${string}`,
-            distributorAddress: JINN_MVI_CONFIG.distributor as `0x${string}`,
-            messengerAddress: JINN_MVI_CONFIG.messenger as `0x${string}`,
-            messengerMode: JINN_CLAIM_MESSENGER_MODE,
-            optimismPortalAddress,
-            disputeGameFactoryAddress,
-          }
-        : undefined,
+    jinnClaim: jinnClaimLoopConfig,
     restorationEngine: {
       paths: {
         workingDirRoot: config.engine.workingDirRoot,
