@@ -870,3 +870,44 @@ describe('OverviewPage activity surface (issue #219)', () => {
     expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
   });
 });
+
+// ── IdentityCard promotion — spec §2.2 ─────────────────────────────────────
+//
+// IdentityCard is a first-class identity surface (spec §2.2). It must render
+// above the fold on /overview without requiring the operator to expand the
+// "Advanced details" disclosure. This test fails before the promotion and
+// passes after IdentityCard is moved out of <AdvancedDetails>.
+describe('OverviewPage IdentityCard (spec §2.2)', () => {
+  it('renders IdentityCard above the fold (not buried under Advanced details) — spec §2.2', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: {
+        services: [
+          {
+            index: 0,
+            step: 'complete',
+            agentId: 42,
+            safeAddress: '0xSafe0000000000000000000000000000000000AA',
+            safeBoundToAgent: true,
+          },
+        ],
+      },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    // IdentityCard section header "Identity" must be in the DOM without
+    // expanding the Advanced details disclosure.
+    await waitFor(() => {
+      expect(screen.getByText('Identity')).toBeTruthy();
+    });
+
+    // Confirm IdentityCard is NOT a descendant of the AdvancedDetails toggle.
+    const identityEl = screen.getByText('Identity');
+    const advancedToggle = screen.getByRole('button', { name: /advanced details/i });
+    expect(advancedToggle.parentElement?.contains(identityEl)).toBe(false);
+  });
+});

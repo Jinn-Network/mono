@@ -375,13 +375,13 @@ export function OverviewPage(): JSX.Element {
        */}
       <ActivitySections />
 
+      <IdentityCard
+        agentId={services[0]?.agentId ?? null}
+        chain="Base Sepolia"
+        safeAddress={services[0]?.safeAddress ?? null}
+        services={services}
+      />
       <AdvancedDetails>
-        <IdentityCard
-          agentId={services[0]?.agentId ?? null}
-          chain="Base Sepolia"
-          safeAddress={services[0]?.safeAddress ?? null}
-          services={services}
-        />
         <HarnessStatusPanel />
       </AdvancedDetails>
     </div>
