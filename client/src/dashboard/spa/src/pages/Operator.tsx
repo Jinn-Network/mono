@@ -1,5 +1,4 @@
 import { Link } from 'wouter';
-import { SecuritySection } from './configuration/SecuritySection.js';
 import { useHashSection } from './configuration/useHashSection.js';
 import { OperatorDataMarket } from './operator/OperatorDataMarket.js';
 import { LiveNowBand, ACTIVITY_TARGET_DASHBOARD } from './overview/LiveNowBand.js';
@@ -72,7 +71,6 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
         defaultExpanded={expandedSection === 'data-market'}
         onRestartPending={onRestartPending}
       />
-      <SecuritySection defaultExpanded={expandedSection === 'security'} />
     </div>
   );
 }
