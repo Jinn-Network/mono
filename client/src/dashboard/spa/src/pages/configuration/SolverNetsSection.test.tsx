@@ -4,21 +4,19 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SolverNetsSection } from './SolverNetsSection.js';
-import { api } from '../../api/client.js';
 
 /**
- * SolverNetsSection now has two sub-blocks: Joined (operator's joined
- * SolverNets, edit-in-place via JoinedNetCard) above the discovery
- * RegistryCatalog. Tests cover both blocks rendering and the joined-block
- * empty state.
+ * SolverNetsSection now wraps only the RegistryCatalog (DISCOVER block).
+ * The JOINED block was extracted to pages/operator/MembershipsTab.tsx (Task 5.3).
+ * This file will be deleted in Task 5.4 along with SolverNetsSection once
+ * RegistryTab is extracted.
  */
 
 vi.mock('../../api/client.js', () => ({
   api: {
     getSolverNets: vi.fn(),
     operator: {
-      listJoined: vi.fn(),
-      join: vi.fn(),
+      listJoined: async () => ({ joinedSolverNets: {} }),
     },
     solvernets: {
       listRegistry: async () => ({
@@ -57,16 +55,6 @@ function withProviders(node: JSX.Element): JSX.Element {
   );
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  vi.mocked(api.getSolverNets).mockResolvedValue({
-    schemaVersion: 1,
-    generatedAt: '2026-05-07T00:00:00Z',
-    nets: [],
-  });
-  vi.mocked(api.operator.listJoined).mockResolvedValue({ joinedSolverNets: {} });
-});
-
 afterEach(() => {
   window.location.hash = '';
   cleanup();
@@ -82,14 +70,6 @@ describe('SolverNetsSection', () => {
     expect(screen.getByTestId('registry-join-cta').getAttribute('href')).toBe(
       '/operator/join/bafybeiaaa',
     );
-  });
-
-  it('renders the Joined block with empty state when no SolverNets are joined', async () => {
-    render(withProviders(<SolverNetsSection />));
-    await waitFor(() =>
-      expect(screen.getByTestId('solvernets-joined-empty')).toBeTruthy(),
-    );
-    expect(screen.getByText(/Joined · 0/i)).toBeTruthy();
   });
 
   it('anchors and focuses the SolverNets section for /operator#solvernets', async () => {
@@ -113,79 +93,5 @@ describe('SolverNetsSection', () => {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       HTMLElement.prototype.focus = originalFocus;
     }
-  });
-
-  it('renders one JoinedNetCard per joined SolverNet', async () => {
-    vi.mocked(api.operator.listJoined).mockResolvedValue({
-      joinedSolverNets: {
-        bafybeiaaa: {
-          manifestCid: 'bafybeiaaa',
-          name: 'Prediction Markets',
-          roles: ['solver'],
-          harness: 'claude-code-learner',
-          plugins: [],
-          model: 'claude-haiku-4-5-20251001',
-        },
-        bafybeibbb: {
-          manifestCid: 'bafybeibbb',
-          name: 'Other Net',
-          roles: ['evaluator'],
-          harness: 'legacy-claude',
-          plugins: ['plug-1'],
-          model: 'claude-opus-4-7',
-        },
-      },
-    });
-    render(withProviders(<SolverNetsSection />));
-    await waitFor(() =>
-      expect(screen.getAllByTestId('joined-net-card')).toHaveLength(2),
-    );
-    expect(screen.getByText(/Joined · 2/i)).toBeTruthy();
-    // Joined cards are keyed by manifest cid; Discover filters joined
-    // manifests out of the catalog.
-    const cards = screen.getAllByTestId('joined-net-card');
-    expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeiaaa')).toBeTruthy();
-    expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeibbb')).toBeTruthy();
-    expect(screen.getByText('Other Net')).toBeTruthy();
-  });
-
-  it('auto-expands the joined card whose cid matches joinedHashFragment', async () => {
-    vi.mocked(api.operator.listJoined).mockResolvedValue({
-      joinedSolverNets: {
-        bafybeiaaa: {
-          manifestCid: 'bafybeiaaa',
-          name: 'Prediction Markets',
-          roles: ['solver'],
-          harness: 'claude-code-learner',
-          plugins: [],
-          model: 'claude-haiku-4-5-20251001',
-        },
-        bafybeibbb: {
-          manifestCid: 'bafybeibbb',
-          name: 'Other Net',
-          roles: ['evaluator'],
-          harness: 'legacy-claude',
-          plugins: [],
-          model: 'claude-opus-4-7',
-        },
-      },
-    });
-    render(
-      withProviders(
-        <SolverNetsSection joinedHashFragment="bafybeibbb/harness" />,
-      ),
-    );
-    await waitFor(() => {
-      const cards = screen.getAllByTestId('joined-net-card');
-      expect(cards).toHaveLength(2);
-    });
-    const targetCard = screen
-      .getAllByTestId('joined-net-card')
-      .find((el) => el.getAttribute('data-manifest-cid') === 'bafybeibbb');
-    expect(targetCard?.getAttribute('data-expanded')).toBe('true');
-    const otherCard = screen
-      .getAllByTestId('joined-net-card')
-      .find((el) => el.getAttribute('data-manifest-cid') === 'bafybeiaaa');
-    expect(otherCard?.getAttribute('data-expanded')).toBe('false');
   });
 });
