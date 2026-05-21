@@ -1,17 +1,54 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
-import { NetworkCard } from './overview/NetworkCard.js';
-import { OperatorCard } from './overview/OperatorCard.js';
-import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
-import {
-  detectJoinedSolverNet,
-  operatorWaitingMessage,
-  type BootstrapWithSolverNets,
-} from './overview/joined-solver-net.js';
-import { ActivitySections } from './overview/ActivitySections.js';
+import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
+
+/**
+ * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
+ * payload has fleet/service/keystore plumbing we don't need here; this
+ * type captures the joined-SolverNet shapes per spec §12 — both the new
+ * `joinedSolverNets[<manifestCid>]` shape and the legacy `solverNets`
+ * fallback during the Tasks 21/22 migration window.
+ */
+interface BootstrapWithSolverNets {
+  solverNets?: Record<
+    string,
+    {
+      name?: string;
+      manifestCid?: string;
+      enabled?: boolean;
+      roles?: string[];
+      harness?: string;
+    }
+  >;
+  joinedSolverNets?: Record<
+    string,
+    {
+      name?: string;
+      manifestCid?: string;
+      roles?: string[];
+      harness?: string;
+    }
+  >;
+}
+
+interface TaskRunRow {
+  requestId: string;
+  taskId?: string | null;
+  taskCid?: string;
+  solverType?: string | null;
+  state: string;
+  taskRole: 'restoration' | 'evaluation' | null;
+  implName?: string | null;
+  windowStartTs?: number;
+  windowEndTs?: number;
+  stateUpdatedAt: number;
+  manifestCid?: string | null;
+  deliveryTxHash?: string | null;
+  failureReason?: string | null;
+}
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -60,8 +97,15 @@ interface OverviewStatusV1 {
       settledFailed?: number;
       localErrors?: number;
     };
-    inFlight?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
-    recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
+    /**
+     * Full TaskRunSummary as served by the daemon ({@link
+     * client/src/api/task-runs-build.ts}). The Activity card uses
+     * manifestCid + role + state + harness + window timestamps; older
+     * surfaces that only need state/role/stateUpdatedAt still work via
+     * the wider shape.
+     */
+    inFlight?: TaskRunRow[];
+    recentTasks?: TaskRunRow[];
   };
   predictionV1?: {
     /**
@@ -93,7 +137,7 @@ interface OverviewStatusV1 {
       settledFailed?: number;
       localErrors?: number;
     };
-    recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
+    recentTasks?: TaskRunRow[];
   };
 }
 
@@ -218,54 +262,6 @@ export function OverviewPage(): JSX.Element {
     refetchInterval: 30_000,
   });
 
-  const operator = status?.predictionV1?.operator;
-  // Spec §12: surface the operator's joined SolverNets from the
-  // `solverNets[manifestCid]` config block. Until Task 22 retires the
-  // legacy short-name-keyed shape, we accept both shapes in
-  // `detectJoinedSolverNet`. Falling back to the predictionV1 status payload
-  // covers the current Phase-1 single-net world where the daemon writes
-  // `solverNets.prediction.enabled` rather than a manifestCid entry.
-  const joined = detectJoinedSolverNet(
-    bootstrap?.joinedSolverNets,
-    bootstrap?.solverNets,
-    operator?.solverNet?.enabled === true,
-    operator?.solverNet?.roles,
-  );
-  const taskRunTotals = status?.taskRuns?.totals;
-  const predictionTotals = status?.predictionV1?.totals;
-  // Per jinn-mono-0t6p: the NetworkCard's counters must be scoped to the
-  // joined SolverNet. `predictionV1.totals` is filtered to prediction task
-  // runs in the build layer, while
-  // `taskRuns.totals` is global across every solver type the operator's
-  // SQLite has ever observed. The discriminator is the joined net's scoped
-  // status key (see `detectJoinedSolverNet`): both the legacy short-name
-  // `solverNets.prediction` path AND the manifest-keyed
-  // `joinedSolverNets[<cid>]` path route to `predictionV1` via the bound
-  // harness, so users on either shape get scoped counters. For any other
-  // joined net we fall back to taskRunTotals (no scoped payload exists for
-  // those SolverNets today — captured as a follow-up risk).
-  const preferPredictionTotals =
-    joined?.scopedStatusKey === 'predictionV1' && predictionTotals !== undefined;
-  const primaryTotals = preferPredictionTotals ? predictionTotals : taskRunTotals;
-  const fallbackTotals = preferPredictionTotals ? taskRunTotals : predictionTotals;
-  // Old daemons only ship `failed`; surface it under `localErrors` so the
-  // operator's debugging signal isn't lost during the rollout window —
-  // anything that reaches `localErrors` here pre-dates the on-chain split.
-  const legacyFailedFallback =
-    primaryTotals?.failed ?? fallbackTotals?.failed ?? 0;
-  const settledFailed =
-    primaryTotals?.settledFailed ?? fallbackTotals?.settledFailed;
-  const localErrors =
-    primaryTotals?.localErrors ?? fallbackTotals?.localErrors;
-  const totals = {
-    tasks: primaryTotals?.observedTasks ?? fallbackTotals?.observedTasks ?? 0,
-    active: primaryTotals?.activeTaskRuns ?? fallbackTotals?.activeTaskRuns ?? 0,
-    solutions: primaryTotals?.solutions ?? fallbackTotals?.solutions ?? 0,
-    verdicts: primaryTotals?.verdicts ?? fallbackTotals?.verdicts ?? 0,
-    settledFailed: settledFailed ?? 0,
-    localErrors:
-      localErrors ?? (settledFailed === undefined ? legacyFailedFallback : 0),
-  };
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,
     safeAddress: s.safeAddress ?? '',
@@ -284,7 +280,74 @@ export function OverviewPage(): JSX.Element {
   const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
-  const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
+
+  // ── Activity card inputs ────────────────────────────────────────────
+  //
+  // Joined: project `bootstrap.joinedSolverNets` into the ActivityCard
+  // shape. The legacy short-name `solverNets` shape (a relic of pre-spec-§12
+  // configs) is accepted as a fallback so operators who haven't restarted
+  // since the migration still see their net.
+  const joinedNets: ActivityJoinedNet[] = useMemo(() => {
+    const out: ActivityJoinedNet[] = [];
+    const j = bootstrap?.joinedSolverNets;
+    if (j) {
+      for (const [key, entry] of Object.entries(j)) {
+        if (!entry) continue;
+        out.push({
+          name: entry.name ?? entry.manifestCid ?? key,
+          manifestCid: entry.manifestCid ?? key,
+          roles: Array.isArray(entry.roles) ? entry.roles : [],
+          harness: entry.harness,
+        });
+      }
+    }
+    if (out.length > 0) return out;
+    // Fallback: legacy shape.
+    const legacy = bootstrap?.solverNets;
+    if (legacy) {
+      for (const [key, entry] of Object.entries(legacy)) {
+        if (!entry) continue;
+        const roles = Array.isArray(entry.roles) ? entry.roles : [];
+        if (entry.enabled !== true && roles.length === 0) continue;
+        out.push({
+          name: entry.name ?? key,
+          manifestCid: entry.manifestCid ?? key,
+          roles,
+          harness: entry.harness,
+        });
+      }
+    }
+    return out;
+  }, [bootstrap]);
+
+  // Tasks: union of `taskRuns.recentTasks` and (when present)
+  // `predictionV1.recentTasks`, deduplicated by requestId. The daemon emits
+  // the same task into both arrays for prediction.v1 runs; we take the
+  // taskRuns shape (which carries manifestCid + harness) as canonical.
+  const activityTasks: ActivityTask[] = useMemo(() => {
+    const out = new Map<string, ActivityTask>();
+    const ingest = (rows: TaskRunRow[] | undefined): void => {
+      if (!rows) return;
+      for (const r of rows) {
+        if (!r.requestId) continue;
+        if (out.has(r.requestId)) continue;
+        out.set(r.requestId, {
+          requestId: r.requestId,
+          manifestCid: r.manifestCid ?? null,
+          taskRole: r.taskRole,
+          state: r.state,
+          implName: r.implName ?? null,
+          windowStartTs: r.windowStartTs ?? 0,
+          stateUpdatedAt: r.stateUpdatedAt,
+          deliveryTxHash: r.deliveryTxHash ?? null,
+        });
+      }
+    };
+    ingest(status?.taskRuns?.recentTasks);
+    ingest(status?.taskRuns?.inFlight);
+    ingest(status?.predictionV1?.recentTasks);
+    return Array.from(out.values()).sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
+  }, [status]);
 
   // Node Health derivation. Daemon status is "running" as long as the most
   // recent /v1/status fetch succeeded — useQuery keeps stale data across a
@@ -388,34 +451,15 @@ export function OverviewPage(): JSX.Element {
           </div>
         )}
 
-        {/* Public counters for the active SolverNet surfaced by this operator. */}
-        <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
-
         {/*
-         * Operator-side state — shown when the operator has joined a SolverNet.
-         * The empty-state ("no SolverNets joined") is handled globally via the
-         * `no_solvernets_joined` notification kind in AppShell's NotificationsList
-         * (Task 1.5 / Task 1.6). No local empty-state rendering here.
+         * Activity — the operator's view of their node's work. One surface
+         * replaces the prior Network · counters / Solving on / In-flight /
+         * Recent / Harness Status quintet. The aggregate counters are gone
+         * (the marketplace explorer is the right place for those); the
+         * detailed per-task table is here so the operator sees *what
+         * happened* on each task. Spec §2.4 Memberships + §2.6 Tasks.
          */}
-        {joined && (
-          <OperatorCard
-            name={joined.name}
-            configId={joined.configId}
-            roles={joined.roles}
-            state="live"
-            waitingMessage={waitingMessage}
-          />
-        )}
-
-        {/*
-         * Live activity is a primary Dashboard section (issue #219): an
-         * operator who runs `jinn run` and lands on /overview must see what
-         * their daemon is doing right now without navigating to Settings.
-         * The same surface renders on the dedicated /overview/activity page.
-         */}
-        <ActivitySections />
-
-        <HarnessStatusPanel />
+        <ActivityCard joined={joinedNets} tasks={activityTasks} />
       </div>
 
       {/* ── RIGHT RAIL ───────────────────────────────────────────────── */}

@@ -4,7 +4,6 @@ import { Router, Route, Switch, Redirect, useLocation } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
-import { OverviewActivityPage } from './pages/OverviewActivity.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
@@ -113,7 +112,6 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
-          <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview"><OverviewPage /></Route>
           <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
@@ -126,21 +124,6 @@ describe('App routes', () => {
     expect(screen.getByText(/^node health$/i)).toBeTruthy();
     expect(screen.getByText(/^wallet$/i)).toBeTruthy();
     expect(screen.getByText(/^rewards$/i)).toBeTruthy();
-  });
-
-  it('renders OverviewActivityPage on /overview/activity', async () => {
-    render(
-      withProviders(
-        <Switch>
-          <Route path="/overview/activity"><OverviewActivityPage /></Route>
-          <Route path="/overview"><OverviewPage /></Route>
-        </Switch>,
-        '/overview/activity',
-      ),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId('overview-activity')).toBeTruthy();
-    });
   });
 
   it('renders OperatorPage on /operator', async () => {
@@ -161,8 +144,8 @@ describe('App routes', () => {
   });
 
   // Issue #219: the live activity surface belongs on /overview (the
-  // Dashboard), not on /operator (Settings). Assert both placements at the
-  // route level: present on /overview, absent on /operator.
+  // Dashboard), not on /operator (Settings). After the IA reshuffle the
+  // surface is the Activity card.
   it('renders the activity surface on /overview, not on /operator', async () => {
     const { unmount } = render(
       withProviders(
@@ -174,9 +157,8 @@ describe('App routes', () => {
       ),
     );
     await waitFor(() => {
-      expect(screen.getByTestId('overview-activity-in-flight')).toBeTruthy();
+      expect(screen.getByTestId('activity-card')).toBeTruthy();
     });
-    expect(screen.getByTestId('overview-activity-recent')).toBeTruthy();
     unmount();
 
     render(
@@ -189,8 +171,7 @@ describe('App routes', () => {
       ),
     );
     await waitFor(() => expect(screen.getByTestId('operator-page')).toBeTruthy());
-    expect(screen.queryByTestId('overview-activity-in-flight')).toBeNull();
-    expect(screen.queryByTestId('overview-activity-recent')).toBeNull();
+    expect(screen.queryByTestId('activity-card')).toBeNull();
   });
 
   it('renders LauncherPage on /launcher', async () => {

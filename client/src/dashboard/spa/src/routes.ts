@@ -12,7 +12,6 @@ export interface RouteSpec {
 
 export const ROUTES: RouteSpec[] = [
   { path: '/', label: 'root' },
-  { path: '/overview/activity', label: 'overview-activity' },
   { path: '/overview', label: 'overview' },
   {
     path: '/operator/join/:cid',
