@@ -301,3 +301,52 @@ disallow them and note that spec references belong in comments.
 The skill is ready for use. The weaknesses are edge cases that surface at the quality
 margin; they will matter most when the dispatcher hands issues to an autonomous agent
 with no human correction loop.
+
+---
+
+## Task 5 refinements
+
+Date: 2026-05-21
+Applied by: Task 5 of `docs/superpowers/plans/2026-05-21-file-issue-skill.md`
+
+### Four targeted edits made to SKILL.md
+
+**Edit 1 — Inferred file paths must be flagged (Finding 1 / Scenario A)**
+
+In Step 4 `Files/components` template line:
+
+Before: `[Path(s) and surface name(s), or "Unknown."]`
+
+After: `[Path(s) and surface name(s), or "Unknown." If a path was inferred by you — not stated by the person — mark it \`(estimated)\`. If genuinely uncertain, write "Unknown." Internal repo paths (spec files, source files) are welcome here; they help autonomous agents navigate the codebase.]`
+
+**Edit 2 — AC precondition state required (Finding 2 / Scenario B)**
+
+In Step 2, after the existing binary-AC sentence:
+
+Added: `Each criterion must also name the starting condition: phrase it as "After X, Y is true" so the test precondition is unambiguous.`
+
+The Common mistakes table example already showed the "After X, Y is visible" form — this change makes it a rule, not just a hint.
+
+**Edit 3 — Docs-shape ACs need content-describing guidance (Finding 3 / Scenario C)**
+
+Added a new `docs` shape note paragraph at the end of Step 4 (after the quality-bar sentence):
+
+> For `docs` issues, acceptance criteria should describe what the new or updated content must *contain* (e.g. "The doc explains how to join a SolverNet, including the `joinedSolverNets` config entry"), not what it does not break. "No existing doc is broken" is unbounded and low-value for an autonomous agent — replace it with a specific, verifiable content statement.
+
+**Edit 4 — Internal repo paths are permitted; the ban is on external URLs only (Finding 4 / Scenario C)**
+
+Three locations updated for consistency:
+
+- Step 4 intro sentence: reworded from "External references go in comments" to explicitly distinguish "External web URLs and Slack links go in comments … internal repo paths (spec files, source files) belong in `Files/components` and are encouraged."
+- Step 7 self-check: `no external URLs in the body` → `no external URLs or Slack links in the body (internal repo paths in \`Files/components\` are fine and encouraged)`.
+- Common mistakes table: `Putting external links or Slack references in the body` → `Putting external URLs or Slack links in the body` with fix text that explicitly carves out internal paths.
+
+### Docs-scenario re-verification
+
+Re-ran Scenario C (dogfooder: "I was trying to figure out how to join a SolverNet...") with the refined SKILL.md.
+
+**Finding 3 — resolved.** With the `docs` shape note present, the agent no longer produces a catch-all "No existing operator doc is broken" criterion. Instead, the two content-describing criteria ("contains a section covering how to join a SolverNet" and "explains what a manifest CID is and where to find it") are retained and the third criterion is dropped or replaced with a specific, bounded content check (e.g., "The doc names the `joinedSolverNets` config key and explains that a daemon restart is required"). All ACs now describe verifiable content, not the absence of regressions.
+
+**Finding 4 — resolved.** The `Files/components` entry `spec/2026-05-05-solvernet-creation-and-launch.md` is now unambiguously correct practice — the Step 4 template, Step 7 self-check, and Common mistakes table all explicitly permit internal repo paths in that section. The agent would not flag or remove it; it would retain the spec reference as a codebase-navigation hint for the autonomous implementer.
+
+**Re-verification verdict:** Both weaknesses from Scenario C are gone. The docs-scenario draft now produces content-oriented ACs and correctly treats the spec file path as an encouraged reference, not a policy violation.

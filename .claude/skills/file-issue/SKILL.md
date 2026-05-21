@@ -26,7 +26,7 @@ The person is mid-dogfooding with fresh context. Do not over-question. You need 
 
 Ask open questions conversationally. Reserve `AskUserQuestion` for the structured picks (Issue Type confirmation in Step 3, Priority in Step 5).
 
-Acceptance criteria must be **binary** — each criterion is a yes/no, testable question. "The value updates" is binary. "It looks good" is not.
+Acceptance criteria must be **binary** — each criterion is a yes/no, testable question. "The value updates" is binary. "It looks good" is not. Each criterion must also name the starting condition: phrase it as "After X, Y is true" so the test precondition is unambiguous.
 
 ## Step 3 — Classify the Issue Type
 
@@ -50,7 +50,7 @@ Confirm with the person: "I'd classify this as **`fix`** — does that match wha
 
 ## Step 4 — Draft the issue body
 
-The issue body has four short sections. Keep it tight — scoped issues with binary acceptance criteria and file/component hints raise autonomous-implementation merge rates; long bodies and external-reference-heavy issues lower them. External references go in comments after filing, not in the body.
+The issue body has four short sections. Keep it tight — scoped issues with binary acceptance criteria and file/component hints raise autonomous-implementation merge rates; long bodies lower them. External web URLs and Slack links go in comments after filing, not in the body; internal repo paths (spec files, source files) belong in `Files/components` and are encouraged.
 
 **Title:** a one-line summary, no shape prefix (the Issue Type field carries the shape).
 
@@ -65,7 +65,7 @@ The issue body has four short sections. Keep it tight — scoped issues with bin
 - [ ] [Binary yes/no statement.]
 - [ ] [Binary yes/no statement, if there are multiple.]
 
-**Files/components.** [Path(s) and surface name(s), or "Unknown."]
+**Files/components.** [Path(s) and surface name(s), or "Unknown." If a path was inferred by you — not stated by the person — mark it `(estimated)`. If genuinely uncertain, write "Unknown." Internal repo paths (spec files, source files) are welcome here; they help autonomous agents navigate the codebase.]
 ```
 
 **Worked example — use this as the model:**
@@ -89,6 +89,8 @@ claim-status query that feeds it.
 ```
 
 **Quality bar:** if an acceptance criterion cannot be answered yes or no by running the app or a test, rewrite it until it can.
+
+**`docs` shape note:** for `docs` issues, acceptance criteria should describe what the new or updated content must *contain* (e.g. "The doc explains how to join a SolverNet, including the `joinedSolverNets` config entry"), not what it does not break. "No existing doc is broken" is unbounded and low-value for an autonomous agent — replace it with a specific, verifiable content statement.
 
 ## Step 5 — Set the routing fields
 
@@ -142,7 +144,7 @@ Before you output the draft to the person, verify:
 - [ ] All four body sections are present and non-empty (or `Files/components: Unknown`).
 - [ ] Every acceptance criterion is binary — answerable yes/no.
 - [ ] All three routing fields are set (`Blocked on`, `Effort`, `Priority`).
-- [ ] The body is short — no paragraph longer than 4 sentences, no external URLs in the body.
+- [ ] The body is short — no paragraph longer than 4 sentences, no external URLs or Slack links in the body (internal repo paths in `Files/components` are fine and encouraged).
 
 If any check fails, fix before showing the draft.
 
@@ -154,5 +156,5 @@ If any check fails, fix before showing the draft.
 | Over-interviewing — asking for information already in the opening | Re-read the person's message; infer what you can |
 | Filing without confirmation | Always show the draft first |
 | Leaving a routing field unset | All three fields must be set; an issue without them is not triage-complete |
-| Putting external links or Slack references in the body | Put context-links in a comment after filing; keep the body self-contained |
+| Putting external URLs or Slack links in the body | Put web/Slack links in a comment after filing; internal repo paths in `Files/components` are fine |
 | Long body with multiple problems bundled | One issue per problem; offer to file separate issues if scope is unclear |
