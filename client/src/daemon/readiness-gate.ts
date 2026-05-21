@@ -5,11 +5,7 @@
  * See docs/superpowers/specs/2026-05-15-per-harness-auth-design.md.
  */
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
-
-export interface GateLogger {
-  warn(msg: string): void;
-  info(msg: string): void;
-}
+import type { GateLogger } from './gate-logger.js';
 
 // Per-manifestCid status memo so we only log once per ready ↔ not-ready transition.
 // MODULE-LEVEL STATE — see _resetReadinessGateMemoForTests below for the test contract.
