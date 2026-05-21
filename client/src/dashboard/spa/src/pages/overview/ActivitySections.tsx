@@ -7,16 +7,16 @@ import { EventStreamList } from '../../components/EventStreamList.js';
  * Live activity surface — the operator's view of what their daemon has been
  * doing. Two sections:
  *
- *   • In flight — per-task list of currently-active task runs across SolverNets.
- *   • Recent — full activity event stream (activity.recent from /v1/status).
+ *   • In flight — per-task list of currently-active task runs across SolverNets
+ *     (read from polled /v1/status, since task state isn't an "event" per se).
+ *   • Recent — live event stream from /v1/events via `useEventStream()`, rendered
+ *     through the shared <EventStreamList> component. Per OPERATOR-APP-SPEC §3.3,
+ *     all event-based surfaces consume the same SSE vocabulary.
  *
  * Rendered as a primary section on /overview (the Dashboard) so an operator
  * who runs `jinn run` and lands on the dashboard sees live task/event
  * activity without navigating away (issue #219). Also reused by the dedicated
  * /overview/activity drilldown page.
- *
- * v1 limitations (see plan §"Out of scope"):
- *   • activity.recent is capped at 12 events. Pagination is a follow-up.
  */
 
 const TERMINAL_STATES = new Set(['COMPLETE', 'FAILED']);
