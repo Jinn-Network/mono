@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SweRebenchV2EvaluatorHarness } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
+import { HttpHfFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import {
@@ -600,6 +601,58 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     const runner = makeRunner.mock.results[0]?.value as { runEval: ReturnType<typeof vi.fn> };
     expect(runner.runEval).toHaveBeenCalledTimes(2);
   });
+
+  it('retries a transient HF 429 during substrate recheck and still emits a verdict', async () => {
+    const hfRow = {
+      instance_id: 'unidata__netcdf-c-1925',
+      repo: 'Unidata/netcdf-c',
+      image_name: 'docker.io/swerebenchv2/test:latest',
+      FAIL_TO_PASS: ['test_a'],
+      PASS_TO_PASS: ['test_b'],
+      test_patch: 'diff --git ...',
+      install_config: { test_cmd: 'make test', log_parser: 'pytest' },
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        rows: [{ row: hfRow }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetcher = new HttpHfFetcher({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retryBackoffMs: [0],
+      minRequestIntervalMs: 0,
+      sleep: vi.fn(async () => undefined),
+    });
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok after retry',
+        exitCode: 0,
+      }),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        fetcher,
+        runner,
+        uploadToIpfs: vi.fn().mockResolvedValue('bafy-retry-log'),
+        stateDir: implStateDir,
+      },
+    });
+
+    const sol = await harness.run(buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    ));
+
+    expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(true);
+  });
 });
 
 describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () => {
@@ -804,5 +857,34 @@ describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () =
     expect(sol.gating).toMatchObject({ verdict: 'PASS' });
     // Confirm the runner was actually invoked (grading happened).
     expect(runner.runEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the evaluator pool once and shares it across run() calls', async () => {
+    await seedAdmission(stateDir, INSTANCE_ID, {
+      scorable: true,
+      rowHash: MATCHING_ROW_HASH,
+    });
+    const loadPool = makeMatchingPoolLoader();
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    };
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      loadPool,
+      runner,
+      uploadToIpfs: vi.fn().mockResolvedValue('bafy-ok'),
+    });
+
+    await harness.run(makeCtx());
+    await harness.run(makeCtx());
+
+    expect(loadPool).toHaveBeenCalledTimes(1);
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
   });
 });

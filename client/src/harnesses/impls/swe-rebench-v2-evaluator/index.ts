@@ -49,6 +49,7 @@ export interface EvalRunner {
 export interface GradeArgs {
   task: SweRebenchV2Task;
   solutionPayload: SweRebenchV2SolutionPayload;
+  row?: HfRow;
 }
 
 export class SweRebenchV2Evaluator {
@@ -57,7 +58,7 @@ export class SweRebenchV2Evaluator {
   ) {}
 
   async grade(args: GradeArgs): Promise<SweRebenchV2VerdictPayload & { test_log: string }> {
-    const row = await this.deps.fetcher.fetchTaskRow({
+    const row = args.row ?? await this.deps.fetcher.fetchTaskRow({
       hf_dataset: args.task.hf_dataset,
       hf_split: args.task.hf_split,
       instance_id: args.task.instance_id,
