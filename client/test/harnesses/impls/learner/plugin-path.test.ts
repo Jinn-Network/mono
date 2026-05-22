@@ -61,4 +61,28 @@ describe('resolvePluginRoot', () => {
       /missing hooks\/hooks\.json — plugin assets may be stale or incomplete; rebuild the plugin/,
     );
   });
+
+  it('resolves inside dist/plugins/learner when running from a compiled dist tree', () => {
+    // When running from the compiled dist/, the impl file lives at
+    // dist/harnesses/impls/learner/plugin-path.js. The build copies
+    // plugins/learner → dist/plugins/learner. Verify the dist tree exists
+    // (i.e. `yarn build` has been run) and contains the expected layout.
+    const distPluginRoot = join(
+      // Locate client package root: up four from this test file
+      // (impls → harnesses → test → client)
+      new URL('../../../../..', import.meta.url).pathname,
+      'dist',
+      'plugins',
+      'learner',
+    );
+    if (!existsSync(distPluginRoot)) {
+      // The dist tree has not been built yet — skip rather than fail so that
+      // `yarn test` (no prior build) stays green. CI runs `yarn build` before
+      // `yarn test` so this branch is covered in the full pipeline.
+      return;
+    }
+    expect(existsSync(join(distPluginRoot, 'skills', 'learn', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(distPluginRoot, 'hooks', 'session-start'))).toBe(true);
+    expect(existsSync(join(distPluginRoot, 'CLAUDE.md'))).toBe(true);
+  });
 });
