@@ -191,11 +191,56 @@ describe('JinnClaimLoop', () => {
       expect(l2Client.simulateContract).toHaveBeenCalledTimes(1);
       expect(l2Wallet.writeContract).toHaveBeenCalledTimes(1);
       expect(l2Client.getLogs).toHaveBeenCalledTimes(1);
+      expect((l2Client.getLogs as any).mock.calls[0][0]).toMatchObject({
+        toBlock: 'latest',
+      });
       const recordedEvents = (jinnStore.recordActivityEvent as any).mock.calls.map((call: any[]) => call[0]);
       expect(recordedEvents.some((event: any) => event.kind === 'jinn_claim_emitted')).toBe(true);
       const ticketEvent = recordedEvents.find((event: any) => event.kind === 'jinn_claim_ticket_recorded');
       expect(ticketEvent).toBeDefined();
       expect(ticketEvent.detail).toContain(`claimId=${CLAIM_ID}`);
+    });
+
+    it('does not query beyond the current head when recording emit-only tickets', async () => {
+      const l2Client = mockL2Client({ emitBlock: 100n });
+      l2Client.getLogs = vi.fn(async (args: any) => {
+        if (args.toBlock !== 'latest') {
+          throw new Error('block range extends beyond current head block');
+        }
+        return [
+          {
+            address: CLAIM_EMITTER,
+            data: '0x' + (3n).toString(16).padStart(64, '0')
+                  + (5n).toString(16).padStart(64, '0')
+                  + (2n).toString(16).padStart(64, '0')
+                  + MASTER.slice(2).padStart(64, '0'),
+            topics: [
+              CLAIM_TICKET_TOPIC0,
+              '0x' + CLAIM_ID.toString(16).padStart(64, '0'),
+              '0x' + SERVICE_ID.toString(16).padStart(64, '0'),
+              '0x' + MULTISIG.slice(2).padStart(64, '0'),
+            ],
+            logIndex: 0,
+            blockNumber: 100n,
+            transactionHash: '0xaabb',
+            removed: false,
+          },
+        ];
+      });
+      const cfg = baseConfig({
+        submissionMode: 'emit-only',
+        l2Client,
+        l1Client: undefined,
+        l1Wallet: undefined,
+        distributorAddress: undefined,
+        messengerAddress: undefined,
+      });
+
+      const loop = new JinnClaimLoop(cfg);
+      const result = await loop.runOnce();
+
+      expect(result).toMatchObject({ ticks: 1, emits: 1, submits: 0, errors: 0 });
+      expect(l2Client.getLogs).toHaveBeenCalledWith(expect.objectContaining({ toBlock: 'latest' }));
     });
 
     it('never calls L1 fixture or distributor claim in emit-only mode', async () => {

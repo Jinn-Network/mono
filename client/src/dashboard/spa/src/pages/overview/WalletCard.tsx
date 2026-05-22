@@ -45,9 +45,9 @@ export interface WalletCardProps {
     agent: string;
     safe: string;
   };
-  /** JINN currently claimable, formatted as decimal string */
+  /** OLAS-style staking collector queue, formatted as decimal string. */
   claimableJinn: string;
-  /** JINN claimed lifetime, formatted as decimal string */
+  /** OLAS-style staking collector claims submitted lifetime, formatted as decimal string. */
   claimedJinnLifetime: string;
   /**
    * Real Sepolia tJINN ERC-20 Safe balance, formatted as a decimal string
@@ -131,7 +131,7 @@ export function WalletCard({
   actionsDisabled = false,
 }: WalletCardProps): JSX.Element {
   const [, navigate] = useLocation();
-  const canClaim = parseFloat(claimableJinn) > 0;
+  const canClaimCollector = parseFloat(claimableJinn) > 0;
   const { value: tjinnValue, copy: tjinnStateCopy } = tjinnDisplay(
     tjinnState,
     tjinnEarned,
@@ -208,10 +208,9 @@ export function WalletCard({
 
           {/*
             tJINN earned — the real Sepolia tJINN ERC-20 Safe balance (#406).
-            Distinct from the JINN staking rewards below: this is the token
-            minted by JinnDistributor, not the OLAS staking-proxy pending
-            surface. Wrapped in a polite live region so screen readers
-            announce when the ~5s poll resolves pending → ready.
+            This is the operator reward minted by JinnDistributor. The collector
+            rows below are the OLAS-style staking maintenance path and are not
+            spendable operator tJINN.
           */}
           <div
             className="flex flex-col gap-1"
@@ -238,29 +237,29 @@ export function WalletCard({
           </div>
 
           <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Claimable</span>
+            <span className={sectionLabel}>Collector pending</span>
             <div className="flex items-baseline gap-2">
               <span className={statBig}>{claimableJinn}</span>
-              <span className={statUnit}>tJINN</span>
+              <span className={statUnit}>collector-token</span>
             </div>
           </div>
 
           <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Claimed</span>
+            <span className={sectionLabel}>Collector claimed</span>
             <div className="flex items-baseline gap-2">
               <span className={statBig}>{claimedJinnLifetime}</span>
-              <span className={statUnit}>tJINN</span>
+              <span className={statUnit}>collector-token</span>
             </div>
             <Button
               variant="outline"
               size="sm"
-              aria-label="Claim"
+              aria-label="Claim staking collector rewards"
               onClick={onClaim}
-              disabled={!canClaim || actionsDisabled}
+              disabled={!canClaimCollector || actionsDisabled}
               data-testid="wallet-claim"
               className="mt-2 self-start"
             >
-              Claim
+              Claim collector
             </Button>
           </div>
         </div>

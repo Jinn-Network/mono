@@ -362,14 +362,35 @@ export class JinnClaimLoop {
     // can return "receipt not found" briefly after the tx lands when the
     // request hits a backend that hasn't propagated the receipt yet.
     const receipt = await waitForTransactionReceiptWithRetry(this.config.l2Client, emitTxHash);
+    const claimLog = receipt.logs.find((log) =>
+      log.address.toLowerCase() === this.config.claimEmitterAddress.toLowerCase()
+      && log.topics[0]?.toLowerCase() === CLAIM_TICKET_TOPIC0.toLowerCase()
+    );
+    if (claimLog) {
+      const snapshot = decodeClaimTicketFromReceipt(
+        receipt.logs,
+        this.config.claimEmitterAddress,
+        claimLog.logIndex ?? 0,
+      );
+      if (snapshot.serviceId !== serviceId) {
+        throw new Error(
+          `[jinn-claim] ClaimTicket service ${snapshot.serviceId} does not match expected service ${serviceId}`,
+        );
+      }
+      return {
+        ...snapshot,
+        emitTxHash,
+        emitBlockNumber: receipt.blockNumber,
+      };
+    }
+
     // Search a small window around the emit block.
     const fromBlock = receipt.blockNumber > 5n ? receipt.blockNumber - 5n : 0n;
-    const toBlock = receipt.blockNumber + 5n;
     const snapshot = await fetchLatestClaimTicket(
       this.config.l2Client,
       this.config.claimEmitterAddress,
       serviceId,
-      { fromBlock, toBlock },
+      { fromBlock, toBlock: 'latest' },
     );
     if (!snapshot) {
       throw new Error(

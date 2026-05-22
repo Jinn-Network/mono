@@ -59,7 +59,7 @@ describe('WalletCard', () => {
     expect(screen.queryByRole('button', { name: /per role/i })).toBeNull();
   });
 
-  it('shows Claimable + Claimed paired stats and a Claim button tied to Claimed', () => {
+  it('shows collector pending + claimed stats and a collector claim button', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
@@ -69,11 +69,12 @@ describe('WalletCard', () => {
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/claimable/i);
+    expect(rewards.textContent).toMatch(/collector pending/i);
     expect(rewards.textContent).toContain('1.2500');
-    expect(rewards.textContent).toMatch(/claimed/i);
+    expect(rewards.textContent).toMatch(/collector claimed/i);
     expect(rewards.textContent).toContain('42');
-    // Claim button — enabled when claimable > 0.
+    expect(rewards.textContent).toContain('collector-token');
+    // Collector claim button — enabled when collector pending > 0.
     const claim = screen.getByTestId('wallet-claim') as HTMLButtonElement;
     expect(claim.disabled).toBe(false);
     // "last claim" line is commented out.
@@ -93,12 +94,12 @@ describe('WalletCard', () => {
     const rewards = screen.getByTestId('wallet-section-rewards');
     expect(rewards.textContent).toMatch(/testnet jinn earned/i);
     // The tJINN-earned value renders the real Safe balance, not the staking
-    // reward — it is a distinct element from the 999 claimable JINN stat.
+    // collector queue — it is a distinct element from the 999 collector stat.
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).toBe('1.5000');
-    const claimable = screen.getByText('999.0000');
-    expect(claimable).not.toBe(tjinnValue);
-    expect(tjinnValue.contains(claimable)).toBe(false);
+    const collectorPending = screen.getByText('999.0000');
+    expect(collectorPending).not.toBe(tjinnValue);
+    expect(tjinnValue.contains(collectorPending)).toBe(false);
     // Ready state shows the unit and emits no state copy.
     expect(rewards.textContent).toContain('tJINN');
     expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
@@ -139,7 +140,7 @@ describe('WalletCard', () => {
     expect(region.getAttribute('aria-atomic')).toBe('true');
   });
 
-  it('disables Claim when claimable is zero', () => {
+  it('disables collector Claim when collector pending is zero', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} claimableJinn="0.0000" />);
     render(ui);
     expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
@@ -192,7 +193,7 @@ describe('WalletCard', () => {
     expect(onTopUp).toHaveBeenCalledOnce();
   });
 
-  it('invokes onClaim when Claim is clicked', () => {
+  it('invokes onClaim when Claim collector is clicked', () => {
     const onClaim = vi.fn();
     const { ui } = wrap(
       <WalletCard {...defaultProps()} claimableJinn="1.0" onClaim={onClaim} />,

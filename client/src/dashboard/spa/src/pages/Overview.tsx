@@ -283,7 +283,7 @@ export function OverviewPage(): JSX.Element {
   const isEvicted = firstEvictedService != null;
   const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
-  const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
+  const stakingCollectorPending = formatEth(status?.rewards?.pendingStakingRewardsWei);
 
   // tJINN earned — the real Sepolia ERC-20 Safe balance (#406). When the read
   // has resolved (`state === 'ready'`) a null `safeBalanceWei` is a
@@ -509,7 +509,7 @@ export function OverviewPage(): JSX.Element {
             agent: '—',
             safe: '—',
           }}
-          claimableJinn={jinnClaimable}
+          claimableJinn={stakingCollectorPending}
           claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
           tjinnEarned={tjinnEarned}
           tjinnState={tjinnState}

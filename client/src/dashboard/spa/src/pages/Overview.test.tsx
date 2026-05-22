@@ -190,12 +190,12 @@ describe('OverviewPage Wallet wiring', () => {
     expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
   });
 
-  it('wires the Claim button on the Wallet card to api.claimRewards', async () => {
+  it('wires the collector Claim button on the Wallet card to api.claimRewards', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    // Wait for the claimable balance to populate so the button enables.
+    // Wait for the collector pending balance to populate so the button enables.
     await waitFor(() =>
       expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(false),
     );
@@ -221,18 +221,18 @@ describe('OverviewPage Wallet wiring', () => {
     render(withProviders(<OverviewPage />));
 
     // The tJINN-earned value derives from status.tJinn.safeBalanceWei
-    // (1.5 tJINN) — NOT from rewards.pendingStakingRewardsWei (999 JINN).
+    // (1.5 tJINN) — NOT from rewards.pendingStakingRewardsWei (999 collector-token).
     await waitFor(() =>
       expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
     );
     expect(screen.getByText(/testnet jinn earned/i)).toBeTruthy();
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).not.toBe('999.0000');
-    // The 999 figure still renders, but as the claimable staking-reward stat
+    // The 999 figure still renders, but as the staking collector pending stat
     // row — a distinct element from the tJINN-earned value.
-    const claimable999 = screen.getByText('999.0000');
-    expect(claimable999).not.toBe(tjinnValue);
-    expect(tjinnValue.contains(claimable999)).toBe(false);
+    const collector999 = screen.getByText('999.0000');
+    expect(collector999).not.toBe(tjinnValue);
+    expect(tjinnValue.contains(collector999)).toBe(false);
   });
 
   it('renders a confirmed-empty tJINN balance (ready + null) as 0', async () => {

@@ -136,7 +136,7 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
     out.push({
       kind: 'claim_available',
       severity: 'info',
-      message: 'JINN rewards are claimable.',
+      message: 'Staking collector rewards are claimable.',
       jumpTo: '/overview',
     });
   }
