@@ -29,16 +29,19 @@ const ISSUE_LIST_JSON = JSON.stringify([
     labels: [],
     number: ISSUE_ON_BOARD_WITH_TYPE,
     title: 'fix(client): test-gated TaskClaimEmitter redeploy',
+    author: { login: 'alice' },
   },
   {
     labels: [],
     number: ISSUE_ON_BOARD_NO_TYPE,
     title: 'Release feedback — v0.1.6 operator app dogfood (2026-05-19)',
+    author: { login: 'bob' },
   },
   {
     labels: [],
     number: ISSUE_NOT_ON_BOARD,
     title: 'feat(operator-app): expose generator health',
+    author: { login: 'carol' },
   },
 ]);
 
@@ -129,6 +132,7 @@ describe('GhIssueSource', () => {
     expect(issue!.status).toBe('Done');
     expect(issue!.onBoard).toBe(true);
     expect(issue!.blockedOnIssue).toBeNull();
+    expect(issue!.author).toBe('alice');
   });
 
   it('maps an issue on the board with no Issue Type to shape: null', async () => {
@@ -141,6 +145,7 @@ describe('GhIssueSource', () => {
     expect(issue!.onBoard).toBe(true);
     expect(issue!.priority).toBe('P1');
     expect(issue!.status).toBe('In Progress');
+    expect(issue!.author).toBe('bob');
   });
 
   it('maps an issue not on the board to onBoard: false with null routing fields', async () => {
@@ -156,6 +161,7 @@ describe('GhIssueSource', () => {
     expect(issue!.priority).toBeNull();
     expect(issue!.status).toBeNull();
     expect(issue!.blockedOnIssue).toBeNull();
+    expect(issue!.author).toBe('carol');
   });
 
   it('returns all polled issues (including off-board ones)', async () => {

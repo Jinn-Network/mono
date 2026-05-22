@@ -26,6 +26,7 @@ function makePolled(overrides: Partial<PolledIssue> = {}): PolledIssue {
     priority: 'P1',
     status: 'Todo',
     onBoard: true,
+    author: 'alice',
     ...overrides,
   };
 }
@@ -63,7 +64,7 @@ describe('runCycle', () => {
       makePolled({ number: 103, priority: 'P3' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3 };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
 
     const dispatchedNumbers: number[] = [];
     const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) => {
@@ -86,6 +87,7 @@ describe('runCycle', () => {
     expect(report.drift).toEqual([]);
     expect(report.backpressureTripped).toBe(false);
     expect(report.paused).toEqual([]);
+    expect(report.skippedForAuthor).toEqual([]);
     expect(dispatchIssue).toHaveBeenCalledTimes(3);
   });
 
@@ -97,7 +99,7 @@ describe('runCycle', () => {
       makePolled({ number: 103, priority: 'P3' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3 };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
 
     // In-flight are 201, 202 (not overlapping with ready 101-103)
     const existingInFlight = [makeInFlight(201), makeInFlight(202)];
@@ -121,6 +123,7 @@ describe('runCycle', () => {
     expect(report.skippedForThrottle).toBe(2); // 102, 103 skipped
     expect(report.backpressureTripped).toBe(false);
     expect(report.paused).toEqual([]);
+    expect(report.skippedForAuthor).toEqual([]);
     expect(dispatchIssue).toHaveBeenCalledTimes(1);
   });
 
@@ -131,7 +134,7 @@ describe('runCycle', () => {
       makePolled({ number: 102, priority: 'P2' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3 };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
 
     const existingInFlight = [makeInFlight(201), makeInFlight(202), makeInFlight(203)];
 
@@ -151,6 +154,7 @@ describe('runCycle', () => {
     expect(report.skippedForThrottle).toBe(2);
     expect(report.backpressureTripped).toBe(false);
     expect(report.paused).toEqual([]);
+    expect(report.skippedForAuthor).toEqual([]);
     expect(dispatchIssue).not.toHaveBeenCalled();
   });
 
@@ -161,7 +165,7 @@ describe('runCycle', () => {
       makePolled({ number: 102, priority: 'P1' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, openPrBackpressure: 5 };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, openPrBackpressure: 5, authorAllowlist: ['alice'] };
 
     const dispatchIssue = vi.fn().mockResolvedValue(makeInFlight(999));
 
@@ -177,12 +181,13 @@ describe('runCycle', () => {
 
     expect(report.dispatched).toEqual([]);
     expect(report.backpressureTripped).toBe(true);
+    expect(report.skippedForAuthor).toEqual([]);
     expect(dispatchIssue).not.toHaveBeenCalled();
   });
 
   it('includes drift strings from deriveInFlight in the report', async () => {
     const source = makeSource([]);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, authorAllowlist: ['alice'] };
 
     const report: CycleReport = await runCycle({
       source,
@@ -208,7 +213,7 @@ describe('runCycle', () => {
       makePolled({ number: 102, priority: 'P2' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3 };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
 
     const existingInFlight = [makeInFlight(101)]; // 101 already running
 
@@ -246,7 +251,7 @@ describe('runCycle', () => {
     const pauseSession = vi.fn().mockResolvedValue(undefined);
 
     const source = makeSource([]);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, wallClockMs: WALL_CLOCK_MS };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, wallClockMs: WALL_CLOCK_MS, authorAllowlist: ['alice'] };
 
     const report: CycleReport = await runCycle({
       source,
@@ -266,6 +271,34 @@ describe('runCycle', () => {
     expect(report.paused).toEqual([201]);
   });
 
+  it('dispatches nothing when the allowlist is empty (fail-safe)', async () => {
+    // Otherwise fully-ready issue authored by a trusted-looking user;
+    // an empty allowlist must filter it out and surface it in skippedForAuthor.
+    const issues = [
+      makePolled({ number: 444, priority: 'P0', author: 'trusteduser' }),
+    ];
+    const source = makeSource(issues);
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, authorAllowlist: [] };
+
+    const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) =>
+      Promise.resolve(makeInFlight(issue.number)),
+    );
+
+    const report: CycleReport = await runCycle({
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(report.dispatched).toEqual([]);
+    expect(report.skippedForAuthor).toEqual([{ number: 444, author: 'trusteduser' }]);
+    expect(dispatchIssue).not.toHaveBeenCalled();
+  });
+
   it('does not pause in-flight sessions that are within the wall-clock ceiling', async () => {
     const WALL_CLOCK_MS = 4 * 60 * 60 * 1000;
     const freshSession = makeInFlight(301, Date.now()); // just started
@@ -275,7 +308,7 @@ describe('runCycle', () => {
     const pauseSession = vi.fn().mockResolvedValue(undefined);
 
     const source = makeSource([]);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, wallClockMs: WALL_CLOCK_MS };
+    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, wallClockMs: WALL_CLOCK_MS, authorAllowlist: ['alice'] };
 
     const report: CycleReport = await runCycle({
       source,
