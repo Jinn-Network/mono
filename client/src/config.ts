@@ -116,6 +116,16 @@ export const JinnConfigSchema = z.object({
    */
   evictionCheckIntervalMs: z.number().int().min(0).default(60_000),
 
+  /**
+   * Interval between proactive `checkpoint()` tx calls to each staked
+   * proxy (ms). Keeps `tsCheckpoint` advancing so the activity-rate window
+   * stays narrow — without it operators silently fail liveness on realistic
+   * cadence (issue #505). Default 300_000 (5 min), matching the standard
+   * `livenessPeriod` on stOLAS staking proxies. Set to 0 to disable.
+   * Env: JINN_CHECKPOINT_INTERVAL_MS.
+   */
+  checkpointIntervalMs: z.number().int().min(0).default(300_000),
+
   /** HTTP API port */
   apiPort: z.number().int().positive().default(7331),
 
@@ -781,6 +791,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_BALANCE_TOPUP_INTERVAL_MS']) merged.balanceTopupIntervalMs = Number.parseInt(env['JINN_BALANCE_TOPUP_INTERVAL_MS'], 10);
   if (env['JINN_EVICTION_CHECK_INTERVAL_MS']) merged.evictionCheckIntervalMs = Number.parseInt(env['JINN_EVICTION_CHECK_INTERVAL_MS'], 10);
+  if (env['JINN_CHECKPOINT_INTERVAL_MS'] !== undefined) {
+    merged.checkpointIntervalMs = Number.parseInt(env['JINN_CHECKPOINT_INTERVAL_MS'], 10);
+  }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
@@ -1099,6 +1112,7 @@ const TRACKED_ENV_VARS = [
   'JINN_DB_PATH',
   'JINN_POLL_INTERVAL_MS',
   'JINN_REWARD_CLAIM_INTERVAL_MS',
+  'JINN_CHECKPOINT_INTERVAL_MS',
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
   'JINN_API_BIND_HOST',

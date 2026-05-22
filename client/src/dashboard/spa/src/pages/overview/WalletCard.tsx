@@ -26,6 +26,8 @@ import type { TjinnStatusState } from '../../api/types.js';
  */
 export interface ServiceIdentity {
   index: number;
+  /** On-chain service id (OLAS ServiceRegistry token). Null until bootstrap registers the service. */
+  serviceId: number | null;
   safeAddress: string;
   agentId: number | null;
   safeBoundToAgent: boolean;
@@ -140,6 +142,10 @@ export function WalletCard({
 
   // ── Identity binding-pending retry — preserved from IdentityCard ──
   const pendingBinding = services.find((s) => s.agentId !== null && !s.safeBoundToAgent);
+  // Primary service's on-chain ID (Service #50 etc.) — surfaced under Identity
+  // so operators can quote it when triaging with the team without digging
+  // through `jinn status`.
+  const primaryServiceId = services.find((s) => s.serviceId !== null)?.serviceId ?? null;
   const [bindingOpen, setBindingOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState<'success' | 'reverted' | null>(null);
@@ -270,6 +276,15 @@ export function WalletCard({
         <div className="flex flex-col gap-3" data-testid="wallet-section-identity">
           <span className={sectionLabel}>Identity</span>
           <div className="flex flex-wrap gap-8">
+            <div className="flex flex-col gap-1">
+              <span className={sectionLabel}>Service</span>
+              <span
+                data-testid="wallet-service-id"
+                className="font-mono text-[14px] text-foreground"
+              >
+                {primaryServiceId !== null ? `#${primaryServiceId}` : '—'}
+              </span>
+            </div>
             <div className="flex flex-col gap-1">
               <span className={sectionLabel}>Agent</span>
               <span className="flex items-center gap-2 font-mono text-[14px] text-foreground">

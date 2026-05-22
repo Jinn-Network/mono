@@ -14,6 +14,7 @@ import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
+import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
@@ -79,6 +80,15 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   evictionCheck?: EvictionLoopConfig;
+
+  /**
+   * Periodic `checkpoint()` loop (issue #505). Advances `tsCheckpoint` on
+   * each unique staking proxy so the activity-rate window stays narrow
+   * (default 5 min, matching `livenessPeriod`). Without this, operators on
+   * realistic cadence silently fail every liveness check.
+   * Omitted or interval 0 → loop not started.
+   */
+  checkpoint?: CheckpointLoopConfig;
 
   /**
    * Cross-chain JINN claim loop (jinn-mono-7x5). Emits ClaimTicket on L2,
@@ -178,6 +188,7 @@ export class Daemon {
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private evictionLoop?: EvictionLoop;
+  private checkpointLoop?: CheckpointLoop;
   private jinnClaimLoop?: JinnClaimLoop;
   private skipLogDeduper = new SkipLogDeduper();
 
@@ -228,6 +239,9 @@ export class Daemon {
     }
     if (config.evictionCheck && config.evictionCheck.intervalMs > 0) {
       this.evictionLoop = new EvictionLoop(config.evictionCheck);
+    }
+    if (config.checkpoint && config.checkpoint.intervalMs > 0) {
+      this.checkpointLoop = new CheckpointLoop(config.checkpoint);
     }
     if (config.jinnClaim && config.jinnClaim.intervalMs > 0) {
       this.jinnClaimLoop = new JinnClaimLoop({
@@ -367,6 +381,19 @@ export class Daemon {
         }),
       );
     }
+    if (this.checkpointLoop) {
+      this.loopPromises.push(
+        this.checkpointLoop.run().catch(err => {
+          console.error('[daemon] checkpoint-loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'checkpoint loop crashed',
+            errorCode: 'checkpoint_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.jinnClaimLoop) {
       this.loopPromises.push(
         this.jinnClaimLoop.run().catch(err => {
@@ -402,6 +429,7 @@ export class Daemon {
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();
+    this.checkpointLoop?.stop();
     this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
 

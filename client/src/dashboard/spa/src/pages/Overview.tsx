@@ -78,9 +78,11 @@ interface OverviewStatusV1 {
   };
   rewards?: {
     pendingStakingRewardsWei?: string;
-    /** Lifetime JINN claimed. Not yet surfaced by the daemon — null until added. */
+    /** Lifetime claimed amount (wei) — daemon emits this as claimedStakingRewardsWei. */
+    claimedStakingRewardsWei?: string;
+    /** Legacy field name; kept for backwards-compat with older daemons. */
     claimedJinnLifetime?: string;
-    /** ISO timestamp of last claim. Not yet surfaced by the daemon — null until added. */
+    /** ISO timestamp of last claim. */
     lastClaimAt?: string | null;
   };
   /**
@@ -270,6 +272,7 @@ export function OverviewPage(): JSX.Element {
 
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,
+    serviceId: s.serviceId ?? null,
     safeAddress: s.safeAddress ?? '',
     agentId: s.agentId ?? null,
     safeBoundToAgent: s.safeBoundToAgent ?? false,
@@ -387,6 +390,7 @@ export function OverviewPage(): JSX.Element {
           runStartedAt: r.runStartedAt ?? null,
           stateUpdatedAt: r.stateUpdatedAt,
           deliveryTxHash: r.deliveryTxHash ?? null,
+          failureReason: r.failureReason ?? null,
         });
       }
     };
@@ -510,7 +514,11 @@ export function OverviewPage(): JSX.Element {
             safe: '—',
           }}
           claimableJinn={stakingCollectorPending}
-          claimedJinnLifetime={status?.rewards?.claimedJinnLifetime ?? '0'}
+          claimedJinnLifetime={
+            status?.rewards?.claimedStakingRewardsWei
+              ? formatEth(status.rewards.claimedStakingRewardsWei)
+              : status?.rewards?.claimedJinnLifetime ?? '0'
+          }
           tjinnEarned={tjinnEarned}
           tjinnState={tjinnState}
           tjinnError={tjinnError}

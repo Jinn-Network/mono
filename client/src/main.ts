@@ -2501,6 +2501,36 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             },
           }
         : undefined,
+    // Checkpoint loop — proactively advances `tsCheckpoint` on each staked
+    // proxy so the activity-rate window stays narrow (issue #505).
+    // `checkpoint()` is permissionless; master EOA pays gas. No-op for
+    // non-standard staking modes.
+    checkpoint:
+      config.checkpointIntervalMs > 0 && config.stakingMode === 'standard'
+        ? {
+            intervalMs: config.checkpointIntervalMs,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            writeCheckpoint: async ({ stakingProxy }) => {
+              const txHash = await masterWallet.writeContract({
+                address: stakingProxy,
+                abi: [
+                  {
+                    type: 'function',
+                    name: 'checkpoint',
+                    stateMutability: 'nonpayable',
+                    inputs: [],
+                    outputs: [],
+                  },
+                ] as const,
+                functionName: 'checkpoint',
+                account: masterAccount,
+                chain: null,
+              });
+              return { txHash };
+            },
+          }
+        : undefined,
   });
 
   // Write pidfile so `jinn stop` can find us.

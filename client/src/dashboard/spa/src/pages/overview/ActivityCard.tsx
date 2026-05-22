@@ -59,6 +59,8 @@ export interface ActivityTask {
   stateUpdatedAt: number;
   /** Optional on-chain delivery tx for explorer linking. */
   deliveryTxHash: string | null;
+  /** Optional engine failure reason — used to filter "never engaged" rows. */
+  failureReason?: string | null;
 }
 
 export interface ActivityJoinedNet {
@@ -119,7 +121,7 @@ function classifyState(state: string): { label: string; detail: string; tone: St
   if (state === 'COMPLETE') return { label: 'succeeded', detail: 'COMPLETE', tone: 'good' };
   if (state === 'FAILED') return { label: 'failed', detail: 'FAILED', tone: 'bad' };
   if (ACTIVE_STATES.has(state)) {
-    return { label: 'pending', detail: state.toLowerCase().replace(/_/g, ' '), tone: 'active' };
+    return { label: 'active', detail: state.toLowerCase().replace(/_/g, ' '), tone: 'active' };
   }
   return { label: state.toLowerCase().replace(/_/g, ' '), detail: state, tone: 'neutral' };
 }
@@ -193,13 +195,29 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
 
   const filtered = useMemo(() => {
     if (!selected) return [];
-    return tasks
-      .filter((t) => {
-        if (t.manifestCid && selected.manifestCid)
-          return t.manifestCid === selected.manifestCid;
-        return joined.length <= 1;
-      })
-      .slice(0, 50);
+    return tasks.filter((t) => {
+      // Drop "never engaged" rows — daemon marks them FAILED but no actual
+      // work happened. The two known not-engaged signatures both surface in
+      // failureReason: (1) "impl not ready" / "not enabled" when the harness
+      // for the role isn't configured (the operator joined evaluator but
+      // hasn't enabled it yet); (2) `runStartedAt === null` for opportunities
+      // the daemon never even started.
+      if (t.state === 'FAILED') {
+        if (t.runStartedAt === null) return false;
+        const reason = (t.failureReason ?? '').toLowerCase();
+        if (reason.includes('not ready') || reason.includes('not enabled')) {
+          return false;
+        }
+      }
+      // SolverNet scoping: only restrict by manifestCid when the operator
+      // has joined multiple SolverNets. Single-SolverNet operators see all
+      // their rows regardless of whether the row carries a delivery CID
+      // (which doesn't match the SolverNet manifest CID).
+      if (joined.length <= 1) return true;
+      if (t.manifestCid && selected.manifestCid)
+        return t.manifestCid === selected.manifestCid;
+      return true;
+    });
   }, [tasks, selected, joined.length, selectedCid]);
 
   return (
@@ -285,74 +303,72 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                   No task runs recorded yet.
                 </p>
               ) : (
-                <ScrollArea className="max-h-[360px]">
-                  <div data-testid="activity-tasks-table">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="hover:bg-transparent">
-                          <TableHead>Task</TableHead>
-                          <TableHead>Run</TableHead>
-                          <TableHead>State</TableHead>
-                          <TableHead>Started</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filtered.map((t) => {
-                          const stateInfo = classifyState(t.state);
-                          const isActive = stateInfo.tone === 'active';
-                          return (
-                            <TableRow
-                              key={t.requestId}
-                              data-active={isActive ? 'true' : undefined}
-                              data-testid={`activity-task-row-${t.requestId}`}
-                              className={cn(
-                                'border-l-2',
-                                isActive
-                                  ? 'border-l-primary bg-primary/[0.06]'
-                                  : 'border-l-transparent',
-                              )}
-                            >
-                              <TableCell>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className="cursor-help bg-transparent p-0 font-mono text-[12px] text-foreground"
-                                    >
-                                      {trunc(t.requestId)}
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t.requestId}</TooltipContent>
-                                </Tooltip>
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {formatRunType(t.taskRole)}
-                              </TableCell>
-                              <TableCell>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className="cursor-help bg-transparent p-0"
-                                    >
-                                      <Badge variant={stateBadgeVariant(stateInfo.tone)}>
-                                        {stateInfo.label}
-                                      </Badge>
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{stateInfo.detail}</TooltipContent>
-                                </Tooltip>
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {formatRelative(t.runStartedAt ?? t.stateUpdatedAt)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </ScrollArea>
+                <div data-testid="activity-tasks-table">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Run</TableHead>
+                        <TableHead>Task</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Started</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((t) => {
+                        const stateInfo = classifyState(t.state);
+                        const isActive = stateInfo.tone === 'active';
+                        return (
+                          <TableRow
+                            key={t.requestId}
+                            data-active={isActive ? 'true' : undefined}
+                            data-testid={`activity-task-row-${t.requestId}`}
+                            className={cn(
+                              'border-l-2',
+                              isActive
+                                ? 'border-l-primary bg-primary/[0.06]'
+                                : 'border-l-transparent',
+                            )}
+                          >
+                            <TableCell className="text-muted-foreground">
+                              {formatRunType(t.taskRole)}
+                            </TableCell>
+                            <TableCell>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="cursor-help bg-transparent p-0 font-mono text-[12px] text-foreground"
+                                  >
+                                    {trunc(t.requestId)}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t.requestId}</TooltipContent>
+                              </Tooltip>
+                            </TableCell>
+                            <TableCell>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="cursor-help bg-transparent p-0"
+                                  >
+                                    <Badge variant={stateBadgeVariant(stateInfo.tone)}>
+                                      {stateInfo.label}
+                                    </Badge>
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{stateInfo.detail}</TooltipContent>
+                              </Tooltip>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {formatRelative(t.runStartedAt ?? t.stateUpdatedAt)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </div>
 

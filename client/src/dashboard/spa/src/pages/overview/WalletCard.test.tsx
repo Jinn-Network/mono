@@ -167,7 +167,7 @@ describe('WalletCard', () => {
       <WalletCard
         {...defaultProps()}
         services={[
-          { index: 0, safeAddress: '0xSafe', agentId: 5879, safeBoundToAgent: false },
+          { index: 0, serviceId: 50, safeAddress: '0xSafe', agentId: 5879, safeBoundToAgent: false },
         ]}
       />,
     );

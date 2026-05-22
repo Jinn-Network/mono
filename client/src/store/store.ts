@@ -484,6 +484,16 @@ export class Store {
   readonly db: Database.Database;
   readonly path: string;
 
+  /**
+   * Legacy schemas predating Task-native IDs (#406) defined `desired_state_id`
+   * as `TEXT NOT NULL` on `artifacts`. Newer code only writes `task_id`, which
+   * makes inserts revert with "NOT NULL constraint failed: artifacts.desired_state_id"
+   * on databases created before the migration. We can't ALTER COLUMN to drop
+   * the constraint in SQLite without rebuilding the table, so we detect the
+   * legacy column on startup and mirror `task_id` into it from `insertArtifact`.
+   */
+  private hasLegacyDesiredStateId = false;
+
   constructor(dbPath: string) {
     this.path = dbPath;
     if (dbPath !== ':memory:') {
@@ -506,9 +516,10 @@ export class Store {
   private ensureArtifactsTaskColumns(): void {
     const cols = this.db.prepare(`PRAGMA table_info(artifacts)`).all() as Array<{ name: string }>;
     const names = new Set(cols.map((c) => c.name));
+    this.hasLegacyDesiredStateId = names.has('desired_state_id');
     if (!names.has('task_id')) {
       this.db.exec(`ALTER TABLE artifacts ADD COLUMN task_id TEXT`);
-      if (names.has('desired_state_id')) {
+      if (this.hasLegacyDesiredStateId) {
         this.db.exec(`UPDATE artifacts SET task_id = desired_state_id WHERE task_id IS NULL`);
       }
     }
@@ -1345,9 +1356,15 @@ export class Store {
     tags: string[];
     outcome: 'SUCCESS' | 'FAILURE' | 'UNKNOWN';
   }): void {
+    const columns = ['id', 'task_id', 'request_id', 'title', 'content', 'tags', 'outcome'];
+    const values = ['@id', '@taskId', '@requestId', '@title', '@content', '@tags', '@outcome'];
+    if (this.hasLegacyDesiredStateId) {
+      columns.push('desired_state_id');
+      values.push('@taskId');
+    }
     this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, content, tags, outcome)
-      VALUES (@id, @taskId, @requestId, @title, @content, @tags, @outcome)
+      INSERT OR REPLACE INTO artifacts (${columns.join(', ')})
+      VALUES (${values.join(', ')})
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),

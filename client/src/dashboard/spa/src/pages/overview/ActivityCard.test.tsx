@@ -78,7 +78,9 @@ describe('ActivityCard', () => {
   it('renders task rows from the input, showing run type + state + relative time', () => {
     const tasks: ActivityTask[] = [
       { ...baseTask, requestId: 'task-a', state: 'COMPLETE', taskRole: 'restoration' },
-      { ...baseTask, requestId: 'task-b', state: 'FAILED', taskRole: 'evaluation' },
+      // Evaluation row that was actually engaged with (runStartedAt populated)
+      // surfaces; opportunities we never claimed are filtered out elsewhere.
+      { ...baseTask, requestId: 'task-b', state: 'FAILED', taskRole: 'evaluation', runStartedAt: Date.now() - 60_000 },
       { ...baseTask, requestId: 'task-c', state: 'RUNNING', taskRole: 'restoration' },
     ];
     const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
@@ -89,9 +91,25 @@ describe('ActivityCard', () => {
     expect(table.textContent).toContain('task-c');
     expect(table.textContent).toMatch(/succeeded/i);
     expect(table.textContent).toMatch(/failed/i);
-    expect(table.textContent).toMatch(/pending/i);
+    expect(table.textContent).toMatch(/active/i);
     expect(screen.getAllByText('solve').length).toBeGreaterThan(0);
     expect(screen.getAllByText('evaluate').length).toBeGreaterThan(0);
+  });
+
+  it('filters out FAILED rows we never engaged with (never started OR impl not ready) but keeps real failures', () => {
+    const tasks: ActivityTask[] = [
+      // Real solver failure: started, then failed mid-execution
+      { ...baseTask, requestId: 'kept-real-fail', state: 'FAILED', taskRole: 'restoration', runStartedAt: Date.now() - 60_000 },
+      // Never engaged: opportunity observed but daemon never started it
+      { ...baseTask, requestId: 'dropped-never-started', state: 'FAILED', taskRole: 'evaluation', runStartedAt: null },
+      // Never engaged: impl not enabled on this operator (evaluator harness off)
+      { ...baseTask, requestId: 'dropped-impl-not-ready', state: 'FAILED', taskRole: 'evaluation', runStartedAt: Date.now() - 60_000, failureReason: "impl 'swe-rebench-v2-evaluator' not ready: not enabled" },
+    ];
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
+    render(ui);
+    expect(screen.queryByTestId('activity-task-row-kept-real-fail')).not.toBeNull();
+    expect(screen.queryByTestId('activity-task-row-dropped-never-started')).toBeNull();
+    expect(screen.queryByTestId('activity-task-row-dropped-impl-not-ready')).toBeNull();
   });
 
   it('shows STARTED from runStartedAt instead of an old task window start', () => {
