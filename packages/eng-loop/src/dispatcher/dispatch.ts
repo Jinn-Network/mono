@@ -1,17 +1,36 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ReadyIssue, DispatcherConfig, InFlightSession } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import { buildHeadlessPrompt } from '../headless.js';
 
 // ---------------------------------------------------------------------------
-// Repo root — two levels up from src/dispatcher/
+// Repo root + canonical worktree base
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/dispatcher → src → packages/eng-loop → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+
+/**
+ * Per CLAUDE.md AI rule #1, multi-agent worktrees live in
+ * `../jinn-mono_worktrees/<name>` — sibling of the main repo checkout.
+ *
+ * When the dispatcher itself runs *inside* that sibling dir (i.e. its own
+ * REPO_ROOT is already a worktree under `jinn-mono_worktrees/`, common while
+ * `packages/eng-loop` lives on an unmerged branch), the canonical base IS the
+ * parent of REPO_ROOT — not `<REPO_ROOT>/../jinn-mono_worktrees`, which would
+ * nest one level too deep. We detect that case and short-circuit.
+ */
+function computeWorktreesBase(repoRoot: string): string {
+  const parent = dirname(repoRoot);
+  if (basename(parent) === 'jinn-mono_worktrees') {
+    return parent;
+  }
+  return join(repoRoot, '..', 'jinn-mono_worktrees');
+}
+export const WORKTREES_BASE = computeWorktreesBase(REPO_ROOT);
 
 // ---------------------------------------------------------------------------
 // GitHub Project constants (from file-issue/references/gh-taxonomy.md)
@@ -183,7 +202,8 @@ function loadCanon(): string {
  * 2. Set the issue's Project Status to "In Progress" FIRST — so any subsequent
  *    partial failure leaves the issue In Progress (not Todo), which prevents
  *    selectReady from re-queuing it into an infinite retry loop.
- * 3. Create a git worktree at `cargo/.tasks/<N>` off `origin/next`.
+ * 3. Create a git worktree at `<jinn-mono_worktrees>/<N>` off `origin/next`
+ *    (sibling of the main repo per CLAUDE.md AI rule #1).
  *    Idempotent: if the worktree path already exists, reuse it rather than
  *    failing (handles the case where a previous run created the worktree but
  *    then crashed before spawning).
@@ -204,7 +224,7 @@ export async function dispatchIssue(
   const slug = titleSlug(title);
   const branch = `${shape}/${number}-${slug}`;
   // Absolute path so git resolves correctly regardless of process cwd.
-  const worktreePath = join(REPO_ROOT, 'cargo', '.tasks', String(number));
+  const worktreePath = join(WORKTREES_BASE, String(number));
 
   // 2. Set Status → In Progress FIRST.
   //    This must happen before the worktree is created. If anything fails

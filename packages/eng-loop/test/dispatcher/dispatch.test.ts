@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatchIssue } from '../../src/dispatcher/dispatch.js';
+import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
@@ -11,12 +11,15 @@ import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
 // dispatch.ts computes REPO_ROOT as four levels up from src/dispatcher/:
 //   src/dispatcher → src → packages/eng-loop → packages → repo root
 // We replicate the same derivation so the test stays in sync automatically.
+// The canonical task-worktree path is `<jinn-mono_worktrees>/<N>` per CLAUDE.md
+// AI rule #1 — we import WORKTREES_BASE from dispatch.ts so the test stays in
+// sync if that resolution logic changes.
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // test/dispatcher → test → packages/eng-loop → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
-const EXPECTED_WORKTREE_PATH = join(REPO_ROOT, 'cargo', '.tasks', '418');
+const EXPECTED_WORKTREE_PATH = join(WORKTREES_BASE, '418');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -101,8 +104,8 @@ const PROJECT_ITEMS_JSON = JSON.stringify({
 });
 
 /**
- * Canned `git worktree list --porcelain` output — no cargo/.tasks/418 worktree
- * exists yet, so dispatchIssue must create it.
+ * Canned `git worktree list --porcelain` output — no jinn-mono_worktrees/418
+ * worktree exists yet, so dispatchIssue must create it.
  */
 const WORKTREE_LIST_EMPTY = [
   `worktree ${REPO_ROOT}`,
@@ -112,8 +115,8 @@ const WORKTREE_LIST_EMPTY = [
 ].join('\n');
 
 /**
- * Canned `git worktree list --porcelain` output — cargo/.tasks/418 worktree
- * already exists (simulates dispatcher pre-created it before spawning).
+ * Canned `git worktree list --porcelain` output — jinn-mono_worktrees/418
+ * worktree already exists (simulates dispatcher pre-created it before spawning).
  */
 const WORKTREE_LIST_WITH_418 = [
   `worktree ${REPO_ROOT}`,
@@ -135,7 +138,7 @@ type RunnerCall = { cmd: string; args: string[] };
 
 /**
  * Create a fake runner that responds with empty worktree list (no pre-existing
- * cargo/.tasks/418), so git worktree add will be called.
+ * jinn-mono_worktrees/418), so git worktree add will be called.
  */
 function makeRunner(
   worktreeListOutput: string = WORKTREE_LIST_EMPTY,
@@ -177,7 +180,7 @@ function makeSpawn(
 // ---------------------------------------------------------------------------
 
 describe('dispatchIssue', () => {
-  it('creates a cargo/.tasks/<N> worktree off origin/next on a <shape>/<N>-<slug> branch (absolute path)', async () => {
+  it('creates a jinn-mono_worktrees/<N> worktree off origin/next on a <shape>/<N>-<slug> branch (absolute path)', async () => {
     const { runner, calls } = makeRunner();
     const { spawn } = makeSpawn();
 
@@ -193,8 +196,8 @@ describe('dispatchIssue', () => {
     expect(worktreePath).toBe(EXPECTED_WORKTREE_PATH);
     // Confirm it is absolute (starts with /)
     expect(worktreePath).toMatch(/^\//);
-    // Confirm it ends with cargo/.tasks/418
-    expect(worktreePath).toMatch(/cargo\/.tasks\/418$/);
+    // Confirm it ends with jinn-mono_worktrees/418
+    expect(worktreePath).toMatch(/jinn-mono_worktrees\/418$/);
 
     // -b flag must be present
     const bFlagIdx = worktreeCall!.args.indexOf('-b');
@@ -209,7 +212,7 @@ describe('dispatchIssue', () => {
   });
 
   it('skips git worktree add when the worktree already exists (idempotent)', async () => {
-    // Supply a worktree list that already contains cargo/.tasks/418
+    // Supply a worktree list that already contains jinn-mono_worktrees/418
     const { runner, calls } = makeRunner(WORKTREE_LIST_WITH_418);
     const { spawn } = makeSpawn();
 
@@ -390,7 +393,7 @@ describe('dispatchIssue', () => {
     // Worktree path must be the absolute path (reliability fix)
     expect(session.worktreePath).toBe(EXPECTED_WORKTREE_PATH);
     expect(session.worktreePath).toMatch(/^\//);
-    expect(session.worktreePath).toMatch(/cargo\/.tasks\/418$/);
+    expect(session.worktreePath).toMatch(/jinn-mono_worktrees\/418$/);
     expect(session.pid).toBe(77777);
     expect(session.startedAt).toBeGreaterThanOrEqual(before);
     expect(session.startedAt).toBeLessThanOrEqual(after);

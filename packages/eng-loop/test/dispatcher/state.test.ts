@@ -18,7 +18,7 @@ import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
  *   HEAD 61822d46e6dd10063c5aeb1cabe1214b968422e3
  *   detached
  *   <blank line>
- *   worktree /Users/.../cargo/.tasks/418
+ *   worktree /Users/.../jinn-mono_worktrees/418
  *   HEAD abc123
  *   branch refs/heads/feat/418-something
  */
@@ -33,10 +33,11 @@ const ISSUE_IN_PROGRESS_WITH_WORKTREE = 418;
 /** Issue #501: In Progress on the board — no matching worktree → drift warning. */
 const ISSUE_IN_PROGRESS_NO_WORKTREE = 501;
 
-/** The cargo/.tasks/<N> worktree that has no In Progress issue → drift warning. */
+/** The jinn-mono_worktrees/<N> worktree that has no In Progress issue → drift warning. */
 const ORPHAN_WORKTREE_ISSUE = 399;
 
 const REPO_ROOT = '/Users/adrianobradley/jinn-mono';
+const WORKTREES_BASE = '/Users/adrianobradley/jinn-mono_worktrees';
 
 const PROJECT_ITEMS_JSON = JSON.stringify({
   items: [
@@ -55,7 +56,7 @@ const PROJECT_ITEMS_JSON = JSON.stringify({
         repository: 'Jinn-Network/mono',
       },
     },
-    // Issue 501 — In Progress but no cargo/.tasks/501 worktree exists → drift
+    // Issue 501 — In Progress but no jinn-mono_worktrees/501 worktree exists → drift
     {
       status: 'In Progress',
       title: 'fix(client): something broken',
@@ -93,13 +94,13 @@ const PROJECT_ITEMS_JSON = JSON.stringify({
  * Canned git worktree list --porcelain output.
  *
  * Contains:
- *   - the main worktree (not a cargo/.tasks path — ignored)
+ *   - the main worktree (not a jinn-mono_worktrees path — ignored)
  *   - a detached worktree (ignored — no branch)
- *   - cargo/.tasks/418  (matches In Progress issue 418 → in-flight)
- *   - cargo/.tasks/399  (no In Progress issue 399 → drift warning)
+ *   - jinn-mono_worktrees/418  (matches In Progress issue 418 → in-flight)
+ *   - jinn-mono_worktrees/399  (no In Progress issue 399 → drift warning)
  */
 const WORKTREE_PORCELAIN = [
-  // Main worktree — not a cargo/.tasks path
+  // Main worktree — not a jinn-mono_worktrees path
   `worktree ${REPO_ROOT}`,
   'HEAD cdecb61a1f4e1274bda7ab6bb626cca6c465d86e',
   'branch refs/heads/main',
@@ -109,13 +110,13 @@ const WORKTREE_PORCELAIN = [
   'HEAD 61822d46e6dd10063c5aeb1cabe1214b968422e3',
   'detached',
   '',
-  // cargo/.tasks/418 — matches In Progress issue 418
-  `worktree ${REPO_ROOT}/cargo/.tasks/418`,
+  // jinn-mono_worktrees/418 — matches In Progress issue 418
+  `worktree ${WORKTREES_BASE}/418`,
   'HEAD abc123def456abc123def456abc123def456abc1',
   'branch refs/heads/feat/418-something-useful',
   '',
-  // cargo/.tasks/399 — orphan: no In Progress issue 399
-  `worktree ${REPO_ROOT}/cargo/.tasks/399`,
+  // jinn-mono_worktrees/399 — orphan: no In Progress issue 399
+  `worktree ${WORKTREES_BASE}/399`,
   'HEAD deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
   'branch refs/heads/fix/399-old-thing',
   '',
@@ -150,7 +151,7 @@ describe('deriveInFlight', () => {
     expect(inFlight).toHaveLength(1);
     const session = inFlight[0];
     expect(session.issueNumber).toBe(ISSUE_IN_PROGRESS_WITH_WORKTREE);
-    expect(session.worktreePath).toBe(`${REPO_ROOT}/cargo/.tasks/${ISSUE_IN_PROGRESS_WITH_WORKTREE}`);
+    expect(session.worktreePath).toBe(`${WORKTREES_BASE}/${ISSUE_IN_PROGRESS_WITH_WORKTREE}`);
     expect(session.branch).toBe('feat/418-something-useful');
     expect(session.pid).toBeNull();
     // startedAt is either a real timestamp recovered from the worktree directory (> 0)
@@ -168,7 +169,7 @@ describe('deriveInFlight', () => {
     expect(driftForMissingWorktree).toBeDefined();
   });
 
-  it('surfaces an orphan cargo/.tasks worktree (no In Progress issue) as a drift warning', async () => {
+  it('surfaces an orphan jinn-mono_worktrees worktree (no In Progress issue) as a drift warning', async () => {
     const { drift } = await deriveInFlight(makeFakeRunner());
 
     const driftForOrphanWorktree = drift.find((d) =>
@@ -189,14 +190,14 @@ describe('deriveInFlight', () => {
     expect(drift900).toBeUndefined();
   });
 
-  it('normal case: issue #418 In Progress + cargo/.tasks/418 worktree → one InFlightSession', async () => {
+  it('normal case: issue #418 In Progress + jinn-mono_worktrees/418 worktree → one InFlightSession', async () => {
     const { inFlight, drift } = await deriveInFlight(makeFakeRunner());
 
     // Exactly the matched pair
     const session = inFlight.find((s) => s.issueNumber === ISSUE_IN_PROGRESS_WITH_WORKTREE);
     expect(session).toBeDefined();
     expect(session!.issueNumber).toBe(418);
-    expect(session!.worktreePath).toContain('cargo/.tasks/418');
+    expect(session!.worktreePath).toContain('jinn-mono_worktrees/418');
     expect(session!.branch).toBe('feat/418-something-useful');
     expect(session!.pid).toBeNull();
     // startedAt: either recovered from the directory (> 0) or the unknown-age

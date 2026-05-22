@@ -34,7 +34,7 @@ function makeInFlight(issueNumber: number, startedAt?: number): InFlightSession 
   return {
     issueNumber,
     branch: `feat/${issueNumber}-something`,
-    worktreePath: `cargo/.tasks/${issueNumber}`,
+    worktreePath: `/tmp/fixture/jinn-mono_worktrees/${issueNumber}`,
     pid: 1234,
     startedAt: startedAt ?? Date.now(),
   };

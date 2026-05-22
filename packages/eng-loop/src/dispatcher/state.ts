@@ -9,8 +9,15 @@ import type { InFlightSession } from './types.js';
 const PROJECT_OWNER = 'Jinn-Network';
 const PROJECT_NUMBER = '1';
 
-/** Path components that identify a task worktree directory (in order). */
-const TASKS_PATH_COMPONENTS = ['cargo', '.tasks'];
+/**
+ * Path component that identifies a task worktree's parent directory.
+ *
+ * Per CLAUDE.md AI rule #1, multi-agent worktrees live in
+ * `../jinn-mono_worktrees/<name>` — sibling of the main repo checkout.
+ * Task worktrees use the issue number as `<name>`, so the full shape is
+ * `…/jinn-mono_worktrees/<N>`.
+ */
+const WORKTREE_PARENT_COMPONENT = 'jinn-mono_worktrees';
 
 // ---------------------------------------------------------------------------
 // Internal types mirroring real gh output shapes
@@ -88,26 +95,25 @@ function parseWorktreePorcelain(output: string): ParsedWorktree[] {
 }
 
 /**
- * Extract the issue number from a cargo/.tasks/<N> worktree path.
+ * Extract the issue number from a `jinn-mono_worktrees/<N>` worktree path.
  * Returns null if the path is not a task worktree.
  *
- * Matches `cargo/.tasks/<N>` as proper path components (split on `/`) so that
- * a repo mounted under a path whose directory name itself contains the fragment
- * (e.g. `/home/user/cargo/.tasks-backup/foo/cargo/.tasks/418`) is not
- * misidentified — only the final two components before the issue number are
- * examined.
+ * Matches `jinn-mono_worktrees/<N>` as proper path components (split on `/`)
+ * so that a repo mounted under a path whose directory name itself contains
+ * the fragment (e.g. `/home/user/jinn-mono_worktrees-backup/foo/jinn-mono_worktrees/418`)
+ * is not misidentified — only the single component before the issue number
+ * is examined.
  */
 function extractTaskIssueNumber(worktreePath: string): number | null {
   // Split on '/' into proper path components (filter leading '' from absolute paths).
   const parts = worktreePath.split('/').filter((p, i) => i > 0 || p !== '');
-  const [seg0, seg1] = TASKS_PATH_COMPONENTS;
-  // Find the index where the `cargo/.tasks` sequence begins as proper components.
-  for (let i = 0; i < parts.length - 2; i++) {
-    if (parts[i] === seg0 && parts[i + 1] === seg1) {
-      const candidate = parts[i + 2];
+  // Find the `jinn-mono_worktrees/<N>` sequence as proper components.
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parts[i] === WORKTREE_PARENT_COMPONENT) {
+      const candidate = parts[i + 1];
       if (candidate == null) return null;
       // Must be the final component (no trailing path segments after the issue number).
-      if (i + 3 !== parts.length) return null;
+      if (i + 2 !== parts.length) return null;
       const n = parseInt(candidate, 10);
       if (isNaN(n) || String(n) !== candidate) return null;
       return n;
@@ -151,15 +157,15 @@ function recoverStartedAt(worktreePath: string): number {
 /**
  * Re-derive the dispatcher's in-flight set from authoritative external state:
  * - GitHub Project board (issues with `status === 'In Progress'`)
- * - git worktree list (worktrees under `cargo/.tasks/<N>`)
+ * - git worktree list (worktrees under `jinn-mono_worktrees/<N>`)
  *
  * A crash or restart simply calls this again — state is never held only in
  * memory.
  *
  * Rules:
- *   matched pair (In Progress issue + cargo/.tasks/<N> worktree) → InFlightSession
+ *   matched pair (In Progress issue + jinn-mono_worktrees/<N> worktree) → InFlightSession
  *   In Progress issue with no worktree → drift warning string
- *   cargo/.tasks/<N> worktree with no In Progress issue → drift warning string
+ *   jinn-mono_worktrees/<N> worktree with no In Progress issue → drift warning string
  *
  * The dispatcher logs drift but does not act on it automatically. A human
  * resolves drift.
@@ -188,7 +194,7 @@ export async function deriveInFlight(
   const worktreeRaw = await runner('git', ['worktree', 'list', '--porcelain']);
   const worktrees = parseWorktreePorcelain(worktreeRaw);
 
-  // Build a map: issue number → worktree (for cargo/.tasks/<N> paths only)
+  // Build a map: issue number → worktree (for jinn-mono_worktrees/<N> paths only)
   const taskWorktrees = new Map<number, ParsedWorktree>();
   for (const wt of worktrees) {
     const n = extractTaskIssueNumber(wt.worktreePath);
@@ -215,7 +221,7 @@ export async function deriveInFlight(
       });
     } else {
       drift.push(
-        `drift: issue #${issueNumber} is In Progress on the board but has no cargo/.tasks/${issueNumber} worktree`,
+        `drift: issue #${issueNumber} is In Progress on the board but has no jinn-mono_worktrees/${issueNumber} worktree`,
       );
     }
   }
