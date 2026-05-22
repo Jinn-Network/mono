@@ -573,6 +573,101 @@ describe('JoinFlow — per-harness readiness gate', () => {
     expect(submit.disabled).toBe(true);
   });
 
+  it('does NOT gate Save & Join when evaluator is selected and the evaluator harness reports ready', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        contract: {
+          ...baseManifest.contract,
+          evaluationFunction: {
+            ...baseManifest.contract.evaluationFunction,
+            implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
+          },
+        },
+      },
+    });
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    // Default beforeEach mock returns ready: true for every probed name.
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+
+    await waitFor(() =>
+      expect(apiMock.harnessReadiness).toHaveBeenCalledWith('prediction-v1-evaluator'),
+    );
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    expect(screen.queryByTestId('join-evaluator-not-ready')).toBeNull();
+  });
+
+  it('does not probe or gate when the manifest evaluator implementation does not match a known evaluator harness', async () => {
+    // baseManifest's implementation is 'jinn-builtin/prediction-v1-eval@1.0' —
+    // which does NOT contain the 'prediction-v1-evaluator' substring; the
+    // resolver returns undefined and we must neither probe nor gate.
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => ({
+      harnessName: name,
+      manifestCids: [],
+      ready: true,
+    }));
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+
+    // Solver harnesses may still be probed (none selected here, but the catalog
+    // lists them); the evaluator name 'prediction-v1-evaluator' must NOT be.
+    await waitFor(() =>
+      expect(
+        apiMock.harnessReadiness.mock.calls.flat().includes('prediction-v1-evaluator'),
+      ).toBe(false),
+    );
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    expect(screen.queryByTestId('join-evaluator-not-ready')).toBeNull();
+  });
+
+  it('gates Save & Join when both roles are selected and the evaluator harness reports not-ready', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        contract: {
+          ...baseManifest.contract,
+          evaluationFunction: {
+            ...baseManifest.contract.evaluationFunction,
+            implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
+          },
+        },
+      },
+    });
+    apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+      if (name === 'prediction-v1-evaluator') {
+        return {
+          harnessName: name,
+          manifestCids: [],
+          ready: false,
+          reason: 'Docker daemon not reachable',
+        };
+      }
+      return { harnessName: name, manifestCids: [], ready: true };
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-evaluator-not-ready')).toBeTruthy(),
+    );
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    // Solver-side banner should be absent (default solver harness mocked ready).
+    expect(screen.queryByTestId('join-harness-not-ready')).toBeNull();
+  });
+
   it('does not crash when a harness is absent from the readiness snapshot (404)', async () => {
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
     apiMock.harnessReadiness.mockImplementation(async (_name: string) => {
