@@ -105,7 +105,7 @@ import type { TranscriptParser } from './trajectory/transcript-parsers/types.js'
 import type { StopHookPayload, StopHookTool } from './api/stop-hook.js';
 import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
+import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
@@ -2328,8 +2328,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
   }
 
+  // filterBindableTasks (issue #415): drop config-level tasks[] entries without
+  // solverNetManifestCid before they enter the creator loop. Such entries would
+  // throw a PermanentError on every attempt and retry every 30 min indefinitely.
+  const bindableConfigTasks = filterBindableTasks(config.tasks);
   const taskSources = [
-    new StaticConfiguredTaskSource(config.tasks),
+    new StaticConfiguredTaskSource(bindableConfigTasks),
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
       new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator),
     ),
