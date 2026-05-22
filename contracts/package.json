@@ -11,6 +11,12 @@
     "validate:phase1a": "hardhat run scripts/validate-phase1a.ts",
     "checkpoint": "hardhat run scripts/checkpoint-and-verify.ts --network sepolia"
   },
+  "resolutions": {
+    "axios": "^1.15.2",
+    "fast-uri": "^3.1.2",
+    "lodash": "^4.18.0",
+    "serialize-javascript": "^7.0.3"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
     "@nomicfoundation/hardhat-ethers": "^3.1.3",
