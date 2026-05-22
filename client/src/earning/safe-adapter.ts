@@ -24,7 +24,12 @@ import {
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { viemFeeOverridesForAttempt, withRecoverableRetry } from '../tx-retry.js';
+import {
+  removeConflictingLegacyGasPrice,
+  type TxSubmissionLedger,
+  withNonceLedger,
+  withRecoverableRetry,
+} from '../tx-retry.js';
 
 export type { MetaTransactionData, TransactionResult };
 
@@ -253,6 +258,7 @@ export async function executeSafeTxDirect(opts: {
   value?: bigint;
   data: Hex;
   gasLimit?: bigint;
+  ledger?: TxSubmissionLedger;
 }): Promise<{ hash: string }> {
   const executionRpcUrl = await resolveExecutionRpcUrl(opts.rpcUrl);
   const chainId = await createPublicClient({ transport: http(executionRpcUrl) }).getChainId();
@@ -273,7 +279,14 @@ export async function executeSafeTxDirect(opts: {
   const value = opts.value ?? 0n;
   const explicitGasLimit = opts.gasLimit;
 
-  const hash = await withRecoverableRetry(
+  const hash = await withNonceLedger({
+    publicClient,
+    walletClient,
+    ledger: opts.ledger,
+    from: account.address,
+    chainId,
+    recoverStuckNonce: true,
+  }, async (nonceLedger) => withRecoverableRetry(
     async (attemptIndex) => {
       const nonce = await publicClient.readContract({
         address: safeAddress,
@@ -333,30 +346,35 @@ export async function executeSafeTxDirect(opts: {
         }
       }
 
-      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
+      const feeResult = await nonceLedger.feeResultForAttempt(attemptIndex, {
+        forceEstimate: true,
+      });
       const txParams: Parameters<typeof walletClient.sendTransaction>[0] = {
         account,
         to: safeAddress,
         data,
         gas: resolvedGas + BigInt(attemptIndex) * 50_000n,
-        ...feeOverrides,
+        nonce: nonceLedger.nonce,
+        ...feeResult.overrides,
       };
-      if (
-        'maxFeePerGas' in txParams &&
-        txParams.maxFeePerGas !== undefined &&
-        'maxPriorityFeePerGas' in txParams &&
-        txParams.maxPriorityFeePerGas !== undefined
-      ) {
-        delete (txParams as { gasPrice?: bigint }).gasPrice;
-      }
-      return walletClient.sendTransaction(txParams);
+      removeConflictingLegacyGasPrice(txParams);
+      const hash = await walletClient.sendTransaction(txParams);
+      await nonceLedger.recordSubmitted({
+        hash,
+        logicalTx: 'safe.execTransaction.direct',
+        fees: feeResult.snapshot,
+        to: safeAddress,
+        data,
+        value: 0n,
+      });
+      return hash;
     },
     {
       onRetry: ({ attempt, message }) => {
         console.error(`[safe-adapter] executeSafeTxDirect retry ${attempt}: ${message}`);
       },
     },
-  );
+  ));
 
   return { hash };
 }

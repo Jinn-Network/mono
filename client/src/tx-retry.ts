@@ -11,6 +11,9 @@ export const TX_RETRY_DEFAULTS = {
   maxDelayMs: 12_000,
   /** Extra fee bump per retry attempt after the first (basis points, 1500 = +15%) */
   feeBumpBpsPerAttempt: 1500,
+  /** Minimum bump over the previously submitted fee for same-sender nonce replacement. */
+  replacementBumpBps: 1500,
+  stuckNonceAfterMs: 120_000,
 } as const;
 
 export function flattenErrorMessage(error: unknown): string {
@@ -216,8 +219,157 @@ export interface TxRetryOptions {
   maxAttempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  ledger?: TxSubmissionLedger;
+  logicalTx?: string;
+  stuckNonceAfterMs?: number;
   /** If set, invoked before each retry (attempt >= 1) for logging/metrics */
   onRetry?: (info: { attempt: number; error: unknown; message: string }) => void;
+}
+
+export interface TxFeeSnapshot {
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  gasPrice?: bigint;
+}
+
+export type Eip1559FeeOverrides = {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  gasPrice?: undefined;
+};
+
+export type LegacyFeeOverrides = {
+  gasPrice: bigint;
+  maxFeePerGas?: undefined;
+  maxPriorityFeePerGas?: undefined;
+};
+
+export type EmptyFeeOverrides = {
+  maxFeePerGas?: undefined;
+  maxPriorityFeePerGas?: undefined;
+  gasPrice?: undefined;
+};
+
+export type TxFeeOverrides = Eip1559FeeOverrides | LegacyFeeOverrides | EmptyFeeOverrides;
+
+export type TxFeeOverrideResult =
+  | { kind: 'eip1559'; overrides: Eip1559FeeOverrides; snapshot: TxFeeSnapshot }
+  | { kind: 'legacy'; overrides: LegacyFeeOverrides; snapshot: TxFeeSnapshot }
+  | { kind: 'none'; overrides: EmptyFeeOverrides; snapshot: TxFeeSnapshot };
+
+export type TxRecoveryTransactionRequest = TxFeeOverrides & {
+  account?: unknown;
+  to: Address;
+  value: bigint;
+  nonce: number;
+};
+
+export interface TxRecoveryWalletClient {
+  account?: unknown;
+  sendTransaction(tx: TxRecoveryTransactionRequest): Promise<Hex>;
+}
+
+export type TxRetryTransactionRequest = TxFeeOverrides & {
+  account?: unknown;
+  to?: Address;
+  data?: Hex;
+  value?: bigint;
+  gas?: bigint;
+  nonce?: number;
+  [key: string]: unknown;
+};
+
+export interface TxRetryWalletClient {
+  account?: unknown;
+  sendTransaction(tx: TxRetryTransactionRequest): Promise<Hex>;
+}
+
+export interface TxSubmissionKey {
+  chainId: number;
+  from: Address;
+  nonce: number;
+}
+
+export interface TxSubmissionLedgerEntry extends TxSubmissionKey {
+  hash?: Hex;
+  logicalTx?: string;
+  submittedAtMs: number;
+  fees: TxFeeSnapshot;
+  to?: Address;
+  value?: bigint;
+  data?: Hex;
+  resolvedAtMs?: number | null;
+}
+
+type MaybePromise<T> = T | Promise<T>;
+
+export interface TxSubmissionLedger {
+  getTxSubmission(key: TxSubmissionKey): MaybePromise<TxSubmissionLedgerEntry | null>;
+  recordTxSubmission(entry: TxSubmissionLedgerEntry): MaybePromise<void>;
+  markTxSubmissionResolved(key: TxSubmissionKey & { resolvedAtMs: number }): MaybePromise<void>;
+}
+
+export interface NonceLedgerSubmission {
+  hash?: Hex;
+  logicalTx?: string;
+  submittedAtMs?: number;
+  fees: TxFeeSnapshot;
+  to?: Address;
+  value?: bigint;
+  data?: Hex;
+}
+
+export interface NonceLedgerContext {
+  ledger: TxSubmissionLedger;
+  chainId: number;
+  from: Address;
+  nonce: number;
+  feeResultForAttempt(
+    attemptIndex: number,
+    options?: { forceEstimate?: boolean },
+  ): Promise<TxFeeOverrideResult>;
+  recordSubmitted(entry: NonceLedgerSubmission): Promise<void>;
+  markResolved(resolvedAtMs?: number): Promise<void>;
+}
+
+export interface WithNonceLedgerArgs {
+  publicClient: PublicClient;
+  walletClient?: TxRecoveryWalletClient;
+  ledger?: TxSubmissionLedger;
+  from: Address;
+  nonce?: number;
+  chainId?: number;
+  recoverStuckNonce?: boolean;
+  staleAfterMs?: number;
+}
+
+export function createMemoryTxSubmissionLedger(): TxSubmissionLedger {
+  const entries = new Map<string, TxSubmissionLedgerEntry>();
+  const keyFor = (key: TxSubmissionKey) =>
+    `${key.chainId}:${key.from.toLowerCase()}:${key.nonce}`;
+
+  return {
+    getTxSubmission(key) {
+      return entries.get(keyFor(key)) ?? null;
+    },
+    recordTxSubmission(entry) {
+      entries.set(keyFor(entry), { ...entry, resolvedAtMs: entry.resolvedAtMs ?? null });
+    },
+    markTxSubmissionResolved(key) {
+      const existing = entries.get(keyFor(key));
+      if (existing) entries.set(keyFor(key), { ...existing, resolvedAtMs: key.resolvedAtMs });
+    },
+  };
+}
+
+let defaultTxSubmissionLedger: TxSubmissionLedger = createMemoryTxSubmissionLedger();
+
+export function setDefaultTxSubmissionLedger(ledger: TxSubmissionLedger): void {
+  defaultTxSubmissionLedger = ledger;
+}
+
+export function getDefaultTxSubmissionLedger(): TxSubmissionLedger {
+  return defaultTxSubmissionLedger;
 }
 
 export async function withRecoverableRetry<T>(
@@ -271,28 +423,109 @@ export async function waitForContractCode(
   throw new Error(`No contract code at ${address} after ${maxAttempts} getCode attempts`);
 }
 
-/** EIP-1559 or legacy gas overrides for viem, increasingly aggressive on later attempts. */
-export async function viemFeeOverridesForAttempt(
+function mulDivCeil(value: bigint, numerator: bigint, denominator: bigint): bigint {
+  return (value * numerator + denominator - 1n) / denominator;
+}
+
+function maxBigInt(...values: Array<bigint | undefined>): bigint | undefined {
+  const present = values.filter((value): value is bigint => value !== undefined);
+  if (present.length === 0) return undefined;
+  return present.reduce((max, value) => (value > max ? value : max), present[0]!);
+}
+
+function replacementBump(value: bigint): bigint {
+  return mulDivCeil(
+    value,
+    10000n + BigInt(TX_RETRY_DEFAULTS.replacementBumpBps),
+    10000n,
+  );
+}
+
+function attemptBump(value: bigint, attemptIndex: number): bigint {
+  if (attemptIndex <= 0) return value;
+  const bps = BigInt(TX_RETRY_DEFAULTS.feeBumpBpsPerAttempt) * BigInt(attemptIndex);
+  return mulDivCeil(value, 10000n + bps, 10000n);
+}
+
+export function mergeFeeEstimateWithPrevious(
+  current: TxFeeSnapshot,
+  previous?: TxFeeSnapshot | null,
+  attemptIndex = 0,
+): TxFeeSnapshot {
+  if (current.gasPrice !== undefined || previous?.gasPrice !== undefined) {
+    const gasPrice = maxBigInt(
+      current.gasPrice === undefined ? undefined : attemptBump(current.gasPrice, attemptIndex),
+      previous?.gasPrice === undefined ? undefined : replacementBump(previous.gasPrice),
+    );
+    return gasPrice === undefined ? {} : { gasPrice };
+  }
+
+  const maxFeePerGas = maxBigInt(
+    current.maxFeePerGas === undefined ? undefined : attemptBump(current.maxFeePerGas, attemptIndex),
+    previous?.maxFeePerGas === undefined ? undefined : replacementBump(previous.maxFeePerGas),
+  );
+  const maxPriorityFeePerGas = maxBigInt(
+    current.maxPriorityFeePerGas === undefined
+      ? undefined
+      : attemptBump(current.maxPriorityFeePerGas, attemptIndex),
+    previous?.maxPriorityFeePerGas === undefined
+      ? undefined
+      : replacementBump(previous.maxPriorityFeePerGas),
+  );
+  if (maxFeePerGas !== undefined && maxPriorityFeePerGas !== undefined) {
+    return { maxFeePerGas, maxPriorityFeePerGas };
+  }
+  return {};
+}
+
+function feeOverrideResultFromSnapshot(snapshot: TxFeeSnapshot): TxFeeOverrideResult {
+  if (snapshot.maxFeePerGas !== undefined && snapshot.maxPriorityFeePerGas !== undefined) {
+    const overrides: Eip1559FeeOverrides = {
+      maxFeePerGas: snapshot.maxFeePerGas,
+      maxPriorityFeePerGas: snapshot.maxPriorityFeePerGas,
+    };
+    return { kind: 'eip1559', overrides, snapshot: overrides };
+  }
+
+  if (snapshot.gasPrice !== undefined) {
+    const overrides: LegacyFeeOverrides = { gasPrice: snapshot.gasPrice };
+    return { kind: 'legacy', overrides, snapshot: overrides };
+  }
+
+  return { kind: 'none', overrides: {}, snapshot: {} };
+}
+
+/**
+ * EIP-1559 or legacy gas overrides for viem, increasingly aggressive on later attempts.
+ *
+ * The result carries both the spreadable viem transaction overrides and the
+ * ledger snapshot, keeping call sites from recasting the override object.
+ */
+export async function viemFeeOverrideResultForAttempt(
   publicClient: PublicClient,
   attemptIndex: number,
-): Promise<
-  | { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }
-  | { gasPrice: bigint }
-  | Record<string, never>
-> {
-  if (attemptIndex <= 0) return {};
-
-  const bps = BigInt(TX_RETRY_DEFAULTS.feeBumpBpsPerAttempt) * BigInt(attemptIndex);
-  const mult = 10000n + bps;
-  const apply = (v: bigint) => (v * mult) / 10000n;
+  options: {
+    previousFees?: TxFeeSnapshot | null;
+    forceEstimate?: boolean;
+  } = {},
+): Promise<TxFeeOverrideResult> {
+  if (attemptIndex <= 0 && !options.previousFees && !options.forceEstimate) {
+    return feeOverrideResultFromSnapshot({});
+  }
 
   try {
     const fees = await publicClient.estimateFeesPerGas();
     if (fees.maxFeePerGas !== undefined && fees.maxPriorityFeePerGas !== undefined) {
-      return {
-        maxFeePerGas: apply(fees.maxFeePerGas),
-        maxPriorityFeePerGas: apply(fees.maxPriorityFeePerGas),
-      };
+      return feeOverrideResultFromSnapshot(
+        mergeFeeEstimateWithPrevious(
+          {
+            maxFeePerGas: fees.maxFeePerGas,
+            maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+          },
+          options.previousFees,
+          attemptIndex,
+        ),
+      );
     }
   } catch {
     // fall through to gasPrice
@@ -300,10 +533,30 @@ export async function viemFeeOverridesForAttempt(
 
   try {
     const gasPrice = await publicClient.getGasPrice();
-    return { gasPrice: apply(gasPrice) };
+    return feeOverrideResultFromSnapshot(
+      mergeFeeEstimateWithPrevious(
+        { gasPrice },
+        options.previousFees,
+        attemptIndex,
+      ),
+    );
   } catch {
-    return {};
+    return options.previousFees
+      ? feeOverrideResultFromSnapshot(mergeFeeEstimateWithPrevious({}, options.previousFees, attemptIndex))
+      : feeOverrideResultFromSnapshot({});
   }
+}
+
+/** EIP-1559 or legacy gas overrides for viem, increasingly aggressive on later attempts. */
+export async function viemFeeOverridesForAttempt(
+  publicClient: PublicClient,
+  attemptIndex: number,
+  options: {
+    previousFees?: TxFeeSnapshot | null;
+    forceEstimate?: boolean;
+  } = {},
+): Promise<TxFeeOverrides> {
+  return (await viemFeeOverrideResultForAttempt(publicClient, attemptIndex, options)).overrides;
 }
 
 export async function waitForTransactionReceiptWithRetry(
@@ -341,50 +594,258 @@ export async function waitForTransactionReceiptWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-export async function viemSendTransactionWithRetry(
-  walletClient: { sendTransaction: (tx: any) => Promise<Hex> },
+async function resolveTxChainId(publicClient: PublicClient): Promise<number> {
+  return Number(await publicClient.getChainId());
+}
+
+async function resolvePendingNonce(
   publicClient: PublicClient,
-  txRequest: {
-    account: any;
-    to?: Address;
-    data?: Hex;
-    value?: bigint;
-    gas?: bigint;
-    maxFeePerGas?: bigint;
-    maxPriorityFeePerGas?: bigint;
-    gasPrice?: bigint;
-    [key: string]: any;
-  },
+  from: Address,
+): Promise<number> {
+  return Number(await publicClient.getTransactionCount({ address: from, blockTag: 'pending' }));
+}
+
+async function resolveLatestNonce(
+  publicClient: PublicClient,
+  from: Address,
+): Promise<number> {
+  return Number(await publicClient.getTransactionCount({ address: from, blockTag: 'latest' }));
+}
+
+function accountAddress(account: unknown): Address | undefined {
+  if (account && typeof account === 'object' && typeof (account as { address?: unknown }).address === 'string') {
+    return (account as { address: Address }).address;
+  }
+  return undefined;
+}
+
+function supportsNonceTracking(publicClient: PublicClient): boolean {
+  const client = publicClient as unknown as {
+    getChainId?: unknown;
+    getTransactionCount?: unknown;
+  };
+  return typeof client.getChainId === 'function' && typeof client.getTransactionCount === 'function';
+}
+
+function isEmptyFees(fees: TxFeeSnapshot): boolean {
+  return fees.maxFeePerGas === undefined
+    && fees.maxPriorityFeePerGas === undefined
+    && fees.gasPrice === undefined;
+}
+
+export function removeConflictingLegacyGasPrice<T extends TxFeeSnapshot>(tx: T): void {
+  if (tx.maxFeePerGas !== undefined && tx.maxPriorityFeePerGas !== undefined) {
+    delete tx.gasPrice;
+  }
+}
+
+function withoutFeeOverrides<T extends TxFeeSnapshot>(tx: T): Omit<T, keyof TxFeeSnapshot> {
+  const {
+    maxFeePerGas: _maxFeePerGas,
+    maxPriorityFeePerGas: _maxPriorityFeePerGas,
+    gasPrice: _gasPrice,
+    ...baseRequest
+  } = tx;
+  return baseRequest;
+}
+
+export async function withNonceLedger<T>(
+  args: WithNonceLedgerArgs,
+  fn: (context: NonceLedgerContext) => Promise<T>,
+): Promise<T> {
+  const ledger = args.ledger ?? defaultTxSubmissionLedger;
+  const chainId = args.chainId ?? await resolveTxChainId(args.publicClient);
+
+  if (args.recoverStuckNonce) {
+    if (!args.walletClient) {
+      throw new Error('withNonceLedger recovery requested without a wallet client');
+    }
+    await recoverStuckNonceIfNeeded({
+      publicClient: args.publicClient,
+      walletClient: args.walletClient,
+      ledger,
+      chainId,
+      from: args.from,
+      staleAfterMs: args.staleAfterMs,
+    });
+  }
+
+  const nonce = args.nonce ?? await resolvePendingNonce(args.publicClient, args.from);
+  const key = { chainId, from: args.from, nonce };
+  const context: NonceLedgerContext = {
+    ledger,
+    chainId,
+    from: args.from,
+    nonce,
+    async feeResultForAttempt(attemptIndex, options = {}) {
+      const previous = await ledger.getTxSubmission(key);
+      return viemFeeOverrideResultForAttempt(args.publicClient, attemptIndex, {
+        previousFees: previous?.resolvedAtMs == null ? previous?.fees : undefined,
+        forceEstimate: options.forceEstimate,
+      });
+    },
+    async recordSubmitted(entry) {
+      await ledger.recordTxSubmission({
+        chainId,
+        from: args.from,
+        nonce,
+        hash: entry.hash,
+        logicalTx: entry.logicalTx,
+        submittedAtMs: entry.submittedAtMs ?? Date.now(),
+        fees: entry.fees,
+        to: entry.to,
+        value: entry.value,
+        data: entry.data,
+      });
+    },
+    async markResolved(resolvedAtMs = Date.now()) {
+      await ledger.markTxSubmissionResolved({ chainId, from: args.from, nonce, resolvedAtMs });
+    },
+  };
+
+  return fn(context);
+}
+
+export async function recoverStuckNonceIfNeeded(args: {
+  publicClient: PublicClient;
+  walletClient: TxRecoveryWalletClient;
+  ledger?: TxSubmissionLedger;
+  from: Address;
+  chainId?: number;
+  staleAfterMs?: number;
+  nowMs?: number;
+}): Promise<{
+  nonce: number;
+  previousHash?: Hex;
+  recoveryHash: Hex;
+} | null> {
+  const ledger = args.ledger ?? defaultTxSubmissionLedger;
+  const [chainId, pendingNonce, latestNonce] = await Promise.all([
+    args.chainId ?? resolveTxChainId(args.publicClient),
+    resolvePendingNonce(args.publicClient, args.from),
+    resolveLatestNonce(args.publicClient, args.from),
+  ]);
+  if (pendingNonce <= latestNonce) return null;
+
+  const nowMs = args.nowMs ?? Date.now();
+  const staleAfterMs = args.staleAfterMs ?? TX_RETRY_DEFAULTS.stuckNonceAfterMs;
+
+  for (let nonce = latestNonce; nonce < pendingNonce; nonce++) {
+    const entry = await ledger.getTxSubmission({ chainId, from: args.from, nonce });
+    if (!entry || entry.resolvedAtMs != null) continue;
+    if (nowMs - entry.submittedAtMs < staleAfterMs) continue;
+
+    const feeOverrides = await viemFeeOverridesForAttempt(args.publicClient, 1, {
+      previousFees: entry.fees,
+      forceEstimate: true,
+    });
+    const account = args.walletClient.account;
+    const tx: TxRecoveryTransactionRequest = {
+      account,
+      to: args.from,
+      value: 0n,
+      nonce,
+      ...feeOverrides,
+    };
+    removeConflictingLegacyGasPrice(tx);
+    const recoveryHash = await args.walletClient.sendTransaction(tx);
+    await ledger.recordTxSubmission({
+      chainId,
+      from: args.from,
+      nonce,
+      hash: recoveryHash,
+      logicalTx: 'stuck-nonce-recovery',
+      submittedAtMs: nowMs,
+      fees: feeOverrides,
+      to: args.from,
+      value: 0n,
+    });
+    await args.publicClient.waitForTransactionReceipt({ hash: recoveryHash });
+    await ledger.markTxSubmissionResolved({ chainId, from: args.from, nonce, resolvedAtMs: nowMs });
+    return { nonce, previousHash: entry.hash, recoveryHash };
+  }
+  return null;
+}
+
+export async function viemSendTransactionWithRetry(
+  walletClient: TxRetryWalletClient,
+  publicClient: PublicClient,
+  txRequest: TxRetryTransactionRequest,
   options: TxRetryOptions = {},
 ): Promise<Hex> {
   const maxAttempts = options.maxAttempts ?? TX_RETRY_DEFAULTS.maxAttempts;
   const baseDelayMs = options.baseDelayMs ?? TX_RETRY_DEFAULTS.baseDelayMs;
   const maxDelayMs = options.maxDelayMs ?? TX_RETRY_DEFAULTS.maxDelayMs;
+  const ledger = options.ledger ?? defaultTxSubmissionLedger;
+  const from = accountAddress(txRequest.account);
+  const shouldTrackNonce = from !== undefined && supportsNonceTracking(publicClient);
+  const requestedNonce = txRequest.nonce === undefined ? undefined : Number(txRequest.nonce);
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      const overrides = await viemFeeOverridesForAttempt(publicClient, attempt);
-      const req = { ...txRequest, ...overrides };
-      
-      // If we provided maxFeePerGas, ensure gasPrice is not somehow inherited
-      if ('maxFeePerGas' in req && 'maxPriorityFeePerGas' in req) {
-        delete (req as any).gasPrice;
-      }
+  const sendWithRetry = async (nonceLedger?: NonceLedgerContext): Promise<Hex> => {
+    const pinnedNonce = nonceLedger?.nonce ?? requestedNonce;
 
-      return await walletClient.sendTransaction(req);
-    } catch (err) {
-      lastError = err;
-      if (!isRecoverableTransactionError(err) || attempt >= maxAttempts - 1) {
-        throw err;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const feeResult = nonceLedger
+          ? await nonceLedger.feeResultForAttempt(attempt, { forceEstimate: true })
+          : await viemFeeOverrideResultForAttempt(publicClient, attempt);
+        const nonceOverride = pinnedNonce !== undefined ? { nonce: pinnedNonce } : {};
+        const req: TxRetryTransactionRequest =
+          feeResult.kind === 'none'
+            ? {
+                ...txRequest,
+                ...nonceOverride,
+              }
+            : {
+                ...withoutFeeOverrides(txRequest),
+                ...nonceOverride,
+                ...feeResult.overrides,
+              };
+        removeConflictingLegacyGasPrice(req);
+
+        const hash = await walletClient.sendTransaction(req);
+        if (nonceLedger && !isEmptyFees(feeResult.snapshot)) {
+          await nonceLedger.recordSubmitted({
+            hash,
+            logicalTx: options.logicalTx,
+            fees: feeResult.snapshot,
+            to: txRequest.to,
+            value: txRequest.value,
+            data: txRequest.data,
+          });
+        }
+        return hash;
+      } catch (err) {
+        lastError = err;
+        if (!isRecoverableTransactionError(err) || attempt >= maxAttempts - 1) {
+          throw err;
+        }
+        options.onRetry?.({
+          attempt: attempt + 1,
+          error: err,
+          message: flattenErrorMessage(err),
+        });
+        await backoffDelay(attempt, baseDelayMs, maxDelayMs);
       }
-      options.onRetry?.({
-        attempt: attempt + 1,
-        error: err,
-        message: flattenErrorMessage(err),
-      });
-      await backoffDelay(attempt, baseDelayMs, maxDelayMs);
     }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  };
+
+  if (from && shouldTrackNonce) {
+    return withNonceLedger(
+      {
+        publicClient,
+        walletClient,
+        ledger,
+        from,
+        nonce: requestedNonce,
+        recoverStuckNonce: true,
+        staleAfterMs: options.stuckNonceAfterMs,
+      },
+      sendWithRetry,
+    );
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+
+  return sendWithRetry();
 }

@@ -28,6 +28,52 @@ describe('Store', () => {
     expect(store.getShutdownState()).toBe('clean');
   });
 
+  it('persists unresolved transaction submissions for replacement fee recovery', () => {
+    store.recordTxSubmission({
+      chainId: 84532,
+      from: '0x1111111111111111111111111111111111111111',
+      nonce: 7,
+      hash: `0x${'11'.repeat(32)}`,
+      logicalTx: 'safe.execTransaction',
+      submittedAtMs: 1_000,
+      fees: {
+        maxFeePerGas: 100n,
+        maxPriorityFeePerGas: 10n,
+      },
+      to: '0x2222222222222222222222222222222222222222',
+      value: 0n,
+      data: '0x1234',
+    });
+
+    expect(store.getTxSubmission({
+      chainId: 84532,
+      from: '0x1111111111111111111111111111111111111111',
+      nonce: 7,
+    })).toMatchObject({
+      hash: `0x${'11'.repeat(32)}`,
+      logicalTx: 'safe.execTransaction',
+      fees: {
+        maxFeePerGas: 100n,
+        maxPriorityFeePerGas: 10n,
+      },
+      data: '0x1234',
+      resolvedAtMs: null,
+    });
+
+    store.markTxSubmissionResolved({
+      chainId: 84532,
+      from: '0x1111111111111111111111111111111111111111',
+      nonce: 7,
+      resolvedAtMs: 2_000,
+    });
+
+    expect(store.getTxSubmission({
+      chainId: 84532,
+      from: '0x1111111111111111111111111111111111111111',
+      nonce: 7,
+    })?.resolvedAtMs).toBe(2_000);
+  });
+
   it('aggregates own activity and config rows', () => {
     store.recordOwnActivity('r1', 'delivered');
     store.recordOwnActivity('r2', 'evaluated');
