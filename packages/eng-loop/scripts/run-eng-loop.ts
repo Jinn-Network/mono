@@ -30,6 +30,21 @@ import type { SpawnOptions } from 'node:child_process';
 const INTERVAL_MS = 60_000; // 1 minute between cycles
 const REPO = 'Jinn-Network/mono';
 
+/**
+ * Env var carrying the comma-separated GitHub-login allowlist (#497).
+ * Empty / unset means dispatch nothing — fail-safe per design.
+ */
+const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
+
+/** Parse the allowlist env var into a trimmed, non-empty string array. */
+function parseAuthorAllowlist(raw: string | undefined): string[] {
+  if (raw == null || raw.trim() === '') return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 // ---------------------------------------------------------------------------
 // countOpenReadyPrs — count open PRs awaiting merge ("In Review" on the board)
 // ---------------------------------------------------------------------------
@@ -125,6 +140,13 @@ function printReport(report: CycleReport, label: string): void {
 
   console.log(`   skipped (throttle): ${report.skippedForThrottle}`);
 
+  if (report.skippedForAuthor.length > 0) {
+    const rendered = report.skippedForAuthor
+      .map((s) => `#${s.number} (@${s.author})`)
+      .join(', ');
+    console.log(`   skipped (author allowlist): ${rendered}`);
+  }
+
   if (report.paused.length > 0) {
     console.log(`\n   WALL-CLOCK PAUSED: #${report.paused.join(', #')} (Blocked on: Human)`);
   }
@@ -160,6 +182,24 @@ async function main(): Promise<void> {
   if (Number.isInteger(bpOverride) && bpOverride > 0) {
     cfg = { ...cfg, openPrBackpressure: bpOverride };
   }
+
+  const authorAllowlist = parseAuthorAllowlist(process.env[AUTHOR_ALLOWLIST_ENV]);
+  cfg = { ...cfg, authorAllowlist };
+
+  if (cfg.authorAllowlist.length === 0) {
+    // Fail-safe per spec 2026-05-23-author-allowlist-design.md: empty
+    // allowlist means dispatch nothing. Warn loudly so a misconfigured
+    // deploy is visible from the very first cycle log.
+    console.warn(
+      `[eng:loop] WARNING: authorAllowlist is empty — no issues will be dispatched. ` +
+        `Set ${AUTHOR_ALLOWLIST_ENV}=login1,login2,... to enable dispatch.`,
+    );
+  } else {
+    console.log(
+      `[eng:loop] authorAllowlist (${cfg.authorAllowlist.length}): ${cfg.authorAllowlist.join(', ')}`,
+    );
+  }
+
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
   // TODO: wire GhPrSink.collect once session-completion detection exists
