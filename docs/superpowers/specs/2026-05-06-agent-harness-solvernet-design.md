@@ -222,6 +222,16 @@ The aggregation runs continuously (per-Verdict or per-batch) and emits a fresh s
 
 ### 3.6 Task generation policy — full historical pool, post until target successes per task
 
+> **Amendment — proposed 2026-05-22 (issue [#487](https://github.com/Jinn-Network/mono/issues/487), DR-2026-05-22-a).**
+> The posting policy below is being revised. As written it produced two live
+> failure modes: a *global* cooldown that stalls the whole SolverNet after one
+> post, and a `maxClaims` claim policy (50) that lets a single posting yield far
+> more than `N_target_successes` (3) trajectories. The revised semantics —
+> fill-the-pool posting, generator-sized per-posting `maxClaims = N − successes`,
+> retry-on-expiry, longer window, no cadence — are defined in
+> [`log/decisions/2026-05-22-swe-rebench-v2-generation-claiming-semantics.md`](../../../log/decisions/2026-05-22-swe-rebench-v2-generation-claiming-semantics.md).
+> This section is rewritten to match on ratification.
+
 The launcher's Task generator runs against the **full historical pool** of SWE-rebench v2 monthly partitions, not just the current month's drop. This gives the substrate plenty of unsolved task surface even between monthly drops, and lets new operators arriving on the network train on historical content while waiting for the next fresh drop.
 
 The generator implements a **post-until-target-successes** policy across the full pool. This is load-bearing for memorisation resistance — fresh-supply benchmarks (DR-b) handle cross-month memorisation, but within-month memorisation can still emerge if the same task is posted many times: the first successful trajectory enters the corpus and subsequent attempts read it and near-copy. The generator's posting policy bounds this.
