@@ -122,15 +122,11 @@ function truncateAddress(address: string): string {
 
 /**
  * Mirrors `evaluatorHarnessNameForContract` in
- * `client/src/solver-nets/registry.ts` — substring match against
- * `manifest.contract.evaluationFunction.implementation`. Returns `undefined`
- * when the implementation string maps to no known evaluator harness; the
- * caller must then skip the probe and the gate.
- *
- * Symmetry with the daemon helper is intentional: if the daemon would not
- * pair a contract to an evaluator harness, the join form has nothing to
- * probe. New evaluator harnesses get added in both places — track the daemon
- * helper as the source of truth.
+ * `client/src/solver-nets/registry.ts` (the daemon-side source of truth) so
+ * the join form probes the same harness the daemon would pair to this
+ * contract. Returns `undefined` when no known evaluator harness matches —
+ * callers must then skip the probe and the gate. New evaluator harnesses
+ * get added in both places.
  */
 function evaluatorHarnessNameForManifest(
   manifest: RegistryManifestResponse['manifest'] | undefined,
@@ -263,15 +259,13 @@ export function JoinFlow({
   }, [catalogPreferredHarness]);
   const modelOptions = modelOptionsForHarness(form.harness);
 
-  // Per-harness readiness (#332). Probe every solver-compatible harness so
-  // not-ready options render disabled, and Save & Join can gate on the
-  // selected harness reporting ready. The daemon keys the readiness endpoint
-  // by `Harness.name` — the same canonical name `form.harness` carries.
-  //
-  // Issue #523: also probe the evaluator harness — derived from the
-  // manifest's `contract.evaluationFunction.implementation` — so a Docker
-  // outage (the evaluator's `isReady()` check) blocks the evaluator-role
-  // join with the same symmetry as the solver gate.
+  // Per-harness readiness probes. Solver-compatible harnesses (#332) so
+  // not-ready options render disabled and Save & Join can gate on the
+  // selected harness reporting ready; plus the manifest-bound evaluator
+  // harness when the evaluator role is selected (#523) — symmetric gate
+  // catches e.g. a Docker outage failing the evaluator's `isReady()` check.
+  // The daemon keys the readiness endpoint by `Harness.name`, the same
+  // canonical name `form.harness` carries.
   const evaluatorHarnessName = evaluatorHarnessNameForManifest(manifest);
   const readinessProbeNames = [
     ...solverCompatibleHarnesses.map((h) => h.name),
@@ -405,10 +399,9 @@ export function JoinFlow({
   // we avoid flashing a disabled button before the first probe resolves.
   const harnessReadinessBlocked =
     showSolverFields && selectedHarnessReadiness?.ready === false;
-  // Evaluator readiness gate (#523): symmetric with the solver gate. Only
-  // applies when the operator has selected the evaluator role AND the
-  // manifest's evaluator implementation resolved to a known evaluator
-  // harness. Unknown implementation → undefined name → no probe, no gate.
+  // Symmetric gate for the evaluator role (#523). An unknown evaluator
+  // implementation resolves `evaluatorHarnessName` to undefined → no probe
+  // → `evaluatorReadiness` stays undefined → no gate.
   const evaluatorReadinessBlocked =
     showEvaluatorInfo && evaluatorReadiness?.ready === false;
 

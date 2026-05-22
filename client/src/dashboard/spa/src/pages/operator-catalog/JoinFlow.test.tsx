@@ -420,6 +420,40 @@ describe('JoinFlow — per-harness readiness gate', () => {
     ],
   };
 
+  /**
+   * Manifest variant whose evaluator implementation matches the
+   * `prediction-v1-evaluator` harness name (the substring resolver in
+   * JoinFlow.tsx). Used by the evaluator-readiness gate tests below.
+   */
+  const manifestWithPredictionV1Evaluator = {
+    manifest: {
+      ...baseManifest,
+      contract: {
+        ...baseManifest.contract,
+        evaluationFunction: {
+          ...baseManifest.contract.evaluationFunction,
+          implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
+        },
+      },
+    },
+  };
+
+  /** Readiness mock where `prediction-v1-evaluator` is not-ready; others ready. */
+  function mockEvaluatorNotReady(reason: string, nextStep?: { description: string; cli?: string }): void {
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+      if (name === 'prediction-v1-evaluator') {
+        return {
+          harnessName: name,
+          manifestCids: [],
+          ready: false,
+          reason,
+          ...(nextStep ? { nextStep } : {}),
+        };
+      }
+      return { harnessName: name, manifestCids: [], ready: true };
+    });
+  }
+
   it('disables the harness option for a not-ready harness', async () => {
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
     apiMock.harnessReadiness.mockImplementation(async (name: string) => {
@@ -531,30 +565,11 @@ describe('JoinFlow — per-harness readiness gate', () => {
   });
 
   it('gates Save & Join and shows a not-ready warning when evaluator is selected and the evaluator harness reports not-ready (e.g. Docker stopped)', async () => {
-    apiMock.getManifest.mockResolvedValue({
-      manifest: {
-        ...baseManifest,
-        contract: {
-          ...baseManifest.contract,
-          evaluationFunction: {
-            ...baseManifest.contract.evaluationFunction,
-            implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
-          },
-        },
-      },
-    });
+    apiMock.getManifest.mockResolvedValue(manifestWithPredictionV1Evaluator);
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
-    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
-      if (name === 'prediction-v1-evaluator') {
-        return {
-          harnessName: name,
-          manifestCids: [],
-          ready: false,
-          reason: 'Docker daemon not reachable',
-          nextStep: { description: 'Start Docker Desktop', cli: 'open -a Docker' },
-        };
-      }
-      return { harnessName: name, manifestCids: [], ready: true };
+    mockEvaluatorNotReady('Docker daemon not reachable', {
+      description: 'Start Docker Desktop',
+      cli: 'open -a Docker',
     });
 
     wrap(<JoinFlow />);
@@ -574,18 +589,7 @@ describe('JoinFlow — per-harness readiness gate', () => {
   });
 
   it('does NOT gate Save & Join when evaluator is selected and the evaluator harness reports ready', async () => {
-    apiMock.getManifest.mockResolvedValue({
-      manifest: {
-        ...baseManifest,
-        contract: {
-          ...baseManifest.contract,
-          evaluationFunction: {
-            ...baseManifest.contract.evaluationFunction,
-            implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
-          },
-        },
-      },
-    });
+    apiMock.getManifest.mockResolvedValue(manifestWithPredictionV1Evaluator);
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
     // Default beforeEach mock returns ready: true for every probed name.
 
@@ -606,11 +610,6 @@ describe('JoinFlow — per-harness readiness gate', () => {
     // which does NOT contain the 'prediction-v1-evaluator' substring; the
     // resolver returns undefined and we must neither probe nor gate.
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
-    apiMock.harnessReadiness.mockImplementation(async (name: string) => ({
-      harnessName: name,
-      manifestCids: [],
-      ready: true,
-    }));
 
     wrap(<JoinFlow />);
     await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
@@ -629,30 +628,9 @@ describe('JoinFlow — per-harness readiness gate', () => {
   });
 
   it('gates Save & Join when both roles are selected and the evaluator harness reports not-ready', async () => {
-    apiMock.getManifest.mockResolvedValue({
-      manifest: {
-        ...baseManifest,
-        contract: {
-          ...baseManifest.contract,
-          evaluationFunction: {
-            ...baseManifest.contract.evaluationFunction,
-            implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
-          },
-        },
-      },
-    });
+    apiMock.getManifest.mockResolvedValue(manifestWithPredictionV1Evaluator);
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
-    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
-      if (name === 'prediction-v1-evaluator') {
-        return {
-          harnessName: name,
-          manifestCids: [],
-          ready: false,
-          reason: 'Docker daemon not reachable',
-        };
-      }
-      return { harnessName: name, manifestCids: [], ready: true };
-    });
+    mockEvaluatorNotReady('Docker daemon not reachable');
 
     wrap(<JoinFlow />);
     await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
