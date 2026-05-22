@@ -27,17 +27,14 @@ describe('NetworkTab', () => {
 
   it('renders the Network section heading', () => {
     render(withProviders(<NetworkTab />));
-    // The SectionCard button renders "Network" as the section title.
-    const networkHeadings = screen
-      .getAllByRole('button')
-      .filter((b) => b.textContent?.includes('Network'));
-    expect(networkHeadings.length).toBeGreaterThan(0);
+    // shadcn Card.CardTitle exposes the heading as an <h3>.
+    const heading = screen.getByRole('heading', { name: /^network$/i });
+    expect(heading).toBeTruthy();
   });
 
-  it('renders the section body (defaultExpanded=true passes locked/rpc-url fields)', () => {
+  it('renders the chain locked chip + RPC URL input', () => {
     render(withProviders(<NetworkTab />));
-    // With defaultExpanded=true, SectionCard renders the body immediately.
-    // The "locked" chip on the Chain field is a reliable stable assertion.
     expect(screen.getByText(/locked/i)).toBeTruthy();
+    expect(screen.getByLabelText(/rpc url/i)).toBeTruthy();
   });
 });

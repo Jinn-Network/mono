@@ -1,59 +1,32 @@
 import { Link } from 'wouter';
+import { ArrowRight, Wrench } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card.js';
+import { Button } from '../components/ui/button.js';
 
 export interface OperatorPageProps {
   onRestartPending?: () => void;
 }
 
 export function OperatorPage(_props: OperatorPageProps = {}): JSX.Element {
-
   return (
-    <div
-      data-testid="operator-page"
-      style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}
-    >
-      <section
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
-          borderRadius: '10px',
-          padding: '16px 20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '16px',
-          fontFamily: "'JetBrains Mono', monospace",
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 500,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--fg-muted)',
-            }}
-          >
-            Launcher tools
-          </span>
-          <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
-            Create or manage SolverNets you own.
-          </span>
-        </div>
-        <Link
-          href="/launcher"
-          style={{
-            color: 'var(--accent-sky)',
-            fontSize: '11px',
-            textDecoration: 'none',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          Open Launcher →
-        </Link>
-      </section>
+    <div data-testid="operator-page" className="flex flex-col gap-4 p-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div className="flex flex-col gap-1.5">
+            <CardTitle className="flex items-center gap-2">
+              <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+              Launcher tools
+            </CardTitle>
+            <CardDescription>Create or manage SolverNets you own.</CardDescription>
+          </div>
+          <Button asChild variant="link" size="sm" className="h-auto whitespace-nowrap p-0">
+            <Link href="/launcher">
+              Open Launcher <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent />
+      </Card>
     </div>
   );
 }

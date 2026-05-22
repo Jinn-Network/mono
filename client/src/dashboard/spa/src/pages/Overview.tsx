@@ -1,12 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '../api/client.js';
 import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
 import type { SolverNetsCatalogResponse, TjinnStatus } from '../api/types.js';
-import { Alert, AlertDescription } from '../components/ui/alert.js';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
+import { Button } from '../components/ui/button.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -205,29 +208,21 @@ function EvictionBanner({
 }): JSX.Element {
   const [restaking, setRestaking] = useState(false);
   return (
-    <section
+    <Alert
+      variant="blocking"
       data-testid="overview-eviction-banner"
-      className="j-surface-primary j-surface--blocking"
       aria-live="polite"
-      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+      className="flex flex-col gap-2"
     >
-      <span
-        style={{
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-xs)',
-          fontWeight: 500,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--severity-blocking-fg)',
-        }}
-      >
-        Service evicted
-      </span>
-      <p style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 'var(--text-base)', color: 'var(--fg)' }}>
+      <AlertTriangle className="h-4 w-4 text-[var(--break-red)]" />
+      <AlertTitle className="text-[var(--break-red)]">Service evicted</AlertTitle>
+      <AlertDescription className="text-base text-foreground">
         A service has been evicted from staking. Re-stake to resume earning.
-      </p>
+      </AlertDescription>
       {serviceId != null && (
-        <button
+        <Button
+          variant="destructive"
+          size="sm"
           type="button"
           data-testid="overview-eviction-restake"
           disabled={restaking}
@@ -240,32 +235,17 @@ function EvictionBanner({
               setRestaking(false);
             }
           }}
-          style={{
-            alignSelf: 'flex-start',
-            marginTop: 'var(--space-2)',
-            background: 'transparent',
-            border: '1px solid var(--severity-blocking-fg)',
-            borderRadius: 'var(--radius-2)',
-            color: 'var(--severity-blocking-fg)',
-            cursor: restaking ? 'wait' : 'pointer',
-            fontFamily: 'var(--mono)',
-            fontSize: 'var(--text-xs)',
-            letterSpacing: '0.14em',
-            opacity: restaking ? 0.55 : 1,
-            padding: '6px 10px',
-            textTransform: 'uppercase',
-          }}
+          className="mt-2 self-start"
         >
-          {restaking ? 'Working...' : 'Re-stake now'}
-        </button>
+          {restaking ? 'Working…' : 'Re-stake now'}
+        </Button>
       )}
-    </section>
+    </Alert>
   );
 }
 
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const queryClient = useQueryClient();
   const { data: status, isError: statusIsError } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
@@ -430,46 +410,28 @@ export function OverviewPage(): JSX.Element {
   // Node Health stays a glance-level health card.
   const daemonStateMessage: string | undefined = undefined;
 
-  // Auto-clear timer for transient success notices (e.g. the gas top-up
-  // confirmation, which should surface the amount + tx hash for ~5s then
-  // fade — issue #336).
-  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-    },
-    [],
-  );
-
+  // Action confirmation now flows through sonner toast() — the
+  // auto-dismiss timer the inline `dashboard-action-notice` band used to
+  // own is the toast primitive's `duration`. Error toasts are persistent
+  // (no auto-dismiss) so the operator sees the failure reason.
   const runAction = (
     label: string,
     action: () => Promise<{ message?: string } | void> | { message?: string } | void,
     opts?: { autoClearMs?: number },
   ): void => {
     setActiveAction(label);
-    setNotice(null);
-    if (noticeTimerRef.current) {
-      clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = null;
-    }
     Promise.resolve()
       .then(action)
       .then((result) => {
-        setNotice({
-          tone: 'success',
-          text: result?.message ?? `${label} requested.`,
+        toast.success(label, {
+          description: result?.message,
+          duration: opts?.autoClearMs ?? 5_000,
         });
-        if (opts?.autoClearMs) {
-          noticeTimerRef.current = setTimeout(() => {
-            setNotice(null);
-            noticeTimerRef.current = null;
-          }, opts.autoClearMs);
-        }
       })
       .catch((err) => {
-        setNotice({
-          tone: 'error',
-          text: err instanceof Error ? err.message : String(err),
+        toast.error(`${label} failed`, {
+          description: err instanceof Error ? err.message : String(err),
+          duration: Infinity,
         });
       })
       .finally(() => setActiveAction(null));
@@ -478,16 +440,10 @@ export function OverviewPage(): JSX.Element {
   return (
     <div
       data-testid="overview-page-grid"
-      style={{
-        padding: 'var(--space-5)',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 380px)',
-        gap: 'var(--space-5)',
-        alignItems: 'start',
-      }}
+      className="grid items-start gap-6 p-6 [grid-template-columns:minmax(0,1fr)_minmax(0,380px)]"
     >
       {/* ── MAIN COLUMN ──────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', minWidth: 0 }}>
+      <div className="flex min-w-0 flex-col gap-6">
         {isEvicted && (
           <EvictionBanner
             serviceId={evictedServiceId}
@@ -499,25 +455,6 @@ export function OverviewPage(): JSX.Element {
               await queryClient.invalidateQueries({ queryKey: ['status'] });
             }}
           />
-        )}
-
-        {notice && (
-          <Alert
-            variant={notice.tone === 'error' ? 'blocking' : 'success'}
-            role={notice.tone === 'error' ? 'alert' : 'status'}
-            data-testid="dashboard-action-notice"
-            className="rounded-md border border-l-2 px-3 py-2.5"
-          >
-            <AlertDescription
-              className={
-                notice.tone === 'error'
-                  ? 'text-[var(--break-red)]'
-                  : 'text-[var(--vow-green)]'
-              }
-            >
-              {notice.text}
-            </AlertDescription>
-          </Alert>
         )}
 
         {/*
@@ -537,13 +474,7 @@ export function OverviewPage(): JSX.Element {
         stick on a normal-height viewport, and a sticky overflow makes
         the column un-scrollable. The aside flows with the page now.
       */}
-      <aside
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-5)',
-        }}
-      >
+      <aside className="flex flex-col gap-6">
         <NodeHealthCard
           daemonStatus={daemonStatus}
           daemonStateMessage={daemonStateMessage}

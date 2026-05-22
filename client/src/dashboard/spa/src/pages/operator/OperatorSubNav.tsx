@@ -12,6 +12,7 @@ import { Button } from '../../components/ui/button.js';
 const TABS = [
   { to: '/operator/memberships', label: 'Memberships' },
   { to: '/operator/registry', label: 'Registry' },
+  { to: '/operator/execution-data', label: 'Execution data' },
   { to: '/operator/network', label: 'Network' },
   { to: '/operator/security', label: 'Security' },
 ] as const;

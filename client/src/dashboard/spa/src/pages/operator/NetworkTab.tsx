@@ -1,16 +1,26 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { SectionCard } from '../../components/SectionCard.js';
-import { ConfigField } from '../../components/ConfigField.js';
+import { Network, AlertTriangle, ExternalLink } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '../../api/client.js';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card.js';
+import { Button } from '../../components/ui/button.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Input } from '../../components/ui/input.js';
+import { Label } from '../../components/ui/label.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
 
 /**
  * /operator/network — RPC + chain config (§2.11).
- * Code moved from pages/configuration/NetworkSection.tsx (Task 5.5).
  *
- * Network section: chain is read-only (changing chains is a state-reset
- * flow handled outside the dashboard); RPC URL is a free-text input that
- * can be reverted to the chain default by clearing it.
+ * Chain is read-only; RPC URL is free-text with a one-click "use default"
+ * restore. Save surfaces via sonner toast.
  */
 
 interface BootstrapWithChain {
@@ -70,189 +80,156 @@ function NetworkSectionContent({
 }: NetworkSectionContentProps): JSX.Element {
   const [draft, setDraft] = useState(rpcUrl);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const dirty = draft !== rpcUrl;
-  // Surface a "shared RPC — bring your own" warning when the operator is
-  // still on Jinn's shipped default. The default is a free public Tenderly
-  // gateway shared with every default-config operator; reliable steady-state
-  // operation requires the operator's own key. See contracts.ts comment.
   const onSharedDefault = rpcUrl === defaultRpcUrl;
-  const chainLabel = chain === 'base' ? 'Base mainnet (chain id 8453)' : 'Base Sepolia (chain id 84532)';
+  const chainLabel =
+    chain === 'base' ? 'Base mainnet (chain id 8453)' : 'Base Sepolia (chain id 84532)';
+  const chainShort = chainLabel.split(' (')[0];
 
   const save = async (): Promise<void> => {
     setSaving(true);
-    setError(null);
     try {
       const next = draft.length === 0 ? null : draft;
       const res = await api.updateNetwork({ rpcUrl: next });
+      toast.success('RPC URL saved', {
+        description: res.restartRequired
+          ? 'Restart pending — applies on next daemon start.'
+          : 'Applied to the running daemon.',
+      });
       if (res.restartRequired) onRestartPending();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      toast.error('Failed to save RPC URL', {
+        description: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <SectionCard
-      title="Network"
-      summary={`${chainLabel.split(' (')[0]} · ${rpcUrl}`}
-      metaChip={{
-        label: rpcHealthy ? 'Healthy' : 'Unreachable',
-        tone: rpcHealthy ? 'live' : 'danger',
-      }}
-      defaultExpanded={true}
-      dirty={
-        dirty
-          ? {
-              pendingSummary: 'RPC URL changed · save to apply',
-              saving,
-              error: error ?? undefined,
-              onSave: () => { void save(); },
-              onCancel: () => { setDraft(rpcUrl); setError(null); },
-            }
-          : undefined
-      }
-    >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-        <ConfigField
-          label="Chain"
-          helperText="Switching chains resets fleet state — that's a separate flow."
-        >
-          <div
-            style={{
-              background: 'var(--bg-sunken)',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              padding: '10px 12px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              color: 'var(--fg-muted)',
-            }}
-          >
-            {chainLabel}
-          </div>
-          <span
-            style={{
-              alignSelf: 'flex-start',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '9px',
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: 'var(--fg-dim)',
-              border: '1px solid var(--border)',
-              borderRadius: '999px',
-              padding: '1px 6px',
-              marginTop: '6px',
-            }}
-          >
-            locked
-          </span>
-        </ConfigField>
-        <ConfigField
-          label="RPC URL"
-          restartRequired
-          helperText={`Default: ${defaultRpcUrl}`}
-        >
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={defaultRpcUrl}
-            style={{
-              background: 'var(--bg)',
-              border: `1px solid ${dirty ? 'var(--accent-sky)' : 'var(--border)'}`,
-              borderRadius: '6px',
-              padding: '10px 12px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              color: 'var(--fg)',
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => setDraft('')}
-            style={{
-              alignSelf: 'flex-start',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--accent-sky)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              cursor: 'pointer',
-              marginTop: '4px',
-              padding: 0,
-            }}
-          >
-            Use default
-          </button>
-          {onSharedDefault && (
-            <div
-              style={{
-                marginTop: '12px',
-                padding: '10px 12px',
-                border: '1px solid var(--wane)',
-                borderRadius: '6px',
-                background: 'transparent',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                lineHeight: 1.55,
-                color: 'var(--fg)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-              }}
-              data-testid="network-shared-rpc-warning"
-            >
-              <span
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '10px',
-                  fontWeight: 500,
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  color: 'var(--wane)',
-                }}
-              >
-                Shared RPC
-              </span>
-              <span>
-                You're on the default RPC — a free public gateway shared with
-                every operator on the default config. Fine for setup; not
-                reliable under load. Get your own free key from{' '}
-                <a
-                  href="https://dashboard.tenderly.co/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--accent-sky)' }}
-                >
-                  Tenderly
-                </a>
-                ,{' '}
-                <a
-                  href="https://www.alchemy.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--accent-sky)' }}
-                >
-                  Alchemy
-                </a>
-                , or{' '}
-                <a
-                  href="https://www.quicknode.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--accent-sky)' }}
-                >
-                  QuickNode
-                </a>{' '}
-                and paste it above.
-              </span>
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5">
+          <CardTitle className="flex items-center gap-2">
+            <Network className="h-3.5 w-3.5" aria-hidden="true" />
+            Network
+          </CardTitle>
+          <CardDescription>
+            {chainShort} · {rpcUrl}
+          </CardDescription>
+        </div>
+        <Badge variant={rpcHealthy ? 'success' : 'destructive'}>
+          {rpcHealthy ? 'Healthy' : 'Unreachable'}
+        </Badge>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <Label>Chain</Label>
+            <div className="rounded-md border border-border bg-[var(--bg-sunken)] px-3 py-2 font-mono text-[13px] text-muted-foreground">
+              {chainLabel}
             </div>
-          )}
-        </ConfigField>
-      </div>
-    </SectionCard>
+            <Badge variant="outline" className="self-start">
+              locked
+            </Badge>
+            <p className="font-mono text-[11px] text-[var(--fg-dim)]">
+              Switching chains resets fleet state — that's a separate flow.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="rpc-url">RPC URL</Label>
+              {dirty && <Badge variant="warning">Restart</Badge>}
+            </div>
+            <Input
+              id="rpc-url"
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={defaultRpcUrl}
+              className={dirty ? 'border-primary' : undefined}
+            />
+            <Button
+              variant="link"
+              size="sm"
+              type="button"
+              onClick={() => setDraft('')}
+              className="h-auto self-start p-0 text-[11px]"
+            >
+              Use default
+            </Button>
+            {onSharedDefault && (
+              <Alert
+                variant="warning"
+                className="mt-3"
+                data-testid="network-shared-rpc-warning"
+              >
+                <AlertTriangle className="h-4 w-4 text-[var(--wane)]" />
+                <AlertTitle className="text-[var(--wane)]">Shared RPC</AlertTitle>
+                <AlertDescription>
+                  You're on the default RPC — a free public gateway shared with every
+                  operator on the default config. Fine for setup; not reliable under
+                  load. Get your own free key from{' '}
+                  <a
+                    href="https://dashboard.tenderly.co/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                  >
+                    Tenderly <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                  ,{' '}
+                  <a
+                    href="https://www.alchemy.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                  >
+                    Alchemy <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                  , or{' '}
+                  <a
+                    href="https://www.quicknode.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                  >
+                    QuickNode <ExternalLink className="h-2.5 w-2.5" />
+                  </a>{' '}
+                  and paste it above.
+                </AlertDescription>
+              </Alert>
+            )}
+            <p className="font-mono text-[11px] text-[var(--fg-dim)]">
+              Default: {defaultRpcUrl}
+            </p>
+          </div>
+        </div>
+        {dirty && (
+          <div className="mt-6 flex items-center justify-end gap-2 border-t border-border pt-4">
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => setDraft(rpcUrl)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                void save();
+              }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

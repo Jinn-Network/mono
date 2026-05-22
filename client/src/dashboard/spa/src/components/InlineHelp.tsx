@@ -1,19 +1,22 @@
 import { useState } from 'react';
+import { Info } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover.js';
 
 /**
  * Expandable inline help. A small "i" trigger sits next to a field label;
- * clicking it reveals a short decision-context panel below the label without
- * leaving the form (Issue #334 — operators were choosing roles / harnesses /
- * plug-ins with no trade-off context).
+ * clicking it reveals a short decision-context panel without leaving the
+ * form (Issue #334 — operators were choosing roles / harnesses / plug-ins
+ * with no trade-off context).
  *
- * The panel carries the *short* answer. The full long-form copy lives in
- * `client/docs/operator/join-form-context.md`; `docHref` points the operator
- * there when they want the complete picture.
+ * Backed by shadcn `<Popover>` so focus management, click-outside, and
+ * Escape-to-close come from Radix. The panel carries the *short* answer;
+ * the full long-form copy lives in `client/docs/operator/join-form-context.md`,
+ * and `docHref` points the operator there for the complete picture.
  */
 export interface InlineHelpProps {
   /** Accessible label for the trigger, e.g. "Roles help". */
   label: string;
-  /** Short decision-context copy shown in the expandable panel. */
+  /** Short decision-context copy shown in the popover panel. */
   children: React.ReactNode;
   /** Optional link to the long-form doc section. */
   docHref?: string;
@@ -30,75 +33,37 @@ export function InlineHelp({
   const [open, setOpen] = useState(false);
 
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '6px' }}>
-      <button
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
         type="button"
         data-testid="inline-help-trigger"
         aria-label={label}
-        aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
-        style={{
-          width: '14px',
-          height: '14px',
-          lineHeight: '12px',
-          padding: 0,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '10px',
-          fontWeight: 600,
-          fontStyle: 'italic',
-          color: 'var(--fg-muted)',
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--fg-muted)',
-          borderRadius: 'var(--radius-2)',
-          cursor: 'pointer',
-        }}
+        className="inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded-md border border-muted-foreground bg-card p-0 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
       >
-        i
-      </button>
-      {open && (
-        <span
-          data-testid="inline-help-panel"
-          role="note"
-          style={{
-            display: 'block',
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
-            padding: '10px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            lineHeight: 1.6,
-            fontWeight: 400,
-            letterSpacing: 'normal',
-            textTransform: 'none',
-            // `pre-line` collapses runs of spaces but keeps newlines, so help
-            // copy can use blank lines (`\n\n`) to break dense paragraphs
-            // into short, scannable chunks (#328 inline-help polish).
-            whiteSpace: 'pre-line',
-            color: 'var(--fg-muted)',
-            maxWidth: '420px',
-          }}
-        >
-          {children}
-          {docHref && (
-            <>
-              {' '}
-              <a
-                data-testid="inline-help-doc-link"
-                href={docHref}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: 'var(--accent-sky)' }}
-              >
-                {docLabel}
-              </a>
-            </>
-          )}
-        </span>
-      )}
-    </span>
+        <Info className="h-2.5 w-2.5" aria-hidden="true" />
+      </PopoverTrigger>
+      <PopoverContent
+        data-testid="inline-help-panel"
+        role="note"
+        align="start"
+        className="max-w-[420px] whitespace-pre-line font-mono text-[11px] font-normal leading-relaxed normal-case tracking-normal text-muted-foreground"
+      >
+        {children}
+        {docHref && (
+          <>
+            {' '}
+            <a
+              data-testid="inline-help-doc-link"
+              href={docHref}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary hover:underline"
+            >
+              {docLabel}
+            </a>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }

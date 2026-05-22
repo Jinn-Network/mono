@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
+import { Toaster } from '../components/ui/sonner.js';
 
 /**
  * Overview integration tests. With the IA reshuffle, the per-card behaviour
@@ -60,6 +61,9 @@ function withProviders(node: JSX.Element, path = '/overview'): JSX.Element {
   return (
     <QueryClientProvider client={qc}>
       <Router hook={hook}>{node}</Router>
+      {/* sonner Toaster mounted so toast() calls render under jsdom; matches
+          App.tsx's root-level Toaster placement. */}
+      <Toaster />
     </QueryClientProvider>
   );
 }
@@ -279,9 +283,11 @@ describe('OverviewPage Wallet wiring', () => {
     render(withProviders(<OverviewPage />));
 
     fireEvent.click(await screen.findByTestId('wallet-topup'));
-    const notice = await screen.findByTestId('dashboard-action-notice');
-    expect(notice.textContent).toMatch(/0\.005000 ETH/);
-    expect(notice.textContent).toMatch(/0xabc0…1234/);
+    // Toast surface: amount + truncated tx hash both rendered in the
+    // sonner portal, queried by text rather than testid (sonner doesn't
+    // surface testids on individual toasts).
+    expect(await screen.findByText(/0\.005000 ETH/)).toBeTruthy();
+    expect(screen.getByText(/0xabc0…1234/)).toBeTruthy();
   });
 
   it('surfaces a faucet failure as an error notice', async () => {
@@ -295,8 +301,7 @@ describe('OverviewPage Wallet wiring', () => {
     render(withProviders(<OverviewPage />));
 
     fireEvent.click(await screen.findByTestId('wallet-topup'));
-    const notice = await screen.findByRole('alert');
-    expect(notice.textContent).toMatch(/rate limited/i);
+    expect(await screen.findByText(/rate limited/i)).toBeTruthy();
   });
 
   it('auto-clears the gas top-up confirmation after the autoClearMs window', async () => {
@@ -313,13 +318,15 @@ describe('OverviewPage Wallet wiring', () => {
 
       const topUp = await vi.waitFor(() => screen.getByTestId('wallet-topup'));
       fireEvent.click(topUp);
-      const notice = await vi.waitFor(() => screen.getByTestId('dashboard-action-notice'));
+      const notice = await vi.waitFor(() => screen.getByText(/topped up|top-up sent/i));
       expect(notice.textContent).toMatch(/topped up|top-up sent/i);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(6_000);
       });
-      expect(screen.queryByTestId('dashboard-action-notice')).toBeNull();
+      // Sonner's default dismiss is timer-driven; with fake timers + the
+      // explicit 5s autoClearMs in runAction, the toast unmounts.
+      expect(screen.queryByText(/topped up|top-up sent/i)).toBeNull();
     } finally {
       vi.useRealTimers();
     }

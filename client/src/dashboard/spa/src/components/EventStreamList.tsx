@@ -7,34 +7,29 @@ export interface EventStreamListProps {
 }
 
 export function EventStreamList({ events, filterKind }: EventStreamListProps): JSX.Element {
-  const filtered = filterKind ? events.filter(e => e.kind === filterKind) : events;
-  // Sort descending — most recent first. Stable for equal timestamps.
+  const filtered = filterKind ? events.filter((e) => e.kind === filterKind) : events;
   const sorted = [...filtered].sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
 
   if (sorted.length === 0) {
-    return <p>No events.</p>;
+    return <p className="m-0 font-mono text-[12px] text-muted-foreground">No events.</p>;
   }
 
   return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-      {sorted.map(e => (
+    <ul className="m-0 list-none p-0">
+      {sorted.map((e) => (
         <li
           key={e.id}
           data-kind={e.kind}
-          style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '6px 0' }}
+          className="flex items-baseline gap-3 py-1.5"
         >
           <time
             dateTime={e.ts}
-            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', minWidth: 180 }}
+            className="min-w-[180px] font-mono text-[11px] text-[var(--fg-dim)]"
           >
             {e.ts}
           </time>
-          <code
-            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', textTransform: 'uppercase', minWidth: 80 }}
-          >
-            {e.kind}
-          </code>
-          <span style={{ flex: 1 }}>{e.message}</span>
+          <code className="min-w-[80px] font-mono text-[11px] uppercase">{e.kind}</code>
+          <span className="flex-1 font-mono text-[12px]">{e.message}</span>
         </li>
       ))}
     </ul>

@@ -14,10 +14,11 @@ describe('OperatorSubNav', () => {
     render(withRouter('/operator/memberships', <OperatorSubNav />));
     const nav = screen.getByRole('navigation', { name: /operator sections/i });
     const links = nav.querySelectorAll('a');
-    expect(links).toHaveLength(4);
+    expect(links).toHaveLength(5);
     const labels = Array.from(links).map((l) => l.textContent);
     expect(labels).toContain('Memberships');
     expect(labels).toContain('Registry');
+    expect(labels).toContain('Execution data');
     expect(labels).toContain('Network');
     expect(labels).toContain('Security');
   });

@@ -137,10 +137,10 @@ describe('App routes', () => {
       ),
     );
     expect(screen.getByTestId('operator-page')).toBeTruthy();
-    expect(screen.getByText(/launcher tools/i).closest('section')).toBeTruthy();
-    expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
-    // Operator page still renders the launcher-tools banner.
+    // The launcher-tools panel migrated from a styled <section> to shadcn
+    // <Card>; assert by testid + link href instead of element name.
     expect(screen.getByText(/launcher tools/i)).toBeTruthy();
+    expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
   });
 
   // Issue #219: the live activity surface belongs on /overview (the

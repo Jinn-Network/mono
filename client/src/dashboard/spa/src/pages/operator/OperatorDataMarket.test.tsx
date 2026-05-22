@@ -112,7 +112,10 @@ describe('OperatorDataMarket', () => {
     expect(screen.getByText(/already published to IPFS may remain available/i)).toBeTruthy();
     expect(screen.queryByText('Scrubber')).toBeNull();
     expect(screen.queryByTestId('operator-artifact-list')).toBeNull();
-    expect(screen.getByRole('link', { name: /review execution data/i }).getAttribute('href')).toBe('/operator/execution-data');
+    // "Review execution data" link removed — the Execution data sub-nav
+    // entry is the canonical way to reach the surface now (the donation
+    // card lives on that same route, so the in-card link was redundant).
+    expect(screen.queryByRole('link', { name: /review execution data/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /show recent data/i })).toBeNull();
     expect(screen.queryByText('Execution data')).toBeNull();
     expect(screen.queryByText(/scrubbed execution artifacts become discoverable peer data/i)).toBeNull();
@@ -132,13 +135,13 @@ describe('OperatorDataMarket', () => {
     await waitFor(() => expect(screen.getByTestId('operator-donation-status')).toBeTruthy());
 
     expect(screen.queryByLabelText(/price for design_document/i)).toBeNull();
-    fireEvent.click(screen.getByRole('checkbox', { name: /donate produced data/i }));
-    expect(screen.getByRole('dialog', { name: /share future execution data/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('switch', { name: /donate produced data/i }));
+    expect(screen.getByRole('alertdialog', { name: /share future execution data/i })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog', { name: /share future execution data/i })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: /share future execution data/i })).toBeNull();
     expect(screen.getByTestId('operator-donation-mode').textContent).toBe('Donation is off');
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /donate produced data/i }));
+    fireEvent.click(screen.getByRole('switch', { name: /donate produced data/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Enable donation' }));
 
     // write-through: mutation fires immediately on confirm — no Save click required
@@ -157,8 +160,8 @@ describe('OperatorDataMarket', () => {
 
     await waitFor(() => expect(screen.getByTestId('operator-donation-status')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /donate produced data/i }));
-    expect(screen.getByRole('dialog', { name: /share future execution data/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('switch', { name: /donate produced data/i }));
+    expect(screen.getByRole('alertdialog', { name: /share future execution data/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable donation' }));
 
@@ -176,7 +179,7 @@ describe('OperatorDataMarket', () => {
     await waitFor(() => expect(screen.getByTestId('operator-donation-status')).toBeTruthy());
 
     expect(screen.getByTestId('operator-donation-mode').textContent).toBe('Donation is off');
-    fireEvent.click(screen.getByRole('checkbox', { name: /donate produced data/i }));
+    fireEvent.click(screen.getByRole('switch', { name: /donate produced data/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Enable donation' }));
 
     // optimistic toggle shows "on" immediately

@@ -23,9 +23,8 @@ import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
 import { BuildPage } from './pages/Build.js';
 import { getFeatures } from './lib/features.js';
-
-// Canonical routes enumerated in ./routes.ts — T1.4 imports that list for
-// route-smoke coverage. Keep ROUTES in sync whenever the Switch below changes.
+import { TooltipProvider } from './components/ui/tooltip.js';
+import { Toaster } from './components/ui/sonner.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -34,8 +33,11 @@ import { getFeatures } from './lib/features.js';
  *
  *   Operating  — bootstrap complete. A persistent shell (header, top tabs,
  *                agent rail) wraps top-level workspaces: /overview,
- *                /operator, and /launcher. The operator's relationship with
- *                the agent stays continuous across all pages.
+ *                /operator, and /launcher.
+ *
+ * `TooltipProvider` and `Toaster` are mounted at the root so descendants
+ * can use shadcn `<Tooltip>` / sonner `toast()` without re-declaring the
+ * provider in every card.
  */
 export default function App(): JSX.Element {
   const { data, isLoading } = useQuery<BootstrapState>({
@@ -57,73 +59,82 @@ export default function App(): JSX.Element {
       : data.mode === 'uninitialized'
         ? 'Setting up your wallet'
         : 'Loading';
-    return <LoadingScreen headline={headline} />;
+    return (
+      <TooltipProvider delayDuration={150}>
+        <LoadingScreen headline={headline} />
+        <Toaster />
+      </TooltipProvider>
+    );
   }
 
   if (data.mode !== 'running') {
-    return <Onboarding />;
+    return (
+      <TooltipProvider delayDuration={150}>
+        <Onboarding />
+        <Toaster />
+      </TooltipProvider>
+    );
   }
 
   const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
 
-  // Issue #327: the builder surfaces (/build route + Build top-tab) are hidden
-  // until the operator-app first-run UX is solid. The plug-in substrate stays
-  // live for direct-CLI builders; only the operator-app promotion is gated.
-  // Set JINN_ENABLE_PLUGIN_BUILDER_UI=1 on the daemon to re-enable.
-  //
-  // Issue #326 / #367: the embedded agent rail renders only when the daemon
-  // reports the surface is enabled (JINN_ENABLE_EMBEDDED_AGENT=1). Default-off.
-  // Read via the same `window.__JINN_FEATURES__` channel as every other flag.
   const { pluginBuilderUi, embeddedAgent } = getFeatures();
 
   return (
-    <RestartPendingContext.Provider value={restartCtx}>
-      <Router>
-        <AppShell
-          header={<Header network={network} />}
-          tabs={<TopTabs />}
-          rail={embeddedAgent ? <AgentRail /> : undefined}
-        >
-          <Switch>
-            <Route path="/overview" component={OverviewPage} />
-            <Route path="/operator/join/:cid"><JoinFlow /></Route>
-            <Route path="/operator/execution-data"><CapturesTab /></Route>
-            <Route path="/operator/memberships">
-              <OperatorShell>
-                <MembershipsTab onRestartPending={() => setRestartPending(true)} />
-              </OperatorShell>
-            </Route>
-            <Route path="/operator/registry">
-              <OperatorShell>
-                <RegistryTab />
-              </OperatorShell>
-            </Route>
-            <Route path="/operator/network">
-              <OperatorShell>
-                <NetworkTab onRestartPending={() => setRestartPending(true)} />
-              </OperatorShell>
-            </Route>
-            <Route path="/operator/security">
-              <OperatorShell>
-                <SecurityTab />
-              </OperatorShell>
-            </Route>
-            <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
-            <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
-            <Route path="/configuration"><ConfigurationRedirect /></Route>
-            <Route path="/launcher/create"><LauncherCreatePage /></Route>
-            <Route path="/launcher/launched/:solverNetId">
-              <LauncherLaunchedPage />
-            </Route>
-            <Route path="/launcher"><LauncherPage /></Route>
-            <Route path="/build">
-              {pluginBuilderUi ? <BuildPage /> : <Redirect to="/overview" />}
-            </Route>
-            <Route><Redirect to="/overview" /></Route>
-          </Switch>
-        </AppShell>
-      </Router>
-    </RestartPendingContext.Provider>
+    <TooltipProvider delayDuration={150}>
+      <RestartPendingContext.Provider value={restartCtx}>
+        <Router>
+          <AppShell
+            header={<Header network={network} />}
+            tabs={<TopTabs />}
+            rail={embeddedAgent ? <AgentRail /> : undefined}
+          >
+            <Switch>
+              <Route path="/overview" component={OverviewPage} />
+              <Route path="/operator/join/:cid"><JoinFlow /></Route>
+              <Route path="/operator/execution-data">
+                <OperatorShell>
+                  <CapturesTab />
+                </OperatorShell>
+              </Route>
+              <Route path="/operator/memberships">
+                <OperatorShell>
+                  <MembershipsTab onRestartPending={() => setRestartPending(true)} />
+                </OperatorShell>
+              </Route>
+              <Route path="/operator/registry">
+                <OperatorShell>
+                  <RegistryTab />
+                </OperatorShell>
+              </Route>
+              <Route path="/operator/network">
+                <OperatorShell>
+                  <NetworkTab onRestartPending={() => setRestartPending(true)} />
+                </OperatorShell>
+              </Route>
+              <Route path="/operator/security">
+                <OperatorShell>
+                  <SecurityTab />
+                </OperatorShell>
+              </Route>
+              <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+              <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
+              <Route path="/configuration"><ConfigurationRedirect /></Route>
+              <Route path="/launcher/create"><LauncherCreatePage /></Route>
+              <Route path="/launcher/launched/:solverNetId">
+                <LauncherLaunchedPage />
+              </Route>
+              <Route path="/launcher"><LauncherPage /></Route>
+              <Route path="/build">
+                {pluginBuilderUi ? <BuildPage /> : <Redirect to="/overview" />}
+              </Route>
+              <Route><Redirect to="/overview" /></Route>
+            </Switch>
+          </AppShell>
+        </Router>
+        <Toaster />
+      </RestartPendingContext.Provider>
+    </TooltipProvider>
   );
 }
 

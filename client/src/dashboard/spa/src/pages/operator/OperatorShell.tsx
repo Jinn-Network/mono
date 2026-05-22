@@ -7,17 +7,9 @@ import { OperatorSubNav } from './OperatorSubNav.js';
  */
 export function OperatorShell({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <div
-      data-testid="operator-shell"
-      style={{
-        display: 'flex',
-        gap: '24px',
-        padding: '24px',
-        alignItems: 'flex-start',
-      }}
-    >
+    <div data-testid="operator-shell" className="flex items-start gap-6 p-6">
       <OperatorSubNav />
-      <div style={{ flex: '1 1 0', minWidth: 0 }}>{children}</div>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
