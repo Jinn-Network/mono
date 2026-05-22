@@ -219,8 +219,13 @@ approach diversity; absent that, it derives.
   `N_target_successes` as the memorisation cap, `N_max_postings_per_task` as the
   impossible-task cap.
 - **Spec §3.6** of `docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md`
-  carries a proposed-amendment banner now; it is rewritten to match on
-  ratification.
+  carries a proposed-amendment banner now. On ratification: §3.6 is rewritten to
+  swe-rebench-v2's configuration, and a generic **Task-generator framework**
+  sub-section (the knobs from §Decision — pool source, time-expiry, cooldown,
+  target-success cap, attempt-budget) is added to the same spec, which §3.6 then
+  references as swe-rebench-v2's instantiation of the framework. A standalone
+  spec doc is not created — the framework is two generators wide today; revisit
+  if it grows.
 - **Implementation follow-up** (a `refactor`-shape issue): delete the global
   cooldown gate; expose `time-expiry`/`cooldown` as generic per-SolverNet
   generator knobs; `GeneratorConfig` drops `cooldown_ms`, adds
