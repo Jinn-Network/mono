@@ -6,6 +6,7 @@ import {
   recoverStuckNonceIfNeeded,
   viemSendTransactionWithRetry,
   withRecoverableRetry,
+  withNonceLedger,
   viemFeeOverridesForAttempt,
   waitForContractCode,
 } from '../src/tx-retry.js';
@@ -320,6 +321,87 @@ describe('tx-retry', () => {
     });
   });
 
+  describe('withNonceLedger', () => {
+    it('resolves chain/from/nonce once and records submissions through the provided ledger', async () => {
+      const from = '0x1111111111111111111111111111111111111111' as const;
+      const ledger = createMemoryTxSubmissionLedger();
+      await ledger.recordTxSubmission({
+        chainId: 84532,
+        from,
+        nonce: 7,
+        hash: `0x${'11'.repeat(32)}`,
+        logicalTx: 'previous',
+        submittedAtMs: 1_000,
+        fees: {
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        },
+      });
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount: vi.fn().mockResolvedValue(7),
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 80n,
+          maxPriorityFeePerGas: 8n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+
+      const result = await withNonceLedger(
+        {
+          publicClient: publicClient as never,
+          ledger,
+          from,
+        },
+        async (nonceLedger) => {
+          expect(nonceLedger.chainId).toBe(84532);
+          expect(nonceLedger.from).toBe(from);
+          expect(nonceLedger.nonce).toBe(7);
+
+          const feeResult = await nonceLedger.feeResultForAttempt(1, {
+            forceEstimate: true,
+          });
+          expect(feeResult).toMatchObject({
+            kind: 'eip1559',
+            overrides: {
+              maxFeePerGas: 115n,
+              maxPriorityFeePerGas: 12n,
+            },
+          });
+
+          await nonceLedger.recordSubmitted({
+            hash: `0x${'22'.repeat(32)}`,
+            logicalTx: 'helper.test',
+            fees: feeResult.snapshot,
+            to: '0x2222222222222222222222222222222222222222',
+            value: 1n,
+            data: '0x1234',
+            submittedAtMs: 2_000,
+          });
+          await nonceLedger.markResolved(3_000);
+          return 'ok';
+        },
+      );
+
+      expect(result).toBe('ok');
+      expect(publicClient.getChainId).toHaveBeenCalledTimes(1);
+      expect(publicClient.getTransactionCount).toHaveBeenCalledWith({
+        address: from,
+        blockTag: 'pending',
+      });
+      const submitted = await ledger.getTxSubmission({ chainId: 84532, from, nonce: 7 });
+      expect(submitted).toMatchObject({
+        hash: `0x${'22'.repeat(32)}`,
+        logicalTx: 'helper.test',
+        resolvedAtMs: 3_000,
+        fees: {
+          maxFeePerGas: 115n,
+          maxPriorityFeePerGas: 12n,
+        },
+      });
+    });
+  });
+
   describe('stuck nonce recovery', () => {
     it('detects an old unresolved nonce and clears it with a bumped self-transfer', async () => {
       const from = '0x1111111111111111111111111111111111111111' as const;
@@ -360,10 +442,12 @@ describe('tx-retry', () => {
         walletClient,
         ledger,
         from,
+        chainId: 84532,
         staleAfterMs: 30_000,
         nowMs: 61_000,
       });
 
+      expect(publicClient.getChainId).not.toHaveBeenCalled();
       expect(result?.recoveryHash).toBe(`0x${'22'.repeat(32)}`);
       expect(sendTransaction).toHaveBeenCalledWith({
         account: walletClient.account,

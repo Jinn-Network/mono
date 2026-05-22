@@ -12,10 +12,9 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
-  getDefaultTxSubmissionLedger,
-  recoverStuckNonceIfNeeded,
+  type TxSubmissionLedger,
+  withNonceLedger,
   withRecoverableRetry,
-  viemFeeOverridesForAttempt,
 } from '../../tx-retry.js';
 import {
   SafeInnerRevertError,
@@ -37,6 +36,10 @@ export interface SafeTransactionParams {
   data: Hex;
 }
 
+export interface SafeExecutionOptions {
+  ledger?: TxSubmissionLedger;
+}
+
 // Per-Safe transaction lock to prevent nonce races when concurrent
 // loops (creator + harness) share the same Safe
 const safeLocks = new Map<string, Promise<void>>();
@@ -45,6 +48,7 @@ export async function executeSafeTransaction(
   publicClient: PublicClient,
   walletClient: WalletClient,
   params: SafeTransactionParams,
+  options: SafeExecutionOptions = {},
 ): Promise<Hex> {
   const lockKey = params.safeAddress.toLowerCase();
 
@@ -58,7 +62,7 @@ export async function executeSafeTransaction(
   await pending;
 
   try {
-    const hash = await executeSafeTransactionInner(publicClient, walletClient, params);
+    const hash = await executeSafeTransactionInner(publicClient, walletClient, params, options);
     return hash;
   } finally {
     releaseLock();
@@ -69,25 +73,20 @@ async function executeSafeTransactionInner(
   publicClient: PublicClient,
   walletClient: WalletClient,
   params: SafeTransactionParams,
+  options: SafeExecutionOptions,
 ): Promise<Hex> {
   const { safeAddress, to, value, data } = params;
   const account = walletClient.account;
   if (!account) throw new Error('Wallet client has no account');
-  const chainId = Number(await publicClient.getChainId());
   const from = account.address;
-  const ledger = getDefaultTxSubmissionLedger();
-  await recoverStuckNonceIfNeeded({
-    publicClient,
-    walletClient: walletClient as unknown as { account?: unknown; sendTransaction: (tx: any) => Promise<Hex> },
-    ledger,
-    from,
-  });
-  const eoaNonce = Number(await publicClient.getTransactionCount({
-    address: from,
-    blockTag: 'pending',
-  }));
 
-  return withRecoverableRetry(
+  return withNonceLedger({
+    publicClient,
+    walletClient,
+    ledger: options.ledger,
+    from,
+    recoverStuckNonce: true,
+  }, async (nonceLedger) => withRecoverableRetry(
     async (attemptIndex) => {
       const nonce = await publicClient.readContract({
         address: safeAddress,
@@ -122,9 +121,7 @@ async function executeSafeTransactionInner(
       sigBytes[64] = sigBytes[64] + 4;
       const safeSignature = `0x${sigBytes.toString('hex')}` as Hex;
 
-      const previous = await ledger.getTxSubmission({ chainId, from, nonce: eoaNonce });
-      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex, {
-        previousFees: previous?.resolvedAtMs == null ? previous?.fees : undefined,
+      const feeResult = await nonceLedger.feeResultForAttempt(attemptIndex, {
         forceEstimate: true,
       });
 
@@ -149,8 +146,8 @@ async function executeSafeTransactionInner(
           account,
           chain: walletClient.chain,
           value: params.value,
-          nonce: eoaNonce,
-          ...feeOverrides,
+          nonce: nonceLedger.nonce,
+          ...feeResult.overrides,
         });
       } catch (writeErr) {
         // viem pre-flight gas estimation may revert with GS013 when the inner
@@ -173,14 +170,10 @@ async function executeSafeTransactionInner(
         }
         throw writeErr;
       }
-      await ledger.recordTxSubmission({
-        chainId,
-        from,
-        nonce: eoaNonce,
+      await nonceLedger.recordSubmitted({
         hash,
         logicalTx: 'safe.execTransaction',
-        submittedAtMs: Date.now(),
-        fees: feeOverrides,
+        fees: feeResult.snapshot,
         to: safeAddress,
         value: params.value,
         data,
@@ -206,12 +199,7 @@ async function executeSafeTransactionInner(
         }
         throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
       }
-      await ledger.markTxSubmissionResolved({
-        chainId,
-        from,
-        nonce: eoaNonce,
-        resolvedAtMs: Date.now(),
-      });
+      await nonceLedger.markResolved();
       return hash;
     },
     {
@@ -219,7 +207,7 @@ async function executeSafeTransactionInner(
         console.error(`[safe/viem] execTransaction retry ${attempt}: ${message}`);
       },
     },
-  );
+  ));
 }
 
 export function createClients(rpcUrl: string, privateKey: Hex, chain?: Chain): { publicClient: PublicClient; walletClient: WalletClient; account: ReturnType<typeof privateKeyToAccount> } {
