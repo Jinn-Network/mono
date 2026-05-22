@@ -22,11 +22,16 @@
 
 import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
-import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
+import {
+  computeRowHash,
+  defaultCommandRunner,
+  resolveImageDigest,
+  resolveUpstreamEvalCommit,
+  type CommandRunner,
+} from './_swe-rebench-v2-substrate.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 
 // In-process mutex map: serialises concurrent record() calls against the
@@ -142,6 +147,19 @@ function isValidFile(raw: unknown, evalSemanticsVersion: string): raw is Validat
 
 function publicationPath(stateDir: string): string {
   return resolvePath(join(stateDir, PUBLICATION_FILE));
+}
+
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+  await writeFile(tmp, JSON.stringify(value, null, 2));
+  try {
+    await rename(tmp, file); // POSIX rename is atomic
+  } catch (err) {
+    // Best-effort tempfile cleanup — don't mask the original error.
+    await unlink(tmp).catch(() => undefined);
+    throw err;
+  }
 }
 
 function isObject(raw: unknown): raw is Record<string, unknown> {
@@ -312,16 +330,7 @@ export class ValidatedPoolStore {
   }
 
   private async writeAtomic(file: ValidatedPoolFile): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.${randomBytes(6).toString('hex')}.tmp`;
-    await writeFile(tmp, JSON.stringify(file, null, 2));
-    try {
-      await rename(tmp, this.file); // POSIX rename is atomic
-    } catch (err) {
-      // Best-effort tempfile cleanup — don't mask the original error.
-      await unlink(tmp).catch(() => undefined);
-      throw err;
-    }
+    await writeJsonAtomic(this.file, file);
   }
 
   /** The set of instance ids known scorable for `evalSemanticsVersion`, or
@@ -459,16 +468,7 @@ export async function writeVettedPoolArtifactPublication(args: {
     ref,
     artifact,
   };
-  const file = publicationPath(args.stateDir);
-  await mkdir(dirname(file), { recursive: true });
-  const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
-  await writeFile(tmp, JSON.stringify(publication, null, 2));
-  try {
-    await rename(tmp, file);
-  } catch (err) {
-    await unlink(tmp).catch(() => undefined);
-    throw err;
-  }
+  await writeJsonAtomic(publicationPath(args.stateDir), publication);
   return publication;
 }
 
@@ -517,15 +517,6 @@ function looksPython(patch: string | undefined): boolean {
   // Match `--- a/<p>` / `+++ b/<p>` / `diff --git a/<p>` ending in .py
   return /(?:^|\n)(?:---|\+\+\+|diff --git) [ab]\/\S+\.py(?:\s|$)/.test(patch);
 }
-
-const defaultCommandRunner: CommandRunner = (bin, args, opts) => new Promise((resolve, reject) => {
-  const child = spawn(bin, args, { ...(opts ?? {}), stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = ''; let stderr = '';
-  child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-  child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-  child.on('error', reject);
-  child.on('close', (code: number | null) => resolve({ exitCode: code ?? 1, stdout, stderr }));
-});
 
 export interface ValidatePoolDeps {
   fetcher: HfFetcher;

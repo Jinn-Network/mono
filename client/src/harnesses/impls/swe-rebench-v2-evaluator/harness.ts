@@ -53,6 +53,7 @@ import {
   loadVettedPoolArtifactScorableEntries,
   parseVettedPoolArtifact,
   vettedPoolArtifactRefFromEligibility,
+  type ScorableVettedPoolArtifactEntries,
 } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import {
   computeRowHash,
@@ -87,6 +88,12 @@ interface EnabledState {
   enabled: true;
   enabledAt: string;
   upstreamRepoDir: string;
+}
+
+interface CachedPublishedPoolArtifact {
+  evalSemanticsVersion: string;
+  artifactHash: string;
+  entries: ScorableVettedPoolArtifactEntries;
 }
 
 export interface SweRebenchV2EvaluatorHarnessOptions {
@@ -168,6 +175,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private cachedPool:
     | { stateDir: string; promise: Promise<PoolTask[]> }
     | undefined;
+  private readonly publishedPoolArtifactCache = new Map<string, Promise<CachedPublishedPoolArtifact>>();
 
   constructor(opts: SweRebenchV2EvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
@@ -226,6 +234,46 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       }
       throw err;
     });
+  }
+
+  private loadPublishedPoolArtifact(artifactCid: string): Promise<CachedPublishedPoolArtifact> {
+    const cached = this.publishedPoolArtifactCache.get(artifactCid);
+    if (cached) return cached;
+
+    const fetchArtifact = this.deps.fetchFromIpfs ?? fetchFromIpfs;
+    const promise = (async () => {
+      let rawArtifact: unknown;
+      try {
+        rawArtifact = await fetchArtifact(this.ipfsGatewayUrl, artifactCid);
+      } catch (err) {
+        throw new SkippableError(
+          'vetted_pool_fetch_failed',
+          `cannot fetch vetted pool artifact ${artifactCid}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      try {
+        const artifact = parseVettedPoolArtifact(rawArtifact);
+        return {
+          evalSemanticsVersion: artifact.evalSemanticsVersion,
+          artifactHash: hashVettedPoolArtifact(artifact),
+          entries: loadVettedPoolArtifactScorableEntries(artifact),
+        };
+      } catch (err) {
+        throw new SkippableError(
+          'vetted_pool_artifact_invalid',
+          `invalid vetted pool artifact ${artifactCid}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    })();
+
+    this.publishedPoolArtifactCache.set(artifactCid, promise);
+    promise.catch(() => {
+      if (this.publishedPoolArtifactCache.get(artifactCid) === promise) {
+        this.publishedPoolArtifactCache.delete(artifactCid);
+      }
+    });
+    return promise;
   }
 
   private async isDockerReachable(now: number = Date.now()): Promise<boolean> {
@@ -542,28 +590,14 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       );
     }
 
-    const fetchArtifact = this.deps.fetchFromIpfs ?? fetchFromIpfs;
-    let rawArtifact: unknown;
+    const artifact = await this.loadPublishedPoolArtifact(ref.artifactCid);
     try {
-      rawArtifact = await fetchArtifact(this.ipfsGatewayUrl, ref.artifactCid);
-    } catch (err) {
-      throw new SkippableError(
-        'vetted_pool_fetch_failed',
-        `cannot fetch vetted pool artifact ${ref.artifactCid}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    let entries;
-    try {
-      const artifact = parseVettedPoolArtifact(rawArtifact);
       if (artifact.evalSemanticsVersion !== ref.evalSemanticsVersion) {
         throw new Error(`artifact semanticsVersion=${artifact.evalSemanticsVersion} does not match ref=${ref.evalSemanticsVersion}`);
       }
-      const actualHash = hashVettedPoolArtifact(artifact);
-      if (actualHash !== ref.artifactHash) {
-        throw new Error(`artifact hash ${actualHash} does not match ref ${ref.artifactHash}`);
+      if (artifact.artifactHash !== ref.artifactHash) {
+        throw new Error(`artifact hash ${artifact.artifactHash} does not match ref ${ref.artifactHash}`);
       }
-      entries = loadVettedPoolArtifactScorableEntries(artifact);
     } catch (err) {
       throw new SkippableError(
         'vetted_pool_artifact_invalid',
@@ -571,7 +605,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       );
     }
 
-    if (!entries.byId.has(task.instance_id)) {
+    if (!artifact.entries.byId.has(task.instance_id)) {
       throw new SkippableError(
         'vetted_pool_instance_missing_or_unscorable',
         `${task.instance_id} is not present as scorable in vetted pool artifact ${ref.artifactCid}`,

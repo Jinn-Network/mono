@@ -247,6 +247,12 @@ function normalizeClaimPolicy(raw: unknown): TaskClaimPolicy {
   };
 }
 
+interface PublishedVettedPool {
+  scorableIds: Set<string> | null;
+  artifactRef: SolverNetArtifactRef | null;
+  mode: 'published' | 'published-from-local' | 'no-publication' | 'no-manifest';
+}
+
 async function resolvePublishedVettedPool(args: {
   stateDir: string;
   manifestCid: string | undefined;
@@ -254,11 +260,7 @@ async function resolvePublishedVettedPool(args: {
   nowIso: string;
   ipfsRegistryUrl: string;
   upload: typeof uploadToIpfs;
-}): Promise<{
-  scorableIds: Set<string> | null;
-  artifactRef: SolverNetArtifactRef | null;
-  mode: 'published' | 'published-from-local' | 'no-publication' | 'no-manifest';
-}> {
+}): Promise<PublishedVettedPool> {
   if (!args.manifestCid) {
     return { scorableIds: null, artifactRef: null, mode: 'no-manifest' };
   }
@@ -364,6 +366,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let lastError: SweRebenchV2GeneratorStateSnapshot['lastError'];
   let totalPosted = 0;
   let lastPostedInstanceId: string | undefined;
+  let publishedPoolCache: PublishedVettedPool | null = null;
 
   async function refreshPool(): Promise<void> {
     const result = await loadPoolWithCacheFallback({
@@ -410,25 +413,31 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     }
     lastPollAt = new Date(now).toISOString();
 
-    const publishedPool = await resolvePublishedVettedPool({
-      stateDir: config.stateDir,
-      manifestCid: config.solverNetManifestCid,
-      store: validatedPoolStore,
-      nowIso: lastPollAt,
-      ipfsRegistryUrl:
-        config.ipfsRegistryUrl ??
-        process.env['JINN_IPFS_REGISTRY_URL'] ??
-        DEFAULT_IPFS_REGISTRY_URL,
-      upload: uploadToIpfs,
-    }).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      lastError = {
-        message: `vetted pool publication failed: ${message}`,
-        at: new Date().toISOString(),
-      };
-      console.warn(`[swe-rebench-v2-gen] ${lastError.message}`);
-      return null;
-    });
+    let publishedPool: PublishedVettedPool | null = publishedPoolCache;
+    if (!publishedPool) {
+      publishedPool = await resolvePublishedVettedPool({
+        stateDir: config.stateDir,
+        manifestCid: config.solverNetManifestCid,
+        store: validatedPoolStore,
+        nowIso: lastPollAt,
+        ipfsRegistryUrl:
+          config.ipfsRegistryUrl ??
+          process.env['JINN_IPFS_REGISTRY_URL'] ??
+          DEFAULT_IPFS_REGISTRY_URL,
+        upload: uploadToIpfs,
+      }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = {
+          message: `vetted pool publication failed: ${message}`,
+          at: new Date().toISOString(),
+        };
+        console.warn(`[swe-rebench-v2-gen] ${lastError.message}`);
+        return null;
+      });
+      if (publishedPool?.artifactRef) {
+        publishedPoolCache = publishedPool;
+      }
+    }
     if (publishedPool === null) {
       lastPollSummary = { poolSize: 0, posted: 0, skipped: pool.length };
       return null;
@@ -550,9 +559,6 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       },
       claimPolicy,
       spec,
-      ...(publishedPool.artifactRef
-        ? { context: { [VETTED_POOL_REF_ELIGIBILITY_KEY]: publishedPool.artifactRef } }
-        : {}),
       eligibility: {
         hf_dataset: candidate.hf_dataset,
         hf_split: candidate.hf_split,

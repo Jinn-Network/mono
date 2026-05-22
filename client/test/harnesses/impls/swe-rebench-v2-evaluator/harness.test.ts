@@ -939,11 +939,15 @@ describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () =
       uploadToIpfs: vi.fn().mockResolvedValue('bafy-ok'),
     });
 
-    const sol = await harness.run(buildHarnessContext(implStateDir, task));
+    const ctx = buildHarnessContext(implStateDir, task);
+    const sol = await harness.run(ctx);
+    const second = await harness.run(ctx);
 
     expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    expect(second.gating).toMatchObject({ verdict: 'PASS' });
+    expect(fetchFromIpfs).toHaveBeenCalledTimes(1);
     expect(fetchFromIpfs).toHaveBeenCalledWith(expect.any(String), 'bafy-vetted-pool');
-    expect(runner.runEval).toHaveBeenCalledTimes(1);
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
     expect(loadPool).not.toHaveBeenCalled();
     expect(runCommand).not.toHaveBeenCalled();
   });

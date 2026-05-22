@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -276,6 +276,7 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
       artifactCid: 'bafy-vetted-pool-cid',
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
     });
+    expect(task?.context?.['vettedPoolRef']).toBeUndefined();
   });
 
   it('uses the published artifact pool, not unpublished local scorable entries', async () => {
@@ -312,6 +313,50 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
 
     expect(task?.spec).toMatchObject({ instance_id: 'org__repo-2' });
     expect(task?.eligibility?.['vettedPoolRef']).toEqual(ref);
+  });
+
+  it('caches the write-once vetted-pool publication after first resolution', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'org__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+        },
+        {
+          instance_id: 'org__repo-2',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:01Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-existing-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      N_max_postings_per_task: 1,
+    });
+
+    const first = await gen();
+    unlinkSync(join(stateDir, 'vetted-pool-artifact-publication.json'));
+    const second = await gen();
+
+    expect(first?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(second?.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(second?.eligibility?.['vettedPoolRef']).toEqual(ref);
   });
 
   it('falls back to python-floor when admissionMode is python-floor and no validation data exists', async () => {

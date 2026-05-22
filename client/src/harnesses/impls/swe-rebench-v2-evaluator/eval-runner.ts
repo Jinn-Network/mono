@@ -31,6 +31,10 @@ import { mkdtemp, writeFile, readFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
+import {
+  defaultCommandRunner,
+  resolveImageDigest as resolveSubstrateImageDigest,
+} from '../../../solver-types/_swe-rebench-v2-substrate.js';
 
 /**
  * Thrown when the eval could not actually grade the solution. There is no
@@ -143,21 +147,20 @@ export interface PythonEvalRunnerOptions {
  * command is logged, never thrown (#476: cleanup must not break the eval loop).
  */
 function runDocker(args: string[]): Promise<void> {
-  return new Promise((resolve) => {
-    const child = spawn('docker', args, { stdio: ['ignore', 'ignore', 'ignore'] });
-    child.on('exit', (code, signal) => {
-      if (code !== 0) {
-        const status =
-          code !== null ? `exited ${code}` : `terminated by signal ${signal ?? 'unknown'}`;
-        console.warn(`[swe-rebench-v2] docker ${args.join(' ')} ${status}`);
+  return defaultCommandRunner('docker', args)
+    .then((res) => {
+      if (res.exitCode !== 0) {
+        const detail = (res.stderr || res.stdout).trim();
+        console.warn(
+          `[swe-rebench-v2] docker ${args.join(' ')} exited ${res.exitCode}` +
+            `${detail ? `: ${detail.slice(-500)}` : ''}`,
+        );
       }
-      resolve();
+    })
+    .catch((err: unknown) => {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${reason}`);
     });
-    child.on('error', (err) => {
-      console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${err.message}`);
-      resolve();
-    });
-  });
 }
 
 /**
@@ -170,34 +173,8 @@ async function defaultPruneRound(image: string): Promise<void> {
   await runDocker(['builder', 'prune', '-f']);
 }
 
-function runDockerForOutput(args: string[]): Promise<{ exitCode: number; stdout: string }> {
-  return new Promise((resolve) => {
-    const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'ignore'] });
-    let stdout = '';
-    child.stdout?.on('data', (d) => { stdout += d.toString(); });
-    child.on('exit', (code) => {
-      resolve({ exitCode: code ?? 1, stdout });
-    });
-    child.on('error', () => {
-      resolve({ exitCode: 1, stdout: '' });
-    });
-  });
-}
-
 async function defaultResolveImageDigest(imageName: string): Promise<string | null> {
-  const res = await runDockerForOutput([
-    'image', 'inspect', imageName, '--format', '{{json .RepoDigests}}',
-  ]);
-  if (res.exitCode !== 0) return null;
-  let parsed: unknown;
-  try { parsed = JSON.parse(res.stdout.trim()); } catch { return null; }
-  if (!Array.isArray(parsed) || parsed.length === 0) return null;
-  const first = parsed[0];
-  if (typeof first !== 'string') return null;
-  const at = first.indexOf('@');
-  if (at === -1) return null;
-  const digest = first.slice(at + 1);
-  return /^sha256:[0-9a-f]{64}$/.test(digest) ? digest : null;
+  return resolveSubstrateImageDigest(imageName, defaultCommandRunner);
 }
 
 /**

@@ -9,6 +9,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 
 export interface RowHashInput {
   hf_dataset: string;
@@ -60,6 +61,16 @@ export type CommandRunner = (
   args: string[],
   opts?: { cwd?: string },
 ) => Promise<CommandResult>;
+
+export const defaultCommandRunner: CommandRunner = (bin, args, opts) => new Promise((resolve, reject) => {
+  const child = spawn(bin, args, { ...(opts ?? {}), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+  child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+  child.on('error', reject);
+  child.on('close', (code: number | null) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+});
 
 /**
  * Resolve the digest of a local Docker image via `docker image inspect`.
