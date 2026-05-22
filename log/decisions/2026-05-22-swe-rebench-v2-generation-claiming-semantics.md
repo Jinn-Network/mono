@@ -237,7 +237,22 @@ approach diversity; absent that, it derives.
   `post_batch_size` / an optional `maxClaimsPerOperator` override and drops
   `cooldown_ms`; regression tests cover both failure modes (one post must not
   stall the pool; one posting must not exceed N claims).
-- **Churn is expected and acceptable.** An instance may cycle post → expire →
+- **Operator app surface.** The generator is a *launcher* concern.
+  `client/OPERATOR-APP-SPEC.md` §2.13 lists **Launcher** as an optional component
+  that is still a stub ("fully specified in its own follow-up when activated"),
+  so the generator has no spec'd surface today — while
+  `LauncherGeneratorStateSnapshot` and the launcher SPA pages already ship ahead
+  of the spec. This DR forces that follow-up (a canonical-doc change —
+  CODEOWNERS + Discussion): the §2.13 Launcher component needs its four-axis
+  spec, and its generator surface must reflect the post-DR model — drop
+  `cadenceMs` (no cadence; `launched-record-dispatcher.ts:155` projects it
+  today), and replace the cooldown-gated `lastPollSummary.skipped` with
+  fill-the-pool / saturation progress (pool size; instance counts by state:
+  `unposted` / `live` / `saturated` / `abandoned`). The solver-side surfaces
+  (§2.4 Memberships, §2.5 Registry, §2.6 Tasks, §2.10 `claim_available` /
+  `claim_failed`) already model claiming and need no change — generator-sized
+  `maxClaims` only means a posting reaches fully-claimed sooner, which the
+  existing discovery filter (`http.ts:619`) already handles.
   repost several times (up to `N_max_postings_per_task`) before it saturates;
   escrow churns per posting; mild overshoot past N can occur from verdicts that
   land just after expiry. This is the accepted cost of the 7-day window with no
