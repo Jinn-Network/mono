@@ -9,6 +9,8 @@ export interface TaskNativeReadiness {
   ok: boolean;
   solverReady: boolean;
   evaluatorReady: boolean;
+  evaluatorRoleReady: boolean;
+  distinctEvaluatorServiceReady: boolean;
   detail: string;
   remedy?: string;
   source: string | null;
@@ -27,7 +29,7 @@ export interface TaskNativeReadiness {
     activeMech?: string;
     evaluatorSafe?: string;
     evaluatorMech?: string;
-    selfEvaluationAllowed: boolean;
+    distinctEvaluatorServiceReady: boolean;
   };
 }
 
@@ -51,6 +53,17 @@ function isTaskNativeService(service: ServiceState): boolean {
     service.service_id !== null &&
     isNonZeroAddress(service.safe_address) &&
     isNonZeroAddress(service.mech_address);
+}
+
+function hasConfiguredEvaluatorRole(config: JinnConfig): boolean {
+  const legacySolverNets = Object.values(config.solverNets ?? {});
+  const legacyHasEvaluator = legacySolverNets.some((entry) => (
+    entry.enabled !== false && entry.roles.includes('evaluating')
+  ));
+  if (legacyHasEvaluator) return true;
+
+  const joinedSolverNets = Object.values(config.joinedSolverNets ?? {});
+  return joinedSolverNets.some((entry) => entry.roles.includes('evaluator'));
 }
 
 function loadFleetState(config: JinnConfig): { path: string; state: FleetState | null; error?: string } {
@@ -80,6 +93,8 @@ export function resolveTaskNativeReadiness(config: JinnConfig): TaskNativeReadin
       ok: false,
       solverReady: false,
       evaluatorReady: false,
+      evaluatorRoleReady: false,
+      distinctEvaluatorServiceReady: false,
       detail:
         source
           ? `Task-native deployment artifact is not bundled at ${source}`
@@ -104,6 +119,8 @@ export function resolveTaskNativeReadiness(config: JinnConfig): TaskNativeReadin
       ok: false,
       solverReady: false,
       evaluatorReady: false,
+      evaluatorRoleReady: false,
+      distinctEvaluatorServiceReady: false,
       detail: `Task-native deployment config could not be resolved: ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -123,6 +140,8 @@ export function resolveTaskNativeReadiness(config: JinnConfig): TaskNativeReadin
       ok: false,
       solverReady: false,
       evaluatorReady: false,
+      evaluatorRoleReady: false,
+      distinctEvaluatorServiceReady: false,
       detail: `Task-native deployment artifact could not be parsed at ${source}: ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -162,6 +181,7 @@ export function resolveTaskNativeReadiness(config: JinnConfig): TaskNativeReadin
   const evaluator = active
     ? taskNativeServices.find((svc) => svc.safe_address!.toLowerCase() !== active.safe_address!.toLowerCase())
     : undefined;
+  const configuredEvaluatorRole = hasConfiguredEvaluatorRole(config);
   const stateChainReady = state?.chain === expectedFleetChain;
   const operatorState = {
     statePath: stateLoad.path,
@@ -172,7 +192,7 @@ export function resolveTaskNativeReadiness(config: JinnConfig): TaskNativeReadin
     ...(active?.mech_address ? { activeMech: active.mech_address } : {}),
     ...(evaluator?.safe_address ? { evaluatorSafe: evaluator.safe_address } : {}),
     ...(evaluator?.mech_address ? { evaluatorMech: evaluator.mech_address } : {}),
-    selfEvaluationAllowed: false,
+    distinctEvaluatorServiceReady: Boolean(evaluator),
   };
 
   const stateIssues = [
@@ -189,18 +209,25 @@ export function resolveTaskNativeReadiness(config: JinnConfig): TaskNativeReadin
   ].filter((part): part is string => part !== null);
 
   const solverReady = deploymentReady && stateChainReady && Boolean(active);
-  const evaluatorReady = solverReady && Boolean(evaluator);
-  const evaluatorDetail = evaluatorReady
-    ? `evaluator-ready=true evaluatorSafe=${evaluator!.safe_address} evaluatorMech=${evaluator!.mech_address}`
-    : 'evaluator-ready=false (self-evaluation is disabled and no distinct evaluator Safe/Mech is configured)';
+  const evaluatorRoleReady = solverReady && configuredEvaluatorRole;
+  const distinctEvaluatorServiceReady = solverReady && Boolean(evaluator);
+  const evaluatorReady = evaluatorRoleReady;
+  const evaluatorRoleDetail = evaluatorRoleReady
+    ? 'evaluator-role=ready'
+    : 'evaluator-role=not-ready (operator has not joined any evaluator role)';
+  const evaluatorTopologyDetail = distinctEvaluatorServiceReady
+    ? `evaluator-topology=distinct evaluatorSafe=${evaluator!.safe_address} evaluatorMech=${evaluator!.mech_address}`
+    : 'evaluator-topology=same-service (no distinct evaluator Safe/Mech configured)';
   const detail = solverReady
-    ? `Task-native solver-ready=true ${evaluatorDetail} on ${chain}: TaskCoordinator=${taskCoordinator}, JinnRouterV3=${jinnRouterV3}, TaskActivityCheckerV3=${taskActivityCheckerV3}; activeSafe=${active!.safe_address} activeMech=${active!.mech_address}`
+    ? `Task-native solver-ready=true evaluator-ready=${evaluatorReady ? 'true' : 'false'} ${evaluatorRoleDetail}; ${evaluatorTopologyDetail} on ${chain}: TaskCoordinator=${taskCoordinator}, JinnRouterV3=${jinnRouterV3}, TaskActivityCheckerV3=${taskActivityCheckerV3}; activeSafe=${active!.safe_address} activeMech=${active!.mech_address}`
     : `Task-native not ready on ${chain}: ${[...deploymentIssues, ...stateIssues].join('; ')}`;
 
   return {
     ok: solverReady,
     solverReady,
     evaluatorReady,
+    evaluatorRoleReady,
+    distinctEvaluatorServiceReady,
     detail,
     ...(solverReady
       ? {}

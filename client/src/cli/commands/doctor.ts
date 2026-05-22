@@ -77,6 +77,8 @@ interface CheckResult {
   taskNative?: {
     solverReady: boolean;
     evaluatorReady: boolean;
+    evaluatorRoleReady: boolean;
+    distinctEvaluatorServiceReady: boolean;
     source: string | null;
     contracts: {
       taskCoordinator?: string;
@@ -158,6 +160,8 @@ function taskNativeCheckForDoctor(readiness: TaskNativeReadiness): CheckResult {
     taskNative: {
       solverReady: readiness.solverReady,
       evaluatorReady: readiness.evaluatorReady,
+      evaluatorRoleReady: readiness.evaluatorRoleReady,
+      distinctEvaluatorServiceReady: readiness.distinctEvaluatorServiceReady,
       source: readiness.source,
       contracts: readiness.contracts,
       ...(readiness.routerClaimDeliveryVersion

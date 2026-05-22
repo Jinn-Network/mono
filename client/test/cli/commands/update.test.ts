@@ -255,10 +255,22 @@ describe('update command', () => {
         network: 'testnet',
         earningDir,
         dbPath: ':memory:',
+        solverNets: {
+          swe: {
+            enabled: true,
+            solverType: 'swe-rebench-v2.v1',
+            roles: ['solving', 'evaluating'],
+            harness: 'codex-code-learner',
+            plugins: [],
+            taskGenerator: { enabled: true },
+          },
+        },
       } as any);
       expect(readiness.ok).toBe(true);
       expect(readiness.solverReady).toBe(true);
       expect(readiness.evaluatorReady).toBe(true);
+      expect(readiness.evaluatorRoleReady).toBe(true);
+      expect(readiness.distinctEvaluatorServiceReady).toBe(true);
       expect(readiness.source).toBe(DEFAULT_TESTNET_ARTIFACTS.taskCoordinatorRouterV3);
       expect(readiness.contracts).toEqual({
         taskCoordinator: artifact.contracts.taskCoordinator,

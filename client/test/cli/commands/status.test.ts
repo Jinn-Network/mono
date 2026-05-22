@@ -40,7 +40,7 @@ function service(index: number, safe: string, mech: string): unknown {
   };
 }
 
-function realReadinessDeps(earningDir: string) {
+function realReadinessDeps(earningDir: string, roles: Array<'solving' | 'evaluating'> = ['solving', 'evaluating']) {
   const { resolveTaskNativeReadiness: _unused, ...deps } = fakeDeps;
   return {
     ...deps,
@@ -49,6 +49,16 @@ function realReadinessDeps(earningDir: string) {
       earningDir,
       dbPath: '/tmp/x',
       runtimeMode: undefined,
+      solverNets: {
+        swe: {
+          enabled: true,
+          solverType: 'swe-rebench-v2.v1',
+          roles,
+          harness: 'codex-code-learner',
+          plugins: [],
+          taskGenerator: { enabled: true },
+        },
+      },
     } as any),
   };
 }
@@ -111,6 +121,8 @@ const fakeDeps = {
     ok: true,
     solverReady: true,
     evaluatorReady: true,
+    evaluatorRoleReady: true,
+    distinctEvaluatorServiceReady: true,
     detail: 'fake Task-native deployment ready',
     source: '/tmp/deployment-task-coordinator-router-v3-baseSepolia-fast.json',
     contracts: {
@@ -136,7 +148,13 @@ describe('status command', () => {
       earnings: { pendingTotal: string; asset: string };
       exit: { blocking: boolean; hint: string };
       paths: { earningDir: string; dbPath: string };
-      taskNative: { solverReady: boolean; evaluatorReady: boolean; contracts: Record<string, string> };
+      taskNative: {
+        solverReady: boolean;
+        evaluatorReady: boolean;
+        evaluatorRoleReady: boolean;
+        distinctEvaluatorServiceReady: boolean;
+        contracts: Record<string, string>;
+      };
     };
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.daemon.state).toBe('running');
@@ -157,6 +175,8 @@ describe('status command', () => {
     });
     expect(parsed.taskNative.solverReady).toBe(true);
     expect(parsed.taskNative.evaluatorReady).toBe(true);
+    expect(parsed.taskNative.evaluatorRoleReady).toBe(true);
+    expect(parsed.taskNative.distinctEvaluatorServiceReady).toBe(true);
     expect(parsed.taskNative.contracts.jinnRouterV3).toBe('0x2222222222222222222222222222222222222222');
   });
 
@@ -200,6 +220,8 @@ describe('status command', () => {
           ok: boolean;
           solverReady: boolean;
           evaluatorReady: boolean;
+          evaluatorRoleReady: boolean;
+          distinctEvaluatorServiceReady: boolean;
           contracts: Record<string, string>;
           operatorState?: { taskNativeServices: number; activeSafe?: string; evaluatorSafe?: string };
         };
@@ -207,6 +229,8 @@ describe('status command', () => {
       expect(payload.taskNative.ok).toBe(true);
       expect(payload.taskNative.solverReady).toBe(true);
       expect(payload.taskNative.evaluatorReady).toBe(true);
+      expect(payload.taskNative.evaluatorRoleReady).toBe(true);
+      expect(payload.taskNative.distinctEvaluatorServiceReady).toBe(true);
       expect(payload.taskNative.contracts.taskCoordinator).toMatch(/^0x[0-9a-fA-F]{40}$/);
       expect(payload.taskNative.contracts.jinnRouterV3).toMatch(/^0x[0-9a-fA-F]{40}$/);
       expect(payload.taskNative.contracts.taskActivityCheckerV3).toMatch(/^0x[0-9a-fA-F]{40}$/);
@@ -218,7 +242,7 @@ describe('status command', () => {
     }
   });
 
-  it('reports solver-only when self-evaluation is disallowed and no distinct evaluator service exists', async () => {
+  it('reports evaluator-ready same-service topology when no distinct evaluator service exists', async () => {
     const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-task-native-'));
     try {
       writeFleetState(earningDir, [
@@ -232,18 +256,64 @@ describe('status command', () => {
       const { envelopes, raw } = await runCommand(cmd, { argv: ['--human'], tty: true });
       expect(envelopes).toEqual([]);
       const out = raw.join('');
-      expect(out).toContain('task-native: solver=ready evaluator=not-ready');
-      expect(out).toContain('self-evaluation is disabled');
+      expect(out).toContain('task-native: solver=ready evaluator=ready');
+      expect(out).toContain('evaluator-topology=same-service');
+      expect(out).not.toContain('self-evaluation is disabled');
 
       const jsonCmd = createStatusCommand(realReadinessDeps(earningDir));
       const jsonResult = await runCommand(jsonCmd);
       const payload = jsonResult.envelopes[0] as {
-        taskNative: { ok: boolean; solverReady: boolean; evaluatorReady: boolean; detail: string };
+        taskNative: {
+          ok: boolean;
+          solverReady: boolean;
+          evaluatorReady: boolean;
+          evaluatorRoleReady: boolean;
+          distinctEvaluatorServiceReady: boolean;
+          detail: string;
+        };
       };
       expect(payload.taskNative.ok).toBe(true);
       expect(payload.taskNative.solverReady).toBe(true);
+      expect(payload.taskNative.evaluatorReady).toBe(true);
+      expect(payload.taskNative.evaluatorRoleReady).toBe(true);
+      expect(payload.taskNative.distinctEvaluatorServiceReady).toBe(false);
+      expect(payload.taskNative.detail).toContain('evaluator-topology=same-service');
+    } finally {
+      rmSync(earningDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports evaluator not-ready when the operator has no evaluator role', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-task-native-'));
+    try {
+      writeFleetState(earningDir, [
+        service(
+          1,
+          '0x1111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222',
+        ),
+      ]);
+      const cmd = createStatusCommand(realReadinessDeps(earningDir, ['solving']));
+      const { envelopes, raw } = await runCommand(cmd, { argv: ['--human'], tty: true });
+      expect(envelopes).toEqual([]);
+      const out = raw.join('');
+      expect(out).toContain('task-native: solver=ready evaluator=not-ready');
+      expect(out).toContain('operator has not joined any evaluator role');
+
+      const jsonCmd = createStatusCommand(realReadinessDeps(earningDir, ['solving']));
+      const jsonResult = await runCommand(jsonCmd);
+      const payload = jsonResult.envelopes[0] as {
+        taskNative: {
+          solverReady: boolean;
+          evaluatorReady: boolean;
+          evaluatorRoleReady: boolean;
+          distinctEvaluatorServiceReady: boolean;
+        };
+      };
+      expect(payload.taskNative.solverReady).toBe(true);
       expect(payload.taskNative.evaluatorReady).toBe(false);
-      expect(payload.taskNative.detail).toContain('no distinct evaluator Safe/Mech is configured');
+      expect(payload.taskNative.evaluatorRoleReady).toBe(false);
+      expect(payload.taskNative.distinctEvaluatorServiceReady).toBe(false);
     } finally {
       rmSync(earningDir, { recursive: true, force: true });
     }

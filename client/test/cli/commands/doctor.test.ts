@@ -72,6 +72,8 @@ const fakeDeps = {
     ok: true,
     solverReady: true,
     evaluatorReady: true,
+    evaluatorRoleReady: true,
+    distinctEvaluatorServiceReady: true,
     detail: 'fake Task-native deployment ready; solver-ready=true evaluator-ready=true',
     source: '/tmp/deployment-task-coordinator-router-v3-baseSepolia-fast.json',
     contracts: {
