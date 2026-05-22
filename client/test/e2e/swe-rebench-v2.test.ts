@@ -12,7 +12,7 @@
  *   1. Pool builder + policy → picks eligible task, skips saturated.
  *   2. Escrow calculator → produces sensible wei value for realistic inputs.
  *   3. Evaluator (mocked deps) → emits passing Verdict on passed_match=true.
- *   4. State-update after 3 successes saturates a task; policy moves on.
+ *   4. State-update after 5 successes saturates a task; policy moves on.
  *   5. Full loop: pool → policy → grade → state-update → re-select closes
  *      the lifecycle round-trip.
  *
@@ -125,8 +125,8 @@ async function runPoolAndPolicy(): Promise<void> {
     `expected org__repo-42 (alphabetically first), got ${next?.instance_id}`,
   );
 
-  // Mark netcdf task as saturated (3 successes), verify policy skips to next.
-  counters.set('unidata__netcdf-c-1925', { posted: 3, successful: 3, last_posted_at: 0 });
+  // Mark netcdf task as saturated (5 successes), verify policy skips to next.
+  counters.set('unidata__netcdf-c-1925', { posted: 5, successful: 5, last_posted_at: 0 });
   const next2 = selectNextPostingCandidate({
     pool,
     counters,
@@ -208,15 +208,17 @@ async function runSaturationPolicy(stateDir: string): Promise<void> {
   const store = new GeneratorStateStore({ stateDir });
   const counters = new Map<string, any>();
 
-  // Record 3 successes for the first task (netcdf), hitting the saturation threshold.
+  // Record 5 successes for the first task (netcdf), hitting the saturation threshold.
+  await store.recordSuccess('unidata__netcdf-c-1925');
+  await store.recordSuccess('unidata__netcdf-c-1925');
   await store.recordSuccess('unidata__netcdf-c-1925');
   await store.recordSuccess('unidata__netcdf-c-1925');
   await store.recordSuccess('unidata__netcdf-c-1925');
   counters.set('unidata__netcdf-c-1925', await store.getCounters('unidata__netcdf-c-1925'));
 
   assert(
-    counters.get('unidata__netcdf-c-1925').successful === 3,
-    'state store should report 3 successes after 3 recordSuccess calls',
+    counters.get('unidata__netcdf-c-1925').successful === 5,
+    'state store should report 5 successes after 5 recordSuccess calls',
   );
 
   // Policy must not select the saturated task even when called far in the future.
@@ -276,14 +278,16 @@ async function runFullLoop(stateDir: string): Promise<void> {
     'full-loop: state store should report 1 success after one recordSuccess',
   );
 
-  // 6. After N_target_successes (3) successes on a task, the policy stops selecting it.
+  // 6. After N_target_successes (5) successes on a task, the policy stops selecting it.
+  await store.recordSuccess(selected!.instance_id);
+  await store.recordSuccess(selected!.instance_id);
   await store.recordSuccess(selected!.instance_id);
   await store.recordSuccess(selected!.instance_id);
   counters.set(selected!.instance_id, await store.getCounters(selected!.instance_id));
   const saturated = counters.get(selected!.instance_id);
   assert(
-    saturated.successful === 3,
-    `full-loop: expected 3 successes, got ${saturated.successful}`,
+    saturated.successful === 5,
+    `full-loop: expected 5 successes, got ${saturated.successful}`,
   );
 
   const next = selectNextPostingCandidate({

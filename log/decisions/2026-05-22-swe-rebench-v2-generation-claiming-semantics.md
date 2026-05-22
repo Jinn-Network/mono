@@ -30,7 +30,7 @@ That assumption does not hold against the shipped claim policy. The
 maxClaimsPerOperator: 5` (`packages/sdk/src/contracts.ts`), and
 `TaskCoordinator.sol` enforces both per-Task on-chain. So **a single posting can
 absorb 50 claims → up to 50 score=1 verdicts → 50 near-copy trajectories in the
-corpus** — 16× past the `N_target_successes = 3` memorisation cap DR-i exists to
+corpus** — 10× past the `N_target_successes = 5` memorisation cap DR-i exists to
 enforce.
 
 The 2026-05-22 Phase 2 testnet run exposed two concrete failure modes:
@@ -126,13 +126,12 @@ using only local time state (`last_posted_at + posting_window_ms`) — no indexe
 query. On expiry: if `posted_count ≥ N_max_postings_per_task` → **abandoned**
 (retire); otherwise → **repost**.
 
-**5. 7-day window kept; churn accepted.** The window stays at the existing 7 days
-— a launcher knob `posting_window_ms` with default 7 d, *not* lengthened. On a
-thin operator set a 7-day window frequently expires before N successes
-accumulate, producing reposting churn; and a verdict landing just after expiry
-produces mild overshoot past N. Both are **accepted** for simplicity — no
-post-expiry drain grace, no indexer-based in-flight tracking. `N_target_successes`
-is a soft target.
+**5. 1-day window; churn accepted.** The window is a launcher knob
+`posting_window_ms` with default 1 d. On a thin operator set a 1-day window may
+expire before N successes accumulate, producing reposting churn; and a verdict
+landing just after expiry produces mild overshoot past N. Both are **accepted**
+for simplicity — no post-expiry drain grace, no indexer-based in-flight
+tracking. `N_target_successes` is a soft target.
 
 **6. Cooldown removed for swe-rebench-v2.** With one-live-posting + repost-only-
 after-expiry, the window length *is* the repost spacing. `cooldown` stays a
@@ -152,9 +151,9 @@ makes the local ledger under-count.
 
 | Parameter | Before | After | Meaning |
 |---|---|---|---|
-| `N_target_successes` | 3 | 3 | memorisation cap — score=1 verdicts per instance before retire |
+| `N_target_successes` | 3 | 5 | memorisation cap — score=1 verdicts per instance before retire |
 | `N_max_postings_per_task` | 10 | 10 | impossible-task cap — abandon after this many postings without N |
-| `posting_window_ms` | 7 d (hardcoded) | 7 d (launcher knob, default 7 d) | time-expiry window; repost trigger + escrow-reclaim deadline |
+| `posting_window_ms` | 7 d (hardcoded) | 1 d (launcher knob, default 1 d) | time-expiry window; repost trigger + escrow-reclaim deadline |
 | `cooldown_ms` | 24 h | **removed** | generic knob; off for swe-rebench-v2 |
 | `post_batch_size` | — | ≈ 25 | max Tasks posted per tick (chain-hammer throttle, not cadence) |
 | `maxClaims` (per posting) | 50 (flat) | `N − successful_count` (derived) | the posting is the capacity unit |
@@ -173,11 +172,11 @@ approach diversity; absent that, it derives.
 - **Finite expiry is not optional plumbing.** It is the only mechanism that
   resets the one-way claim budget. "No expiry" + non-recycling slots = stranded
   instances with no recovery path short of an indexer-driven capacity check.
-  Keeping the 7-day window keeps the heal local and time-based, and keeps escrow
+  Keeping a finite 1-day window keeps the heal local and time-based, and keeps escrow
   reclaiming on dead slots.
-- **7 days over a longer window — simplicity.** A longer window would reduce
-  churn but delays saturation and adds a knob value to justify. The issue author
-  chose to keep the existing 7 d and accept the churn.
+- **1 day over a longer window — faster retry.** A longer window would reduce
+  churn but delays saturation. The issue author chose a 1 d default and accepts
+  the repost churn.
 - **Fill-the-pool matches DR-i's own reasoning.** DR-i argued the full
   ~750-instance pool gives bootstrap surface and compounding corpus value;
   posting it all now delivers that, a trickle does not.
@@ -206,7 +205,7 @@ approach diversity; absent that, it derives.
   deadlocks loop closure on a single-/thin-operator network (cf. the 2026-05-08
   single-operator loop-closed run). Retained only as an opt-in launcher knob.
 - **Lengthen the window to ~30-90 d.** Rejected for simplicity — issue author
-  chose 7 d + accept churn.
+  chose 1 d + accept churn.
 - **A `repost_drain_ms` grace after expiry.** Dropped — "accept the churn"
   subsumes the late-verdict overshoot the grace was there to prevent.
 - **Source success counts from the subgraph now.** Deferred — correct per DR-i
@@ -226,7 +225,7 @@ approach diversity; absent that, it derives.
 - **Implementation follow-up** (a `refactor`-shape issue): delete the global
   cooldown gate; expose `time-expiry`/`cooldown` as generic per-SolverNet
   generator knobs; `GeneratorConfig` drops `cooldown_ms`, adds
-  `posting_window_ms` (default 7 d) and `post_batch_size`;
+  `posting_window_ms` (default 1 d) and `post_batch_size`;
   `selectNextPostingCandidate` becomes a batch selector returning up to
   `post_batch_size` instances (`tick` already returns `Task | Task[] | null`);
   the generator sets per-posting `maxClaims = N − successful_count` and
@@ -257,7 +256,7 @@ approach diversity; absent that, it derives.
   existing discovery filter (`http.ts:619`) already handles.
   repost several times (up to `N_max_postings_per_task`) before it saturates;
   escrow churns per posting; mild overshoot past N can occur from verdicts that
-  land just after expiry. This is the accepted cost of the 7-day window with no
+  land just after expiry. This is the accepted cost of the 1-day window with no
   in-flight tracking.
 - **Thin-operator testnet.** Because `maxClaimsPerOperator = maxClaims`, a single
   operator can saturate an instance on its own — the loop closes with any
@@ -266,7 +265,7 @@ approach diversity; absent that, it derives.
   `maxClaimsPerOperator` below `maxClaims` once operator supply supports it.
 - **Spend.** Posting cost scales with `maxClaims` (`JinnRouterV3` escrows
   `solutionBudget = solutionMaxDeliveryRate × maxClaims`). Dropping `maxClaims`
-  from 50 to ≤ N = 3 is ~16× cheaper per posting; the 7-day expiry reclaims
+  from 50 to ≤ N = 5 is ~10× cheaper per posting; the 1-day expiry reclaims
   escrow on unconsumed slots.
 
 ## Status

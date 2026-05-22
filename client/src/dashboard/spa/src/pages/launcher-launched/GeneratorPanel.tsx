@@ -86,8 +86,8 @@ function initialSweRebenchV2Form(
   const c = config ?? {};
   const policy = readClaimPolicyConfig(c.claimPolicy);
   const defaults = manifest?.contract.claimPolicyDefaults ?? {
-    maxClaims: 3,
-    maxClaimsPerOperator: 3,
+    maxClaims: 5,
+    maxClaimsPerOperator: 5,
     claimLeaseTtlSeconds: 60 * 60,
   };
   return {

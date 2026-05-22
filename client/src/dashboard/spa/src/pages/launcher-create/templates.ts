@@ -226,8 +226,8 @@ export const SWE_REBENCH_V2_V1_TEMPLATE: SweRebenchV2V1Template = {
   },
   claimPolicyDefaults: {
     mode: 'parallel',
-    maxClaims: 3,
-    maxClaimsPerOperator: 3,
+    maxClaims: 5,
+    maxClaimsPerOperator: 5,
     claimLeaseTtlSeconds: 60 * 60,
   },
   credentialRequirements: {
@@ -259,9 +259,9 @@ export const SWE_REBENCH_V2_V1_TEMPLATE: SweRebenchV2V1Template = {
     ],
   },
   generatorDefaults: {
-    N_target_successes: 3,
+    N_target_successes: 5,
     N_max_postings_per_task: 10,
-    posting_window_ms: 7 * 24 * 60 * 60 * 1000, // 7d
+    posting_window_ms: 24 * 60 * 60 * 1000, // 1d
     post_batch_size: 25,
     claimLeaseTtlSeconds: 60 * 60,
   },

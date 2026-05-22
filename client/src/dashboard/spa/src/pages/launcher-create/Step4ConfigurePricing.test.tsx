@@ -189,7 +189,7 @@ describe('Step4ConfigurePricing component', () => {
     });
   });
 
-  it('uses the active template claimPolicyDefaults.maxClaimsPerOperator (swe-rebench-v2 = 3)', () => {
+  it('uses the active template claimPolicyDefaults.maxClaimsPerOperator (swe-rebench-v2 = 5)', () => {
     render(
       <Step4ConfigurePricing
         draft={buildDraft({
@@ -209,10 +209,10 @@ describe('Step4ConfigurePricing component', () => {
     fireEvent.change(screen.getByTestId('launcher-create-verdictPriceWei'), {
       target: { value: '200' },
     });
-    // perTaskWei = 100 + 200 * 3 = 700; 11000 / 700 = 15 tasks
-    expect(screen.getByTestId('launcher-create-projected-tasks').textContent).toContain('~15');
-    // hint references 3
+    // perTaskWei = 100 + 200 * 5 = 1100; 11000 / 1100 = 10 tasks
+    expect(screen.getByTestId('launcher-create-projected-tasks').textContent).toContain('~10');
+    // hint references 5
     const projection = screen.getByTestId('launcher-create-projection');
-    expect(projection.textContent).toMatch(/maxClaimsPerOperator \(3\)/);
+    expect(projection.textContent).toMatch(/maxClaimsPerOperator \(5\)/);
   });
 });

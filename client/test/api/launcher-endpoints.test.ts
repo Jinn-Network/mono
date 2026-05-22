@@ -513,7 +513,7 @@ describe('GET /v1/launcher/tasks', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as TasksResponseBody;
     expect(body.tasks[0]?.solverNet).toBe('swe');
-    expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 3 });
+    expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 5 });
   });
 
   it('clamps limit to [1, 100]', async () => {

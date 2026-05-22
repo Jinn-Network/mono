@@ -381,8 +381,8 @@ describe('LauncherLaunchedPage', () => {
           version: 'v1',
           claimPolicyDefaults: {
             mode: 'parallel',
-            maxClaims: 3,
-            maxClaimsPerOperator: 3,
+            maxClaims: 5,
+            maxClaimsPerOperator: 5,
             claimLeaseTtlSeconds: 3600,
           },
         },

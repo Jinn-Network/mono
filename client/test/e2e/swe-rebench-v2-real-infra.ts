@@ -196,7 +196,7 @@ export async function runSweRebenchV2HfFetchE2E(): Promise<HfFetchE2EResult> {
     interface: String(sample['interface'] ?? ''),
     hf_dataset: HF_DATASET,
     hf_split: chosenPartition,
-    deadline_unix: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60,
+    deadline_unix: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
     round_month: chosenPartition.replace('_', '-'),
   };
 
@@ -570,7 +570,7 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
 
     // ── Build a real-shaped SweRebenchV2Task (independent of HF) ─────────────
     const nowMs = Date.now();
-    const deadlineUnix = Math.floor(nowMs / 1000) + 7 * 24 * 60 * 60;
+    const deadlineUnix = Math.floor(nowMs / 1000) + 24 * 60 * 60;
     const sweTaskSpec = SweRebenchV2TaskSchema.parse({
       schemaVersion: 'swe-rebench-v2.v1',
       instance_id: 'unidata__netcdf-c-1925',
@@ -587,7 +587,7 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
 
     const taskWindow = {
       startTs: nowMs - 1_000,
-      endTs: nowMs + 7 * 24 * 60 * 60 * 1000,
+      endTs: nowMs + 24 * 60 * 60 * 1000,
     };
     const solverNetManifestCid = 'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku';
     const task = {
@@ -612,8 +612,8 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       claimWindowEnd: BigInt(nowSec + 300),
       submissionDeadline: BigInt(nowSec + 900),
       claimLeaseTtlSeconds: 120,
-      maxClaims: 3,
-      maxClaimsPerOperator: 1,
+      maxClaims: 5,
+      maxClaimsPerOperator: 5,
       policyHook: zeroAddress,
       evaluationPolicy: {
         requiredVerdicts: 1,

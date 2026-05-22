@@ -47,11 +47,11 @@ function buildSweRebenchRecord(
 ): LaunchedSolverNetRecord {
   return buildRecord({
     generatorConfig: {
-      N_target_successes: 1,
-      N_max_postings_per_task: 1,
-      posting_window_ms: 604_800_000,
+      N_target_successes: 5,
+      N_max_postings_per_task: 10,
+      posting_window_ms: 86_400_000,
       post_batch_size: 25,
-      maxClaimsPerOperator: 3,
+      maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 3_600,
     },
     summary: {
@@ -306,15 +306,15 @@ describe('GeneratorPanel', () => {
     expandGeneratorConfig();
     expect(
       (screen.getByTestId('launcher-launched-generator-N_target_successes') as HTMLInputElement).value,
-    ).toBe('1');
+    ).toBe('5');
     expect(
       (screen.getByTestId(
         'launcher-launched-generator-N_max_postings_per_task',
       ) as HTMLInputElement).value,
-    ).toBe('1');
+    ).toBe('10');
     expect(
       (screen.getByTestId('launcher-launched-generator-posting_window_ms') as HTMLInputElement).value,
-    ).toBe('604800000');
+    ).toBe('86400000');
     expect(
       (screen.getByTestId('launcher-launched-generator-post_batch_size') as HTMLInputElement).value,
     ).toBe('25');
@@ -322,7 +322,7 @@ describe('GeneratorPanel', () => {
       (screen.getByTestId(
         'launcher-launched-generator-maxClaimsPerOperator',
       ) as HTMLInputElement).value,
-    ).toBe('3');
+    ).toBe('5');
     expect(
       (screen.getByTestId(
         'launcher-launched-generator-claimLeaseTtlSeconds',
@@ -339,7 +339,7 @@ describe('GeneratorPanel', () => {
       target: { value: '3' },
     });
     fireEvent.change(screen.getByTestId('launcher-launched-generator-N_max_postings_per_task'), {
-      target: { value: '10' },
+      target: { value: '11' },
     });
     fireEvent.change(screen.getByTestId('launcher-launched-generator-posting_window_ms'), {
       target: { value: '300000' },
@@ -363,7 +363,7 @@ describe('GeneratorPanel', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
       N_target_successes: 3,
-      N_max_postings_per_task: 10,
+      N_max_postings_per_task: 11,
       posting_window_ms: 300000,
       post_batch_size: 7,
       maxClaimsPerOperator: 2,
@@ -411,24 +411,24 @@ describe('buildPatch', () => {
 
 describe('buildSweRebenchV2Patch', () => {
   const prior = {
-    N_target_successes: '1',
-    N_max_postings_per_task: '1',
-    posting_window_ms: '604800000',
+    N_target_successes: '5',
+    N_max_postings_per_task: '10',
+    posting_window_ms: '86400000',
     post_batch_size: '25',
-    maxClaimsPerOperator: '3',
+    maxClaimsPerOperator: '5',
     claimLeaseTtlSeconds: '3600',
   };
 
   it('returns only changed swe-rebench fields', () => {
     const r = buildSweRebenchV2Patch({
       ...prior,
-      N_target_successes: '3',
-      N_max_postings_per_task: '10',
+      N_target_successes: '6',
+      N_max_postings_per_task: '12',
     }, prior);
     expect(r.ok).toBe(true);
     expect(r.patch).toEqual({
-      N_target_successes: 3,
-      N_max_postings_per_task: 10,
+      N_target_successes: 6,
+      N_max_postings_per_task: 12,
     });
   });
 

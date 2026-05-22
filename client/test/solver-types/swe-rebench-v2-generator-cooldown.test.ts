@@ -108,7 +108,7 @@ function makeTestGenerator(opts: MakeTestGeneratorOpts) {
     admissionMode,
     N_target_successes = 1,
     N_max_postings_per_task = 3,
-    posting_window_ms = 7 * 24 * 60 * 60 * 1000,
+    posting_window_ms = 24 * 60 * 60 * 1000,
     post_batch_size = 25,
   } = opts;
   const recordRef = { current: launchedRecord() };

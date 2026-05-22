@@ -264,8 +264,8 @@ scorable, unposted, unsaturated instance up to `post_batch_size`; the default is
 creator loop supplies the outer tick; long posting batches self-throttle because
 posts are sequential.
 
-There is exactly one live posting per instance. The existing 7-day window becomes
-the launcher knob `posting_window_ms` and remains the default. The generator
+There is exactly one live posting per instance. The window is the launcher knob
+`posting_window_ms`, with a v1 default of 1 day. The generator
 derives live/expired state from local counters only:
 
 - `posted_count[instance]`
@@ -282,23 +282,23 @@ do not decrement `claimCount`.
 
 No v1 in-flight accounting is added. A verdict that lands just after expiry may
 push an instance slightly past `N_target_successes`, and thin operator supply may
-cause 7-day repost churn. Both are accepted for simplicity; the generator does
+cause 1-day repost churn. Both are accepted for simplicity; the generator does
 not query the indexer for open attempts or pending verdicts.
 
 **v1 defaults:**
 
 | Parameter | Default | Rationale |
 |---|---|---|
-| `N_target_successes` | 3 | Diversity of successful approaches without excessive memorisation surface. |
+| `N_target_successes` | 5 | Diversity of successful approaches without excessive memorisation surface. |
 | `N_max_postings_per_task` | 10 | Cap on impossible tasks; abandon after repeated unsaturated postings. |
-| `posting_window_ms` | 7 days | Expiry window, repost trigger, and escrow-reclaim deadline. |
+| `posting_window_ms` | 1 day | Expiry window, repost trigger, and escrow-reclaim deadline. |
 | `post_batch_size` | 25 | Fill the pool quickly while keeping each tick's on-chain posting batch bounded. |
 | `cooldown` | off | Expiry is the repost spacing rule for SWE-rebench-v2. |
 | `maxClaims` | derived | `N_target_successes - successful_count` per posting. |
 | `maxClaimsPerOperator` | derived | Equals `maxClaims` unless a launcher pins a lower override. |
 
-**Volume implication.** Full pool ≈ 750 unsaturated tasks at v1 launch × N=3
-target successes = up to ~2,250 successful Solutions during the initial
+**Volume implication.** Full pool ≈ 750 unsaturated tasks at v1 launch × N=5
+target successes = up to ~3,750 successful Solutions during the initial
 saturation phase, plus failed attempts. After initial saturation, equilibrium is
 ~150 successful Solutions/month from new monthly drops plus residual unsaturated
 tasks.
@@ -722,7 +722,7 @@ The following DRs are filed alongside this spec at `log/decisions/2026-05-06-…
 - **DR-2026-05-06-f — Reward function: task-complexity-weighted escrow (R2).** Rejects flat per-Solution rewards; selects launcher-set complexity-proxy escrow weighting; aligns operator incentives with task value.
 - **DR-2026-05-06-g — Vocabulary: train / frozen / HarnessCheckpoint.** Rejects `'learning' | 'frozen'` (less ML-native); rejects `'train' | 'eval'` (overloads Evaluator role); selects `'train' | 'frozen'` + `HarnessCheckpoint`. Aligns with PyTorch + ML transfer-learning + universal ML checkpoint vocabulary.
 - **DR-2026-05-06-h — Phase placement: A.5 (post-A.4 campaign launch).** Rejects parallel-to-A.3 (splits recruitment focus); selects sequential-after-A.4 (substrate generalisation story; freeze mechanism back-applies to `prediction.v1`).
-- **DR-2026-05-06-i — Task generation policy: full historical pool, post until target successes per task.** Generator runs against the union of all monthly partitions (~750 tasks at v1 launch, growing ~50/month) minus saturated tasks. Rejects current-month-only (artificially low volume; ignores compounding across the full history). Rejects post-each-task-once (low volume; operators idle) and post-each-task-many-times (memorisation vector). Selects: post until N successful Solutions per task (default N=3) with `N_max_postings_per_task` cap and cooldown window. Saturated tasks remain in corpus as historical training data. Bounds within-task memorisation surface; preserves diversity of successful approaches; bootstraps substrate volume via the full 14-month history.
+- **DR-2026-05-06-i — Task generation policy: full historical pool, post until target successes per task.** Generator runs against the union of all monthly partitions (~750 tasks at v1 launch, growing ~50/month) minus saturated tasks. Rejects current-month-only (artificially low volume; ignores compounding across the full history). Rejects post-each-task-once (low volume; operators idle) and post-each-task-many-times (memorisation vector). Selects: post until N successful Solutions per task, with `N_max_postings_per_task` cap. DR-2026-05-22-a amends the v1 default to `N_target_successes = 5` and `posting_window_ms = 1 day`, with cooldown off for `swe-rebench-v2`. Saturated tasks remain in corpus as historical training data. Bounds within-task memorisation surface; preserves diversity of successful approaches; bootstraps substrate volume via the full 14-month history.
 
 ---
 

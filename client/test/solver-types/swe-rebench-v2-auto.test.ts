@@ -9,9 +9,9 @@ import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-typ
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 
 const config: GeneratorConfig = {
-  N_target_successes: 3,
+  N_target_successes: 5,
   N_max_postings_per_task: 10,
-  posting_window_ms: 7 * 24 * 60 * 60 * 1000,
+  posting_window_ms: 24 * 60 * 60 * 1000,
   post_batch_size: 25,
   claimLeaseTtlSeconds: 60 * 60,
 };
@@ -70,7 +70,7 @@ describe('selectNextPostingCandidate', () => {
 
   it('does not select saturated or abandoned instances', () => {
     const counters = new Map([
-      ['a', { posted: 2, successful: 3, last_posted_at: 0 }],
+      ['a', { posted: 2, successful: 5, last_posted_at: 0 }],
       ['b', { posted: 10, successful: 0, last_posted_at: 0 }],
       ['c', { posted: 1, successful: 0, last_posted_at: 1 }],
     ]);
@@ -85,9 +85,9 @@ describe('selectNextPostingCandidate', () => {
 
   it('returns undefined when all tasks are saturated or capped', () => {
     const counters = new Map([
-      ['a', { posted: 10, successful: 3, last_posted_at: 0 }],
+      ['a', { posted: 10, successful: 5, last_posted_at: 0 }],
       ['b', { posted: 10, successful: 0, last_posted_at: 0 }],
-      ['c', { posted: 10, successful: 3, last_posted_at: 0 }],
+      ['c', { posted: 10, successful: 5, last_posted_at: 0 }],
     ]);
     const next = selectNextPostingCandidate({ pool, counters, config, now: 1_000_000_000 });
     expect(next).toBeUndefined();

@@ -25,9 +25,9 @@ export interface GeneratorConfig {
 }
 
 export const DEFAULT_GENERATOR_CONFIG: GeneratorConfig = {
-  N_target_successes: 3,
+  N_target_successes: 5,
   N_max_postings_per_task: 10,
-  posting_window_ms: 7 * 24 * 60 * 60 * 1000,
+  posting_window_ms: 24 * 60 * 60 * 1000,
   post_batch_size: 25,
   claimLeaseTtlSeconds: 60 * 60,
 };

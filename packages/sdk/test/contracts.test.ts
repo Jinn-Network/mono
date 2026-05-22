@@ -81,8 +81,8 @@ describe('SolverNetContract surface (Task 6 / Task 30)', () => {
   it('SWE-rebench v2 claim defaults match the target-success cap', () => {
     expect(SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT.claimPolicyDefaults).toMatchObject({
       mode: 'parallel',
-      maxClaims: 3,
-      maxClaimsPerOperator: 3,
+      maxClaims: 5,
+      maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 60 * 60,
     });
   });

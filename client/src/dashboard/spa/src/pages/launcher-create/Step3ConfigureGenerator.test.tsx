@@ -180,19 +180,19 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     );
     expect(
       (screen.getByTestId('launcher-create-N_target_successes') as HTMLInputElement).value,
-    ).toBe('3');
+    ).toBe('5');
     expect(
       (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
     ).toBe('10');
     expect(
       (screen.getByTestId('launcher-create-posting_window_ms') as HTMLInputElement).value,
-    ).toBe(String(7 * 24 * 60 * 60 * 1000));
+    ).toBe(String(24 * 60 * 60 * 1000));
     expect(
       (screen.getByTestId('launcher-create-post_batch_size') as HTMLInputElement).value,
     ).toBe('25');
     expect(
       (screen.getByTestId('launcher-create-maxClaimsPerOperator') as HTMLInputElement).value,
-    ).toBe('3');
+    ).toBe('5');
     expect(
       (screen.getByTestId('launcher-create-claimLeaseTtlSeconds') as HTMLInputElement).value,
     ).toBe('3600');
@@ -295,11 +295,11 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     const patch = onAdvance.mock.calls[0]![0]!;
     expect(patch.completedSteps).toEqual(['define', 'reviewContract', 'configureGenerator']);
     expect(patch.generatorConfig).toEqual({
-      N_target_successes: 3,
+      N_target_successes: 5,
       N_max_postings_per_task: 10,
       posting_window_ms: 60_000,
       post_batch_size: 25,
-      maxClaimsPerOperator: 3,
+      maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 3600,
     });
   });
@@ -341,20 +341,20 @@ describe('validateGeneratorConfig (prediction.v1)', () => {
 describe('validateSweRebenchV2GeneratorConfig', () => {
   it('accepts the swe-rebench-v2 defaults', () => {
     const r = validateSweRebenchV2GeneratorConfig({
-      N_target_successes: '3',
+      N_target_successes: '5',
       N_max_postings_per_task: '10',
-      posting_window_ms: String(7 * 24 * 60 * 60 * 1000),
+      posting_window_ms: String(24 * 60 * 60 * 1000),
       post_batch_size: '25',
-      maxClaimsPerOperator: '3',
+      maxClaimsPerOperator: '5',
       claimLeaseTtlSeconds: '3600',
     });
     expect(r.ok).toBe(true);
     expect(r.generatorConfig).toEqual({
-      N_target_successes: 3,
+      N_target_successes: 5,
       N_max_postings_per_task: 10,
-      posting_window_ms: 7 * 24 * 60 * 60 * 1000,
+      posting_window_ms: 24 * 60 * 60 * 1000,
       post_batch_size: 25,
-      maxClaimsPerOperator: 3,
+      maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 3600,
     });
   });
