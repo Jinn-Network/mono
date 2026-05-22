@@ -18,7 +18,7 @@ import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
-import type { ReadyIssue } from '../src/dispatcher/types.js';
+import type { DispatcherConfig, ReadyIssue } from '../src/dispatcher/types.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
@@ -38,7 +38,7 @@ const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
-  if (raw == null || raw.trim() === '') return [];
+  if (raw == null) return [];
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -175,16 +175,15 @@ async function main(): Promise<void> {
   const bpIdx = process.argv.indexOf('--backpressure');
   const bpOverride = bpIdx >= 0 ? parseInt(process.argv[bpIdx + 1] ?? '', 10) : NaN;
 
-  let cfg = DEFAULT_CONFIG;
-  if (Number.isInteger(capOverride) && capOverride > 0) {
-    cfg = { ...cfg, concurrencyCap: capOverride };
-  }
-  if (Number.isInteger(bpOverride) && bpOverride > 0) {
-    cfg = { ...cfg, openPrBackpressure: bpOverride };
-  }
-
   const authorAllowlist = parseAuthorAllowlist(process.env[AUTHOR_ALLOWLIST_ENV]);
-  cfg = { ...cfg, authorAllowlist };
+  const capOk = Number.isInteger(capOverride) && capOverride > 0;
+  const bpOk = Number.isInteger(bpOverride) && bpOverride > 0;
+  const cfg: DispatcherConfig = {
+    ...DEFAULT_CONFIG,
+    ...(capOk ? { concurrencyCap: capOverride } : {}),
+    ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
+    authorAllowlist,
+  };
 
   if (cfg.authorAllowlist.length === 0) {
     // Fail-safe per spec 2026-05-23-author-allowlist-design.md: empty

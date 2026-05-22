@@ -45,6 +45,15 @@ function makeSource(issues: PolledIssue[]): IssueSource {
   return { poll: vi.fn().mockResolvedValue(issues) };
 }
 
+/**
+ * Default test cfg: `authorAllowlist: ['alice']` matches the `makePolled`
+ * default author so callers don't have to thread it everywhere. Pass
+ * `authorAllowlist: []` (or any other override) to exercise that path.
+ */
+function makeCfg(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig {
+  return { ...DEFAULT_CONFIG, authorAllowlist: ['alice'], ...overrides };
+}
+
 /** A WallClock that never expires any session (all sessions are fresh). */
 function makeNeverExpiredClock(): WallClock {
   // Use a nowFn that always returns 0 so elapsed is always negative vs. a large wallClockMs
@@ -64,7 +73,7 @@ describe('runCycle', () => {
       makePolled({ number: 103, priority: 'P3' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ concurrencyCap: 3 });
 
     const dispatchedNumbers: number[] = [];
     const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) => {
@@ -99,7 +108,7 @@ describe('runCycle', () => {
       makePolled({ number: 103, priority: 'P3' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ concurrencyCap: 3 });
 
     // In-flight are 201, 202 (not overlapping with ready 101-103)
     const existingInFlight = [makeInFlight(201), makeInFlight(202)];
@@ -134,7 +143,7 @@ describe('runCycle', () => {
       makePolled({ number: 102, priority: 'P2' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ concurrencyCap: 3 });
 
     const existingInFlight = [makeInFlight(201), makeInFlight(202), makeInFlight(203)];
 
@@ -165,7 +174,7 @@ describe('runCycle', () => {
       makePolled({ number: 102, priority: 'P1' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, openPrBackpressure: 5, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ concurrencyCap: 3, openPrBackpressure: 5 });
 
     const dispatchIssue = vi.fn().mockResolvedValue(makeInFlight(999));
 
@@ -187,7 +196,7 @@ describe('runCycle', () => {
 
   it('includes drift strings from deriveInFlight in the report', async () => {
     const source = makeSource([]);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, authorAllowlist: ['alice'] };
+    const cfg = makeCfg();
 
     const report: CycleReport = await runCycle({
       source,
@@ -213,7 +222,7 @@ describe('runCycle', () => {
       makePolled({ number: 102, priority: 'P2' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ concurrencyCap: 3 });
 
     const existingInFlight = [makeInFlight(101)]; // 101 already running
 
@@ -251,7 +260,7 @@ describe('runCycle', () => {
     const pauseSession = vi.fn().mockResolvedValue(undefined);
 
     const source = makeSource([]);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, concurrencyCap: 3, wallClockMs: WALL_CLOCK_MS, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ concurrencyCap: 3, wallClockMs: WALL_CLOCK_MS });
 
     const report: CycleReport = await runCycle({
       source,
@@ -278,7 +287,7 @@ describe('runCycle', () => {
       makePolled({ number: 444, priority: 'P0', author: 'trusteduser' }),
     ];
     const source = makeSource(issues);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, authorAllowlist: [] };
+    const cfg = makeCfg({ authorAllowlist: [] });
 
     const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) =>
       Promise.resolve(makeInFlight(issue.number)),
@@ -308,7 +317,7 @@ describe('runCycle', () => {
     const pauseSession = vi.fn().mockResolvedValue(undefined);
 
     const source = makeSource([]);
-    const cfg: DispatcherConfig = { ...DEFAULT_CONFIG, wallClockMs: WALL_CLOCK_MS, authorAllowlist: ['alice'] };
+    const cfg = makeCfg({ wallClockMs: WALL_CLOCK_MS });
 
     const report: CycleReport = await runCycle({
       source,

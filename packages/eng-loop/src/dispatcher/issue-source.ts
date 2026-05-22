@@ -37,11 +37,9 @@ interface GhIssue {
   title: string;
   labels: Array<{ name: string } | string>;
   /**
-   * `gh` returns this as `{ login: string, ... }`. We flatten to a plain
-   * string in the `PolledIssue` mapping. The field is optional so older
-   * `gh` versions (or unexpected payloads) degrade to the empty string
-   * rather than throwing — the empty string will never match an allowlist
-   * entry, so the trust boundary fails safe.
+   * `gh` returns `{ login, ... }`. Optional so older `gh` versions or
+   * unexpected payloads degrade to `''` rather than throwing — the empty
+   * string never matches an allowlist entry, so the trust boundary fails safe.
    */
   author?: { login?: string };
 }
@@ -227,8 +225,7 @@ export class GhIssueSource implements IssueSource {
         priority,
         status,
         onBoard,
-        // Defensive `?.` against older `gh` versions / unexpected payload
-        // shapes; empty string never matches an allowlist entry (#497).
+        // Empty string is the unknown-author sentinel; never matches the allowlist (#497).
         author: ghIssue.author?.login ?? '',
       };
     });

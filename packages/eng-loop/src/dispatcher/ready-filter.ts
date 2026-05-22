@@ -18,28 +18,26 @@ export interface SelectReadyResult {
 
 /**
  * An issue is **ready** when it is triage-complete (Issue Type set),
- * `Blocked on: Nothing`, on the board, in `Todo`, and not already in flight,
- * AND its author is on the configured allowlist (#497 trust boundary).
- * Ready issues are ordered by Priority, then FIFO by issue number.
+ * `Blocked on: Nothing`, on the board, in `Todo`, not already in flight,
+ * AND its author is on the allowlist (#497 trust boundary). Output is
+ * ordered by Priority, then FIFO by issue number.
  *
- * The author check is a second-pass predicate: issues that pass every other
- * predicate but fail the allowlist are recorded in `skippedForAuthor` so
- * operators can see *who* is being blocked, not just a count. Issues that
- * fail the first-pass predicates (shape, board, status, ...) are excluded
- * from both arrays — they're not a trust signal, they're just not ready.
+ * The author check is a *second-pass* predicate so `skippedForAuthor` only
+ * surfaces issues that would otherwise be ready — operators need to see
+ * *who* is being blocked, not just a count. First-pass failures (shape,
+ * board, status, ...) are excluded from both arrays.
  *
- * `authorAllowlist` is expected to already be lowercased by the caller —
- * the function lowercases the issue side at compare time and does an O(1)
- * `Set.has` lookup. An empty allowlist means "dispatch nothing" by design
- * (fail-safe default; see spec 2026-05-23-author-allowlist-design.md).
+ * `authorAllowlist` must already be lowercased by the caller; the function
+ * lowercases the issue side at compare time. Empty allowlist = dispatch
+ * nothing (fail-safe default; spec 2026-05-23-author-allowlist-design.md).
  */
 export function selectReady(
   polled: PolledIssue[],
   inFlight: ReadonlySet<number>,
   authorAllowlist: ReadonlySet<string>,
 ): SelectReadyResult {
-  // First pass: all the existing readiness predicates. Failures are excluded
-  // from both arrays — author-skips only apply to otherwise-ready issues.
+  // First pass: existing readiness predicates. Failures are excluded from both
+  // arrays — author-skips only apply to otherwise-ready issues.
   const firstPass = polled.filter(
     (i): i is ReadyIssue =>
       i.shape !== null &&
@@ -50,7 +48,7 @@ export function selectReady(
       !inFlight.has(i.number),
   );
 
-  // Second pass: author allowlist. Partition into ready vs. skippedForAuthor.
+  // Second pass: partition by author allowlist.
   const ready: ReadyIssue[] = [];
   const skippedForAuthor: SkippedForAuthor[] = [];
   for (const issue of firstPass) {

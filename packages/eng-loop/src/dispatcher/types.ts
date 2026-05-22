@@ -27,12 +27,9 @@ export interface PolledIssue {
   status: ProjectStatus | null;
   onBoard: boolean;
   /**
-   * GitHub login of the issue's author. Used by the author-allowlist
-   * predicate in `selectReady` to enforce the trust boundary on the
-   * autonomous dispatcher (issue #497). The empty string indicates the
-   * field was missing from the upstream `gh issue list` payload (older
-   * `gh` versions); such issues will never appear on the allowlist and
-   * will be filtered as not-allowlisted.
+   * GitHub login of the issue's author — input to the `selectReady`
+   * allowlist trust boundary (#497). Empty string = author missing from
+   * the upstream `gh` payload; never matches any allowlist entry.
    */
   author: string;
 }
@@ -70,11 +67,10 @@ export interface DispatcherConfig {
   /** v1 default implementer; per-issue label can override. */
   defaultImplementer: 'claude' | 'codex' | 'cursor';
   /**
-   * GitHub logins whose issues the dispatcher is allowed to pick up (#497).
-   * Compared case-insensitively against `PolledIssue.author`. Default `[]` —
-   * empty list means dispatch *nothing*, enforcing fail-safe behaviour when
-   * the operator forgets to configure the allowlist. Source of truth is the
-   * `JINN_DISPATCHER_AUTHOR_ALLOWLIST` env var read by the runner.
+   * GitHub logins whose issues the dispatcher may pick up (#497). Compared
+   * case-insensitively against `PolledIssue.author`. Empty (the default) =
+   * dispatch nothing — fail-safe when the operator forgets to configure it.
+   * Source of truth is `JINN_DISPATCHER_AUTHOR_ALLOWLIST` (runner-read).
    */
   authorAllowlist: string[];
 }

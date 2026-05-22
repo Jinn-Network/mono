@@ -1,8 +1,7 @@
 import type { IssueSource } from './issue-source.js';
 import type { DispatcherConfig, InFlightSession, ReadyIssue } from './types.js';
 import type { WallClock } from './wall-clock.js';
-import { selectReady } from './ready-filter.js';
-import type { SkippedForAuthor } from './ready-filter.js';
+import { selectReady, type SkippedForAuthor } from './ready-filter.js';
 import { concurrencyOk, backpressureOk } from './throttles.js';
 
 // ---------------------------------------------------------------------------
@@ -26,10 +25,9 @@ export interface CycleReport {
    */
   paused: number[];
   /**
-   * Issues that passed every other readiness predicate but whose author is
-   * not on `cfg.authorAllowlist` (#497 trust boundary). The richer shape
-   * (number + author) is intentional — operators need to know *who* is
-   * being blocked, not just a count, to diagnose misconfigurations.
+   * Otherwise-ready issues whose author is not on `cfg.authorAllowlist`
+   * (#497 trust boundary). Carries `{number, author}` so operators can
+   * diagnose misconfigurations from the log alone.
    */
   skippedForAuthor: SkippedForAuthor[];
 }
@@ -113,8 +111,8 @@ export async function runCycle(deps: CycleDeps): Promise<CycleReport> {
   // 3. Build the in-flight set for the ready filter
   const inFlightSet: ReadonlySet<number> = new Set<number>(inFlight.map((s) => s.issueNumber));
 
-  // 3b. Build the lowercased allowlist set (#497). Lowercasing here keeps the
-  //     hot path inside `selectReady` to a single `Set.has(s.toLowerCase())`.
+  // 3b. Build the lowercased allowlist set (#497) — `selectReady` lowercases
+  //     each issue author at compare time, so the allowlist side must match.
   const allowlistSet: ReadonlySet<string> = new Set<string>(
     cfg.authorAllowlist.map((s) => s.toLowerCase()),
   );
