@@ -415,7 +415,7 @@ describe('loadConfig RPC override handling', () => {
     expect(ds!.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 
-  it('defaults testnet L1 RPC and leaves the claim loop disabled in emit-only mode', async () => {
+  it('defaults testnet L1 RPC and enables the claim loop in emit-only mode', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
 
     delete process.env['BASE_RPC_URL'];
@@ -430,6 +430,21 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.ethereumRpcUrl).toBe(DEFAULT_TESTNET_ETHEREUM_RPC_URL);
     expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.jinnClaimLoopEnabled).toBe(true);
+  });
+
+  it('preserves an explicit testnet claim-loop opt-out', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      jinnClaimLoopEnabled: false,
+    });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_CLAIM_LOOP_ENABLED'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
     expect(config.jinnClaimLoopEnabled).toBe(false);
   });
 
@@ -443,6 +458,7 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.network).toBe('mainnet');
     expect(config.ethereumRpcUrl).toBeUndefined();
+    expect(config.jinnClaimLoopEnabled).toBe(false);
   });
 
   it('loads claim submission mode and loop enabled gate from env', async () => {

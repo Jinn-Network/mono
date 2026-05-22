@@ -325,8 +325,9 @@ export const JinnConfigSchema = z.object({
   jinnClaimSubmissionMode: z.enum(['emit-only', 'submit']).default('emit-only'),
 
   /**
-   * Explicit operator gate for the cross-chain JINN claim loop. Disabled by
-   * default until the testnet PR1/PR3 dependencies are live.
+   * Explicit operator gate for the cross-chain JINN claim loop. The schema
+   * default stays off for mainnet/unknown networks; loadConfig defaults this
+   * on for testnet now that the emitter and standing relayer are live.
    * Env: JINN_CLAIM_LOOP_ENABLED=1|true|yes.
    */
   jinnClaimLoopEnabled: z.boolean().default(false),
@@ -972,6 +973,10 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (resolvedNetwork === 'testnet' && !merged.ethereumRpcUrl) {
     merged.ethereumRpcUrl = DEFAULT_TESTNET_ETHEREUM_RPC_URL;
+  }
+
+  if (resolvedNetwork === 'testnet' && merged.jinnClaimLoopEnabled === undefined) {
+    merged.jinnClaimLoopEnabled = true;
   }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
