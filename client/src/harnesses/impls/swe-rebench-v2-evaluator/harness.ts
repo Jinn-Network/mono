@@ -61,6 +61,10 @@ import {
   defaultStateDir as defaultSolverTypeStateDir,
   loadSweRebenchV2Pool,
 } from '../../../solver-types/swe-rebench-v2.js';
+import {
+  PoolCacheStore,
+  loadPoolWithCacheFallback,
+} from '../../../solver-types/_swe-rebench-v2-pool-cache.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
@@ -151,6 +155,10 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
    * call and the disk-budget bead (jinn-mono-uy6v.11) is a no-op.
    */
   private cachedRunner: EvalRunner | undefined;
+  private cachedFetcher: HfFetcher | undefined;
+  private cachedPool:
+    | { stateDir: string; promise: Promise<PoolTask[]> }
+    | undefined;
 
   constructor(opts: SweRebenchV2EvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
@@ -175,6 +183,39 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       this.cachedRunner = make({ upstreamRepoDir });
     }
     return this.cachedRunner;
+  }
+
+  private getFetcher(): HfFetcher {
+    if (this.deps.fetcher) return this.deps.fetcher;
+    if (!this.cachedFetcher) {
+      this.cachedFetcher = new HttpHfFetcher();
+    }
+    return this.cachedFetcher;
+  }
+
+  private loadPoolForRecheck(stateDir: string): Promise<PoolTask[]> {
+    if (!this.cachedPool || this.cachedPool.stateDir !== stateDir) {
+      const loadPool = this.deps.loadPool ?? loadSweRebenchV2Pool;
+      const promise = loadPoolWithCacheFallback({
+        loadPool,
+        cache: new PoolCacheStore({ stateDir }),
+        currentPool: [],
+      }).then((result) => {
+        if (result.pool.length > 0) return result.pool;
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+        return result.pool;
+      });
+      this.cachedPool = { stateDir, promise };
+    }
+    const cached = this.cachedPool;
+    return cached.promise.catch((err) => {
+      if (this.cachedPool === cached) {
+        this.cachedPool = undefined;
+      }
+      throw err;
+    });
   }
 
   private async isDockerReachable(now: number = Date.now()): Promise<boolean> {
@@ -504,18 +545,21 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       this.deps.stateDir ??
       process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
       defaultSolverTypeStateDir();
-    const recheckFetcher: HfFetcher = this.deps.fetcher ?? new HttpHfFetcher();
-    const loadPool = this.deps.loadPool ?? loadSweRebenchV2Pool;
-    const recheckRow = await this.recheckSubstrate(task, recheckFetcher, loadPool, stateDir);
+    const fetcher: HfFetcher = this.getFetcher();
+    const recheckRow = await this.recheckSubstrate(
+      task,
+      fetcher,
+      () => this.loadPoolForRecheck(stateDir),
+      stateDir,
+    );
     // ── End substrate recheck ─────────────────────────────────────────────────
 
-    const fetcher: HfFetcher = this.deps.fetcher ?? new HttpHfFetcher();
     const runner: EvalRunner = this.getRunner(state.upstreamRepoDir);
     const evaluator = new SweRebenchV2Evaluator({ fetcher, runner });
 
     let graded: Awaited<ReturnType<SweRebenchV2Evaluator['grade']>>;
     try {
-      graded = await evaluator.grade({ task, solutionPayload });
+      graded = await evaluator.grade({ task, solutionPayload, row: recheckRow });
     } catch (err) {
       if (err instanceof EvalCouldNotGradeError) {
         // The eval never actually graded the solution (Docker down, patch

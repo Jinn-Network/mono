@@ -117,7 +117,7 @@ describe('HttpHfFetcher', () => {
 
   it('throws when HF datasets-server returns non-2xx', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response('rate limited', { status: 429 }));
-    const fetcher = new HttpHfFetcher({ fetchImpl });
+    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [] });
     await expect(
       fetcher.fetchTaskRow({
         hf_dataset: 'nebius/SWE-rebench-leaderboard',
@@ -155,6 +155,86 @@ describe('HttpHfFetcher', () => {
 });
 
 describe('HttpHfFetcher — retry budget for transient failures', () => {
+  it('retries on HTTP 429 and succeeds on the second try', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(jsonResponse({ rows: [{ row: makeRow('a__1') }] }));
+    const sleep = vi.fn(async () => undefined);
+    const fetcher = new HttpHfFetcher({
+      fetchImpl,
+      retryBackoffMs: [25],
+      minRequestIntervalMs: 0,
+      sleep,
+    });
+
+    const row = await fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });
+
+    expect(row.instance_id).toBe('a__1');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(25);
+  });
+
+  it('honors Retry-After for retryable responses', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', {
+        status: 429,
+        headers: { 'Retry-After': '2' },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ rows: [{ row: makeRow('a__1') }] }));
+    const sleep = vi.fn(async () => undefined);
+    const fetcher = new HttpHfFetcher({
+      fetchImpl,
+      retryBackoffMs: [25],
+      minRequestIntervalMs: 0,
+      sleep,
+    });
+
+    await fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });
+
+    expect(sleep).toHaveBeenCalledWith(2000);
+  });
+
+  it('serializes requests through the shared throttle', async () => {
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    const firstRequest = new Promise<Response>((resolve) => {
+      releaseFirst = () => {
+        events.push('first released');
+        resolve(jsonResponse({ rows: [{ row: makeRow('a__1') }] }));
+      };
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        events.push('first fetch');
+        return firstRequest;
+      })
+      .mockImplementationOnce(async () => {
+        events.push('second fetch');
+        return jsonResponse({ rows: [{ row: makeRow('b__2') }] });
+      });
+    const sleep = vi.fn(async () => undefined);
+    const fetcherA = new HttpHfFetcher({ fetchImpl, minRequestIntervalMs: 10, sleep });
+    const fetcherB = new HttpHfFetcher({ fetchImpl, minRequestIntervalMs: 10, sleep });
+
+    const first = fetcherA.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });
+    const second = fetcherB.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'b__2' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    try {
+      expect(events).toEqual(['first fetch']);
+    } finally {
+      releaseFirst();
+    }
+
+    await Promise.all([first, second]);
+
+    expect(events).toEqual(['first fetch', 'first released', 'second fetch']);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep.mock.calls[0]?.[0]).toBeGreaterThan(0);
+  });
+
   it('retries on transient HTTP 5xx and succeeds on the third try', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
@@ -164,7 +244,7 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
         rows: [{ row: makeRow('a__1') }],
       }), { status: 200 });
     }) as unknown as typeof fetch;
-    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2, 4] });
+    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2, 4], minRequestIntervalMs: 0 });
     const row = await fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });
     expect(row.instance_id).toBe('a__1');
     expect(calls).toBe(3);
@@ -176,7 +256,7 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
       calls += 1;
       return new Response('', { status: 503 });
     }) as unknown as typeof fetch;
-    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2, 4] });
+    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2, 4], minRequestIntervalMs: 0 });
     await expect(
       fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' }),
     ).rejects.toThrow(/503/);
@@ -189,7 +269,7 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
       calls += 1;
       return new Response('', { status: 404 });
     }) as unknown as typeof fetch;
-    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2, 4] });
+    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2, 4], minRequestIntervalMs: 0 });
     await expect(
       fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' }),
     ).rejects.toThrow(/404/);
