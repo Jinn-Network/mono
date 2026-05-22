@@ -9,6 +9,7 @@
  * silently grading against a missing instance.
  */
 
+import { sleep as defaultSleep } from '../../../tx-retry.js';
 import type { HfFetcher, HfRow } from './index.js';
 
 export interface HttpHfFetcherOptions {
@@ -29,7 +30,7 @@ export interface HttpHfFetcherOptions {
   retryBackoffMs?: number[];
   /** Minimum spacing between HF HTTP requests. Defaults to 250ms. */
   minRequestIntervalMs?: number;
-  /** Sleep implementation. Defaults to setTimeout (allows test injection). */
+  /** Sleep implementation. Defaults to the shared tx-retry sleep (allows test injection). */
   sleep?: (ms: number) => Promise<void>;
   /** Shared request limiter. Defaults to the module-level HF limiter. */
   limiter?: HfRequestLimiter;
@@ -87,7 +88,7 @@ export class HttpHfFetcher implements HfFetcher {
     this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
     this.retryBackoffMs = opts.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
     this.minRequestIntervalMs = opts.minRequestIntervalMs ?? DEFAULT_MIN_REQUEST_INTERVAL_MS;
-    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.sleep = opts.sleep ?? defaultSleep;
     this.limiter = opts.limiter ?? sharedHfRequestLimiter;
   }
 
