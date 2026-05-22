@@ -129,11 +129,6 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ current, next }),
     }),
-  claimRewards: () =>
-    jfetch<{ ok: boolean; result?: unknown; exitCode?: number | null; error?: string }>(
-      '/api/admin/claim-rewards',
-      { method: 'POST' },
-    ),
   /**
    * Trigger a daemon restart. The Node Health card's Restart button passes
    * `forceRespawn: true` so the daemon comes back even under a supervisor

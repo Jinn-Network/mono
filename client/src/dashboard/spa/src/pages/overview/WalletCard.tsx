@@ -47,16 +47,14 @@ export interface WalletCardProps {
     agent: string;
     safe: string;
   };
-  /** OLAS-style staking collector queue, formatted as decimal string. */
-  claimableJinn: string;
-  /** OLAS-style staking collector claims submitted lifetime, formatted as decimal string. */
-  claimedJinnLifetime: string;
   /**
    * Real Sepolia tJINN ERC-20 Safe balance, formatted as a decimal string
    * (#406). Only meaningful when `tjinnState === 'ready'`; `pending`/`error`
    * render state copy from `tjinnDisplay` instead.
    */
   tjinnEarned: string;
+  /** Real JinnDistributor.totalClaimedOperator sum, formatted as a decimal string when available. */
+  tjinnClaimedLifetime: string | null;
   /** Read state for the Sepolia tJINN balance. */
   tjinnState: TjinnStatusState;
   /** Public read error string, if the Sepolia balance is unavailable. */
@@ -74,7 +72,6 @@ export interface WalletCardProps {
   /** ISO timestamp of last password rotation, or null if never rotated */
   lastPasswordRotationAt: string | null;
   onTopUp: () => void;
-  onClaim: () => void;
   /** When true, action buttons are disabled (e.g. another action is in flight). */
   actionsDisabled?: boolean;
 }
@@ -117,9 +114,8 @@ function tjinnDisplay(
 export function WalletCard({
   totalEth,
   runwayDays,
-  claimableJinn,
-  claimedJinnLifetime,
   tjinnEarned,
+  tjinnClaimedLifetime,
   tjinnState,
   tjinnError,
   agentId,
@@ -129,11 +125,9 @@ export function WalletCard({
   bindingError,
   lastPasswordRotationAt,
   onTopUp,
-  onClaim,
   actionsDisabled = false,
 }: WalletCardProps): JSX.Element {
   const [, navigate] = useLocation();
-  const canClaimCollector = parseFloat(claimableJinn) > 0;
   const { value: tjinnValue, copy: tjinnStateCopy } = tjinnDisplay(
     tjinnState,
     tjinnEarned,
@@ -212,12 +206,7 @@ export function WalletCard({
         <div className="flex flex-col gap-3" data-testid="wallet-section-rewards">
           <span className={sectionLabel}>Rewards</span>
 
-          {/*
-            tJINN earned — the real Sepolia tJINN ERC-20 Safe balance (#406).
-            This is the operator reward minted by JinnDistributor. The collector
-            rows below are the OLAS-style staking maintenance path and are not
-            spendable operator tJINN.
-          */}
+          {/* Real Sepolia tJINN ERC-20 Safe balance (#406), minted by JinnDistributor. */}
           <div
             className="flex flex-col gap-1"
             data-testid="tjinn-earned-region"
@@ -242,31 +231,20 @@ export function WalletCard({
             )}
           </div>
 
-          <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Collector pending</span>
-            <div className="flex items-baseline gap-2">
-              <span className={statBig}>{claimableJinn}</span>
-              <span className={statUnit}>collector-token</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Collector claimed</span>
-            <div className="flex items-baseline gap-2">
-              <span className={statBig}>{claimedJinnLifetime}</span>
-              <span className={statUnit}>collector-token</span>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label="Claim staking collector rewards"
-              onClick={onClaim}
-              disabled={!canClaimCollector || actionsDisabled}
-              data-testid="wallet-claim"
-              className="mt-2 self-start"
+          <div
+            className="flex items-baseline gap-2"
+            data-testid="tjinn-claimed-lifetime-region"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className={statAux}>Lifetime claimed</span>
+            <span
+              className="font-mono text-[14px] text-foreground"
+              data-testid="tjinn-claimed-lifetime-value"
             >
-              Claim collector
-            </Button>
+              {tjinnClaimedLifetime ?? (tjinnState === 'error' ? 'unavailable' : 'pending')}
+            </span>
+            {tjinnClaimedLifetime !== null && <span className={statUnit}>tJINN</span>}
           </div>
         </div>
 

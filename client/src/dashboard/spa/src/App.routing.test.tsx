@@ -27,7 +27,6 @@ vi.mock('./api/client.js', () => ({
     getBootstrap: async () => ({}),
     getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
-    claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
     operator: {
       listArtifacts: async () => ({

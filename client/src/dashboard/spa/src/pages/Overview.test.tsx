@@ -16,7 +16,6 @@ import { Toaster } from '../components/ui/sonner.js';
 
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
-const claimRewardsMock = vi.fn();
 const triggerDripMock = vi.fn();
 const restartDaemonMock = vi.fn();
 const stopDaemonMock = vi.fn();
@@ -27,7 +26,6 @@ vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
-    claimRewards: () => claimRewardsMock(),
     triggerDrip: (opts?: { singleDrip?: boolean }) => triggerDripMock(opts),
     restartDaemon: (opts?: { forceRespawn?: boolean }) => restartDaemonMock(opts),
     stopDaemon: () => stopDaemonMock(),
@@ -42,13 +40,11 @@ const { OverviewPage } = await import('./Overview.js');
 beforeEach(() => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
-  claimRewardsMock.mockReset();
   triggerDripMock.mockReset();
   restartDaemonMock.mockReset();
   stopDaemonMock.mockReset();
   restakeMock.mockReset();
   retryAgentBindingMock.mockReset();
-  claimRewardsMock.mockResolvedValue({ ok: true });
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
   stopDaemonMock.mockResolvedValue({ ok: true });
@@ -190,20 +186,7 @@ describe('OverviewPage Wallet wiring', () => {
     expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
   });
 
-  it('wires the collector Claim button on the Wallet card to api.claimRewards', async () => {
-    getStatusMock.mockResolvedValue(baseStatus);
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    // Wait for the collector pending balance to populate so the button enables.
-    await waitFor(() =>
-      expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(screen.getByTestId('wallet-claim'));
-    await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
-  });
-
-  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei, not pending staking rewards', async () => {
+  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei and ignores pending staking rewards', async () => {
     getStatusMock.mockResolvedValue({
       ...baseStatus,
       rewards: { pendingStakingRewardsWei: '999000000000000000000' },
@@ -212,6 +195,7 @@ describe('OverviewPage Wallet wiring', () => {
         chainId: 11155111,
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: '1500000000000000000',
+        operatorClaimedWei: '2750000000000000000',
         safeCount: 1,
         services: [],
         error: null,
@@ -221,18 +205,18 @@ describe('OverviewPage Wallet wiring', () => {
     render(withProviders(<OverviewPage />));
 
     // The tJINN-earned value derives from status.tJinn.safeBalanceWei
-    // (1.5 tJINN) — NOT from rewards.pendingStakingRewardsWei (999 collector-token).
+    // (1.5 tJINN), not rewards.pendingStakingRewardsWei (999 collector-token).
     await waitFor(() =>
       expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
     );
+    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('2.7500');
     expect(screen.getByText(/testnet jinn earned/i)).toBeTruthy();
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).not.toBe('999.0000');
-    // The 999 figure still renders, but as the staking collector pending stat
-    // row — a distinct element from the tJINN-earned value.
-    const collector999 = screen.getByText('999.0000');
-    expect(collector999).not.toBe(tjinnValue);
-    expect(tjinnValue.contains(collector999)).toBe(false);
+    expect(screen.queryByText('999.0000')).toBeNull();
+    expect(screen.queryByText(/collector/i)).toBeNull();
+    expect(screen.queryByTestId('wallet-claim')).toBeNull();
+    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
   });
 
   it('renders a confirmed-empty tJINN balance (ready + null) as 0', async () => {
@@ -243,6 +227,7 @@ describe('OverviewPage Wallet wiring', () => {
         chainId: 11155111,
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: null,
+        operatorClaimedWei: '0',
         safeCount: 1,
         services: [],
         error: null,

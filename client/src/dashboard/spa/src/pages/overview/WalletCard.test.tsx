@@ -15,9 +15,8 @@ function defaultProps(): WalletCardProps {
     totalEth: '0.0088',
     runwayDays: 1,
     perRole: { master: '0.0088', agent: '—', safe: '—' },
-    claimableJinn: '0.0000',
-    claimedJinnLifetime: '0',
     tjinnEarned: '0.0000',
+    tjinnClaimedLifetime: '0.0000',
     tjinnState: 'ready',
     tjinnError: null,
     lastClaimAt: null,
@@ -27,7 +26,6 @@ function defaultProps(): WalletCardProps {
     services: [],
     lastPasswordRotationAt: null,
     onTopUp: vi.fn(),
-    onClaim: vi.fn(),
   };
 }
 
@@ -59,26 +57,18 @@ describe('WalletCard', () => {
     expect(screen.queryByRole('button', { name: /per role/i })).toBeNull();
   });
 
-  it('shows collector pending + claimed stats and a collector claim button', () => {
-    const { ui } = wrap(
-      <WalletCard
-        {...defaultProps()}
-        claimableJinn="1.2500"
-        claimedJinnLifetime="42"
-      />,
-    );
+  it('does not show collector reward rows or claim actions', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} tjinnEarned="1.2500" />);
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/collector pending/i);
+    expect(rewards.textContent).toMatch(/testnet jinn earned/i);
     expect(rewards.textContent).toContain('1.2500');
-    expect(rewards.textContent).toMatch(/collector claimed/i);
-    expect(rewards.textContent).toContain('42');
-    expect(rewards.textContent).toContain('collector-token');
-    // Collector claim button — enabled when collector pending > 0.
-    const claim = screen.getByTestId('wallet-claim') as HTMLButtonElement;
-    expect(claim.disabled).toBe(false);
-    // "last claim" line is commented out.
-    expect(rewards.textContent).not.toMatch(/last claim/i);
+    expect(rewards.textContent).toMatch(/lifetime claimed/i);
+    expect(rewards.textContent).not.toMatch(/collector pending/i);
+    expect(rewards.textContent).not.toMatch(/collector claimed/i);
+    expect(rewards.textContent).not.toMatch(/collector-token/i);
+    expect(screen.queryByTestId('wallet-claim')).toBeNull();
+    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
   });
 
   it('shows the tJINN-earned stat in the Rewards section when the read is ready', () => {
@@ -87,30 +77,47 @@ describe('WalletCard', () => {
         {...defaultProps()}
         tjinnEarned="1.5000"
         tjinnState="ready"
-        claimableJinn="999.0000"
       />,
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
     expect(rewards.textContent).toMatch(/testnet jinn earned/i);
-    // The tJINN-earned value renders the real Safe balance, not the staking
-    // collector queue — it is a distinct element from the 999 collector stat.
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).toBe('1.5000');
-    const collectorPending = screen.getByText('999.0000');
-    expect(collectorPending).not.toBe(tjinnValue);
-    expect(tjinnValue.contains(collectorPending)).toBe(false);
     // Ready state shows the unit and emits no state copy.
     expect(rewards.textContent).toContain('tJINN');
     expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
   });
 
+  it('keeps a real lifetime-claimed tJINN counter without claim actions', () => {
+    const { ui } = wrap(
+      <WalletCard
+        {...defaultProps()}
+        tjinnEarned="1.5000"
+        tjinnClaimedLifetime="2.7500"
+        tjinnState="ready"
+      />,
+    );
+    render(ui);
+    expect(screen.getByTestId('tjinn-claimed-lifetime-region').textContent).toMatch(
+      /lifetime claimed/i,
+    );
+    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('2.7500');
+    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
+  });
+
   it('shows pending copy and no value while the tJINN read is unresolved', () => {
     const { ui } = wrap(
-      <WalletCard {...defaultProps()} tjinnEarned="—" tjinnState="pending" />,
+      <WalletCard
+        {...defaultProps()}
+        tjinnEarned="—"
+        tjinnClaimedLifetime={null}
+        tjinnState="pending"
+      />,
     );
     render(ui);
     expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending');
+    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('pending');
     expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
       /waiting for sepolia balance/i,
     );
@@ -121,6 +128,7 @@ describe('WalletCard', () => {
       <WalletCard
         {...defaultProps()}
         tjinnEarned="—"
+        tjinnClaimedLifetime={null}
         tjinnState="error"
         tjinnError="Sepolia tJINN balance temporarily unavailable."
       />,
@@ -130,6 +138,7 @@ describe('WalletCard', () => {
     expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
       /temporarily unavailable/i,
     );
+    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('unavailable');
   });
 
   it('wraps the tJINN-earned row in a polite live region', () => {
@@ -138,12 +147,6 @@ describe('WalletCard', () => {
     const region = screen.getByTestId('tjinn-earned-region');
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.getAttribute('aria-atomic')).toBe('true');
-  });
-
-  it('disables collector Claim when collector pending is zero', () => {
-    const { ui } = wrap(<WalletCard {...defaultProps()} claimableJinn="0.0000" />);
-    render(ui);
-    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('shows Identity labels (Agent / Master / Safe) with truncated addresses', () => {
@@ -193,13 +196,4 @@ describe('WalletCard', () => {
     expect(onTopUp).toHaveBeenCalledOnce();
   });
 
-  it('invokes onClaim when Claim collector is clicked', () => {
-    const onClaim = vi.fn();
-    const { ui } = wrap(
-      <WalletCard {...defaultProps()} claimableJinn="1.0" onClaim={onClaim} />,
-    );
-    render(ui);
-    fireEvent.click(screen.getByTestId('wallet-claim'));
-    expect(onClaim).toHaveBeenCalledOnce();
-  });
 });

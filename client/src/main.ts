@@ -1224,6 +1224,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // is read from `config.ethereumRpcUrl` via the threaded `config`.
         tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
         tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
+        tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
         network: config.network,
         pollIntervalMs: config.pollIntervalMs,
         masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -2406,6 +2407,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // is read from `config.ethereumRpcUrl` via the threaded `config`.
       tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
       tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
+      tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
       network: config.network,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,

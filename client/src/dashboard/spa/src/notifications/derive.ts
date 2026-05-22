@@ -9,7 +9,6 @@ export interface DeriveInput {
   bootstrap: { mode: string; blockingReason?: string };
   status: {
     funds: { eth: string; runwayDays: number };
-    rewards: { claimableWei: string };
     harness: { ready: boolean; name: string; reason?: string };
     rpc: { reachable: boolean };
     restartPending: boolean;
@@ -23,15 +22,6 @@ export interface DeriveInput {
 
 const RUNWAY_LOW_THRESHOLD_DAYS = 3;
 const PASSWORD_ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24 * 90;
-
-function safeBigInt(s: string | undefined): bigint {
-  if (!s) return 0n;
-  try {
-    return BigInt(s);
-  } catch {
-    return 0n;
-  }
-}
 
 export function deriveNotifications(input: DeriveInput): OperatorNotification[] {
   const out: OperatorNotification[] = [];
@@ -130,15 +120,6 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
         jumpTo: '/operator/security',
       });
     }
-  }
-
-  if (safeBigInt(s.rewards.claimableWei) > 0n) {
-    out.push({
-      kind: 'claim_available',
-      severity: 'info',
-      message: 'Staking collector rewards are claimable.',
-      jumpTo: '/overview',
-    });
   }
 
   return out;

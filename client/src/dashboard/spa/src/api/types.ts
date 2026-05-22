@@ -14,8 +14,10 @@ export type TjinnStatusState = 'pending' | 'ready' | 'error';
 /** Per-service tJINN Safe balance entry. */
 export interface TjinnServiceStatus {
   index: number;
+  serviceId: number | null;
   safeAddress: string | null;
   balanceWei: string | null;
+  operatorClaimedWei: string | null;
   state: TjinnStatusState;
   error: string | null;
 }
@@ -31,6 +33,7 @@ export interface TjinnStatus {
   chainId: number;
   tokenAddress: string;
   safeBalanceWei: string | null;
+  operatorClaimedWei: string | null;
   safeCount: number;
   services: TjinnServiceStatus[];
   error: string | null;

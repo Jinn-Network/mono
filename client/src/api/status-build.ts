@@ -30,8 +30,10 @@ const TJINN_PUBLIC_ERRORS = new Set([
 
 export interface TjinnServiceStatus {
   index: number;
+  serviceId: number | null;
   safeAddress: string | null;
   balanceWei: string | null;
+  operatorClaimedWei: string | null;
   state: TjinnStatusState;
   error: string | null;
 }
@@ -41,6 +43,7 @@ export interface TjinnStatus {
   chainId: number;
   tokenAddress: string;
   safeBalanceWei: string | null;
+  operatorClaimedWei: string | null;
   safeCount: number;
   services: TjinnServiceStatus[];
   error: string | null;
@@ -101,6 +104,11 @@ export interface GatheredStatusRaw {
    * Optional for the same reasons as `tjinnTokenAddress`.
    */
   tjinnChainId?: number;
+  /**
+   * JinnDistributor address on the tJINN chain. Used to expose real
+   * operator lifetime claimed totals via `totalClaimedOperator(serviceId)`.
+   */
+  tjinnDistributorAddress?: string;
   /** ISO timestamp when the staking contract will next accept a checkpoint. */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
@@ -318,6 +326,7 @@ export function pendingTjinnStatus(
     chainId: chainId ?? 0,
     tokenAddress: tokenAddress ?? '',
     safeBalanceWei: null,
+    operatorClaimedWei: null,
     safeCount: 0,
     services: [],
     error: null,

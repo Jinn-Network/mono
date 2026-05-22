@@ -69,9 +69,10 @@ function mapStatusToDeriveInput(
       eth: masterEth,
       runwayDays: masterRunwayDays,
     },
-    rewards: {
-      claimableWei: String(s.rewards?.pendingStakingRewardsWei ?? '0'),
-    },
+    // Do not map `/v1/status.rewards.pendingStakingRewardsWei` into
+    // notifications. That field is the OLAS/staking collector queue, not real
+    // operator tJINN earning, and tJINN claims are automatic via the daemon
+    // emit loop plus standing relayer.
     // Harness readiness is its own endpoint (`/v1/harnesses/readiness`) — not on
     // /v1/status today. Default to ready=true so harness_not_ready doesn't fire
     // spuriously. Follow-up Issue: surface a rollup field on /v1/status.

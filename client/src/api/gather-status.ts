@@ -62,6 +62,16 @@ const ERC20_BALANCE_OF_ABI = [
   },
 ] as const;
 
+const JINN_DISTRIBUTOR_CLAIMED_ABI = [
+  {
+    type: 'function',
+    name: 'totalClaimedOperator',
+    stateMutability: 'view',
+    inputs: [{ name: 'serviceId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
+
 const TJINN_BALANCE_CACHE_TTL_MS = 30_000;
 const TJINN_BALANCE_TIMEOUT_MS = 4_000;
 
@@ -105,7 +115,9 @@ function resolveTjinnIdentity(
 interface TjinnBalanceSnapshot {
   chainId: number;
   balances: Map<string, string>;
+  operatorClaimedByService: Map<number, string>;
   errors: Map<string, string>;
+  claimedErrors: Map<number, string>;
 }
 
 /** Fill a fresh errors Map with `TJINN_PUBLIC_READ_ERROR` for every key. */
@@ -113,6 +125,14 @@ function errorsForAllKeys(keys: Iterable<string>): Map<string, string> {
   const errors = new Map<string, string>();
   for (const key of keys) {
     errors.set(key, TJINN_PUBLIC_READ_ERROR);
+  }
+  return errors;
+}
+
+function errorsForAllServiceIds(serviceIds: Iterable<number>): Map<number, string> {
+  const errors = new Map<number, string>();
+  for (const serviceId of serviceIds) {
+    errors.set(serviceId, TJINN_PUBLIC_READ_ERROR);
   }
   return errors;
 }
@@ -169,6 +189,8 @@ export interface StatusGatherConfig {
   tjinnTokenAddress?: string;
   /** tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`. */
   tjinnChainId?: number;
+  /** JinnDistributor address used for real operator lifetime claimed totals. */
+  tjinnDistributorAddress?: string;
   network: 'mainnet' | 'testnet';
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
@@ -360,9 +382,16 @@ function errorMessage(error: unknown): string {
 
 function tJinnBalanceCacheKey(
   ethereumRpcUrl: string,
+  distributorAddress: string | undefined,
   safeKeys: readonly string[],
+  serviceIds: readonly number[],
 ): string {
-  return `${ethereumRpcUrl}\0${[...safeKeys].sort().join(',')}`;
+  return [
+    ethereumRpcUrl,
+    distributorAddress ?? '',
+    [...safeKeys].sort().join(','),
+    [...serviceIds].sort((a, b) => a - b).join(','),
+  ].join('\0');
 }
 
 function timeoutError(message: string): Error {
@@ -387,16 +416,25 @@ function withTimeout<T>(
 async function readTjinnBalances(
   ethereumRpcUrl: string,
   tokenAddress: string,
+  distributorAddress: string | undefined,
   expectedChainId: number,
   safeToAddress: Map<string, `0x${string}`>,
+  serviceIds: readonly number[],
 ): Promise<TjinnBalanceSnapshot> {
   const safeEntries = [...safeToAddress.entries()];
   const client = createJinnL1PublicClient(ethereumRpcUrl, 'sepolia');
   const chainId = await client.getChainId();
   const balances = new Map<string, string>();
+  const operatorClaimedByService = new Map<number, string>();
 
   if (chainId !== expectedChainId) {
-    return { chainId, balances, errors: errorsForAllKeys(safeToAddress.keys()) };
+    return {
+      chainId,
+      balances,
+      operatorClaimedByService,
+      errors: errorsForAllKeys(safeToAddress.keys()),
+      claimedErrors: errorsForAllServiceIds(serviceIds),
+    };
   }
 
   const errors = new Map<string, string>();
@@ -424,17 +462,49 @@ async function readTjinnBalances(
     }
   }
 
-  return { chainId, balances, errors };
+  const claimedErrors = new Map<number, string>();
+  if (distributorAddress && serviceIds.length > 0) {
+    const claimedResults = await client.multicall({
+      allowFailure: true,
+      contracts: serviceIds.map((serviceId) => ({
+        address: distributorAddress as `0x${string}`,
+        abi: JINN_DISTRIBUTOR_CLAIMED_ABI,
+        functionName: 'totalClaimedOperator',
+        args: [BigInt(serviceId)],
+      })),
+    });
+
+    for (let i = 0; i < claimedResults.length; i++) {
+      const serviceId = serviceIds[i];
+      if (serviceId === undefined) continue;
+      const result = claimedResults[i]!;
+      if (result.status === 'success') {
+        operatorClaimedByService.set(serviceId, (result.result as bigint).toString());
+      } else {
+        claimedErrors.set(serviceId, TJINN_PUBLIC_READ_ERROR);
+      }
+    }
+  }
+
+  return { chainId, balances, operatorClaimedByService, errors, claimedErrors };
 }
 
 async function getCachedTjinnBalances(
   ethereumRpcUrl: string,
   tokenAddress: string,
+  distributorAddress: string | undefined,
   expectedChainId: number,
   safeToAddress: Map<string, `0x${string}`>,
+  serviceIds: readonly number[],
 ): Promise<TjinnBalanceSnapshot> {
   const safeKeys = [...safeToAddress.keys()].sort();
-  const cacheKey = tJinnBalanceCacheKey(ethereumRpcUrl, safeKeys);
+  const sortedServiceIds = [...serviceIds].sort((a, b) => a - b);
+  const cacheKey = tJinnBalanceCacheKey(
+    ethereumRpcUrl,
+    distributorAddress,
+    safeKeys,
+    sortedServiceIds,
+  );
   const now = Date.now();
   const cached = tjinnBalanceCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
@@ -442,14 +512,23 @@ async function getCachedTjinnBalances(
   }
 
   const promise = withTimeout(
-    readTjinnBalances(ethereumRpcUrl, tokenAddress, expectedChainId, safeToAddress),
+    readTjinnBalances(
+      ethereumRpcUrl,
+      tokenAddress,
+      distributorAddress,
+      expectedChainId,
+      safeToAddress,
+      sortedServiceIds,
+    ),
     TJINN_BALANCE_TIMEOUT_MS,
     'tJINN balance collection timed out',
   ).catch((): TjinnBalanceSnapshot => {
     return {
       chainId: expectedChainId,
       balances: new Map<string, string>(),
+      operatorClaimedByService: new Map<number, string>(),
       errors: errorsForAllKeys(safeKeys),
+      claimedErrors: errorsForAllServiceIds(sortedServiceIds),
     };
   });
   tjinnBalanceCache.set(cacheKey, {
@@ -538,6 +617,7 @@ function tjinnPublicError(opts: {
 async function gatherTjinnStatus(
   ethereumRpcUrl: string | undefined,
   tokenAddress: string,
+  distributorAddress: string | undefined,
   chainId: number,
   fleet: FleetState | null,
 ): Promise<TjinnStatus> {
@@ -547,15 +627,22 @@ async function gatherTjinnStatus(
 
   const services: TjinnServiceStatus[] = [];
   const safeToAddress = new Map<string, `0x${string}`>();
+  const serviceIds = new Set<number>();
 
   for (const svc of fleet.services) {
     const index = displayFleetServiceIndex(svc);
+    const serviceId = svc.service_id ?? null;
+    if (serviceId !== null) {
+      serviceIds.add(serviceId);
+    }
     const safeAddress = svc.safe_address;
     if (!safeAddress) {
       services.push({
         index,
+        serviceId,
         safeAddress: null,
         balanceWei: null,
+        operatorClaimedWei: null,
         state: 'pending',
         error: null,
       });
@@ -566,8 +653,10 @@ async function gatherTjinnStatus(
       const key = checksum.toLowerCase();
       services.push({
         index,
+        serviceId,
         safeAddress: checksum,
         balanceWei: null,
+        operatorClaimedWei: null,
         state: 'pending',
         error: null,
       });
@@ -575,8 +664,10 @@ async function gatherTjinnStatus(
     } catch {
       services.push({
         index,
+        serviceId,
         safeAddress,
         balanceWei: null,
+        operatorClaimedWei: null,
         state: 'error',
         error: TJINN_PUBLIC_INVALID_SAFE_ERROR,
       });
@@ -601,12 +692,27 @@ async function gatherTjinnStatus(
   const snapshot = await getCachedTjinnBalances(
     ethereumRpcUrl,
     tokenAddress,
+    distributorAddress,
     chainId,
     safeToAddress,
+    [...serviceIds],
   );
   let total = 0n;
   for (const balance of snapshot.balances.values()) {
     total += BigInt(balance);
+  }
+  const allClaimedReadsAvailable =
+    !!distributorAddress &&
+    serviceIds.size > 0 &&
+    snapshot.claimedErrors.size === 0 &&
+    [...serviceIds].every((serviceId) => snapshot.operatorClaimedByService.has(serviceId));
+  let operatorClaimedWei: string | null = null;
+  if (allClaimedReadsAvailable) {
+    let claimedTotal = 0n;
+    for (const serviceId of serviceIds) {
+      claimedTotal += BigInt(snapshot.operatorClaimedByService.get(serviceId) ?? '0');
+    }
+    operatorClaimedWei = claimedTotal.toString();
   }
   const hasInvalidSafe = services.some((svc) => svc.error === TJINN_PUBLIC_INVALID_SAFE_ERROR);
   const hasReadError = snapshot.errors.size > 0;
@@ -619,18 +725,30 @@ async function gatherTjinnStatus(
   return pendingTjinnStatus(tokenAddress, snapshot.chainId, {
     state: hasAnyError ? 'error' : 'ready',
     safeBalanceWei: hasAnyBalance ? total.toString() : null,
+    operatorClaimedWei,
     safeCount,
     services: services.map((svc): TjinnServiceStatus => {
-      if (!svc.safeAddress) return svc;
-      if (svc.state === 'error') return svc;
+      const operatorClaimedForService =
+        svc.serviceId !== null
+          ? (snapshot.operatorClaimedByService.get(svc.serviceId) ?? null)
+          : null;
+      if (!svc.safeAddress) return { ...svc, operatorClaimedWei: operatorClaimedForService };
+      if (svc.state === 'error') return { ...svc, operatorClaimedWei: operatorClaimedForService };
       const key = svc.safeAddress.toLowerCase();
       const balance = snapshot.balances.get(key);
       if (balance !== undefined) {
-        return { ...svc, state: 'ready', balanceWei: balance, error: null };
+        return {
+          ...svc,
+          state: 'ready',
+          balanceWei: balance,
+          operatorClaimedWei: operatorClaimedForService,
+          error: null,
+        };
       }
       return {
         ...svc,
         state: 'error',
+        operatorClaimedWei: operatorClaimedForService,
         error: snapshot.errors.get(key) ?? TJINN_PUBLIC_READ_ERROR,
       };
     }),
@@ -863,6 +981,7 @@ export async function gatherGatheredStatusRaw(
     claimedByService: store.getClaimedRewardsByService(),
     tjinnTokenAddress: tjinnIdentity.tokenAddress,
     tjinnChainId: tjinnIdentity.chainId,
+    tjinnDistributorAddress: status?.tjinnDistributorAddress,
   };
 
   if (!status) {
@@ -888,6 +1007,7 @@ export async function gatherGatheredStatusRaw(
   const tJinnPromise = gatherTjinnStatus(
     status.network === 'testnet' ? status.config?.ethereumRpcUrl : undefined,
     tjinnIdentity.tokenAddress,
+    status.tjinnDistributorAddress,
     tjinnIdentity.chainId,
     fleet,
   );

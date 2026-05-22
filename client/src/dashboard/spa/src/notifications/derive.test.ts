@@ -5,7 +5,6 @@ const baseState = {
   bootstrap: { mode: 'running' as const },
   status: {
     funds: { eth: '1.0', runwayDays: 30 },
-    rewards: { claimableWei: '0' },
     harness: { ready: true, name: 'claude-code' },
     rpc: { reachable: true },
     restartPending: false,
@@ -166,26 +165,22 @@ describe('deriveNotifications', () => {
     expect(out.map(n => n.kind)).not.toContain('password_rotation_due');
   });
 
-  it('emits claim_available when claimableWei is a decimal string > 0', () => {
+  it('does not emit claim_available from collector reward claimableWei', () => {
     const out = deriveNotifications({
       ...baseState,
       status: { ...baseState.status, rewards: { claimableWei: '1' } },
+    } as Parameters<typeof deriveNotifications>[0] & {
+      status: { rewards: { claimableWei: string } };
     });
-    expect(out.map(n => n.kind)).toContain('claim_available');
+    expect(out.map(n => n.kind)).not.toContain('claim_available');
   });
 
-  it('emits claim_available when claimableWei is a hex string (does not throw)', () => {
-    const out = deriveNotifications({
-      ...baseState,
-      status: { ...baseState.status, rewards: { claimableWei: '0x10' } },
-    });
-    expect(out.map(n => n.kind)).toContain('claim_available');
-  });
-
-  it('does not emit claim_available when claimableWei is malformed (treats as zero)', () => {
+  it('ignores malformed collector claimableWei without throwing', () => {
     const out = deriveNotifications({
       ...baseState,
       status: { ...baseState.status, rewards: { claimableWei: 'not-a-number' } },
+    } as Parameters<typeof deriveNotifications>[0] & {
+      status: { rewards: { claimableWei: string } };
     });
     expect(out.map(n => n.kind)).not.toContain('claim_available');
   });

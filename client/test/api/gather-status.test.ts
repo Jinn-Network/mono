@@ -20,12 +20,27 @@ describe('gatherStatusForApi', () => {
     const safeA = '0x3333333333333333333333333333333333333333';
     const safeB = '0x4444444444444444444444444444444444444444';
     const stakingProxy = '0x5555555555555555555555555555555555555555';
+    const distributor = '0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6';
     const balanceReads: Array<{ token: string; safe: string; chainId: number }> = [];
+    const claimedReads: Array<{ distributor: string; serviceId: bigint; chainId: number }> = [];
     const balanceOf = (token: string, safe: string): bigint => {
       balanceReads.push({ token, safe, chainId: 11155111 });
       return safe.toLowerCase() === safeA.toLowerCase()
         ? 1500000000000000000n
         : 2000000000000000000n;
+    };
+    const totalClaimedOperator = (address: string, serviceId: bigint): bigint => {
+      claimedReads.push({ distributor: address, serviceId, chainId: 11155111 });
+      switch (serviceId) {
+        case 41n:
+          return 10000000000000000000n;
+        case 42n:
+          return 20000000000000000000n;
+        case 43n:
+          return 30000000000000000000n;
+        default:
+          return 0n;
+      }
     };
     vi.doMock('viem', async (importOriginal) => {
       const actual = await importOriginal<typeof import('viem')>();
@@ -40,7 +55,7 @@ describe('gatherStatusForApi', () => {
             contracts: ReadonlyArray<{
               address: string;
               functionName: string;
-              args?: readonly [`0x${string}`];
+              args?: readonly [`0x${string}`] | readonly [bigint];
             }>;
           }) =>
             req.contracts.map((c) => {
@@ -48,6 +63,12 @@ describe('gatherStatusForApi', () => {
                 return {
                   status: 'success' as const,
                   result: balanceOf(c.address, (c.args?.[0] as string | undefined) ?? '0x'),
+                };
+              }
+              if (chain.id === 11155111 && c.functionName === 'totalClaimedOperator') {
+                return {
+                  status: 'success' as const,
+                  result: totalClaimedOperator(c.address, (c.args?.[0] as bigint | undefined) ?? 0n),
                 };
               }
               return { status: 'success' as const, result: 0n };
@@ -118,6 +139,7 @@ describe('gatherStatusForApi', () => {
         // The Sepolia tJINN RPC endpoint is read from config.ethereumRpcUrl.
         config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
         network: 'testnet',
+        tjinnDistributorAddress: distributor,
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
       });
@@ -128,6 +150,7 @@ describe('gatherStatusForApi', () => {
         chainId: 11155111,
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: '3500000000000000000',
+        operatorClaimedWei: '60000000000000000000',
         safeCount: 2,
         error: null,
       });
@@ -137,11 +160,21 @@ describe('gatherStatusForApi', () => {
         '1500000000000000000',
         '2000000000000000000',
       ]);
+      expect(apiStatus.tJinn.services.map((svc) => svc.operatorClaimedWei)).toEqual([
+        '10000000000000000000',
+        '20000000000000000000',
+        '30000000000000000000',
+      ]);
     });
 
     expect(balanceReads).toEqual([
       { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeA, chainId: 11155111 },
       { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeB, chainId: 11155111 },
+    ]);
+    expect(claimedReads).toEqual([
+      { distributor, serviceId: 41n, chainId: 11155111 },
+      { distributor, serviceId: 42n, chainId: 11155111 },
+      { distributor, serviceId: 43n, chainId: 11155111 },
     ]);
   });
 

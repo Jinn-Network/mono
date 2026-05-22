@@ -76,15 +76,6 @@ interface OverviewStatusV1 {
       evicted?: boolean;
     }>;
   };
-  rewards?: {
-    pendingStakingRewardsWei?: string;
-    /** Lifetime claimed amount (wei) — daemon emits this as claimedStakingRewardsWei. */
-    claimedStakingRewardsWei?: string;
-    /** Legacy field name; kept for backwards-compat with older daemons. */
-    claimedJinnLifetime?: string;
-    /** ISO timestamp of last claim. */
-    lastClaimAt?: string | null;
-  };
   /**
    * Real Sepolia tJINN ERC-20 Safe balance (#406, daemon half PR #447).
    * Optional: older daemons predate this field.
@@ -286,8 +277,6 @@ export function OverviewPage(): JSX.Element {
   const isEvicted = firstEvictedService != null;
   const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
-  const stakingCollectorPending = formatEth(status?.rewards?.pendingStakingRewardsWei);
-
   // tJINN earned — the real Sepolia ERC-20 Safe balance (#406). When the read
   // has resolved (`state === 'ready'`) a null `safeBalanceWei` is a
   // confirmed-empty balance, so format it as '0' rather than the bare '—'
@@ -298,6 +287,10 @@ export function OverviewPage(): JSX.Element {
     status?.tJinn?.state === 'ready'
       ? formatEth(status.tJinn.safeBalanceWei ?? '0')
       : formatEth(status?.tJinn?.safeBalanceWei ?? undefined);
+  const tjinnClaimedLifetime =
+    status?.tJinn?.operatorClaimedWei != null
+      ? formatEth(status.tJinn.operatorClaimedWei)
+      : null;
   const tjinnError = status?.tJinn?.error ?? null;
 
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
@@ -513,16 +506,10 @@ export function OverviewPage(): JSX.Element {
             agent: '—',
             safe: '—',
           }}
-          claimableJinn={stakingCollectorPending}
-          claimedJinnLifetime={
-            status?.rewards?.claimedStakingRewardsWei
-              ? formatEth(status.rewards.claimedStakingRewardsWei)
-              : status?.rewards?.claimedJinnLifetime ?? '0'
-          }
           tjinnEarned={tjinnEarned}
+          tjinnClaimedLifetime={tjinnClaimedLifetime}
           tjinnState={tjinnState}
           tjinnError={tjinnError}
-          lastClaimAt={status?.rewards?.lastClaimAt ?? null}
           agentId={services[0]?.agentId ?? null}
           masterAddress={bootstrap?.master_address ?? null}
           safeAddress={services[0]?.safeAddress ?? null}
@@ -555,14 +542,6 @@ export function OverviewPage(): JSX.Element {
               // Confirmation is transient — surface it, then fade after ~5s.
               { autoClearMs: 5_000 },
             )}
-          onClaim={() =>
-            runAction('Claim JINN', async () => {
-              const res = await api.claimRewards();
-              if (!res.ok) {
-                throw new Error(res.error ?? 'Reward claim failed.');
-              }
-              return { message: 'JINN claim command completed.' };
-            })}
         />
       </aside>
     </div>
