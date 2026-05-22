@@ -56,20 +56,22 @@ assert_contains "retire-labels" "$OUT" "lists retire-labels subcommand"
 # ---- Test 2: default is dry-run; retire-labels lists labels without deleting ----
 
 say "Test 2: default is dry-run (no --apply means no gh delete called)"
-# Stub gh so any call is logged; if any 'gh label delete' is invoked, the
-# test fails. The rate-limit probe stub returns a healthy quota so the
-# script proceeds past the probe.
+# Stub gh so every invocation is recorded to a sentinel file (calls.log)
+# inside the test tempdir. After the script runs, we assert that calls.log
+# contains no `label delete` line -- this fails loud if a regression
+# causes `cmd_retire_labels` to invoke `gh label delete` on the dry-run
+# path, even if the stub never emits stdout/stderr. The rate-limit probe
+# stub returns a healthy quota so the script proceeds past the probe.
 TMPDIR_T2="$(mktemp -d)"
-cat > "${TMPDIR_T2}/gh" <<'STUB'
+CALLS_LOG_T2="${TMPDIR_T2}/calls.log"
+: > "$CALLS_LOG_T2"
+cat > "${TMPDIR_T2}/gh" <<STUB
 #!/usr/bin/env bash
-if [ "${1:-}" = "api" ] && [ "${2:-}" = "graphql" ]; then
+printf '%s\n' "\$*" >> "${CALLS_LOG_T2}"
+if [ "\${1:-}" = "api" ] && [ "\${2:-}" = "graphql" ]; then
   # Heuristic: rate-limit probe response.
   printf '{"data":{"rateLimit":{"remaining":5000,"resetAt":"2099-01-01T00:00:00Z"}}}\n'
   exit 0
-fi
-printf 'gh called with: %s\n' "$*" >&2
-if [ "${1:-}" = "label" ] && [ "${2:-}" = "delete" ]; then
-  printf 'STUB-GH-DELETED:%s\n' "${3:-}" >&2
 fi
 exit 0
 STUB
@@ -83,7 +85,11 @@ assert_contains "sprint:2026-05-18" "$OUT2" "lists sprint:2026-05-18 label"
 assert_contains "agent:opus" "$OUT2" "lists agent:opus label"
 assert_contains "bug" "$OUT2" "lists bug label"
 assert_contains "dry-run" "$OUT2" "indicates dry-run posture"
-assert_not_contains "STUB-GH-DELETED" "$OUT2" "no gh label delete invoked"
+# Sentinel-file assertion: the stub records every gh invocation, so this
+# catches any `gh label delete ...` call regardless of stub stdout shape.
+CALLS_T2="$(cat "$CALLS_LOG_T2")"
+assert_not_contains "label delete" "$CALLS_T2" "no gh label delete invoked (calls.log)"
+assert_not_contains "delete" "$CALLS_T2" "no gh delete-shaped invocation at all (calls.log)"
 rm -rf "$TMPDIR_T2"
 
 # ---- Test 3: rate-limit probe handles remaining: 0 ----
