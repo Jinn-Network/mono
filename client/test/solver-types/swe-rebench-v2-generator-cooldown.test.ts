@@ -304,17 +304,17 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     );
     const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
 
-    const task = await gen();
+    const task = expectTaskArray(await gen())[0];
 
-    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
-    expect(task?.eligibility?.['vettedPoolRef']).toMatchObject({
+    expect(task.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(task.eligibility?.['vettedPoolRef']).toMatchObject({
       schemaVersion: 'solvernet.artifact-ref.v1',
       manifestCid: launchedRecord().manifestCid,
       artifactType: 'swe-rebench-v2-vetted-pool.v1',
       artifactCid: 'bafy-vetted-pool-cid',
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
     });
-    expect(task?.context?.['vettedPoolRef']).toBeUndefined();
+    expect(task.context?.['vettedPoolRef']).toBeUndefined();
   });
 
   it('uses the published artifact pool, not unpublished local scorable entries', async () => {
@@ -347,10 +347,10 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
 
     const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
-    const task = await gen();
+    const task = expectTaskArray(await gen())[0];
 
-    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-2' });
-    expect(task?.eligibility?.['vettedPoolRef']).toEqual(ref);
+    expect(task.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(task.eligibility?.['vettedPoolRef']).toEqual(ref);
   });
 
   it('caches the write-once vetted-pool publication after first resolution', async () => {
@@ -386,15 +386,16 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
       stateDir,
       admissionMode: 'required',
       N_max_postings_per_task: 1,
+      post_batch_size: 1,
     });
 
-    const first = await gen();
+    const first = expectTaskArray(await gen())[0];
     unlinkSync(join(stateDir, 'vetted-pool-artifact-publication.json'));
-    const second = await gen();
+    const second = expectTaskArray(await gen())[0];
 
-    expect(first?.spec).toMatchObject({ instance_id: 'org__repo-1' });
-    expect(second?.spec).toMatchObject({ instance_id: 'org__repo-2' });
-    expect(second?.eligibility?.['vettedPoolRef']).toEqual(ref);
+    expect(first.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(second.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(second.eligibility?.['vettedPoolRef']).toEqual(ref);
   });
 
   it('falls back to python-floor when admissionMode is python-floor and no validation data exists', async () => {
