@@ -169,7 +169,7 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     });
   }
 
-  it('renders three numeric inputs and pre-fills swe-rebench defaults', () => {
+  it('renders fill-the-pool inputs and pre-fills swe-rebench defaults', () => {
     render(
       <Step3ConfigureGenerator
         draft={buildSweDraft()}
@@ -185,8 +185,17 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
       (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
     ).toBe('10');
     expect(
-      (screen.getByTestId('launcher-create-cooldown_ms') as HTMLInputElement).value,
-    ).toBe(String(24 * 60 * 60 * 1000));
+      (screen.getByTestId('launcher-create-posting_window_ms') as HTMLInputElement).value,
+    ).toBe(String(7 * 24 * 60 * 60 * 1000));
+    expect(
+      (screen.getByTestId('launcher-create-post_batch_size') as HTMLInputElement).value,
+    ).toBe('25');
+    expect(
+      (screen.getByTestId('launcher-create-maxClaimsPerOperator') as HTMLInputElement).value,
+    ).toBe('3');
+    expect(
+      (screen.getByTestId('launcher-create-claimLeaseTtlSeconds') as HTMLInputElement).value,
+    ).toBe('3600');
     // Prediction-only fields must not appear
     expect(screen.queryByTestId('launcher-create-cadenceMs')).toBeNull();
     expect(screen.queryByTestId('launcher-create-allowlistConditionIds')).toBeNull();
@@ -199,7 +208,10 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
           generatorConfig: {
             N_target_successes: 5,
             N_max_postings_per_task: 20,
-            cooldown_ms: 60_000,
+            posting_window_ms: 60_000,
+            post_batch_size: 7,
+            maxClaimsPerOperator: 2,
+            claimLeaseTtlSeconds: 1_800,
           },
         })}
         template={SWE_REBENCH_V2_V1_TEMPLATE}
@@ -214,11 +226,17 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
       (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
     ).toBe('20');
     expect(
-      (screen.getByTestId('launcher-create-cooldown_ms') as HTMLInputElement).value,
+      (screen.getByTestId('launcher-create-posting_window_ms') as HTMLInputElement).value,
     ).toBe('60000');
+    expect(
+      (screen.getByTestId('launcher-create-post_batch_size') as HTMLInputElement).value,
+    ).toBe('7');
+    expect(
+      (screen.getByTestId('launcher-create-maxClaimsPerOperator') as HTMLInputElement).value,
+    ).toBe('2');
   });
 
-  it('rejects sub-60s cooldown', () => {
+  it('rejects empty posting window', () => {
     const onAdvance = vi.fn();
     render(
       <Step3ConfigureGenerator
@@ -228,12 +246,12 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
         onBack={() => undefined}
       />,
     );
-    fireEvent.change(screen.getByTestId('launcher-create-cooldown_ms'), {
-      target: { value: '5000' },
+    fireEvent.change(screen.getByTestId('launcher-create-posting_window_ms'), {
+      target: { value: '' },
     });
     fireEvent.click(screen.getByTestId('launcher-create-next'));
     expect(onAdvance).not.toHaveBeenCalled();
-    expect(screen.getByText(/Cooldown must be at least 60s/)).toBeTruthy();
+    expect(screen.getByText(/positive integer \(ms\)/)).toBeTruthy();
   });
 
   it('rejects max-postings < target-successes', () => {
@@ -269,7 +287,7 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
         onBack={() => undefined}
       />,
     );
-    fireEvent.change(screen.getByTestId('launcher-create-cooldown_ms'), {
+    fireEvent.change(screen.getByTestId('launcher-create-posting_window_ms'), {
       target: { value: '60000' },
     });
     fireEvent.click(screen.getByTestId('launcher-create-next'));
@@ -279,7 +297,10 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     expect(patch.generatorConfig).toEqual({
       N_target_successes: 3,
       N_max_postings_per_task: 10,
-      cooldown_ms: 60_000,
+      posting_window_ms: 60_000,
+      post_batch_size: 25,
+      maxClaimsPerOperator: 3,
+      claimLeaseTtlSeconds: 3600,
     });
   });
 });
@@ -322,13 +343,19 @@ describe('validateSweRebenchV2GeneratorConfig', () => {
     const r = validateSweRebenchV2GeneratorConfig({
       N_target_successes: '3',
       N_max_postings_per_task: '10',
-      cooldown_ms: String(24 * 60 * 60 * 1000),
+      posting_window_ms: String(7 * 24 * 60 * 60 * 1000),
+      post_batch_size: '25',
+      maxClaimsPerOperator: '3',
+      claimLeaseTtlSeconds: '3600',
     });
     expect(r.ok).toBe(true);
     expect(r.generatorConfig).toEqual({
       N_target_successes: 3,
       N_max_postings_per_task: 10,
-      cooldown_ms: 24 * 60 * 60 * 1000,
+      posting_window_ms: 7 * 24 * 60 * 60 * 1000,
+      post_batch_size: 25,
+      maxClaimsPerOperator: 3,
+      claimLeaseTtlSeconds: 3600,
     });
   });
 
@@ -336,19 +363,25 @@ describe('validateSweRebenchV2GeneratorConfig', () => {
     const r = validateSweRebenchV2GeneratorConfig({
       N_target_successes: '5',
       N_max_postings_per_task: '3',
-      cooldown_ms: '60000',
+      posting_window_ms: '60000',
+      post_batch_size: '25',
+      maxClaimsPerOperator: '3',
+      claimLeaseTtlSeconds: '3600',
     });
     expect(r.ok).toBe(false);
     expect(r.errors.N_max_postings_per_task).toBeTruthy();
   });
 
-  it('rejects empty cooldown', () => {
+  it('rejects empty posting window', () => {
     const r = validateSweRebenchV2GeneratorConfig({
       N_target_successes: '3',
       N_max_postings_per_task: '10',
-      cooldown_ms: '',
+      posting_window_ms: '',
+      post_batch_size: '25',
+      maxClaimsPerOperator: '3',
+      claimLeaseTtlSeconds: '3600',
     });
     expect(r.ok).toBe(false);
-    expect(r.errors.cooldown_ms).toBeTruthy();
+    expect(r.errors.posting_window_ms).toBeTruthy();
   });
 });

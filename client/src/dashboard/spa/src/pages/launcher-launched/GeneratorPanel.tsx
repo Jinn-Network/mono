@@ -31,7 +31,6 @@ import { formatTimestamp } from './helpers.js';
  */
 
 const MIN_CADENCE_MS = 60_000;
-const SWE_REBENCH_V2_MIN_COOLDOWN_MS = 60_000;
 
 export interface GeneratorPanelProps {
   record: LaunchedSolverNetRecord;
@@ -54,8 +53,8 @@ interface FormState {
 interface SweRebenchV2FormState {
   N_target_successes: string;
   N_max_postings_per_task: string;
-  cooldown_ms: string;
-  maxClaims: string;
+  posting_window_ms: string;
+  post_batch_size: string;
   maxClaimsPerOperator: string;
   claimLeaseTtlSeconds: string;
 }
@@ -87,20 +86,20 @@ function initialSweRebenchV2Form(
   const c = config ?? {};
   const policy = readClaimPolicyConfig(c.claimPolicy);
   const defaults = manifest?.contract.claimPolicyDefaults ?? {
-    maxClaims: 50,
-    maxClaimsPerOperator: 5,
+    maxClaims: 3,
+    maxClaimsPerOperator: 3,
     claimLeaseTtlSeconds: 60 * 60,
   };
   return {
     N_target_successes: stringField(c.N_target_successes),
     N_max_postings_per_task: stringField(c.N_max_postings_per_task),
-    cooldown_ms: stringField(c.cooldown_ms),
-    maxClaims: stringField(policy.maxClaims ?? defaults.maxClaims),
+    posting_window_ms: stringField(c.posting_window_ms),
+    post_batch_size: stringField(c.post_batch_size),
     maxClaimsPerOperator: stringField(
-      policy.maxClaimsPerOperator ?? defaults.maxClaimsPerOperator,
+      c.maxClaimsPerOperator ?? policy.maxClaimsPerOperator ?? defaults.maxClaimsPerOperator,
     ),
     claimLeaseTtlSeconds: stringField(
-      policy.claimLeaseTtlSeconds ?? defaults.claimLeaseTtlSeconds,
+      c.claimLeaseTtlSeconds ?? policy.claimLeaseTtlSeconds ?? defaults.claimLeaseTtlSeconds,
     ),
   };
 }
@@ -202,33 +201,12 @@ export function buildSweRebenchV2Patch(
 
   const parsedTarget = parsePositiveInt(form.N_target_successes);
   const parsedMaxPostings = parsePositiveInt(form.N_max_postings_per_task);
-  const parsedMaxClaims = parsePositiveInt(form.maxClaims);
-  const parsedMaxClaimsPerOperator = parsePositiveInt(form.maxClaimsPerOperator);
 
   for (const key of [
     'N_target_successes',
     'N_max_postings_per_task',
-    'cooldown_ms',
-  ] as const) {
-    if (form[key] === prior[key]) continue;
-    if (form[key].trim().length === 0) continue;
-    const parsed = parsePositiveInt(form[key]);
-    if (parsed === null) {
-      errors[key] = key === 'cooldown_ms'
-        ? 'Must be a positive integer (ms).'
-        : 'Must be a positive integer.';
-      continue;
-    }
-    if (key === 'cooldown_ms' && parsed < SWE_REBENCH_V2_MIN_COOLDOWN_MS) {
-      errors[key] = `Cooldown must be at least ${SWE_REBENCH_V2_MIN_COOLDOWN_MS / 1000}s.`;
-      continue;
-    }
-    patch[key] = parsed;
-  }
-
-  const claimPolicyPatch: Record<string, unknown> = {};
-  for (const key of [
-    'maxClaims',
+    'posting_window_ms',
+    'post_batch_size',
     'maxClaimsPerOperator',
     'claimLeaseTtlSeconds',
   ] as const) {
@@ -236,15 +214,14 @@ export function buildSweRebenchV2Patch(
     if (form[key].trim().length === 0) continue;
     const parsed = parsePositiveInt(form[key]);
     if (parsed === null) {
-      errors[key] = key === 'claimLeaseTtlSeconds'
-        ? 'Must be a positive integer (seconds).'
+      errors[key] = key === 'posting_window_ms'
+        ? 'Must be a positive integer (ms).'
+        : key === 'claimLeaseTtlSeconds'
+          ? 'Must be a positive integer (seconds).'
         : 'Must be a positive integer.';
       continue;
     }
-    claimPolicyPatch[key] = parsed;
-  }
-  if (Object.keys(claimPolicyPatch).length > 0) {
-    patch.claimPolicy = claimPolicyPatch;
+    patch[key] = parsed;
   }
 
   if (
@@ -254,14 +231,6 @@ export function buildSweRebenchV2Patch(
   ) {
     errors.N_max_postings_per_task =
       'Max postings must be >= target successes.';
-  }
-  if (
-    parsedMaxClaims !== null &&
-    parsedMaxClaimsPerOperator !== null &&
-    parsedMaxClaimsPerOperator > parsedMaxClaims
-  ) {
-    errors.maxClaimsPerOperator =
-      'Claims per operator must be <= max claims.';
   }
 
   return {
@@ -288,6 +257,7 @@ function isSweRebenchV2Record(
   return (
     Object.prototype.hasOwnProperty.call(config, 'N_target_successes') ||
     Object.prototype.hasOwnProperty.call(config, 'N_max_postings_per_task') ||
+    Object.prototype.hasOwnProperty.call(config, 'posting_window_ms') ||
     Object.prototype.hasOwnProperty.call(config, 'cooldown_ms')
   );
 }
@@ -354,6 +324,8 @@ function PanelShell({
           testid="launcher-launched-generator-enabled"
         />
       </dl>
+
+      <GeneratorPoolSummary record={record} />
 
       {record.generatorState?.lastError && <GeneratorError record={record} />}
 
@@ -587,11 +559,19 @@ function SweRebenchV2GeneratorPanel({
               disabled={saving}
             />
             <NumField
-              label="Cooldown between task postings (ms)"
-              testid="launcher-launched-generator-cooldown_ms"
-              value={form.cooldown_ms}
-              onChange={(v) => set('cooldown_ms', v)}
-              error={validation.errors.cooldown_ms}
+              label="Posting window (ms)"
+              testid="launcher-launched-generator-posting_window_ms"
+              value={form.posting_window_ms}
+              onChange={(v) => set('posting_window_ms', v)}
+              error={validation.errors.posting_window_ms}
+              disabled={saving}
+            />
+            <NumField
+              label="Post batch size"
+              testid="launcher-launched-generator-post_batch_size"
+              value={form.post_batch_size}
+              onChange={(v) => set('post_batch_size', v)}
+              error={validation.errors.post_batch_size}
               disabled={saving}
             />
           </div>
@@ -602,16 +582,8 @@ function SweRebenchV2GeneratorPanel({
 
           <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
             <NumField
-              label="Max claims per Task"
-              testid="launcher-launched-generator-claimPolicy-maxClaims"
-              value={form.maxClaims}
-              onChange={(v) => set('maxClaims', v)}
-              error={validation.errors.maxClaims}
-              disabled={saving}
-            />
-            <NumField
               label="Max claims per operator"
-              testid="launcher-launched-generator-claimPolicy-maxClaimsPerOperator"
+              testid="launcher-launched-generator-maxClaimsPerOperator"
               value={form.maxClaimsPerOperator}
               onChange={(v) => set('maxClaimsPerOperator', v)}
               error={validation.errors.maxClaimsPerOperator}
@@ -619,7 +591,7 @@ function SweRebenchV2GeneratorPanel({
             />
             <NumField
               label="Claim lease (seconds)"
-              testid="launcher-launched-generator-claimPolicy-claimLeaseTtlSeconds"
+              testid="launcher-launched-generator-claimLeaseTtlSeconds"
               value={form.claimLeaseTtlSeconds}
               onChange={(v) => set('claimLeaseTtlSeconds', v)}
               error={validation.errors.claimLeaseTtlSeconds}
@@ -673,6 +645,47 @@ function GeneratorSaveRow({
       </div>
     </div>
   );
+}
+
+function GeneratorPoolSummary({ record }: { record: LaunchedSolverNetRecord }): JSX.Element | null {
+  const summary = record.generatorState?.lastPollSummary;
+  if (!isPoolSummary(summary)) return null;
+  return (
+    <dl
+      data-testid="launcher-launched-generator-pool-summary"
+      className="m-0 grid gap-y-2 gap-x-4 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]"
+    >
+      <MetaItem label="Pool" value={String(summary.poolSize)} testid="launcher-launched-generator-poolSize" />
+      <MetaItem label="Posted" value={String(summary.posted)} testid="launcher-launched-generator-posted" />
+      <MetaItem label="Unposted" value={String(summary.unposted)} testid="launcher-launched-generator-unposted" />
+      <MetaItem label="Live" value={String(summary.live)} testid="launcher-launched-generator-live" />
+      <MetaItem label="Repostable" value={String(summary.repostable)} testid="launcher-launched-generator-repostable" />
+      <MetaItem label="Saturated" value={String(summary.saturated)} testid="launcher-launched-generator-saturated" />
+      <MetaItem label="Abandoned" value={String(summary.abandoned)} testid="launcher-launched-generator-abandoned" />
+    </dl>
+  );
+}
+
+function isPoolSummary(value: unknown): value is {
+  poolSize: number;
+  posted: number;
+  unposted: number;
+  live: number;
+  repostable: number;
+  saturated: number;
+  abandoned: number;
+} {
+  if (typeof value !== 'object' || value === null) return false;
+  const summary = value as Record<string, unknown>;
+  return [
+    'poolSize',
+    'posted',
+    'unposted',
+    'live',
+    'repostable',
+    'saturated',
+    'abandoned',
+  ].every((key) => typeof summary[key] === 'number');
 }
 
 function GeneratorError({ record }: { record: LaunchedSolverNetRecord }): JSX.Element {

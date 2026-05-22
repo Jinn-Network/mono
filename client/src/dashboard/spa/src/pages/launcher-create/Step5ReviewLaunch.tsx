@@ -390,12 +390,14 @@ function SweRebenchV2GeneratorSummary({
 }): JSX.Element {
   const targetSuccesses = numericString(generator.N_target_successes);
   const maxPostings = numericString(generator.N_max_postings_per_task);
-  const cooldown = numericString(generator.cooldown_ms);
+  const postingWindow = numericString(generator.posting_window_ms);
+  const batchSize = numericString(generator.post_batch_size);
   return (
     <>
       <SummaryItem label="Target successes" value={targetSuccesses ?? '—'} />
       <SummaryItem label="Max postings / Task" value={maxPostings ?? '—'} />
-      <SummaryItem label="Cooldown" value={cooldown ? `${cooldown} ms` : '—'} />
+      <SummaryItem label="Posting window" value={postingWindow ? `${postingWindow} ms` : '—'} />
+      <SummaryItem label="Batch size" value={batchSize ?? '—'} />
     </>
   );
 }

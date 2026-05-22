@@ -2335,7 +2335,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const taskSources = [
     new StaticConfiguredTaskSource(bindableConfigTasks),
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
-      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator),
+      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
+        bucketKeyForTask: (task) => {
+          if (task.solverType !== 'swe-rebench-v2.v1') return undefined;
+          const instanceId = task.spec?.['instance_id'];
+          const postedCount = task.eligibility?.['posted_count_after_record'];
+          if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
+          return `swe-rebench-v2:${instanceId}:${postedCount}`;
+        },
+      }),
     ),
   ];
 

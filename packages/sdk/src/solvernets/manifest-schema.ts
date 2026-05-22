@@ -120,6 +120,7 @@ export const SolverNetManifestV1Schema = z.object({
   solutionPriceWei: NumericStringZ,
   verdictPriceWei: NumericStringZ,
   openRoles: z.array(z.enum(['solver', 'evaluator'])).min(1),
+  generatorConfig: z.record(z.string(), z.unknown()).optional(),
 
   registry: RegistryZ.optional(),
 

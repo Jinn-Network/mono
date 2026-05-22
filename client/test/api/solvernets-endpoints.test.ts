@@ -1186,27 +1186,19 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(await res.json()).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
-      cooldown_ms: 300_000,
-      claimPolicy: {
-        maxClaims: 10,
-        maxClaimsPerOperator: 5,
-        claimLeaseTtlSeconds: 1_800,
-      },
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 1_800,
     });
     expect(configRef.current).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
-      cooldown_ms: 300_000,
-      claimPolicy: {
-        maxClaims: 10,
-        maxClaimsPerOperator: 5,
-        claimLeaseTtlSeconds: 1_800,
-      },
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 1_800,
     });
     const onDisk = await store.loadRecord(launched.solverNetId);
-    expect(onDisk?.generatorConfig?.cooldown_ms).toBe(300_000);
-    expect(onDisk?.generatorConfig?.claimPolicy).toEqual({
-      maxClaims: 10,
+    expect(onDisk?.generatorConfig).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
       maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 1_800,
     });
@@ -1255,11 +1247,10 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(await res.json()).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
-      cooldown_ms: 300_000,
     });
   });
 
-  it('rejects swe-rebench-v2 claim policy with per-operator claims above max claims', async () => {
+  it('tolerates legacy swe-rebench-v2 claimPolicy.maxClaims and normalizes it away', async () => {
     const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
     const launchBundle = makeLaunchDeps({ store, pendingGenerators });
     const { app } = buildTestApp({ store, launch: launchBundle.launch });
@@ -1282,13 +1273,23 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
       {
         method: 'PATCH',
         headers: authHeaders(),
-        body: JSON.stringify({ claimPolicy: { maxClaims: 3 } }),
+        body: JSON.stringify({
+          claimPolicy: {
+            maxClaims: 3,
+            maxClaimsPerOperator: 4,
+            claimLeaseTtlSeconds: 1_800,
+          },
+        }),
       },
     );
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { message?: string };
-    expect(body.message).toMatch(/maxClaimsPerOperator/);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
+      maxClaimsPerOperator: 4,
+      claimLeaseTtlSeconds: 1_800,
+    });
   });
 
   it('rejects partial swe-rebench-v2 patches that violate merged posting invariants', async () => {

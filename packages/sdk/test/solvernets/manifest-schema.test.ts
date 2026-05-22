@@ -105,6 +105,20 @@ describe('SolverNetManifestV1 schema (§7)', () => {
     expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(true);
   });
 
+  it('accepts optional generatorConfig on a manifest', () => {
+    const manifest: SolverNetManifestV1 = {
+      ...buildValidManifest(),
+      generatorConfig: {
+        N_target_successes: 3,
+        N_max_postings_per_task: 10,
+        posting_window_ms: 7 * 24 * 60 * 60 * 1000,
+        post_batch_size: 25,
+        claimLeaseTtlSeconds: 60 * 60,
+      },
+    };
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(true);
+  });
+
   it('rejects when schemaVersion is wrong', () => {
     const manifest = buildValidManifest() as unknown as Record<string, unknown>;
     manifest.schemaVersion = 'solvernet.manifest.v2';

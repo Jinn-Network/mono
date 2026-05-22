@@ -276,10 +276,10 @@ describe('GET /v1/launcher/status', () => {
       headers: { 'x-jinn-ui-token': token },
     });
     const body = await res.json() as {
-      nets: Array<{ generator: { state: string; cadenceMs: number; stale: boolean } }>;
+      nets: Array<{ generator: { state: string; cadenceMs?: number; stale: boolean } }>;
     };
     expect(body.nets[0]?.generator.state).toBe('paused');
-    expect(body.nets[0]?.generator.cadenceMs).toBe(0);
+    expect(body.nets[0]?.generator).not.toHaveProperty('cadenceMs');
     expect(body.nets[0]?.generator.stale).toBe(false);
   });
 
@@ -513,7 +513,7 @@ describe('GET /v1/launcher/tasks', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as TasksResponseBody;
     expect(body.tasks[0]?.solverNet).toBe('swe');
-    expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 50 });
+    expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 3 });
   });
 
   it('clamps limit to [1, 100]', async () => {

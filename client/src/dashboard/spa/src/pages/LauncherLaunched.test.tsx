@@ -381,8 +381,8 @@ describe('LauncherLaunchedPage', () => {
           version: 'v1',
           claimPolicyDefaults: {
             mode: 'parallel',
-            maxClaims: 50,
-            maxClaimsPerOperator: 5,
+            maxClaims: 3,
+            maxClaimsPerOperator: 3,
             claimLeaseTtlSeconds: 3600,
           },
         },
@@ -404,7 +404,8 @@ describe('LauncherLaunchedPage', () => {
     expect(
       screen.getByTestId('launcher-launched-generator-N_max_postings_per_task'),
     ).toBeTruthy();
-    expect(screen.getByTestId('launcher-launched-generator-cooldown_ms')).toBeTruthy();
+    expect(screen.getByTestId('launcher-launched-generator-posting_window_ms')).toBeTruthy();
+    expect(screen.getByTestId('launcher-launched-generator-post_batch_size')).toBeTruthy();
     expect(screen.queryByTestId('launcher-launched-generator-cadenceMs')).toBeNull();
   });
 

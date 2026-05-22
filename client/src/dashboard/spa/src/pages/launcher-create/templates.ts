@@ -81,8 +81,14 @@ export interface SweRebenchV2V1GeneratorDefaults {
   N_target_successes: number;
   /** Hard cap on postings per Task to prevent runaway costs. */
   N_max_postings_per_task: number;
-  /** Minimum gap between consecutive postings of the same Task (ms). */
-  cooldown_ms: number;
+  /** How long a posting remains live before the instance is repostable (ms). */
+  posting_window_ms: number;
+  /** Maximum number of instances to post in one creator tick. */
+  post_batch_size: number;
+  /** Optional per-operator cap; omitted means equal to remaining target successes. */
+  maxClaimsPerOperator?: number;
+  /** Claim lease for each Task claim. */
+  claimLeaseTtlSeconds: number;
 }
 
 /**
@@ -220,8 +226,8 @@ export const SWE_REBENCH_V2_V1_TEMPLATE: SweRebenchV2V1Template = {
   },
   claimPolicyDefaults: {
     mode: 'parallel',
-    maxClaims: 50,
-    maxClaimsPerOperator: 5,
+    maxClaims: 3,
+    maxClaimsPerOperator: 3,
     claimLeaseTtlSeconds: 60 * 60,
   },
   credentialRequirements: {
@@ -255,7 +261,9 @@ export const SWE_REBENCH_V2_V1_TEMPLATE: SweRebenchV2V1Template = {
   generatorDefaults: {
     N_target_successes: 3,
     N_max_postings_per_task: 10,
-    cooldown_ms: 24 * 60 * 60 * 1000, // 24h
+    posting_window_ms: 7 * 24 * 60 * 60 * 1000, // 7d
+    post_batch_size: 25,
+    claimLeaseTtlSeconds: 60 * 60,
   },
 };
 

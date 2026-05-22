@@ -302,7 +302,14 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
   .object({
     N_target_successes: z.number().int().positive().optional(),
     N_max_postings_per_task: z.number().int().positive().optional(),
+    posting_window_ms: z.number().int().positive().optional(),
+    post_batch_size: z.number().int().positive().optional(),
+    maxClaimsPerOperator: z.number().int().positive().max(65_535).optional(),
+    claimLeaseTtlSeconds: z.number().int().positive().optional(),
+    admissionMode: z.enum(['required', 'python-floor']).optional(),
+    /** @deprecated tolerated legacy key; ignored on canonical write. */
     cooldown_ms: z.number().int().nonnegative().optional(),
+    /** @deprecated tolerated legacy nested shape; flattened on canonical write. */
     claimPolicy: z
       .object({
         maxClaims: z.number().int().positive().max(65_535).optional(),
@@ -325,17 +332,6 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
         message: 'must be >= N_target_successes',
       });
     }
-    if (
-      value.claimPolicy?.maxClaims !== undefined &&
-      value.claimPolicy.maxClaimsPerOperator !== undefined &&
-      value.claimPolicy.maxClaimsPerOperator > value.claimPolicy.maxClaims
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['claimPolicy', 'maxClaimsPerOperator'],
-        message: 'must be <= claimPolicy.maxClaims',
-      });
-    }
   });
 
 function isContractRefFor(
@@ -346,20 +342,40 @@ function isContractRefFor(
   return contract?.id === id && contract.version === version;
 }
 
-function defaultSweRebenchV2ClaimPolicy(): {
-  maxClaims: number;
-  maxClaimsPerOperator: number;
-  claimLeaseTtlSeconds: number;
-} {
-  const defaults = getSolverNetContract({
-    id: 'swe-rebench-v2',
-    version: 'v1',
-  })?.claimPolicyDefaults;
-  return {
-    maxClaims: defaults?.maxClaims ?? 50,
-    maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? 5,
-    claimLeaseTtlSeconds: defaults?.claimLeaseTtlSeconds ?? 60 * 60,
-  };
+function canonicalSweRebenchV2GeneratorConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const legacyPolicy =
+    typeof config.claimPolicy === 'object' && config.claimPolicy !== null
+      ? config.claimPolicy as Record<string, unknown>
+      : {};
+  const next: Record<string, unknown> = {};
+  for (const key of [
+    'N_target_successes',
+    'N_max_postings_per_task',
+    'posting_window_ms',
+    'post_batch_size',
+  ] as const) {
+    if (typeof config[key] === 'number') next[key] = config[key];
+  }
+  const maxClaimsPerOperator =
+    typeof config.maxClaimsPerOperator === 'number'
+      ? config.maxClaimsPerOperator
+      : legacyPolicy.maxClaimsPerOperator;
+  if (typeof maxClaimsPerOperator === 'number') {
+    next.maxClaimsPerOperator = maxClaimsPerOperator;
+  }
+  const claimLeaseTtlSeconds =
+    typeof config.claimLeaseTtlSeconds === 'number'
+      ? config.claimLeaseTtlSeconds
+      : legacyPolicy.claimLeaseTtlSeconds;
+  if (typeof claimLeaseTtlSeconds === 'number') {
+    next.claimLeaseTtlSeconds = claimLeaseTtlSeconds;
+  }
+  if (config.admissionMode === 'required' || config.admissionMode === 'python-floor') {
+    next.admissionMode = config.admissionMode;
+  }
+  return next;
 }
 
 function mergeGeneratorConfigPatchForRecord(
@@ -367,7 +383,7 @@ function mergeGeneratorConfigPatchForRecord(
   contract: LaunchedRecordContractRef | null,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
-  const nextConfig: Record<string, unknown> = {
+  let nextConfig: Record<string, unknown> = {
     ...(record.generatorConfig ?? {}),
     ...patch,
   };
@@ -385,6 +401,9 @@ function mergeGeneratorConfigPatchForRecord(
       ...existingPolicy,
       ...patch.claimPolicy as Record<string, unknown>,
     };
+  }
+  if (isContractRefFor(contract, 'swe-rebench-v2', 'v1')) {
+    nextConfig = canonicalSweRebenchV2GeneratorConfig(nextConfig);
   }
   return nextConfig;
 }
@@ -408,23 +427,6 @@ function validateSweRebenchV2EffectiveConfig(
     return {
       path: 'N_max_postings_per_task',
       message: 'must be >= N_target_successes',
-    };
-  }
-  const defaults = defaultSweRebenchV2ClaimPolicy();
-  const rawPolicy =
-    typeof config.claimPolicy === 'object' && config.claimPolicy !== null
-      ? config.claimPolicy as Record<string, unknown>
-      : {};
-  const maxClaims = typeof rawPolicy.maxClaims === 'number'
-    ? rawPolicy.maxClaims
-    : defaults.maxClaims;
-  const maxClaimsPerOperator = typeof rawPolicy.maxClaimsPerOperator === 'number'
-    ? rawPolicy.maxClaimsPerOperator
-    : defaults.maxClaimsPerOperator;
-  if (maxClaimsPerOperator > maxClaims) {
-    return {
-      path: 'claimPolicy.maxClaimsPerOperator',
-      message: 'claimPolicy.maxClaimsPerOperator must be <= claimPolicy.maxClaims',
     };
   }
   return undefined;
@@ -545,6 +547,7 @@ function buildUnsignedManifest(args: {
     solutionPriceWei: draft.solutionPriceWei!,
     verdictPriceWei: draft.verdictPriceWei!,
     openRoles: draft.openRoles!,
+    ...(draft.generatorConfig ? { generatorConfig: draft.generatorConfig } : {}),
     createdAt: draft.createdAt,
     launchedAt: nowIso,
   };

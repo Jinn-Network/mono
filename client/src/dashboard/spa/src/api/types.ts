@@ -175,13 +175,23 @@ export interface SolverNetsCatalogResponse {
 export interface LauncherStatusGeneratorView {
   state: 'active' | 'paused' | 'errored';
   lastPollAt?: string;
-  lastPollSummary?: {
+  lastPollSummary?:
+    | {
     evaluated: number;
     posted: number;
     skipped: number;
-  };
+    }
+    | {
+      poolSize: number;
+      posted: number;
+      unposted: number;
+      live: number;
+      repostable: number;
+      saturated: number;
+      abandoned: number;
+    };
   lastError?: { message: string; at: string };
-  cadenceMs: number;
+  cadenceMs?: number;
   stale: boolean;
 }
 
@@ -495,6 +505,7 @@ export interface LifecycleProgress {
 
 export interface LaunchedGeneratorState {
   lastPollAt?: Iso8601;
+  lastPollSummary?: LauncherStatusGeneratorView['lastPollSummary'];
   lastError?: TimestampedError;
 }
 
@@ -558,6 +569,11 @@ export interface GeneratorConfig {
   maxOrderbookAgeSeconds?: number;
   N_target_successes?: number;
   N_max_postings_per_task?: number;
+  posting_window_ms?: number;
+  post_batch_size?: number;
+  maxClaimsPerOperator?: number;
+  claimLeaseTtlSeconds?: number;
+  admissionMode?: 'required' | 'python-floor';
   cooldown_ms?: number;
   claimPolicy?: {
     maxClaims?: number;
@@ -656,6 +672,7 @@ export interface SolverNetManifestV1 {
   solutionPriceWei: string;
   verdictPriceWei: string;
   openRoles: Array<'solver' | 'evaluator'>;
+  generatorConfig?: Record<string, unknown>;
   registry?: {
     manifestCid?: string;
     registryUrl?: string;

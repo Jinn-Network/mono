@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PREDICTION_V1_SOLVER_NET_CONTRACT,
   SOLVER_NET_CONTRACTS,
+  SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT,
   getSolverNetContract,
   type SolverNetContract,
 } from '../src/contracts.js';
@@ -75,6 +76,15 @@ describe('SolverNetContract surface (Task 6 / Task 30)', () => {
     // that this keeps functioning end-to-end through getSolverNetContract.
     const contract = getSolverNetContract({ id: 'prediction', version: 'v1' }) as SolverNetContract;
     expect(contract.schemas.task.zod.safeParse(null).success).toBe(false);
+  });
+
+  it('SWE-rebench v2 claim defaults match the target-success cap', () => {
+    expect(SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT.claimPolicyDefaults).toMatchObject({
+      mode: 'parallel',
+      maxClaims: 3,
+      maxClaimsPerOperator: 3,
+      claimLeaseTtlSeconds: 60 * 60,
+    });
   });
 });
 
