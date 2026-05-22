@@ -91,7 +91,7 @@ describe('WalletCard', () => {
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/tJINN earned/i);
+    expect(rewards.textContent).toMatch(/testnet jinn earned/i);
     // The tJINN-earned value renders the real Safe balance, not the staking
     // reward — it is a distinct element from the 999 claimable JINN stat.
     const tjinnValue = screen.getByTestId('tjinn-earned-value');

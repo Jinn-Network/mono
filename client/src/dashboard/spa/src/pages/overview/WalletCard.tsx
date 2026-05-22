@@ -219,7 +219,7 @@ export function WalletCard({
             aria-live="polite"
             aria-atomic="true"
           >
-            <span className={sectionLabel}>tJINN earned</span>
+            <span className={sectionLabel}>Testnet JINN earned</span>
             <div className="flex items-baseline gap-2">
               <span
                 className={statBig}
@@ -241,7 +241,7 @@ export function WalletCard({
             <span className={sectionLabel}>Claimable</span>
             <div className="flex items-baseline gap-2">
               <span className={statBig}>{claimableJinn}</span>
-              <span className={statUnit}>JINN</span>
+              <span className={statUnit}>tJINN</span>
             </div>
           </div>
 
@@ -249,7 +249,7 @@ export function WalletCard({
             <span className={sectionLabel}>Claimed</span>
             <div className="flex items-baseline gap-2">
               <span className={statBig}>{claimedJinnLifetime}</span>
-              <span className={statUnit}>JINN</span>
+              <span className={statUnit}>tJINN</span>
             </div>
             <Button
               variant="outline"

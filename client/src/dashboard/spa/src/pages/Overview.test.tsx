@@ -129,7 +129,7 @@ describe('OverviewPage layout', () => {
     );
     const tasks = await screen.findByTestId('activity-tasks-table');
     expect(tasks.textContent).toContain('task-a');
-    expect(tasks.textContent).toMatch(/complete/i);
+    expect(tasks.textContent).toMatch(/succeeded/i);
   });
 });
 
@@ -225,7 +225,7 @@ describe('OverviewPage Wallet wiring', () => {
     await waitFor(() =>
       expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
     );
-    expect(screen.getByText(/tJINN earned/i)).toBeTruthy();
+    expect(screen.getByText(/testnet jinn earned/i)).toBeTruthy();
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).not.toBe('999.0000');
     // The 999 figure still renders, but as the claimable staking-reward stat

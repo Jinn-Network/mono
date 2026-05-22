@@ -75,7 +75,7 @@ describe('ActivityCard', () => {
     expect(history.at(-1)).toBe('/operator/memberships');
   });
 
-  it('renders task rows from the input, showing role + state + relative time', () => {
+  it('renders task rows from the input, showing run type + state + relative time', () => {
     const tasks: ActivityTask[] = [
       { ...baseTask, requestId: 'task-a', state: 'COMPLETE', taskRole: 'restoration' },
       { ...baseTask, requestId: 'task-b', state: 'FAILED', taskRole: 'evaluation' },
@@ -87,11 +87,11 @@ describe('ActivityCard', () => {
     expect(table.textContent).toContain('task-a');
     expect(table.textContent).toContain('task-b');
     expect(table.textContent).toContain('task-c');
-    expect(table.textContent).toMatch(/complete/i);
+    expect(table.textContent).toMatch(/succeeded/i);
     expect(table.textContent).toMatch(/failed/i);
-    expect(table.textContent).toMatch(/running/i);
-    expect(table.textContent).toMatch(/solver/i);
-    expect(table.textContent).toMatch(/evaluator/i);
+    expect(table.textContent).toMatch(/pending/i);
+    expect(screen.getAllByText('solve').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('evaluate').length).toBeGreaterThan(0);
   });
 
   it('shows STARTED from runStartedAt instead of an old task window start', () => {

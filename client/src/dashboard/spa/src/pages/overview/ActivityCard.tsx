@@ -109,19 +109,19 @@ function trunc(s: string, head = 6, tail = 4): string {
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
-function formatRole(role: ActivityTask['taskRole']): string {
-  if (role === 'restoration') return 'solver';
-  if (role === 'evaluation') return 'evaluator';
+function formatRunType(role: ActivityTask['taskRole']): string {
+  if (role === 'restoration') return 'solve';
+  if (role === 'evaluation') return 'evaluate';
   return '—';
 }
 
-function classifyState(state: string): { label: string; tone: StateTone } {
-  if (state === 'COMPLETE') return { label: 'Complete', tone: 'good' };
-  if (state === 'FAILED') return { label: 'Failed', tone: 'bad' };
+function classifyState(state: string): { label: string; detail: string; tone: StateTone } {
+  if (state === 'COMPLETE') return { label: 'succeeded', detail: 'COMPLETE', tone: 'good' };
+  if (state === 'FAILED') return { label: 'failed', detail: 'FAILED', tone: 'bad' };
   if (ACTIVE_STATES.has(state)) {
-    return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'active' };
+    return { label: 'pending', detail: state.toLowerCase().replace(/_/g, ' '), tone: 'active' };
   }
-  return { label: state.toLowerCase().replace(/_/g, ' '), tone: 'neutral' };
+  return { label: state.toLowerCase().replace(/_/g, ' '), detail: state, tone: 'neutral' };
 }
 
 function stateBadgeVariant(
@@ -291,7 +291,7 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                       <TableHeader>
                         <TableRow className="hover:bg-transparent">
                           <TableHead>Task</TableHead>
-                          <TableHead>Role</TableHead>
+                          <TableHead>Run</TableHead>
                           <TableHead>State</TableHead>
                           <TableHead>Started</TableHead>
                         </TableRow>
@@ -326,12 +326,22 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                                 </Tooltip>
                               </TableCell>
                               <TableCell className="text-muted-foreground">
-                                {formatRole(t.taskRole)}
+                                {formatRunType(t.taskRole)}
                               </TableCell>
                               <TableCell>
-                                <Badge variant={stateBadgeVariant(stateInfo.tone)}>
-                                  {stateInfo.label}
-                                </Badge>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="cursor-help bg-transparent p-0"
+                                    >
+                                      <Badge variant={stateBadgeVariant(stateInfo.tone)}>
+                                        {stateInfo.label}
+                                      </Badge>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{stateInfo.detail}</TooltipContent>
+                                </Tooltip>
                               </TableCell>
                               <TableCell className="text-muted-foreground">
                                 {formatRelative(t.runStartedAt ?? t.stateUpdatedAt)}
