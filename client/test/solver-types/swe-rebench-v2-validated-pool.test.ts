@@ -7,6 +7,10 @@ import {
   filterToScorablePool,
   validatePoolInstances,
   EVAL_SEMANTICS_VERSION,
+  exportScorableVettedPoolArtifact,
+  hashVettedPoolArtifact,
+  loadVettedPoolArtifactScorableEntries,
+  sweRebenchV2VettedPoolArtifactMetadataKey,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
@@ -107,6 +111,76 @@ describe('filterToScorablePool', () => {
     ];
     const { pool: out } = filterToScorablePool(inferred, null, 'python-floor');
     expect(out.map((t) => t.instance_id)).toEqual(['a__inferred_py']);
+  });
+});
+
+describe('swe-rebench-v2 vetted pool artifact helpers', () => {
+  it('exports only scorable entries with grading substrate metadata and stable hash', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record(
+      'org__repo-2',
+      {
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-05-14T00:00:02Z',
+        rowHash: 'sha256:' + '2'.repeat(64),
+        imageName: 'swerebenchv2/repo-2:latest',
+        imageDigest: 'sha256:' + 'b'.repeat(64),
+        upstreamEvalCommit: '2'.repeat(40),
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    await store.record(
+      'org__repo-1',
+      {
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-05-14T00:00:01Z',
+        rowHash: 'sha256:' + '1'.repeat(64),
+        imageName: 'swerebenchv2/repo-1:latest',
+        imageDigest: 'sha256:' + 'a'.repeat(64),
+        upstreamEvalCommit: '1'.repeat(40),
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    await store.record(
+      'org__repo-bad',
+      {
+        scorable: false,
+        reason: 'gold-patch-not-resolved',
+        checkedAt: '2026-05-14T00:00:03Z',
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+
+    const artifact = await exportScorableVettedPoolArtifact(store, EVAL_SEMANTICS_VERSION, {
+      generatedAt: '2026-05-22T00:00:00.000Z',
+    });
+
+    expect(artifact).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+    });
+    expect(artifact.entries.map((e) => e.instance_id)).toEqual(['org__repo-1', 'org__repo-2']);
+    expect(artifact.entries[0]).toMatchObject({
+      instance_id: 'org__repo-1',
+      reason: 'gold-patch-resolves',
+      rowHash: 'sha256:' + '1'.repeat(64),
+      imageName: 'swerebenchv2/repo-1:latest',
+      imageDigest: 'sha256:' + 'a'.repeat(64),
+      upstreamEvalCommit: '1'.repeat(40),
+    });
+
+    const entries = loadVettedPoolArtifactScorableEntries(artifact);
+    expect(entries.ids).toEqual(new Set(['org__repo-1', 'org__repo-2']));
+    expect(entries.byId.get('org__repo-2')?.imageDigest).toBe('sha256:' + 'b'.repeat(64));
+    expect(hashVettedPoolArtifact(artifact)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(hashVettedPoolArtifact({ ...artifact, entries: [...artifact.entries].reverse() }))
+      .toBe(hashVettedPoolArtifact(artifact));
+    expect(sweRebenchV2VettedPoolArtifactMetadataKey('bafy-manifest'))
+      .toBe('solvernet-artifact:bafy-manifest:swe-rebench-v2-vetted-pool');
   });
 });
 
@@ -374,6 +448,60 @@ describe('validatePoolInstances — populates substrate fields', () => {
       upstreamEvalCommit: '0123456789abcdef0123456789abcdef01234567',
     });
     expect(entry!.rowHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('uses the runner-carried imageDigest when cleanup pruned the local image before post-eval inspection', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const carriedDigest = 'sha256:' + 'f'.repeat(64);
+
+    const summary = await validatePoolInstances(
+      [poolTask('a__1')],
+      {
+        fetcher: {
+          fetchTaskRow: async () => ({
+            instance_id: 'a__1',
+            repo: 'acme/widget',
+            image_name: 'acme/widget:latest',
+            FAIL_TO_PASS: ['t::a'],
+            PASS_TO_PASS: ['t::b'],
+            test_patch: 'diff b',
+            install_config: { install: ['pip install .'], test_cmd: ['pytest'], log_parser: 'parse_log_pytest' },
+          }),
+        },
+        runner: {
+          runEval: async () => ({
+            passed_match: true,
+            passed: ['t::a'],
+            failed: [],
+            log: '',
+            exitCode: 0,
+            imageDigest: carriedDigest,
+          }),
+        },
+        store,
+        semanticsVersion: EVAL_SEMANTICS_VERSION,
+        upstreamRepoDir: '/fake/upstream',
+        commandRunner: async (bin, args) => {
+          if (bin === 'docker' && args[0] === 'image') {
+            return { exitCode: 1, stdout: '', stderr: 'No such image: acme/widget:latest' };
+          }
+          if (bin === 'git' && args[0] === 'rev-parse') {
+            return { exitCode: 0, stdout: '0123456789abcdef0123456789abcdef01234567\n', stderr: '' };
+          }
+          return { exitCode: 1, stdout: '', stderr: 'unexpected' };
+        },
+      },
+    );
+
+    expect(summary).toMatchObject({ checked: 1, scorable: 1, unscorable: 0 });
+    const entry = await store.getEntry('a__1', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: true,
+      reason: 'gold-patch-resolves',
+      imageName: 'acme/widget:latest',
+      imageDigest: carriedDigest,
+    });
   });
 
   it('records the entry as unscorable when imageDigest cannot be resolved (required mode)', async () => {

@@ -120,6 +120,11 @@ export interface PythonEvalRunnerOptions {
    */
   pruneRound?: (image: string) => Promise<void>;
   /**
+   * Resolves the eval image digest while the image is still local, before
+   * per-round pruning removes it. Defaults to `docker image inspect`.
+   */
+  resolveImageDigest?: (image: string) => Promise<string | null>;
+  /**
    * Required free disk (bytes) before an eval round starts. Explicit value >
    * `JINN_EVAL_DISK_FLOOR_GB` env > {@link DEFAULT_EVAL_DISK_FLOOR_BYTES}.
    */
@@ -163,6 +168,36 @@ async function defaultPruneRound(image: string): Promise<void> {
   if (image) await runDocker(['rmi', '-f', image]);
   await runDocker(['container', 'prune', '-f']);
   await runDocker(['builder', 'prune', '-f']);
+}
+
+function runDockerForOutput(args: string[]): Promise<{ exitCode: number; stdout: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    let stdout = '';
+    child.stdout?.on('data', (d) => { stdout += d.toString(); });
+    child.on('exit', (code) => {
+      resolve({ exitCode: code ?? 1, stdout });
+    });
+    child.on('error', () => {
+      resolve({ exitCode: 1, stdout: '' });
+    });
+  });
+}
+
+async function defaultResolveImageDigest(imageName: string): Promise<string | null> {
+  const res = await runDockerForOutput([
+    'image', 'inspect', imageName, '--format', '{{json .RepoDigests}}',
+  ]);
+  if (res.exitCode !== 0) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(res.stdout.trim()); } catch { return null; }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  const first = parsed[0];
+  if (typeof first !== 'string') return null;
+  const at = first.indexOf('@');
+  if (at === -1) return null;
+  const digest = first.slice(at + 1);
+  return /^sha256:[0-9a-f]{64}$/.test(digest) ? digest : null;
 }
 
 /**
@@ -248,12 +283,14 @@ export class PythonEvalRunner implements EvalRunner {
   private readonly diskFloorBytes: number;
   private readonly freeDiskBytes: () => Promise<number>;
   private readonly systemPrune: () => Promise<void>;
+  private readonly resolveImageDigest: (image: string) => Promise<string | null>;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
     this.pruneRound = opts.pruneRound ?? defaultPruneRound;
     this.diskFloorBytes = resolveDiskFloorBytes(opts.diskFloorBytes);
     this.freeDiskBytes = opts.freeDiskBytes ?? defaultFreeDiskBytes;
     this.systemPrune = opts.systemPrune ?? (() => runDocker(['system', 'prune', '-f']));
+    this.resolveImageDigest = opts.resolveImageDigest ?? defaultResolveImageDigest;
   }
 
   /**
@@ -276,7 +313,18 @@ export class PythonEvalRunner implements EvalRunner {
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
     await this.ensureDiskHeadroom();
     try {
-      return await this.runEvalImpl(args);
+      const result = await this.runEvalImpl(args);
+      let imageDigest: string | null = null;
+      try {
+        imageDigest = await this.resolveImageDigest(args.image);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[swe-rebench-v2] resolveImageDigest failed for ${args.image}: ${reason}`);
+      }
+      return {
+        ...result,
+        ...(imageDigest ? { imageDigest } : {}),
+      };
     } finally {
       // Prune this round's full Docker footprint — even when the eval threw,
       // a pull-and-crash still left an image on disk (#476).

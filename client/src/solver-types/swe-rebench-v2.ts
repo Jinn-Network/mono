@@ -19,6 +19,7 @@ import type { TaskGenerator } from '../tasks/sources.js';
 import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
+import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import type { SolverTypeDefinition } from './solver-type.js';
 import {
   selectNextPostingCandidate,
@@ -30,7 +31,15 @@ import {
   ValidatedPoolStore,
   filterToScorablePool,
   EVAL_SEMANTICS_VERSION,
+  VETTED_POOL_REF_ELIGIBILITY_KEY,
+  createVettedPoolArtifactRef,
+  exportScorableVettedPoolArtifact,
+  hashVettedPoolArtifact,
+  loadVettedPoolArtifactScorableEntries,
+  readVettedPoolArtifactPublication,
+  writeVettedPoolArtifactPublication,
   type AdmissionMode,
+  type SolverNetArtifactRef,
 } from './_swe-rebench-v2-validated-pool.js';
 import {
   buildHistoricalPool,
@@ -44,6 +53,7 @@ export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
 const CONTRACT_ID = 'swe-rebench-v2';
 const CONTRACT_VERSION = 'v1';
+const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 
 /** How long the pool is cached before a full refresh (24 h). */
 const POOL_REFRESH_MS = 24 * 60 * 60 * 1000;
@@ -66,6 +76,7 @@ export interface SweRebenchV2AutoConfig {
 
 export interface SweRebenchV2GeneratorStaticConfig {
   stateDir?: string;
+  ipfsRegistryUrl?: string;
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
@@ -94,6 +105,7 @@ export type SweRebenchV2GeneratorTick = TaskGenerator & {
 interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
   getGeneratorConfig?: () => SweRebenchV2GeneratorRuntimeConfig | unknown;
   solverNetManifestCid?: string;
+  ipfsRegistryUrl?: string;
   creator?: {
     agentEoa?: `0x${string}`;
     safeAddress?: `0x${string}`;
@@ -235,6 +247,63 @@ function normalizeClaimPolicy(raw: unknown): TaskClaimPolicy {
   };
 }
 
+async function resolvePublishedVettedPool(args: {
+  stateDir: string;
+  manifestCid: string | undefined;
+  store: ValidatedPoolStore;
+  nowIso: string;
+  ipfsRegistryUrl: string;
+  upload: typeof uploadToIpfs;
+}): Promise<{
+  scorableIds: Set<string> | null;
+  artifactRef: SolverNetArtifactRef | null;
+  mode: 'published' | 'published-from-local' | 'no-publication' | 'no-manifest';
+}> {
+  if (!args.manifestCid) {
+    return { scorableIds: null, artifactRef: null, mode: 'no-manifest' };
+  }
+
+  const existing = await readVettedPoolArtifactPublication({
+    stateDir: args.stateDir,
+    manifestCid: args.manifestCid,
+    evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+  });
+  if (existing) {
+    return {
+      scorableIds: loadVettedPoolArtifactScorableEntries(existing.artifact).ids,
+      artifactRef: existing.ref,
+      mode: 'published',
+    };
+  }
+
+  const artifact = await exportScorableVettedPoolArtifact(args.store, EVAL_SEMANTICS_VERSION, {
+    generatedAt: args.nowIso,
+  });
+  if (!artifact || artifact.entries.length === 0) {
+    return { scorableIds: null, artifactRef: null, mode: 'no-publication' };
+  }
+
+  const artifactCid = await args.upload(args.ipfsRegistryUrl, artifact);
+  const artifactRef = createVettedPoolArtifactRef({
+    manifestCid: args.manifestCid,
+    artifactCid,
+    artifactHash: hashVettedPoolArtifact(artifact),
+    evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+    publishedAt: args.nowIso,
+  });
+  await writeVettedPoolArtifactPublication({
+    stateDir: args.stateDir,
+    ref: artifactRef,
+    artifact,
+    updatedAt: args.nowIso,
+  });
+  return {
+    scorableIds: loadVettedPoolArtifactScorableEntries(artifact).ids,
+    artifactRef,
+    mode: 'published-from-local',
+  };
+}
+
 async function maybeSignTask(
   task: Task,
   opts: {
@@ -288,6 +357,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let poolLoadedAt = 0;
   let poolFromCache = false;
   let floorWarned = false;
+  let publicationWarned = false;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
   let lastPollSummary: SweRebenchV2GeneratorStateSnapshot['lastPollSummary'];
@@ -340,12 +410,49 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     }
     lastPollAt = new Date(now).toISOString();
 
-    // Restrict to instances we can actually score (validated gold-patch pool).
-    // In required mode (default): absent or stale admission data → empty pool,
-    // emit a startup warning. In python-floor mode (local/dev opt-in): fall
-    // back to Python-only instances when no validation data exists.
-    // See jinn-mono-uy6v.9.
-    const scorableIds = await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION);
+    const publishedPool = await resolvePublishedVettedPool({
+      stateDir: config.stateDir,
+      manifestCid: config.solverNetManifestCid,
+      store: validatedPoolStore,
+      nowIso: lastPollAt,
+      ipfsRegistryUrl:
+        config.ipfsRegistryUrl ??
+        process.env['JINN_IPFS_REGISTRY_URL'] ??
+        DEFAULT_IPFS_REGISTRY_URL,
+      upload: uploadToIpfs,
+    }).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      lastError = {
+        message: `vetted pool publication failed: ${message}`,
+        at: new Date().toISOString(),
+      };
+      console.warn(`[swe-rebench-v2-gen] ${lastError.message}`);
+      return null;
+    });
+    if (publishedPool === null) {
+      lastPollSummary = { poolSize: 0, posted: 0, skipped: pool.length };
+      return null;
+    }
+    if (
+      genConfig.admissionMode === 'required' &&
+      publishedPool.mode === 'no-manifest' &&
+      !publicationWarned
+    ) {
+      publicationWarned = true;
+      console.warn(
+        `[swe-rebench-v2-gen] no solverNetManifestCid is available, so the launcher cannot stamp a vetted pool artifact ref; admissionMode='required' is fail-closed.`,
+      );
+    }
+
+    // Restrict to instances in the launcher's published pool artifact. If the
+    // launcher has no publication yet but local scorable data exists, the
+    // helper above publishes it once before this filter runs. Python-floor is
+    // preserved only for local/dev generators.
+    const scorableIds = publishedPool.artifactRef
+      ? publishedPool.scorableIds
+      : genConfig.admissionMode === 'python-floor'
+        ? await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION)
+        : null;
     const { pool: eligiblePool, mode: poolMode } = filterToScorablePool(
       pool,
       scorableIds,
@@ -443,11 +550,17 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       },
       claimPolicy,
       spec,
+      ...(publishedPool.artifactRef
+        ? { context: { [VETTED_POOL_REF_ELIGIBILITY_KEY]: publishedPool.artifactRef } }
+        : {}),
       eligibility: {
         hf_dataset: candidate.hf_dataset,
         hf_split: candidate.hf_split,
         instance_id: candidate.instance_id,
         generatorConfig: genConfig,
+        ...(publishedPool.artifactRef
+          ? { [VETTED_POOL_REF_ELIGIBILITY_KEY]: publishedPool.artifactRef }
+          : {}),
       },
     };
 
@@ -514,6 +627,7 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
     stateDir,
     getGeneratorConfig: () => configRef.current,
     solverNetManifestCid: recordRef.current.manifestCid,
+    ipfsRegistryUrl: staticConfig.ipfsRegistryUrl,
     creator: {
       agentEoa: staticConfig.agentEoa,
       safeAddress: staticConfig.safeAddress,

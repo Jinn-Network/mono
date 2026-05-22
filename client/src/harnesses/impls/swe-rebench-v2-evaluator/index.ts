@@ -43,6 +43,11 @@ export interface EvalRunner {
     failed: string[];
     log: string;
     exitCode: number;
+    /**
+     * Digest of the eval image observed while it was still present locally.
+     * Production runners may prune images before callers can inspect Docker.
+     */
+    imageDigest?: string;
   }>;
 }
 
