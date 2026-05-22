@@ -226,9 +226,11 @@ The aggregation runs continuously (per-Verdict or per-batch) and emits a fresh s
 > The posting policy below is being revised. As written it produced two live
 > failure modes: a *global* cooldown that stalls the whole SolverNet after one
 > post, and a `maxClaims` claim policy (50) that lets a single posting yield far
-> more than `N_target_successes` (3) trajectories. The revised semantics —
-> fill-the-pool posting, generator-sized per-posting `maxClaims = N − successes`,
-> retry-on-expiry, longer window, no cadence — are defined in
+> more than `N_target_successes` (3) trajectories. The revised semantics — task-
+> generator expiry/cooldown as generic per-SolverNet knobs; and for
+> `swe-rebench-v2`: fill-the-pool posting, generator-sized per-posting
+> `maxClaims = N − successes`, retry-on-expiry at the existing 7-day window, no
+> cadence — are defined in
 > [`log/decisions/2026-05-22-swe-rebench-v2-generation-claiming-semantics.md`](../../../log/decisions/2026-05-22-swe-rebench-v2-generation-claiming-semantics.md).
 > This section is rewritten to match on ratification.
 

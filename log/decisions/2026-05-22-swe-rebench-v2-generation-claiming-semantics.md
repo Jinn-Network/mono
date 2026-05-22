@@ -1,6 +1,6 @@
 ---
 id: DR-2026-05-22-a
-title: SWE-rebench v2 generation & claiming — fill-the-pool posting, generator-sized claim caps, retry-on-expiry
+title: Task generation & claiming — generic generator knobs; swe-rebench-v2 = target-success cap, fill-the-pool, retry-on-expiry
 date: 2026-05-22
 verb: Steer
 status: proposed
@@ -31,196 +31,204 @@ maxClaimsPerOperator: 5` (`packages/sdk/src/contracts.ts`), and
 `TaskCoordinator.sol` enforces both per-Task on-chain. So **a single posting can
 absorb 50 claims → up to 50 score=1 verdicts → 50 near-copy trajectories in the
 corpus** — 16× past the `N_target_successes = 3` memorisation cap DR-i exists to
-enforce. Posting-count and the memorisation cap are decoupled by the claim
-policy.
+enforce.
 
 The 2026-05-22 Phase 2 testnet run exposed two concrete failure modes:
 
 1. **Under-posting.** `client/src/solver-types/swe-rebench-v2.ts:381-389` applies
-   `cooldown_ms` *globally* — it takes `Math.max(last_posted_at)` across the whole
-   eligible pool and blocks every poll if *any* instance was posted within
-   `cooldown_ms`. The selector in `swe-rebench-v2-auto.ts:59` already applies
-   cooldown correctly per-instance; the global gate is a bug on top of it. The
-   run posted exactly one task (`carsdotcom__skelebot-280`, id `157`) then idled
-   for the full cooldown with a 20-instance scorable pool available.
+   `cooldown_ms` *globally* — `Math.max(last_posted_at)` across the whole eligible
+   pool blocks every poll if *any* instance was posted within `cooldown_ms`. The
+   selector in `swe-rebench-v2-auto.ts:59` already applies cooldown per-instance;
+   the global gate is a bug on top of it. The run posted exactly one task
+   (`carsdotcom__skelebot-280`, id `157`) then idled for the full cooldown with a
+   20-instance scorable pool available.
 
 2. **Over-solving.** Per the claim-policy decoupling above, one posting yields up
-   to 50 successes — the corpus accumulates far more than N trajectories for an
-   instance even though the generator never reposts it.
+   to 50 successes — far past N.
 
-DR-i §Consequences stated the subgraph would index per-task success counts
-"for the generator's own consumption". The shipped generator instead counts
-successes in a local `~/.jinn-client/swe-rebench-v2/generator-state.json`,
-incremented by the delivery-watcher hook on verdicts the daemon witnesses. For a
-single-launcher testnet this is adequate; it is not the network-wide source DR-i
-named.
+**Contract finding — claim slots are a one-way budget.** `TaskCoordinator.sol`
+`claimTask` does `record.claimCount++` (line 345) and gates on
+`claimCount >= maxClaims` (line 330). `expireAttempt` (lines 579-587) marks a
+stale attempt `Expired` but **never decrements `claimCount`**. So every claim —
+success, failure, or expired lease — permanently burns one of the `maxClaims`
+slots; once the budget is spent the Task is permanently closed to new claims.
+A posting is a fixed attempt budget that cannot self-heal.
 
-This DR defines the intended protocol semantics for SWE-rebench-v2 generation
-and claiming. It is the scoping output requested by issue #487; implementation is
-a follow-up.
+**Generalisation.** Expiry and cooldown are not SWE-rebench-v2 facts — they are
+generic task-generator knobs. Different SolverNets want different settings:
+`prediction.v1` *must* expire (a Polymarket market resolves; a stale prediction
+task is meaningless), whereas `swe-rebench-v2` instances are evergreen (a 2025-03
+coding issue is just as valid to solve today). This DR defines the generic knobs
+and pins `swe-rebench-v2`'s configuration.
+
+DR-i §Consequences stated the subgraph would index per-task success counts "for
+the generator's own consumption". The shipped generator instead counts successes
+in a local `~/.jinn-client/swe-rebench-v2/generator-state.json`, incremented by
+the delivery-watcher hook on witnessed verdicts.
+
+This DR is the scoping output requested by issue #487; implementation is a
+follow-up.
 
 ## Decision
 
-**`N_target_successes` is the single memorisation cap.** It counts score=1
-verdicts per instance, network-wide in intent. When reached, the instance is
-*saturated* — retired from posting, retained in the corpus. Every other mechanism
-below exists only to respect this cap.
+### Generic task-generator knobs
 
-### 1. Generator-sized claim caps
+The task-generator framework exposes, configurable per SolverNet:
 
-The generator sets each posting's `maxClaims` to the **remaining budget**
-`N_target_successes − successful_count` at post time, and `maxClaimsPerOperator =
-1`. Because `TaskCoordinator.sol` enforces `maxClaims` per-Task on-chain, the
-posted Task itself **hard-caps** how many trajectories that posting can produce —
-the fix is an on-chain guarantee, not a soft generator check. The flat
-`maxClaims: 50` default is removed; the `swe-rebench-v2` contract
-`maxClaimsPerOperator` default changes `5 → 1`.
+- **pool source** — how instances enter the generator (a static set, or a pool
+  that grows; `swe-rebench-v2` grows ~50 instances/month).
+- **time-expiry** — on/off + window length. It serves *two* roles: (a) the
+  **repost trigger**, and (b) the **escrow-reclaim deadline** — `JinnRouterV3`
+  escrows per-slot budget up front, and expiry returns escrow on unconsumed
+  slots.
+- **cooldown** — on/off + per-instance minimum spacing between postings.
+- **target-success cap** `N_target_successes` — the universal stopping semantic.
+- **attempt-budget policy** — how each posting's `maxClaims` is sized.
 
-`maxClaimsPerOperator = 1` ensures the N successes come from N *distinct*
-operators — the approach diversity DR-i wants ("different harnesses solve the
-same task in genuinely different ways"). `maxClaimsPerOperator = 5` lets one
-operator self-produce up to 5 near-copy trajectories of the same instance — the
-exact copy surface DR-i caps.
+`swe-rebench-v2`'s configuration is pinned below; other SolverNets set their own.
 
-### 2. Fill-the-pool posting, no cadence
+### The semantics, configured for swe-rebench-v2
 
-The generator posts a Task for **every** scorable instance that is unposted and
-unsaturated — as fast as a per-tick batch throttle (`post_batch_size`) allows —
-so operators have a full supply of work immediately. There is no posting
-cadence, interval, or `cadenceMs`. A trickle starves operators and contradicts
-DR-i's own substrate-volume and bootstrap-surface rationale (the whole historical
-pool *should* be live now, not metered out monthly).
+**1. `N_target_successes` is the single memorisation cap.** It counts score=1
+verdicts per instance. When reached, the instance is *saturated* — retired from
+posting, retained in the corpus. Every mechanism below exists only to respect it.
 
-`post_batch_size` is a chain-hammer throttle (post at most B Tasks per tick,
-continuing batch-by-batch on subsequent ticks until the unposted set is live) —
-not a cadence.
+**2. Generator-sized claim caps.** The generator sets each posting's `maxClaims`
+to the remaining budget `N_target_successes − successful_count` at post time, and
+`maxClaimsPerOperator = 1`. `TaskCoordinator.sol` enforces `maxClaims` per-Task
+on-chain, so the posting itself **hard-caps** the trajectories it can produce.
+The flat `maxClaims: 50` default is removed; the contract `maxClaimsPerOperator`
+default changes `5 → 1` so the N successes come from N *distinct* operators — the
+approach diversity DR-i wants.
 
-### 3. Retry-on-expiry is the only ongoing per-instance work
+**3. Fill-the-pool posting, no cadence.** The generator posts a Task for *every*
+scorable instance that is unposted and unsaturated, as fast as a per-tick batch
+throttle (`post_batch_size`) allows, so operators have a full supply of work
+immediately. There is no posting cadence, interval, or `cadenceMs`.
 
-There is exactly **one live posting per instance** at a time. When a posting's
-submission window expires without `successful_count ≥ N_target_successes`:
+**4. Retry-on-expiry — and finite expiry is load-bearing.** There is exactly one
+live posting per instance. Because the contract claim budget is one-way (slots
+never recycle — see Context), a posting whose claims fail strands the instance
+below N with no recovery *within that posting*. **Time-expiry is the heal:** when
+a posting expires, the instance is reposted with a *fresh* `maxClaims =
+N − successful_count` budget. Expiry → repost lets a stranded instance self-heal
+using only local time state (`last_posted_at + posting_window_ms`) — no indexer
+query. On expiry: if `posted_count ≥ N_max_postings_per_task` → **abandoned**
+(retire); otherwise → **repost**.
 
-- if `posted_count ≥ N_max_postings_per_task` → **abandoned** (genuinely beyond
-  current network capability), retire;
-- otherwise → eligible for **repost**, with `maxClaims` re-sized to
-  `N_target_successes − successful_count`.
+**5. 7-day window kept; churn accepted.** The window stays at the existing 7 days
+— a launcher knob `posting_window_ms` with default 7 d, *not* lengthened. On a
+thin operator set a 7-day window frequently expires before N successes
+accumulate, producing reposting churn; and a verdict landing just after expiry
+produces mild overshoot past N. Both are **accepted** for simplicity — no
+post-expiry drain grace, no indexer-based in-flight tracking. `N_target_successes`
+is a soft target.
 
-A short `repost_drain_ms` grace after expiry, before the repost, lets verdicts
-for solutions delivered near window-end land and be counted — so the repost is
-sized against an up-to-date `successful_count`.
+**6. Cooldown removed for swe-rebench-v2.** With one-live-posting + repost-only-
+after-expiry, the window length *is* the repost spacing. `cooldown` stays a
+generic knob; `swe-rebench-v2` sets it off. The global cooldown gate
+(`swe-rebench-v2.ts:381-389`) — the under-posting bug — is deleted.
 
-### 4. Lengthen the posting window
-
-The task window moves from a hardcoded 7 days to a launcher-tunable
-`posting_window_ms` (default ≈ 30 days). A posting must stay claimable long
-enough to collect its N successes from a thin operator set before expiry forces a
-needless repost (and inflates `posted_count` toward the `N_max` abandon cap on
-otherwise-solvable tasks).
-
-### 5. `cooldown_ms` is removed
-
-With one-live-posting-per-instance and repost-only-after-expiry, the window
-length *is* the repost spacing. The residual "do not repost the instant the
-window closes" need is served by `repost_drain_ms`. The global cooldown gate
-(`swe-rebench-v2.ts:381-389`) is deleted; `cooldown_ms` leaves the config and
-manifest schema.
-
-### 6. In-flight accounting — not tracked, tiny overshoot accepted
-
-The expiry boundary serializes postings per instance, so no concurrent in-flight
-attempts ever race a new posting. The only residual overshoot — a verdict landing
-just after a window expires — is absorbed by `repost_drain_ms` and otherwise
-accepted; `N_target_successes` is a soft target, not a hard wall. v1 keeps the
-local `generator-state.json` success ledger (`posted`, `successful`,
+**7. In-flight accounting — none for v1.** The expiry boundary serializes
+postings per instance, so no concurrent in-flight attempts race a new posting.
+The residual overshoot (a verdict landing just after expiry) is accepted per (5).
+v1 keeps the local `generator-state.json` ledger (`posted`, `successful`,
 `last_posted_at` is the complete state the generator needs). Migrating
-success/in-flight counts to the subgraph — the canonical network-wide source DR-i
-§Consequences named — is a scoped follow-up, required once multi-daemon
-evaluation makes the local ledger under-count.
+success counts to the subgraph — the canonical network-wide source DR-i
+§Consequences named — is a scoped follow-up for when multi-daemon evaluation
+makes the local ledger under-count.
 
-### Parameters after this DR
+### Parameters after this DR (swe-rebench-v2)
 
 | Parameter | Before | After | Meaning |
 |---|---|---|---|
 | `N_target_successes` | 3 | 3 | memorisation cap — score=1 verdicts per instance before retire |
-| `N_max_postings_per_task` | 10 | 10 | impossible-task cap |
-| `cooldown_ms` | 24 h | **removed** | subsumed by `posting_window_ms` + `repost_drain_ms` |
-| `posting_window_ms` | (7 d, hardcoded) | ≈ 30 d, launcher-tunable | how long a posted Task stays claimable |
-| `repost_drain_ms` | — | ≈ 6 h | grace after expiry before repost; lets late verdicts count |
+| `N_max_postings_per_task` | 10 | 10 | impossible-task cap — abandon after this many postings without N |
+| `posting_window_ms` | 7 d (hardcoded) | 7 d (launcher knob, default 7 d) | time-expiry window; repost trigger + escrow-reclaim deadline |
+| `cooldown_ms` | 24 h | **removed** | generic knob; off for swe-rebench-v2 |
 | `post_batch_size` | — | ≈ 25 | max Tasks posted per tick (chain-hammer throttle, not cadence) |
 | `maxClaims` (per posting) | 50 (flat) | `N − successful_count` (derived) | the posting is the capacity unit |
 | `maxClaimsPerOperator` | 5 | 1 | N trajectories from N distinct operators |
 
-All of `N_target_successes`, `N_max_postings_per_task`, `posting_window_ms`,
-`repost_drain_ms`, `post_batch_size` remain launcher-set in the manifest.
+`N_target_successes`, `N_max_postings_per_task`, `posting_window_ms`,
+`post_batch_size` are launcher-set in the manifest.
 
 ## Rationale
 
 - **Generator-sized caps make the posting the unit of capacity.** The on-chain
-  `TaskCoordinator` enforces the per-posting cap for free; no live claim-state
-  query is needed; there is zero in-posting overshoot by construction. Total
-  successes across reposts stay bounded because each repost re-sizes `maxClaims`
-  down to the remaining budget.
-- **Fill-the-pool matches DR-i's own reasoning.** DR-i argued the full ~750-task
-  historical pool gives bootstrap surface and compounding corpus value. Posting
-  it all *now* delivers that; a trickle delays it by a month and idles operators.
-- **Retry-on-expiry serializes cleanly.** One live posting per instance means
-  there is never an in-flight race, so the generator needs only local state — no
-  indexer dependency for v1.
-- **Accepting overshoot is cheap and correct here.** With the drain grace,
-  overshoot is ≤ 1-2 per instance in the rare late-verdict case. An indexer query
-  to eliminate it is not worth the dependency for a single-launcher testnet.
-- **The longer window prevents false abandonment.** A 7-day window can expire
-  before N successes accumulate on a thin operator set; that triggers needless
-  reposts and can drive a solvable task to the `N_max` abandon cap.
+  `TaskCoordinator` enforces the per-posting cap for free; zero in-posting
+  overshoot by construction; no live claim-state query needed.
+- **Finite expiry is not optional plumbing.** It is the only mechanism that
+  resets the one-way claim budget. "No expiry" + non-recycling slots = stranded
+  instances with no recovery path short of an indexer-driven capacity check.
+  Keeping the 7-day window keeps the heal local and time-based, and keeps escrow
+  reclaiming on dead slots.
+- **7 days over a longer window — simplicity.** A longer window would reduce
+  churn but delays saturation and adds a knob value to justify. The issue author
+  chose to keep the existing 7 d and accept the churn.
+- **Fill-the-pool matches DR-i's own reasoning.** DR-i argued the full
+  ~750-instance pool gives bootstrap surface and compounding corpus value;
+  posting it all now delivers that, a trickle does not.
+- **`maxClaimsPerOperator = 1`** ensures N trajectories from N distinct
+  operators; `= 5` lets one operator self-produce near-copy trajectories — the
+  exact copy surface DR-i caps.
 
 ## Alternatives considered and rejected
 
-- **Small fixed `maxClaims` per posting (e.g. 3) + repost while successes < N.**
-  Rejected: tolerates overshoot when all of a posting's claims succeed.
-  Generator-sized caps achieve the same supply with zero in-posting overshoot.
-- **On-chain instance-level claim cap via `policyHook`.** Rejected for v1: needs
-  a new hook contract plus on-chain instance success state. Generator-sized
-  `maxClaims` already gives a hard on-chain per-posting cap; the cross-repost
-  total is bounded by re-sizing. Revisit only if a launcher cannot be trusted to
-  size postings.
-- **Keep `cooldown_ms` + a fixed posting cadence.** Rejected: this is the current
-  design — it produced the under-posting failure mode and starves operators of
-  work surface.
-- **Source success/in-flight counts from the subgraph now.** Deferred, not
-  rejected: correct per DR-i §Consequences, but unnecessary for a
-  single-launcher testnet. Scoped as a follow-up for when multi-daemon
-  evaluation is real.
+- **Keep `maxClaims: 50` flat / the current design.** Rejected — this is the
+  over-solving + under-posting bug.
+- **No time-expiry, single posting, over-provisioned `maxClaims`** (Option A
+  from the design session). Rejected: a fixed attempt budget either strands hard
+  instances (budget too low) or overshoots easy ones (too high); reposting
+  adapts the budget per instance. Also locks escrow on unconsumed slots
+  indefinitely.
+- **No time-expiry, repost on claim-exhaustion via an indexer query** (Option B).
+  Deferred: gives exact-N with zero overshoot but makes the generator depend on
+  the indexer. Kept as the generic framework's option for SolverNets that want an
+  exact-N guarantee; not used by `swe-rebench-v2` v1.
+- **Lengthen the window to ~30-90 d.** Rejected for simplicity — issue author
+  chose 7 d + accept churn.
+- **A `repost_drain_ms` grace after expiry.** Dropped — "accept the churn"
+  subsumes the late-verdict overshoot the grace was there to prevent.
+- **Source success counts from the subgraph now.** Deferred — correct per DR-i
+  §Consequences, but unnecessary for a single-launcher testnet.
 
 ## Consequences
 
-- **DR-2026-05-06-i is amended.** Its posting-policy specifics — `cooldown_window`
-  and the per-task posting loop — are superseded. The core P5 choice stands: full
-  historical pool, `N_target_successes` as the memorisation cap,
-  `N_max_postings_per_task` as the impossible-task cap.
+- **DR-2026-05-06-i is amended.** Its `cooldown_window` and per-task posting-loop
+  framing are superseded. The core P5 choice stands: full historical pool,
+  `N_target_successes` as the memorisation cap, `N_max_postings_per_task` as the
+  impossible-task cap.
 - **Spec §3.6** of `docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md`
-  carries a proposed-amendment banner now and is rewritten to match this DR on
+  carries a proposed-amendment banner now; it is rewritten to match on
   ratification.
 - **Implementation follow-up** (a `refactor`-shape issue): delete the global
-  cooldown gate; `GeneratorConfig` drops `cooldown_ms`, adds `posting_window_ms`,
-  `repost_drain_ms`, `post_batch_size`; `selectNextPostingCandidate` becomes a
-  batch selector returning up to `post_batch_size` instances (`tick` already
-  returns `Task | Task[] | null`); the generator sets per-posting `maxClaims =
-  N − successful_count` and `maxClaimsPerOperator = 1`; the deadline derives from
-  `posting_window_ms`; per-instance live/expired state derives from
-  `last_posted_at + posting_window_ms`; the `swe-rebench-v2` contract
-  `claimPolicyDefaults.maxClaimsPerOperator` changes `5 → 1`; the manifest schema
-  gains the new params and drops `cooldown_ms`; regression tests cover both
-  failure modes (one post must not stall the pool; one posting must not exceed N
-  claims).
+  cooldown gate; expose `time-expiry`/`cooldown` as generic per-SolverNet
+  generator knobs; `GeneratorConfig` drops `cooldown_ms`, adds
+  `posting_window_ms` (default 7 d) and `post_batch_size`;
+  `selectNextPostingCandidate` becomes a batch selector returning up to
+  `post_batch_size` instances (`tick` already returns `Task | Task[] | null`);
+  the generator sets per-posting `maxClaims = N − successful_count` and
+  `maxClaimsPerOperator = 1`; the deadline derives from `posting_window_ms`;
+  live/expired state derives from `last_posted_at + posting_window_ms`; the
+  `swe-rebench-v2` contract `claimPolicyDefaults.maxClaimsPerOperator` changes
+  `5 → 1`; the manifest schema gains `posting_window_ms` / `post_batch_size` and
+  drops `cooldown_ms`; regression tests cover both failure modes (one post must
+  not stall the pool; one posting must not exceed N claims).
+- **Churn is expected and acceptable.** An instance may cycle post → expire →
+  repost several times (up to `N_max_postings_per_task`) before it saturates;
+  escrow churns per posting; mild overshoot past N can occur from verdicts that
+  land just after expiry. This is the accepted cost of the 7-day window with no
+  in-flight tracking.
 - **Thin-operator testnet note.** `maxClaimsPerOperator = 1` means an instance
   needs N distinct operators to saturate. While the testnet operator count is
   below `N_target_successes`, the launcher should lower `N_target_successes` (or,
-  as a deliberate exception, raise `maxClaimsPerOperator`) in the manifest so the
-  loop can close — a manifest tweak, no code change.
+  as a deliberate exception, raise `maxClaimsPerOperator`) in the manifest — a
+  manifest tweak, no code change.
 - **Spend.** Posting cost scales with `maxClaims` (`JinnRouterV3` escrows
   `solutionBudget = solutionMaxDeliveryRate × maxClaims`). Dropping `maxClaims`
-  from 50 to ≤ N = 3 is ~16× cheaper per posting — which is what makes
-  fill-the-pool affordable.
+  from 50 to ≤ N = 3 is ~16× cheaper per posting; the 7-day expiry reclaims
+  escrow on unconsumed slots.
 
 ## Status
 
