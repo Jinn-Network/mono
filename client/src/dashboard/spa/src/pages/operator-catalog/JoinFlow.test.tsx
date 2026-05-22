@@ -530,25 +530,47 @@ describe('JoinFlow — per-harness readiness gate', () => {
     expect(screen.queryByTestId('join-harness-not-ready')).toBeNull();
   });
 
-  it('does NOT gate Save & Join on harness readiness when only evaluator is selected', async () => {
+  it('gates Save & Join and shows a not-ready warning when evaluator is selected and the evaluator harness reports not-ready (e.g. Docker stopped)', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        contract: {
+          ...baseManifest.contract,
+          evaluationFunction: {
+            ...baseManifest.contract.evaluationFunction,
+            implementation: 'jinn-builtin/prediction-v1-evaluator@1.0',
+          },
+        },
+      },
+    });
     apiMock.getSolverNets.mockResolvedValue(twoHarnessCatalog);
-    // Even if a solver harness probe came back not-ready, the evaluator-only
-    // path binds harness from the manifest and must not be readiness-gated.
-    apiMock.harnessReadiness.mockImplementation(async (name: string) => ({
-      harnessName: name,
-      manifestCids: [],
-      ready: false,
-      reason: 'not signed in',
-    }));
+    apiMock.harnessReadiness.mockImplementation(async (name: string) => {
+      if (name === 'prediction-v1-evaluator') {
+        return {
+          harnessName: name,
+          manifestCids: [],
+          ready: false,
+          reason: 'Docker daemon not reachable',
+          nextStep: { description: 'Start Docker Desktop', cli: 'open -a Docker' },
+        };
+      }
+      return { harnessName: name, manifestCids: [], ready: true };
+    });
 
     wrap(<JoinFlow />);
     await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
     fireEvent.click(screen.getByLabelText('Evaluator'));
 
+    await waitFor(() =>
+      expect(apiMock.harnessReadiness).toHaveBeenCalledWith('prediction-v1-evaluator'),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('join-evaluator-not-ready')).toBeTruthy(),
+    );
+    const banner = screen.getByTestId('join-evaluator-not-ready');
+    expect(banner.textContent).toMatch(/Docker daemon not reachable/);
     const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
-    expect(submit.disabled).toBe(false);
-    // The solver-only not-ready banner is not rendered without solver fields.
-    expect(screen.queryByTestId('join-harness-not-ready')).toBeNull();
+    expect(submit.disabled).toBe(true);
   });
 
   it('does not crash when a harness is absent from the readiness snapshot (404)', async () => {
