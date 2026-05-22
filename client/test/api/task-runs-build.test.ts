@@ -103,6 +103,26 @@ describe('gatherTaskRunsStatus', () => {
       expect(status.totals.localErrors).toBe(1);
     });
   });
+
+  it('includes runStartedAt in task run summaries distinct from windowStartTs', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      insertTask(persistence, {
+        requestId: 'fresh-claim',
+        taskId: 'task-fresh',
+        taskRole: 'restoration',
+        runStartedAt: 10_000,
+      });
+
+      const status = gatherTaskRunsStatus(store);
+
+      expect(status.inFlight[0]).toMatchObject({
+        requestId: 'fresh-claim',
+        windowStartTs: 1_000,
+        runStartedAt: 10_000,
+      });
+    });
+  });
 });
 
 function insertTask(
@@ -111,6 +131,7 @@ function insertTask(
     requestId: string;
     taskId: string;
     taskRole: 'restoration' | 'evaluation';
+    runStartedAt?: number;
   },
 ): void {
   persistence.insertDiscovered({
@@ -121,6 +142,7 @@ function insertTask(
     onchainCreationBlock: 1,
     solverType: 'swe-rebench-v2.v1',
     taskRole: input.taskRole,
+    runStartedAt: input.runStartedAt,
     windowStartTs: 1_000,
     windowEndTs: 2_000,
     task: {

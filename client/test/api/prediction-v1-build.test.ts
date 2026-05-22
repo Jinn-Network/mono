@@ -14,6 +14,7 @@ function seedPredictionRun(
     state?: 'DISCOVERED' | 'COMPLETE' | 'FAILED';
     stateUpdatedAt?: number;
     solverType?: string;
+    runStartedAt?: number;
   },
 ): void {
   persistence.insertDiscovered({
@@ -24,6 +25,7 @@ function seedPredictionRun(
     onchainCreationBlock: 1,
     solverType: input.solverType ?? 'prediction.v1',
     taskRole: input.taskRole ?? 'restoration',
+    runStartedAt: input.runStartedAt,
     windowStartTs: 1_000,
     windowEndTs: 2_000,
     task: {
@@ -247,6 +249,26 @@ describe('gatherPredictionV1Status', () => {
       expect(result.recentTasks.map((task) => task.requestId)).toEqual(
         expect.arrayContaining(['canonical-prediction', 'legacy-prediction']),
       );
+    });
+  });
+
+  it('includes runStartedAt in prediction task summaries', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      seedPredictionRun(store, persistence, {
+        requestId: 'recent-prediction-claim',
+        taskId: 'prediction-recent-task',
+        runStartedAt: 50_000,
+        stateUpdatedAt: 60_000,
+      });
+
+      const result = gatherPredictionV1Status(store);
+
+      expect(result.recentTasks[0]).toMatchObject({
+        requestId: 'recent-prediction-claim',
+        windowStartTs: 1_000,
+        runStartedAt: 50_000,
+      });
     });
   });
 });

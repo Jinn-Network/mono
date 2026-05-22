@@ -54,6 +54,7 @@ interface TaskRunRow {
   implName?: string | null;
   windowStartTs?: number;
   windowEndTs?: number;
+  runStartedAt?: number | null;
   stateUpdatedAt: number;
   manifestCid?: string | null;
   deliveryTxHash?: string | null;
@@ -403,6 +404,7 @@ export function OverviewPage(): JSX.Element {
           state: r.state,
           implName: r.implName ?? null,
           windowStartTs: r.windowStartTs ?? 0,
+          runStartedAt: r.runStartedAt ?? null,
           stateUpdatedAt: r.stateUpdatedAt,
           deliveryTxHash: r.deliveryTxHash ?? null,
         });

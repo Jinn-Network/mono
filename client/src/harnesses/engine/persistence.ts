@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
 
   window_start_ts         INTEGER NOT NULL,
   window_end_ts           INTEGER NOT NULL,
+  run_started_at          INTEGER,
 
   pre_snapshot_captured_at  INTEGER,
   pre_snapshot_payload      TEXT,
@@ -127,6 +128,8 @@ export interface PersistedTaskRunInput {
   taskRole?: 'restoration' | 'evaluation';
   windowStartTs: number;
   windowEndTs: number;
+  /** Unix ms timestamp captured when this operator successfully claimed the run. */
+  runStartedAt?: number;
   /**
    * Full Task payload, captured at observe() time.
    * Required: production callers always thread it (daemon.ts); making this
@@ -157,6 +160,8 @@ export interface PersistedTaskRun {
 
   windowStartTs: number;
   windowEndTs: number;
+  /** Unix ms timestamp captured when this operator successfully claimed the run. */
+  runStartedAt: number | null;
 
   preSnapshotCapturedAt: number | null;
   preSnapshotPayload: unknown | null;    // deserialized JSON
@@ -262,6 +267,7 @@ interface RawRow {
   impl_state_dir: string | null;
   window_start_ts: number;
   window_end_ts: number;
+  run_started_at: number | null;
   pre_snapshot_captured_at: number | null;
   pre_snapshot_payload: string | null;
   post_snapshot_captured_at: number | null;
@@ -304,6 +310,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
     { column: 'task_id',             ddl: 'ALTER TABLE task_runs ADD COLUMN task_id TEXT' },
     { column: 'attempt_index',       ddl: 'ALTER TABLE task_runs ADD COLUMN attempt_index INTEGER' },
+    { column: 'run_started_at',      ddl: 'ALTER TABLE task_runs ADD COLUMN run_started_at INTEGER' },
     // ERC-8004 payload v2 (jinn-mono-9fe5): persists executor mode + codeDigest
     // from pack() so deliver() can emit a v2 setMetadata payload after the
     // transient maps are cleared.
@@ -353,6 +360,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     implStateDir: row.impl_state_dir,
     windowStartTs: row.window_start_ts,
     windowEndTs: row.window_end_ts,
+    runStartedAt: row.run_started_at,
     preSnapshotCapturedAt: row.pre_snapshot_captured_at,
     preSnapshotPayload: parseJson(row.pre_snapshot_payload),
     postSnapshotCapturedAt: row.post_snapshot_captured_at,
@@ -396,14 +404,15 @@ export class TaskRunPersistence {
    * `requestId` already exists, this is a no-op (INSERT OR IGNORE).
    */
   insertDiscovered(input: PersistedTaskRunInput): void {
+    const now = Date.now();
     this.db.prepare(`
       INSERT OR IGNORE INTO task_runs (
         request_id, task_id, attempt_index, task_cid, onchain_creation_tx, onchain_creation_block,
-        solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts,
+        solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts, run_started_at,
         task_payload
       ) VALUES (
         @requestId, @taskId, @attemptIndex, @taskCid, @onchainCreationTx, @onchainCreationBlock,
-        @solverType, @taskRole, 'DISCOVERED', @now, @windowStartTs, @windowEndTs,
+        @solverType, @taskRole, 'DISCOVERED', @now, @windowStartTs, @windowEndTs, @runStartedAt,
         @taskPayload
       )
     `).run({
@@ -415,9 +424,10 @@ export class TaskRunPersistence {
       onchainCreationBlock: input.onchainCreationBlock,
       solverType: input.solverType ?? null,
       taskRole: input.taskRole ?? null,
-      now: Date.now(),
+      now,
       windowStartTs: input.windowStartTs,
       windowEndTs: input.windowEndTs,
+      runStartedAt: input.runStartedAt ?? now,
       taskPayload: input.task ? JSON.stringify(input.task) : null,
     });
   }

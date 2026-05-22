@@ -502,9 +502,11 @@ export class Daemon {
       }
 
       let request;
+      let runStartedAt: number;
       try {
         request = await this.adapter.claimTask(taskAnnouncement.taskId);
         this.store.recordOwnActivity(request.requestId, 'claimed');
+        runStartedAt = Date.now();
       } catch (err) {
         console.error(
           `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
@@ -546,6 +548,7 @@ export class Daemon {
           taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
+          runStartedAt,
           task: request.task,
         });
 
