@@ -26,6 +26,15 @@ export interface PolledIssue {
   priority: Priority | null;
   status: ProjectStatus | null;
   onBoard: boolean;
+  /**
+   * GitHub login of the issue's author. Used by the author-allowlist
+   * predicate in `selectReady` to enforce the trust boundary on the
+   * autonomous dispatcher (issue #497). The empty string indicates the
+   * field was missing from the upstream `gh issue list` payload (older
+   * `gh` versions); such issues will never appear on the allowlist and
+   * will be filtered as not-allowlisted.
+   */
+  author: string;
 }
 
 /** An issue that passed the ready-filter — safe to dispatch. */
@@ -60,6 +69,14 @@ export interface DispatcherConfig {
   wallClockMs: number;
   /** v1 default implementer; per-issue label can override. */
   defaultImplementer: 'claude' | 'codex' | 'cursor';
+  /**
+   * GitHub logins whose issues the dispatcher is allowed to pick up (#497).
+   * Compared case-insensitively against `PolledIssue.author`. Default `[]` —
+   * empty list means dispatch *nothing*, enforcing fail-safe behaviour when
+   * the operator forgets to configure the allowlist. Source of truth is the
+   * `JINN_DISPATCHER_AUTHOR_ALLOWLIST` env var read by the runner.
+   */
+  authorAllowlist: string[];
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -71,4 +88,5 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   openPrBackpressure: 30,
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
+  authorAllowlist: [],
 };

@@ -35,6 +35,7 @@ const ISSUE: ReadyIssue = {
   priority: 'P1',
   status: 'Todo',
   onBoard: true,
+  author: 'alice',
 };
 
 const CFG: DispatcherConfig = {
@@ -42,6 +43,7 @@ const CFG: DispatcherConfig = {
   openPrBackpressure: 5,
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
+  authorAllowlist: ['alice'],
 };
 
 /**

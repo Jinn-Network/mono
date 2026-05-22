@@ -31,11 +31,19 @@ export type CommandRunner = (cmd: string, args: string[]) => Promise<string>;
 // Internal shapes that mirror real `gh` JSON output (observed 2026-05-21).
 // ---------------------------------------------------------------------------
 
-/** One entry from `gh issue list --json number,title,labels`. */
+/** One entry from `gh issue list --json number,title,labels,author`. */
 interface GhIssue {
   number: number;
   title: string;
   labels: Array<{ name: string } | string>;
+  /**
+   * `gh` returns this as `{ login: string, ... }`. We flatten to a plain
+   * string in the `PolledIssue` mapping. The field is optional so older
+   * `gh` versions (or unexpected payloads) degrade to the empty string
+   * rather than throwing — the empty string will never match an allowlist
+   * entry, so the trust boundary fails safe.
+   */
+  author?: { login?: string };
 }
 
 /** One item from `gh project item-list --format json`. */
@@ -146,7 +154,8 @@ export class GhIssueSource implements IssueSource {
       '--repo', REPO,
       '--state', 'open',
       // TODO: `labels` is the hook for per-issue `agent:*` implementer override (Phase 3 stacked dispatch).
-      '--json', 'number,title,labels',
+      // `author` powers the dispatcher author-allowlist trust boundary (#497).
+      '--json', 'number,title,labels,author',
       '--limit', '200',
     ]);
     const ghIssues: GhIssue[] = JSON.parse(issueListRaw) as GhIssue[];
@@ -218,6 +227,9 @@ export class GhIssueSource implements IssueSource {
         priority,
         status,
         onBoard,
+        // Defensive `?.` against older `gh` versions / unexpected payload
+        // shapes; empty string never matches an allowlist entry (#497).
+        author: ghIssue.author?.login ?? '',
       };
     });
   }
