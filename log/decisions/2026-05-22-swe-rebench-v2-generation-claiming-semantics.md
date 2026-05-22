@@ -3,8 +3,8 @@ id: DR-2026-05-22-a
 title: Task generation & claiming — generic generator knobs; swe-rebench-v2 = target-success cap, fill-the-pool, retry-on-expiry
 date: 2026-05-22
 verb: Steer
-status: proposed
-authors: opus (drafted on claude/issue-487-design), ritsukai (issue #487 author)
+status: ratified
+authors: opus (drafted on claude/issue-487-design), ritsukai (issue #487 author; ratifying Captain)
 spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.6; amends DR-2026-05-06-i
 ---
 
@@ -219,13 +219,10 @@ approach diversity; absent that, it derives.
   `N_target_successes` as the memorisation cap, `N_max_postings_per_task` as the
   impossible-task cap.
 - **Spec §3.6** of `docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md`
-  carries a proposed-amendment banner now. On ratification: §3.6 is rewritten to
-  swe-rebench-v2's configuration, and a generic **Task-generator framework**
-  sub-section (the knobs from §Decision — pool source, time-expiry, cooldown,
-  target-success cap, attempt-budget) is added to the same spec, which §3.6 then
-  references as swe-rebench-v2's instantiation of the framework. A standalone
-  spec doc is not created — the framework is two generators wide today; revisit
-  if it grows.
+  is rewritten to swe-rebench-v2's configuration, with a generic
+  **Task-generator framework** vocabulary sub-section (pool source, time-expiry,
+  cooldown, target-success cap, attempt-budget). A standalone spec doc is not
+  created — the framework is two generators wide today; revisit if it grows.
 - **Implementation follow-up** (a `refactor`-shape issue): delete the global
   cooldown gate; expose `time-expiry`/`cooldown` as generic per-SolverNet
   generator knobs; `GeneratorConfig` drops `cooldown_ms`, adds
@@ -274,7 +271,7 @@ approach diversity; absent that, it derives.
 
 ## Status
 
-Proposed — drafted on `claude/issue-487-design` in a from-first-principles design
-session with the issue author (ritsukai). Awaiting Captain ratification; on
-ratification, spec §3.6 is rewritten and the implementation follow-up issue is
-filed.
+Ratified by Captain ritsukai on 2026-05-22 after review of issue #487, the
+proposed DR in PR #488, and the follow-up implementation plan. Drafted on
+`claude/issue-487-design` in a from-first-principles design session with the
+issue author.
