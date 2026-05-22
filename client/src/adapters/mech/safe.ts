@@ -12,6 +12,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
+  getDefaultTxSubmissionLedger,
+  recoverStuckNonceIfNeeded,
   withRecoverableRetry,
   viemFeeOverridesForAttempt,
 } from '../../tx-retry.js';
@@ -71,6 +73,19 @@ async function executeSafeTransactionInner(
   const { safeAddress, to, value, data } = params;
   const account = walletClient.account;
   if (!account) throw new Error('Wallet client has no account');
+  const chainId = Number(await publicClient.getChainId());
+  const from = account.address;
+  const ledger = getDefaultTxSubmissionLedger();
+  await recoverStuckNonceIfNeeded({
+    publicClient,
+    walletClient: walletClient as unknown as { account?: unknown; sendTransaction: (tx: any) => Promise<Hex> },
+    ledger,
+    from,
+  });
+  const eoaNonce = Number(await publicClient.getTransactionCount({
+    address: from,
+    blockTag: 'pending',
+  }));
 
   return withRecoverableRetry(
     async (attemptIndex) => {
@@ -107,7 +122,11 @@ async function executeSafeTransactionInner(
       sigBytes[64] = sigBytes[64] + 4;
       const safeSignature = `0x${sigBytes.toString('hex')}` as Hex;
 
-      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
+      const previous = await ledger.getTxSubmission({ chainId, from, nonce: eoaNonce });
+      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex, {
+        previousFees: previous?.resolvedAtMs == null ? previous?.fees : undefined,
+        forceEstimate: true,
+      });
 
       let hash: Hex;
       try {
@@ -130,6 +149,7 @@ async function executeSafeTransactionInner(
           account,
           chain: walletClient.chain,
           value: params.value,
+          nonce: eoaNonce,
           ...feeOverrides,
         });
       } catch (writeErr) {
@@ -153,6 +173,18 @@ async function executeSafeTransactionInner(
         }
         throw writeErr;
       }
+      await ledger.recordTxSubmission({
+        chainId,
+        from,
+        nonce: eoaNonce,
+        hash,
+        logicalTx: 'safe.execTransaction',
+        submittedAtMs: Date.now(),
+        fees: feeOverrides,
+        to: safeAddress,
+        value: params.value,
+        data,
+      });
       // Wait inside the retry attempt so reverted Safe executions caused by
       // stale nonce signatures (GS026/GS013) re-read nonce and re-sign.
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
@@ -174,6 +206,12 @@ async function executeSafeTransactionInner(
         }
         throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
       }
+      await ledger.markTxSubmissionResolved({
+        chainId,
+        from,
+        nonce: eoaNonce,
+        resolvedAtMs: Date.now(),
+      });
       return hash;
     },
     {

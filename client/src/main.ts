@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
+import { setDefaultTxSubmissionLedger } from './tx-retry.js';
 // addHarnessReadinessRoutes is wired through startApiServer's holder ref now
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
@@ -861,6 +862,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // /v1/bootstrap + /v1/events + /v1/status here. The same Store instance is
   // later passed into Daemon so we don't double-open the SQLite file.
   const sharedStore = new Store(config.dbPath);
+  setDefaultTxSubmissionLedger(sharedStore);
   const capturesStore = new CapturesStore(sharedStore);
   let captureReceiver: Receiver | undefined;
   try {

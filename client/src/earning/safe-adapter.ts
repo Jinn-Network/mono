@@ -21,10 +21,16 @@ import {
   type Address,
   type Chain,
   type Hex,
+  type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { viemFeeOverridesForAttempt, withRecoverableRetry } from '../tx-retry.js';
+import {
+  getDefaultTxSubmissionLedger,
+  recoverStuckNonceIfNeeded,
+  viemFeeOverridesForAttempt,
+  withRecoverableRetry,
+} from '../tx-retry.js';
 
 export type { MetaTransactionData, TransactionResult };
 
@@ -272,6 +278,17 @@ export async function executeSafeTxDirect(opts: {
   const to = opts.to as Address;
   const value = opts.value ?? 0n;
   const explicitGasLimit = opts.gasLimit;
+  const ledger = getDefaultTxSubmissionLedger();
+  await recoverStuckNonceIfNeeded({
+    publicClient: publicClient as PublicClient,
+    walletClient,
+    ledger,
+    from: account.address,
+  });
+  const eoaNonce = Number(await publicClient.getTransactionCount({
+    address: account.address,
+    blockTag: 'pending',
+  }));
 
   const hash = await withRecoverableRetry(
     async (attemptIndex) => {
@@ -333,12 +350,21 @@ export async function executeSafeTxDirect(opts: {
         }
       }
 
-      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
+      const previous = await ledger.getTxSubmission({
+        chainId,
+        from: account.address,
+        nonce: eoaNonce,
+      });
+      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex, {
+        previousFees: previous?.resolvedAtMs == null ? previous?.fees : undefined,
+        forceEstimate: true,
+      });
       const txParams: Parameters<typeof walletClient.sendTransaction>[0] = {
         account,
         to: safeAddress,
         data,
         gas: resolvedGas + BigInt(attemptIndex) * 50_000n,
+        nonce: eoaNonce,
         ...feeOverrides,
       };
       if (
@@ -349,7 +375,20 @@ export async function executeSafeTxDirect(opts: {
       ) {
         delete (txParams as { gasPrice?: bigint }).gasPrice;
       }
-      return walletClient.sendTransaction(txParams);
+      const hash = await walletClient.sendTransaction(txParams);
+      await ledger.recordTxSubmission({
+        chainId,
+        from: account.address,
+        nonce: eoaNonce,
+        hash,
+        logicalTx: 'safe.execTransaction.direct',
+        submittedAtMs: Date.now(),
+        fees: feeOverrides,
+        to: safeAddress,
+        data,
+        value: 0n,
+      });
+      return hash;
     },
     {
       onRetry: ({ attempt, message }) => {

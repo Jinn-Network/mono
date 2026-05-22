@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createMemoryTxSubmissionLedger,
   flattenErrorMessage,
   isRecoverableTransactionError,
+  recoverStuckNonceIfNeeded,
+  viemSendTransactionWithRetry,
   withRecoverableRetry,
   viemFeeOverridesForAttempt,
   waitForContractCode,
@@ -244,6 +247,134 @@ describe('tx-retry', () => {
       const o = await viemFeeOverridesForAttempt(publicClient as never, 2);
       expect('maxFeePerGas' in o && o.maxFeePerGas).toBe(130n);
       expect('maxPriorityFeePerGas' in o && o.maxPriorityFeePerGas).toBe(13n);
+    });
+
+    it('bumps EIP-1559 replacement fees from the previous submitted fee when the fresh estimate is lower', async () => {
+      const publicClient = {
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 90n,
+          maxPriorityFeePerGas: 9n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+      const o = await viemFeeOverridesForAttempt(publicClient as never, 1, {
+        previousFees: {
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        },
+      });
+      expect(o).toEqual({
+        maxFeePerGas: 115n,
+        maxPriorityFeePerGas: 12n,
+      });
+    });
+
+    it('bumps legacy replacement gasPrice from the previous submitted fee when the fresh estimate is lower', async () => {
+      const publicClient = {
+        estimateFeesPerGas: vi.fn().mockRejectedValue(new Error('legacy chain')),
+        getGasPrice: vi.fn().mockResolvedValue(90n),
+      };
+      const o = await viemFeeOverridesForAttempt(publicClient as never, 1, {
+        previousFees: { gasPrice: 100n },
+      });
+      expect(o).toEqual({ gasPrice: 115n });
+    });
+  });
+
+  describe('viemSendTransactionWithRetry', () => {
+    const account = {
+      address: '0x1111111111111111111111111111111111111111',
+    } as const;
+
+    it('pins an explicit EOA nonce across replacement retries', async () => {
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount: vi.fn().mockResolvedValue(7),
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+      const sendTransaction = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('replacement transaction underpriced'))
+        .mockResolvedValueOnce(`0x${'aa'.repeat(32)}`);
+
+      await expect(
+        viemSendTransactionWithRetry(
+          { sendTransaction },
+          publicClient as never,
+          {
+            account,
+            to: '0x2222222222222222222222222222222222222222',
+            value: 1n,
+          },
+          { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1 },
+        ),
+      ).resolves.toBe(`0x${'aa'.repeat(32)}`);
+
+      expect(sendTransaction).toHaveBeenCalledTimes(2);
+      expect(sendTransaction.mock.calls[0]![0].nonce).toBe(7);
+      expect(sendTransaction.mock.calls[1]![0].nonce).toBe(7);
+    });
+  });
+
+  describe('stuck nonce recovery', () => {
+    it('detects an old unresolved nonce and clears it with a bumped self-transfer', async () => {
+      const from = '0x1111111111111111111111111111111111111111' as const;
+      const ledger = createMemoryTxSubmissionLedger();
+      await ledger.recordTxSubmission({
+        chainId: 84532,
+        from,
+        nonce: 7,
+        hash: `0x${'11'.repeat(32)}`,
+        logicalTx: 'safe.execTransaction',
+        submittedAtMs: 1_000,
+        fees: {
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        },
+      });
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount: vi
+          .fn()
+          .mockResolvedValueOnce(8)
+          .mockResolvedValueOnce(7),
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 80n,
+          maxPriorityFeePerGas: 8n,
+        }),
+        getGasPrice: vi.fn(),
+        waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
+      };
+      const sendTransaction = vi.fn().mockResolvedValue(`0x${'22'.repeat(32)}`);
+      const walletClient = {
+        account: { address: from },
+        sendTransaction,
+      };
+
+      const result = await recoverStuckNonceIfNeeded({
+        publicClient: publicClient as never,
+        walletClient,
+        ledger,
+        from,
+        staleAfterMs: 30_000,
+        nowMs: 61_000,
+      });
+
+      expect(result?.recoveryHash).toBe(`0x${'22'.repeat(32)}`);
+      expect(sendTransaction).toHaveBeenCalledWith({
+        account: walletClient.account,
+        to: from,
+        value: 0n,
+        nonce: 7,
+        maxFeePerGas: 115n,
+        maxPriorityFeePerGas: 12n,
+      });
+      const resolved = await ledger.getTxSubmission({ chainId: 84532, from, nonce: 7 });
+      expect(resolved?.resolvedAtMs).toBe(61_000);
     });
   });
 });
