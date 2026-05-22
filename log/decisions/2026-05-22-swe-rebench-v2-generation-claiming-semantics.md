@@ -95,11 +95,21 @@ posting, retained in the corpus. Every mechanism below exists only to respect it
 
 **2. Generator-sized claim caps.** The generator sets each posting's `maxClaims`
 to the remaining budget `N_target_successes − successful_count` at post time, and
-`maxClaimsPerOperator = 1`. `TaskCoordinator.sol` enforces `maxClaims` per-Task
+sets `maxClaimsPerOperator` **equal to it** — both derive from the same
+remaining-success budget. `TaskCoordinator.sol` enforces `maxClaims` per-Task
 on-chain, so the posting itself **hard-caps** the trajectories it can produce.
-The flat `maxClaims: 50` default is removed; the contract `maxClaimsPerOperator`
-default changes `5 → 1` so the N successes come from N *distinct* operators — the
-approach diversity DR-i wants.
+The flat `maxClaims: 50` / `maxClaimsPerOperator: 5` defaults are removed.
+
+`maxClaimsPerOperator = maxClaims` means there is no per-operator sub-limit
+*within* a posting — a single operator may take every slot. This is deliberate.
+The memorisation cap is `N_target_successes`, enforced by `maxClaims` regardless
+of *who* fills the slots; a per-operator sub-limit buys only *approach
+diversity*, and only when enough operators exist. On a bootstrapping network a
+sub-limit instead deadlocks loop closure — the 2026-05-08 single-operator
+loop-closed run could not saturate an instance under any sub-limit `< maxClaims`.
+`maxClaimsPerOperator` stays a launcher knob: a mature, multi-operator launched
+instance can pin it below `maxClaims` to force approach diversity once operator
+supply is healthy.
 
 **3. Fill-the-pool posting, no cadence.** The generator posts a Task for *every*
 scorable instance that is unposted and unsaturated, as fast as a per-tick batch
@@ -148,10 +158,12 @@ makes the local ledger under-count.
 | `cooldown_ms` | 24 h | **removed** | generic knob; off for swe-rebench-v2 |
 | `post_batch_size` | — | ≈ 25 | max Tasks posted per tick (chain-hammer throttle, not cadence) |
 | `maxClaims` (per posting) | 50 (flat) | `N − successful_count` (derived) | the posting is the capacity unit |
-| `maxClaimsPerOperator` | 5 | 1 | N trajectories from N distinct operators |
+| `maxClaimsPerOperator` (per posting) | 5 (flat) | `= maxClaims` (derived) | no per-operator sub-limit; launcher-tightenable |
 
 `N_target_successes`, `N_max_postings_per_task`, `posting_window_ms`,
-`post_batch_size` are launcher-set in the manifest.
+`post_batch_size` are launcher-set in the manifest. `maxClaimsPerOperator` may be
+optionally pinned in the manifest *below* the derived `maxClaims` value to force
+approach diversity; absent that, it derives.
 
 ## Rationale
 
@@ -169,9 +181,12 @@ makes the local ledger under-count.
 - **Fill-the-pool matches DR-i's own reasoning.** DR-i argued the full
   ~750-instance pool gives bootstrap surface and compounding corpus value;
   posting it all now delivers that, a trickle does not.
-- **`maxClaimsPerOperator = 1`** ensures N trajectories from N distinct
-  operators; `= 5` lets one operator self-produce near-copy trajectories — the
-  exact copy surface DR-i caps.
+- **`maxClaimsPerOperator` derives `= maxClaims`, not a fixed sub-limit.** The
+  load-bearing cap is `N_target_successes`; *who* fills the N slots does not
+  change the corpus's trajectory count. A per-operator sub-limit adds approach
+  diversity only when operators are plentiful, and on a thin network blocks the
+  loop from closing. Diversity is better pursued through real network growth; the
+  knob remains for launchers that have the operator supply to use it.
 
 ## Alternatives considered and rejected
 
@@ -186,6 +201,10 @@ makes the local ledger under-count.
   Deferred: gives exact-N with zero overshoot but makes the generator depend on
   the indexer. Kept as the generic framework's option for SolverNets that want an
   exact-N guarantee; not used by `swe-rebench-v2` v1.
+- **`maxClaimsPerOperator = 1` (strict per-operator diversity) as the default.**
+  Rejected: it requires N distinct operators to saturate any instance and
+  deadlocks loop closure on a single-/thin-operator network (cf. the 2026-05-08
+  single-operator loop-closed run). Retained only as an opt-in launcher knob.
 - **Lengthen the window to ~30-90 d.** Rejected for simplicity — issue author
   chose 7 d + accept churn.
 - **A `repost_drain_ms` grace after expiry.** Dropped — "accept the churn"
@@ -209,22 +228,25 @@ makes the local ledger under-count.
   `selectNextPostingCandidate` becomes a batch selector returning up to
   `post_batch_size` instances (`tick` already returns `Task | Task[] | null`);
   the generator sets per-posting `maxClaims = N − successful_count` and
-  `maxClaimsPerOperator = 1`; the deadline derives from `posting_window_ms`;
-  live/expired state derives from `last_posted_at + posting_window_ms`; the
-  `swe-rebench-v2` contract `claimPolicyDefaults.maxClaimsPerOperator` changes
-  `5 → 1`; the manifest schema gains `posting_window_ms` / `post_batch_size` and
-  drops `cooldown_ms`; regression tests cover both failure modes (one post must
-  not stall the pool; one posting must not exceed N claims).
+  `maxClaimsPerOperator = maxClaims`; the deadline derives from
+  `posting_window_ms`; live/expired state derives from
+  `last_posted_at + posting_window_ms`; the `swe-rebench-v2` contract
+  `claimPolicyDefaults` static fallback becomes
+  `maxClaims = maxClaimsPerOperator = N_target_successes` (the generator
+  overrides both per posting); the manifest schema gains `posting_window_ms` /
+  `post_batch_size` / an optional `maxClaimsPerOperator` override and drops
+  `cooldown_ms`; regression tests cover both failure modes (one post must not
+  stall the pool; one posting must not exceed N claims).
 - **Churn is expected and acceptable.** An instance may cycle post → expire →
   repost several times (up to `N_max_postings_per_task`) before it saturates;
   escrow churns per posting; mild overshoot past N can occur from verdicts that
   land just after expiry. This is the accepted cost of the 7-day window with no
   in-flight tracking.
-- **Thin-operator testnet note.** `maxClaimsPerOperator = 1` means an instance
-  needs N distinct operators to saturate. While the testnet operator count is
-  below `N_target_successes`, the launcher should lower `N_target_successes` (or,
-  as a deliberate exception, raise `maxClaimsPerOperator`) in the manifest — a
-  manifest tweak, no code change.
+- **Thin-operator testnet.** Because `maxClaimsPerOperator = maxClaims`, a single
+  operator can saturate an instance on its own — the loop closes with any
+  operator count ≥ 1, and no manifest workaround is needed at low operator
+  counts. A launcher that later wants enforced approach diversity pins
+  `maxClaimsPerOperator` below `maxClaims` once operator supply supports it.
 - **Spend.** Posting cost scales with `maxClaims` (`JinnRouterV3` escrows
   `solutionBudget = solutionMaxDeliveryRate × maxClaims`). Dropping `maxClaims`
   from 50 to ≤ N = 3 is ~16× cheaper per posting; the 7-day expiry reclaims
