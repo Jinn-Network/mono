@@ -1,6 +1,6 @@
 ---
 name: eng-day
-description: Daily aggregator + guidance surface for Jinn engineering work — reads the open GitHub Issue queue, open PRs, and the "Jinn engineering" GitHub Project (v2) board state for the current sprint. Surfaces sprint progress against the upcoming Monday cut, yesterday's shipped, today's top-3 *guidance* actions tagged by work shape (fix / feat / refactor / spike / chore / docs / test), drift flags (canary status, sprint age > 7 days, PRs > 3 days stale, latest vs canary mismatch). Not a dispatcher — does not invoke action skills (brainstorming / writing-plans / executing-plans / systematic-debugging / etc.); Captain invokes those from the brief. Triggers on "eng day", "morning engineering standup", "what should I do today", "daily eng check", "what's pending", "start of day engineering", "let's plan today's work", "engineering check-in", "what's next". Reads Issue state via `gh issue list`, open PRs via `gh pr list`, and the GitHub Project board state via `gh project item-list`. Refuses to produce a top-3 if no active sprint exists in the Project board (fail-loud, references docs/engineering/handbook.md §The shipping machine for the daily-loop shape). Per DR-2026-05-18 the prior `bd ready` / `bd list` reads are retired — historical `jinn-mono-<id>` lookups still resolve via `bd show <id>` against the in-tree `.beads/` archive.
+description: Daily aggregator + guidance surface for Jinn engineering work — reads the open GitHub Issue queue, open PRs, and the "Jinn engineering" GitHub Project (v2) board state for the current sprint. Surfaces sprint progress against the upcoming Monday cut, yesterday's shipped, today's top-3 *guidance* actions tagged by work shape (read from the GitHub Issue Type — feat / fix / refactor / spike / chore / docs / test / incident / design), drift flags (canary status, sprint age > 7 days, PRs > 3 days stale, latest vs canary mismatch). Not a dispatcher — does not invoke action skills (brainstorming / writing-plans / executing-plans / systematic-debugging / etc.); Captain invokes those from the brief. Triggers on "eng day", "morning engineering standup", "what should I do today", "daily eng check", "what's pending", "start of day engineering", "let's plan today's work", "engineering check-in", "what's next". Reads Issue state via `gh issue list`, open PRs via `gh pr list`, and the GitHub Project board state via `gh project item-list`. Refuses to produce a top-3 if no active sprint exists in the Project board (fail-loud, references docs/engineering/handbook.md §The shipping machine for the daily-loop shape). Per DR-2026-05-18 the prior `bd ready` / `bd list` reads are retired — historical `jinn-mono-<id>` lookups still resolve via `bd show <id>` against the in-tree `.beads/` archive.
 ---
 
 # Engineering day
@@ -15,7 +15,7 @@ Modeled on the `growth-day` skill — same Tier-A discipline, same drift-flag pa
 
 - [`docs/engineering/handbook.md`](../../../docs/engineering/handbook.md) §The shipping machine (daily loop + weekly retrace), §The shapes of work (which shapes exist + their flows), §Sprint surface (GH Project shape).
 - [`CLAUDE.md`](../../../CLAUDE.md) — agent-canonical project guide.
-- Open Issues (ready queue): `gh issue list --repo Jinn-Network/mono --state open --json number,title,labels,assignees,createdAt,updatedAt,milestone --limit 200`. Filter to items with no open blocking sub-issue / no `blocked:*` label for "ready."
+- Open Issues (ready queue): `gh issue list --repo Jinn-Network/mono --state open --json number,title,issueType,labels,assignees,createdAt,updatedAt,milestone --limit 200`. Filter to items where the "Jinn engineering" Project (v2) "Blocked on" field equals `Nothing` (the `blocked:*` label is retired per DR-2026-05-20-b). The Issue Type field is the shape source; `## Run-mode` body sections are read only as a fallback for pre-cutover Issues that haven't been backfilled.
 - Open PRs: `gh pr list --search 'is:open draft:false' --json number,title,author,createdAt,updatedAt,reviewDecision,mergeable`.
 - GitHub Project board: `gh project item-list <project-number> --owner Jinn-Network --format json`, filtered to the current `Sprint` Iteration value. (Project number: 1 — the "Jinn engineering" board on `Jinn-Network`.)
 
@@ -50,8 +50,17 @@ A four-section brief:
 3. Build the top-3 by:
    - Filter open Issues to those on the Project board with `Sprint = <upcoming-monday>` (sprint-target); else fall back to recent P0/P1-labelled Issues for an "off-sprint preview."
    - Rank by: stale-PR-review-needed > sprint-blocker > sprint-target ready > non-sprint P0 > non-sprint P1.
-   - Tag each with shape from the Issue body's `## Run-mode` section (or the `shape:*` label if present).
+   - Tag each with shape from the GitHub Issue Type (`feat` / `fix` / `refactor` / `spike` / `chore` / `docs` / `test` / `incident` / `design`); fall back to the Issue body's `## Run-mode` section only for issues created before the cutover that haven't been backfilled yet. The `shape:*` label is retired and is not consulted.
 4. Format the brief; output to terminal; do not dispatch.
+
+## Routing signals
+
+Two Project (v2) single-select fields enter ranking alongside the sprint-fit tier:
+
+- **Priority** — `P0` / `P1` / `P2` / `P3` / `P4`. Within the same sprint-fit tier, `P0` ranks above `P1`, and so on. `P0` also overrides the non-sprint cap (an off-sprint `P0` outranks an on-sprint `P3`).
+- **Effort** — `Low` / `Medium` / `High`. Effort does not affect rank order; it is surfaced inline next to the shape tag in the top-3 so the operator can pick a top-3 item whose effort fits the block of time they have available.
+
+The "Blocked on" field has three values — `Nothing`, `Human`, `Another issue`. Only items with `Blocked on = Nothing` are eligible for the top-3 ready queue; `Human` and `Another issue` items surface under "Drift flags" if they have been blocked for > 3 days.
 
 ## Failure modes
 
