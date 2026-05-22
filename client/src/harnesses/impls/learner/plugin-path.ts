@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -36,7 +36,7 @@ export function resolvePluginRoot(): string {
   const threeUp = resolve(here, '..', '..', '..');
 
   // Compiled dist layout: dist/harnesses/impls/learner → dist/ → dist/plugins/learner
-  const isDistTree = threeUp.endsWith(`${sep}dist`) || threeUp.endsWith('/dist');
+  const isDistTree = threeUp.endsWith('/dist');
   const pluginRoot = isDistTree
     ? join(threeUp, 'plugins', 'learner')
     : join(resolve(here, '..', '..', '..', '..'), 'plugins', 'learner');
