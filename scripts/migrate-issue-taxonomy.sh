@@ -42,8 +42,12 @@ REPO_NAME="mono"
 REPO_SLUG="${REPO_OWNER}/${REPO_NAME}"
 PROJECT_NUMBER=1
 RATE_LIMIT_FLOOR=200
-BATCH_SIZE=25
-BATCH_SLEEP_SECS=30
+# Note: batching constants (chunk size, inter-chunk sleep) intentionally
+# omitted -- the --apply mutation paths for backfill-type / backfill-fields
+# are deferred to the runbook's manual mutation shape (see
+# docs/runbooks/2026-05-23-issue-taxonomy-provisioning.md section 5). When
+# those paths land in-script, re-introduce the constants alongside the
+# batching loop that actually consumes them.
 
 # Retired labels -- exact list from runbook section 4. Edit here to extend.
 RETIRED_LABELS=(

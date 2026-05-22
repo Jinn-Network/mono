@@ -124,7 +124,7 @@ bash scripts/migrate-issue-taxonomy.sh backfill-fields --apply   # suggests; mut
 bash scripts/migrate-issue-taxonomy.sh retire-labels --apply -y
 ```
 
-The script runs a GraphQL rate-limit probe (`{ rateLimit { remaining resetAt } }`) before each mutation batch. If `remaining < 200`, it prints the `resetAt` time and exits 0 cleanly — re-run after the window. Batches are chunked at 25 items with a 30s sleep between chunks; each batch is independently resumable because each subcommand is idempotent (assignments are checked before mutation, label deletes treat-absent-as-success).
+The script runs a GraphQL rate-limit probe (`{ rateLimit { remaining resetAt } }`) before each mutation batch. If `remaining < 200`, it prints the `resetAt` time and exits 0 cleanly — re-run after the window. The dry-run path performs no batching (no mutations are issued). The `--apply` paths for `backfill-type` and `backfill-fields` are currently deferred to the "Manual apply path" sections below; when those paths land in-script, the documented intent is chunks of 25 items with a 30s sleep between chunks, with each batch independently resumable because every subcommand is idempotent (assignments are checked before mutation, label deletes treat-absent-as-success). The `retire-labels --apply` path is in-script today and is naturally per-label-idempotent — absent labels are treated as success — so an interrupted run can simply be re-invoked.
 
 ### Manual apply path — Issue Type backfill
 
