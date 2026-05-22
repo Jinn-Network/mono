@@ -2,8 +2,12 @@
  * eng:loop entry point.
  *
  * Usage:
- *   yarn eng:loop             # run the dispatcher on an interval (normal mode)
+ *   yarn eng:loop             # run the dispatcher on a 60s interval (normal mode)
  *   yarn eng:loop --dry-run   # one cycle, no mutations, prints the CycleReport
+ *   yarn eng:loop --once      # one cycle live (dispatch up to cap), then exit
+ *   yarn eng:loop --cap <N>   # override concurrencyCap (default: see DEFAULT_CONFIG)
+ *
+ * --once + --cap <N> compose: bound a first live run to at most N dispatches.
  */
 
 import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
@@ -141,8 +145,14 @@ function printReport(report: CycleReport, label: string): void {
 
 async function main(): Promise<void> {
   const isDryRun = process.argv.includes('--dry-run');
+  const isOnce = process.argv.includes('--once');
+  const capIdx = process.argv.indexOf('--cap');
+  const capOverride = capIdx >= 0 ? parseInt(process.argv[capIdx + 1] ?? '', 10) : NaN;
 
-  const cfg = DEFAULT_CONFIG;
+  const cfg =
+    Number.isInteger(capOverride) && capOverride > 0
+      ? { ...DEFAULT_CONFIG, concurrencyCap: capOverride }
+      : DEFAULT_CONFIG;
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
   // TODO: wire GhPrSink.collect once session-completion detection exists
@@ -191,8 +201,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Normal mode: run on an interval
-  console.log(`[eng:loop] Starting dispatcher loop (interval=${INTERVAL_MS}ms, cap=${cfg.concurrencyCap}, backpressure=${cfg.openPrBackpressure})`);
+  // Normal mode: run on an interval (or once + exit when --once)
+  console.log(
+    `[eng:loop] Starting dispatcher (cap=${cfg.concurrencyCap}, backpressure=${cfg.openPrBackpressure}, ` +
+      (isOnce ? 'mode=once' : `interval=${INTERVAL_MS}ms`) +
+      ')',
+  );
 
   const runOneCycle = async (): Promise<void> => {
     try {
@@ -221,8 +235,12 @@ async function main(): Promise<void> {
     }
   };
 
-  // Run immediately, then on interval
+  // Run immediately, then either exit (--once) or schedule on interval.
   await runOneCycle();
+  if (isOnce) {
+    console.log('[eng:loop] --once: first cycle complete, exiting (any spawned sessions continue detached).');
+    return;
+  }
   setInterval(() => { void runOneCycle(); }, INTERVAL_MS);
 }
 
