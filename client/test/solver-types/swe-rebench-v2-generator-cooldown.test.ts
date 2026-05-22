@@ -1,11 +1,18 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
 import type { AdmissionMode } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
-import { ValidatedPoolStore, EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+import {
+  ValidatedPoolStore,
+  EVAL_SEMANTICS_VERSION,
+  createVettedPoolArtifactRef,
+  hashVettedPoolArtifact,
+  writeVettedPoolArtifactPublication,
+  type SweRebenchV2VettedPoolArtifact,
+} from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
 
@@ -201,10 +208,19 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     stateDir = tmpDir();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-14T10:00:00.000Z'));
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ splits: [{ split: '2026_02' }] }),
-    } as Response);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'POST' || url.includes('/api/v0/add')) {
+        return {
+          status: 200,
+          text: async () => `${JSON.stringify({ Hash: 'bafy-vetted-pool-cid' })}\n`,
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ splits: [{ split: '2026_02' }] }),
+      } as Response;
+    });
   });
 
   afterEach(() => {
@@ -233,6 +249,114 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
     const task = await gen();
     expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+  });
+
+  it('publishes the local scorable pool before posting and stamps the artifact ref', async () => {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record(
+      'org__repo-1',
+      {
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-05-14T00:00:00Z',
+        rowHash: 'sha256:' + '1'.repeat(64),
+        imageDigest: 'sha256:' + 'a'.repeat(64),
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+
+    const task = await gen();
+
+    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(task?.eligibility?.['vettedPoolRef']).toMatchObject({
+      schemaVersion: 'solvernet.artifact-ref.v1',
+      manifestCid: launchedRecord().manifestCid,
+      artifactType: 'swe-rebench-v2-vetted-pool.v1',
+      artifactCid: 'bafy-vetted-pool-cid',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+    });
+    expect(task?.context?.['vettedPoolRef']).toBeUndefined();
+  });
+
+  it('uses the published artifact pool, not unpublished local scorable entries', async () => {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record(
+      'org__repo-1',
+      { scorable: true, reason: 'locally validated only', checkedAt: '2026-05-14T00:00:00Z' },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'org__repo-2',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:01Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-existing-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+    const task = await gen();
+
+    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(task?.eligibility?.['vettedPoolRef']).toEqual(ref);
+  });
+
+  it('caches the write-once vetted-pool publication after first resolution', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'org__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+        },
+        {
+          instance_id: 'org__repo-2',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:01Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-existing-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      N_max_postings_per_task: 1,
+    });
+
+    const first = await gen();
+    unlinkSync(join(stateDir, 'vetted-pool-artifact-publication.json'));
+    const second = await gen();
+
+    expect(first?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(second?.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(second?.eligibility?.['vettedPoolRef']).toEqual(ref);
   });
 
   it('falls back to python-floor when admissionMode is python-floor and no validation data exists', async () => {

@@ -38,7 +38,7 @@ import type {
 import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { Task } from '../../../types/task.js';
 import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
-import { uploadToIpfs } from '../../../adapters/mech/ipfs.js';
+import { fetchFromIpfs, uploadToIpfs } from '../../../adapters/mech/ipfs.js';
 import { SweRebenchV2Evaluator, type EvalRunner, type HfFetcher, type HfRow } from './index.js';
 import {
   PythonEvalRunner,
@@ -49,6 +49,11 @@ import { HttpHfFetcher } from './hf-fetcher.js';
 import {
   ValidatedPoolStore,
   EVAL_SEMANTICS_VERSION,
+  hashVettedPoolArtifact,
+  loadVettedPoolArtifactScorableEntries,
+  parseVettedPoolArtifact,
+  vettedPoolArtifactRefFromEligibility,
+  type ScorableVettedPoolArtifactEntries,
 } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import {
   computeRowHash,
@@ -67,6 +72,7 @@ import {
 } from '../../../solver-types/_swe-rebench-v2-pool-cache.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
+const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
 const STATE_FILE = 'state.json';
 const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
@@ -84,6 +90,12 @@ interface EnabledState {
   upstreamRepoDir: string;
 }
 
+interface CachedPublishedPoolArtifact {
+  evalSemanticsVersion: string;
+  artifactHash: string;
+  entries: ScorableVettedPoolArtifactEntries;
+}
+
 export interface SweRebenchV2EvaluatorHarnessOptions {
   /** Marks a stub registry — `isReady()` reports requires-live-daemon. */
   stub?: boolean;
@@ -95,6 +107,8 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
   implStateDir?: string;
   /** IPFS registry URL used to pin test logs. Defaults to Autonolas gateway. */
   ipfsRegistryUrl?: string;
+  /** IPFS gateway URL used to fetch launcher-published vetted pool artifacts. */
+  ipfsGatewayUrl?: string;
   /**
    * Test-only injection points. Production runs use Node's child_process
    * + node:fs + the bundled HFFetcher / PythonEvalRunner.
@@ -118,6 +132,7 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
      */
     makeRunner?: (opts: PythonEvalRunnerOptions) => EvalRunner;
     uploadToIpfs?: typeof uploadToIpfs;
+    fetchFromIpfs?: typeof fetchFromIpfs;
     /**
      * Override the state directory used for the {@link ValidatedPoolStore}
      * substrate-recheck. Defaults to `JINN_SWE_REBENCH_V2_STATE_DIR` env
@@ -140,6 +155,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private readonly stub: boolean;
   private readonly implStateDir: string | undefined;
   private readonly ipfsRegistryUrl: string;
+  private readonly ipfsGatewayUrl: string;
   private readonly deps: NonNullable<SweRebenchV2EvaluatorHarnessOptions['_testDeps']>;
   /** The engine's claim-eligibility check calls `isReady()` per candidate
    *  task per tick (~17 Hz potential). Cache the live `docker info` result
@@ -159,11 +175,13 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private cachedPool:
     | { stateDir: string; promise: Promise<PoolTask[]> }
     | undefined;
+  private readonly publishedPoolArtifactCache = new Map<string, Promise<CachedPublishedPoolArtifact>>();
 
   constructor(opts: SweRebenchV2EvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
     this.implStateDir = opts.implStateDir;
     this.ipfsRegistryUrl = opts.ipfsRegistryUrl ?? DEFAULT_IPFS_REGISTRY_URL;
+    this.ipfsGatewayUrl = opts.ipfsGatewayUrl ?? process.env['JINN_IPFS_GATEWAY_URL'] ?? DEFAULT_IPFS_GATEWAY_URL;
     this.deps = opts._testDeps ?? {};
   }
 
@@ -216,6 +234,46 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       }
       throw err;
     });
+  }
+
+  private loadPublishedPoolArtifact(artifactCid: string): Promise<CachedPublishedPoolArtifact> {
+    const cached = this.publishedPoolArtifactCache.get(artifactCid);
+    if (cached) return cached;
+
+    const fetchArtifact = this.deps.fetchFromIpfs ?? fetchFromIpfs;
+    const promise = (async () => {
+      let rawArtifact: unknown;
+      try {
+        rawArtifact = await fetchArtifact(this.ipfsGatewayUrl, artifactCid);
+      } catch (err) {
+        throw new SkippableError(
+          'vetted_pool_fetch_failed',
+          `cannot fetch vetted pool artifact ${artifactCid}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      try {
+        const artifact = parseVettedPoolArtifact(rawArtifact);
+        return {
+          evalSemanticsVersion: artifact.evalSemanticsVersion,
+          artifactHash: hashVettedPoolArtifact(artifact),
+          entries: loadVettedPoolArtifactScorableEntries(artifact),
+        };
+      } catch (err) {
+        throw new SkippableError(
+          'vetted_pool_artifact_invalid',
+          `invalid vetted pool artifact ${artifactCid}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    })();
+
+    this.publishedPoolArtifactCache.set(artifactCid, promise);
+    promise.catch(() => {
+      if (this.publishedPoolArtifactCache.get(artifactCid) === promise) {
+        this.publishedPoolArtifactCache.delete(artifactCid);
+      }
+    });
+    return promise;
   }
 
   private async isDockerReachable(now: number = Date.now()): Promise<boolean> {
@@ -503,6 +561,71 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     return recheckRow;
   }
 
+  private async loadPublishedPoolRow(
+    task: ReturnType<typeof SweRebenchV2TaskSchema.parse>,
+    runtimeTask: Task,
+    fetcher: HfFetcher,
+  ): Promise<HfRow | null> {
+    let ref;
+    try {
+      ref = vettedPoolArtifactRefFromEligibility(runtimeTask.eligibility);
+    } catch (err) {
+      throw new SkippableError(
+        'vetted_pool_ref_invalid',
+        `invalid vetted pool ref: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!ref) return null;
+
+    if (runtimeTask.solverNetManifestCid && ref.manifestCid !== runtimeTask.solverNetManifestCid) {
+      throw new SkippableError(
+        'vetted_pool_manifest_mismatch',
+        `vetted pool ref manifestCid ${ref.manifestCid} does not match task manifestCid ${runtimeTask.solverNetManifestCid}`,
+      );
+    }
+    if (ref.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+      throw new SkippableError(
+        'vetted_pool_semantics_mismatch',
+        `vetted pool ref semanticsVersion=${ref.evalSemanticsVersion} does not match evaluator semanticsVersion=${EVAL_SEMANTICS_VERSION}`,
+      );
+    }
+
+    const artifact = await this.loadPublishedPoolArtifact(ref.artifactCid);
+    try {
+      if (artifact.evalSemanticsVersion !== ref.evalSemanticsVersion) {
+        throw new Error(`artifact semanticsVersion=${artifact.evalSemanticsVersion} does not match ref=${ref.evalSemanticsVersion}`);
+      }
+      if (artifact.artifactHash !== ref.artifactHash) {
+        throw new Error(`artifact hash ${artifact.artifactHash} does not match ref ${ref.artifactHash}`);
+      }
+    } catch (err) {
+      throw new SkippableError(
+        'vetted_pool_artifact_invalid',
+        `invalid vetted pool artifact ${ref.artifactCid}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if (!artifact.entries.byId.has(task.instance_id)) {
+      throw new SkippableError(
+        'vetted_pool_instance_missing_or_unscorable',
+        `${task.instance_id} is not present as scorable in vetted pool artifact ${ref.artifactCid}`,
+      );
+    }
+
+    try {
+      return await fetcher.fetchTaskRow({
+        hf_dataset: task.hf_dataset,
+        hf_split: task.hf_split,
+        instance_id: task.instance_id,
+      });
+    } catch (err) {
+      throw new SkippableError(
+        'hf_fetch_failed',
+        `cannot load grading row after vetted-pool admission: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async run(ctx: HarnessContext): Promise<Solution> {
     if (this.stub) {
       throw new Error(
@@ -546,7 +669,8 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
       defaultSolverTypeStateDir();
     const fetcher: HfFetcher = this.getFetcher();
-    const recheckRow = await this.recheckSubstrate(
+    const publishedPoolRow = await this.loadPublishedPoolRow(task, ctx.task, fetcher);
+    const recheckRow = publishedPoolRow ?? await this.recheckSubstrate(
       task,
       fetcher,
       () => this.loadPoolForRecheck(stateDir),

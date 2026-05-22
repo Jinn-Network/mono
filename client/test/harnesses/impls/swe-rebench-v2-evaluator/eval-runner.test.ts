@@ -252,6 +252,28 @@ describe('PythonEvalRunner', () => {
       expect(pruned).toEqual(['img-A']);
     });
 
+    it('carries the image digest resolved before pruning removes the local image', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const events: string[] = [];
+      const digest = 'sha256:' + 'a'.repeat(64);
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        resolveImageDigest: async (image) => {
+          events.push(`digest:${image}`);
+          return digest;
+        },
+        pruneRound: async (image) => {
+          events.push(`prune:${image}`);
+        },
+      });
+
+      const result = await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-A' });
+
+      expect(result.imageDigest).toBe(digest);
+      expect(events).toEqual(['digest:img-A', 'prune:img-A']);
+    });
+
     it('prunes the round image even when the eval throws EvalCouldNotGradeError', async () => {
       // eval.py exits non-zero without writing a report — runEval throws
       // EvalCouldNotGradeError('eval_no_report'). The image must still be

@@ -9,7 +9,10 @@ import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import {
   ValidatedPoolStore,
   EVAL_SEMANTICS_VERSION,
+  createVettedPoolArtifactRef,
+  hashVettedPoolArtifact,
   type ValidatedPoolEntry,
+  type SweRebenchV2VettedPoolArtifact,
 } from '../../../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../../../src/solver-types/_swe-rebench-v2-substrate.js';
 
@@ -886,5 +889,105 @@ describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () =
 
     expect(loadPool).toHaveBeenCalledTimes(1);
     expect(runner.runEval).toHaveBeenCalledTimes(2);
+  });
+
+  it('grades launcher-posted tasks from the published pool ref without local admission data', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: INSTANCE_ID,
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+          rowHash: MATCHING_ROW_HASH,
+          imageName: IMAGE_NAME,
+          imageDigest: IMAGE_DIGEST,
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: 'bafy-launch-manifest',
+      artifactCid: 'bafy-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    const task = buildEvaluationTask(buildSolverEnvelope());
+    task.solverNetManifestCid = 'bafy-launch-manifest';
+    task.eligibility = { vettedPoolRef: ref };
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    };
+    const loadPool = makeMatchingPoolLoader();
+    const runCommand = makeMatchingDockerInspect();
+    const fetchFromIpfs = vi.fn().mockResolvedValue(artifact);
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      fetchFromIpfs,
+      loadPool,
+      runCommand: runCommand as unknown as typeof import('../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js').runCommand,
+      runner,
+      uploadToIpfs: vi.fn().mockResolvedValue('bafy-ok'),
+    });
+
+    const ctx = buildHarnessContext(implStateDir, task);
+    const sol = await harness.run(ctx);
+    const second = await harness.run(ctx);
+
+    expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    expect(second.gating).toMatchObject({ verdict: 'PASS' });
+    expect(fetchFromIpfs).toHaveBeenCalledTimes(1);
+    expect(fetchFromIpfs).toHaveBeenCalledWith(expect.any(String), 'bafy-vetted-pool');
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
+    expect(loadPool).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it('skips launcher-posted tasks when the published pool ref omits the instance', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'other__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: 'bafy-launch-manifest',
+      artifactCid: 'bafy-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    const task = buildEvaluationTask(buildSolverEnvelope());
+    task.solverNetManifestCid = 'bafy-launch-manifest';
+    task.eligibility = { vettedPoolRef: ref };
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn() },
+      fetchFromIpfs: vi.fn().mockResolvedValue(artifact),
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+
+    const err = await harness.run(buildHarnessContext(implStateDir, task)).catch((e) => e);
+
+    expect(err).toBeInstanceOf(SkippableError);
+    expect(err.reason).toBe('vetted_pool_instance_missing_or_unscorable');
+    expect(err.reason).not.toBe('admission_missing_or_unscorable');
   });
 });

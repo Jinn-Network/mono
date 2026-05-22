@@ -31,6 +31,10 @@ import { mkdtemp, writeFile, readFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
+import {
+  defaultCommandRunner,
+  resolveImageDigest as resolveSubstrateImageDigest,
+} from '../../../solver-types/_swe-rebench-v2-substrate.js';
 
 /**
  * Thrown when the eval could not actually grade the solution. There is no
@@ -120,6 +124,11 @@ export interface PythonEvalRunnerOptions {
    */
   pruneRound?: (image: string) => Promise<void>;
   /**
+   * Resolves the eval image digest while the image is still local, before
+   * per-round pruning removes it. Defaults to `docker image inspect`.
+   */
+  resolveImageDigest?: (image: string) => Promise<string | null>;
+  /**
    * Required free disk (bytes) before an eval round starts. Explicit value >
    * `JINN_EVAL_DISK_FLOOR_GB` env > {@link DEFAULT_EVAL_DISK_FLOOR_BYTES}.
    */
@@ -138,21 +147,20 @@ export interface PythonEvalRunnerOptions {
  * command is logged, never thrown (#476: cleanup must not break the eval loop).
  */
 function runDocker(args: string[]): Promise<void> {
-  return new Promise((resolve) => {
-    const child = spawn('docker', args, { stdio: ['ignore', 'ignore', 'ignore'] });
-    child.on('exit', (code, signal) => {
-      if (code !== 0) {
-        const status =
-          code !== null ? `exited ${code}` : `terminated by signal ${signal ?? 'unknown'}`;
-        console.warn(`[swe-rebench-v2] docker ${args.join(' ')} ${status}`);
+  return defaultCommandRunner('docker', args)
+    .then((res) => {
+      if (res.exitCode !== 0) {
+        const detail = (res.stderr || res.stdout).trim();
+        console.warn(
+          `[swe-rebench-v2] docker ${args.join(' ')} exited ${res.exitCode}` +
+            `${detail ? `: ${detail.slice(-500)}` : ''}`,
+        );
       }
-      resolve();
+    })
+    .catch((err: unknown) => {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${reason}`);
     });
-    child.on('error', (err) => {
-      console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${err.message}`);
-      resolve();
-    });
-  });
 }
 
 /**
@@ -163,6 +171,10 @@ async function defaultPruneRound(image: string): Promise<void> {
   if (image) await runDocker(['rmi', '-f', image]);
   await runDocker(['container', 'prune', '-f']);
   await runDocker(['builder', 'prune', '-f']);
+}
+
+async function defaultResolveImageDigest(imageName: string): Promise<string | null> {
+  return resolveSubstrateImageDigest(imageName, defaultCommandRunner);
 }
 
 /**
@@ -248,12 +260,14 @@ export class PythonEvalRunner implements EvalRunner {
   private readonly diskFloorBytes: number;
   private readonly freeDiskBytes: () => Promise<number>;
   private readonly systemPrune: () => Promise<void>;
+  private readonly resolveImageDigest: (image: string) => Promise<string | null>;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
     this.pruneRound = opts.pruneRound ?? defaultPruneRound;
     this.diskFloorBytes = resolveDiskFloorBytes(opts.diskFloorBytes);
     this.freeDiskBytes = opts.freeDiskBytes ?? defaultFreeDiskBytes;
     this.systemPrune = opts.systemPrune ?? (() => runDocker(['system', 'prune', '-f']));
+    this.resolveImageDigest = opts.resolveImageDigest ?? defaultResolveImageDigest;
   }
 
   /**
@@ -276,7 +290,18 @@ export class PythonEvalRunner implements EvalRunner {
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
     await this.ensureDiskHeadroom();
     try {
-      return await this.runEvalImpl(args);
+      const result = await this.runEvalImpl(args);
+      let imageDigest: string | null = null;
+      try {
+        imageDigest = await this.resolveImageDigest(args.image);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[swe-rebench-v2] resolveImageDigest failed for ${args.image}: ${reason}`);
+      }
+      return {
+        ...result,
+        ...(imageDigest ? { imageDigest } : {}),
+      };
     } finally {
       // Prune this round's full Docker footprint — even when the eval threw,
       // a pull-and-crash still left an image on disk (#476).

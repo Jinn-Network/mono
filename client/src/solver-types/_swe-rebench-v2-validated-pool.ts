@@ -21,12 +21,18 @@
  */
 
 import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
-import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
+import {
+  computeRowHash,
+  defaultCommandRunner,
+  resolveImageDigest,
+  resolveUpstreamEvalCommit,
+  type CommandRunner,
+} from './_swe-rebench-v2-substrate.js';
+import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 
 // In-process mutex map: serialises concurrent record() calls against the
 // same file. Entries are never removed; bounded by the number of distinct
@@ -64,6 +70,11 @@ function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
 export const EVAL_SEMANTICS_VERSION = '3';
 
 const SCHEMA_VERSION = 'swe-rebench-v2-validated-pool.v1' as const;
+export const SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE = 'swe-rebench-v2-vetted-pool.v1' as const;
+export const SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION = 'solvernet.artifact-ref.v1' as const;
+export const VETTED_POOL_REF_ELIGIBILITY_KEY = 'vettedPoolRef' as const;
+const PUBLICATION_SCHEMA_VERSION = 'swe-rebench-v2-vetted-pool-publication.v1' as const;
+const PUBLICATION_FILE = 'vetted-pool-artifact-publication.json';
 
 export interface ValidatedPoolEntry {
   scorable: boolean;
@@ -87,6 +98,40 @@ interface ValidatedPoolFile {
   entries: Record<string, ValidatedPoolEntry>;
 }
 
+export interface SweRebenchV2VettedPoolArtifactEntry extends ValidatedPoolEntry {
+  instance_id: string;
+  scorable: true;
+}
+
+export interface SweRebenchV2VettedPoolArtifact {
+  schemaVersion: typeof SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE;
+  evalSemanticsVersion: string;
+  generatedAt: string;
+  entries: SweRebenchV2VettedPoolArtifactEntry[];
+}
+
+export interface SolverNetArtifactRef {
+  schemaVersion: typeof SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION;
+  manifestCid: string;
+  artifactType: typeof SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE;
+  artifactCid: string;
+  artifactHash: `sha256:${string}`;
+  evalSemanticsVersion: string;
+  publishedAt: string;
+}
+
+export interface VettedPoolArtifactPublication {
+  schemaVersion: typeof PUBLICATION_SCHEMA_VERSION;
+  updatedAt: string;
+  ref: SolverNetArtifactRef;
+  artifact: SweRebenchV2VettedPoolArtifact;
+}
+
+export interface ScorableVettedPoolArtifactEntries {
+  ids: Set<string>;
+  byId: Map<string, SweRebenchV2VettedPoolArtifactEntry>;
+}
+
 function freshFile(evalSemanticsVersion: string): ValidatedPoolFile {
   return { schemaVersion: SCHEMA_VERSION, evalSemanticsVersion, updatedAt: new Date().toISOString(), entries: {} };
 }
@@ -98,6 +143,163 @@ function isValidFile(raw: unknown, evalSemanticsVersion: string): raw is Validat
     (raw as ValidatedPoolFile).evalSemanticsVersion === evalSemanticsVersion &&
     typeof (raw as ValidatedPoolFile).entries === 'object' && (raw as ValidatedPoolFile).entries !== null
   );
+}
+
+function publicationPath(stateDir: string): string {
+  return resolvePath(join(stateDir, PUBLICATION_FILE));
+}
+
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+  await writeFile(tmp, JSON.stringify(value, null, 2));
+  try {
+    await rename(tmp, file); // POSIX rename is atomic
+  } catch (err) {
+    // Best-effort tempfile cleanup — don't mask the original error.
+    await unlink(tmp).catch(() => undefined);
+    throw err;
+  }
+}
+
+function isObject(raw: unknown): raw is Record<string, unknown> {
+  return typeof raw === 'object' && raw !== null;
+}
+
+function isSha256(value: unknown): value is `sha256:${string}` {
+  return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+}
+
+function parseVettedPoolArtifactEntry(raw: unknown): SweRebenchV2VettedPoolArtifactEntry | null {
+  if (!isObject(raw)) return null;
+  if (typeof raw['instance_id'] !== 'string' || raw['instance_id'].length === 0) return null;
+  if (raw['scorable'] !== true) return null;
+  if (typeof raw['reason'] !== 'string') return null;
+  if (typeof raw['checkedAt'] !== 'string') return null;
+  const entry: SweRebenchV2VettedPoolArtifactEntry = {
+    instance_id: raw['instance_id'],
+    scorable: true,
+    reason: raw['reason'],
+    checkedAt: raw['checkedAt'],
+    ...(typeof raw['rowHash'] === 'string' ? { rowHash: raw['rowHash'] } : {}),
+    ...(typeof raw['imageName'] === 'string' ? { imageName: raw['imageName'] } : {}),
+    ...(typeof raw['imageDigest'] === 'string' ? { imageDigest: raw['imageDigest'] } : {}),
+    ...(typeof raw['upstreamEvalCommit'] === 'string' ? { upstreamEvalCommit: raw['upstreamEvalCommit'] } : {}),
+  };
+  return entry;
+}
+
+export function parseVettedPoolArtifact(raw: unknown): SweRebenchV2VettedPoolArtifact {
+  if (!isObject(raw)) throw new Error('vetted pool artifact must be an object');
+  if (raw['schemaVersion'] !== SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE) {
+    throw new Error(`vetted pool artifact schemaVersion must be ${SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE}`);
+  }
+  if (typeof raw['evalSemanticsVersion'] !== 'string') {
+    throw new Error('vetted pool artifact evalSemanticsVersion must be a string');
+  }
+  if (typeof raw['generatedAt'] !== 'string') {
+    throw new Error('vetted pool artifact generatedAt must be a string');
+  }
+  if (!Array.isArray(raw['entries'])) {
+    throw new Error('vetted pool artifact entries must be an array');
+  }
+  const entries = raw['entries'].map(parseVettedPoolArtifactEntry);
+  if (entries.some((e) => e === null)) {
+    throw new Error('vetted pool artifact contains an invalid or unscorable entry');
+  }
+  return {
+    schemaVersion: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+    evalSemanticsVersion: raw['evalSemanticsVersion'],
+    generatedAt: raw['generatedAt'],
+    entries: (entries as SweRebenchV2VettedPoolArtifactEntry[]).sort((a, b) => a.instance_id.localeCompare(b.instance_id)),
+  };
+}
+
+function normalizeVettedPoolArtifact(artifact: SweRebenchV2VettedPoolArtifact): SweRebenchV2VettedPoolArtifact {
+  return {
+    schemaVersion: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+    evalSemanticsVersion: artifact.evalSemanticsVersion,
+    generatedAt: artifact.generatedAt,
+    entries: [...artifact.entries]
+      .map((entry) => ({ ...entry, scorable: true as const }))
+      .sort((a, b) => a.instance_id.localeCompare(b.instance_id)),
+  };
+}
+
+export function hashVettedPoolArtifact(artifact: SweRebenchV2VettedPoolArtifact): `sha256:${string}` {
+  const canonical = canonicalJson(normalizeVettedPoolArtifact(artifact));
+  return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
+}
+
+export function loadVettedPoolArtifactScorableEntries(raw: unknown): ScorableVettedPoolArtifactEntries {
+  const artifact = parseVettedPoolArtifact(raw);
+  const byId = new Map<string, SweRebenchV2VettedPoolArtifactEntry>();
+  for (const entry of artifact.entries) {
+    byId.set(entry.instance_id, entry);
+  }
+  return { ids: new Set(byId.keys()), byId };
+}
+
+export function createVettedPoolArtifactRef(args: {
+  manifestCid: string;
+  artifactCid: string;
+  artifactHash: `sha256:${string}`;
+  evalSemanticsVersion: string;
+  publishedAt: string;
+}): SolverNetArtifactRef {
+  return {
+    schemaVersion: SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
+    manifestCid: args.manifestCid,
+    artifactType: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+    artifactCid: args.artifactCid,
+    artifactHash: args.artifactHash,
+    evalSemanticsVersion: args.evalSemanticsVersion,
+    publishedAt: args.publishedAt,
+  };
+}
+
+export function sweRebenchV2VettedPoolArtifactMetadataKey(manifestCid: string): string {
+  return `solvernet-artifact:${manifestCid}:swe-rebench-v2-vetted-pool`;
+}
+
+export function parseVettedPoolArtifactRef(raw: unknown): SolverNetArtifactRef {
+  if (!isObject(raw)) throw new Error('vetted pool artifact ref must be an object');
+  if (raw['schemaVersion'] !== SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION) {
+    throw new Error(`vetted pool artifact ref schemaVersion must be ${SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION}`);
+  }
+  if (raw['artifactType'] !== SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE) {
+    throw new Error(`vetted pool artifact ref artifactType must be ${SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE}`);
+  }
+  if (typeof raw['manifestCid'] !== 'string' || raw['manifestCid'].length === 0) {
+    throw new Error('vetted pool artifact ref manifestCid must be a string');
+  }
+  if (typeof raw['artifactCid'] !== 'string' || raw['artifactCid'].length === 0) {
+    throw new Error('vetted pool artifact ref artifactCid must be a string');
+  }
+  if (!isSha256(raw['artifactHash'])) {
+    throw new Error('vetted pool artifact ref artifactHash must be sha256:<64 hex>');
+  }
+  if (typeof raw['evalSemanticsVersion'] !== 'string') {
+    throw new Error('vetted pool artifact ref evalSemanticsVersion must be a string');
+  }
+  if (typeof raw['publishedAt'] !== 'string') {
+    throw new Error('vetted pool artifact ref publishedAt must be a string');
+  }
+  return {
+    schemaVersion: SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
+    manifestCid: raw['manifestCid'],
+    artifactType: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+    artifactCid: raw['artifactCid'],
+    artifactHash: raw['artifactHash'],
+    evalSemanticsVersion: raw['evalSemanticsVersion'],
+    publishedAt: raw['publishedAt'],
+  };
+}
+
+export function vettedPoolArtifactRefFromEligibility(eligibility: Record<string, unknown> | undefined): SolverNetArtifactRef | null {
+  const raw = eligibility?.[VETTED_POOL_REF_ELIGIBILITY_KEY];
+  if (raw === undefined) return null;
+  return parseVettedPoolArtifactRef(raw);
 }
 
 export class ValidatedPoolStore {
@@ -128,16 +330,7 @@ export class ValidatedPoolStore {
   }
 
   private async writeAtomic(file: ValidatedPoolFile): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.${randomBytes(6).toString('hex')}.tmp`;
-    await writeFile(tmp, JSON.stringify(file, null, 2));
-    try {
-      await rename(tmp, this.file); // POSIX rename is atomic
-    } catch (err) {
-      // Best-effort tempfile cleanup — don't mask the original error.
-      await unlink(tmp).catch(() => undefined);
-      throw err;
-    }
+    await writeJsonAtomic(this.file, file);
   }
 
   /** The set of instance ids known scorable for `evalSemanticsVersion`, or
@@ -156,6 +349,18 @@ export class ValidatedPoolStore {
       : null;
     this.scorableIdsCache = { mtimeMs, semanticsVersion: evalSemanticsVersion, ids };
     return ids;
+  }
+
+  async getScorableEntries(evalSemanticsVersion: string): Promise<{
+    entries: Record<string, ValidatedPoolEntry>;
+    updatedAt: string;
+  } | null> {
+    const raw = await this.readRaw();
+    if (!isValidFile(raw, evalSemanticsVersion)) return null;
+    return {
+      updatedAt: raw.updatedAt,
+      entries: Object.fromEntries(Object.entries(raw.entries).filter(([, entry]) => entry.scorable)),
+    };
   }
 
   /** The entry for `instanceId`, or `null` if not validated for this semantics version. */
@@ -178,6 +383,93 @@ export class ValidatedPoolStore {
       this.cache = file;
     });
   }
+}
+
+export async function exportScorableVettedPoolArtifact(
+  store: ValidatedPoolStore,
+  evalSemanticsVersion: string,
+  opts: { generatedAt?: string } = {},
+): Promise<SweRebenchV2VettedPoolArtifact | null> {
+  const scorable = await store.getScorableEntries(evalSemanticsVersion);
+  if (!scorable) return null;
+  const entries = Object.entries(scorable.entries)
+    .map(([instance_id, entry]) => ({
+      instance_id,
+      scorable: true as const,
+      reason: entry.reason,
+      checkedAt: entry.checkedAt,
+      ...(entry.rowHash ? { rowHash: entry.rowHash } : {}),
+      ...(entry.imageName ? { imageName: entry.imageName } : {}),
+      ...(entry.imageDigest ? { imageDigest: entry.imageDigest } : {}),
+      ...(entry.upstreamEvalCommit ? { upstreamEvalCommit: entry.upstreamEvalCommit } : {}),
+    }))
+    .sort((a, b) => a.instance_id.localeCompare(b.instance_id));
+  return {
+    schemaVersion: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+    evalSemanticsVersion,
+    generatedAt: opts.generatedAt ?? scorable.updatedAt,
+    entries,
+  };
+}
+
+function parsePublication(raw: unknown): VettedPoolArtifactPublication {
+  if (!isObject(raw) || raw['schemaVersion'] !== PUBLICATION_SCHEMA_VERSION) {
+    throw new Error(`vetted pool publication schemaVersion must be ${PUBLICATION_SCHEMA_VERSION}`);
+  }
+  if (typeof raw['updatedAt'] !== 'string') {
+    throw new Error('vetted pool publication updatedAt must be a string');
+  }
+  const ref = parseVettedPoolArtifactRef(raw['ref']);
+  const artifact = parseVettedPoolArtifact(raw['artifact']);
+  const actualHash = hashVettedPoolArtifact(artifact);
+  if (actualHash !== ref.artifactHash) {
+    throw new Error(`vetted pool publication hash mismatch: ref=${ref.artifactHash} artifact=${actualHash}`);
+  }
+  return {
+    schemaVersion: PUBLICATION_SCHEMA_VERSION,
+    updatedAt: raw['updatedAt'],
+    ref,
+    artifact,
+  };
+}
+
+export async function readVettedPoolArtifactPublication(args: {
+  stateDir: string;
+  manifestCid?: string;
+  evalSemanticsVersion?: string;
+}): Promise<VettedPoolArtifactPublication | null> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(publicationPath(args.stateDir), 'utf8'));
+  } catch {
+    return null;
+  }
+  const publication = parsePublication(raw);
+  if (args.manifestCid !== undefined && publication.ref.manifestCid !== args.manifestCid) return null;
+  if (args.evalSemanticsVersion !== undefined && publication.ref.evalSemanticsVersion !== args.evalSemanticsVersion) return null;
+  return publication;
+}
+
+export async function writeVettedPoolArtifactPublication(args: {
+  stateDir: string;
+  ref: SolverNetArtifactRef;
+  artifact: SweRebenchV2VettedPoolArtifact;
+  updatedAt?: string;
+}): Promise<VettedPoolArtifactPublication> {
+  const artifact = parseVettedPoolArtifact(args.artifact);
+  const ref = parseVettedPoolArtifactRef(args.ref);
+  const artifactHash = hashVettedPoolArtifact(artifact);
+  if (artifactHash !== ref.artifactHash) {
+    throw new Error(`vetted pool publication hash mismatch: ref=${ref.artifactHash} artifact=${artifactHash}`);
+  }
+  const publication: VettedPoolArtifactPublication = {
+    schemaVersion: PUBLICATION_SCHEMA_VERSION,
+    updatedAt: args.updatedAt ?? new Date().toISOString(),
+    ref,
+    artifact,
+  };
+  await writeJsonAtomic(publicationPath(args.stateDir), publication);
+  return publication;
 }
 
 export type AdmissionMode = 'required' | 'python-floor';
@@ -225,15 +517,6 @@ function looksPython(patch: string | undefined): boolean {
   // Match `--- a/<p>` / `+++ b/<p>` / `diff --git a/<p>` ending in .py
   return /(?:^|\n)(?:---|\+\+\+|diff --git) [ab]\/\S+\.py(?:\s|$)/.test(patch);
 }
-
-const defaultCommandRunner: CommandRunner = (bin, args, opts) => new Promise((resolve, reject) => {
-  const child = spawn(bin, args, { ...(opts ?? {}), stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = ''; let stderr = '';
-  child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-  child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-  child.on('error', reject);
-  child.on('close', (code: number | null) => resolve({ exitCode: code ?? 1, stdout, stderr }));
-});
 
 export interface ValidatePoolDeps {
   fetcher: HfFetcher;
@@ -338,9 +621,10 @@ export async function validatePoolInstances(
         pass_to_pass: row.PASS_TO_PASS,
       });
       const checkedAt = new Date().toISOString();
-      // Resolve digest AFTER the eval ran — that's when the image is guaranteed
-      // to be present locally with its RepoDigests populated.
-      const imageDigest = await resolveImageDigest(row.image_name, runner);
+      // Prefer the digest captured by a real runner before per-round pruning.
+      // Test runners that do not carry it still use the legacy post-eval
+      // Docker inspect fallback.
+      const imageDigest = res.imageDigest ?? await resolveImageDigest(row.image_name, runner);
       const substrate = {
         checkedAt,
         rowHash,
