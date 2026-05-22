@@ -178,8 +178,11 @@ rate_limit_probe() {
     return 0
   fi
   local remaining reset_at
-  remaining="$(printf '%s' "$probe" | sed -n 's/.*"remaining":[[:space:]]*\([0-9]*\).*/\1/p' | head -n1)"
-  reset_at="$(printf '%s' "$probe" | sed -n 's/.*"resetAt":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  # Parse with jq, not sed: the script already hard-requires jq, and a
+  # future gh release that pretty-prints multi-line JSON would silently
+  # defeat a sed-on-one-line parser, disabling the floor check.
+  remaining="$(printf '%s' "$probe" | jq -r '.data.rateLimit.remaining // empty' 2>/dev/null)"
+  reset_at="$(printf '%s' "$probe" | jq -r '.data.rateLimit.resetAt // empty' 2>/dev/null)"
   if [ -z "$remaining" ]; then
     warn "could not parse rate-limit probe response; continuing without floor check."
     return 0
