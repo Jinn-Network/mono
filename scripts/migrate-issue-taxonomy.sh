@@ -226,12 +226,8 @@ cmd_backfill_type() {
   raw="$(gh issue list --repo "$REPO_SLUG" --state open --limit 500 \
     --json number,title,body,labels,type 2>/dev/null || true)"
   if [ -z "$raw" ]; then
-    warn "gh issue list returned empty."
-    if ! guard_apply; then
-      return 0
-    fi
-    defer_with_pointer "backfill-type"
-    return 0
+    warn "gh issue list returned empty; no issues to scan."
+    raw='[]'
   fi
   local count=0
   while IFS=$'\t' read -r num title labels body_b64; do
@@ -261,9 +257,7 @@ cmd_backfill_type() {
     | jq -r '.[] | select(.type == null or .type.name == null)
              | [.number, .title, (.labels | map(.name) | join(",")), (.body // "" | @base64)] | @tsv')
   note "done. suggested=${count}"
-  if ! guard_apply; then
-    return 0
-  fi
+  guard_apply || return 0
   defer_with_pointer "backfill-type"
 }
 
@@ -300,10 +294,7 @@ cmd_backfill_fields() {
   rate_limit_probe
   note "Defaults: Blocked on=${DEFAULT_BLOCKED_ON}, Effort=${DEFAULT_EFFORT}, Priority=${DEFAULT_PRIORITY}"
   cmd_list_missing_fields
-  if ! guard_apply; then
-    note "(dry-run) re-run with --apply to print the deferred-mutation pointer for the manual loop."
-    return 0
-  fi
+  guard_apply || return 0
   defer_with_pointer "backfill-fields"
 }
 
