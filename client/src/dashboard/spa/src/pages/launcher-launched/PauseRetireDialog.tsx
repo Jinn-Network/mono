@@ -89,7 +89,12 @@ export function PauseRetireDialog({
 
   const copy = TARGET_COPY[target];
   const requiresType = target === 'retired';
-  const typeMatches = !requiresType || typed.trim() === solverNetName.trim();
+  // Compare case-insensitively: the label renders the name with
+  // `text-transform: uppercase` in CSS, so the operator types what they see
+  // (all-caps) but the underlying name may have mixed case.  Lowercasing both
+  // sides collapses the mismatch without altering the displayed label.
+  const typeMatches =
+    !requiresType || typed.trim().toLowerCase() === solverNetName.trim().toLowerCase();
   const confirmDisabled = pending || !typeMatches;
 
   return (

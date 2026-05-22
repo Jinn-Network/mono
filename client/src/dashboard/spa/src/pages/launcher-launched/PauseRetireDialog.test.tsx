@@ -75,6 +75,34 @@ describe('PauseRetireDialog', () => {
     expect(confirm.disabled).toBe(false);
   });
 
+  it('Retire: typed-name gate is case-insensitive (matches the uppercase display)', () => {
+    // The confirm label renders the SolverNet name with `text-transform:
+    // uppercase` via CSS, so an operator who types exactly what is displayed
+    // (e.g. "SWE-REBENCH V2" for a net named "SWE-rebench v2") must be able
+    // to enable the Retire button.  Regression for #413.
+    render(
+      <PauseRetireDialog
+        open
+        target="retired"
+        solverNetName="SWE-rebench v2"
+        onConfirm={() => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+    const typed = screen.getByTestId('launcher-launched-dialog-typed') as HTMLInputElement;
+    const confirm = screen.getByTestId('launcher-launched-dialog-confirm') as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    // Typing the CSS-uppercased form (what the dialog visually shows) should match.
+    fireEvent.change(typed, { target: { value: 'SWE-REBENCH V2' } });
+    expect(confirm.disabled).toBe(false);
+    // Typing the original mixed-case form should also still match.
+    fireEvent.change(typed, { target: { value: 'SWE-rebench v2' } });
+    expect(confirm.disabled).toBe(false);
+    // A clearly wrong value must not match.
+    fireEvent.change(typed, { target: { value: 'SWE-rebench' } });
+    expect(confirm.disabled).toBe(true);
+  });
+
   it('Retire: Confirm fires onConfirm only when name matches', () => {
     const onConfirm = vi.fn();
     render(
