@@ -105,6 +105,11 @@
     "e2e:dashboard": "yarn build && playwright test --config=playwright.config.ts",
     "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts test/smoke/donation-ipfs-http-smoke.test.ts"
   },
+  "resolutions": {
+    "axios": "^1.15.2",
+    "fast-uri": "^3.1.2",
+    "protobufjs": "^8.0.3"
+  },
   "dependencies": {
     "@ethereumjs/wallet": "^10.0.0",
     "@grpc/grpc-js": "^1.14.3",
