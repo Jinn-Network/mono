@@ -121,6 +121,28 @@ function truncateAddress(address: string): string {
 }
 
 /**
+ * Mirrors `evaluatorHarnessNameForContract` in
+ * `client/src/solver-nets/registry.ts` — substring match against
+ * `manifest.contract.evaluationFunction.implementation`. Returns `undefined`
+ * when the implementation string maps to no known evaluator harness; the
+ * caller must then skip the probe and the gate.
+ *
+ * Symmetry with the daemon helper is intentional: if the daemon would not
+ * pair a contract to an evaluator harness, the join form has nothing to
+ * probe. New evaluator harnesses get added in both places — track the daemon
+ * helper as the source of truth.
+ */
+function evaluatorHarnessNameForManifest(
+  manifest: RegistryManifestResponse['manifest'] | undefined,
+): string | undefined {
+  const implementation = manifest?.contract.evaluationFunction.implementation;
+  if (!implementation) return undefined;
+  if (implementation.includes('swe-rebench-v2-evaluator')) return 'swe-rebench-v2-evaluator';
+  if (implementation.includes('prediction-v1-evaluator')) return 'prediction-v1-evaluator';
+  return undefined;
+}
+
+/**
  * Readiness lookup keyed by harness name. `undefined` for a name means the
  * probe is still in flight or the harness is absent from the daemon's
  * readiness snapshot (404 — treated as not-yet-known, not a hard failure).
@@ -245,10 +267,23 @@ export function JoinFlow({
   // not-ready options render disabled, and Save & Join can gate on the
   // selected harness reporting ready. The daemon keys the readiness endpoint
   // by `Harness.name` — the same canonical name `form.harness` carries.
-  const { readiness } = useReadiness(
-    solverCompatibleHarnesses.map((h) => h.name),
-  );
+  //
+  // Issue #523: also probe the evaluator harness — derived from the
+  // manifest's `contract.evaluationFunction.implementation` — so a Docker
+  // outage (the evaluator's `isReady()` check) blocks the evaluator-role
+  // join with the same symmetry as the solver gate.
+  const evaluatorHarnessName = evaluatorHarnessNameForManifest(manifest);
+  const readinessProbeNames = [
+    ...solverCompatibleHarnesses.map((h) => h.name),
+    ...(form.roles.includes('evaluator') && evaluatorHarnessName
+      ? [evaluatorHarnessName]
+      : []),
+  ];
+  const { readiness } = useReadiness(readinessProbeNames);
   const selectedHarnessReadiness = readiness.get(form.harness);
+  const evaluatorReadiness = evaluatorHarnessName
+    ? readiness.get(evaluatorHarnessName)
+    : undefined;
 
   const submitMutation = useMutation({
     mutationFn: () =>
@@ -370,12 +405,45 @@ export function JoinFlow({
   // we avoid flashing a disabled button before the first probe resolves.
   const harnessReadinessBlocked =
     showSolverFields && selectedHarnessReadiness?.ready === false;
+  // Evaluator readiness gate (#523): symmetric with the solver gate. Only
+  // applies when the operator has selected the evaluator role AND the
+  // manifest's evaluator implementation resolved to a known evaluator
+  // harness. Unknown implementation → undefined name → no probe, no gate.
+  const evaluatorReadinessBlocked =
+    showEvaluatorInfo && evaluatorReadiness?.ready === false;
 
   const canSubmit =
     form.roles.length > 0 &&
     !submitMutation.isPending &&
     !costGateBlocked &&
-    !harnessReadinessBlocked;
+    !harnessReadinessBlocked &&
+    !evaluatorReadinessBlocked;
+
+  const evaluatorNotReadyBanner =
+    evaluatorReadinessBlocked && evaluatorHarnessName ? (
+      <div
+        data-testid="join-evaluator-not-ready"
+        data-harness={evaluatorHarnessName}
+        role="status"
+        className="flex flex-col gap-1 rounded-md border border-destructive bg-[var(--bg)] p-2.5 font-mono text-[11px] text-foreground"
+      >
+        <span className="text-destructive">
+          {harnessDisplayName(evaluatorHarnessName)} is not ready
+          {evaluatorReadiness?.reason ? `: ${evaluatorReadiness.reason}` : ''}
+        </span>
+        {evaluatorReadiness?.nextStep && (
+          <span
+            data-testid="join-evaluator-not-ready-next-step"
+            className="text-[var(--fg-muted)]"
+          >
+            {evaluatorReadiness.nextStep.description}
+            {evaluatorReadiness.nextStep.cli
+              ? ` (${evaluatorReadiness.nextStep.cli})`
+              : ''}
+          </span>
+        )}
+      </div>
+    ) : null;
 
   return (
     <main
@@ -743,6 +811,7 @@ export function JoinFlow({
             </code>{' '}
             by the manifest's contract; no operator selection required.
           </p>
+          {evaluatorNotReadyBanner}
         </Card>
       )}
 
@@ -772,6 +841,7 @@ export function JoinFlow({
             </code>{' '}
             by the manifest. The fields above only configure the solver role.
           </p>
+          {evaluatorNotReadyBanner}
         </Card>
       )}
 
