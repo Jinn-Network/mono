@@ -50,16 +50,21 @@ export class GeneratedTaskSource implements TaskSource {
   constructor(
     readonly sourceKey: string,
     private readonly generator: TaskGenerator,
+    private readonly opts: {
+      bucketKeyForTask?: (task: Task, index: number) => string | undefined;
+    } = {},
   ) {}
 
   async collect(_now: Date): Promise<TaskCandidate[]> {
     const generated = await this.generator();
     if (!generated) return [];
     const tasks = Array.isArray(generated) ? generated : [generated];
-    return tasks.map((task) => {
-      const bucketKey = task.window
-        ? `${task.window.startTs}:${task.window.endTs}`
-        : task.id;
+    return tasks.map((task, index) => {
+      const overrideBucketKey = this.opts.bucketKeyForTask?.(task, index);
+      const bucketKey = overrideBucketKey
+        ?? (task.window
+          ? `${task.window.startTs}:${task.window.endTs}`
+          : task.id);
       return {
         task,
         sourceKey: this.sourceKey,

@@ -140,6 +140,36 @@ describe('GeneratedTaskSource', () => {
     expect(policy.bucketKey).toBe('1700000000000:1700003600000');
   });
 
+  it('uses configured bucket override when supplied', async () => {
+    const jobs: Task[] = [
+      {
+        id: 'generated-a',
+        description: 'first generated',
+        window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+      },
+      {
+        id: 'generated-b',
+        description: 'second generated',
+        window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+      },
+    ];
+    const generator = vi.fn(async () => jobs);
+    const source = new GeneratedTaskSource('gen:batch', generator, {
+      bucketKeyForTask: (task, index) => `override:${task.id}:${index}`,
+    });
+
+    const candidates = await source.collect(new Date());
+
+    expect(candidates.map((candidate) => candidate.sourceMeta?.bucketKey)).toEqual([
+      'override:generated-a:0',
+      'override:generated-b:1',
+    ]);
+    expect(candidates.map((candidate) => candidate.postingPolicy)).toEqual([
+      { kind: 'once_per_bucket', bucketKey: 'override:generated-a:0' },
+      { kind: 'once_per_bucket', bucketKey: 'override:generated-b:1' },
+    ]);
+  });
+
   it('falls back to id as bucketKey when no window', async () => {
     const job: Task = { id: 'no-window-1', description: 'no window' };
     const generator = vi.fn(async () => job);
