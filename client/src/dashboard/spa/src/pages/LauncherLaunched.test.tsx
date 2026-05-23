@@ -196,6 +196,34 @@ describe('LauncherLaunchedPage', () => {
     );
   });
 
+  it('renders manifest fields (not placeholders) for an owned launching record (issue #114)', async () => {
+    // Simulates the just-launched window: record.status === 'launching',
+    // registry.metadataBlockNumber undefined. The API now serves the
+    // hash-verified owned manifest with a synthesised launched lifecycle
+    // (sourceBlock: 0), so name + prices render instead of placeholders.
+    vi.mocked(api.solvernets.get).mockResolvedValue(
+      buildRecord({ status: 'launching', registry: {} }),
+    );
+    vi.mocked(api.solvernets.getManifest).mockResolvedValue({
+      manifest: buildManifest({ name: 'Polymarket' }),
+      lifecycle: {
+        status: 'launched',
+        statusUpdatedAt: '2026-05-05T15:00:00Z',
+        sourceBlock: 0,
+      },
+    });
+    wrap(<LauncherLaunchedPage solverNetId="sn-1" pollIntervalMs={1000} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-launched-name').textContent).toBe('Polymarket'),
+    );
+    // Spend panel should render — i.e. it did not bail on a missing manifest.
+    expect(screen.getByTestId('launcher-launched-spend-panel')).toBeTruthy();
+    // No placeholder fallbacks visible.
+    expect(screen.queryByText(/unnamed/i)).toBeNull();
+    expect(screen.queryByText(/missing price/i)).toBeNull();
+  });
+
   it('surfaces the operator-join count from the discovery API (issue #351)', async () => {
     vi.mocked(api.solvernets.get).mockResolvedValue(buildRecord());
     vi.mocked(api.solvernets.getManifest).mockResolvedValue(buildManifestResponse());
