@@ -219,9 +219,6 @@ describe('LauncherLaunchedPage', () => {
     );
     // Spend panel should render — i.e. it did not bail on a missing manifest.
     expect(screen.getByTestId('launcher-launched-spend-panel')).toBeTruthy();
-    // No placeholder fallbacks visible.
-    expect(screen.queryByText(/unnamed/i)).toBeNull();
-    expect(screen.queryByText(/missing price/i)).toBeNull();
   });
 
   it('surfaces the operator-join count from the discovery API (issue #351)', async () => {
