@@ -2,12 +2,14 @@
  * eng:loop entry point.
  *
  * Usage:
- *   yarn eng:loop             # run the dispatcher on a 60s interval (normal mode)
- *   yarn eng:loop --dry-run   # one cycle, no mutations, prints the CycleReport
- *   yarn eng:loop --once      # one cycle live (dispatch up to cap), then exit
- *   yarn eng:loop --cap <N>   # override concurrencyCap (default: see DEFAULT_CONFIG)
+ *   yarn eng:loop                     # run the dispatcher on a 60s interval (normal mode)
+ *   yarn eng:loop --dry-run           # one cycle, no mutations, prints the CycleReport
+ *   yarn eng:loop --once              # one cycle live (dispatch up to cap), then exit
+ *   yarn eng:loop --cap <N>           # override concurrencyCap
+ *   yarn eng:loop --backpressure <N>  # override openPrBackpressure
  *
  * --once + --cap <N> compose: bound a first live run to at most N dispatches.
+ * Defaults live in src/dispatcher/types.ts DEFAULT_CONFIG.
  */
 
 import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
@@ -148,11 +150,16 @@ async function main(): Promise<void> {
   const isOnce = process.argv.includes('--once');
   const capIdx = process.argv.indexOf('--cap');
   const capOverride = capIdx >= 0 ? parseInt(process.argv[capIdx + 1] ?? '', 10) : NaN;
+  const bpIdx = process.argv.indexOf('--backpressure');
+  const bpOverride = bpIdx >= 0 ? parseInt(process.argv[bpIdx + 1] ?? '', 10) : NaN;
 
-  const cfg =
-    Number.isInteger(capOverride) && capOverride > 0
-      ? { ...DEFAULT_CONFIG, concurrencyCap: capOverride }
-      : DEFAULT_CONFIG;
+  let cfg = DEFAULT_CONFIG;
+  if (Number.isInteger(capOverride) && capOverride > 0) {
+    cfg = { ...cfg, concurrencyCap: capOverride };
+  }
+  if (Number.isInteger(bpOverride) && bpOverride > 0) {
+    cfg = { ...cfg, openPrBackpressure: bpOverride };
+  }
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
   // TODO: wire GhPrSink.collect once session-completion detection exists

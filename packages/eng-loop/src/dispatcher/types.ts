@@ -64,7 +64,11 @@ export interface DispatcherConfig {
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
   concurrencyCap: 3,
-  openPrBackpressure: 5,
+  // PR backpressure ceiling: pause dispatch when this many open PRs target `next`.
+  // 30 is enough headroom for a normal sprint's worth of in-flight + parked work
+  // without the dispatcher idling on a healthy queue. Override per run with
+  // `--backpressure N` on scripts/run-eng-loop.ts.
+  openPrBackpressure: 30,
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
 };
