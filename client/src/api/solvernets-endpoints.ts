@@ -663,14 +663,13 @@ function localLifecycleForRecord(record: LaunchedSolverNetRecord): {
   // placeholders. The record-level `status` field (queried separately by
   // the SPA via `/v1/solvernets/launched/:id`) continues to carry the
   // `launching`/`failed` signal for the status pill.
-  const sourceBlock = record.registry.metadataBlockNumber ?? 0;
   return {
     status:
       record.status === 'paused' || record.status === 'retired'
         ? record.status
         : 'launched',
     statusUpdatedAt: record.statusUpdatedAt,
-    sourceBlock,
+    sourceBlock: record.registry.metadataBlockNumber ?? 0,
   };
 }
 
