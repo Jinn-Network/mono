@@ -2417,6 +2417,44 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
     expect(body.error).toBe('manifest_not_found');
   });
 
+  it('falls back to owned cached manifest when the registry client throws (issue #114)', async () => {
+    const cid = 'bafyownedregistrythrows1234567890';
+    const manifest = makeManifest({
+      solverNetId: 'owned-registry-throws',
+      manifestCid: cid,
+    });
+    const manifestPath = await store.writeManifestCache(cid, manifest);
+    await store.writeRecord({
+      ...makeOwnedRecord({ solverNetId: 'owned-registry-throws', status: 'launching' }),
+      manifestCid: cid,
+      manifestHash: manifestHash(manifest),
+      manifestPath,
+      registry: {},
+    });
+
+    // Registry IS wired but every call throws — simulates Anvil/local dev
+    // where the Ponder indexer is unreachable but the operator owns the
+    // record + has the manifest in the local cache.
+    const registry = makeMockRegistryGet({
+      getManifestError: new Error('subgraph unreachable'),
+    });
+    const { app } = buildTestApp({ store, registry });
+
+    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      manifest: SolverNetManifestV1;
+      lifecycle: { status: string; sourceBlock: number };
+    };
+    expect(body.manifest.solverNetId).toBe('owned-registry-throws');
+    expect(body.lifecycle.status).toBe('launched');
+    expect(body.lifecycle.sourceBlock).toBe(0);
+  });
+
   it('rejects trivially-malformed cid with 400', async () => {
     const registry = makeMockRegistryGet({});
     const { app } = buildTestApp({ store, registry });

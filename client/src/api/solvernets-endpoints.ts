@@ -1604,6 +1604,18 @@ export function registerSolverNetsEndpoints(
     try {
       manifest = await registry.getManifest({ manifestCid: cid });
     } catch (err) {
+      // Registry is wired but unreachable (e.g. Anvil/local dev, Ponder
+      // subgraph down). If the operator owns this manifest and the local
+      // cache has a hash-verified copy, serve it with a synthesised
+      // lifecycle so the launched dashboard does not render placeholders.
+      // The hash check inside tryGetOwnedCachedManifest is unchanged —
+      // non-owned manifests still fall through to the 404 path.
+      if (ownedCached) {
+        return c.json({
+          manifest: ownedCached.manifest,
+          lifecycle: localLifecycleForRecord(ownedCached.record),
+        });
+      }
       return c.json(
         {
           error: 'manifest_not_found',
@@ -1621,11 +1633,15 @@ export function registerSolverNetsEndpoints(
     try {
       lifecycle = await registry.getLifecycleStatus({ manifestCid: cid });
     } catch (err) {
-      // The manifest body exists on IPFS but no lifecycle events were found
-      // on chain — surface as 404 with the real reason in the message.
-      // This is genuinely unusual (the launcher must have setMetadata'd the
-      // initial cid for the manifest to be discoverable at all), but it can
-      // happen during the brief window between IPFS pin and on-chain confirm.
+      // Manifest body resolved on IPFS but lifecycle events lookup failed.
+      // Same re-fallback rule as above: prefer the owned cache's
+      // synthesised lifecycle over a 404 when the operator owns the record.
+      if (ownedCached) {
+        return c.json({
+          manifest: ownedCached.manifest,
+          lifecycle: localLifecycleForRecord(ownedCached.record),
+        });
+      }
       return c.json(
         {
           error: 'manifest_not_found',
