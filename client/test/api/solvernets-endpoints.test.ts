@@ -2305,7 +2305,7 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
   });
 
   it.each(['launching', 'failed'] as const)(
-    'does not serve an owned cached %s manifest before the lifecycle is anchored',
+    'serves an owned cached %s manifest before the lifecycle is anchored (issue #114)',
     async (status) => {
       const cid = `bafyowned${status}prebroadcast1234567890`;
       const solverNetId = `owned-${status}-prebroadcast`;
@@ -2333,9 +2333,18 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
         headers: authHeaders(),
       });
 
-      expect(res.status).toBe(503);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toBe('registry_unavailable');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        manifest: SolverNetManifestV1;
+        lifecycle: { status: string; statusUpdatedAt: string; sourceBlock: number };
+      };
+      expect(body.manifest.solverNetId).toBe(solverNetId);
+      // No on-chain anchor yet — synthesise a `launched` lifecycle so the SPA
+      // can render real manifest fields. The record-level `status` (carried
+      // separately in the record query) still shows the `launching`/`failed` pill.
+      expect(body.lifecycle.status).toBe('launched');
+      expect(body.lifecycle.sourceBlock).toBe(0);
+      expect(typeof body.lifecycle.statusUpdatedAt).toBe('string');
     },
   );
 
