@@ -132,12 +132,36 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
   app.get('/v1/bootstrap', (c) => {
     const path = join(config.earningDir, 'earning_state.json');
     if (!existsSync(path)) {
+      // No earning_state.json yet — but the daemon may have exited before
+      // writing it (e.g. funding_required before first full run). Surface any
+      // persisted bootstrap-error.json and bootstrap-funding.json so the SPA
+      // can render actionable states rather than a blank "uninitialized" screen.
+      const uninitError = readBootstrapError(config.earningDir);
+      let uninitFunding: FundingGateOnDisk | null = null;
+      const uninitFundingPath = join(config.earningDir, 'bootstrap-funding.json');
+      if (existsSync(uninitFundingPath)) {
+        try {
+          uninitFunding = JSON.parse(readFileSync(uninitFundingPath, 'utf-8')) as FundingGateOnDisk;
+        } catch {
+          uninitFunding = null;
+        }
+      }
       return c.json({
         schemaVersion: 1,
         mode: 'uninitialized',
         steps: STEPS,
         currentStep: STEPS[0],
         services: [],
+        ...(uninitError ? { error: uninitError } : {}),
+        ...(uninitFunding ? {
+          funding: {
+            master_address: uninitFunding.master_address,
+            eth_required: uninitFunding.eth_required,
+            eth_balance: uninitFunding.eth_balance,
+            targetWei: fundingTargetWei(uninitFunding),
+            targetMet: false,
+          },
+        } : {}),
       });
     }
 

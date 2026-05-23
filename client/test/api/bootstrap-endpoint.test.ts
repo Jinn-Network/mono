@@ -330,6 +330,68 @@ describe('GET /v1/bootstrap', () => {
   });
 });
 
+// Issue #110: uninitialized branch should surface bootstrap-error.json and
+// bootstrap-funding.json so the SPA can render actionable states even before
+// earning_state.json exists (i.e. before the first daemon run completes).
+describe('GET /v1/bootstrap — uninitialized branch surfaces persisted files (issue #110)', () => {
+  it('uninitialized branch surfaces persisted bootstrap-error.json', async () => {
+    // NO earning_state.json — this is the uninitialized branch.
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-bootstrap-uninit-error-'));
+    const env = buildEnvelope({
+      code: 'funding_required',
+      message: 'EOA needs 0.01 ETH; have 0',
+      hint: 'Fund the address shown above, then re-run jinn run.',
+      details: { address: '0xWallet', requiredWei: '10000000000000000', haveWei: '0' },
+    });
+    persistBootstrapError(env, earningDir);
+
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      mode: string;
+      error?: { code: string; exitCode: number; message: string };
+    };
+    expect(body.mode).toBe('uninitialized');
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe('funding_required');
+    expect(body.error!.exitCode).toBe(10);
+    expect(body.error!.message).toContain('EOA needs 0.01 ETH');
+  });
+
+  it('uninitialized branch surfaces bootstrap-funding.json', async () => {
+    // NO earning_state.json — uninitialized. Only a funding gate file.
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-bootstrap-uninit-funding-'));
+    writeFileSync(join(earningDir, 'bootstrap-funding.json'), JSON.stringify({
+      schemaVersion: 1,
+      master_address: '0xMaster',
+      eth_required: '10000000000000000',
+      eth_balance: '0',
+    }));
+
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      mode: string;
+      funding?: {
+        master_address?: string;
+        eth_required?: string;
+        eth_balance?: string;
+        targetWei?: string;
+        targetMet?: boolean;
+      };
+    };
+    expect(body.mode).toBe('uninitialized');
+    expect(body.funding).toBeDefined();
+    expect(body.funding!.eth_required).toBe('10000000000000000');
+    expect(body.funding!.targetWei).toBe('10000000000000000');
+    expect(body.funding!.targetMet).toBe(false);
+  });
+});
+
 // Issue #367: `/v1/bootstrap` no longer carries the embedded-agent feature
 // flag. The operator app reads it (and every feature flag) via the injected
 // `window.__JINN_FEATURES__` — see `test/api/feature-flags-inject.test.ts`
