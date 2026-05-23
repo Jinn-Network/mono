@@ -128,6 +128,36 @@ function fundingTargetWei(fundingGate: FundingGateOnDisk): string | undefined {
   return (BigInt(required) + BigInt(balance)).toString();
 }
 
+function readFundingGate(earningDir: string): FundingGateOnDisk | null {
+  const path = join(earningDir, 'bootstrap-funding.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as FundingGateOnDisk;
+  } catch {
+    return null;
+  }
+}
+
+// targetMet is always false in responses where we surface the funding block:
+//   - uninitialized branch surfaces it pre-bootstrap, before any balance check
+//   - setup branch only surfaces it when fundingGateActive (master balance < target)
+// Once the gate clears, callers omit the funding block entirely.
+function fundingResponse(gate: FundingGateOnDisk): {
+  master_address?: string;
+  eth_required?: string;
+  eth_balance?: string;
+  targetWei: string | undefined;
+  targetMet: false;
+} {
+  return {
+    master_address: gate.master_address,
+    eth_required: gate.eth_required,
+    eth_balance: gate.eth_balance,
+    targetWei: fundingTargetWei(gate),
+    targetMet: false,
+  };
+}
+
 export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): void {
   app.get('/v1/bootstrap', (c) => {
     const path = join(config.earningDir, 'earning_state.json');
@@ -137,15 +167,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       // persisted bootstrap-error.json and bootstrap-funding.json so the SPA
       // can render actionable states rather than a blank "uninitialized" screen.
       const uninitError = readBootstrapError(config.earningDir);
-      let uninitFunding: FundingGateOnDisk | null = null;
-      const uninitFundingPath = join(config.earningDir, 'bootstrap-funding.json');
-      if (existsSync(uninitFundingPath)) {
-        try {
-          uninitFunding = JSON.parse(readFileSync(uninitFundingPath, 'utf-8')) as FundingGateOnDisk;
-        } catch {
-          uninitFunding = null;
-        }
-      }
+      const uninitFunding = readFundingGate(config.earningDir);
       return c.json({
         schemaVersion: 1,
         mode: 'uninitialized',
@@ -153,15 +175,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
         currentStep: STEPS[0],
         services: [],
         ...(uninitError ? { error: uninitError } : {}),
-        ...(uninitFunding ? {
-          funding: {
-            master_address: uninitFunding.master_address,
-            eth_required: uninitFunding.eth_required,
-            eth_balance: uninitFunding.eth_balance,
-            targetWei: fundingTargetWei(uninitFunding),
-            targetMet: false,
-          },
-        } : {}),
+        ...(uninitFunding ? { funding: fundingResponse(uninitFunding) } : {}),
       });
     }
 
@@ -173,15 +187,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
     }
 
     const services = parsed.services ?? [];
-    let fundingGate: FundingGateOnDisk | null = null;
-    const fundingGatePath = join(config.earningDir, 'bootstrap-funding.json');
-    if (existsSync(fundingGatePath)) {
-      try {
-        fundingGate = JSON.parse(readFileSync(fundingGatePath, 'utf-8')) as FundingGateOnDisk;
-      } catch {
-        fundingGate = null;
-      }
-    }
+    const fundingGate = readFundingGate(config.earningDir);
     // `[].every(...)` returns true vacuously, so a fresh fleet (no services
     // yet) was previously treated as "all services running" and the funding
     // gate was suppressed even when bootstrap-funding.json existed. Compute
@@ -234,19 +240,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
       ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
       ...(cfg.joinedSolverNets !== undefined ? { joinedSolverNets: cfg.joinedSolverNets } : {}),
-      ...(fundingGateActive && fundingGate ? {
-        funding: {
-          master_address: fundingGate.master_address,
-          eth_required: fundingGate.eth_required,
-          eth_balance: fundingGate.eth_balance,
-          targetWei: fundingTargetWei(fundingGate),
-          // targetMet is false whenever the funding gate is active: the gate
-          // fires only when master balance < target. Once the gate clears the
-          // daemon advances past awaiting_funding and the funding block is
-          // omitted entirely (allRunning path or currentStep > awaiting_funding).
-          targetMet: false,
-        },
-      } : {}),
+      ...(fundingGateActive && fundingGate ? { funding: fundingResponse(fundingGate) } : {}),
       ...(error ? { error } : {}),
       ...(retireFailed ? {
         retire_failed: {
