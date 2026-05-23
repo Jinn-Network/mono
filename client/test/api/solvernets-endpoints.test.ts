@@ -2228,15 +2228,35 @@ describe('GET /v1/solvernets/registry (Task 15)', () => {
 });
 
 describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
-  it('returns 503 when registry dep is not configured', async () => {
+  it('returns 503 when registry dep is not configured and no owned cache matches', async () => {
+    // CID is valid-shape so it passes the malformed-cid 400 guard and falls
+    // through to the no-registry / no-owned-cache 503 path. The malformed-cid
+    // 400 path is covered by a separate test below.
     const { app } = buildTestApp({ store });
-    const res = await app.request('/v1/solvernets/registry/bafy-test', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
+    const res = await app.request(
+      '/v1/solvernets/registry/bafynoownedrecord1234567890',
+      {
+        method: 'GET',
+        headers: authHeaders(),
+      },
+    );
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('registry_unavailable');
+  });
+
+  it('rejects trivially-malformed cid with 400 even when no registry is configured', async () => {
+    // Regression guard (#114): the owned-cache short-circuit and the
+    // no-registry 503 guard must not run before CID shape validation,
+    // otherwise garbage cids return 503 instead of 400 in no-registry mode.
+    const { app } = buildTestApp({ store });
+    const res = await app.request('/v1/solvernets/registry/not-a-cid', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('invalid_cid');
   });
 
   it('returns an owned cached manifest without requiring the registry client', async () => {
