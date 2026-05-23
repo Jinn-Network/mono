@@ -1558,6 +1558,21 @@ export function registerSolverNetsEndpoints(
       );
     }
 
+    // CID shape validation runs before the owned-cache lookup and the
+    // no-registry 503 guard so garbage cids never reach those branches.
+    // Pre-#114 the no-registry 503 short-circuited first, but the owned-cache
+    // short-circuit added by #114 would otherwise let malformed cids return
+    // 503 instead of 400 in no-registry mode.
+    if (!CID_SHAPE_REGEX.test(cid)) {
+      return c.json(
+        {
+          error: 'invalid_cid',
+          message: `cid does not look like a CID: ${cid}`,
+        },
+        400,
+      );
+    }
+
     let ownedCached: Awaited<ReturnType<typeof tryGetOwnedCachedManifest>>;
     try {
       ownedCached = await tryGetOwnedCachedManifest(store, cid);
@@ -1588,16 +1603,6 @@ export function registerSolverNetsEndpoints(
       );
     }
     const registry = deps.registry;
-
-    if (!CID_SHAPE_REGEX.test(cid)) {
-      return c.json(
-        {
-          error: 'invalid_cid',
-          message: `cid does not look like a CID: ${cid}`,
-        },
-        400,
-      );
-    }
 
     let manifest: SolverNetManifestV1;
     try {
