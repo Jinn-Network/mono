@@ -654,9 +654,16 @@ function localLifecycleForRecord(record: LaunchedSolverNetRecord): {
   status: 'launched' | 'paused' | 'retired';
   statusUpdatedAt: string;
   sourceBlock: number;
-} | null {
-  const sourceBlock = record.registry.metadataBlockNumber;
-  if (sourceBlock === undefined) return null;
+} {
+  // For records whose lifecycle has not yet been anchored on chain
+  // (status === 'launching' or 'failed' — `metadataBlockNumber` undefined),
+  // synthesise a `launched` display-lifecycle with `sourceBlock: 0`. The
+  // manifest body IS real (hash-verified by `tryGetOwnedCachedManifest`),
+  // so the launched dashboard can render names + prices instead of
+  // placeholders. The record-level `status` field (queried separately by
+  // the SPA via `/v1/solvernets/launched/:id`) continues to carry the
+  // `launching`/`failed` signal for the status pill.
+  const sourceBlock = record.registry.metadataBlockNumber ?? 0;
   return {
     status:
       record.status === 'paused' || record.status === 'retired'
@@ -1565,13 +1572,10 @@ export function registerSolverNetsEndpoints(
       );
     }
     if (ownedCached) {
-      const lifecycle = localLifecycleForRecord(ownedCached.record);
-      if (lifecycle) {
-        return c.json({
-          manifest: ownedCached.manifest,
-          lifecycle,
-        });
-      }
+      return c.json({
+        manifest: ownedCached.manifest,
+        lifecycle: localLifecycleForRecord(ownedCached.record),
+      });
     }
 
     if (!deps.registry) {
