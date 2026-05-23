@@ -217,8 +217,17 @@ describe('LauncherLaunchedPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('launcher-launched-name').textContent).toBe('Polymarket'),
     );
-    // Spend panel should render — i.e. it did not bail on a missing manifest.
+    // Spend panel renders manifest-sourced prices (not the '—' placeholder
+    // SpendPanel falls back to when the manifest is missing). The issue
+    // explicitly names "missing prices" as a symptom, so assert on the price
+    // testids that surface that symptom.
     expect(screen.getByTestId('launcher-launched-spend-panel')).toBeTruthy();
+    expect(
+      screen.getByTestId('launcher-launched-spend-solution-price').textContent,
+    ).not.toBe('—');
+    expect(
+      screen.getByTestId('launcher-launched-spend-verdict-price').textContent,
+    ).not.toBe('—');
   });
 
   it('surfaces the operator-join count from the discovery API (issue #351)', async () => {
