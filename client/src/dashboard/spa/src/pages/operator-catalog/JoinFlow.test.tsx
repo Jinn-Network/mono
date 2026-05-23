@@ -617,10 +617,13 @@ describe('JoinFlow — per-harness readiness gate', () => {
 
     // Solver harnesses may still be probed (none selected here, but the catalog
     // lists them); the evaluator name 'prediction-v1-evaluator' must NOT be.
-    await waitFor(() =>
-      expect(
-        apiMock.harnessReadiness.mock.calls.flat().includes('prediction-v1-evaluator'),
-      ).toBe(false),
+    // Anchor the negative assertion to a positive event: wait until at least
+    // one solver harness probe has fired, then assert the evaluator name was
+    // never among the probed names. Without the anchor, .toBe(false) would
+    // pass trivially on the first poll before any probes had a chance to run.
+    await waitFor(() => expect(apiMock.harnessReadiness).toHaveBeenCalled());
+    expect(apiMock.harnessReadiness.mock.calls.flat()).not.toContain(
+      'prediction-v1-evaluator',
     );
     const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
