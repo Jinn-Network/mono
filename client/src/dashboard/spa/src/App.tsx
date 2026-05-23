@@ -74,6 +74,8 @@ export default function App(): JSX.Element {
   // removed: uninitialized now always routes to Onboarding (branch 2), which
   // can render actionable error/funding cards from the enriched API response.
   if (connection.status === 'disconnected' && !data) {
+    // TypeScript narrows `connection` to the disconnected variant here, which
+    // satisfies DaemonOfflineScreen's tightened prop type.
     return (
       <TooltipProvider delayDuration={150}>
         <DaemonOfflineScreen connection={connection} />

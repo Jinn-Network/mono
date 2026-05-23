@@ -168,6 +168,14 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       // can render actionable states rather than a blank "uninitialized" screen.
       const uninitError = readBootstrapError(config.earningDir);
       const uninitFunding = readFundingGate(config.earningDir);
+      // The `funding` block is supplementary. The SPA's Onboarding region
+      // surfaces funding details only via the BootstrapErrorCard path (which
+      // requires `error` to be present), because the phase-row +
+      // AwaitingFundingCard path requires `mode === 'setup'` and a non-empty
+      // `master_address`. The error envelope is the canonical display mechanism
+      // for the uninitialized window. The funding block is kept in the response
+      // because downstream clients may want it; surfacing it directly in
+      // Onboarding for the uninitialized case is in-scope for a later PR.
       return c.json({
         schemaVersion: 1,
         mode: 'uninitialized',

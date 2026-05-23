@@ -17,6 +17,9 @@ import type { ConnectionState } from '../api/connection-state.js';
 import { Button } from '../components/ui/button.js';
 import { Card, CardContent } from '../components/ui/card.js';
 
+/** Narrowed to the disconnected variant — the App gate guarantees this before rendering. */
+type DisconnectedState = Extract<ConnectionState, { status: 'disconnected' }>;
+
 const eyebrow =
   'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--accent-gold)]';
 const display = 'font-serif font-normal leading-[1.05] text-foreground text-[64px]';
@@ -24,14 +27,9 @@ const display = 'font-serif font-normal leading-[1.05] text-foreground text-[64p
 export function DaemonOfflineScreen({
   connection,
 }: {
-  connection: ConnectionState;
+  connection: DisconnectedState;
 }): JSX.Element {
   const [showDetails, setShowDetails] = useState(false);
-
-  const attempts =
-    connection.status === 'disconnected' ? connection.attempts : null;
-  const lastError =
-    connection.status === 'disconnected' ? connection.lastError : null;
 
   return (
     <div
@@ -56,9 +54,9 @@ export function DaemonOfflineScreen({
 
         <p className="font-mono text-sm text-[var(--fg-muted)]">
           Reconnecting&hellip;
-          {attempts !== null && attempts > 0 && (
+          {connection.attempts > 0 && (
             <span className="ml-1 text-[var(--fg-dim)]">
-              (attempt {attempts})
+              (attempt {connection.attempts})
             </span>
           )}
         </p>
@@ -75,10 +73,10 @@ export function DaemonOfflineScreen({
           {showDetails ? 'Hide details' : 'Show details'}
         </Button>
 
-        {showDetails && lastError && (
+        {showDetails && connection.lastError && (
           <Card className="bg-[var(--bg-elevated)]">
             <CardContent className="px-3 py-2">
-              <p className="font-mono text-xs text-[var(--fg-muted)]">{lastError}</p>
+              <p className="font-mono text-xs text-[var(--fg-muted)]">{connection.lastError}</p>
             </CardContent>
           </Card>
         )}

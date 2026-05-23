@@ -178,4 +178,25 @@ describe('App gate — issue #110', () => {
     await waitFor(() => expect(screen.queryByTestId('daemon-offline-screen')).toBeTruthy());
     expect(screen.queryByText(/Starting jinn/i)).toBeNull();
   });
+
+  it('AC1-regression — disconnected + stale cached data → Onboarding, not DaemonOfflineScreen', async () => {
+    // react-query keeps the last successful response in cache even when
+    // subsequent refetches fail. The gate `connection.status === 'disconnected'
+    // && !data` must NOT flip to DaemonOfflineScreen when cached data exists —
+    // we already have enough to render Onboarding (or the running app).
+    _connectionState = { status: 'disconnected', attempts: 2, lastError: 'fetch failed', since: Date.now() };
+    await renderApp();
+    // Resolve with a cached setup-mode payload — simulates react-query serving
+    // its last known good value while the refetch probe is failing.
+    _bootstrapResolver?.({
+      schemaVersion: 1,
+      mode: 'setup',
+      steps: [],
+      currentStep: 'wallet',
+      services: [],
+      chain: 'base-sepolia',
+    });
+    await waitFor(() => expect(screen.queryByTestId('onboarding')).toBeTruthy());
+    expect(screen.queryByTestId('daemon-offline-screen')).toBeNull();
+  });
 });

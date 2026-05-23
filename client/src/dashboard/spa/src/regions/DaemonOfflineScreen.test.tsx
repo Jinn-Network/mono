@@ -3,22 +3,24 @@
  *
  * Asserts: headline literal, `jinn run` code element, "Reconnecting…" text,
  * and the disclosure toggle revealing lastError.
+ *
+ * The component accepts only the disconnected variant of ConnectionState
+ * (narrowed via DisconnectedState = Extract<ConnectionState, { status: 'disconnected' }>).
+ * The "connected state" test has been removed since the type system now
+ * forbids that input path.
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { DaemonOfflineScreen } from './DaemonOfflineScreen.js';
 import type { ConnectionState } from '../api/connection-state.js';
 
-const disconnected: ConnectionState = {
+type DisconnectedState = Extract<ConnectionState, { status: 'disconnected' }>;
+
+const disconnected: DisconnectedState = {
   status: 'disconnected',
   since: Date.now() - 5000,
   lastError: 'TypeError: fetch failed',
   attempts: 3,
-};
-
-const connected: ConnectionState = {
-  status: 'connected',
-  lastConnectedAt: Date.now(),
 };
 
 describe('DaemonOfflineScreen', () => {
@@ -63,12 +65,5 @@ describe('DaemonOfflineScreen', () => {
     expect(screen.getByText('TypeError: fetch failed')).toBeTruthy();
     fireEvent.click(screen.getByText('Hide details'));
     expect(screen.queryByText('TypeError: fetch failed')).toBeNull();
-  });
-
-  it('renders correctly with a connected state (no attempts/lastError)', () => {
-    render(<DaemonOfflineScreen connection={connected} />);
-    expect(screen.getByRole('heading').textContent).toBe('Daemon not running.');
-    // No attempt counter shown
-    expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 });
