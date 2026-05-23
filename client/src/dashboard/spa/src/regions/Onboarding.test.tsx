@@ -85,6 +85,53 @@ describe('Onboarding (3-phase post-vh74.2)', () => {
   });
 });
 
+// Issue #110: Onboarding must gracefully render mode=uninitialized with
+// empty services and a funding_required error envelope. The BootstrapErrorCard
+// "Send ETH to" row must resolve details.address from the envelope.
+describe('Onboarding with mode=uninitialized + funding_required error (issue #110)', () => {
+  it('renders BootstrapErrorCard "Send ETH to" row with envelope details.address', async () => {
+    bootstrapOverride = {
+      mode: 'uninitialized',
+      services: [],
+      master_address: undefined,
+      currentStep: 'wallet',
+      error: {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        code: 'funding_required',
+        exitCode: 10,
+        message: 'EOA needs 0.01 ETH to continue; have 0',
+        hint: 'Fund the address shown above, then re-run jinn run.',
+        details: {
+          category: 'insufficient_funds',
+          address: '0xDeadBeefWalletAddress',
+          requiredWei: '10000000000000000',
+          haveWei: '0',
+        },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    // Wait for bootstrap data
+    await screen.findByText(/Provisioning your wallet/i);
+    // BootstrapErrorCard should render the funding address
+    expect(screen.getByText('0xDeadBeefWalletAddress')).toBeTruthy();
+  });
+
+  it('does not crash when services is empty and master_address is undefined', async () => {
+    bootstrapOverride = {
+      mode: 'uninitialized',
+      services: [],
+      master_address: undefined,
+      currentStep: 'wallet',
+    };
+    render(withQueryClient(<Onboarding />));
+    // Should render the three phases without errors
+    await screen.findByText(/Provisioning your wallet/i);
+    expect(screen.getByText(/Fund your wallet/i)).toBeTruthy();
+    expect(screen.getByText(/Joining Jinn/i)).toBeTruthy();
+  });
+});
+
 // statusFor — determines whether a phase row is 'done', 'active', or
 // 'queued'. The funding gate (jinn-mono-hjex.7): Phase 2 ("Fund your wallet")
 // must stay 'active' until the funding gate explicitly clears, even when
