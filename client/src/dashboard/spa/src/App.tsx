@@ -3,8 +3,10 @@ import { useState } from 'react';
 import { Router, Route, Switch, Redirect } from 'wouter';
 import { api } from './api/client.js';
 import type { BootstrapState } from './api/types.js';
+import { useConnectionState } from './api/connection-state.js';
 import { LoadingScreen } from './regions/LoadingScreen.js';
 import { Onboarding } from './regions/Onboarding.js';
+import { DaemonOfflineScreen } from './regions/DaemonOfflineScreen.js';
 import { AppShell } from './shell/AppShell.js';
 import { Header } from './shell/Header.js';
 import { TopTabs } from './shell/TopTabs.js';
@@ -47,6 +49,7 @@ export default function App(): JSX.Element {
     queryFn: () => api.getBootstrap(),
     refetchInterval: 1500,
   });
+  const connection = useConnectionState();
   const [restartPending, setRestartPending] = useState(false);
 
   // Offline state and restart-pending are both notification categories (§2.10).
@@ -55,24 +58,43 @@ export default function App(): JSX.Element {
   // useNotifications without prop-drilling.
   const restartCtx = { restartPending, setRestartPending };
 
-  if (isLoading || !data || data.mode === 'uninitialized') {
-    const headline = !data
-      ? 'Starting jinn'
-      : data.mode === 'uninitialized'
-        ? 'Setting up your wallet'
-        : 'Loading';
+  // Three-way pre-running gate (issue #110):
+  //
+  //   1. Daemon offline — connection is disconnected AND we have no cached data.
+  //      Show DaemonOfflineScreen with recovery instruction ("jinn run").
+  //
+  //   2. Bootstrap in progress — we have data but mode is not 'running'.
+  //      Show Onboarding (covers 'setup' AND 'uninitialized' so the operator
+  //      sees funding/error cards rather than a blank loading state).
+  //
+  //   3. Loading — we are connected but data hasn't arrived yet.
+  //      Show the "Starting jinn" LoadingScreen.
+  //
+  // The original `data.mode === 'uninitialized' → LoadingScreen` path is
+  // removed: uninitialized now always routes to Onboarding (branch 2), which
+  // can render actionable error/funding cards from the enriched API response.
+  if (connection.status === 'disconnected' && !data) {
     return (
       <TooltipProvider delayDuration={150}>
-        <LoadingScreen headline={headline} />
+        <DaemonOfflineScreen connection={connection} />
         <Toaster />
       </TooltipProvider>
     );
   }
 
-  if (data.mode !== 'running') {
+  if (data && data.mode !== 'running') {
     return (
       <TooltipProvider delayDuration={150}>
         <Onboarding />
+        <Toaster />
+      </TooltipProvider>
+    );
+  }
+
+  if (isLoading || !data) {
+    return (
+      <TooltipProvider delayDuration={150}>
+        <LoadingScreen headline="Starting jinn" />
         <Toaster />
       </TooltipProvider>
     );
