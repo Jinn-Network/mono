@@ -40,9 +40,21 @@ describe('TopTabs', () => {
   it('marks Dashboard active when location is /overview', () => {
     renderTabs('/overview');
     const dashboard = screen.getByText('Dashboard');
+    const events = screen.getByText('Events');
     const settings = screen.getByText('Settings');
     expect(dashboard.getAttribute('data-active')).toBe('true');
+    expect(events.getAttribute('data-active')).toBe('false');
     expect(settings.getAttribute('data-active')).toBe('false');
+  });
+
+  it('marks Events active for event log routes', () => {
+    renderTabs('/events/42');
+    expect(screen.getByText('Events').getAttribute('data-active')).toBe('true');
+  });
+
+  it('marks Events active for request-scoped event log URLs', () => {
+    renderTabs('/events?requestId=req-1');
+    expect(screen.getByText('Events').getAttribute('data-active')).toBe('true');
   });
 
   it('does not render the Leaderboard tab while the leaderboard surface is disabled', () => {

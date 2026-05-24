@@ -68,6 +68,13 @@ describe('ActivityCard', () => {
     expect(history.at(-1)).toBe('/operator/registry');
   });
 
+  it('navigates to the event log from the Activity header', () => {
+    const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
+    render(ui);
+    fireEvent.click(screen.getByTestId('activity-view-event-log'));
+    expect(history.at(-1)).toBe('/events');
+  });
+
   it('navigates to /operator/memberships when Settings · Edit is clicked', () => {
     const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
     render(ui);
@@ -94,6 +101,13 @@ describe('ActivityCard', () => {
     expect(table.textContent).toMatch(/active/i);
     expect(screen.getAllByText('solve').length).toBeGreaterThan(0);
     expect(screen.getAllByText('evaluate').length).toBeGreaterThan(0);
+  });
+
+  it('drills from a task request id into request-scoped events', () => {
+    const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[baseTask]} />);
+    render(ui);
+    fireEvent.click(screen.getByText('0xabc1…cdef'));
+    expect(history.at(-1)).toBe('/events?requestId=0xabc1234567890abcdef');
   });
 
   it('filters out FAILED rows we never engaged with (never started OR impl not ready) but keeps real failures', () => {

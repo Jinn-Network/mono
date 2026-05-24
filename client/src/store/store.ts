@@ -1194,6 +1194,103 @@ export class Store {
     }));
   }
 
+  /**
+   * Filtered, id-cursored page of activity events for the dedicated Events
+   * page. Newest-first.
+   *
+   * Cursors on `id` rather than `ts` so startup/shutdown rows with null
+   * timestamps remain reachable.
+   */
+  getActivityEventsPage(opts: {
+    kinds?: string[];
+    outcome?: string;
+    requestId?: string;
+    beforeId?: number;
+    limit?: number;
+  } = {}): ActivityEventRow[] {
+    const effectiveLimit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+    const clauses: string[] = [];
+    const params: Record<string, unknown> = { limit: effectiveLimit };
+    if (opts.kinds && opts.kinds.length > 0) {
+      const placeholders = opts.kinds.map((_, i) => `@kind${i}`);
+      clauses.push(`kind IN (${placeholders.join(', ')})`);
+      opts.kinds.forEach((k, i) => {
+        params[`kind${i}`] = k;
+      });
+    }
+    if (opts.outcome) {
+      clauses.push('outcome = @outcome');
+      params['outcome'] = opts.outcome;
+    }
+    if (opts.requestId) {
+      clauses.push('request_id = @requestId');
+      params['requestId'] = opts.requestId;
+    }
+    if (opts.beforeId !== undefined) {
+      clauses.push('id < @beforeId');
+      params['beforeId'] = opts.beforeId;
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db.prepare(
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
+       FROM activity_events
+       ${where}
+       ORDER BY id DESC
+       LIMIT @limit`,
+    ).all(params) as Array<{
+      id: number;
+      ts: string | null;
+      kind: string;
+      request_id: string | null;
+      service_index: number | null;
+      tx_hash: string | null;
+      solver_type: string | null;
+      outcome: string | null;
+      detail: string | null;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      kind: r.kind,
+      requestId: r.request_id,
+      serviceIndex: r.service_index,
+      txHash: r.tx_hash,
+      solverType: r.solver_type,
+      outcome: r.outcome,
+      detail: r.detail,
+    }));
+  }
+
+  getActivityEventById(id: number): ActivityEventRow | null {
+    const r = this.db.prepare(
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
+       FROM activity_events
+       WHERE id = ?`,
+    ).get(id) as {
+      id: number;
+      ts: string | null;
+      kind: string;
+      request_id: string | null;
+      service_index: number | null;
+      tx_hash: string | null;
+      solver_type: string | null;
+      outcome: string | null;
+      detail: string | null;
+    } | undefined;
+    if (!r) return null;
+    return {
+      id: r.id,
+      ts: r.ts,
+      kind: r.kind,
+      requestId: r.request_id,
+      serviceIndex: r.service_index,
+      txHash: r.tx_hash,
+      solverType: r.solver_type,
+      outcome: r.outcome,
+      detail: r.detail,
+    };
+  }
+
   getActivityCountsByKind(): Record<string, number> {
     const rows = this.db.prepare(
       `SELECT kind, COUNT(*) as c FROM activity_events GROUP BY kind`,

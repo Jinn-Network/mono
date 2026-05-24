@@ -57,6 +57,24 @@ export interface StructuredEvent {
   details?: Record<string, unknown>;
 }
 
+export interface ActivityEventRow {
+  id: number;
+  ts: string | null;
+  kind: string;
+  requestId: string | null;
+  serviceIndex: number | null;
+  txHash: string | null;
+  solverType: string | null;
+  outcome: string | null;
+  detail: string | null;
+}
+
+export interface ActivityEventsResponse {
+  events: ActivityEventRow[];
+  nextCursor: number | null;
+  counts: Record<string, number>;
+}
+
 export type DaemonMode = 'setup' | 'running' | 'uninitialized';
 
 export interface BootstrapErrorEnvelope {

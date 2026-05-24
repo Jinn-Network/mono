@@ -11,6 +11,8 @@ import { TopTabs } from './shell/TopTabs.js';
 import { AgentRail } from './shell/AgentRail.js';
 import { RestartPendingContext } from './shell/RestartPendingContext.js';
 import { OverviewPage } from './pages/Overview.js';
+import { EventsPage } from './pages/Events.js';
+import { EventDetailPage } from './pages/EventDetail.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
@@ -90,6 +92,8 @@ export default function App(): JSX.Element {
             rail={embeddedAgent ? <AgentRail /> : undefined}
           >
             <Switch>
+              <Route path="/events/:id"><EventDetailPage /></Route>
+              <Route path="/events"><EventsPage /></Route>
               <Route path="/overview" component={OverviewPage} />
               <Route path="/operator/join/:cid"><JoinFlow /></Route>
               <Route path="/operator/execution-data">

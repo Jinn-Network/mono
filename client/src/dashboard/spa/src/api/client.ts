@@ -2,6 +2,8 @@ import type {
   BootstrapState,
   ClaudeAuthState,
   StructuredEvent,
+  ActivityEventRow,
+  ActivityEventsResponse,
   SolverNetsCatalogResponse,
   LauncherStatusResponse,
   LauncherTasksResponse,
@@ -82,6 +84,24 @@ export const api = {
     q.set('limit', String(limit));
     return jfetch<{ events: StructuredEvent[] }>(`/v1/events/recent?${q.toString()}`);
   },
+  getActivityEvents: (opts?: {
+    kinds?: string[];
+    outcome?: string;
+    requestId?: string;
+    beforeId?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (opts?.kinds && opts.kinds.length > 0) q.set('kinds', opts.kinds.join(','));
+    if (opts?.outcome) q.set('outcome', opts.outcome);
+    if (opts?.requestId) q.set('requestId', opts.requestId);
+    if (opts?.beforeId !== undefined) q.set('beforeId', String(opts.beforeId));
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return jfetch<ActivityEventsResponse>(`/v1/activity-events${qs ? `?${qs}` : ''}`);
+  },
+  getActivityEvent: (id: number | string) =>
+    jfetch<ActivityEventRow>(`/v1/activity-events/${encodeURIComponent(String(id))}`),
   getClaudeAuth: () => jfetch<ClaudeAuthState>('/v1/auth/claude'),
   installClaudeCode: () =>
     jfetch<{

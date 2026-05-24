@@ -1,21 +1,24 @@
 import type { Store } from '../store/store.js';
 
-export type LifecycleKind =
-  | 'task_posted'
-  | 'intent_registry_failed'
-  | 'request_claimed'
-  | 'delivery_submitted'
-  | 'evaluation_submitted'
-  | 'reward_claimed'
-  | 'balance_topup'
-  | 'jinn_claim_emitted'
-  | 'jinn_claim_ticket_recorded'
-  | 'jinn_claim_submitted'
-  | 'jinn_claim_canonical_skip'
-  | 'engine_transition'
-  | 'tick_error'
-  | 'startup'
-  | 'shutdown';
+export const ALLOWED_LIFECYCLE_KINDS = [
+  'task_posted',
+  'intent_registry_failed',
+  'request_claimed',
+  'delivery_submitted',
+  'evaluation_submitted',
+  'reward_claimed',
+  'balance_topup',
+  'jinn_claim_emitted',
+  'jinn_claim_ticket_recorded',
+  'jinn_claim_submitted',
+  'jinn_claim_canonical_skip',
+  'engine_transition',
+  'tick_error',
+  'startup',
+  'shutdown',
+] as const;
+
+export type LifecycleKind = (typeof ALLOWED_LIFECYCLE_KINDS)[number];
 
 export interface LifecycleEvent {
   kind: LifecycleKind;

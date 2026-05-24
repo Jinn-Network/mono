@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
-import { Activity as ActivityIcon, Pencil, Plus } from 'lucide-react';
+import { Activity as ActivityIcon, ListTree, Pencil, Plus } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -227,9 +227,20 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
         aria-label="Activity"
         data-testid="activity-card"
       >
-        <CardHeader className="flex flex-row items-center gap-2 pb-3">
-          <ActivityIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          <CardTitle>Activity</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div className="flex items-center gap-2">
+            <ActivityIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            <CardTitle>Activity</CardTitle>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="activity-view-event-log"
+            onClick={() => navigate('/events')}
+          >
+            <ListTree className="h-3 w-3" aria-hidden="true" />
+            View event log
+          </Button>
         </CardHeader>
         <CardContent>
           <div className="grid items-start gap-6 [grid-template-columns:minmax(160px,200px)_minmax(0,1fr)_minmax(180px,220px)]">
@@ -337,7 +348,8 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                                 <TooltipTrigger asChild>
                                   <button
                                     type="button"
-                                    className="cursor-help bg-transparent p-0 font-mono text-[12px] text-foreground"
+                                    className="bg-transparent p-0 font-mono text-[12px] text-[var(--accent-sky)] underline-offset-4 hover:underline"
+                                    onClick={() => navigate(`/events?requestId=${encodeURIComponent(t.requestId)}`)}
                                   >
                                     {trunc(t.requestId)}
                                   </button>

@@ -4,6 +4,8 @@ import { Router, Route, Switch, Redirect, useLocation } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
+import { EventsPage } from './pages/Events.js';
+import { EventDetailPage } from './pages/EventDetail.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
@@ -26,6 +28,18 @@ vi.mock('./api/client.js', () => ({
   api: {
     getBootstrap: async () => ({}),
     getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
+    getActivityEvents: async () => ({ events: [], nextCursor: null, counts: {} }),
+    getActivityEvent: async () => ({
+      id: 1,
+      ts: '2026-05-01T00:00:00Z',
+      kind: 'task_posted',
+      requestId: 'req-1',
+      serviceIndex: null,
+      txHash: null,
+      solverType: null,
+      outcome: 'ok',
+      detail: null,
+    }),
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     restartDaemon: async () => ({ ok: true }),
     operator: {
@@ -171,6 +185,37 @@ describe('App routes', () => {
     );
     await waitFor(() => expect(screen.getByTestId('operator-page')).toBeTruthy());
     expect(screen.queryByTestId('activity-card')).toBeNull();
+  });
+
+  it('renders the durable Events page on /events', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/events/:id"><EventDetailPage /></Route>
+          <Route path="/events"><EventsPage /></Route>
+          <Route path="/overview"><OverviewPage /></Route>
+        </Switch>,
+        '/events',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('events-page')).toBeTruthy();
+    });
+  });
+
+  it('renders the event detail page on /events/:id', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/events/:id"><EventDetailPage /></Route>
+          <Route path="/events"><EventsPage /></Route>
+        </Switch>,
+        '/events/1',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /task posted/i })).toBeTruthy();
+    });
   });
 
   it('renders LauncherPage on /launcher', async () => {

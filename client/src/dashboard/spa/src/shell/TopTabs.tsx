@@ -9,12 +9,14 @@ import { cn } from '../lib/utils.js';
 // JINN_ENABLE_PLUGIN_BUILDER_UI=1.
 const BASE_TABS = [
   { path: '/overview', label: 'Dashboard' },
+  { path: '/events', label: 'Events' },
   { path: '/operator', label: 'Settings' },
 ] as const;
 
 export function TopTabs(): JSX.Element {
   const [location] = useLocation();
-  const onLauncherRoute = location === '/launcher' || location.startsWith('/launcher/');
+  const locationPath = location.split(/[?#]/)[0] || '/';
+  const onLauncherRoute = locationPath === '/launcher' || locationPath.startsWith('/launcher/');
   const { data: launched } = useQuery({
     queryKey: ['solvernets', 'launched', 'top-tabs'],
     queryFn: () => api.solvernets.listLaunched(),
@@ -32,7 +34,7 @@ export function TopTabs(): JSX.Element {
   return (
     <nav className="-mb-px flex px-6">
       {tabs.map((tab) => {
-        const active = location === tab.path || location.startsWith(`${tab.path}/`);
+        const active = locationPath === tab.path || locationPath.startsWith(`${tab.path}/`);
         return (
           <Link
             key={tab.path}

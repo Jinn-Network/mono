@@ -13,6 +13,12 @@ export interface RouteSpec {
 export const ROUTES: RouteSpec[] = [
   { path: '/', label: 'root' },
   { path: '/overview', label: 'overview' },
+  { path: '/events', label: 'events' },
+  {
+    path: '/events/:id',
+    label: 'event-detail',
+    params: { id: '1' },
+  },
   {
     path: '/operator/join/:cid',
     label: 'operator-join',

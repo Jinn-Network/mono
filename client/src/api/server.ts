@@ -31,6 +31,7 @@ import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import type { ArtifactSource } from '../types/envelope.js';
 import { addEventsRoutes } from './events-endpoint.js';
+import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
 import {
@@ -438,6 +439,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // Gate SPA-only routes (do NOT gate /v1/status or /artifacts/*).
     app.use('/v1/events', requireUiToken(config.ui.token));
     app.use('/v1/events/*', requireUiToken(config.ui.token));
+    app.use('/v1/activity-events', requireUiToken(config.ui.token));
+    app.use('/v1/activity-events/*', requireUiToken(config.ui.token));
     app.use('/v1/bootstrap', requireUiToken(config.ui.token));
     app.use('/v1/solvernets', requireUiToken(config.ui.token));
     app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
@@ -457,6 +460,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   }
 
   addEventsRoutes(app);
+  addActivityEventsRoutes(app, { store });
 
   if (config.stopHook) {
     addStopHookRoutes(app, config.stopHook);
