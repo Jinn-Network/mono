@@ -213,13 +213,16 @@ describe('loadConfig RPC override handling', () => {
 
     const config = loadConfig(configPath);
 
-    // Testnet default flipped from the public sepolia.base.org node to a
-    // Tenderly gateway (free public key) in response to the 2026-05-18 canary
-    // rate-limit churn. The public node's per-IP cap throttled SolverNet
-    // manifest discovery and balance polls during/after bootstrap; Tenderly
-    // has much higher headroom. Operators are nudged to bring their own key
-    // via the NetworkSection panel warning.
-    expect(config.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu');
+    // Testnet default is publicnode — no-auth, no shared-key quota cliff.
+    // History: briefly flipped to a Tenderly gateway in response to the
+    // 2026-05-18 sepolia.base.org rate-limit churn, but Tenderly's shared
+    // project key hit its plan quota on 2026-05-24 and every default-config
+    // daemon got HTTP 403 simultaneously (dashboard "Runway 0d", faucet 500s,
+    // daemon hot-loops). Publicnode avoids the shared-quota cliff and is
+    // symmetric with DEFAULT_TESTNET_ETHEREUM_RPC_URL. Operators with heavy
+    // workloads are still nudged to bring their own key via the
+    // NetworkSection panel warning. See #554.
+    expect(config.rpcUrl).toBe('https://base-sepolia-rpc.publicnode.com');
   });
 
   it('defaults testnet discovery to the privately-operated Ponder indexer (http mode)', async () => {

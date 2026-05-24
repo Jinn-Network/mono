@@ -262,7 +262,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 
 | Config key       | Env override             | Default                           |
 |------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| https://mainnet.base.org          |
+| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet: https://mainnet.base.org · testnet: https://base-sepolia-rpc.publicnode.com |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |

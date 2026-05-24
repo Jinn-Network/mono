@@ -48,7 +48,7 @@ export function NetworkTab({
     data?.defaultRpcUrl ??
     (chain === 'base'
       ? 'https://mainnet.base.org'
-      : 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu');
+      : 'https://base-sepolia-rpc.publicnode.com');
 
   return (
     <div data-testid="network-tab">

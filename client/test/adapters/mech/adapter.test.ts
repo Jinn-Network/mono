@@ -149,8 +149,12 @@ const TEST_CONFIG: MechAdapterConfig = {
 
 function makeConfigStore(initial: Record<string, string> = {}, lastProcessedBlock: bigint | null = null) {
   const values = new Map(Object.entries(initial));
+  let storedBlock: bigint | null = lastProcessedBlock;
   return {
-    getLastProcessedBlock: vi.fn().mockReturnValue(lastProcessedBlock),
+    getLastProcessedBlock: vi.fn(() => storedBlock),
+    setLastProcessedBlock: vi.fn((block: bigint) => {
+      storedBlock = block;
+    }),
     getConfigValue: vi.fn((key: string) => values.get(key) ?? null),
     setConfigValue: vi.fn((key: string, value: string) => {
       values.set(key, value);
@@ -1687,6 +1691,129 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
 
     await adapter.stop();
+  });
+
+  // ── issue #552: watchForDeliveries chunked log scan ─────────────────────────
+  // The mech adapter's delivery-polling loop must paginate `getLogs` so a
+  // multi-100k-block cursor → head gap can drain without hitting RPC block-range
+  // limits (Tenderly base-sepolia caps at 100k; sepolia.base.org ~1k). Before the
+  // fix a single unchunked call wedged the loop for ~9 days on a live operator
+  // and the cursor never advanced. Persistence must happen per chunk so a
+  // mid-scan RPC failure doesn't strand the cursor.
+
+  it('scanDeliveryLogChunks chunks getLogs when the cursor lags head by more than the chunk window', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    vi.mocked(decodeDeliverLogs).mockReturnValue([]);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const getLogs = vi.fn().mockResolvedValue([]);
+    (adapter as any).publicClient.getLogs = getLogs;
+    (adapter as any).deliveryBlockCursor = 0n;
+
+    // Drive the chunked scan directly — no setTimeout / generator scheduling
+    // to fight. cursor=0, head=30_000, chunk=9_999 → 3 chunks.
+    for await (const _ of (adapter as any).scanDeliveryLogChunks(30_000n)) {
+      // decoded is [] each chunk; nothing to process
+    }
+
+    expect(getLogs).toHaveBeenCalledTimes(3);
+    const ranges = getLogs.mock.calls.map((c: unknown[]) => ({
+      fromBlock: (c[0] as { fromBlock: bigint }).fromBlock,
+      toBlock: (c[0] as { toBlock: bigint }).toBlock,
+    }));
+    expect(ranges).toEqual([
+      { fromBlock: 1n, toBlock: 10_000n },
+      { fromBlock: 10_001n, toBlock: 20_000n },
+      { fromBlock: 20_001n, toBlock: 30_000n },
+    ]);
+    // Each call queries the mech contract address — must not be the router.
+    for (const call of getLogs.mock.calls) {
+      expect((call[0] as { address: string }).address).toBe(TEST_CONFIG.mechContractAddress);
+    }
+    expect((adapter as any).deliveryBlockCursor).toBe(30_000n);
+  });
+
+  it('scanDeliveryLogChunks persists per-chunk progress so a mid-scan RPC failure does not strand the cursor', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    vi.mocked(decodeDeliverLogs).mockReturnValue([]);
+
+    const store = makeConfigStore();
+    const adapter = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter.initialize();
+    const getLogs = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('query exceeds max block range 100000'));
+    (adapter as any).publicClient.getLogs = getLogs;
+    (adapter as any).deliveryBlockCursor = 0n;
+
+    // Drive the chunked scan until the second chunk throws.
+    await expect((async () => {
+      for await (const _ of (adapter as any).scanDeliveryLogChunks(20_000n)) {
+        // first chunk yields []; second chunk throws before yielding
+      }
+    })()).rejects.toThrow(/exceeds max block range/);
+
+    expect(getLogs).toHaveBeenCalledTimes(2);
+    // First chunk succeeded → cursor advanced to its end and was persisted.
+    // Second chunk threw and the cursor was NOT advanced — partial progress is durable.
+    expect((adapter as any).deliveryBlockCursor).toBe(10_000n);
+    expect(store.setLastProcessedBlock).toHaveBeenCalledWith(10_000n);
+    expect(store.setLastProcessedBlock).toHaveBeenCalledTimes(1);
+  });
+
+  // ── issue #553: prune evaluation opportunities whose Deliver event is gone ─
+  // When the Deliver event lookup exhausts its configured lookback without
+  // finding the event (e.g. the event is older than the 100k-block default,
+  // which happens after a long daemon outage), the retry is deterministically
+  // futile — toBlock is fixed at solution.blockNumber, so re-running the same
+  // window can never start finding the event. Before the fix the solution
+  // stayed in `pendingEvaluationSolutions` and logged "No Deliver event data
+  // found" forever, every poll cycle.
+
+  it('prunes a pending evaluation solution when the Deliver event is not found within the lookback', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({ ok: true });
+    vi.mocked(getMarketplaceRequestDeliveryMech)
+      .mockResolvedValueOnce(('0x' + 'aa'.repeat(20)) as `0x${string}`);
+    // The lookup returns null — Deliver event is not in the lookback window.
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValueOnce(null);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Solution is pruned: the retry would deterministically re-query the same
+    // [333 - 100_000, 333] window with the same null result.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    // We never paid the IPFS fetch cost — pruning happens before that.
+    expect(fetchFromIpfs).not.toHaveBeenCalled();
+    // Restoration lookup did run (`getTaskCidDigest`, etc. via
+    // `restorationAnnouncementForTaskId`) — that's expected: the cheap
+    // claimability gate passed, so we paid the restoration lookup before
+    // discovering the Deliver event is gone. Subsequent cycles will not
+    // re-pay it because the solution is now pruned.
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalled();
   });
 });
 

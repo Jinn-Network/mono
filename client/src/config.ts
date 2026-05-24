@@ -1047,13 +1047,17 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   // 4. Resolve rpcUrl default based on network (if not explicitly set).
-  // Testnet default is a Tenderly gateway (free public key) — much higher
-  // rate limits than `https://sepolia.base.org`. See contracts.ts comment +
-  // the panel's "shared RPC" warning in NetworkSection.tsx for the operator-
-  // facing pitch to bring their own key.
+  // Testnet default is publicnode — no-auth, no shared-key quota cliff. The
+  // previous default was a Tenderly gateway with a shared project key; when
+  // aggregate operator traffic hit the plan quota every default-config daemon
+  // got HTTP 403 simultaneously (dashboard "Runway 0d", faucet 500s, daemon
+  // hot-loops on every eth_*). See #554 + the panel's "shared RPC" warning in
+  // NetworkSection.tsx for the operator-facing pitch to bring their own key.
+  // The sibling Ethereum L1 default (DEFAULT_TESTNET_ETHEREUM_RPC_URL above)
+  // is already publicnode — this keeps the two L1/L2 defaults symmetric.
   const parsed = result.data;
   const defaultRpcUrl = parsed.network === 'testnet'
-    ? 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu'
+    ? 'https://base-sepolia-rpc.publicnode.com'
     : 'https://mainnet.base.org';
 
   return {

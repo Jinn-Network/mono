@@ -58,12 +58,11 @@ describe('auth command', () => {
       });
       await auth.run(ctx);
       const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-      // Testnet default flipped to a Tenderly gateway in 2026-05-18 — the
-      // public sepolia.base.org node rate-limited SolverNet manifest fetches
-      // and balance polls during/after bootstrap.
+      // Testnet default is publicnode (no-auth, no shared-key quota cliff).
+      // See client/src/config.ts comment and #554 for the Tenderly history.
       expect(persisted).toMatchObject({
         network: 'testnet',
-        rpcUrl: 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu',
+        rpcUrl: 'https://base-sepolia-rpc.publicnode.com',
         runtimeMode: 'bare',
       });
     } finally {

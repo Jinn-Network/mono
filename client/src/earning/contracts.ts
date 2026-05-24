@@ -253,11 +253,14 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   // rate limits than `https://sepolia.base.org` (the prior default) — the
   // public node throttled SolverNet manifest discovery and balance polls
   // during/after bootstrap (operators hit 404 + rate-limit churn until
-  // retries happened to land). The panel surfaces a "shared RPC — bring
-  // your own" warning when the operator is still on this default; operators
-  // should get their own key (Tenderly / Alchemy / QuickNode free tiers)
-  // for reliable steady-state operation.
-  rpcUrl: 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu',
+  // retries happened to land). Default flipped to publicnode after the
+  // Tenderly shared-project key hit its plan quota on 2026-05-24 and every
+  // default-config daemon got HTTP 403 simultaneously (see #554). The panel
+  // surfaces a "shared RPC — bring your own" warning when the operator is
+  // still on this default; operators with heavier workloads should get their
+  // own key (Tenderly / Alchemy / QuickNode free tiers) for reliable
+  // steady-state operation.
+  rpcUrl: 'https://base-sepolia-rpc.publicnode.com',
 
   // Autonolas protocol contracts (Base Sepolia)
   serviceRegistry: '0x31D3202d8744B16A120117A053459DDFAE93c855',

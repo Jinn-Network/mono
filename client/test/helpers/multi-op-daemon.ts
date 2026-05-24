@@ -74,13 +74,13 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
   // config.ts gives JINN_RPC_URL unconditional precedence over BASE_RPC_URL,
   // so any RPC URL the caller passed in extraEnv must be surfaced through it.
   // Resolution order: extraEnv JINN/BASE RPC URL, host JINN/BASE_SEPOLIA RPC
-  // URL, then the public Tenderly gateway (matches config.ts:986).
+  // URL, then the publicnode default (matches config.ts; see #554).
   const fallbackRpcUrl =
     opts.extraEnv?.['JINN_RPC_URL'] ??
     opts.extraEnv?.['BASE_RPC_URL'] ??
     process.env['JINN_RPC_URL'] ??
     process.env['BASE_SEPOLIA_RPC_URL'] ??
-    'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
+    'https://base-sepolia-rpc.publicnode.com';
 
   try {
     for (const op of opts.ops) {

@@ -805,7 +805,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     if (body.rpcUrl === null || body.rpcUrl === '') {
       nextRpcUrl =
         config.defaultRpcUrlForChain?.() ??
-        'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
+        'https://base-sepolia-rpc.publicnode.com';
     } else if (typeof body.rpcUrl === 'string') {
       try {
         const parsed = new URL(body.rpcUrl);

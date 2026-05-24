@@ -176,7 +176,7 @@ const config = loadConfig(CONFIG_PATH);
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
   config.network = 'testnet';
-  config.rpcUrl = 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
+  config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
 }
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its

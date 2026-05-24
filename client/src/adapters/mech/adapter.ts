@@ -703,10 +703,21 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  /**
+   * Look up the Deliver-event envelope CID for a pending evaluation solution.
+   *
+   * Returns `null` when the Deliver event is not present in the configured
+   * lookback window. This is a terminal signal for the caller — re-running the
+   * same lookup later is deterministically futile when `solution.blockNumber`
+   * is set (toBlock is fixed at the SolutionDeliveryClaimed block), and is
+   * monotonically less likely to find the event when toBlock follows chain head
+   * (the window slides forward, away from any older Deliver event). Callers
+   * should prune the pending solution on `null` rather than retry — see #553.
+   */
   private async deliveryEnvelopeCidForSolution(solution: {
     requestId: string;
     blockNumber?: number;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const deliveryMech = await getMarketplaceRequestDeliveryMech(
       this.publicClient,
       this.config.mechMarketplaceAddress,
@@ -727,10 +738,7 @@ export class MechAdapter implements ExecutionAdapter {
       toBlock,
     );
     if (!deliveryDataHex) {
-      throw new Error(
-        `No Deliver event data found for solution ${solution.requestId} on mech ${deliveryMech} ` +
-        `between blocks ${fromBlock} and ${toBlock}`,
-      );
+      return null;
     }
     const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
     return `f01551220${digest}`;
@@ -775,6 +783,18 @@ export class MechAdapter implements ExecutionAdapter {
 
     const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
     const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
+    if (solutionEnvelopeCid == null) {
+      // #553: Deliver event is not within the configured lookback window. A
+      // retry with the same toBlock cannot reach an older event, so this is
+      // terminal — prune so the loop never re-pays the canClaimEvaluation +
+      // restoration lookup cost on a deterministically-failing opportunity.
+      console.log(
+        `[mech] pruning evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ` +
+          `no Deliver event found within configured lookback (terminal — pruned)`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
+      return undefined;
+    }
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
       solutionEnvelopeCid,
@@ -1125,21 +1145,51 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  /**
+   * Paginate `getLogs` over `[deliveryBlockCursor+1, currentBlock]` chunked by
+   * `DEFAULT_ROUTER_LOG_CHUNK_BLOCKS` to honor RPC provider block-range limits
+   * (Tenderly base-sepolia caps at 100k; sepolia.base.org ~1k). Advances +
+   * persists `deliveryBlockCursor` per chunk so a mid-scan RPC failure on a
+   * later chunk does not strand the cursor at the pre-poll value (#552).
+   *
+   * Yields each chunk's decoded Deliver entries so the consumer can process
+   * them with the live "current block" context (needed for the recovery-
+   * delivery timestamp cache).
+   */
+  private async *scanDeliveryLogChunks(
+    currentBlock: bigint,
+  ): AsyncIterable<ReturnType<typeof decodeDeliverLogs>> {
+    while (currentBlock > this.deliveryBlockCursor) {
+      const chunkStart = this.deliveryBlockCursor + 1n;
+      const chunkEnd = chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > currentBlock
+        ? currentBlock
+        : chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      const logs = await this.publicClient.getLogs({
+        address: this.config.mechContractAddress,
+        fromBlock: chunkStart,
+        toBlock: chunkEnd,
+      });
+      // Advance + persist BEFORE yielding so partial progress is durable even
+      // if a downstream throw escapes back through the for-await consumer.
+      this.deliveryBlockCursor = chunkEnd;
+      if (this.store) {
+        this.store.setLastProcessedBlock(this.deliveryBlockCursor);
+      }
+      yield decodeDeliverLogs(logs);
+    }
+  }
+
   async *watchForDeliveries(): AsyncIterable<DeliveredResult> {
     while (!this.stopped) {
       try {
         const currentBlock = await this.publicClient.getBlockNumber();
-        if (currentBlock > this.deliveryBlockCursor) {
-          const logs = await this.publicClient.getLogs({
-            address: this.config.mechContractAddress,
-            fromBlock: this.deliveryBlockCursor + 1n,
-            toBlock: currentBlock,
-          });
-          this.deliveryBlockCursor = currentBlock;
+        // Caches scoped to the whole poll iteration: the "current block"
+        // reference does not change across chunks.
+        const blockTimestampSecondsByNumber = new Map<bigint, number>();
+        let currentBlockTimestampSeconds: number | undefined;
 
-          const decoded = decodeDeliverLogs(logs);
-          const blockTimestampSecondsByNumber = new Map<bigint, number>();
-          let currentBlockTimestampSeconds: number | undefined;
+        for await (const decoded of this.scanDeliveryLogChunks(currentBlock)) {
+          if (this.stopped) break;
           for (const { requestId, deliveryDataHex, mechAddress, blockNumber } of decoded) {
             // Two concerns, independent:
             //   (a) Did this Safe DELIVER this? → claim it (counter credit goes to msg.sender)
@@ -1234,10 +1284,8 @@ export class MechAdapter implements ExecutionAdapter {
         }));
       }
 
-      // Persist block cursor for crash recovery
-      if (this.store && this.deliveryBlockCursor > 0n) {
-        this.store.setLastProcessedBlock(this.deliveryBlockCursor);
-      }
+      // Cursor persistence is per-chunk inside the loop above (#552). A poll
+      // that did no chunked work has no progress to persist.
 
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
