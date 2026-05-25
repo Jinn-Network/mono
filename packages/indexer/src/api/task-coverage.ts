@@ -1,64 +1,31 @@
 /**
- * /health/task-coverage — operator-facing health probe that detects the
- * issue-#567 condition where the Ponder TaskCreated handler has silently
- * stopped writing rows after a views swap or schema regression.
+ * /health/task-coverage — operator-facing health probe for issue #567 (Ponder
+ * `TaskCreated` handler silently stops writing rows after a views swap).
  *
- * Strategy:
- *   - Query the JinnRouter's `nextTaskId()` (the authoritative on-chain
- *     next-allocated task id) via the cached helper.
- *   - Query the indexer's `max(task.id::bigint)` and
- *     `max(attempt.taskId::bigint)`.
- *   - Compare; if either gap exceeds the threshold the route returns 503.
+ * Compares the JinnRouter's authoritative on-chain `nextTaskId()` against the
+ * indexer's `max(task.id)` and `max(attempt.taskId)`; returns 503 when either
+ * gap exceeds the threshold (env-configurable, default 5).
  *
- * This file exports the Hono sub-app mounted as `/health/task-coverage` from
- * src/api/index.ts. The pure `computeTaskCoverage` helper lives in
- * `./task-coverage-helper.ts` so Vitest can exercise it without the
- * `ponder:api` virtual module; we re-export it here so callers that want a
- * single import path still get one.
+ * The pure `computeTaskCoverage` helper lives in `./task-coverage-helper.ts`
+ * so Vitest can exercise it without the `ponder:api` virtual module (which is
+ * only resolvable inside a running Ponder process).
  *
- * Env var:
- *   JINN_TASK_COVERAGE_GAP_THRESHOLD — integer, default 5. Both gaps must be
- *                                     ≤ this value for the route to return 200.
- *
- * Response shape (JSON):
- *   {
- *     chainId, onchainNextTaskId, maxIndexedTaskId, maxAttemptTaskId,
- *     taskGap, attemptGap, status, httpStatus
- *   }
- * Bigints serialise to decimal strings because JSON cannot represent them.
+ * Env:
+ *   JINN_TASK_COVERAGE_GAP_THRESHOLD — integer ≥ 0, default 5.
  */
 import { Hono } from 'hono';
 import { db } from 'ponder:api';
 import schema from 'ponder:schema';
 import { eq } from 'ponder';
 import { getNextTaskId } from './next-task-id.js';
-import {
-  computeTaskCoverage,
-  type TaskCoverageInputs,
-  type TaskCoverageResult,
-} from './task-coverage-helper.js';
+import { computeTaskCoverage } from './task-coverage-helper.js';
 
-// Re-export so callers can import everything from this file.
-export { computeTaskCoverage };
-export type { TaskCoverageInputs, TaskCoverageResult };
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/**
- * The chain the indexer scopes its task-coverage check to. Matches
- * EXPLORER_CHAIN_ID in explorer.ts — Base Sepolia today; revisit when mainnet
- * indexing lands.
- */
+/** Matches EXPLORER_CHAIN_ID in explorer.ts — Base Sepolia today. */
 const TASK_COVERAGE_CHAIN_ID = 84532;
 
 const DEFAULT_GAP_THRESHOLD = 5;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Parse JINN_TASK_COVERAGE_GAP_THRESHOLD. Returns the default on missing /
- * non-integer / non-positive input so the route is never broken by a bad env.
- */
+/** Parse the env threshold; falls back to the default on missing/invalid input. */
 function readGapThreshold(): number {
   const raw = process.env['JINN_TASK_COVERAGE_GAP_THRESHOLD'];
   if (raw === undefined) return DEFAULT_GAP_THRESHOLD;
@@ -68,62 +35,42 @@ function readGapThreshold(): number {
 }
 
 /**
- * Query the indexer's max `task.id` (a decimal string column) and convert to
- * bigint. Returns null when no rows exist.
- *
- * `task.id` is `t.text()` so a SQL `max()` would be lexicographic — '9'
- * would rank above '10'. To get the true numeric max we read the column and
- * reduce client-side. The row count is bounded by the on-chain task count
- * (one row per TaskCreated event), so this is acceptable for a monitoring
- * endpoint. If/when the table grows past a few hundred thousand rows we can
- * switch to a server-side cast (e.g. `MAX(id::numeric)`).
+ * Reduce a list of decimal-string ids to the numeric max as a bigint. Used
+ * because `task.id` and `attempt.taskId` are `t.text()` columns — a SQL
+ * `max()` on them would be lexicographic ('9' > '10'). The row count is
+ * bounded by the on-chain task count, so client-side reduction is acceptable
+ * for a monitoring endpoint. Server-side cast (`MAX(id::numeric)`) is the
+ * upgrade path if/when the table grows past a few hundred thousand rows.
  */
+function maxDecimalString(ids: ReadonlyArray<string | null | undefined>): bigint | null {
+  let best: bigint | null = null;
+  for (const v of ids) {
+    if (typeof v !== 'string' || v.length === 0) continue;
+    let asBig: bigint;
+    try { asBig = BigInt(v); } catch { continue; }
+    if (best === null || asBig > best) best = asBig;
+  }
+  return best;
+}
+
 async function getMaxIndexedTaskId(): Promise<bigint | null> {
   const rows = await db
     .select({ id: schema.task.id })
     .from(schema.task)
     .where(eq(schema.task.chainId, TASK_COVERAGE_CHAIN_ID));
-  if (rows.length === 0) return null;
-  let best: bigint | null = null;
-  for (const row of rows) {
-    const v = row.id;
-    if (typeof v !== 'string' || v.length === 0) continue;
-    let asBig: bigint;
-    try { asBig = BigInt(v); } catch { continue; }
-    if (best === null || asBig > best) best = asBig;
-  }
-  return best;
+  return maxDecimalString(rows.map((r) => r.id));
 }
 
-/**
- * Query the indexer's max `attempt.taskId` (also a decimal string).
- * Same lexicographic concern as task.id; reduce client-side.
- */
 async function getMaxAttemptTaskId(): Promise<bigint | null> {
   const rows = await db
     .select({ taskId: schema.attempt.taskId })
     .from(schema.attempt)
     .where(eq(schema.attempt.chainId, TASK_COVERAGE_CHAIN_ID));
-  if (rows.length === 0) return null;
-  let best: bigint | null = null;
-  for (const row of rows) {
-    const v = row.taskId;
-    if (typeof v !== 'string' || v.length === 0) continue;
-    let asBig: bigint;
-    try { asBig = BigInt(v); } catch { continue; }
-    if (best === null || asBig > best) best = asBig;
-  }
-  return best;
+  return maxDecimalString(rows.map((r) => r.taskId));
 }
-
-// ── Hono sub-app ──────────────────────────────────────────────────────────────
 
 const app = new Hono();
 
-/**
- * GET /task-coverage — see file header for response shape. Mounted as
- * `/health/task-coverage` from src/api/index.ts.
- */
 app.get('/task-coverage', async (c) => {
   const gapThreshold = readGapThreshold();
   try {

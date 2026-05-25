@@ -1,48 +1,22 @@
 /**
- * Cached on-chain lookup of the JinnRouter's `nextTaskId()` view.
+ * Cached on-chain lookup of the JinnRouter's `nextTaskId()` view, consumed by
+ * the /health/task-coverage route to detect the issue-#567 silent-handler-drop
+ * condition. Uses the shared `createCachedRpcCall` helper (60 s TTL on both
+ * success and error) so we share a degraded-endpoint backoff with chain-head.
  *
- * Mirrors src/api/chain-head.ts: module-scope cell with a 60 s TTL on both
- * successful and null (error) results so a degraded RPC endpoint does not get
- * retry-stormed. The /health/task-coverage route consumes this value to detect
- * the issue-#567 condition where the indexer's TaskCreated handler has
- * silently stopped writing rows.
- *
- * Address + chain mirror the chain-head module's source (PONDER_RPC_URL_84532
- * → Base Sepolia). When mainnet indexing lands, this file will need a
- * per-chain extension; the testnet-only scope matches what the indexer
- * actually serves today.
+ * Address is hard-coded rather than imported from `ponder.config.ts` because
+ * the config module registers Ponder event handlers on load — pulling it into
+ * a Vitest run would drag those side effects in. When mainnet indexing lands
+ * this will need a per-chain extension; the testnet-only scope matches what
+ * the indexer serves today.
  */
 import { createPublicClient, http } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { JINN_ROUTER_ABI } from '../../abis/JinnRouter.js';
+import { createCachedRpcCall, RPC_TIMEOUT_MS } from './rpc-cache.js';
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/** 60 s TTL for both successful and null (error) results. */
-const CACHE_TTL_MS = 60_000;
-
-/** Race timeout for the RPC call — avoids blocking the route on a slow endpoint. */
-const RPC_TIMEOUT_MS = 1_500;
-
-/**
- * JinnRouter address on Base Sepolia — must stay in sync with the address in
- * `ponder.config.ts`. The address is hard-coded rather than imported from
- * ponder.config.ts because the config module is loaded by Ponder at startup
- * and has side effects (event registration); importing it from an API helper
- * would pull in those side effects under Vitest.
- */
+/** JinnRouter address on Base Sepolia — must stay in sync with `ponder.config.ts`. */
 const ROUTER_ADDRESS = '0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9' as const;
-
-// ── Module-scope cache cell ───────────────────────────────────────────────────
-
-interface CacheCell {
-  value: bigint | null;
-  fetchedAt: number;
-}
-
-let cache: CacheCell = { value: null, fetchedAt: 0 };
-
-// ── Viem client (created once; stateless) ─────────────────────────────────────
 
 const RPC_URL =
   process.env['PONDER_RPC_URL_84532'] ?? 'https://sepolia.base.org';
@@ -52,33 +26,21 @@ const client = createPublicClient({
   transport: http(RPC_URL, { timeout: RPC_TIMEOUT_MS }),
 });
 
-// ── getNextTaskId ─────────────────────────────────────────────────────────────
+const cached = createCachedRpcCall<bigint>(async () => {
+  return (await client.readContract({
+    address: ROUTER_ADDRESS,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'nextTaskId',
+  })) as bigint;
+});
 
 /**
- * Returns the JinnRouter's current `nextTaskId()` view value, cached for 60 s.
- *
+ * Returns the JinnRouter's current `nextTaskId()` value, cached for 60 s.
  * Returns `null` if the RPC is unreachable or the call times out; the null is
- * also cached for 60 s to avoid retry-storming a degraded endpoint.
+ * also cached for 60 s.
  */
 export async function getNextTaskId(): Promise<bigint | null> {
-  const now = Date.now();
-  if (now - cache.fetchedAt < CACHE_TTL_MS) {
-    return cache.value;
-  }
-
-  try {
-    const value = (await client.readContract({
-      address: ROUTER_ADDRESS,
-      abi: JINN_ROUTER_ABI,
-      functionName: 'nextTaskId',
-    })) as bigint;
-    cache = { value, fetchedAt: now };
-    return value;
-  } catch {
-    // Cache null so we don't retry-storm a failing RPC.
-    cache = { value: null, fetchedAt: now };
-    return null;
-  }
+  return cached();
 }
 
 /**
@@ -86,5 +48,5 @@ export async function getNextTaskId(): Promise<bigint | null> {
  * @internal
  */
 export function _resetNextTaskIdCache(): void {
-  cache = { value: null, fetchedAt: 0 };
+  cached.reset();
 }

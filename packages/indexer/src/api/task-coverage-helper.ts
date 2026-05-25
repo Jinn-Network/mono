@@ -1,14 +1,12 @@
 /**
  * Pure helper for the /health/task-coverage route. Kept in a sub-module so
  * Vitest can import it without pulling in the `ponder:api` virtual module
- * (which is only resolvable inside a running Ponder process). The route in
- * task-coverage.ts re-exports `computeTaskCoverage` for callers that want
- * to import everything from one path.
+ * (which is only resolvable inside a running Ponder process).
  *
  * Issue #567 — see task-coverage.ts header.
  */
 
-export interface TaskCoverageInputs {
+interface TaskCoverageInputs {
   chainId: number;
   onchainNextTaskId: bigint | null;
   maxIndexedTaskId: bigint | null;
@@ -16,7 +14,7 @@ export interface TaskCoverageInputs {
   gapThreshold: number;
 }
 
-export interface TaskCoverageResult {
+interface TaskCoverageResult {
   chainId: number;
   onchainNextTaskId: string | null;
   maxIndexedTaskId: string | null;
