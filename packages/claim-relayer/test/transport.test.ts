@@ -4,10 +4,11 @@
  * keep behaviour aligned across packages.
  */
 
-import { describe, expect, it } from 'vitest';
-import { createPublicClient } from 'viem';
+import { describe, expect, it, vi } from 'vitest';
+import { createPublicClient, custom } from 'viem';
 import { mainnet } from 'viem/chains';
 import {
+  AllRpcsFailedError,
   buildFallbackTransport,
   describeFallbackChain,
   MAX_RPC_CHAIN_LENGTH,
@@ -70,6 +71,83 @@ describe('buildFallbackTransport (relayer)', () => {
     const client = createPublicClient({ chain: mainnet, transport });
     expect(client.transport.type).toBe('fallback');
   });
+
+  it('rejects with AllRpcsFailedError when every provider fails', async () => {
+    const primary = vi.fn(async () => {
+      throw new Error('primary down');
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('secondary down');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AllRpcsFailedError);
+    if (caught instanceof AllRpcsFailedError) {
+      expect(caught.providers).toEqual(['a.example', 'b.example']);
+    }
+  });
+
+  it('re-throws viem ExecutionRevertedError without wrapping', async () => {
+    const reverted = Object.assign(new Error('execution reverted: bad'), {
+      name: 'ExecutionRevertedError',
+      code: 3,
+    });
+    const primary = vi.fn(async () => {
+      throw reverted;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+  });
+
+  it('re-throws CAIP user-rejected (code 5000) without wrapping', async () => {
+    const caip = Object.assign(new Error('user rejected'), {
+      name: 'CAIPUserRejectedError',
+      code: 5000,
+    });
+    const primary = vi.fn(async () => {
+      throw caip;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+  });
 });
 
 describe('describeFallbackChain (relayer)', () => {
@@ -79,3 +157,23 @@ describe('describeFallbackChain (relayer)', () => {
     );
   });
 });
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function buildFallbackTransportFromMocks(
+  requestFns: ReadonlyArray<(args: { method: string; params: unknown[] }) => Promise<unknown>>,
+  urls: readonly string[],
+) {
+  if (requestFns.length !== urls.length) {
+    throw new Error('buildFallbackTransportFromMocks: requestFns length must match urls');
+  }
+  const transports = requestFns.map((fn, i) =>
+    custom(
+      {
+        request: fn as (args: { method: string; params: unknown[] }) => Promise<unknown>,
+      },
+      { key: urls[i], name: urls[i] },
+    ),
+  );
+  return buildFallbackTransport.buildFromTransports(transports, urls);
+}
