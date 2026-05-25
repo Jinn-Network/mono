@@ -25,7 +25,19 @@ const UI_TOKEN = 'ui-token-test';
 const SAFE_ADDRESS = '0x0000000000000000000000000000000000000abc';
 
 interface BuildArgs {
-  solverNets?: JinnConfig['solverNets'];
+  /**
+   * Legacy `solverNets` block (issue #421 retired). For test ergonomics
+   * the fixture continues to accept this shape; the harness translates it
+   * into the manifest-keyed `joinedSolverNets` block the launcher reads now.
+   */
+  solverNets?: JinnConfig['solverNets'] | Record<string, {
+    enabled?: boolean;
+    solverType?: string;
+    roles?: readonly string[];
+    harness?: string;
+    plugins?: unknown[];
+    taskGenerator?: { enabled?: boolean };
+  }>;
   generatorStates?: Record<string, LauncherGeneratorStateSnapshot | undefined>;
   openTaskCount?: (netName: string) => number;
   reservedBudgetWei?: (netName: string) => string;
@@ -41,6 +53,42 @@ interface BuildArgs {
   postedTasks?:
     | PostedTaskRecord[]
     | ((opts: FetchPostedTasksOptions) => PostedTaskRecord[]);
+}
+
+/**
+ * Map a legacy-shaped solverNets fixture into the manifest-keyed
+ * joinedSolverNets shape the launcher reads. Mirrors the production
+ * `migrateLegacySolverNets` helper from `client/src/config.ts`.
+ */
+function legacyToJoined(
+  legacy: BuildArgs['solverNets'] | undefined,
+): JinnConfig['joinedSolverNets'] | undefined {
+  if (!legacy) return undefined;
+  const out: NonNullable<JinnConfig['joinedSolverNets']> = {};
+  for (const [name, entry] of Object.entries(legacy)) {
+    if (!entry) continue;
+    const e = entry as { solverType?: string; roles?: readonly string[]; harness?: string };
+    const dot = e.solverType?.lastIndexOf('.') ?? -1;
+    const contract = dot > 0 && e.solverType
+      ? { id: e.solverType.slice(0, dot), version: e.solverType.slice(dot + 1) }
+      : { id: name, version: 'v1' };
+    const roles: Array<'solver' | 'evaluator'> = [];
+    for (const r of e.roles ?? []) {
+      if (r === 'solving') roles.push('solver');
+      else if (r === 'evaluating') roles.push('evaluator');
+    }
+    if (roles.length === 0) roles.push('solver');
+    out[`legacy:${name}`] = {
+      manifestCid: `legacy:${name}`,
+      name,
+      contract,
+      roles: Array.from(new Set(roles)),
+      ...(e.harness ? { harness: e.harness } : {}),
+      plugins: [],
+      disabledDefaultPlugins: [],
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -100,14 +148,16 @@ function buildTestApp(args: BuildArgs): {
           return (args.postedTasks as (o: FetchPostedTasksOptions) => PostedTaskRecord[])(opts);
         }
       : defaultFetchPostedTasks(args.postedTasks, fetchSpy);
-  // Live, mutable solverNets so PATCH can read the latest snapshot via
-  // getConfig() (the production wiring does the same thing — main.ts mutates
-  // `config.solverNets` in place from the onSolverNetsUpdated hook).
-  let liveSolverNets: JinnConfig['solverNets'] | undefined = args.solverNets ?? {};
+  // Issue #421: the launcher now reads joinedSolverNets exclusively.
+  // Translate the legacy-shaped fixture into joined entries for the
+  // launcher routes; keep the persistShim semantics for tests that assert
+  // on PATCH writes.
+  const liveJoinedSolverNets: JinnConfig['joinedSolverNets'] | undefined =
+    legacyToJoined(args.solverNets);
   const persistShim = buildPersistShim();
   let lastNotified: Record<string, Record<string, unknown>> | undefined;
   addLauncherRoutes(app, {
-    getConfig: () => ({ solverNets: liveSolverNets } as Pick<JinnConfig, 'solverNets'>),
+    getConfig: () => ({ joinedSolverNets: liveJoinedSolverNets } as Pick<JinnConfig, 'joinedSolverNets'>),
     getGeneratorState: (name) => args.generatorStates?.[name],
     getOpenTaskCount: (name) => args.openTaskCount?.(name) ?? 0,
     getReservedBudgetWei: (name) => args.reservedBudgetWei?.(name) ?? '0',
@@ -122,10 +172,6 @@ function buildTestApp(args: BuildArgs): {
     persistConfigValue: persistShim.persistConfigValue,
     onSolverNetsUpdated: (solverNets) => {
       lastNotified = solverNets;
-      // Mirror main.ts: keep the live config snapshot pointed at the
-      // post-edit object so subsequent reads (status, follow-up patches)
-      // see the fresh state.
-      liveSolverNets = solverNets as JinnConfig['solverNets'];
     },
   });
   return {

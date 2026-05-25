@@ -24,17 +24,20 @@ describe('default prediction agent runtime plugins', () => {
   it('routes prediction.v1 to the specialist harness with Network Tools and Prediction plugin surfaces', async () => {
     // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, the
     // bundled prediction plugin is operator-configured (not contract-bound),
-    // so the launcher's quick-start defaults seed it into
-    // `solverNets.prediction.plugins`.
+    // so the launcher's quick-start defaults seed it into the operator's
+    // joined SolverNet `plugins` array. Issue #421 retired the legacy
+    // `solverNets` block; the registry reads joinedSolverNets exclusively.
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'claude-code-learner',
           model: 'claude-opus-test',
           plugins: ['bundled:jinn-prediction-plugin'],
-          taskGenerator: { enabled: true },
+          disabledDefaultPlugins: [],
         },
       },
     });

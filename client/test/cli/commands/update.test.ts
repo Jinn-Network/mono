@@ -255,14 +255,16 @@ describe('update command', () => {
         network: 'testnet',
         earningDir,
         dbPath: ':memory:',
-        solverNets: {
-          swe: {
-            enabled: true,
-            solverType: 'swe-rebench-v2.v1',
-            roles: ['solving', 'evaluating'],
+        // Issue #421: evaluator-role detection reads joinedSolverNets only.
+        joinedSolverNets: {
+          'legacy:swe': {
+            manifestCid: 'legacy:swe',
+            name: 'swe',
+            contract: { id: 'swe-rebench-v2', version: 'v1' },
+            roles: ['solver', 'evaluator'],
             harness: 'codex-code-learner',
             plugins: [],
-            taskGenerator: { enabled: true },
+            disabledDefaultPlugins: [],
           },
         },
       } as any);

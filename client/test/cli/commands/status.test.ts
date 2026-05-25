@@ -42,6 +42,13 @@ function service(index: number, safe: string, mech: string): unknown {
 
 function realReadinessDeps(earningDir: string, roles: Array<'solving' | 'evaluating'> = ['solving', 'evaluating']) {
   const { resolveTaskNativeReadiness: _unused, ...deps } = fakeDeps;
+  // Issue #421: the legacy `solverNets` block is retired; surface
+  // SolverNet membership via joinedSolverNets keyed by manifestCid.
+  const joinedRoles: Array<'solver' | 'evaluator'> = [];
+  for (const r of roles) {
+    if (r === 'solving') joinedRoles.push('solver');
+    else if (r === 'evaluating') joinedRoles.push('evaluator');
+  }
   return {
     ...deps,
     loadConfig: () => ({
@@ -49,14 +56,15 @@ function realReadinessDeps(earningDir: string, roles: Array<'solving' | 'evaluat
       earningDir,
       dbPath: '/tmp/x',
       runtimeMode: undefined,
-      solverNets: {
-        swe: {
-          enabled: true,
-          solverType: 'swe-rebench-v2.v1',
-          roles,
+      joinedSolverNets: {
+        'legacy:swe': {
+          manifestCid: 'legacy:swe',
+          name: 'swe',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: joinedRoles,
           harness: 'codex-code-learner',
           plugins: [],
-          taskGenerator: { enabled: true },
+          disabledDefaultPlugins: [],
         },
       },
     } as any),
