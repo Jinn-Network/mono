@@ -307,7 +307,7 @@ describe('runCycle', () => {
       Promise.resolve(makeInFlight(issue.number)),
     );
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
