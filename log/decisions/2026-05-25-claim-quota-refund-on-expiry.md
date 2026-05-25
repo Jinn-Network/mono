@@ -3,10 +3,47 @@ id: DR-2026-05-25
 title: TaskCoordinator — refund per-operator (and task-wide) claim quota on attempt expiry
 date: 2026-05-25
 verb: Steer
-status: proposed
+status: rejected
+rejected-on: 2026-05-26
 authors: opus (drafted in design/576-…; design note: docs/superpowers/specs/2026-05-25-issue-576-claim-quota-refund-design-note.md)
 amends: DR-2026-05-22-a
 relates-to: issue #576, issue #545, issue #569
+---
+
+## Decision update (2026-05-26) — REJECTED
+
+Status flipped to `rejected` after review. The brainstorming note (Stage 1)
+and this DR (Stage 2) stay in-tree as a record of the considered alternative;
+future "why don't we refund on expiry?" questions are answered here.
+
+**Reasoning:**
+
+- **Anti-Sybil / claim-as-commitment is the intended property.** Every claim
+  costing a slot — permanently, regardless of outcome — is the mechanism that
+  makes claiming meaningful. Refunding turns claim into a free option and
+  re-opens the chain-claim-expire grief surface this DR itself concedes (§9:
+  `~40% of a 1-day swe-rebench-v2 posting` denial window per (task, operator)
+  under the bare refund-with-cap proposed below).
+
+- **The cited 2026-05-25 incident (OpenRouter monthly-cap 403) is
+  operator-side, not protocol-side.** PR #477 (merged 2026-05-25) introduced a
+  per-credential daily spend-cap gate that refuses to claim when the
+  credential's spend cap is reached. The trigger case is now prevented
+  upstream at the right layer (refuse to claim) rather than the wrong layer
+  (claim, fail, plead for refund).
+
+- **Recovery already exists at the posting-rotation timescale.** The DR
+  itself notes (§Context) that the per-operator counter resets across
+  postings; the generator reposts the same instance on the next cycle. The
+  "permanent lockout" is bounded by repost cadence, not by the protocol.
+
+- **Grief mitigation belongs in Phase B.2 bond-and-slash**, not in a
+  pre-submission refund path that pulls grief surface forward. The DR
+  defers bond-and-slash to Phase B.2 anyway; that's the right home for the
+  honest-operator recovery story too.
+
+Original proposal below preserved unchanged for record.
+
 ---
 
 ## Context
