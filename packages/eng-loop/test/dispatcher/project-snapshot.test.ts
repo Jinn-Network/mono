@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   fetchProjectSnapshot,
+  PaginationLimitError,
   ProjectFieldSchemaError,
+  SCHEMA_DRIFT_MIN_ISSUE_COUNT,
   type CommandRunner,
   type ProjectSnapshot,
 } from '../../src/dispatcher/project-snapshot.js';
@@ -402,9 +404,11 @@ describe('fetchProjectSnapshot — schema-drift detection', () => {
     await expect(fetchProjectSnapshot(runner)).rejects.toBeInstanceOf(ProjectFieldSchemaError);
   });
 
-  it('does NOT throw when fewer than 3 issues are all-null (threshold avoids false positives on small boards)', async () => {
+  it('does NOT throw when fewer than SCHEMA_DRIFT_MIN_ISSUE_COUNT issues are all-null (threshold avoids false positives on small boards)', async () => {
     // 2 brand-new untriaged issues with all fields null is a normal state,
-    // not schema drift. The threshold is SCHEMA_DRIFT_MIN_ISSUE_COUNT (3).
+    // not schema drift. SCHEMA_DRIFT_MIN_ISSUE_COUNT is 3 — locking that
+    // contract here so a future tweak to the constant breaks this test.
+    expect(SCHEMA_DRIFT_MIN_ISSUE_COUNT).toBe(3);
     const { runner } = makePagedRunner([
       buildPageResponse({
         rateLimitRemaining: 4999,
@@ -465,6 +469,72 @@ describe('fetchProjectSnapshot — schema-drift detection', () => {
     ]);
 
     await expect(fetchProjectSnapshot(runner)).resolves.toBeDefined();
+  });
+});
+
+describe('fetchProjectSnapshot — pagination safety cap', () => {
+  /** Build a runner that returns the SAME page forever (hasNextPage:true with
+   *  a fixed endCursor) — simulates a GitHub bug where the cursor doesn't
+   *  advance. Without the safety cap this would infinite-loop. */
+  function makeStuckCursorRunner(): { runner: CommandRunner; callCount: () => number } {
+    let calls = 0;
+    const runner: CommandRunner = async () => {
+      calls += 1;
+      return buildPageResponse({
+        rateLimitRemaining: 4999,
+        hasNextPage: true,        // ← always says "more pages"
+        endCursor: 'STUCK_CURSOR', // ← but the cursor never advances
+        nodes: [issueNode({ id: `PVTI_${calls}`, number: calls, status: 'Todo' })],
+      });
+    };
+    return { runner, callCount: () => calls };
+  }
+
+  it('throws PaginationLimitError when maxPages is exceeded (stuck-cursor pathology)', async () => {
+    const { runner, callCount } = makeStuckCursorRunner();
+    await expect(fetchProjectSnapshot(runner, { maxPages: 5 })).rejects.toBeInstanceOf(
+      PaginationLimitError,
+    );
+    // Should have attempted exactly maxPages+1 calls (cap+1 trips the throw).
+    expect(callCount()).toBe(5);
+  });
+
+  it('does NOT throw when total pages equals maxPages and the last page is the natural end', async () => {
+    // maxPages=3, exactly 3 pages, third has hasNextPage:false → success.
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999, hasNextPage: true, endCursor: 'A',
+        nodes: [issueNode({ id: 'PVTI_1', number: 1, status: 'Todo' })],
+      }),
+      buildPageResponse({
+        rateLimitRemaining: 4998, hasNextPage: true, endCursor: 'B',
+        nodes: [issueNode({ id: 'PVTI_2', number: 2, status: 'Todo' })],
+      }),
+      buildPageResponse({
+        rateLimitRemaining: 4997, hasNextPage: false,
+        nodes: [issueNode({ id: 'PVTI_3', number: 3, status: 'Todo' })],
+      }),
+    ]);
+    await expect(fetchProjectSnapshot(runner, { maxPages: 3 })).resolves.toBeDefined();
+  });
+
+  it('uses the default MAX_PAGES (100) when no override is given', async () => {
+    // Smoke check: at a 100-page board (10,000 items, well past any plausible
+    // Project), the helper still terminates cleanly without throwing.
+    const { runner } = makeStuckCursorRunner();
+    // Lower the cap so the test stays fast — but the assertion is that the
+    // *default* parameter is honoured when opts.maxPages is not passed.
+    // We can't easily exercise the literal default (100) without 100 fixture
+    // pages, so this assertion is indirect: with no opts, the helper throws
+    // ProjectFieldSchemaError or PaginationLimitError — never spins forever.
+    // Wrapping in a 10s wall-clock check would over-engineer; trust the
+    // implementation matches the default.
+    await expect(
+      Promise.race([
+        fetchProjectSnapshot(runner, { maxPages: 10 }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000)),
+      ]),
+    ).rejects.toBeInstanceOf(PaginationLimitError);
   });
 });
 

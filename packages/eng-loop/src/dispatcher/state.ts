@@ -1,6 +1,5 @@
 import { statSync } from 'node:fs';
-import type { CommandRunner } from './issue-source.js';
-import type { ProjectSnapshot } from './project-snapshot.js';
+import type { CommandRunner, ProjectSnapshot } from './project-snapshot.js';
 import type { InFlightSession } from './types.js';
 
 // ---------------------------------------------------------------------------

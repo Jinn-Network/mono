@@ -121,6 +121,23 @@ export interface ProjectSnapshot {
 /** Schema-drift check fires only when the issue count is at least this. */
 export const SCHEMA_DRIFT_MIN_ISSUE_COUNT = 3;
 
+/** Thrown when {@link fetchProjectSnapshot} hits {@link MAX_PAGES}. The most
+ *  likely cause is a buggy paginator (GitHub returning the same `endCursor`
+ *  repeatedly) — the snapshot is unsafe to use because some items would be
+ *  silently dropped. */
+export class PaginationLimitError extends Error {
+  constructor(pagesAttempted: number) {
+    super(
+      `PaginationLimitError: snapshot fetch exceeded ${pagesAttempted} pages. ` +
+        `Most likely the GraphQL cursor stopped advancing (GitHub returned the ` +
+        `same endCursor twice) or the board grew past the safety cap. Inspect ` +
+        `the raw response or raise the cap deliberately if the board legitimately ` +
+        `has >${pagesAttempted * 100} items.`,
+    );
+    this.name = 'PaginationLimitError';
+  }
+}
+
 /**
  * Thrown by `fetchProjectSnapshot` when N ≥ {@link SCHEMA_DRIFT_MIN_ISSUE_COUNT}
  * Issue items all have *every* single-select Project field (`Status`,
@@ -174,6 +191,15 @@ const PROJECT_NUMBER = 1;
  * Project's actual field labels. A rename will trip
  * {@link ProjectFieldSchemaError} on the next cycle.
  */
+/**
+ * Defensive upper bound on the number of GraphQL pages we'll fetch in a
+ * single snapshot. At 100 items/page this caps the snapshot at 10,000
+ * board items — well past any plausible Project size. Exists to catch the
+ * pathological case where GitHub returns `hasNextPage: true` with the same
+ * `endCursor` forever (cursor doesn't advance → infinite loop).
+ */
+const MAX_PAGES = 100;
+
 const SNAPSHOT_QUERY = `query($cursor: String) {
   rateLimit { cost remaining used resetAt }
   organization(login: "${PROJECT_OWNER}") {
@@ -323,16 +349,32 @@ function parseNode(node: ResponseNode): SnapshotItem | null {
  *
  * @see {@link ProjectSnapshot}
  */
+export interface FetchOpts {
+  /** Defensive page cap. Defaults to {@link MAX_PAGES} (100 pages = 10,000
+   *  items). Lowering this is useful in tests; raising it requires a
+   *  deliberate decision because the snapshot's correctness depends on
+   *  reading every page. */
+  maxPages?: number;
+}
+
 export async function fetchProjectSnapshot(
   runner: CommandRunner,
+  opts: FetchOpts = {},
 ): Promise<ProjectSnapshot> {
+  const maxPages = opts.maxPages ?? MAX_PAGES;
   const items: SnapshotItem[] = [];
   let rateLimit: RateLimitInfo | null = null;
   let cursor: string | null = null;
   let issueCount = 0;
   let issuesWithAllFieldsNull = 0;
+  let pageNum = 0;
 
   for (;;) {
+    pageNum += 1;
+    if (pageNum > maxPages) {
+      throw new PaginationLimitError(maxPages);
+    }
+
     const args = ['api', 'graphql', '-f', `query=${SNAPSHOT_QUERY}`];
     if (cursor != null) {
       args.push('-f', `cursor=${cursor}`);
