@@ -30,6 +30,8 @@ Tag format on Monday cuts: dual — `v2026.MM.DD` (the human-readable build iden
 
 **Hotfix sub-flow** — see [`docs/runbooks/hotfix.md`](../runbooks/hotfix.md). Critical fixes to `@latest` may target `main` directly; the hotfix PR is published as an out-of-cadence release; a back-merge `main → next` chore PR is mandatory before closing the incident.
 
+**main-next ancestor backstop** — `.github/workflows/main-next-ancestor-check.yml` (issue #590) runs daily at 08:00 UTC and on every push to `main` or `next`, asserting `git merge-base --is-ancestor origin/main origin/next`. On failure the workflow opens-or-updates a single alert issue titled `[main-next-divergence] …` with label `automated:divergence` linking to the back-merge step in [`docs/runbooks/hotfix.md`](../runbooks/hotfix.md); the issue auto-closes when the invariant is restored, so the alert is self-healing. `eng-day` surfaces open `automated:divergence` issues.
+
 ## Dist-tags
 
 - `canary` — rolling, every-push-to-next build (`<v>-canary.<sha>`). Sourced from `next` (integration).

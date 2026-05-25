@@ -1,0 +1,157 @@
+# .github/workflows/main-next-ancestor-check.yml
+#
+# Backstop for missed hotfix back-merges (issue #590).
+# Asserts `git merge-base --is-ancestor origin/main origin/next` daily and on
+# every push to main or next. On failure, opens-or-updates a single alert
+# issue tagged [main-next-divergence]. On success, auto-closes it.
+#
+# Reference: docs/engineering/handbook.md §Cadence; docs/runbooks/hotfix.md.
+
+name: main-next ancestor check
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 08:00 UTC daily — one hour before Monday 09:00 UTC release-notes cron
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - next
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-ancestor:
+    name: Assert main is ancestor of next
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main and next
+        run: git fetch origin main next
+
+      - name: Check ancestor relationship
+        id: check
+        shell: bash
+        run: |
+          if git merge-base --is-ancestor origin/main origin/next; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            MAIN_SHA="$(git rev-parse origin/main)"
+            NEXT_SHA="$(git rev-parse origin/next)"
+            DIVERGED="$(git rev-list --count origin/next..origin/main)"
+            {
+              echo "result=fail"
+              echo "main_sha=$MAIN_SHA"
+              echo "next_sha=$NEXT_SHA"
+              echo "diverged=$DIVERGED"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure label exists
+        if: steps.check.outputs.result == 'fail'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "automated:divergence" \
+            --color "D93F0B" \
+            --description "Surfaced by the main-next divergence backstop workflow" \
+            --force \
+            --repo "${{ github.repository }}" || true
+
+      - name: Open or update divergence alert issue
+        if: steps.check.outputs.result == 'fail'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          MAIN_SHA: ${{ steps.check.outputs.main_sha }}
+          NEXT_SHA: ${{ steps.check.outputs.next_sha }}
+          DIVERGED: ${{ steps.check.outputs.diverged }}
+        shell: bash
+        run: |
+          MAIN_SHORT="${MAIN_SHA:0:8}"
+          NEXT_SHORT="${NEXT_SHA:0:8}"
+          TITLE="[main-next-divergence] main@${MAIN_SHORT} is not ancestor of next@${NEXT_SHORT}"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          BODY_FILE="$(mktemp)"
+          cat > "$BODY_FILE" <<BODY_EOF
+          ## main is not an ancestor of next
+
+          \`origin/main\` must always be an ancestor of \`origin/next\`. This invariant is broken.
+
+          | | SHA |
+          |---|---|
+          | \`origin/main\` | \`${MAIN_SHA}\` |
+          | \`origin/next\` | \`${NEXT_SHA}\` |
+
+          **Commits on main not reachable from next:** ${DIVERGED}
+
+          ### How to fix
+
+          A hotfix was merged to \`main\` without the mandatory back-merge to \`next\`.
+          See [docs/runbooks/hotfix.md](https://github.com/${REPO}/blob/main/docs/runbooks/hotfix.md) for the back-merge procedure.
+
+          ### Run URL
+
+          ${RUN_URL}
+          BODY_EOF
+
+          EXISTING="$(gh issue list \
+            --repo "${REPO}" \
+            --search "[main-next-divergence] is:open" \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+
+          if [ -n "$EXISTING" ]; then
+            COMMENT_FILE="$(mktemp)"
+            cat > "$COMMENT_FILE" <<COMMENT_EOF
+          Still diverged as of run ${RUN_URL}.
+
+          | | SHA |
+          |---|---|
+          | \`origin/main\` | \`${MAIN_SHA}\` |
+          | \`origin/next\` | \`${NEXT_SHA}\` |
+
+          Commits on main not reachable from next: ${DIVERGED}
+          COMMENT_EOF
+            gh issue comment "$EXISTING" \
+              --repo "${REPO}" \
+              --body-file "$COMMENT_FILE"
+            echo "::warning::Commented on existing divergence issue #${EXISTING}"
+          else
+            gh issue create \
+              --repo "${REPO}" \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --label "automated:divergence"
+            echo "::error::main is NOT an ancestor of next — divergence alert issue opened. See ${RUN_URL}"
+          fi
+
+          exit 1
+
+      - name: Auto-close divergence alert if passing
+        if: steps.check.outputs.result == 'pass'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          EXISTING="$(gh issue list \
+            --repo "${REPO}" \
+            --search "[main-next-divergence] is:open" \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" \
+              --repo "${REPO}" \
+              --comment "main is now an ancestor of next as of run ${RUN_URL}. Closing."
+            echo "::notice::Auto-closed divergence issue #${EXISTING} — invariant restored."
+          else
+            echo "::notice::main is ancestor of next — no open alert issue to close."
+          fi
