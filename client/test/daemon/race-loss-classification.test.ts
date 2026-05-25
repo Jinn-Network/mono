@@ -32,8 +32,8 @@ function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
 
 /**
  * Wraps LocalAdapter so a test can configure `claimTask` to throw a
- * specific error. After the first failed claim, subsequent claims also
- * throw — the daemon should keep running, not crash.
+ * specific error. Every claim throws — the daemon should keep running,
+ * not crash.
  */
 class FailingClaimAdapter extends LocalAdapter {
   override readonly name = 'failing-claim';
@@ -42,11 +42,43 @@ class FailingClaimAdapter extends LocalAdapter {
     super();
   }
 
-  override async claimTask(taskId: string): Promise<never> {
-    // Touch parent state so the adapter still tracks the task announcement
-    // (avoids "Unknown task" surprise if the parent enforces it elsewhere).
-    void taskId;
+  override async claimTask(_taskId: string): Promise<never> {
     throw this.errorFactory();
+  }
+}
+
+/**
+ * Build a SafeInnerRevertError shaped like the race-loss reverts the daemon
+ * sees in production (decoded name + args populated, no tx hash). Keeps the
+ * three race-loss test bodies focused on assertions instead of constructor
+ * arg shapes.
+ */
+function raceLossRevert(name: string, args: readonly unknown[]): SafeInnerRevertError {
+  const formatted = args
+    .map((a) => (typeof a === 'bigint' ? a.toString() : String(a)))
+    .join(', ');
+  return new SafeInnerRevertError(
+    `Safe execTransaction inner revert (estimate): ${name}(${formatted})`,
+    '0x00000000' as Hex,
+    null,
+    name,
+    args,
+    null,
+  );
+}
+
+/**
+ * Assert that at least one JSON log line whose `kind` matches the given kind
+ * is present, and that every matching line carries the expected `level`.
+ */
+function assertLogLinesLevel(chunks: string[], kind: string, level: 'info' | 'error'): void {
+  const lines = chunks
+    .join('')
+    .split('\n')
+    .filter((l) => l.includes(`"kind":"${kind}"`));
+  expect(lines.length).toBeGreaterThan(0);
+  for (const line of lines) {
+    expect(line).toContain(`"level":"${level}"`);
   }
 }
 
@@ -127,19 +159,9 @@ describe('daemon race-loss revert classification', () => {
   });
 
   it('emits race_lost (level=info, outcome=ok) when claimTask reverts with TCMaxVerdictsReached', async () => {
-    const adapter = new FailingClaimAdapter(() =>
-      new SafeInnerRevertError(
-        'Safe execTransaction inner revert (estimate): TCMaxVerdictsReached(232, 0)',
-        '0x39d0ed4c' as Hex,
-        '0x39d0ed4c00000000000000000000000000000000000000000000000000000000000000e80000000000000000000000000000000000000000000000000000000000000000' as Hex,
-        'TCMaxVerdictsReached',
-        [232n, 0],
-        null,
-      ),
-    );
+    const adapter = new FailingClaimAdapter(() => raceLossRevert('TCMaxVerdictsReached', [232n, 0]));
 
     harness = await startHarness(adapter);
-
     await adapter.postTask({ id: 'race-1', description: 'lost-race task' });
 
     const event = await waitForActivityEvent(harness.store, (r) => r.kind === 'race_lost');
@@ -152,27 +174,11 @@ describe('daemon race-loss revert classification', () => {
     expect(recent.find((r) => r.kind === 'tick_error')).toBeUndefined();
 
     // The JSON log line carries level=info / kind=race_lost.
-    const raceLostLines = harness.stderrChunks
-      .join('')
-      .split('\n')
-      .filter((l) => l.includes('"kind":"race_lost"'));
-    expect(raceLostLines.length).toBeGreaterThan(0);
-    for (const line of raceLostLines) {
-      expect(line).toContain('"level":"info"');
-    }
+    assertLogLinesLevel(harness.stderrChunks, 'race_lost', 'info');
   });
 
   it('emits race_lost for TCAttemptAlreadyFinalized', async () => {
-    const adapter = new FailingClaimAdapter(() =>
-      new SafeInnerRevertError(
-        'Safe execTransaction inner revert (estimate): TCAttemptAlreadyFinalized(99, 1)',
-        '0xbe465de7' as Hex,
-        null,
-        'TCAttemptAlreadyFinalized',
-        [99n, 1],
-        null,
-      ),
-    );
+    const adapter = new FailingClaimAdapter(() => raceLossRevert('TCAttemptAlreadyFinalized', [99n, 1]));
 
     harness = await startHarness(adapter);
     await adapter.postTask({ id: 'race-2', description: 'finalized-attempt task' });
@@ -185,16 +191,7 @@ describe('daemon race-loss revert classification', () => {
   });
 
   it('emits race_lost for TCEvaluationDeadlinePassed', async () => {
-    const adapter = new FailingClaimAdapter(() =>
-      new SafeInnerRevertError(
-        'Safe execTransaction inner revert (estimate): TCEvaluationDeadlinePassed(7)',
-        '0x3187a525' as Hex,
-        null,
-        'TCEvaluationDeadlinePassed',
-        [7n],
-        null,
-      ),
-    );
+    const adapter = new FailingClaimAdapter(() => raceLossRevert('TCEvaluationDeadlinePassed', [7n]));
 
     harness = await startHarness(adapter);
     await adapter.postTask({ id: 'race-3', description: 'past-deadline task' });
@@ -219,14 +216,7 @@ describe('daemon race-loss revert classification', () => {
     expect(harness.store.getRecentActivityEvents(50).find((r) => r.kind === 'race_lost')).toBeUndefined();
 
     // stderr log line should be level=error.
-    const tickErrorLines = harness.stderrChunks
-      .join('')
-      .split('\n')
-      .filter((l) => l.includes('"kind":"tick_error"'));
-    expect(tickErrorLines.length).toBeGreaterThan(0);
-    for (const line of tickErrorLines) {
-      expect(line).toContain('"level":"error"');
-    }
+    assertLogLinesLevel(harness.stderrChunks, 'tick_error', 'error');
   });
 
   it('still emits tick_error for SafeInnerRevertError whose decodedName is not in the non-recoverable set', async () => {
