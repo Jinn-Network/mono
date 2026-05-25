@@ -1520,7 +1520,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           return Number.isFinite(n) && n > 0 ? n : 15_000;
         })();
         if (isHaltedOnFunding && haltAddress && haltRequired !== null) {
-          const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+          const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
           const schedulePoll = (): void => {
             fundingPollHandle = setTimeout(async () => {
               // Guard: if the signal was already fired, stop polling.
@@ -1637,9 +1637,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     PASSWORD,
   );
   const masterAccount = deriveMasterSigner(mnemonicForMaster);
-  const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+  const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
-  const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
+  const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
 
   // hjex.3: populate the restake callback now that mnemonic is available.
   if (config.stakingMode === 'standard' && CHAIN_CONFIG.distributorAddress) {
@@ -1728,7 +1728,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   discoveryApiHolder.current = sharedDiscoveryApi;
 
   const adapter = new MechAdapter({
-    rpcUrl: config.rpcUrl,
+    rpcUrl: config.rpcUrls,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
     routerAddress: ROUTER_ADDRESS,
     mechContractAddress: mechAddress,
@@ -1773,10 +1773,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     agentChainContracts?.portal?.[l1Chain.id]?.address;
   const disputeGameFactoryAddress =
     agentChainContracts?.disputeGameFactory?.[l1Chain.id]?.address;
-  const l2ProofClient = config.l2ProofRpcUrl
-    ? createJinnPublicClient(config.l2ProofRpcUrl, NETWORK_CHAIN)
+  const l2ProofClient = config.l2ProofRpcUrls
+    ? createJinnPublicClient(config.l2ProofRpcUrls, NETWORK_CHAIN)
     : undefined;
-  const agentClients = createClients(config.rpcUrl, agentPrivateKey, agentChain);
+  const agentClients = createClients(config.rpcUrls, agentPrivateKey, agentChain);
 
   // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
   // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
@@ -1789,11 +1789,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     ethereumRpcUrl: config.ethereumRpcUrl,
   });
   const l1ClientsForJinnClaim =
-    shouldWireJinnClaimL1 && config.ethereumRpcUrl
+    shouldWireJinnClaimL1 && config.ethereumRpcUrls
       ? {
-          public: createJinnL1PublicClient(config.ethereumRpcUrl, config.jinnL1Network),
+          public: createJinnL1PublicClient(config.ethereumRpcUrls, config.jinnL1Network),
           wallet: createJinnL1WalletClient(
-            config.ethereumRpcUrl,
+            config.ethereumRpcUrls,
             config.jinnL1Network,
             privateKeyToAccount(agentPrivateKey),
           ),

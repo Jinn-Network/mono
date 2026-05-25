@@ -9,7 +9,12 @@ export interface EvictionRecoveryConfig {
 }
 
 export interface MechAdapterConfig {
-  rpcUrl: string;
+  /**
+   * Base RPC endpoint(s). Accepts string OR array — when an array, the mech
+   * adapter builds a viem `fallback()` chain via buildFallbackTransport.
+   * Single-string form remains the back-compat default.
+   */
+  rpcUrl: string | readonly string[];
   mechMarketplaceAddress: `0x${string}`;
   routerAddress: `0x${string}`;  // JinnRouter proxy on Base
   mechContractAddress: `0x${string}`;

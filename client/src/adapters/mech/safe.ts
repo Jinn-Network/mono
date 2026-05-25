@@ -1,7 +1,6 @@
 import {
   createPublicClient,
   createWalletClient,
-  http,
   type Address,
   type Hex,
   type PublicClient,
@@ -21,6 +20,7 @@ import {
   decodeSafeInnerRevert,
   formatDecodedRevert,
 } from './safe-revert.js';
+import { buildFallbackTransport, parseRpcUrls } from '../../rpc/transport.js';
 
 export function buildSafeSignature(signerAddress: string): Hex {
   const r = signerAddress.toLowerCase().replace('0x', '').padStart(64, '0');
@@ -210,19 +210,24 @@ async function executeSafeTransactionInner(
   ));
 }
 
-export function createClients(rpcUrl: string, privateKey: Hex, chain?: Chain): { publicClient: PublicClient; walletClient: WalletClient; account: ReturnType<typeof privateKeyToAccount> } {
+export function createClients(
+  rpcUrl: string | readonly string[],
+  privateKey: Hex,
+  chain?: Chain,
+): { publicClient: PublicClient; walletClient: WalletClient; account: ReturnType<typeof privateKeyToAccount> } {
   const account = privateKeyToAccount(privateKey);
   const selectedChain = chain ?? base;
+  const transport = buildFallbackTransport(parseRpcUrls(rpcUrl));
 
   const publicClient = createPublicClient({
     chain: selectedChain,
-    transport: http(rpcUrl),
+    transport,
   });
 
   const walletClient = createWalletClient({
     account,
     chain: selectedChain,
-    transport: http(rpcUrl),
+    transport,
   });
 
   return { publicClient: publicClient as unknown as PublicClient, walletClient: walletClient as unknown as WalletClient, account };

@@ -14,6 +14,16 @@ import type {
 } from '../../types/index.js';
 import { TransientError, PermanentError, parseTask } from '../../types/index.js';
 import { createClients } from './safe.js';
+
+/**
+ * Coalesce a string-or-array RPC input down to the head URL for display in
+ * error contexts (`formatRpcError` expects a single host). The adapter
+ * accepts the full fallback chain at the type level; this helper exists so
+ * the error-formatting call sites can keep their old signature.
+ */
+function rpcUrlForDisplay(rpcUrl: string | readonly string[]): string {
+  return Array.isArray(rpcUrl) ? rpcUrl[0]! : (rpcUrl as string);
+}
 import {
   buildResultPayload,
   uploadToIpfs,
@@ -216,7 +226,7 @@ export class MechAdapter implements ExecutionAdapter {
             formatRpcError(message, {
               operation: 'getBlockNumber',
               chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
-              rpcUrl: this.config.rpcUrl,
+              rpcUrl: rpcUrlForDisplay(this.config.rpcUrl),
             }),
           );
         },
@@ -945,7 +955,7 @@ export class MechAdapter implements ExecutionAdapter {
         console.error('[mech] Error polling for tasks:', formatRpcError(err, {
           operation: 'pollTaskCreated',
           chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
-          rpcUrl: this.config.rpcUrl,
+          rpcUrl: rpcUrlForDisplay(this.config.rpcUrl),
           contract: this.config.routerAddress,
           fromBlock: this.requestBlockCursor + 1n,
         }));
@@ -1328,7 +1338,7 @@ export class MechAdapter implements ExecutionAdapter {
         console.error('[mech] Error polling for deliveries:', formatRpcError(err, {
           operation: 'pollDeliveries',
           chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
-          rpcUrl: this.config.rpcUrl,
+          rpcUrl: rpcUrlForDisplay(this.config.rpcUrl),
           contract: this.config.mechContractAddress,
           fromBlock: this.deliveryBlockCursor + 1n,
         }));
