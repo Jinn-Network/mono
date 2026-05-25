@@ -806,6 +806,108 @@ export class ConfigLoadError extends Error {
 
 // ── Loader ──────────────────────────────────────────────────────────────────
 
+interface LegacySolverNetEntry {
+  enabled?: boolean;
+  solverType?: string;
+  roles?: Array<'solving' | 'evaluating' | 'launching' | string>;
+  harness?: string;
+  model?: string;
+  plugins?: unknown[];
+  taskGenerator?: unknown;
+}
+
+/**
+ * Parse a legacy `<id>.<version>` solverType string into `{id, version}`.
+ * Falls back to `{ id: fallbackId, version: 'v1' }` when the string lacks a
+ * dot or terminates in one — this happens only on hand-edited operator
+ * configs and keeps the migration loud-but-non-fatal.
+ */
+function parseSolverTypeRef(
+  solverType: string | undefined,
+  fallbackId: string,
+): { id: string; version: string } {
+  if (typeof solverType !== 'string') {
+    return { id: fallbackId, version: 'v1' };
+  }
+  const dot = solverType.lastIndexOf('.');
+  if (dot <= 0 || dot === solverType.length - 1) {
+    return { id: fallbackId, version: 'v1' };
+  }
+  return { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) };
+}
+
+/**
+ * Translate any legacy short-name-keyed `solverNets` block on the raw parsed
+ * config into manifest-keyed `joinedSolverNets` entries with synthetic
+ * `legacy:<short-name>` keys.
+ *
+ * This is the auto-migration path for operators upgrading past issue #421.
+ * The runtime claim filter remains manifest-digest gated, so synthetic-keyed
+ * entries don't change task eligibility — they exist purely so the diagnostic
+ * surfaces (Overview SOLVING-ON eyebrow, prediction-operator-status) keep
+ * showing the operator's previous SolverNets until they re-join via the SPA.
+ *
+ * Returns the number of legacy entries migrated. Idempotent — calling on an
+ * already-migrated raw config is a no-op.
+ *
+ * @param raw — the JSON-parsed config file contents (mutated in place).
+ */
+export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
+  const legacy = raw['solverNets'];
+  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) {
+    return 0;
+  }
+  const entries = Object.entries(legacy as Record<string, unknown>);
+  if (entries.length === 0) {
+    delete raw['solverNets'];
+    return 0;
+  }
+
+  const joined = (typeof raw['joinedSolverNets'] === 'object' && raw['joinedSolverNets'] !== null && !Array.isArray(raw['joinedSolverNets']))
+    ? (raw['joinedSolverNets'] as Record<string, unknown>)
+    : {};
+
+  let migrated = 0;
+  for (const [name, entryRaw] of entries) {
+    if (!entryRaw || typeof entryRaw !== 'object') continue;
+    const entry = entryRaw as LegacySolverNetEntry;
+    const syntheticKey = `legacy:${name}`;
+    // Do not overwrite a pre-existing joinedSolverNets entry under the same key.
+    if (joined[syntheticKey] !== undefined) continue;
+
+    const contract = parseSolverTypeRef(entry.solverType, name);
+    const rolesIn = Array.isArray(entry.roles) && entry.roles.length > 0
+      ? entry.roles
+      : ['solving'];
+    const roles: Array<'solver' | 'evaluator'> = [];
+    for (const r of rolesIn) {
+      if (r === 'solving') roles.push('solver');
+      else if (r === 'evaluating') roles.push('evaluator');
+      // 'launching' (and any other unknown role) is dropped — operator config
+      // no longer carries the launcher role per spec §11.
+    }
+    if (roles.length === 0) roles.push('solver');
+
+    joined[syntheticKey] = {
+      manifestCid: syntheticKey,
+      name,
+      contract,
+      roles: Array.from(new Set(roles)),
+      ...(typeof entry.harness === 'string' ? { harness: entry.harness } : {}),
+      ...(typeof entry.model === 'string' ? { model: entry.model } : {}),
+      plugins: Array.isArray(entry.plugins) ? entry.plugins : [],
+      disabledDefaultPlugins: [],
+    };
+    migrated += 1;
+  }
+
+  if (Object.keys(joined).length > 0) {
+    raw['joinedSolverNets'] = joined;
+  }
+  delete raw['solverNets'];
+  return migrated;
+}
+
 /**
  * Load config with resolution: env > config file > defaults.
  *

@@ -7,6 +7,7 @@ import {
   DEFAULT_TESTNET_ETHEREUM_RPC_URL,
   loadConfig,
   buildConfigProvenance,
+  migrateLegacySolverNets,
 } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
@@ -1375,5 +1376,121 @@ describe('hermes config keys', () => {
     process.env['JINN_HERMES_PATH'] = '/opt/hermes/bin/hermes';
     const cfg = loadConfig(configPath);
     expect(cfg.hermesPath).toBe('/opt/hermes/bin/hermes');
+  });
+});
+
+describe('migrateLegacySolverNets', () => {
+  it('migrates a single legacy solverNets entry into joinedSolverNets keyed by `legacy:<name>`', () => {
+    const raw: Record<string, unknown> = {
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['solving'],
+          harness: 'claude-code',
+          plugins: [],
+          taskGenerator: { enabled: true },
+        },
+      },
+    };
+    const migrated = migrateLegacySolverNets(raw);
+    expect(migrated).toBe(1);
+    expect(raw.solverNets).toBeUndefined();
+    expect(raw.joinedSolverNets).toEqual({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'claude-code',
+        plugins: [],
+        disabledDefaultPlugins: [],
+      },
+    });
+  });
+
+  it('returns 0 and does not mutate when no legacy block exists', () => {
+    const raw: Record<string, unknown> = { joinedSolverNets: { existing: { manifestCid: 'cid1', roles: ['solver'] } } };
+    const before = JSON.stringify(raw);
+    expect(migrateLegacySolverNets(raw)).toBe(0);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it('maps the legacy "evaluating" role to "evaluator"', () => {
+    const raw: Record<string, unknown> = {
+      solverNets: {
+        'swe-rebench-v2': {
+          enabled: true,
+          solverType: 'swe-rebench-v2.v1',
+          roles: ['solving', 'evaluating'],
+          harness: 'hermes-agent',
+          model: 'minimax-m2.7',
+          plugins: ['bundled:swe-rebench-v2-runtime'],
+        },
+      },
+    };
+    expect(migrateLegacySolverNets(raw)).toBe(1);
+    expect(raw.joinedSolverNets).toEqual({
+      'legacy:swe-rebench-v2': {
+        manifestCid: 'legacy:swe-rebench-v2',
+        name: 'swe-rebench-v2',
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'hermes-agent',
+        model: 'minimax-m2.7',
+        plugins: ['bundled:swe-rebench-v2-runtime'],
+        disabledDefaultPlugins: [],
+      },
+    });
+  });
+
+  it('preserves a pre-existing joinedSolverNets entry under the same synthetic key (does not overwrite)', () => {
+    const raw: Record<string, unknown> = {
+      solverNets: {
+        prediction: { solverType: 'prediction.v1', roles: ['solving'], harness: 'claude-code' },
+      },
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'preserved',
+          roles: ['solver'],
+        },
+      },
+    };
+    migrateLegacySolverNets(raw);
+    // The pre-existing entry wins; the legacy block does not clobber it.
+    expect((raw.joinedSolverNets as Record<string, { name: string }>)['legacy:prediction'].name).toBe('preserved');
+  });
+
+  it('handles an empty solverNets object as a no-op migration (no entries to convert)', () => {
+    const raw: Record<string, unknown> = { solverNets: {} };
+    expect(migrateLegacySolverNets(raw)).toBe(0);
+    expect(raw.solverNets).toBeUndefined();
+    expect(raw.joinedSolverNets).toBeUndefined();
+  });
+
+  it('defaults roles to ["solver"] when the legacy entry has no roles field', () => {
+    const raw: Record<string, unknown> = {
+      solverNets: { prediction: { solverType: 'prediction.v1', harness: 'claude-code' } },
+    };
+    migrateLegacySolverNets(raw);
+    expect((raw.joinedSolverNets as Record<string, { roles: string[] }>)['legacy:prediction'].roles).toEqual(['solver']);
+  });
+
+  it('drops legacy "launching" roles during migration (operator config no longer carries them)', () => {
+    const raw: Record<string, unknown> = {
+      solverNets: { prediction: { solverType: 'prediction.v1', roles: ['solving', 'launching'] } },
+    };
+    migrateLegacySolverNets(raw);
+    expect((raw.joinedSolverNets as Record<string, { roles: string[] }>)['legacy:prediction'].roles).toEqual(['solver']);
+  });
+
+  it('falls back to id=<name>, version="v1" when solverType is malformed', () => {
+    const raw: Record<string, unknown> = {
+      solverNets: { 'broken-net': { solverType: 'no-dot-version', roles: ['solving'] } },
+    };
+    migrateLegacySolverNets(raw);
+    expect((raw.joinedSolverNets as Record<string, { contract: unknown }>)['legacy:broken-net'].contract)
+      .toEqual({ id: 'broken-net', version: 'v1' });
   });
 });
