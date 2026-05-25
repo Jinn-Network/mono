@@ -144,15 +144,35 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
 
   // ── spec-file loading ───────────────────────────────────────────────────────
   const config = loadConfig(getConfigPathFromArgs(ctx.argv));
-  const solverTypeFromNet =
-    requestedSolverNet ? config.solverNets[requestedSolverNet]?.solverType : undefined;
+  // Issue #421: --solver-net resolves via joinedSolverNets (manifest-CID-keyed).
+  // The needle matches either the joined display name, the manifest CID, or
+  // the synthetic `legacy:<short-name>` key from on-disk migrations.
+  const joinedLookup = (() => {
+    if (!requestedSolverNet) return undefined;
+    const joined = config.joinedSolverNets ?? {};
+    for (const [cid, entry] of Object.entries(joined)) {
+      const displayName = entry.name ?? cid;
+      if (displayName === requestedSolverNet || cid === requestedSolverNet || entry.manifestCid === requestedSolverNet) {
+        if (!entry.contract) continue;
+        return {
+          name: displayName,
+          solverType: `${entry.contract.id}.${entry.contract.version}`,
+        };
+      }
+    }
+    return undefined;
+  })();
+  const solverTypeFromNet = joinedLookup?.solverType;
   if (requestedSolverNet && !solverTypeFromNet) {
+    const available = Object.entries(config.joinedSolverNets ?? {})
+      .map(([cid, entry]) => entry.name ?? cid)
+      .join('|');
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: `Unknown SolverNet: ${requestedSolverNet}`,
         exampleCli: 'jinn solver-nets list',
-        details: { field: '--solver-net', expected: Object.keys(config.solverNets).join('|') },
+        details: { field: '--solver-net', expected: available },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
