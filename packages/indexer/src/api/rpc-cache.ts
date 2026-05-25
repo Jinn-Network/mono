@@ -6,7 +6,7 @@
  * request handler that depends on it.
  *
  * Used by chain-head.ts (eth_blockNumber) and next-task-id.ts
- * (JinnRouter.nextTaskId view) — the two on-chain reads the /explorer and
+ * (TaskCoordinator.nextTaskId view) — the two on-chain reads the /explorer and
  * /health/task-coverage routes depend on.
  */
 

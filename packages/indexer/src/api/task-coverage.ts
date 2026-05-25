@@ -2,9 +2,9 @@
  * /health/task-coverage — operator-facing health probe for issue #567 (Ponder
  * `TaskCreated` handler silently stops writing rows after a views swap).
  *
- * Compares the JinnRouter's authoritative on-chain `nextTaskId()` against the
- * indexer's `max(task.id)` and `max(attempt.taskId)`; returns 503 when either
- * gap exceeds the threshold (env-configurable, default 5).
+ * Compares the TaskCoordinator's authoritative on-chain `nextTaskId()` against
+ * the indexer's `max(task.id)` and `max(attempt.taskId)`; returns 503 when
+ * either gap exceeds the threshold (env-configurable, default 5).
  *
  * The pure `computeTaskCoverage` helper lives in `./task-coverage-helper.ts`
  * so Vitest can exercise it without the `ponder:api` virtual module (which is

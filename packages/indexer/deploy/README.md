@@ -44,7 +44,7 @@ The `/explorer/*` routes set `Cache-Control: public, max-age=30, stale-while-rev
 
 ### Monitoring (`/health/task-coverage`)
 
-`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It compares the JinnRouter's authoritative on-chain `nextTaskId()` view against the indexer's `max(task.id)` and `max(attempt.taskId)` and returns 200 when both gaps are within the configured threshold, 503 otherwise.
+`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It compares the TaskCoordinator contract's authoritative on-chain `nextTaskId()` view (the storage slot is on `TaskCoordinator`, not JinnRouter — JinnRouterV3 holds a reference to the coordinator but does not re-expose the view) against the indexer's `max(task.id)` and `max(attempt.taskId)` and returns 200 when both gaps are within the configured threshold, 503 otherwise.
 
 ```
 GET /health/task-coverage
