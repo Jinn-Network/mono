@@ -464,3 +464,45 @@ Jinn's brand is **headless** in the specific sense defined by Other Internet's [
 **Operational rule, restated:** **keep the words, loosen the visuals.** The lexicon and non-negotiables are the protocol; everything else is narrative. If you're about to invent new vow-language, that's a protocol change — mark it as a proposal. If you're about to change a color or swap a sigil, that's a narrative move — just document what you changed.
 
 The received design bundle (palette, sigils, type pairing) is one narrative — a well-reasoned starting point, not the canonical Jinn. Treat it as such.
+
+## External Communication
+
+Rules for any external-facing artifact about Jinn — press releases, blog posts, threads, talks, slides, public-channel announcements, anything a non-contributor will read.
+
+Read first:
+- [`PRINCIPLES.md`](PRINCIPLES.md) — every public claim must satisfy Legibility (independently verifiable, on-chain where possible) and stay coherent with Neutral, Learning Maximised, Governance Minimal, Permissionless, Prestige.
+- [`BRAND.md`](BRAND.md) — voice, headless-brand posture, protocol-vs-narrative split, content non-negotiables.
+
+Operate the workflow through the `create-press-release` skill (`.claude/skills/create-press-release/SKILL.md`) when the artifact is release-shaped; the skill composes `distil-writing` and enforces these rules.
+
+### Framing and structure
+
+- **Frame Jinn as "an open agentic knowledge economy."** Use this exact phrase in About-blocks, boilerplate, and headline framings of what Jinn *is*. Older phrasings ("decentralised training protocol", "agentic intent network") are superseded.
+- **There is no "team", no "co-founder", no "executive".** Do not use these words in any external artifact. Jinn is headless in the Other Internet sense (see `BRAND.md`); there is no corporate structure for the brand to point at.
+- **Attribution is role-only by default.** Quote attribution: `— Jinn contributor`. Named attribution only on explicit sign-off from the contributor concerned, and prefer affiliation over name unless naming is independently load-bearing.
+
+### Verbs
+
+- **Never use `paid` / `pays` / `payment for` / `compensation`** in protocol-action context. The contract does not pay anyone. Use, in order of preference:
+  - `mints to` — when the contract is literally minting (most accurate for JinnDistributor)
+  - `emits tokens to` — when describing the protocol pattern abstractly
+  - `settles with` / `settles for` — for the cross-chain settlement frame
+  - `distributes to` / `issues to` — for governance / treasury framings
+- `Earned` (operator-side, active voice) is acceptable and matches the dashboard label `TESTNET JINN EARNED`. Avoid `earned` for the protocol's action ("the protocol earned the operator…" — wrong).
+
+### Claim discipline (Legibility)
+
+- **Every claim about Jinn must be independently verifiable**, on chain where possible. Cite the address, the tx hash, the indexer endpoint, the canonical-doc line. If a claim isn't on-chain-verifiable, say so explicitly and name what closes the gap.
+- **Distinct vs independent.** The chain proves *distinctness* (different addresses, different transactions). It does not prove *independence* (different real-world parties). Use `distinct` in the body; only use `independent` where it's the actual news, and back-stop it with a caveats section that names the trust step.
+- **Always include a "What this does not yet prove" section** for any milestone release. Name the mock components, the testnet status, the social assertions that aren't yet on-chain-provable. Naming the gap is more Legible than papering over it.
+
+### PII
+
+- **No dateline city.** Use the date alone: `**25 May 2026** —`. No city, no country.
+- **No personal locations, schedules, family details, or other identifying material.** This applies even if the contributor is publicly identifiable elsewhere; the artifact should not add identifying surface.
+- **Multisig and wallet addresses are pseudonymous, not PII.** Public on-chain addresses are slashable and discoverable; they are valid receipts. Names attached to addresses are PII; keep them separate unless consent is explicit.
+
+### Where releases live
+
+- `docs/press/YYYY-MM-DD-<slug>.md` — standalone press releases.
+- The release file is the canonical source; X threads / Discussion posts / blog versions derive from it.
