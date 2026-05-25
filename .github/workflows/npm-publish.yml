@@ -197,6 +197,18 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'latest'
         run: yarn release:tier-1 "${{ steps.meta.outputs.publish_version }}"
 
+      # Upload tier-1-evidence so the Captain can inspect per-scenario logs on
+      # CI failures without re-running locally. `if: always()` ensures the
+      # artifact is captured even when the Tier 1 gate exits non-zero.
+      - name: Upload Tier 1 evidence
+        if: always() && steps.meta.outputs.dist_tag == 'latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier-1-evidence-${{ github.event.release.tag_name || github.sha }}
+          path: client/tier-1-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'
         run: |
