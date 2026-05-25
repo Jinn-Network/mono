@@ -25,6 +25,7 @@ import {
 import { base, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
+  isNonceTooLowError,
   removeConflictingLegacyGasPrice,
   type TxSubmissionLedger,
   withNonceLedger,
@@ -358,16 +359,29 @@ export async function executeSafeTxDirect(opts: {
         ...feeResult.overrides,
       };
       removeConflictingLegacyGasPrice(txParams);
-      const hash = await walletClient.sendTransaction(txParams);
-      await nonceLedger.recordSubmitted({
-        hash,
-        logicalTx: 'safe.execTransaction.direct',
-        fees: feeResult.snapshot,
-        to: safeAddress,
-        data,
-        value: 0n,
-      });
-      return hash;
+      try {
+        const hash = await walletClient.sendTransaction(txParams);
+        await nonceLedger.recordSubmitted({
+          hash,
+          logicalTx: 'safe.execTransaction.direct',
+          fees: feeResult.snapshot,
+          to: safeAddress,
+          data,
+          value: 0n,
+        });
+        return hash;
+      } catch (err) {
+        // Issue #562: a daemon respawn can leave nonceLedger.nonce behind the
+        // RPC's pending nonce. Refresh in place so the next retry attempt
+        // submits with the fresh value instead of looping on the stale one.
+        if (isNonceTooLowError(err)) {
+          const refreshed = await nonceLedger.refreshNonce();
+          console.error(
+            `[safe-adapter] executeSafeTxDirect refreshed pinned nonce -> ${refreshed}`,
+          );
+        }
+        throw err;
+      }
     },
     {
       onRetry: ({ attempt, message }) => {

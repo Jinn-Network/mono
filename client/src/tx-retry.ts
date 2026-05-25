@@ -201,6 +201,18 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * True when the error message contains the RPC's "nonce too low" signal.
+ *
+ * Issue #562: a daemon respawn can leave the locally-pinned ledger nonce
+ * behind the RPC's pending nonce, and every retry that re-submits with the
+ * stale value triggers this error. Callers use this helper to decide whether
+ * to refresh the pinned nonce before the next retry attempt.
+ */
+export function isNonceTooLowError(error: unknown): boolean {
+  return flattenErrorMessage(error).toLowerCase().includes('nonce too low');
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -330,6 +342,12 @@ export interface NonceLedgerContext {
   ): Promise<TxFeeOverrideResult>;
   recordSubmitted(entry: NonceLedgerSubmission): Promise<void>;
   markResolved(resolvedAtMs?: number): Promise<void>;
+  /**
+   * Re-read the pending nonce from the RPC, update `nonce` in place, and
+   * return the new value. Callers use this after a `nonce too low` revert
+   * (issue #562) so the next retry attempt picks up the fresh value.
+   */
+  refreshNonce(): Promise<number>;
 }
 
 export interface WithNonceLedgerArgs {
@@ -701,6 +719,11 @@ export async function withNonceLedger<T>(
     async markResolved(resolvedAtMs = Date.now()) {
       await ledger.markTxSubmissionResolved({ chainId, from: args.from, nonce, resolvedAtMs });
     },
+    async refreshNonce() {
+      const fresh = await resolvePendingNonce(args.publicClient, args.from);
+      context.nonce = fresh;
+      return fresh;
+    },
   };
 
   return fn(context);
@@ -782,7 +805,7 @@ export async function viemSendTransactionWithRetry(
   const requestedNonce = txRequest.nonce === undefined ? undefined : Number(txRequest.nonce);
 
   const sendWithRetry = async (nonceLedger?: NonceLedgerContext): Promise<Hex> => {
-    const pinnedNonce = nonceLedger?.nonce ?? requestedNonce;
+    let pinnedNonce = nonceLedger?.nonce ?? requestedNonce;
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -821,11 +844,18 @@ export async function viemSendTransactionWithRetry(
         if (!isRecoverableTransactionError(err) || attempt >= maxAttempts - 1) {
           throw err;
         }
-        options.onRetry?.({
-          attempt: attempt + 1,
-          error: err,
-          message: flattenErrorMessage(err),
-        });
+        const message = flattenErrorMessage(err);
+        options.onRetry?.({ attempt: attempt + 1, error: err, message });
+        // Issue #562: on `nonce too low` the locally-pinned value is stale —
+        // re-derive from the RPC's pending nonce so the next attempt does
+        // not resubmit with the same stale value.
+        if (isNonceTooLowError(err)) {
+          if (nonceLedger) {
+            pinnedNonce = await nonceLedger.refreshNonce();
+          } else if (from && supportsNonceTracking(publicClient)) {
+            pinnedNonce = await resolvePendingNonce(publicClient, from);
+          }
+        }
         await backoffDelay(attempt, baseDelayMs, maxDelayMs);
       }
     }

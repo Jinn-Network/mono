@@ -319,6 +319,52 @@ describe('tx-retry', () => {
       expect(sendTransaction.mock.calls[0]![0].nonce).toBe(7);
       expect(sendTransaction.mock.calls[1]![0].nonce).toBe(7);
     });
+
+    it('refreshes pinned nonce after `nonce too low` revert', async () => {
+      // Issue #562: when the daemon respawns and the local ledger pins a stale
+      // nonce M but the RPC has already advanced to N, the retry must re-derive
+      // the pending nonce via getTransactionCount and resubmit with N, not M.
+      //
+      // viemSendTransactionWithRetry enters withNonceLedger with
+      // recoverStuckNonce: true, so getTransactionCount is called for
+      // (1) recoverStuckNonceIfNeeded pending, (2) recoverStuckNonceIfNeeded
+      // latest, (3) withNonceLedger initial pin, (4) refreshNonce after revert.
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount: vi
+          .fn()
+          .mockResolvedValueOnce(7) // recoverStuckNonce pending
+          .mockResolvedValueOnce(7) // recoverStuckNonce latest (equal -> no recovery)
+          .mockResolvedValueOnce(7) // initial pin via withNonceLedger
+          .mockResolvedValueOnce(8), // refresh after nonce-too-low revert
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+      const sendTransaction = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('nonce too low: next nonce 8, tx nonce 7'))
+        .mockResolvedValueOnce(`0x${'bb'.repeat(32)}`);
+
+      await expect(
+        viemSendTransactionWithRetry(
+          { sendTransaction },
+          publicClient as never,
+          {
+            account,
+            to: '0x2222222222222222222222222222222222222222',
+            value: 1n,
+          },
+          { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1 },
+        ),
+      ).resolves.toBe(`0x${'bb'.repeat(32)}`);
+
+      expect(sendTransaction).toHaveBeenCalledTimes(2);
+      expect(sendTransaction.mock.calls[0]![0].nonce).toBe(7);
+      expect(sendTransaction.mock.calls[1]![0].nonce).toBe(8);
+    });
   });
 
   describe('withNonceLedger', () => {
@@ -399,6 +445,40 @@ describe('tx-retry', () => {
           maxPriorityFeePerGas: 12n,
         },
       });
+    });
+
+    it('NonceLedgerContext.refreshNonce re-reads pending nonce and updates context.nonce', async () => {
+      const from = '0x1111111111111111111111111111111111111111' as const;
+      const ledger = createMemoryTxSubmissionLedger();
+      const getTransactionCount = vi
+        .fn()
+        .mockResolvedValueOnce(5) // initial pin
+        .mockResolvedValueOnce(9); // refreshNonce read
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount,
+        estimateFeesPerGas: vi.fn(),
+        getGasPrice: vi.fn(),
+      };
+
+      await withNonceLedger(
+        {
+          publicClient: publicClient as never,
+          ledger,
+          from,
+        },
+        async (nonceLedger) => {
+          expect(nonceLedger.nonce).toBe(5);
+          const refreshed = await nonceLedger.refreshNonce();
+          expect(refreshed).toBe(9);
+          expect(nonceLedger.nonce).toBe(9);
+        },
+      );
+
+      expect(getTransactionCount).toHaveBeenCalledTimes(2);
+      for (const call of getTransactionCount.mock.calls) {
+        expect(call[0]).toMatchObject({ address: from, blockTag: 'pending' });
+      }
     });
   });
 
