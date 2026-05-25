@@ -44,6 +44,12 @@ export interface TjinnStatus {
   tokenAddress: string;
   safeBalanceWei: string | null;
   operatorClaimedWei: string | null;
+  /**
+   * Sum of `JinnDistributor.Claimed.operatorMinted` across the operator's
+   * services over the last 24 hours, as a base-10 wei string. Null when the
+   * window read failed or has not been resolved yet.
+   */
+  operatorMintedLast24hWei: string | null;
   safeCount: number;
   services: TjinnServiceStatus[];
   error: string | null;
@@ -327,6 +333,7 @@ export function pendingTjinnStatus(
     tokenAddress: tokenAddress ?? '',
     safeBalanceWei: null,
     operatorClaimedWei: null,
+    operatorMintedLast24hWei: null,
     safeCount: 0,
     services: [],
     error: null,

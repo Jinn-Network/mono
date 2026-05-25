@@ -79,6 +79,7 @@ describe('assembleStatusV1', () => {
       tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
       safeBalanceWei: null,
       operatorClaimedWei: null,
+      operatorMintedLast24hWei: null,
       safeCount: 0,
       services: [],
       error: null,
@@ -198,6 +199,7 @@ describe('assembleStatusV1', () => {
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: '1500000000000000000',
         operatorClaimedWei: '1500000000000000000',
+        operatorMintedLast24hWei: '250000000000000000',
         safeCount: 1,
         services: [{
           index: 1,
@@ -237,6 +239,7 @@ describe('assembleStatusV1', () => {
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: null,
         operatorClaimedWei: null,
+        operatorMintedLast24hWei: null,
         safeCount: 1,
         services: [{
           index: 1,

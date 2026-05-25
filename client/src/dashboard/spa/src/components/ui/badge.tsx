@@ -11,7 +11,7 @@ const badgeVariants = cva(
         secondary: 'border-transparent bg-[var(--bg-sunken)] text-[var(--fg-muted)]',
         destructive: 'border-[var(--severity-blocking-border)] bg-[var(--severity-blocking-bg)] text-[var(--severity-blocking-fg)]',
         warning: 'border-[var(--severity-warning-border)] bg-[var(--severity-warning-bg)] text-[var(--severity-warning-fg)]',
-        success: 'border-[var(--vow-green)]/60 bg-transparent text-[var(--vow-green)]',
+        success: 'border-[var(--severity-success-border)] bg-[var(--severity-success-bg)] text-[var(--severity-success-fg)]',
         outline: 'border-[var(--border)] bg-transparent text-[var(--fg)]',
         pill: 'rounded-full border-[var(--wane)] bg-transparent text-[var(--wane)] normal-case tracking-[0.12em] px-1.5',
       },

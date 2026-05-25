@@ -53,8 +53,12 @@ export interface WalletCardProps {
    * render state copy from `tjinnDisplay` instead.
    */
   tjinnEarned: string;
-  /** Real JinnDistributor.totalClaimedOperator sum, formatted as a decimal string when available. */
-  tjinnClaimedLifetime: string | null;
+  /**
+   * Sum of `JinnDistributor.Claimed.operatorMinted` for the operator's
+   * services over the last 24 hours, formatted as a decimal string when
+   * available. Null while pending or on read error.
+   */
+  tjinnEarnedLast24h: string | null;
   /** Read state for the Sepolia tJINN balance. */
   tjinnState: TjinnStatusState;
   /** Public read error string, if the Sepolia balance is unavailable. */
@@ -115,7 +119,7 @@ export function WalletCard({
   totalEth,
   runwayDays,
   tjinnEarned,
-  tjinnClaimedLifetime,
+  tjinnEarnedLast24h,
   tjinnState,
   tjinnError,
   agentId,
@@ -178,6 +182,70 @@ export function WalletCard({
       >
         <span className={eyebrow}>Wallet</span>
 
+        {/* ── REWARDS ───────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3" data-testid="wallet-section-rewards">
+          <span className={sectionLabel}>Rewards</span>
+
+          {/*
+            24h-window minted is the operationally meaningful number — it's
+            what the operator earned today. Lifetime (`tJinn.safeBalanceWei`)
+            is a supporting reference shown below in smaller type.
+          */}
+          <div
+            className="flex flex-col gap-1"
+            data-testid="tjinn-earned-24h-region"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <p className="text-sm font-medium text-muted-foreground">
+              JINN earned last 24hrs
+            </p>
+            <div className="flex items-baseline gap-2">
+              <span
+                className="text-2xl font-bold tracking-tight"
+                data-testid="tjinn-earned-24h-value"
+                style={tjinnState === 'error' ? { color: 'var(--break-red)' } : undefined}
+              >
+                {tjinnEarnedLast24h ?? (tjinnState === 'error' ? 'unavailable' : 'pending')}
+              </span>
+              {tjinnEarnedLast24h !== null && (
+                <span className="text-xs text-muted-foreground">tJINN</span>
+              )}
+            </div>
+          </div>
+
+          {/* Lifetime tJINN ERC-20 Safe balance (#406), minted by JinnDistributor. */}
+          <div
+            className="flex flex-col gap-1"
+            data-testid="tjinn-earned-region"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <p className="text-xs text-muted-foreground" data-testid="tjinn-earned-state-prefix">
+              Lifetime
+            </p>
+            <div className="flex items-baseline gap-2">
+              <span
+                className="text-base font-medium"
+                data-testid="tjinn-earned-value"
+                style={tjinnState === 'error' ? { color: 'var(--break-red)' } : undefined}
+              >
+                {tjinnValue}
+              </span>
+              {tjinnState === 'ready' && (
+                <span className="text-xs text-muted-foreground">tJINN</span>
+              )}
+            </div>
+            {tjinnStateCopy && (
+              <span className="text-xs text-muted-foreground" data-testid="tjinn-earned-state">
+                {tjinnStateCopy}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <Separator />
+
         {/* ── GAS ───────────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3" data-testid="wallet-section-gas">
           <span className={sectionLabel}>Gas</span>
@@ -198,54 +266,6 @@ export function WalletCard({
           >
             Top up from faucet (free)
           </Button>
-        </div>
-
-        <Separator />
-
-        {/* ── REWARDS ───────────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-3" data-testid="wallet-section-rewards">
-          <span className={sectionLabel}>Rewards</span>
-
-          {/* Real Sepolia tJINN ERC-20 Safe balance (#406), minted by JinnDistributor. */}
-          <div
-            className="flex flex-col gap-1"
-            data-testid="tjinn-earned-region"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span className={sectionLabel}>Testnet JINN earned</span>
-            <div className="flex items-baseline gap-2">
-              <span
-                className={statBig}
-                data-testid="tjinn-earned-value"
-                style={tjinnState === 'error' ? { color: 'var(--break-red)' } : undefined}
-              >
-                {tjinnValue}
-              </span>
-              {tjinnState === 'ready' && <span className={statUnit}>tJINN</span>}
-            </div>
-            {tjinnStateCopy && (
-              <span className={statAux} data-testid="tjinn-earned-state">
-                {tjinnStateCopy}
-              </span>
-            )}
-          </div>
-
-          <div
-            className="flex items-baseline gap-2"
-            data-testid="tjinn-claimed-lifetime-region"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span className={statAux}>Lifetime claimed</span>
-            <span
-              className="font-mono text-[14px] text-foreground"
-              data-testid="tjinn-claimed-lifetime-value"
-            >
-              {tjinnClaimedLifetime ?? (tjinnState === 'error' ? 'unavailable' : 'pending')}
-            </span>
-            {tjinnClaimedLifetime !== null && <span className={statUnit}>tJINN</span>}
-          </div>
         </div>
 
         <Separator />

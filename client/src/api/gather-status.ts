@@ -2,7 +2,7 @@
  * Best-effort status collection for GET /v1/status (RPC + earning store + SQLite).
  */
 
-import { createPublicClient, getAddress, http, type PublicClient } from 'viem';
+import { createPublicClient, getAddress, http, parseAbiItem, type PublicClient } from 'viem';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -72,8 +72,26 @@ const JINN_DISTRIBUTOR_CLAIMED_ABI = [
   },
 ] as const;
 
+/**
+ * `Claimed` event item for `getLogs({ event, args })`. Matches the
+ * Solidity signature in
+ * `contracts/src/jinn/distribution/JinnDistributor.sol` so the operator
+ * 24h-minted sum can be computed without a separate indexer.
+ */
+const JINN_DISTRIBUTOR_CLAIMED_EVENT = parseAbiItem(
+  'event Claimed(uint256 indexed serviceId, address indexed multisig, uint256 operatorMinted, uint256 daoMinted, uint256 totalEntitledOperator, uint256 totalEntitledDao)',
+);
+
 const TJINN_BALANCE_CACHE_TTL_MS = 30_000;
-const TJINN_BALANCE_TIMEOUT_MS = 4_000;
+const TJINN_BALANCE_TIMEOUT_MS = 6_000;
+
+/**
+ * Approximate Sepolia blocks per 24 hours. The chain produces a block every
+ * ~12s; 86_400 / 12 = 7_200. We pad to 7_500 to absorb the occasional
+ * slower block and keep the window comfortably within the common 10k-block
+ * `eth_getLogs` cap.
+ */
+const SEPOLIA_BLOCKS_PER_24H = 7_500n;
 
 /**
  * tJINN token address + chain id resolved from the bundled JINN MVI L1
@@ -116,8 +134,17 @@ interface TjinnBalanceSnapshot {
   chainId: number;
   balances: Map<string, string>;
   operatorClaimedByService: Map<number, string>;
+  /**
+   * Sum of `Claimed.operatorMinted` over the last 24h, keyed by serviceId.
+   * Missing entries indicate "no claims observed in the window" → 0; a null
+   * top-level `operatorMintedLast24hWei` is only produced when the log
+   * query itself failed (see `claimedLast24hError`).
+   */
+  operatorMintedLast24hByService: Map<number, string>;
   errors: Map<string, string>;
   claimedErrors: Map<number, string>;
+  /** Set when the 24h `getLogs` query failed; the field is then reported as null. */
+  claimedLast24hError: string | null;
 }
 
 /** Fill a fresh errors Map with `TJINN_PUBLIC_READ_ERROR` for every key. */
@@ -426,14 +453,17 @@ async function readTjinnBalances(
   const chainId = await client.getChainId();
   const balances = new Map<string, string>();
   const operatorClaimedByService = new Map<number, string>();
+  const operatorMintedLast24hByService = new Map<number, string>();
 
   if (chainId !== expectedChainId) {
     return {
       chainId,
       balances,
       operatorClaimedByService,
+      operatorMintedLast24hByService,
       errors: errorsForAllKeys(safeToAddress.keys()),
       claimedErrors: errorsForAllServiceIds(serviceIds),
+      claimedLast24hError: TJINN_PUBLIC_READ_ERROR,
     };
   }
 
@@ -486,7 +516,46 @@ async function readTjinnBalances(
     }
   }
 
-  return { chainId, balances, operatorClaimedByService, errors, claimedErrors };
+  let claimedLast24hError: string | null = null;
+  if (distributorAddress && serviceIds.length > 0) {
+    try {
+      const latest = await client.getBlockNumber();
+      const fromBlock =
+        latest > SEPOLIA_BLOCKS_PER_24H ? latest - SEPOLIA_BLOCKS_PER_24H : 0n;
+      const logs = await client.getLogs({
+        address: distributorAddress as `0x${string}`,
+        event: JINN_DISTRIBUTOR_CLAIMED_EVENT,
+        args: { serviceId: serviceIds.map((id) => BigInt(id)) },
+        fromBlock,
+        toBlock: latest,
+      });
+      const sums = new Map<number, bigint>();
+      for (const log of logs) {
+        const args = log.args as { serviceId?: bigint; operatorMinted?: bigint };
+        if (args.serviceId === undefined || args.operatorMinted === undefined) continue;
+        const id = Number(args.serviceId);
+        sums.set(id, (sums.get(id) ?? 0n) + args.operatorMinted);
+      }
+      for (const serviceId of serviceIds) {
+        operatorMintedLast24hByService.set(
+          serviceId,
+          (sums.get(serviceId) ?? 0n).toString(),
+        );
+      }
+    } catch {
+      claimedLast24hError = TJINN_PUBLIC_READ_ERROR;
+    }
+  }
+
+  return {
+    chainId,
+    balances,
+    operatorClaimedByService,
+    operatorMintedLast24hByService,
+    errors,
+    claimedErrors,
+    claimedLast24hError,
+  };
 }
 
 async function getCachedTjinnBalances(
@@ -527,8 +596,10 @@ async function getCachedTjinnBalances(
       chainId: expectedChainId,
       balances: new Map<string, string>(),
       operatorClaimedByService: new Map<number, string>(),
+      operatorMintedLast24hByService: new Map<number, string>(),
       errors: errorsForAllKeys(safeKeys),
       claimedErrors: errorsForAllServiceIds(sortedServiceIds),
+      claimedLast24hError: TJINN_PUBLIC_READ_ERROR,
     };
   });
   tjinnBalanceCache.set(cacheKey, {
@@ -714,6 +785,19 @@ async function gatherTjinnStatus(
     }
     operatorClaimedWei = claimedTotal.toString();
   }
+  // 24h-window sum: null when the log query errored or there are no services.
+  let operatorMintedLast24hWei: string | null = null;
+  if (
+    !!distributorAddress &&
+    serviceIds.size > 0 &&
+    snapshot.claimedLast24hError === null
+  ) {
+    let last24hTotal = 0n;
+    for (const serviceId of serviceIds) {
+      last24hTotal += BigInt(snapshot.operatorMintedLast24hByService.get(serviceId) ?? '0');
+    }
+    operatorMintedLast24hWei = last24hTotal.toString();
+  }
   const hasInvalidSafe = services.some((svc) => svc.error === TJINN_PUBLIC_INVALID_SAFE_ERROR);
   const hasReadError = snapshot.errors.size > 0;
   const hasAnyError = hasInvalidSafe || hasReadError;
@@ -726,6 +810,7 @@ async function gatherTjinnStatus(
     state: hasAnyError ? 'error' : 'ready',
     safeBalanceWei: hasAnyBalance ? total.toString() : null,
     operatorClaimedWei,
+    operatorMintedLast24hWei,
     safeCount,
     services: services.map((svc): TjinnServiceStatus => {
       const operatorClaimedForService =

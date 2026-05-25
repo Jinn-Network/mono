@@ -42,6 +42,24 @@ describe('gatherStatusForApi', () => {
           return 0n;
       }
     };
+    // `Claimed` events captured by `getLogs` for the 24h-minted sum. The
+    // operator's three services each have one event in the window; service 41
+    // also has a second event so the per-service sum is exercised.
+    const claimedEvents: ReadonlyArray<{
+      serviceId: bigint;
+      operatorMinted: bigint;
+    }> = [
+      { serviceId: 41n, operatorMinted: 250000000000000000n },
+      { serviceId: 41n, operatorMinted: 250000000000000000n },
+      { serviceId: 42n, operatorMinted: 500000000000000000n },
+      { serviceId: 43n, operatorMinted: 1000000000000000000n },
+    ];
+    const logReads: Array<{
+      address: string;
+      fromBlock: bigint;
+      toBlock: bigint;
+      serviceIds: bigint[];
+    }> = [];
     vi.doMock('viem', async (importOriginal) => {
       const actual = await importOriginal<typeof import('viem')>();
       return {
@@ -85,6 +103,27 @@ describe('gatherStatusForApi', () => {
             if (req.functionName === 'getStakingState') return 0;
             if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
             return 0n;
+          },
+          getLogs: async (req: {
+            address: `0x${string}`;
+            fromBlock: bigint;
+            toBlock: bigint;
+            args?: { serviceId?: bigint[] };
+          }) => {
+            const allowed = new Set(
+              (req.args?.serviceId ?? []).map((id) => id.toString()),
+            );
+            logReads.push({
+              address: req.address,
+              fromBlock: req.fromBlock,
+              toBlock: req.toBlock,
+              serviceIds: req.args?.serviceId ?? [],
+            });
+            return claimedEvents
+              .filter((e) => allowed.has(e.serviceId.toString()))
+              .map((e) => ({
+                args: { serviceId: e.serviceId, operatorMinted: e.operatorMinted },
+              }));
           },
         }),
         http: () => ({}),
@@ -151,6 +190,8 @@ describe('gatherStatusForApi', () => {
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: '3500000000000000000',
         operatorClaimedWei: '60000000000000000000',
+        // 0.25 + 0.25 + 0.5 + 1.0 = 2.0 tJINN minted across services in 24h
+        operatorMintedLast24hWei: '2000000000000000000',
         safeCount: 2,
         error: null,
       });

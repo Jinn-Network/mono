@@ -90,6 +90,8 @@
   --severity-info-border: rgba(122, 167, 220, 0.4);
   --severity-info-bg: transparent;
   --severity-success-fg: var(--vow-green);
+  --severity-success-border: rgba(106, 155, 143, 0.6);
+  --severity-success-bg: rgba(106, 155, 143, 0.06);
 
   /* shadcn token mapping → our brand tokens. shadcn-vendored primitives
      reach for `bg-background`, `text-card-foreground`, `border-input`,

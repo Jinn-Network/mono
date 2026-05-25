@@ -196,6 +196,7 @@ describe('OverviewPage Wallet wiring', () => {
         tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
         safeBalanceWei: '1500000000000000000',
         operatorClaimedWei: '2750000000000000000',
+        operatorMintedLast24hWei: '250000000000000000',
         safeCount: 1,
         services: [],
         error: null,
@@ -209,8 +210,8 @@ describe('OverviewPage Wallet wiring', () => {
     await waitFor(() =>
       expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
     );
-    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('2.7500');
-    expect(screen.getByText(/testnet jinn earned/i)).toBeTruthy();
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
+    expect(screen.getByText(/jinn earned last 24hrs/i)).toBeTruthy();
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).not.toBe('999.0000');
     expect(screen.queryByText('999.0000')).toBeNull();

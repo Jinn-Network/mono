@@ -16,7 +16,7 @@ function defaultProps(): WalletCardProps {
     runwayDays: 1,
     perRole: { master: '0.0088', agent: '—', safe: '—' },
     tjinnEarned: '0.0000',
-    tjinnClaimedLifetime: '0.0000',
+    tjinnEarnedLast24h: '0.0000',
     tjinnState: 'ready',
     tjinnError: null,
     lastClaimAt: null,
@@ -61,9 +61,10 @@ describe('WalletCard', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} tjinnEarned="1.2500" />);
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/testnet jinn earned/i);
+    expect(rewards.textContent).toMatch(/lifetime/i);
     expect(rewards.textContent).toContain('1.2500');
-    expect(rewards.textContent).toMatch(/lifetime claimed/i);
+    expect(rewards.textContent).toMatch(/jinn earned last 24hrs/i);
+    expect(rewards.textContent).not.toMatch(/lifetime claimed/i);
     expect(rewards.textContent).not.toMatch(/collector pending/i);
     expect(rewards.textContent).not.toMatch(/collector claimed/i);
     expect(rewards.textContent).not.toMatch(/collector-token/i);
@@ -71,7 +72,7 @@ describe('WalletCard', () => {
     expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
   });
 
-  it('shows the tJINN-earned stat in the Rewards section when the read is ready', () => {
+  it('shows the lifetime tJINN stat in the Rewards section when the read is ready', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
@@ -81,7 +82,7 @@ describe('WalletCard', () => {
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/testnet jinn earned/i);
+    expect(rewards.textContent).toMatch(/lifetime/i);
     const tjinnValue = screen.getByTestId('tjinn-earned-value');
     expect(tjinnValue.textContent).toBe('1.5000');
     // Ready state shows the unit and emits no state copy.
@@ -89,21 +90,20 @@ describe('WalletCard', () => {
     expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
   });
 
-  it('keeps a real lifetime-claimed tJINN counter without claim actions', () => {
+  it('shows JINN earned in the last 24hrs above the lifetime balance', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
         tjinnEarned="1.5000"
-        tjinnClaimedLifetime="2.7500"
+        tjinnEarnedLast24h="0.2500"
         tjinnState="ready"
       />,
     );
     render(ui);
-    expect(screen.getByTestId('tjinn-claimed-lifetime-region').textContent).toMatch(
-      /lifetime claimed/i,
-    );
-    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('2.7500');
-    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
+    const region = screen.getByTestId('tjinn-earned-24h-region');
+    expect(region.textContent).toMatch(/jinn earned last 24hrs/i);
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
+    expect(region.textContent).toContain('tJINN');
   });
 
   it('shows pending copy and no value while the tJINN read is unresolved', () => {
@@ -111,13 +111,13 @@ describe('WalletCard', () => {
       <WalletCard
         {...defaultProps()}
         tjinnEarned="—"
-        tjinnClaimedLifetime={null}
+        tjinnEarnedLast24h={null}
         tjinnState="pending"
       />,
     );
     render(ui);
     expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending');
-    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('pending');
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('pending');
     expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
       /waiting for sepolia balance/i,
     );
@@ -128,7 +128,7 @@ describe('WalletCard', () => {
       <WalletCard
         {...defaultProps()}
         tjinnEarned="—"
-        tjinnClaimedLifetime={null}
+        tjinnEarnedLast24h={null}
         tjinnState="error"
         tjinnError="Sepolia tJINN balance temporarily unavailable."
       />,
@@ -138,7 +138,7 @@ describe('WalletCard', () => {
     expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
       /temporarily unavailable/i,
     );
-    expect(screen.getByTestId('tjinn-claimed-lifetime-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('unavailable');
   });
 
   it('wraps the tJINN-earned row in a polite live region', () => {

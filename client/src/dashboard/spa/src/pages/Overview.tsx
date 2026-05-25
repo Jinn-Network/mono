@@ -287,9 +287,9 @@ export function OverviewPage(): JSX.Element {
     status?.tJinn?.state === 'ready'
       ? formatEth(status.tJinn.safeBalanceWei ?? '0')
       : formatEth(status?.tJinn?.safeBalanceWei ?? undefined);
-  const tjinnClaimedLifetime =
-    status?.tJinn?.operatorClaimedWei != null
-      ? formatEth(status.tJinn.operatorClaimedWei)
+  const tjinnEarnedLast24h =
+    status?.tJinn?.operatorMintedLast24hWei != null
+      ? formatEth(status.tJinn.operatorMintedLast24hWei)
       : null;
   const tjinnError = status?.tJinn?.error ?? null;
 
@@ -507,7 +507,7 @@ export function OverviewPage(): JSX.Element {
             safe: '—',
           }}
           tjinnEarned={tjinnEarned}
-          tjinnClaimedLifetime={tjinnClaimedLifetime}
+          tjinnEarnedLast24h={tjinnEarnedLast24h}
           tjinnState={tjinnState}
           tjinnError={tjinnError}
           agentId={services[0]?.agentId ?? null}
