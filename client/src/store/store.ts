@@ -1293,7 +1293,8 @@ export class Store {
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
-      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
+              credential_id, cost_usd_micros, model
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -1308,6 +1309,9 @@ export class Store {
       solver_type: string | null;
       outcome: string | null;
       detail: string | null;
+      credential_id: string | null;
+      cost_usd_micros: number | null;
+      model: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -1319,12 +1323,16 @@ export class Store {
       solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
+      credentialId: r.credential_id,
+      costUsdMicros: r.cost_usd_micros,
+      model: r.model,
     }));
   }
 
   getActivityEventById(id: number): ActivityEventRow | null {
     const r = this.db.prepare(
-      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
+              credential_id, cost_usd_micros, model
        FROM activity_events
        WHERE id = ?`,
     ).get(id) as {
@@ -1337,6 +1345,9 @@ export class Store {
       solver_type: string | null;
       outcome: string | null;
       detail: string | null;
+      credential_id: string | null;
+      cost_usd_micros: number | null;
+      model: string | null;
     } | undefined;
     if (!r) return null;
     return {
@@ -1349,6 +1360,9 @@ export class Store {
       solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
+      credentialId: r.credential_id,
+      costUsdMicros: r.cost_usd_micros,
+      model: r.model,
     };
   }
 
