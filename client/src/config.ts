@@ -25,41 +25,6 @@ import { parseRpcUrls } from './rpc/transport.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
-export interface DefaultSolverNetConfig extends Record<string, unknown> {
-  enabled?: boolean;
-  solverType: string;
-  /**
-   * Operator-selected roles for this SolverNet. A non-empty subset of
-   * `['solving', 'evaluating']`. Multiple roles can run concurrently — the
-   * daemon enforces `disallowSolverSelfEvaluation` on-chain so the operator
-   * never evaluates its own Solutions, and the on-chain
-   * TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
-   * `verdictDeliveryWeight` as independent additive counters.
-   *
-   * Launcher-side flagging is no longer expressed as an operator role —
-   * launcher ownership is determined by the launched-record subsystem
-   * (spec/2026-05-05-solvernet-creation-and-launch.md §11). Operator config
-   * carries only the participation roles.
-   *
-   * Legacy `role: 'solving' | 'evaluating'` configs are auto-migrated to
-   * `roles: [<role>]` by the loader (zod preprocessor on solverNets[*]).
-   */
-  roles?: Array<'solving' | 'evaluating'>;
-  harness?: string;
-  model?: string;
-  plugins?: Array<string | { name?: string; source: string; version?: string }>;
-  taskGenerator?: { enabled?: boolean };
-}
-
-/**
- * Default `solverNets` is empty per Decision 5 of
- * spec/2026-05-05-solvernet-creation-and-launch.md — pre-release, no
- * migration burden. Fresh installs no longer seed the `prediction` entry;
- * the operator joins SolverNets through the registry (Task 21's
- * `joinedSolverNets` block).
- */
-export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {};
-
 const HarnessNameSchema = z.string().transform((name) => canonicalHarnessName(name));
 
 export const JinnConfigSchema = z.object({
@@ -449,74 +414,7 @@ export const JinnConfigSchema = z.object({
     .default({ mode: 'train' }),
 
   /**
-   * SolverNet activation, Harness selection, and operator-configured runtime plugins.
-   *
-   * Each entry's `roles` is a non-empty subset of `['solving', 'evaluating']`.
-   * Multiple roles can run concurrently for the same SolverNet; the
-   * protocol-level `disallowSolverSelfEvaluation` flag prevents the operator
-   * from evaluating its own Solutions and the on-chain
-   * TaskActivityCheckerV3 tracks Solution and Verdict counters independently
-   * (additive into `eligibleActivityWeight`).
-   *
-   * Launcher ownership lives in the launched-record subsystem
-   * (spec/2026-05-05-solvernet-creation-and-launch.md §11), not in operator
-   * config — there is no `'launching'` operator role. Legacy entries that
-   * include `'launching'` in `roles` have it stripped by the preprocessor so
-   * older config files keep loading.
-   *
-   * Backwards-compat: a legacy `role: 'solving' | 'evaluating'` field is
-   * auto-promoted to `roles: [<role>]` by the zod preprocessor below so
-   * existing `~/.jinn-client/config.json` files keep loading without an
-   * operator migration step.
-   */
-  solverNets: z.record(z.preprocess(
-    (raw) => {
-      if (typeof raw !== 'object' || raw === null) return raw;
-      const obj = raw as Record<string, unknown>;
-      // Promote legacy `role: X` → `roles: [X]` when only the singular form
-      // is provided. If both are present (mid-migration third-party config),
-      // `roles` wins and `role` is dropped.
-      if (Array.isArray(obj['roles']) && obj['roles'].length > 0) {
-        // Drop legacy `'launching'` entries — operator config no longer
-        // carries the launcher role; ownership is via launched records.
-        const filteredRoles = (obj['roles'] as unknown[]).filter(
-          (r) => r !== 'launching',
-        );
-        const { role: _legacyRole, ...rest } = obj;
-        return { ...rest, roles: filteredRoles };
-      }
-      if (typeof obj['role'] === 'string' && (obj['role'] === 'solving' || obj['role'] === 'evaluating')) {
-        const { role, ...rest } = obj;
-        return { ...rest, roles: [role] };
-      }
-      return obj;
-    },
-    z.object({
-      enabled: z.boolean().default(true),
-      solverType: z.string(),
-      roles: z.array(z.enum(['solving', 'evaluating']))
-        .min(1, 'each SolverNet must enable at least one role')
-        .default(['solving'])
-        // Deduplicate to keep downstream consumers simple.
-        .transform((arr) => Array.from(new Set(arr))),
-      harness: HarnessNameSchema.default(CLAUDE_CODE_HARNESS),
-      model: z.string().optional(),
-      plugins: z.array(z.union([
-        z.string(),
-        z.object({
-          name: z.string().optional(),
-          source: z.string(),
-          version: z.string().optional(),
-        }),
-      ])).default([]),
-      taskGenerator: z.object({
-        enabled: z.boolean().default(true),
-      }).default({ enabled: true }),
-    }),
-  )).default(DEFAULT_SOLVER_NETS),
-
-  /**
-   * Manifest-keyed joined SolverNets (Task 21).
+   * Manifest-keyed joined SolverNets.
    *
    * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
    *
@@ -525,10 +423,10 @@ export const JinnConfigSchema = z.object({
    * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
    * launched-instance authority across launchers.
    *
-   * Kept structurally separate from legacy `solverNets` for now. The daemon
-   * narrows this block into runtime SolverNet registry entries on restart, and
-   * Task 22 collapses both branches into a single manifest-keyed shape once
-   * the legacy block is fully drained.
+   * The daemon narrows this block into runtime SolverNet registry entries on
+   * restart. Legacy short-name-keyed `solverNets` blocks on operator config
+   * files are auto-migrated into synthetic `legacy:<short-name>`-keyed
+   * entries at load time (see `migrateLegacySolverNets`).
    */
   joinedSolverNets: z
     .record(
@@ -1202,6 +1100,20 @@ export function loadConfig(configPath?: string): JinnConfig {
         },
       );
     }
+  }
+
+  // Auto-migrate any legacy short-name-keyed `solverNets` block into
+  // `joinedSolverNets` with synthetic `legacy:<name>` keys. Operators upgrade
+  // without an explicit action; the warning surfaces the migration so they
+  // know to re-join via the SPA when they want a real manifest CID. See
+  // spec/2026-05-25-retire-legacy-solvernets-config.md and issue #421.
+  const migratedCount = migrateLegacySolverNets(merged);
+  if (migratedCount > 0) {
+    console.warn(
+      `[config] Migrated ${migratedCount} legacy solverNets ${migratedCount === 1 ? 'entry' : 'entries'} to joinedSolverNets. ` +
+      'Open Operator > SolverNets in the dashboard to re-join via the registry ' +
+      '(replaces the synthetic legacy:* keys with real manifest CIDs).'
+    );
   }
 
   // 3. Validate
