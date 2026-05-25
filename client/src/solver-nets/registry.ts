@@ -194,7 +194,6 @@ function parseSolverTypeRef(solverType: string): { id: string; version: string }
 
 export async function loadSolverNets(
   config: {
-    solverNets: Record<string, SolverNetConfig>;
     joinedSolverNets?: Record<string, JoinedSolverNetConfig>;
   },
 ): Promise<SolverNetRegistry> {
@@ -277,8 +276,5 @@ export async function loadSolverNets(
     });
   }
 
-  for (const [name, net] of Object.entries(config.solverNets)) {
-    await registerFromConfig(name, net);
-  }
   return registry;
 }

@@ -53,19 +53,19 @@ describe('SolverNet contracts', () => {
     // Runtime plugins are operator-configured. The bundled
     // `jinn-prediction-plugin` is no longer auto-loaded by the contract; it is
     // a quick-start default the launcher seeds into the local
-    // `solverNets.prediction.plugins` config (provenance: 'configured').
+    // joined config's `plugins` array (provenance: 'configured').
     // Network Tools remains auto-loaded as a runtime-scoped default
     // (`provenance: 'default'`, `supports: ['jinn.runtime']`).
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          roles: ['evaluating'],
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['evaluator'],
           harness: 'prediction-v1-baseline',
           model: 'claude-opus-test',
           plugins: ['bundled:jinn-prediction-plugin'],
-          taskGenerator: { enabled: true },
         },
       },
     });
@@ -95,14 +95,14 @@ describe('SolverNet contracts', () => {
 
   it('returns the SolverNet for both restoration and evaluation when both roles are active', async () => {
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          roles: ['solving', 'evaluating'],
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver', 'evaluator'],
           harness: 'prediction-v1-baseline',
           plugins: ['bundled:jinn-prediction-plugin'],
-          taskGenerator: { enabled: true },
         },
       },
     });
@@ -116,7 +116,6 @@ describe('SolverNet contracts', () => {
 
   it('loads manifest-joined SolverNets into the runtime registry', async () => {
     const registry = await loadSolverNets({
-      solverNets: {},
       joinedSolverNets: {
         bafyfixture: {
           manifestCid: 'bafyfixture',
@@ -145,19 +144,12 @@ describe('SolverNet contracts', () => {
     ]);
   });
 
-  it('prefers app-joined SolverNets over same-name legacy runtime config', async () => {
+  it('app-joined SolverNets resolve via the joined registry only', async () => {
+    // Pre-issue-#421 this test asserted that a joined entry "won" over a
+    // legacy short-name-keyed `solverNets` entry of the same display name.
+    // With the legacy block retired, only the joined entry remains; the
+    // assertion is that the joined block alone resolves the SolverNet.
     const registry = await loadSolverNets({
-      solverNets: {
-        'SWE-rebench v2': {
-          enabled: true,
-          solverType: 'swe-rebench-v2.v1',
-          roles: ['solving'],
-          harness: 'codex-code-learner',
-          model: 'gpt-5.4-mini',
-          plugins: [],
-          taskGenerator: { enabled: false },
-        },
-      },
       joinedSolverNets: {
         bafyfixture: {
           manifestCid: 'bafyfixture',
@@ -177,12 +169,11 @@ describe('SolverNet contracts', () => {
     expect(registry.claudeModelSelections()['swe-rebench-v2.v1']).toBe(
       'claude-haiku-4-5-20251001',
     );
-    expect(registry.list().filter((entry) => entry.name === 'SWE-rebench v2')).toHaveLength(2);
+    expect(registry.list().filter((entry) => entry.name === 'SWE-rebench v2')).toHaveLength(1);
   });
 
   it('derives evaluator-only harnesses from the joined SolverNet contract', async () => {
     const registry = await loadSolverNets({
-      solverNets: {},
       joinedSolverNets: {
         bafyfixture: {
           manifestCid: 'bafyfixture',
@@ -201,7 +192,6 @@ describe('SolverNet contracts', () => {
 
   it('lets joined operators opt out of default SolverNet runtime plugins', async () => {
     const registry = await loadSolverNets({
-      solverNets: {},
       joinedSolverNets: {
         bafyfixture: {
           manifestCid: 'bafyfixture',
@@ -221,14 +211,14 @@ describe('SolverNet contracts', () => {
 
   it('returns the SolverNet only for restoration when only solving is active', async () => {
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          roles: ['solving'],
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
           plugins: ['bundled:jinn-prediction-plugin'],
-          taskGenerator: { enabled: true },
         },
       },
     });
@@ -236,15 +226,16 @@ describe('SolverNet contracts', () => {
     expect(registry.forSolverType('prediction.v1', 'evaluation')).toBeUndefined();
   });
 
-  it('falls back to roles=[solving] when neither roles nor role is set', async () => {
+  it('defaults a joined SolverNet to solver-only when only solver is configured', async () => {
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
           plugins: ['bundled:jinn-prediction-plugin'],
-          taskGenerator: { enabled: true },
         },
       },
     });
@@ -255,13 +246,14 @@ describe('SolverNet contracts', () => {
 
   it('does not duplicate Network Tools if it is configured explicitly', async () => {
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
           plugins: [JINN_NETWORK_TOOLS_PLUGIN],
-          taskGenerator: { enabled: true },
         },
       },
     });
@@ -275,49 +267,38 @@ describe('SolverNet contracts', () => {
     ]);
   });
 
-  it('skips legacy-disabled SolverNets before resolving contracts', async () => {
+  it('skips joined SolverNets whose contract is not registered', async () => {
     const registry = await loadSolverNets({
-      solverNets: {
-        disabled: {
-          enabled: false,
-          solverType: 'unknown.v0',
+      joinedSolverNets: {
+        'legacy:unknown': {
+          manifestCid: 'legacy:unknown',
+          name: 'unknown',
+          contract: { id: 'unknown', version: 'v0' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
           plugins: [],
-          taskGenerator: { enabled: true },
         },
       },
     });
-
+    // Unknown contracts are silently skipped (the joined-only loader cannot
+    // throw here because the same shape covers in-progress migrations and
+    // mid-rollout fixtures); the registry simply has no entry for the
+    // missing contract.
     expect(registry.list()).toEqual([]);
     expect(registry.forSolverType('unknown.v0')).toBeUndefined();
-  });
-
-  it('rejects enabled SolverNets without a registered contract', async () => {
-    await expect(
-      loadSolverNets({
-        solverNets: {
-          unknown: {
-            enabled: true,
-            solverType: 'unknown.v0',
-            harness: 'prediction-v1-baseline',
-            plugins: [],
-            taskGenerator: { enabled: true },
-          },
-        },
-      }),
-    ).rejects.toThrow(/no registered SolverNetContract/);
   });
 
   it('loads operator configured runtime plugins after defaults', async () => {
     const localPlugin = makeLocalPlugin(['prediction.v1']);
     const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
           plugins: [localPlugin],
-          taskGenerator: { enabled: true },
         },
       },
     });
@@ -338,13 +319,14 @@ describe('SolverNet contracts', () => {
   it('reports a clear error when an operator configured runtime plugin is not available', async () => {
     await expect(
       loadSolverNets({
-        solverNets: {
-          prediction: {
-            enabled: true,
-            solverType: 'prediction.v1',
+        joinedSolverNets: {
+          'legacy:prediction': {
+            manifestCid: 'legacy:prediction',
+            name: 'prediction',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
             harness: 'prediction-v1-baseline',
             plugins: ['npm:@jinn-network/definitely-missing-prediction-runtime-plugin'],
-            taskGenerator: { enabled: true },
           },
         },
       }),
@@ -356,13 +338,14 @@ describe('SolverNet contracts', () => {
   it('rejects runtime plugins whose supports list does not include the SolverNet solverType', async () => {
     await expect(
       loadSolverNets({
-        solverNets: {
-          prediction: {
-            enabled: true,
-            solverType: 'prediction.v1',
+        joinedSolverNets: {
+          'legacy:prediction': {
+            manifestCid: 'legacy:prediction',
+            name: 'prediction',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
             harness: 'prediction-v1-baseline',
             plugins: [makeLocalPlugin(['portfolio.v0'])],
-            taskGenerator: { enabled: true },
           },
         },
       }),
