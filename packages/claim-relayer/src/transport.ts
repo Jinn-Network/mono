@@ -17,14 +17,18 @@ export function parseRpcUrls(input: string | readonly string[]): string[] {
   if (cleaned.length === 0) {
     throw new Error('parseRpcUrls: at least one RPC URL is required');
   }
-  if (cleaned.length > MAX_RPC_CHAIN_LENGTH) {
+  // Dedup before applying the cap so repeated URLs don't burn slots of the
+  // 4-slot chain. Mirrors `client/src/rpc/transport.ts`. `Set` preserves
+  // first-seen insertion order.
+  const deduped = [...new Set(cleaned)];
+  if (deduped.length > MAX_RPC_CHAIN_LENGTH) {
     process.stderr.write(
       `[claim-relayer] capped fallback chain to ${MAX_RPC_CHAIN_LENGTH} providers ` +
-        `(dropped ${cleaned.length - MAX_RPC_CHAIN_LENGTH} extra slots)\n`,
+        `(dropped ${deduped.length - MAX_RPC_CHAIN_LENGTH} extra slots)\n`,
     );
-    return cleaned.slice(0, MAX_RPC_CHAIN_LENGTH);
+    return deduped.slice(0, MAX_RPC_CHAIN_LENGTH);
   }
-  return cleaned;
+  return deduped;
 }
 
 export function maskRpcHost(url: string): string {

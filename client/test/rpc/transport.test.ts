@@ -58,6 +58,36 @@ describe('parseRpcUrls', () => {
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0][0]).toMatch(/\[rpc\] capped/);
   });
+
+  it('deduplicates repeated URLs, preserving first-seen order', () => {
+    expect(parseRpcUrls(['https://a.example', 'https://a.example', 'https://b.example'])).toEqual([
+      'https://a.example',
+      'https://b.example',
+    ]);
+  });
+
+  it('deduplicates before applying the cap so the effective chain matches operator intent', () => {
+    const log = vi.fn();
+    // 'a' repeated 3× + 4 distinct hosts → dedup yields 5 distinct → cap to 4.
+    const result = parseRpcUrls(
+      ['https://a.example', 'https://a.example', 'https://a.example',
+        'https://b.example', 'https://c.example', 'https://d.example', 'https://e.example'],
+      { log },
+    );
+    expect(result).toEqual([
+      'https://a.example',
+      'https://b.example',
+      'https://c.example',
+      'https://d.example',
+    ]);
+  });
+
+  it('deduplicates entries from a comma-separated string', () => {
+    expect(parseRpcUrls('https://a.example, https://a.example, https://b.example')).toEqual([
+      'https://a.example',
+      'https://b.example',
+    ]);
+  });
 });
 
 describe('buildFallbackTransport', () => {

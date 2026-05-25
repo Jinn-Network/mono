@@ -46,9 +46,12 @@ export interface ParseRpcUrlsOptions {
 }
 
 /**
- * Normalise `string | readonly string[]` into a non-empty, capped list of RPC
- * URLs. Comma-separated strings are split (operator convention, see `peers`
- * in `config.ts`).
+ * Normalise `string | readonly string[]` into a non-empty, deduplicated,
+ * capped list of RPC URLs. Comma-separated strings are split (operator
+ * convention, see `peers` in `config.ts`). Duplicates are removed before the
+ * cap is applied so the effective chain length matches operator intent (an
+ * operator who prepends their paid primary to the existing fallback list
+ * shouldn't burn a slot on the duplicate).
  *
  * @throws if the input yields zero non-empty URLs.
  */
@@ -64,15 +67,21 @@ export function parseRpcUrls(
     throw new Error('parseRpcUrls: at least one RPC URL is required');
   }
 
-  if (cleaned.length > MAX_RPC_CHAIN_LENGTH) {
+  // Dedup before applying the cap so repeated URLs (easy to introduce when an
+  // operator prepends a paid primary that already exists in the fallback list)
+  // don't burn slots of the 4-slot chain. `Set` preserves first-seen insertion
+  // order, which matches the "primary stays in slot 0" constraint.
+  const deduped = [...new Set(cleaned)];
+
+  if (deduped.length > MAX_RPC_CHAIN_LENGTH) {
     log(
       `[rpc] capped fallback chain to ${MAX_RPC_CHAIN_LENGTH} providers ` +
-        `(dropped ${cleaned.length - MAX_RPC_CHAIN_LENGTH} extra slots)`,
+        `(dropped ${deduped.length - MAX_RPC_CHAIN_LENGTH} extra slots)`,
     );
-    return cleaned.slice(0, MAX_RPC_CHAIN_LENGTH);
+    return deduped.slice(0, MAX_RPC_CHAIN_LENGTH);
   }
 
-  return cleaned;
+  return deduped;
 }
 
 /**
