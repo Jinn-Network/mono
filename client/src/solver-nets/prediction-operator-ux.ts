@@ -115,7 +115,6 @@ type LoadSolverNets = typeof defaultLoadSolverNets;
 export interface BuildPredictionOperatorStatusOptions {
   config: JinnConfig;
   configPath: string;
-  name?: string;
   buildHarnesses?: BuildHarnesses;
   loadExternalImpl?: LoadExternalImpl;
   loadSolverNets?: LoadSolverNets;
@@ -184,7 +183,6 @@ function diagnosticNextAction(
 
 function missingSolverNetStatus(
   configPath: string,
-  name: string,
   daemonRunning = false,
 ): PredictionOperatorStatus {
   const diagnostics: PredictionOperatorDiagnostic[] = [
@@ -192,7 +190,7 @@ function missingSolverNetStatus(
       code: 'prediction_solvernet_missing',
       severity: 'error',
       message: 'No active SolverNet configured.',
-      configField: 'solverNets',
+      configField: 'joinedSolverNets',
       nextAction: {
         description: 'Open Operator > SolverNets to join or configure a SolverNet.',
         url: '/operator#solvernets',
@@ -204,7 +202,7 @@ function missingSolverNetStatus(
     ok: false,
     configPath,
     solverNet: {
-      name,
+      name: 'prediction',
       enabled: false,
       solverType: 'prediction.v1',
       roles: [],
@@ -256,26 +254,26 @@ function synthesizeFromJoined(
 export async function buildPredictionOperatorStatus({
   config,
   configPath,
-  name = 'prediction',
   buildHarnesses = defaultBuildHarnesses,
   loadExternalImpl = defaultLoadExternalImpl,
   loadSolverNets = defaultLoadSolverNets,
   daemonRunning = false,
 }: BuildPredictionOperatorStatusOptions): Promise<PredictionOperatorStatus> {
-  const legacy = config.solverNets[name];
   // Prediction is a deprecated SolverNet. Only emit prediction-operator
-  // diagnostics when the operator has a *genuine* prediction config: a legacy
-  // `solverNets.prediction` entry, or a `joinedSolverNets` entry whose contract
-  // is the prediction SolverNet (`contract.id === 'prediction'`). An operator
-  // who joined only non-prediction SolverNets (the normal case) must get no
-  // prediction diagnostics — synthesizing a prediction net from a non-prediction
+  // diagnostics when the operator has a *genuine* prediction config: a
+  // `joinedSolverNets` entry whose contract is the prediction SolverNet
+  // (`contract.id === 'prediction'`). An operator who joined only
+  // non-prediction SolverNets (the normal case) must get no prediction
+  // diagnostics — synthesizing a prediction net from a non-prediction
   // joined entry would mislabel its harness and raise a spurious ATTENTION
   // (dogfood finding #9, issue #328).
   const predictionJoined = findPredictionJoined(config.joinedSolverNets);
-  if (!legacy && !predictionJoined) {
-    return missingSolverNetStatus(configPath, name, daemonRunning);
+  if (!predictionJoined) {
+    return missingSolverNetStatus(configPath, daemonRunning);
   }
-  const net: SolverNetConfig = legacy ?? synthesizeFromJoined(predictionJoined!, 'prediction.v1');
+  const net: SolverNetConfig = synthesizeFromJoined(predictionJoined, 'prediction.v1');
+  const manifestCid = predictionJoined.manifestCid;
+  const displayName = predictionJoined.name ?? manifestCid;
 
   const diagnostics: PredictionOperatorDiagnostic[] = [];
   let loadedNet: LoadedSolverNet | undefined;
@@ -286,10 +284,10 @@ export async function buildPredictionOperatorStatus({
       code: 'prediction_solvernet_disabled',
       severity: 'error',
       message: 'Prediction SolverNet is disabled.',
-      configField: `solverNets.${name}.enabled`,
+      configField: `joinedSolverNets.${manifestCid}.roles`,
       nextAction: {
-        description: 'Enable the Prediction SolverNet before participating.',
-        cli: `jinn solver-nets enable ${name}`,
+        description: 'Re-join the Prediction SolverNet to enable participation.',
+        url: '/operator#solvernets',
       },
     });
   }
@@ -298,10 +296,10 @@ export async function buildPredictionOperatorStatus({
     diagnostics.push({
       code: 'prediction_solver_type_mismatch',
       severity: 'error',
-      message: `SolverNet '${name}' is configured for ${net.solverType}, not prediction.v1.`,
-      configField: `solverNets.${name}.solverType`,
+      message: `SolverNet '${displayName}' is configured for ${net.solverType}, not prediction.v1.`,
+      configField: `joinedSolverNets.${manifestCid}.contract`,
       nextAction: {
-        description: 'Set the SolverNet solverType to prediction.v1.',
+        description: 'Set the SolverNet contract to prediction.v1.',
       },
     });
   }
@@ -309,21 +307,21 @@ export async function buildPredictionOperatorStatus({
   if (net.enabled) {
     try {
       const registry = await loadSolverNets({
-        solverNets: {
-          [name]: net as SolverNetConfig,
+        joinedSolverNets: {
+          [manifestCid]: predictionJoined,
         },
       });
-      loadedNet = registry.get(name);
+      loadedNet = registry.get(displayName);
     } catch (error) {
       pluginLoadError = errorMessage(error);
       diagnostics.push({
         code: 'prediction_plugin_unavailable',
         severity: 'error',
         message: pluginLoadError,
-        configField: `solverNets.${name}.plugins`,
+        configField: `joinedSolverNets.${manifestCid}.plugins`,
         nextAction: {
           description: 'Fix the Prediction runtime plugin source or restore the bundled plugin.',
-          cli: `jinn solver-nets show ${name}`,
+          url: '/operator#solvernets',
         },
       });
     }
@@ -394,10 +392,10 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_harness_missing',
         severity: 'error',
         message: 'No Harness is selected for the Prediction SolverNet.',
-        configField: `solverNets.${name}.harness`,
+        configField: `joinedSolverNets.${manifestCid}.harness`,
         nextAction: {
-          description: 'Select a Harness for prediction.v1 Tasks.',
-          cli: `jinn solver-nets set-harness ${name} prediction-v1-baseline`,
+          description: 'Select a Harness for prediction.v1 Tasks via Operator > SolverNets.',
+          url: '/operator#solvernets',
         },
       });
     } else if (selectedHarnessDisabled) {
@@ -418,7 +416,7 @@ export async function buildPredictionOperatorStatus({
         message: selectedExternalEntry
           ? `Selected external Harness '${net.harness}' is configured but not available.`
           : `Selected Harness '${net.harness}' is not installed.`,
-        configField: `solverNets.${name}.harness`,
+        configField: `joinedSolverNets.${manifestCid}.harness`,
         nextAction: {
           description: 'Select an installed Harness.',
           cli: `jinn harnesses list`,
@@ -429,10 +427,10 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_harness_unsupported',
         severity: 'error',
         message: `Selected Harness '${selectedHarness.name}' does not support prediction.v1 restoration Tasks.`,
-        configField: `solverNets.${name}.harness`,
+        configField: `joinedSolverNets.${manifestCid}.harness`,
         nextAction: {
-          description: 'Select a Harness that supports prediction.v1.',
-          cli: `jinn solver-nets set-harness ${name} prediction-v1-baseline`,
+          description: 'Select a Harness that supports prediction.v1 via Operator > SolverNets.',
+          url: '/operator#solvernets',
         },
       });
     } else if (selectedHarness && harnessStatus && !harnessStatus.readiness.ready) {
@@ -440,7 +438,7 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_harness_not_ready',
         severity: 'warning',
         message: harnessStatus.readiness.reason ?? `Selected Harness '${selectedHarness.name}' is not ready.`,
-        configField: `solverNets.${name}.harness`,
+        configField: `joinedSolverNets.${manifestCid}.harness`,
         nextAction: harnessStatus.readiness.nextStep ?? {
           description: 'Start the daemon with a configured operator fleet.',
           cli: 'jinn run',
@@ -450,21 +448,26 @@ export async function buildPredictionOperatorStatus({
   }
 
   if (net.enabled && !net.taskGenerator.enabled) {
+    // Joined SolverNets do not carry the operator-side task-generator flag —
+    // generator ownership is launched-record-driven (spec §11). Synthesised
+    // entries set `taskGenerator.enabled: false`; the diagnostic is now an
+    // informational note rather than a warning so the dashboard does not
+    // raise ATTENTION on every operator who joins via the registry.
     diagnostics.push({
       code: 'prediction_task_generator_disabled',
-      severity: 'warning',
-      message: 'Prediction Task generator is disabled; this node can still solve shared Tasks but will not post new rounds.',
-      configField: `solverNets.${name}.taskGenerator.enabled`,
+      severity: 'info',
+      message: 'Prediction Task generator runs on the launcher, not on this operator. This node will solve shared Tasks; the launcher posts new rounds.',
+      configField: `joinedSolverNets.${manifestCid}`,
       nextAction: {
-        description: 'Enable the Prediction Task generator if this operator should post shared Tasks.',
+        description: 'Operator config no longer carries the task-generator flag; nothing to change.',
       },
     });
   }
 
-  // Resolve roles from the (potentially partial) net config. The zod
-  // preprocessor already migrated legacy `role` → `roles` at config-load
-  // time; this fallback handles handcrafted configs that bypass the loader
-  // or set `roles: []` (treated as a config error elsewhere — surface it
+  // Resolve roles from the synthesized net config. The joined entry's roles
+  // are already `solver`/`evaluator`; `synthesizeFromJoined` maps them to
+  // `solving`/`evaluating`. Fall back to `['solving']` for a synthesized
+  // entry with no roles (treated as a config error elsewhere — surface it
   // explicitly on the operator-status payload).
   const resolvedRoles: SolverNetOperatorRole[] = (() => {
     const candidate = (net as { roles?: unknown }).roles;
@@ -474,8 +477,6 @@ export async function buildPredictionOperatorStatus({
           r === 'solving' || r === 'evaluating',
       )));
     }
-    const legacy = (net as { role?: unknown }).role;
-    if (legacy === 'solving' || legacy === 'evaluating') return [legacy];
     return ['solving'];
   })();
 
@@ -484,7 +485,7 @@ export async function buildPredictionOperatorStatus({
     ok: diagnostics.every((diagnostic) => diagnostic.severity !== 'error'),
     configPath,
     solverNet: {
-      name,
+      name: displayName,
       enabled: net.enabled,
       solverType: net.solverType,
       roles: resolvedRoles,

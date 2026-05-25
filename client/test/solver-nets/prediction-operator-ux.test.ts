@@ -148,3 +148,41 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
     expect(status.kind).toBe('prediction.v1.operatorStatus');
   });
 });
+
+describe('buildPredictionOperatorStatus — joined-only resolution (issue #421)', () => {
+  it('uses the joined entry display name on the operator-status payload', async () => {
+    const status = await buildPredictionOperatorStatus({
+      config: minimalConfig({
+        joinedSolverNets: {
+          [predictionJoined.manifestCid]: predictionJoined,
+        },
+      }),
+      configPath: '/tmp/config.json',
+      daemonRunning: true,
+      ...minimalDeps,
+    });
+    expect(status.solverNet.name).toBe('Prediction v1');
+  });
+
+  it('emits configField strings keyed by manifestCid (joinedSolverNets.<cid>.*)', async () => {
+    const status = await buildPredictionOperatorStatus({
+      config: minimalConfig({
+        joinedSolverNets: {
+          [predictionJoined.manifestCid]: predictionJoined,
+        },
+      }),
+      configPath: '/tmp/config.json',
+      daemonRunning: true,
+      ...minimalDeps,
+    });
+    const fields = status.diagnostics
+      .map((d) => d.configField)
+      .filter((f): f is string => typeof f === 'string');
+    expect(fields.length).toBeGreaterThan(0);
+    for (const field of fields) {
+      // Every diagnostic that references config must use the joinedSolverNets
+      // path, never the retired legacy `solverNets.<name>.X` shape.
+      expect(field).not.toMatch(/^solverNets\./);
+    }
+  });
+});

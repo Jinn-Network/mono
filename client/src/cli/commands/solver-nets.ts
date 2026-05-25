@@ -513,7 +513,7 @@ Output flags:
     if (subverb === 'doctor') {
       if (net.solverType === 'prediction.v1') {
         const loaded = loadConfig(configPath);
-        const status = await buildPredictionOperatorStatus({ config: loaded, configPath, name });
+        const status = await buildPredictionOperatorStatus({ config: loaded, configPath });
         emit(
           ctx,
           { verb: 'solver-nets doctor', ...status },

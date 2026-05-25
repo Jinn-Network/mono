@@ -244,16 +244,14 @@ function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
 /**
  * Derive the SolverNet name to use for the prediction operator diagnostic.
  *
- * Priority: (1) first legacy `solverNets` entry name, (2) first joined entry's
- * `name` field, (3) first joined entry's manifestCid, (4) fallback `'prediction'`.
+ * Priority: (1) first joined entry's `name` field, (2) first joined entry's
+ * manifestCid, (3) fallback `'prediction'`.
  *
- * This replaces the previous hard-coded `'prediction'` string so that operators
- * who joined a SolverNet via the manifest-keyed flow still get a useful diagnostic
- * (jinn-mono-hjex.2).
+ * Post-issue-#421 the legacy `solverNets` config block has been retired; the
+ * operator's participation choices live in `joinedSolverNets` keyed by
+ * manifestCid.
  */
 function derivePredictionSolverNetName(config: JinnConfig): string {
-  const legacyNames = Object.keys(config.solverNets);
-  if (legacyNames.length > 0) return legacyNames[0]!;
   const joinedEntries = Object.entries(config.joinedSolverNets ?? {});
   if (joinedEntries.length > 0) {
     const [cid, entry] = joinedEntries[0]!;
@@ -283,7 +281,7 @@ async function getCachedPredictionOperatorStatus(
     // gather-status only runs inside a live daemon; the operator-status
     // surface should reflect that (Issue #86 §1: drop the vacuous
     // "start the daemon" copy when the daemon is already running).
-    cached = buildPredictionOperatorStatus({ config, configPath, name, daemonRunning: true })
+    cached = buildPredictionOperatorStatus({ config, configPath, daemonRunning: true })
       .catch((error) => predictionOperatorUnavailable(config, configPath, name, errorMessage(error)));
     byKey.set(key, cached);
   }
@@ -296,27 +294,37 @@ function predictionOperatorUnavailable(
   name: string,
   message: string,
 ): PredictionOperatorStatus {
-  const net = config.solverNets[name];
+  // Resolve the matching joined entry by display name (or manifestCid) so
+  // the diagnostic can still surface the operator's configured roles when
+  // possible. Post-issue-#421 the legacy `config.solverNets` block is gone;
+  // this path now reads `config.joinedSolverNets` exclusively.
+  const joined = Object.values(config.joinedSolverNets ?? {}).find(
+    (entry) => (entry.name ?? entry.manifestCid) === name,
+  );
   const diagnostic = {
     code: 'prediction_operator_status_unavailable',
     severity: 'error' as const,
     message,
     nextAction: {
-      description: 'Inspect Prediction SolverNet configuration and restart the daemon after fixing it.',
-      cli: `jinn solver-nets show ${name}`,
+      description: 'Inspect Prediction SolverNet configuration via Operator > SolverNets and restart the daemon after fixing it.',
+      url: '/operator#solvernets',
     },
   };
 
   // Roles are best-effort: an unavailable status path means the daemon
-  // could not load the SolverNet, so we surface whatever the operator has
-  // configured (post-migration) without trying to default further.
-  const rawRoles = (net as { roles?: unknown } | undefined)?.roles;
-  const netRoles = Array.isArray(rawRoles)
-    ? rawRoles.filter(
-        (r): r is 'solving' | 'evaluating' =>
-          r === 'solving' || r === 'evaluating',
-      )
-    : [];
+  // could not load the SolverNet. Translate the joined operator-role
+  // shape (`solver`/`evaluator`) into the API-facing
+  // `solving`/`evaluating` shape so downstream consumers see a consistent
+  // value.
+  const netRoles: Array<'solving' | 'evaluating'> = [];
+  for (const r of joined?.roles ?? []) {
+    if (r === 'solver') netRoles.push('solving');
+    if (r === 'evaluator') netRoles.push('evaluating');
+  }
+
+  const solverType = joined?.contract
+    ? `${joined.contract.id}.${joined.contract.version}`
+    : 'prediction.v1';
 
   return {
     kind: 'prediction.v1.operatorStatus',
@@ -324,11 +332,11 @@ function predictionOperatorUnavailable(
     configPath,
     solverNet: {
       name,
-      enabled: net?.enabled ?? false,
-      solverType: net?.solverType ?? 'prediction.v1',
+      enabled: joined ? netRoles.length > 0 : false,
+      solverType,
       roles: netRoles,
-      harness: net?.harness,
-      taskGeneratorEnabled: net?.taskGenerator.enabled ?? false,
+      harness: joined?.harness,
+      taskGeneratorEnabled: false,
     },
     runtimePlugins: [],
     diagnostics: [diagnostic],
