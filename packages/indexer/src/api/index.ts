@@ -47,12 +47,18 @@ import {
 import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync } from 'node:fs';
 import explorer from './explorer.js';
+import taskCoverage from './task-coverage.js';
 import { PLACEHOLDER_HTML } from './placeholder.js';
 
 const app = new Hono();
 
 app.use('/graphql', graphql({ db, schema }));
 app.route('/explorer', explorer);
+// /health/task-coverage — operator-facing health probe for issue #567 (the
+// indexer's TaskCreated handler silently stopping after a views swap). Mounted
+// under /health rather than /explorer so monitoring tooling can scope a
+// liveness check to the health namespace.
+app.route('/health', taskCoverage);
 
 // Serve the built explorer SPA from ./public if it exists; otherwise fall back
 // to the placeholder page so the indexer is never broken without a frontend build.
