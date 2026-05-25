@@ -1,14 +1,12 @@
 /**
- * Smoke test for the /health/task-coverage route shape — issue #567.
+ * This file tests the HTTP-shape behaviour of `computeTaskCoverage` (response
+ * JSON envelope, status code mapping). The production route module in
+ * `src/api/task-coverage.ts` imports `ponder:api`, a Ponder virtual module
+ * that Vitest cannot resolve; route-to-helper wiring is exercised in
+ * `yarn dev` smoke runs instead.
  *
- * The full route handler in `src/api/task-coverage.ts` imports `ponder:api`
- * (the Ponder DB virtual module), which Vitest cannot resolve outside a
- * running Ponder process. To exercise the route wiring we mount a parallel
- * Hono app here that delegates to the same `computeTaskCoverage` helper and
- * stubs the on-chain + DB I/O. This catches contract regressions in the
- * response shape, content-type, and HTTP status mapping without booting
- * Ponder; the helper test (`test/task-coverage.test.ts`) covers all the
- * threshold-edge / gap-exceeds cases.
+ * The helper test (`test/task-coverage.test.ts`) covers all the threshold-edge
+ * / gap-exceeds cases.
  */
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';

@@ -128,7 +128,7 @@ If `/health/task-coverage` reports `status: 'degraded'` with a large `taskGap` b
 
 1. **Confirm** the divergence is in the views layer, not the indexer:
    - `curl https://<indexer>/health/task-coverage` — note `maxIndexedTaskId` (from the public views) and `onchainNextTaskId`.
-   - Query the live indexing schema directly: `SELECT max(id::numeric) FROM <DATABASE_SCHEMA>.task;`. If this number matches `onchainNextTaskId - 1`, the indexer is fine and the views are stuck. If it matches `maxIndexedTaskId`, the indexer itself is behind (continue at step 4 below).
+   - Query the live indexing schema directly. Obtain the connection string from Railway's service variables (the `DATABASE_URL` environment variable on the `indexer` service) and run: `psql $DATABASE_URL -c 'SELECT max(id::numeric) FROM <DATABASE_SCHEMA>.task;'`. If this number matches `onchainNextTaskId - 1`, the indexer is fine and the views are stuck. If it matches `maxIndexedTaskId`, the indexer itself is behind (continue at step 4 below).
 2. **Re-run the view swap** atomically against the current `DATABASE_SCHEMA`:
    ```bash
    ponder db create-views --schema=<DATABASE_SCHEMA> --views-schema=jinn_indexer

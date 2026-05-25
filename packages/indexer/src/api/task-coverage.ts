@@ -88,6 +88,9 @@ app.get('/task-coverage', async (c) => {
     });
     return c.json(result, result.httpStatus);
   } catch (err) {
+    // Diagnostic detail stays in server logs; the response body must not echo
+    // it back because Postgres errors can carry fragments of DATABASE_URL.
+    console.warn(`[indexer] task-coverage probe failed: ${String(err)}`);
     return c.json(
       {
         chainId: TASK_COVERAGE_CHAIN_ID,
@@ -98,7 +101,6 @@ app.get('/task-coverage', async (c) => {
         attemptGap: null,
         status: 'unknown' as const,
         httpStatus: 503 as const,
-        error: String(err),
       },
       503,
     );
