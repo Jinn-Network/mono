@@ -31,9 +31,23 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 const PORT = 17333;
 const MASTER_ADDR = '0x1111111111111111111111111111111111111111';
+
+// Base Sepolia chain id = 84532 = 0x14a34. The daemon's testnet RPC
+// preflight (client/src/preflight/rpc-network.ts → checkRpcNetwork) calls
+// eth_chainId and exits via emitEnvelope if the result mismatches or the
+// endpoint is unreachable. CI doesn't have reliable egress to the default
+// Tenderly gateway, so we stand up a loopback JSON-RPC stub that answers
+// eth_chainId with 0x14a34 and point JINN_RPC_URL at it. Anything else the
+// daemon happens to call before binding the API port gets a generic "method
+// not found" — we don't model the chain, we just want the port bound so the
+// SPA can be exercised with route mocks.
+let rpcStub: Server | null = null;
+let rpcStubUrl = '';
 
 let daemon: ChildProcess | null = null;
 let homeDir = '';
@@ -109,6 +123,60 @@ test.beforeAll(async () => {
   if (!existsSync(distBin)) {
     throw new Error(`dist/bin/jinn.js missing — run \`yarn build\` first`);
   }
+
+  // Loopback JSON-RPC stub for the testnet preflight + fleet-bootstrap reads.
+  // Browser-side traffic is mocked by Playwright route.fulfill, but the daemon
+  // process must stay alive (otherwise the SPA's /v1/bootstrap calls hit
+  // ERR_CONNECTION_RESET). We park the daemon in `awaiting_funding` by
+  // returning a zero balance for the master EOA, which is the state the test
+  // exercises anyway.
+  const stubResult = (method: string): unknown => {
+    switch (method) {
+      case 'eth_chainId': return '0x14a34'; // 84532 (Base Sepolia)
+      case 'net_version': return '84532';
+      case 'eth_blockNumber': return '0x1';
+      case 'eth_getBalance': return '0x0';
+      case 'eth_gasPrice': return '0x1';
+      case 'eth_getTransactionCount': return '0x0';
+      case 'eth_getCode': return '0x';
+      case 'eth_call': return '0x';
+      case 'eth_estimateGas': return '0x5208';
+      case 'eth_getBlockByNumber':
+        return {
+          number: '0x1',
+          hash: `0x${'0'.repeat(64)}`,
+          parentHash: `0x${'0'.repeat(64)}`,
+          timestamp: '0x0',
+          gasLimit: '0x1c9c380',
+          gasUsed: '0x0',
+          baseFeePerGas: '0x1',
+          transactions: [],
+        };
+      default: return null;
+    }
+  };
+  rpcStub = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c.toString(); });
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(body); } catch { /* fall through */ }
+      // Support batched JSON-RPC too.
+      const requests = Array.isArray(parsed) ? parsed : [parsed];
+      const responses = requests.map((entry) => {
+        const item = entry as { id?: number | string | null; method?: string } | null;
+        const id = item?.id ?? null;
+        const method = item?.method ?? '';
+        return { jsonrpc: '2.0', id, result: stubResult(method) };
+      });
+      res.end(JSON.stringify(Array.isArray(parsed) ? responses : responses[0]));
+    });
+  });
+  await new Promise<void>((resolve) => rpcStub!.listen(0, '127.0.0.1', resolve));
+  const addr = rpcStub.address() as AddressInfo;
+  rpcStubUrl = `http://127.0.0.1:${addr.port}`;
+
   daemon = spawn('node', [distBin, 'run', '--no-ui'], {
     cwd: process.cwd(),
     env: {
@@ -116,15 +184,19 @@ test.beforeAll(async () => {
       HOME: homeDir,
       JINN_PASSWORD: 'test-password',
       JINN_API_PORT: String(PORT),
-      BASE_RPC_URL: 'http://127.0.0.1:65000',
+      JINN_RPC_URL: rpcStubUrl,
       JINN_NETWORK: 'testnet',
       JINN_DISABLE_TESTNET_FAUCET: '1',
     },
     stdio: 'pipe',
   });
 
+  // Relay daemon output to the test runner so the next startup failure isn't
+  // a black box. Buffered onto stderr because Playwright surfaces it on
+  // failure but suppresses it on pass.
   const onChunk = (chunk: Buffer): void => {
     const text = chunk.toString('utf-8');
+    process.stderr.write(`[daemon] ${text.replace(/\n(?!$)/g, '\n[daemon] ')}`);
     const m = /UI handshake URL:\s+(\S+)/.exec(text);
     if (m && !handshakeUrl) handshakeUrl = m[1];
   };
@@ -150,6 +222,10 @@ test.afterAll(async () => {
     daemon.kill('SIGTERM');
     await new Promise((r) => setTimeout(r, 500));
     if (!daemon.killed) daemon.kill('SIGKILL');
+  }
+  if (rpcStub) {
+    await new Promise<void>((resolve) => rpcStub!.close(() => resolve()));
+    rpcStub = null;
   }
 });
 
