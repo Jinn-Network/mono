@@ -439,12 +439,15 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
-          taskGenerator: { enabled: true },
+          plugins: [],
+          disabledDefaultPlugins: [],
         },
       },
     } as unknown as JinnConfig;
@@ -520,12 +523,15 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
-          taskGenerator: { enabled: true },
+          plugins: [],
+          disabledDefaultPlugins: [],
         },
       },
     } as unknown as JinnConfig;
@@ -576,13 +582,15 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
-          taskGenerator: { enabled: true },
-          roles: ['solving', 'launching'],
+          plugins: [],
+          disabledDefaultPlugins: [],
         },
       },
     } as unknown as JinnConfig;
@@ -625,15 +633,9 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          harness: 'prediction-v1-baseline',
-          taskGenerator: { enabled: true },
-          roles: ['launching'],
-        },
-      },
+      // Operator config no longer carries the 'launching' role (issue #421);
+      // an empty joinedSolverNets is the modern analogue of "launching-only".
+      joinedSolverNets: {},
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -674,7 +676,6 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      solverNets: {},
       joinedSolverNets: {
         'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
           manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
@@ -699,14 +700,14 @@ describe('gatherStatusForApi', () => {
       });
     });
 
-    // gather-status must have called buildPredictionOperatorStatus with the name
-    // from the joined entry ('SWE-rebench v2'), not the hard-coded 'prediction'.
+    // gather-status must have called buildPredictionOperatorStatus exactly
+    // once (the `name` parameter was retired in issue #421 — joined-only).
     expect(buildPredictionOperatorStatus).toHaveBeenCalledTimes(1);
     const [callArgs] = buildPredictionOperatorStatus.mock.calls;
-    expect((callArgs as [{ name?: string }])[0].name).toBe('SWE-rebench v2');
+    expect((callArgs as [{ name?: string }])[0].name).toBeUndefined();
   });
 
-  it("omits 'launching' from operator.solverNet.roles on the unavailable path", async () => {
+  it("surfaces joined-entry roles on the unavailable path (joined-only after issue #421)", async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {
       throw new Error('plugin hash failed');
@@ -716,13 +717,15 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
           harness: 'prediction-v1-baseline',
-          taskGenerator: { enabled: true },
-          roles: ['solving', 'launching'],
+          plugins: [],
+          disabledDefaultPlugins: [],
         },
       },
     } as unknown as JinnConfig;
