@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "outDir": "dist"
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src", "test", "scripts", "bin"]
 }

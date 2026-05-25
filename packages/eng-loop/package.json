@@ -4,11 +4,15 @@
   "private": true,
   "type": "module",
   "packageManager": "yarn@4.13.0",
+  "bin": {
+    "jinn-triage-check": "./bin/jinn-triage-check.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pressure": "tsx scripts/run-pressure-suite.ts",
-    "eng:loop": "tsx scripts/run-eng-loop.ts"
+    "eng:loop": "tsx scripts/run-eng-loop.ts",
+    "triage:check": "tsx bin/jinn-triage-check.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
