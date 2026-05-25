@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { getAddress, isAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { loadArtifactAddresses, type ArtifactAddresses } from './artifacts.js';
+import { maskRpcHost, parseRpcUrls } from './transport.js';
 
 export interface ChainIdentity {
   network: string;
@@ -12,8 +13,14 @@ export interface ChainIdentity {
 export interface ClaimRelayerConfig {
   privateKey: Hex;
   signerAddress: Address;
+  /** Head URL of the L1 fallback chain (preserves display continuity). */
   l1RpcUrl: string;
+  /** Full L1 fallback chain (issue #592, AC3). */
+  l1RpcUrls: readonly string[];
+  /** Head URL of the L2 fallback chain. */
   l2RpcUrl: string;
+  /** Full L2 fallback chain (issue #592, AC3). */
+  l2RpcUrls: readonly string[];
   l1Chain: ChainIdentity;
   l2Chain: ChainIdentity;
   startBlock: bigint;
@@ -78,11 +85,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ClaimRelayerCo
     claimEmitterAddress: optionalAddress(env.JINN_CLAIM_RELAYER_TASK_CLAIM_EMITTER_ADDRESS, 'JINN_CLAIM_RELAYER_TASK_CLAIM_EMITTER_ADDRESS'),
   });
 
+  const l1RpcUrls = parseRpcUrls(requiredEnv(env, 'JINN_CLAIM_RELAYER_L1_RPC_URL'));
+  const l2RpcUrls = parseRpcUrls(requiredEnv(env, 'JINN_CLAIM_RELAYER_L2_RPC_URL'));
+
   return {
     privateKey,
     signerAddress: account.address,
-    l1RpcUrl: requiredEnv(env, 'JINN_CLAIM_RELAYER_L1_RPC_URL'),
-    l2RpcUrl: requiredEnv(env, 'JINN_CLAIM_RELAYER_L2_RPC_URL'),
+    l1RpcUrl: l1RpcUrls[0]!,
+    l1RpcUrls,
+    l2RpcUrl: l2RpcUrls[0]!,
+    l2RpcUrls,
     l1Chain: DEFAULT_L1_CHAIN,
     l2Chain: DEFAULT_L2_CHAIN,
     startBlock: parseInteger(requiredEnv(env, 'JINN_CLAIM_RELAYER_START_BLOCK'), 'JINN_CLAIM_RELAYER_START_BLOCK'),
@@ -94,11 +106,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ClaimRelayerCo
   };
 }
 
+function fallbackSummaryForRedact(urls: readonly string[]): string {
+  // Per #592 AC3 design-note: operators want provider counts + the primary
+  // host in the boot log so they can verify their chain loaded — never just
+  // `[redacted]`. The hostname is non-secret; api-key paths and query
+  // components stay masked because we only emit hostname.
+  return `fallback chain (${urls.length} providers): primary host=${maskRpcHost(urls[0] ?? '')}`;
+}
+
 export function redactConfig(config: ClaimRelayerConfig): Record<string, unknown> {
   return {
     signerAddress: config.signerAddress,
-    l1RpcUrl: '[redacted]',
-    l2RpcUrl: '[redacted]',
+    l1RpcUrl: fallbackSummaryForRedact(config.l1RpcUrls),
+    l2RpcUrl: fallbackSummaryForRedact(config.l2RpcUrls),
     l1Chain: config.l1Chain,
     l2Chain: config.l2Chain,
     hasPrivateKey: true,

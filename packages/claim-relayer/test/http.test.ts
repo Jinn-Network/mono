@@ -26,11 +26,15 @@ function makeStore(): ClaimRelayerStore {
 }
 
 function makeConfig(): ClaimRelayerConfig {
+  const l1Url = 'https://l1-secret.example/rpc?token=super-secret';
+  const l2Url = 'https://l2-secret.example/rpc?token=super-secret';
   return {
     privateKey: PRIVATE_KEY,
     signerAddress: SIGNER,
-    l1RpcUrl: 'https://l1-secret.example/rpc?token=super-secret',
-    l2RpcUrl: 'https://l2-secret.example/rpc?token=super-secret',
+    l1RpcUrl: l1Url,
+    l1RpcUrls: [l1Url],
+    l2RpcUrl: l2Url,
+    l2RpcUrls: [l2Url],
     l1Chain: { network: 'sepolia', chainId: 11155111 },
     l2Chain: { network: 'base-sepolia', chainId: 84532 },
     startBlock: 10n,
@@ -92,8 +96,11 @@ describe('claim-relayer HTTP status', () => {
     expect(json).not.toContain('super-secret');
     expect(json).not.toContain(config.l1RpcUrl);
     expect(json).not.toContain(config.l2RpcUrl);
-    expect(payload.config.l1RpcUrl).toBe('[redacted]');
-    expect(payload.config.l2RpcUrl).toBe('[redacted]');
+    // Per #592 AC3: redacted payload exposes provider count + primary host
+    // (non-secret hostname only — paths and api-key query strings stay
+    // masked) instead of an opaque `[redacted]` blob.
+    expect(String(payload.config.l1RpcUrl)).toMatch(/fallback chain \(1 providers\): primary host=l1-secret\.example/);
+    expect(String(payload.config.l2RpcUrl)).toMatch(/fallback chain \(1 providers\): primary host=l2-secret\.example/);
   });
 
   it('serves /health, /ready, and /status', async () => {
