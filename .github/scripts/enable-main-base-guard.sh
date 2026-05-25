@@ -5,9 +5,13 @@
 # landed on main and run at least once (so the check appears in GitHub's
 # status-context catalogue).
 #
-# This script preserves the existing required_pull_request_reviews,
-# required_linear_history, and required_conversation_resolution settings on
-# main by re-PATCHing the full branch-protection object.
+# The call PUTs the full branch-protection object (PATCH is not supported
+# at this endpoint). The payload mirrors main's current settings exactly:
+# required_pull_request_reviews, require_code_owner_reviews,
+# required_linear_history, required_conversation_resolution, enforce_admins=false,
+# and restrictions=null. If main's protection drifts, update this payload
+# in lockstep — PUT is a full replace, so anything missing from the payload
+# is dropped.
 #
 # Usage:
 #   .github/scripts/enable-main-base-guard.sh              # apply
@@ -43,6 +47,11 @@ PAYLOAD=$(cat <<EOF
 }
 EOF
 )
+
+# enforce_admins=false is intentional: matches main's current protection so
+# Captain retains an emergency override for hotfixes that need to bypass the
+# guard (e.g., a security disclosure where the guard itself is misfiring).
+# Flip to true via the GitHub UI if that policy stance changes.
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   echo "Would PATCH repos/${REPO}/branches/${BRANCH}/protection with:"
