@@ -70,6 +70,15 @@ export async function gatherRealityCheckSignals(
   issueNumber: number,
   runner: CommandRunner,
 ): Promise<RealityCheckInput> {
+  // Defense-in-depth: the CLI shim already validates the issue number, but
+  // any future programmatic caller that bypasses it would otherwise let a
+  // bogus value through into shell-command argv. Fail closed instead.
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error(
+      `gatherRealityCheckSignals: issueNumber must be a positive integer, got ${String(issueNumber)}`,
+    );
+  }
+
   // 1. Refresh local refs once. Fail-loud on error (git fetch never throws
   //    for transient network blips when --quiet is set; an exit code here
   //    means something genuinely wrong).

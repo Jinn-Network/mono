@@ -289,6 +289,15 @@ describe('gatherRealityCheckSignals', () => {
     expect(input.prs[0].bodyClosesIssue).toBe(false);
   });
 
+  it('throws when issueNumber is not a positive integer (0, -1, 1.5)', async () => {
+    const runner: CommandRunner = async () => '';
+    for (const bad of [0, -1, 1.5]) {
+      await expect(gatherRealityCheckSignals(bad, runner)).rejects.toThrow(
+        /must be a positive integer/,
+      );
+    }
+  });
+
   it('buckets `origin/next` and `origin/main` as trunk, release/* + hotfix/* as side, ignores other refs', async () => {
     const rec = recorder();
     const gitLogReply = `abc1234\t\tfix: foo (#572)\n`;
