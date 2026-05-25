@@ -1,26 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { deriveInFlight } from '../../src/dispatcher/state.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
+import type {
+  ProjectSnapshot,
+  SnapshotItem,
+} from '../../src/dispatcher/project-snapshot.js';
 
 /**
- * Fixtures matching real observed output shapes (2026-05-21).
+ * Fixtures matching the post-#585 data flow:
+ * - `ProjectSnapshot` is fetched once per cycle by the orchestrator and
+ *   passed in (used to come from `gh project item-list` inside this fn).
+ * - `git worktree list --porcelain` is still parsed via the runner.
  *
- * gh project item-list 1 --owner Jinn-Network --format json
- *   → {"items":[{"status":"In Progress","title":"...","id":"PVTI_...","repository":"...","content":{"number":418,"type":"Issue",...}}],"totalCount":1}
- *
- * git worktree list --porcelain
- *   → (blank-line-separated blocks, each with worktree/HEAD/branch lines)
- *   worktree /Users/adrianobradley/life's-work/jinn-mono
- *   HEAD cdecb61a1f4e1274bda7ab6bb626cca6c465d86e
- *   branch refs/heads/fix/464-codex-readiness-id-token-deadlock
- *   <blank line>
- *   worktree /private/tmp/jinn-pr423-review
- *   HEAD 61822d46e6dd10063c5aeb1cabe1214b968422e3
- *   detached
- *   <blank line>
- *   worktree /Users/.../jinn-mono_worktrees/418
- *   HEAD abc123
- *   branch refs/heads/feat/418-something
+ * Real `git worktree list --porcelain` output shape (observed 2026-05-21):
+ *   worktree /path/to/worktree
+ *   HEAD <sha>
+ *   branch refs/heads/<branch>   ← present for checked-out branch
+ *   detached                     ← present instead of branch for detached HEAD
+ *   <blank line between blocks>
  */
 
 // ---------------------------------------------------------------------------
@@ -39,56 +36,56 @@ const ORPHAN_WORKTREE_ISSUE = 399;
 const REPO_ROOT = '/Users/adrianobradley/jinn-mono';
 const WORKTREES_BASE = '/Users/adrianobradley/jinn-mono_worktrees';
 
-const PROJECT_ITEMS_JSON = JSON.stringify({
+function snapshotItem(overrides: Partial<SnapshotItem> & Pick<SnapshotItem, 'id' | 'number'>): SnapshotItem {
+  return {
+    contentType: 'Issue',
+    status: null,
+    priority: null,
+    effort: null,
+    blockedOn: null,
+    issueType: null,
+    ...overrides,
+  };
+}
+
+const SNAPSHOT: ProjectSnapshot = {
   items: [
-    // Issue 418 — In Progress, has a worktree
-    {
-      status: 'In Progress',
-      title: 'feat(operator-app): something useful',
+    // Issue 418 — In Progress, has a worktree → in-flight
+    snapshotItem({
       id: 'PVTI_aaa',
-      repository: 'https://github.com/Jinn-Network/mono',
-      content: {
-        number: ISSUE_IN_PROGRESS_WITH_WORKTREE,
-        type: 'Issue',
-        title: 'feat(operator-app): something useful',
-        url: `https://github.com/Jinn-Network/mono/issues/${ISSUE_IN_PROGRESS_WITH_WORKTREE}`,
-        body: '',
-        repository: 'Jinn-Network/mono',
-      },
-    },
-    // Issue 501 — In Progress but no jinn-mono_worktrees/501 worktree exists → drift
-    {
+      number: ISSUE_IN_PROGRESS_WITH_WORKTREE,
+      contentType: 'Issue',
       status: 'In Progress',
-      title: 'fix(client): something broken',
+      priority: 'P1',
+      effort: 'Medium',
+      blockedOn: 'Nothing',
+      issueType: 'feat',
+    }),
+    // Issue 501 — In Progress but no jinn-mono_worktrees/501 worktree exists → drift
+    snapshotItem({
       id: 'PVTI_bbb',
-      repository: 'https://github.com/Jinn-Network/mono',
-      content: {
-        number: ISSUE_IN_PROGRESS_NO_WORKTREE,
-        type: 'Issue',
-        title: 'fix(client): something broken',
-        url: `https://github.com/Jinn-Network/mono/issues/${ISSUE_IN_PROGRESS_NO_WORKTREE}`,
-        body: '',
-        repository: 'Jinn-Network/mono',
-      },
-    },
+      number: ISSUE_IN_PROGRESS_NO_WORKTREE,
+      contentType: 'Issue',
+      status: 'In Progress',
+      priority: 'P2',
+      effort: 'Low',
+      blockedOn: 'Nothing',
+      issueType: 'fix',
+    }),
     // Issue in a different status — should be ignored
-    {
-      status: 'Todo',
-      title: 'chore: some task',
+    snapshotItem({
       id: 'PVTI_ccc',
-      repository: 'https://github.com/Jinn-Network/mono',
-      content: {
-        number: 900,
-        type: 'Issue',
-        title: 'chore: some task',
-        url: 'https://github.com/Jinn-Network/mono/issues/900',
-        body: '',
-        repository: 'Jinn-Network/mono',
-      },
-    },
+      number: 900,
+      contentType: 'Issue',
+      status: 'Todo',
+      priority: 'P2',
+      effort: 'Low',
+      blockedOn: 'Nothing',
+      issueType: 'chore',
+    }),
   ],
-  totalCount: 3,
-});
+  rateLimit: { remaining: 4999, used: 1, resetAt: '2026-05-25T16:00:00Z' },
+};
 
 /**
  * Canned git worktree list --porcelain output.
@@ -128,14 +125,12 @@ const WORKTREE_PORCELAIN = [
 
 function makeFakeRunner(): CommandRunner {
   return async (cmd: string, args: string[]): Promise<string> => {
-    if (cmd === 'gh' && args[0] === 'project') {
-      // gh project item-list 1 --owner Jinn-Network --format json --limit 500
-      return PROJECT_ITEMS_JSON;
-    }
     if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
       // git worktree list --porcelain
       return WORKTREE_PORCELAIN;
     }
+    // Post-#585: deriveInFlight no longer calls `gh` — Project board state
+    // arrives via the snapshot argument, not via the runner.
     throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
   };
 }
@@ -146,7 +141,7 @@ function makeFakeRunner(): CommandRunner {
 
 describe('deriveInFlight', () => {
   it('returns one InFlightSession for an In Progress issue with a matching worktree', async () => {
-    const { inFlight } = await deriveInFlight(makeFakeRunner());
+    const { inFlight } = await deriveInFlight(SNAPSHOT, makeFakeRunner());
 
     expect(inFlight).toHaveLength(1);
     const session = inFlight[0];
@@ -161,7 +156,7 @@ describe('deriveInFlight', () => {
   });
 
   it('surfaces an In Progress issue with no matching worktree as a drift warning', async () => {
-    const { drift } = await deriveInFlight(makeFakeRunner());
+    const { drift } = await deriveInFlight(SNAPSHOT, makeFakeRunner());
 
     const driftForMissingWorktree = drift.find((d) =>
       d.includes(String(ISSUE_IN_PROGRESS_NO_WORKTREE)),
@@ -170,7 +165,7 @@ describe('deriveInFlight', () => {
   });
 
   it('surfaces an orphan jinn-mono_worktrees worktree (no In Progress issue) as a drift warning', async () => {
-    const { drift } = await deriveInFlight(makeFakeRunner());
+    const { drift } = await deriveInFlight(SNAPSHOT, makeFakeRunner());
 
     const driftForOrphanWorktree = drift.find((d) =>
       d.includes(String(ORPHAN_WORKTREE_ISSUE)),
@@ -179,7 +174,7 @@ describe('deriveInFlight', () => {
   });
 
   it('does not include Todo or other non-In-Progress issues in in-flight or drift', async () => {
-    const { inFlight, drift } = await deriveInFlight(makeFakeRunner());
+    const { inFlight, drift } = await deriveInFlight(SNAPSHOT, makeFakeRunner());
 
     // Issue 900 is Todo — not in-flight
     const inFlight900 = inFlight.find((s) => s.issueNumber === 900);
@@ -191,7 +186,7 @@ describe('deriveInFlight', () => {
   });
 
   it('normal case: issue #418 In Progress + jinn-mono_worktrees/418 worktree → one InFlightSession', async () => {
-    const { inFlight, drift } = await deriveInFlight(makeFakeRunner());
+    const { inFlight, drift } = await deriveInFlight(SNAPSHOT, makeFakeRunner());
 
     // Exactly the matched pair
     const session = inFlight.find((s) => s.issueNumber === ISSUE_IN_PROGRESS_WITH_WORKTREE);

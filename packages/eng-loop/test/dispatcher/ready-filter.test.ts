@@ -5,7 +5,7 @@ import type { PolledIssue } from '../../src/dispatcher/types.js';
 const base: PolledIssue = {
   number: 1, title: 't', shape: 'fix', blockedOn: 'Nothing',
   blockedOnIssue: null, effort: 'Low', priority: 'P2',
-  status: 'Todo', onBoard: true, author: 'alice',
+  status: 'Todo', onBoard: true, author: 'alice', projectItemId: 'PVTI_1',
 };
 
 const ALLOW_ALICE: ReadonlySet<string> = new Set(['alice']);

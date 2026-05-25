@@ -1,4 +1,5 @@
 import type { IssueSource } from './issue-source.js';
+import type { ProjectSnapshot } from './project-snapshot.js';
 import type { DispatcherConfig, InFlightSession, ReadyIssue } from './types.js';
 import type { WallClock } from './wall-clock.js';
 import { selectReady, type SkippedForAuthor } from './ready-filter.js';
@@ -76,7 +77,7 @@ export interface CycleDeps {
 /**
  * Run one tick of the dispatcher loop:
  *
- * 1. Poll the issue source.
+ * 1. Poll the issue source (using the supplied snapshot for board state).
  * 2. Derive in-flight state (crash-safe: authoritative external state).
  * 3. Wall-clock circuit-breaker — pause any in-flight session past its ceiling.
  * 4. Apply the ready filter (triage-complete, unblocked, Todo, not in-flight).
@@ -85,14 +86,19 @@ export interface CycleDeps {
  * 7. Return a `CycleReport` for the operator log.
  *
  * `loop.ts` contains NO `gh` or `git` calls — all external I/O is behind the
- * injected `deps` (§9 seam discipline).
+ * injected `deps` (§9 seam discipline). The Project board snapshot is
+ * passed in as data; per jinn-mono#585 the orchestrator fetches it once per
+ * cycle and threads it through here.
  */
-export async function runCycle(deps: CycleDeps): Promise<CycleReport> {
+export async function runCycle(
+  snapshot: ProjectSnapshot,
+  deps: CycleDeps,
+): Promise<CycleReport> {
   const { source, cfg, deriveInFlight, dispatchIssue, countOpenReadyPrs, wallClock, pauseSession } = deps;
 
   // 1. Poll + derive in-flight in parallel for efficiency
   const [polled, { inFlight, drift }, openPrCount] = await Promise.all([
-    source.poll(),
+    source.poll(snapshot),
     deriveInFlight(),
     countOpenReadyPrs(),
   ]);

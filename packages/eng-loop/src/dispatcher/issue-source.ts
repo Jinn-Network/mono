@@ -1,12 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { ProjectSnapshot, SnapshotItem } from './project-snapshot.js';
 import type {
   PolledIssue,
-  IssueShape,
-  BlockedOn,
-  Effort,
-  Priority,
-  ProjectStatus,
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -15,10 +11,21 @@ const execFileAsync = promisify(execFile);
  * SEAM: where ready issues come from.
  * Local implementation polls `gh`; the future SolverNet implementation
  * claims on-chain tasks. Nothing above this interface knows which.
+ *
+ * Project board state is supplied via the {@link ProjectSnapshot} the
+ * orchestrator fetches once per cycle (jinn-mono#585), so individual
+ * implementations don't re-query the board themselves.
  */
 export interface IssueSource {
-  /** Poll for all candidate issues with their taxonomy fields. */
-  poll(): Promise<PolledIssue[]>;
+  /**
+   * Poll for all candidate issues with their taxonomy fields.
+   *
+   * @param snapshot The cycle's Project board snapshot. Issues not present
+   *   in the snapshot are emitted with `onBoard: false` and all
+   *   board-derived fields (`status`, `priority`, `effort`, `blockedOn`,
+   *   `shape`) `null`.
+   */
+  poll(snapshot: ProjectSnapshot): Promise<PolledIssue[]>;
 }
 
 /**
@@ -44,86 +51,11 @@ interface GhIssue {
   author?: { login?: string };
 }
 
-/** One item from `gh project item-list --format json`. */
-interface GhProjectItem {
-  'blocked on'?: string;
-  effort?: string;
-  priority?: string;
-  status?: string;
-  title: string;
-  id: string;
-  repository: string;
-  content?: {
-    number: number;
-    type: string;
-    title: string;
-    url: string;
-    body?: string;
-    repository: string;
-  };
-}
-
-/** Top-level shape of `gh project item-list --format json`. */
-interface GhProjectItemsResponse {
-  items: GhProjectItem[];
-  totalCount: number;
-}
-
-/** Top-level shape of the GraphQL Issue Type batch query response. */
-interface GhIssueTypeResponse {
-  data: {
-    repository: Record<string, { issueType: { name: string } | null } | null>;
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const REPO = 'Jinn-Network/mono';
-const PROJECT_OWNER = 'Jinn-Network';
-const PROJECT_NUMBER = '1';
-
-// ---------------------------------------------------------------------------
-// Type guards / parsers
-// ---------------------------------------------------------------------------
-
-const VALID_SHAPES = new Set<string>([
-  'feat', 'fix', 'refactor', 'spike', 'chore', 'docs', 'test', 'incident', 'design',
-]);
-
-function parseShape(name: string | null | undefined): IssueShape | null {
-  if (name == null) return null;
-  return VALID_SHAPES.has(name) ? (name as IssueShape) : null;
-}
-
-const VALID_BLOCKED_ON = new Set<string>(['Nothing', 'Human', 'Another issue']);
-
-function parseBlockedOn(val: string | undefined): BlockedOn | null {
-  if (val == null) return null;
-  return VALID_BLOCKED_ON.has(val) ? (val as BlockedOn) : null;
-}
-
-const VALID_EFFORT = new Set<string>(['Low', 'Medium', 'High']);
-
-function parseEffort(val: string | undefined): Effort | null {
-  if (val == null) return null;
-  return VALID_EFFORT.has(val) ? (val as Effort) : null;
-}
-
-const VALID_PRIORITY = new Set<string>(['P0', 'P1', 'P2', 'P3', 'P4']);
-
-function parsePriority(val: string | undefined): Priority | null {
-  if (val == null) return null;
-  return VALID_PRIORITY.has(val) ? (val as Priority) : null;
-}
-
-const VALID_STATUS = new Set<string>(['Todo', 'In Progress', 'In Review', 'Done']);
-
-function parseStatus(val: string | undefined): ProjectStatus | null {
-  if (val == null) return null;
-  return VALID_STATUS.has(val) ? (val as ProjectStatus) : null;
-}
 
 // ---------------------------------------------------------------------------
 // Default real CommandRunner
@@ -145,8 +77,8 @@ export class GhIssueSource implements IssueSource {
     this.run = runner;
   }
 
-  async poll(): Promise<PolledIssue[]> {
-    // 1. Fetch open issues from the repo
+  async poll(snapshot: ProjectSnapshot): Promise<PolledIssue[]> {
+    // 1. Fetch open issues from the repo (REST — does not consume GraphQL budget).
     const issueListRaw = await this.run('gh', [
       'issue', 'list',
       '--repo', REPO,
@@ -158,75 +90,42 @@ export class GhIssueSource implements IssueSource {
     ]);
     const ghIssues: GhIssue[] = JSON.parse(issueListRaw) as GhIssue[];
 
-    // 2. Fetch Project board items (Issues only, up to 500)
-    const projectRaw = await this.run('gh', [
-      'project', 'item-list', PROJECT_NUMBER,
-      '--owner', PROJECT_OWNER,
-      '--format', 'json',
-      '--limit', '500',
-    ]);
-    const projectData: GhProjectItemsResponse = JSON.parse(projectRaw) as GhProjectItemsResponse;
-
-    // Build a lookup map: issue number → project item (Issues only)
-    const boardMap = new Map<number, GhProjectItem>();
-    for (const item of projectData.items) {
-      if (item.content?.type === 'Issue') {
-        boardMap.set(item.content.number, item);
+    // 2. Build a lookup map from the snapshot: issue number → snapshot item.
+    //    All board state (status, priority, effort, blockedOn, issueType) comes
+    //    from the snapshot. Pre-#585 this involved a separate
+    //    `gh project item-list` call (~96 GraphQL pts) plus an aliased
+    //    `gh api graphql` issueType lookup; both are now folded into the
+    //    snapshot.
+    const boardMap = new Map<number, SnapshotItem>();
+    for (const item of snapshot.items) {
+      if (item.contentType === 'Issue') {
+        boardMap.set(item.number, item);
       }
     }
 
-    // 3. Batch-query Issue Types via GraphQL for all issues.
-    //    Short-circuit when the issue list is empty — an empty selection set may
-    //    be rejected by GitHub's GraphQL endpoint.
-    const issueNumbers = ghIssues.map((i) => i.number);
-    if (issueNumbers.length === 0) return [];
-    const aliases = issueNumbers
-      .map((n) => `i${n}: issue(number: ${n}) { issueType { name } }`)
-      .join('\n    ');
-    const gqlQuery = `{
-  repository(owner: "Jinn-Network", name: "mono") {
-    ${aliases}
-  }
-}`;
-
-    const issueTypeRaw = await this.run('gh', [
-      'api', 'graphql',
-      '-f', `query=${gqlQuery}`,
-    ]);
-    const issueTypeData: GhIssueTypeResponse = JSON.parse(issueTypeRaw) as GhIssueTypeResponse;
-    const repoData = issueTypeData.data.repository;
-
-    // Build lookup: issue number → IssueShape | null
-    const shapeMap = new Map<number, IssueShape | null>();
-    for (const n of issueNumbers) {
-      const alias = `i${n}`;
-      const entry = repoData[alias];
-      const typeName = entry?.issueType?.name ?? null;
-      shapeMap.set(n, parseShape(typeName));
-    }
-
-    // 4. Map each GhIssue to a PolledIssue
+    // 3. Map each polled issue to PolledIssue.
+    //    Note: an issue not in the snapshot is emitted with `onBoard: false`
+    //    and all board-derived fields null. `selectReady` filters those out
+    //    (it requires `onBoard: true` AND `status === 'Todo'`), so they are
+    //    never dispatched. Issue Type for off-board issues is not fetched —
+    //    this is intentional, since off-board issues are never dispatchable
+    //    in the first place.
     return ghIssues.map((ghIssue): PolledIssue => {
       const boardItem = boardMap.get(ghIssue.number);
       const onBoard = boardItem != null;
-
-      const blockedOn = onBoard ? parseBlockedOn(boardItem!['blocked on']) : null;
-      const effort = onBoard ? parseEffort(boardItem!.effort) : null;
-      const priority = onBoard ? parsePriority(boardItem!.priority) : null;
-      const status = onBoard ? parseStatus(boardItem!.status) : null;
-
       return {
         number: ghIssue.number,
         title: ghIssue.title,
-        shape: shapeMap.get(ghIssue.number) ?? null,
-        blockedOn,
+        shape: boardItem?.issueType ?? null,
+        blockedOn: boardItem?.blockedOn ?? null,
         blockedOnIssue: null,   // Always null in v1 — the field stores "Another issue" with no number suffix; see PolledIssue.blockedOnIssue
-        effort,
-        priority,
-        status,
+        effort: boardItem?.effort ?? null,
+        priority: boardItem?.priority ?? null,
+        status: boardItem?.status ?? null,
         onBoard,
         // Empty string is the unknown-author sentinel; never matches the allowlist (#497).
         author: ghIssue.author?.login ?? '',
+        projectItemId: boardItem?.id ?? null,
       };
     });
   }

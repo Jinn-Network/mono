@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { GhIssueSource } from '../../src/dispatcher/issue-source.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
+import type {
+  ProjectSnapshot,
+  SnapshotItem,
+} from '../../src/dispatcher/project-snapshot.js';
 
 /**
- * Canned JSON fixtures matching real `gh` output shapes observed 2026-05-21.
+ * Post-#585 fixtures.
+ *
+ * GhIssueSource.poll(snapshot) now reads board state (status / priority /
+ * effort / blocked on / issueType) from a {@link ProjectSnapshot} the
+ * orchestrator fetches once per cycle. Only `gh issue list` (REST) remains
+ * as a runner call.
  *
  * gh issue list --repo Jinn-Network/mono --state open --json number,title,labels
- *   → [{"labels":[],"number":403,"title":"fix(client): something"}]
- *
- * gh project item-list 1 --owner Jinn-Network --format json
- *   → {"items":[{"blocked on":"Nothing","effort":"Medium","priority":"P1",
- *       "status":"Done","title":"...","id":"PVTI_...","repository":"...",
- *       "content":{"number":403,"type":"Issue","title":"...","url":"...","body":"...","repository":"Jinn-Network/mono"}}],
- *      "totalCount":158}
- *
- * gh api graphql -f query='{repository(owner:"Jinn-Network",name:"mono"){i403:issue(number:403){issueType{name}}}}'
- *   → {"data":{"repository":{"i403":{"issueType":{"name":"fix"}}}}}
+ *   → [{"labels":[],"number":403,"title":"fix(client): something"}, ...]
  */
 
 // Fixture issue numbers used in tests
@@ -45,59 +45,45 @@ const ISSUE_LIST_JSON = JSON.stringify([
   },
 ]);
 
-/** Canned gh project item-list response — only issues 403 and 328 are on the board. */
-const PROJECT_ITEMS_JSON = JSON.stringify({
-  items: [
-    {
-      'blocked on': 'Nothing',
-      effort: 'Medium',
-      priority: 'P1',
-      status: 'Done',
-      title: '[#220] PR 1: test-gated TaskClaimEmitter redeploy',
-      id: 'PVTI_lADODh3-Ac4BXYaIzgtUv1A',
-      repository: 'https://github.com/Jinn-Network/mono',
-      content: {
-        number: ISSUE_ON_BOARD_WITH_TYPE,
-        type: 'Issue',
-        title: 'fix(client): test-gated TaskClaimEmitter redeploy',
-        url: `https://github.com/Jinn-Network/mono/issues/${ISSUE_ON_BOARD_WITH_TYPE}`,
-        body: 'Context...',
-        repository: 'Jinn-Network/mono',
-      },
-    },
-    {
-      'blocked on': 'Nothing',
-      priority: 'P1',
-      status: 'In Progress',
-      title: 'Release feedback — v0.1.6 operator app dogfood (2026-05-19)',
-      id: 'PVTI_lADODh3-Ac4BXYaIzgtNV5I',
-      repository: 'https://github.com/Jinn-Network/mono',
-      content: {
-        number: ISSUE_ON_BOARD_NO_TYPE,
-        type: 'Issue',
-        title: 'Release feedback — v0.1.6 operator app dogfood (2026-05-19)',
-        url: `https://github.com/Jinn-Network/mono/issues/${ISSUE_ON_BOARD_NO_TYPE}`,
-        body: 'Context...',
-        repository: 'Jinn-Network/mono',
-      },
-    },
-  ],
-  totalCount: 158,
-});
+function snapshotItem(overrides: Partial<SnapshotItem> & Pick<SnapshotItem, 'id' | 'number'>): SnapshotItem {
+  return {
+    contentType: 'Issue',
+    status: null,
+    priority: null,
+    effort: null,
+    blockedOn: null,
+    issueType: null,
+    ...overrides,
+  };
+}
 
 /**
- * Canned GraphQL response for Issue Types.
- * Real shape: {"data":{"repository":{"i403":{"issueType":{"name":"fix"}},"i328":{"issueType":null}}}}
+ * Snapshot containing only issues 403 and 328 (471 is intentionally absent
+ * → off-board test).
  */
-const GRAPHQL_ISSUE_TYPES_JSON = JSON.stringify({
-  data: {
-    repository: {
-      [`i${ISSUE_ON_BOARD_WITH_TYPE}`]: { issueType: { name: 'fix' } },
-      [`i${ISSUE_ON_BOARD_NO_TYPE}`]: { issueType: null },
-      [`i${ISSUE_NOT_ON_BOARD}`]: { issueType: null },
-    },
-  },
-});
+const SNAPSHOT: ProjectSnapshot = {
+  items: [
+    snapshotItem({
+      id: 'PVTI_lADODh3-Ac4BXYaIzgtUv1A',
+      number: ISSUE_ON_BOARD_WITH_TYPE,
+      status: 'Done',
+      priority: 'P1',
+      effort: 'Medium',
+      blockedOn: 'Nothing',
+      issueType: 'fix',
+    }),
+    snapshotItem({
+      id: 'PVTI_lADODh3-Ac4BXYaIzgtNV5I',
+      number: ISSUE_ON_BOARD_NO_TYPE,
+      status: 'In Progress',
+      priority: 'P1',
+      effort: null,
+      blockedOn: 'Nothing',
+      issueType: null, // no Issue Type set
+    }),
+  ],
+  rateLimit: { remaining: 4999, used: 1, resetAt: '2026-05-25T16:00:00Z' },
+};
 
 /** Build a fake CommandRunner that returns canned JSON matching real gh shapes. */
 function makeFakeRunner(): CommandRunner {
@@ -106,14 +92,9 @@ function makeFakeRunner(): CommandRunner {
       // gh issue list --repo ... --state open --json number,title,labels --limit ...
       return ISSUE_LIST_JSON;
     }
-    if (cmd === 'gh' && args[0] === 'project') {
-      // gh project item-list 1 --owner Jinn-Network --format json --limit ...
-      return PROJECT_ITEMS_JSON;
-    }
-    if (cmd === 'gh' && args[0] === 'api') {
-      // gh api graphql -f query=...
-      return GRAPHQL_ISSUE_TYPES_JSON;
-    }
+    // Post-#585: GhIssueSource.poll no longer calls `gh project` or
+    // `gh api graphql` — both are folded into the orchestrator-supplied
+    // snapshot.
     throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
   };
 }
@@ -121,7 +102,7 @@ function makeFakeRunner(): CommandRunner {
 describe('GhIssueSource', () => {
   it('maps an issue on the board with Issue Type to a fully-populated PolledIssue', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll();
+    const issues = await source.poll(SNAPSHOT);
 
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_WITH_TYPE);
     expect(issue).toBeDefined();
@@ -137,7 +118,7 @@ describe('GhIssueSource', () => {
 
   it('maps an issue on the board with no Issue Type to shape: null', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll();
+    const issues = await source.poll(SNAPSHOT);
 
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_NO_TYPE);
     expect(issue).toBeDefined();
@@ -150,7 +131,7 @@ describe('GhIssueSource', () => {
 
   it('maps an issue not on the board to onBoard: false with null routing fields', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll();
+    const issues = await source.poll(SNAPSHOT);
 
     const issue = issues.find((i) => i.number === ISSUE_NOT_ON_BOARD);
     expect(issue).toBeDefined();
@@ -166,14 +147,38 @@ describe('GhIssueSource', () => {
 
   it('returns all polled issues (including off-board ones)', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll();
+    const issues = await source.poll(SNAPSHOT);
     expect(issues.length).toBe(3);
   });
 
   it('preserves issue title from the issue list', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll();
+    const issues = await source.poll(SNAPSHOT);
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_WITH_TYPE);
     expect(issue!.title).toBe('fix(client): test-gated TaskClaimEmitter redeploy');
+  });
+
+  it('skips snapshot items whose contentType is not Issue (PRs, DraftIssues)', async () => {
+    // A snapshot containing a PR item with number=403 must NOT be matched
+    // to the Issue #403 in the issue list — only Issue-typed snapshot items
+    // are considered for board membership.
+    const snapshotWithPr: ProjectSnapshot = {
+      items: [
+        snapshotItem({
+          id: 'PVTI_pr',
+          number: ISSUE_ON_BOARD_WITH_TYPE,
+          contentType: 'PullRequest',
+          // PR items legitimately have no Project field values set
+          issueType: null,
+        }),
+      ],
+      rateLimit: { remaining: 4999, used: 1, resetAt: '2026-05-25T16:00:00Z' },
+    };
+    const source = new GhIssueSource(makeFakeRunner());
+    const issues = await source.poll(snapshotWithPr);
+
+    const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_WITH_TYPE);
+    expect(issue!.onBoard).toBe(false);
+    expect(issue!.status).toBeNull();
   });
 });

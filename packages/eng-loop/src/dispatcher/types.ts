@@ -32,12 +32,21 @@ export interface PolledIssue {
    * the upstream `gh` payload; never matches any allowlist entry.
    */
   author: string;
+  /**
+   * The Project board item id (e.g. `PVTI_…`). Populated from the snapshot
+   * when `onBoard` is true; `null` otherwise. `dispatchIssue` uses this to
+   * mutate Project fields without re-querying the board — pre-#585 the
+   * dispatcher made a separate `gh project item-list --limit 500` call here
+   * costing ~96 GraphQL points per dispatch.
+   */
+  projectItemId: string | null;
 }
 
 /** An issue that passed the ready-filter — safe to dispatch. */
 export interface ReadyIssue extends PolledIssue {
-  shape: IssueShape;     // non-null: ready issues are triage-complete
-  priority: Priority;    // non-null: needed for ordering
+  shape: IssueShape;          // non-null: ready issues are triage-complete
+  priority: Priority;         // non-null: needed for ordering
+  projectItemId: string;      // non-null: onBoard:true requires it (see ready-filter)
 }
 
 /** A session the dispatcher has spawned and is tracking. */

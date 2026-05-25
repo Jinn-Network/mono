@@ -36,6 +36,7 @@ const ISSUE: ReadyIssue = {
   status: 'Todo',
   onBoard: true,
   author: 'alice',
+  projectItemId: 'PVTI_418',
 };
 
 const CFG: DispatcherConfig = {
@@ -81,28 +82,6 @@ const FIELD_LIST_JSON = JSON.stringify({
       ],
     },
   ],
-});
-
-/**
- * Canned `gh project item-list` JSON — returns the issue's project item id.
- */
-const PROJECT_ITEMS_JSON = JSON.stringify({
-  items: [
-    {
-      id: 'PVTI_lADODh3-Ac4BXYaIz_ITEM_418',
-      title: 'feat(operator-app): expose generator health',
-      status: 'Todo',
-      repository: 'https://github.com/Jinn-Network/mono',
-      content: {
-        number: 418,
-        type: 'Issue',
-        title: 'feat(operator-app): expose generator health',
-        url: 'https://github.com/Jinn-Network/mono/issues/418',
-        repository: 'Jinn-Network/mono',
-      },
-    },
-  ],
-  totalCount: 1,
 });
 
 /**
@@ -154,10 +133,11 @@ function makeRunner(
     if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
     // gh project field-list → field JSON
     if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') return FIELD_LIST_JSON;
-    // gh project item-list → items JSON (to get the item id)
-    if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-list') return PROJECT_ITEMS_JSON;
     // gh project item-edit → void (empty stdout)
     if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') return '';
+    // Post-#585: gh project item-list is NOT called by dispatchIssue —
+    // the project item id arrives on ReadyIssue.projectItemId. If this
+    // branch is reached, dispatch.ts has regressed.
     throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
   };
   return { runner, calls };

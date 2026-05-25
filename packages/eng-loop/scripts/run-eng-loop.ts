@@ -17,6 +17,8 @@ import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
+import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
+import { gateOrRun, isSkipped } from '../src/dispatcher/rate-limit-guard.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { DispatcherConfig, ReadyIssue } from '../src/dispatcher/types.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
@@ -226,10 +228,14 @@ async function main(): Promise<void> {
       console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
     };
 
-    const report = await runCycle({
+    // Fetch the per-cycle Project snapshot once and share with deriveInFlight
+    // (and, after step 5 of the #585 plan, source.poll). Costs ≤2 GraphQL pts
+    // versus ~192 in the pre-#585 code.
+    const snapshot = await fetchProjectSnapshot(realRunner);
+    const report = await runCycle(snapshot, {
       source,
       cfg,
-      deriveInFlight: () => deriveInFlight(realRunner),
+      deriveInFlight: () => deriveInFlight(snapshot, realRunner),
       dispatchIssue: dryDispatch,
       countOpenReadyPrs,
       wallClock,
@@ -254,12 +260,34 @@ async function main(): Promise<void> {
       ')',
   );
 
-  const runOneCycle = async (): Promise<void> => {
+  /**
+   * Run one cycle, gated on GraphQL budget.
+   *
+   * Returns the next-attempt delay in ms:
+   *   - On normal cycle (gate passed): {@link INTERVAL_MS} (default 60s).
+   *   - On gate-skip (budget low): the gate's `sleepMs` (sleep until reset
+   *     + 5s, clamped to [0, 1h]).
+   *   - On thrown error: {@link INTERVAL_MS} (retry next tick).
+   *
+   * Per jinn-mono#585, the snapshot is fetched once at the top of the cycle
+   * and threaded through every consumer; the gate reads `snapshot.rateLimit`
+   * to decide whether to proceed.
+   */
+  const runOneCycle = async (): Promise<number> => {
     try {
-      const report = await runCycle({
+      const snapshot = await fetchProjectSnapshot(realRunner);
+      // Allow operators to override the rate-limit floor via env (mainly for
+      // testing the gate). ENG_LOOP_RATELIMIT_FLOOR=4999 forces the gate to
+      // trip on the next cycle for verification.
+      const floorEnv = process.env.ENG_LOOP_RATELIMIT_FLOOR;
+      const floorOverride = floorEnv != null && /^\d+$/.test(floorEnv)
+        ? parseInt(floorEnv, 10)
+        : undefined;
+
+      const result = await gateOrRun(snapshot, {
         source,
         cfg,
-        deriveInFlight: () => deriveInFlight(realRunner),
+        deriveInFlight: () => deriveInFlight(snapshot, realRunner),
         dispatchIssue: (issue) =>
           dispatchIssue(issue, cfg, {
             runner: realRunner,
@@ -274,20 +302,39 @@ async function main(): Promise<void> {
         countOpenReadyPrs,
         wallClock,
         pauseSession,
-      });
-      printReport(report, 'Cycle report');
+      }, floorOverride != null ? { floor: floorOverride } : undefined);
+
+      if (isSkipped(result)) {
+        console.log(
+          `[eng:loop] gh budget low (${result.remaining}); skipping until reset (+${result.sleepMs}ms)`,
+        );
+        return result.sleepMs;
+      }
+
+      printReport(result, 'Cycle report');
+      return INTERVAL_MS;
     } catch (err) {
       console.error('[eng:loop] Cycle error:', err);
+      return INTERVAL_MS;
     }
   };
 
-  // Run immediately, then either exit (--once) or schedule on interval.
-  await runOneCycle();
+  // Run immediately; then either exit (--once) or recursively schedule via
+  // setTimeout with the next-attempt delay returned by runOneCycle. Using
+  // setTimeout (rather than setInterval) lets the gate's sleepMs drive the
+  // next tick when budget is low — and as a side-benefit prevents cycle
+  // overlap if a snapshot fetch hangs.
+  const firstDelay = await runOneCycle();
   if (isOnce) {
     console.log('[eng:loop] --once: first cycle complete, exiting (any spawned sessions continue detached).');
     return;
   }
-  setInterval(() => { void runOneCycle(); }, INTERVAL_MS);
+  const scheduleNext = (delay: number): void => {
+    setTimeout(() => {
+      void runOneCycle().then(scheduleNext);
+    }, delay);
+  };
+  scheduleNext(firstDelay);
 }
 
 main().catch((err) => {

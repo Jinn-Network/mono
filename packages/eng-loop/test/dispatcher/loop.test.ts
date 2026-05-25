@@ -10,6 +10,19 @@ import type {
   DispatcherConfig,
 } from '../../src/dispatcher/types.js';
 import type { IssueSource } from '../../src/dispatcher/issue-source.js';
+import type { ProjectSnapshot } from '../../src/dispatcher/project-snapshot.js';
+
+/**
+ * runCycle is now snapshot-driven (jinn-mono#585). These tests inject a
+ * mocked IssueSource whose `poll` returns canned issues regardless of the
+ * snapshot, so we can pass a trivial snapshot — the dispatcher's decisions
+ * are tested via `polled` + `inFlight` + `openPrCount`, not the snapshot
+ * contents.
+ */
+const EMPTY_SNAPSHOT: ProjectSnapshot = {
+  items: [],
+  rateLimit: { remaining: 5000, used: 0, resetAt: '2026-05-25T16:00:00Z' },
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,6 +40,7 @@ function makePolled(overrides: Partial<PolledIssue> = {}): PolledIssue {
     status: 'Todo',
     onBoard: true,
     author: 'alice',
+    projectItemId: 'PVTI_test',
     ...overrides,
   };
 }
@@ -81,7 +95,7 @@ describe('runCycle', () => {
       return Promise.resolve(makeInFlight(issue.number));
     });
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
@@ -117,7 +131,7 @@ describe('runCycle', () => {
       Promise.resolve(makeInFlight(issue.number)),
     );
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: existingInFlight, drift: [] }),
@@ -149,7 +163,7 @@ describe('runCycle', () => {
 
     const dispatchIssue = vi.fn().mockResolvedValue(makeInFlight(999));
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: existingInFlight, drift: [] }),
@@ -178,7 +192,7 @@ describe('runCycle', () => {
 
     const dispatchIssue = vi.fn().mockResolvedValue(makeInFlight(999));
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
@@ -198,7 +212,7 @@ describe('runCycle', () => {
     const source = makeSource([]);
     const cfg = makeCfg();
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({
@@ -230,7 +244,7 @@ describe('runCycle', () => {
       Promise.resolve(makeInFlight(issue.number)),
     );
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: existingInFlight, drift: [] }),
@@ -262,7 +276,7 @@ describe('runCycle', () => {
     const source = makeSource([]);
     const cfg = makeCfg({ concurrencyCap: 3, wallClockMs: WALL_CLOCK_MS });
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [expiredSession], drift: [] }),
@@ -319,7 +333,7 @@ describe('runCycle', () => {
     const source = makeSource([]);
     const cfg = makeCfg({ wallClockMs: WALL_CLOCK_MS });
 
-    const report: CycleReport = await runCycle({
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source,
       cfg,
       deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [freshSession], drift: [] }),

@@ -1,13 +1,11 @@
 import { statSync } from 'node:fs';
 import type { CommandRunner } from './issue-source.js';
+import type { ProjectSnapshot } from './project-snapshot.js';
 import type { InFlightSession } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const PROJECT_OWNER = 'Jinn-Network';
-const PROJECT_NUMBER = '1';
 
 /**
  * Path component that identifies a task worktree's parent directory.
@@ -18,30 +16,6 @@ const PROJECT_NUMBER = '1';
  * `…/jinn-mono_worktrees/<N>`.
  */
 const WORKTREE_PARENT_COMPONENT = 'jinn-mono_worktrees';
-
-// ---------------------------------------------------------------------------
-// Internal types mirroring real gh output shapes
-// ---------------------------------------------------------------------------
-
-interface GhProjectItem {
-  status?: string;
-  title: string;
-  id: string;
-  repository: string;
-  content?: {
-    number: number;
-    type: string;
-    title: string;
-    url: string;
-    body?: string;
-    repository: string;
-  };
-}
-
-interface GhProjectItemsResponse {
-  items: GhProjectItem[];
-  totalCount: number;
-}
 
 // ---------------------------------------------------------------------------
 // Parser: git worktree list --porcelain
@@ -156,8 +130,9 @@ function recoverStartedAt(worktreePath: string): number {
 
 /**
  * Re-derive the dispatcher's in-flight set from authoritative external state:
- * - GitHub Project board (issues with `status === 'In Progress'`)
- * - git worktree list (worktrees under `jinn-mono_worktrees/<N>`)
+ * - GitHub Project board (issues with `status === 'In Progress'`), consumed
+ *   from the per-cycle {@link ProjectSnapshot} passed in by the orchestrator.
+ * - git worktree list (worktrees under `jinn-mono_worktrees/<N>`).
  *
  * A crash or restart simply calls this again — state is never held only in
  * memory.
@@ -169,28 +144,25 @@ function recoverStartedAt(worktreePath: string): number {
  *
  * The dispatcher logs drift but does not act on it automatically. A human
  * resolves drift.
+ *
+ * Prior to jinn-mono#585 this function called `gh project item-list --limit 500`
+ * itself, costing ~96 GraphQL points per cycle. It now reads the shared
+ * snapshot (1 GraphQL pt for the whole cycle) and uses `runner` only for the
+ * local `git worktree list --porcelain` call.
  */
 export async function deriveInFlight(
+  snapshot: ProjectSnapshot,
   runner: CommandRunner,
 ): Promise<{ inFlight: InFlightSession[]; drift: string[] }> {
-  // 1. Fetch Project board items
-  const projectRaw = await runner('gh', [
-    'project', 'item-list', PROJECT_NUMBER,
-    '--owner', PROJECT_OWNER,
-    '--format', 'json',
-    '--limit', '500',
-  ]);
-  const projectData = JSON.parse(projectRaw) as GhProjectItemsResponse;
-
-  // Build a set of issue numbers that are In Progress
+  // 1. Build a set of issue numbers that are In Progress, from the snapshot.
   const inProgressIssues = new Map<number, true>();
-  for (const item of projectData.items) {
-    if (item.status === 'In Progress' && item.content?.type === 'Issue') {
-      inProgressIssues.set(item.content.number, true);
+  for (const item of snapshot.items) {
+    if (item.status === 'In Progress' && item.contentType === 'Issue') {
+      inProgressIssues.set(item.number, true);
     }
   }
 
-  // 2. Fetch worktrees
+  // 2. Fetch worktrees (local — no GraphQL cost).
   const worktreeRaw = await runner('git', ['worktree', 'list', '--porcelain']);
   const worktrees = parseWorktreePorcelain(worktreeRaw);
 

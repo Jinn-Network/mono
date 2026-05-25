@@ -44,6 +44,7 @@ export function selectReady(
       i.priority !== null &&
       i.blockedOn === 'Nothing' &&
       i.onBoard &&
+      i.projectItemId !== null &&     // implied by onBoard, but TS needs the guard
       i.status === 'Todo' &&
       !inFlight.has(i.number),
   );

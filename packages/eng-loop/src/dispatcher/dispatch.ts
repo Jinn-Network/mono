@@ -106,21 +106,6 @@ interface GhFieldListResponse {
   fields: GhField[];
 }
 
-interface GhProjectItem {
-  id: string;
-  title: string;
-  status?: string;
-  content?: {
-    number: number;
-    type: string;
-  };
-}
-
-interface GhProjectItemsResponse {
-  items: GhProjectItem[];
-  totalCount: number;
-}
-
 /**
  * Look up the "In Progress" option id from the Status field in the project
  * field-list response. Returns both the field id and option id.
@@ -141,31 +126,10 @@ function parseStatusField(
   return { fieldId: statusField.id, inProgressOptionId: inProgressOpt.id };
 }
 
-/**
- * Get the project item id for the given issue number.
- */
-async function getProjectItemId(
-  runner: CommandRunner,
-  issueNumber: number,
-): Promise<string> {
-  const raw = await runner('gh', [
-    'project', 'item-list', PROJECT_NUMBER,
-    '--owner', PROJECT_OWNER,
-    '--format', 'json',
-    '--limit', '500',
-  ]);
-  const data = JSON.parse(raw) as GhProjectItemsResponse;
-  const item = data.items.find(
-    (it) =>
-      it.content?.type === 'Issue' && it.content.number === issueNumber,
-  );
-  if (item == null) {
-    throw new Error(
-      `Issue #${issueNumber} not found in the project item list`,
-    );
-  }
-  return item.id;
-}
+// Note: pre-#585 a `getProjectItemId(runner, issueNumber)` helper called
+// `gh project item-list --limit 500` here (~96 GraphQL points per dispatch).
+// `ReadyIssue.projectItemId` is now populated from the per-cycle snapshot
+// (jinn-mono#585) so the dispatcher can read the item id directly.
 
 // ---------------------------------------------------------------------------
 // Canon loading
@@ -239,8 +203,9 @@ export async function dispatchIssue(
   const fieldListData = JSON.parse(fieldListRaw) as GhFieldListResponse;
   const { fieldId, inProgressOptionId } = parseStatusField(fieldListData);
 
-  //    b) get the project item id for this issue
-  const itemId = await getProjectItemId(runner, number);
+  //    b) read the project item id from the snapshot-populated field on
+  //       ReadyIssue (jinn-mono#585) — no extra `gh project item-list` call.
+  const itemId = issue.projectItemId;
 
   //    c) set the field
   await runner('gh', [
