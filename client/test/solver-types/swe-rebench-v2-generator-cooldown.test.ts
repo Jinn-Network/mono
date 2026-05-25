@@ -1,4 +1,3 @@
-import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,20 +37,6 @@ const DEFAULT_MOCK_ROWS = [
     },
   },
 ];
-
-vi.mock('node:https', () => ({
-  request(_url: unknown, _opts: unknown, cb: (res: EventEmitter) => void) {
-    const req = new EventEmitter() as EventEmitter & { end: () => void };
-    req.end = () => {
-      const res = new EventEmitter();
-      cb(res);
-      const body = JSON.stringify({ rows: DEFAULT_MOCK_ROWS });
-      res.emit('data', body);
-      res.emit('end');
-    };
-    return req;
-  },
-}));
 
 const FIXED_NOW_ISO = '2026-05-08T10:12:45.000Z';
 
@@ -146,9 +131,8 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
-      // /splits and /rows are both faked through fetch now (fetchHfSplit no
-      // longer uses node:https — issue #578). Return the splits envelope for
-      // the splits URL and the rows envelope for everything else.
+      // fetchHfSplit now routes through fetchHfWithRetry (issue #578), so
+      // both /splits and /rows are mocked via this single fetch spy.
       if (url.includes('/splits')) {
         return { ok: true, json: async () => ({ splits: [{ split: '2026_02' }] }) } as Response;
       }

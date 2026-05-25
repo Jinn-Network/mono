@@ -139,7 +139,6 @@ export async function fetchHfWithRetry(
   const limiter = opts.limiter ?? sharedHfRequestLimiter;
   const random = opts.random ?? Math.random;
 
-  let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retryBackoffMs.length; attempt += 1) {
     let retryAfterMs: number | undefined;
     try {
@@ -152,24 +151,17 @@ export async function fetchHfWithRetry(
         throw Object.assign(new Error(`HF returned ${res.status}`), { httpStatus: res.status });
       }
       retryAfterMs = retryAfterHeaderMs(res.headers.get('Retry-After'));
-      lastErr = new Error(`HF returned ${res.status}`);
     } catch (err) {
-      // If this is the synthetic post-exhaustion throw, surface it directly.
-      if (typeof (err as { httpStatus?: number } | null)?.httpStatus === 'number') {
-        throw err;
-      }
-      lastErr = err;
-      if (attempt >= retryBackoffMs.length) {
-        if (lastErr instanceof Error) throw lastErr;
-        throw new Error('HF fetch failed after retries');
-      }
+      // On the final attempt, surface the error (network failure or the
+      // synthetic `httpStatus`-tagged throw above). Otherwise fall through
+      // to the backoff sleep and retry.
+      if (attempt >= retryBackoffMs.length) throw err;
     }
-    if (attempt < retryBackoffMs.length) {
-      const base = retryBackoffMs[attempt] ?? 0;
-      await sleep(retryAfterMs ?? withJitter(base, random));
-    }
+    const base = retryBackoffMs[attempt] ?? 0;
+    await sleep(retryAfterMs ?? withJitter(base, random));
   }
-  if (lastErr instanceof Error) throw lastErr;
+  // Unreachable: the loop returns or throws on every iteration. Kept to
+  // satisfy TS control-flow analysis.
   throw new Error('HF fetch failed after retries');
 }
 
