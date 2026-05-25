@@ -13,7 +13,7 @@ import { addLauncherRoutes } from '../../src/api/launcher-endpoints.js';
 import { requireUiToken } from '../../src/api/handshake.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
-import type { JinnConfig } from '../../src/config.js';
+import { migrateLegacySolverNets, type JinnConfig } from '../../src/config.js';
 import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
 import type {
   PostedTaskRecord,
@@ -57,38 +57,17 @@ interface BuildArgs {
 
 /**
  * Map a legacy-shaped solverNets fixture into the manifest-keyed
- * joinedSolverNets shape the launcher reads. Mirrors the production
- * `migrateLegacySolverNets` helper from `client/src/config.ts`.
+ * joinedSolverNets shape the launcher reads. Delegates to the
+ * production `migrateLegacySolverNets` helper so test fixtures stay in
+ * lockstep with the loader's migration semantics.
  */
 function legacyToJoined(
   legacy: BuildArgs['solverNets'] | undefined,
 ): JinnConfig['joinedSolverNets'] | undefined {
-  if (!legacy) return undefined;
-  const out: NonNullable<JinnConfig['joinedSolverNets']> = {};
-  for (const [name, entry] of Object.entries(legacy)) {
-    if (!entry) continue;
-    const e = entry as { solverType?: string; roles?: readonly string[]; harness?: string };
-    const dot = e.solverType?.lastIndexOf('.') ?? -1;
-    const contract = dot > 0 && e.solverType
-      ? { id: e.solverType.slice(0, dot), version: e.solverType.slice(dot + 1) }
-      : { id: name, version: 'v1' };
-    const roles: Array<'solver' | 'evaluator'> = [];
-    for (const r of e.roles ?? []) {
-      if (r === 'solving') roles.push('solver');
-      else if (r === 'evaluating') roles.push('evaluator');
-    }
-    if (roles.length === 0) roles.push('solver');
-    out[`legacy:${name}`] = {
-      manifestCid: `legacy:${name}`,
-      name,
-      contract,
-      roles: Array.from(new Set(roles)),
-      ...(e.harness ? { harness: e.harness } : {}),
-      plugins: [],
-      disabledDefaultPlugins: [],
-    };
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
+  if (!legacy || Object.keys(legacy).length === 0) return undefined;
+  const raw: Record<string, unknown> = { solverNets: legacy };
+  migrateLegacySolverNets(raw);
+  return raw['joinedSolverNets'] as JinnConfig['joinedSolverNets'] | undefined;
 }
 
 /**
