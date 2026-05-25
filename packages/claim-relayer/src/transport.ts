@@ -9,8 +9,11 @@
  */
 
 import {
+  ExecutionRevertedError,
   fallback,
   http,
+  TransactionRejectedRpcError,
+  UserRejectedRequestError,
   type FallbackTransport,
   type Transport,
 } from 'viem';
@@ -70,12 +73,35 @@ export class AllRpcsFailedError extends Error {
  * fast-exit). These are EVM/wallet-level signals from a single slot, NOT
  * transport-level failures — they must propagate unchanged so callers don't
  * see a spurious "all RPCs failed" outage signal when the real cause is a
- * contract revert or user-rejected wallet prompt. Walks the cause chain
- * because viem wraps low-level RPC errors in higher-level classes.
+ * contract revert or user-rejected wallet prompt.
  *
- * Mirrors `client/src/rpc/transport.ts` `isViemShouldThrowError`.
+ * Mirrors `client/src/rpc/transport.ts` `isViemShouldThrowError` — dispatch
+ * by numeric JSON-RPC `code` (catches raw `RpcRequestError` instances from
+ * viem's HTTP transport, where `name` is `'RpcRequestError'` and the class
+ * identity is hidden behind the code), the `ExecutionRevertedError.nodeMessage`
+ * regex (catches reverts surfaced as plain `Error`), and a class-name
+ * cause-chain walk (catches wallet-provider class instances and viem's
+ * post-`buildRequest` normalised classes).
  */
 export function isViemShouldThrowError(err: unknown): boolean {
+  // 1. Code-based dispatch — matches viem's own `shouldThrow`. Codes are
+  //    pulled from viem error classes where they're exported from the
+  //    top-level package; 7000 and 5000 are inline because
+  //    `WalletConnectSessionSettlementError` is not re-exported and 5000 is
+  //    the CAIP user-rejected code hard-coded alongside it.
+  if (err instanceof Error && 'code' in err && typeof (err as { code?: unknown }).code === 'number') {
+    const code = (err as { code: number }).code;
+    if (
+      code === ExecutionRevertedError.code ||      // 3 — contract revert
+      code === TransactionRejectedRpcError.code || // -32003 — tx rejected
+      code === UserRejectedRequestError.code ||    // 4001 — user-rejected
+      code === 7000 ||                             // WalletConnectSessionSettlementError
+      code === 5000                                // CAIP user-rejected
+    ) return true;
+    // 2. nodeMessage regex — catches reverts arriving as plain `Error`.
+    if (ExecutionRevertedError.nodeMessage.test(err.message)) return true;
+  }
+  // 3. Cause-chain walk with cycle detection.
   const seen = new Set<unknown>();
   let cursor: unknown = err;
   while (cursor instanceof Error && !seen.has(cursor)) {
@@ -84,8 +110,6 @@ export function isViemShouldThrowError(err: unknown): boolean {
     if (cursor.name === 'TransactionRejectedRpcError') return true;
     if (cursor.name === 'UserRejectedRequestError') return true;
     if (cursor.name === 'WalletConnectSessionSettlementError') return true;
-    const code = (cursor as { code?: unknown }).code;
-    if (typeof code === 'number' && code === 5000) return true; // CAIP user-rejected
     cursor = (cursor as { cause?: unknown }).cause;
   }
   return false;

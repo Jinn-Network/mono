@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createPublicClient, custom, HttpRequestError } from 'viem';
+import { createPublicClient, custom, HttpRequestError, RpcRequestError } from 'viem';
 import { mainnet } from 'viem/chains';
 import {
   parseRpcUrls,
@@ -207,6 +207,124 @@ describe('buildFallbackTransport', () => {
     });
     const primary = vi.fn(async () => {
       throw caip;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws a real viem RpcRequestError (code 3) without wrapping', async () => {
+    // Production path: viem's HTTP transport throws RpcRequestError for every
+    // JSON-RPC error response, with `name: 'RpcRequestError'` and `code` set
+    // from the JSON-RPC error. A real revert arrives as code 3, NOT named
+    // 'ExecutionRevertedError', so the name-only check from round-1 missed it.
+    const reverted = new RpcRequestError({
+      body: { method: 'eth_blockNumber', params: [] },
+      error: { code: 3, message: 'execution reverted' },
+      url: 'https://a.example',
+    });
+    const primary = vi.fn(async () => {
+      throw reverted;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws TransactionRejectedRpcError numeric code (-32003) without wrapping', async () => {
+    const rejected = new RpcRequestError({
+      body: { method: 'eth_sendRawTransaction', params: [] },
+      error: { code: -32003, message: 'transaction rejected' },
+      url: 'https://a.example',
+    });
+    const primary = vi.fn(async () => {
+      throw rejected;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws UserRejectedRequestError numeric code (4001) without wrapping', async () => {
+    const rejected = new RpcRequestError({
+      body: { method: 'eth_sendTransaction', params: [] },
+      error: { code: 4001, message: 'user rejected the request' },
+      url: 'https://a.example',
+    });
+    const primary = vi.fn(async () => {
+      throw rejected;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws via ExecutionRevertedError.nodeMessage regex match without wrapping', async () => {
+    // Some node-emitted errors arrive without the viem error class name and
+    // without a numeric code — only the message text identifies them as a
+    // revert. viem's own shouldThrow predicate uses
+    // ExecutionRevertedError.nodeMessage to match these; our helper must too.
+    const reverted = Object.assign(new Error('execution reverted: insufficient balance'), {
+      name: 'Error',
+    });
+    const primary = vi.fn(async () => {
+      throw reverted;
     });
     const secondary = vi.fn(async () => {
       throw new Error('should not be called');

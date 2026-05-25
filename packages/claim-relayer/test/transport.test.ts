@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createPublicClient, custom } from 'viem';
+import { createPublicClient, custom, RpcRequestError } from 'viem';
 import { mainnet } from 'viem/chains';
 import {
   AllRpcsFailedError,
@@ -147,6 +147,122 @@ describe('buildFallbackTransport (relayer)', () => {
       caught = err;
     }
     expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+  });
+
+  it('re-throws a real viem RpcRequestError (code 3) without wrapping', async () => {
+    // Production path: viem's HTTP transport throws RpcRequestError for every
+    // JSON-RPC error response, with `name: 'RpcRequestError'` and `code` set
+    // from the JSON-RPC error. A real revert arrives as code 3, NOT named
+    // 'ExecutionRevertedError' — name-only detection misses it.
+    const reverted = new RpcRequestError({
+      body: { method: 'eth_blockNumber', params: [] },
+      error: { code: 3, message: 'execution reverted' },
+      url: 'https://a.example',
+    });
+    const primary = vi.fn(async () => {
+      throw reverted;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws TransactionRejectedRpcError numeric code (-32003) without wrapping', async () => {
+    const rejected = new RpcRequestError({
+      body: { method: 'eth_sendRawTransaction', params: [] },
+      error: { code: -32003, message: 'transaction rejected' },
+      url: 'https://a.example',
+    });
+    const primary = vi.fn(async () => {
+      throw rejected;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws UserRejectedRequestError numeric code (4001) without wrapping', async () => {
+    const rejected = new RpcRequestError({
+      body: { method: 'eth_sendTransaction', params: [] },
+      error: { code: 4001, message: 'user rejected the request' },
+      url: 'https://a.example',
+    });
+    const primary = vi.fn(async () => {
+      throw rejected;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws via ExecutionRevertedError.nodeMessage regex match without wrapping', async () => {
+    // Reverts can arrive as plain `Error` with no numeric code — only the
+    // message text identifies them. Mirror viem's `shouldThrow` regex check.
+    const reverted = Object.assign(new Error('execution reverted: insufficient balance'), {
+      name: 'Error',
+    });
+    const primary = vi.fn(async () => {
+      throw reverted;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
   });
 });
 
