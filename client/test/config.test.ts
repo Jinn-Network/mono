@@ -204,7 +204,7 @@ describe('loadConfig RPC override handling', () => {
     expect(config.stakingMode).toBe('standard');
   });
 
-  it('defaults testnet to Base Sepolia rpcUrl', async () => {
+  it('defaults testnet to Base Sepolia rpcUrl chain (AC2)', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
     delete process.env['BASE_RPC_URL'];
     delete process.env['BASE_SEPOLIA_RPC_URL'];
@@ -213,16 +213,118 @@ describe('loadConfig RPC override handling', () => {
 
     const config = loadConfig(configPath);
 
-    // Testnet default is publicnode — no-auth, no shared-key quota cliff.
-    // History: briefly flipped to a Tenderly gateway in response to the
-    // 2026-05-18 sepolia.base.org rate-limit churn, but Tenderly's shared
-    // project key hit its plan quota on 2026-05-24 and every default-config
-    // daemon got HTTP 403 simultaneously (dashboard "Runway 0d", faucet 500s,
-    // daemon hot-loops). Publicnode avoids the shared-quota cliff and is
-    // symmetric with DEFAULT_TESTNET_ETHEREUM_RPC_URL. Operators with heavy
-    // workloads are still nudged to bring their own key via the
-    // NetworkSection panel warning. See #554.
-    expect(config.rpcUrl).toBe('https://base-sepolia-rpc.publicnode.com');
+    // AC2 (issue #592): testnet default is a two-provider fallback chain.
+    // Publicnode is no-auth, no shared-key quota cliff (avoids the Tenderly
+    // shared-quota cliff of 2026-05-24 that took out every default-config
+    // daemon at once). sepolia.base.org sits at slot 2 as a free backup.
+    // `config.rpcUrl` is the head URL for display continuity; `config.rpcUrls`
+    // is the full chain used by buildFallbackTransport().
+    expect(config.rpcUrl).toBe('https://base-sepolia.publicnode.com');
+    expect(config.rpcUrls).toEqual([
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
+  });
+
+  it('accepts rpcUrl as an array in the config file (AC1)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: ['https://a.example', 'https://b.example'],
+    });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.rpcUrl).toBe('https://a.example');
+    expect(config.rpcUrls).toEqual(['https://a.example', 'https://b.example']);
+  });
+
+  it('keeps a single-string rpcUrl as a one-element rpcUrls array (AC1 back-compat)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://a.example',
+    });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.rpcUrl).toBe('https://a.example');
+    expect(config.rpcUrls).toEqual(['https://a.example']);
+  });
+
+  it('splits JINN_RPC_URL on commas (AC1)', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_RPC_URL'] = 'https://a.example, https://b.example';
+
+    const config = loadConfig(configPath);
+
+    expect(config.rpcUrl).toBe('https://a.example');
+    expect(config.rpcUrls).toEqual(['https://a.example', 'https://b.example']);
+  });
+
+  it('splits BASE_SEPOLIA_RPC_URL on commas on testnet (AC5)', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['BASE_SEPOLIA_RPC_URL'] = 'https://a.example,https://b.example';
+
+    const config = loadConfig(configPath);
+
+    expect(config.rpcUrls.length).toBe(2);
+    expect(config.rpcUrls[0]).toBe('https://a.example');
+    expect(config.rpcUrls[1]).toBe('https://b.example');
+  });
+
+  it('accepts ethereumRpcUrl as a comma-separated env var (AC1)', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_ETHEREUM_RPC_URL'] = 'https://x.example,https://y.example';
+
+    const config = loadConfig(configPath);
+
+    expect(config.ethereumRpcUrl).toBe('https://x.example');
+    expect(config.ethereumRpcUrls).toEqual(['https://x.example', 'https://y.example']);
+
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+  });
+
+  it('accepts archiveRpcUrl and l2ProofRpcUrl as arrays (AC1)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://primary.example',
+      archiveRpcUrl: ['https://archive-a.example', 'https://archive-b.example'],
+      l2ProofRpcUrl: ['https://proof-a.example', 'https://proof-b.example'],
+    });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.archiveRpcUrl).toBe('https://archive-a.example');
+    expect(config.archiveRpcUrls).toEqual([
+      'https://archive-a.example',
+      'https://archive-b.example',
+    ]);
+    expect(config.l2ProofRpcUrl).toBe('https://proof-a.example');
+    expect(config.l2ProofRpcUrls).toEqual([
+      'https://proof-a.example',
+      'https://proof-b.example',
+    ]);
   });
 
   it('defaults testnet discovery to the privately-operated Ponder indexer (http mode)', async () => {

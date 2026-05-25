@@ -21,6 +21,7 @@ import { z } from 'zod';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
+import { parseRpcUrls } from './rpc/transport.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -72,19 +73,24 @@ export const JinnConfigSchema = z.object({
   network: z.enum(['mainnet', 'testnet']).default('testnet'),
 
   /**
-   * Base RPC endpoint.
-   * Defaults to https://mainnet.base.org for 'mainnet' and
-   * https://sepolia.base.org for 'testnet'. Set explicitly to override.
+   * Base RPC endpoint(s). Accepts either a single URL string or an array of
+   * URLs. When an array (or a comma-separated env var) is supplied, the
+   * daemon builds a viem `fallback()` chain in slot order (primary first).
+   * See `client/src/rpc/transport.ts` for the wrapper. Defaults to the
+   * publicnode+sepolia.base.org two-provider chain on testnet and the public
+   * `mainnet.base.org` on mainnet. Set explicitly to override.
+   *
+   * Env: JINN_RPC_URL / BASE_SEPOLIA_RPC_URL / BASE_RPC_URL (comma-separated).
    */
-  rpcUrl: z.string().optional(),
-  archiveRpcUrl: z.string().optional(),
+  rpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
+  archiveRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
   /**
-   * Optional L2 proof/archive RPC endpoint for canonical cross-chain canaries.
+   * Optional L2 proof/archive RPC endpoint(s) for canonical cross-chain canaries.
    * The daemon can use its normal rpcUrl for writes while proof construction
    * uses this endpoint for historical eth_getProof at OP dispute-game blocks.
-   * Env: JINN_L2_PROOF_RPC_URL.
+   * Accepts string or array form (see rpcUrl). Env: JINN_L2_PROOF_RPC_URL.
    */
-  l2ProofRpcUrl: z.string().url().optional(),
+  l2ProofRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
 
   /** Earning state directory */
   earningDir: z.string().default(join(homedir(), '.jinn-client', 'earning')),
@@ -263,19 +269,20 @@ export const JinnConfigSchema = z.object({
   // ── Cross-chain claim loop (Phase B / jinn-mono-7x5) ─────────────────────
 
   /**
-   * RPC endpoint for the L1 governance chain (Ethereum / Sepolia) where the
-   * JinnDistributor lives. Testnet defaults to a public Sepolia RPC; mainnet
-   * requires an operator override when L1 submit mode is configured.
-   * Env: JINN_ETHEREUM_RPC_URL.
+   * RPC endpoint(s) for the L1 governance chain (Ethereum / Sepolia) where
+   * the JinnDistributor lives. Accepts string or array form (see rpcUrl) and
+   * supports comma-separated env values. Testnet defaults to a public Sepolia
+   * RPC; mainnet requires an operator override when L1 submit mode is
+   * configured. Env: JINN_ETHEREUM_RPC_URL.
    */
-  ethereumRpcUrl: z.string().url().optional(),
+  ethereumRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
 
   /**
-   * Optional archive RPC endpoint for the L1 governance chain. Used for
-   * historical block lookups when constructing canonical-mode proofs.
-   * Env: JINN_ETHEREUM_ARCHIVE_RPC_URL.
+   * Optional archive RPC endpoint(s) for the L1 governance chain. Used for
+   * historical block lookups when constructing canonical-mode proofs. Accepts
+   * string or array form. Env: JINN_ETHEREUM_ARCHIVE_RPC_URL.
    */
-  ethereumArchiveRpcUrl: z.string().url().optional(),
+  ethereumArchiveRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
 
   /**
    * L1 network used by the cross-chain claim loop. 'sepolia' tracks Base
@@ -711,9 +718,37 @@ const DEFAULT_ENGINE = {
   implStateDirRoot: join(homedir(), '.jinn-client', 'engine', 'impl-state'),
 } as const;
 
-/** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and tasks with id always assigned. */
-export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'tasks' | 'engine'> & {
+/**
+ * JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and tasks
+ * with id always assigned.
+ *
+ * `rpcUrl` is the head of the fallback chain (the slot-0 URL) and is kept as
+ * a `string` for display continuity — the ~30 places that log/display
+ * `config.rpcUrl` (provenance, error formatting, `[main] daemon starting on …`)
+ * keep working unchanged. The full chain lives in `rpcUrls: readonly string[]`,
+ * which is what `buildFallbackTransport()` consumes. Same shape for the L1
+ * (ethereum) and optional archive/proof variants.
+ */
+export type JinnConfig = Omit<
+  z.infer<typeof JinnConfigSchema>,
+  | 'rpcUrl'
+  | 'archiveRpcUrl'
+  | 'l2ProofRpcUrl'
+  | 'ethereumRpcUrl'
+  | 'ethereumArchiveRpcUrl'
+  | 'tasks'
+  | 'engine'
+> & {
   rpcUrl: string;
+  rpcUrls: readonly string[];
+  archiveRpcUrl?: string;
+  archiveRpcUrls?: readonly string[];
+  l2ProofRpcUrl?: string;
+  l2ProofRpcUrls?: readonly string[];
+  ethereumRpcUrl?: string;
+  ethereumRpcUrls?: readonly string[];
+  ethereumArchiveRpcUrl?: string;
+  ethereumArchiveRpcUrls?: readonly string[];
   tasks: Task[];
   engine: { workingDirRoot: string; implStateDirRoot: string };
 };
@@ -733,6 +768,21 @@ export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
 export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
 
 export const DEFAULT_TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
+
+/**
+ * Default fallback chain for the L2 measurement chain (Base Sepolia) on
+ * testnet. Per AC2 of issue #592:
+ *   slot 0 — `https://base-sepolia.publicnode.com` (no-auth, 50k-block
+ *     getLogs cap, no shared-quota cliff).
+ *   slot 1 — `https://sepolia.base.org` (free public Coinbase endpoint,
+ *     2k-block cap; last-resort backup).
+ * Operators are encouraged to prepend a paid primary key (Alchemy, Tenderly,
+ * etc.) via `rpcUrl` config or `JINN_RPC_URL` / `BASE_SEPOLIA_RPC_URL` env.
+ */
+export const DEFAULT_TESTNET_RPC_URLS: readonly string[] = [
+  'https://base-sepolia.publicnode.com',
+  'https://sepolia.base.org',
+];
 
 
 export type ConfigLoadErrorCode =
@@ -1068,22 +1118,69 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   // 4. Resolve rpcUrl default based on network (if not explicitly set).
-  // Testnet default is publicnode — no-auth, no shared-key quota cliff. The
-  // previous default was a Tenderly gateway with a shared project key; when
-  // aggregate operator traffic hit the plan quota every default-config daemon
-  // got HTTP 403 simultaneously (dashboard "Runway 0d", faucet 500s, daemon
-  // hot-loops on every eth_*). See #554 + the panel's "shared RPC" warning in
-  // NetworkSection.tsx for the operator-facing pitch to bring their own key.
-  // The sibling Ethereum L1 default (DEFAULT_TESTNET_ETHEREUM_RPC_URL above)
-  // is already publicnode — this keeps the two L1/L2 defaults symmetric.
+  // Testnet default per AC2 (issue #592) is a two-provider fallback chain:
+  //   slot 0 — base-sepolia.publicnode.com (50k-block getLogs cap, no quota)
+  //   slot 1 — sepolia.base.org (free, 2k-block cap; last-resort backup)
+  // Publicnode is no-auth, no shared-key quota cliff (avoids the Tenderly
+  // shared-quota cliff of 2026-05-24 that took out every default-config
+  // daemon at once). See #554 + the NetworkSection.tsx "shared RPC" panel for
+  // the operator-facing pitch to bring their own key. The sibling Ethereum L1
+  // default (DEFAULT_TESTNET_ETHEREUM_RPC_URL above) is already publicnode —
+  // this keeps the two L1/L2 defaults symmetric.
   const parsed = result.data;
-  const defaultRpcUrl = parsed.network === 'testnet'
-    ? 'https://base-sepolia-rpc.publicnode.com'
-    : 'https://mainnet.base.org';
+  const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
+    ? DEFAULT_TESTNET_RPC_URLS
+    : ['https://mainnet.base.org'];
+
+  const rpcUrlsResolved = parsed.rpcUrl !== undefined
+    ? parseRpcUrls(parsed.rpcUrl)
+    : [...defaultRpcUrls];
+  const archiveRpcUrlsResolved = parsed.archiveRpcUrl !== undefined
+    ? parseRpcUrls(parsed.archiveRpcUrl)
+    : undefined;
+  const l2ProofRpcUrlsResolved = parsed.l2ProofRpcUrl !== undefined
+    ? parseRpcUrls(parsed.l2ProofRpcUrl)
+    : undefined;
+  const ethereumRpcUrlsResolved = parsed.ethereumRpcUrl !== undefined
+    ? parseRpcUrls(parsed.ethereumRpcUrl)
+    : undefined;
+  const ethereumArchiveRpcUrlsResolved = parsed.ethereumArchiveRpcUrl !== undefined
+    ? parseRpcUrls(parsed.ethereumArchiveRpcUrl)
+    : undefined;
+
+  const {
+    rpcUrl: _stripRpcUrl,
+    archiveRpcUrl: _stripArchive,
+    l2ProofRpcUrl: _stripL2Proof,
+    ethereumRpcUrl: _stripEth,
+    ethereumArchiveRpcUrl: _stripEthArchive,
+    ...rest
+  } = parsed;
+  void _stripRpcUrl;
+  void _stripArchive;
+  void _stripL2Proof;
+  void _stripEth;
+  void _stripEthArchive;
 
   return {
-    ...parsed,
-    rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
+    ...rest,
+    rpcUrl: rpcUrlsResolved[0]!,
+    rpcUrls: rpcUrlsResolved,
+    ...(archiveRpcUrlsResolved
+      ? { archiveRpcUrl: archiveRpcUrlsResolved[0]!, archiveRpcUrls: archiveRpcUrlsResolved }
+      : {}),
+    ...(l2ProofRpcUrlsResolved
+      ? { l2ProofRpcUrl: l2ProofRpcUrlsResolved[0]!, l2ProofRpcUrls: l2ProofRpcUrlsResolved }
+      : {}),
+    ...(ethereumRpcUrlsResolved
+      ? { ethereumRpcUrl: ethereumRpcUrlsResolved[0]!, ethereumRpcUrls: ethereumRpcUrlsResolved }
+      : {}),
+    ...(ethereumArchiveRpcUrlsResolved
+      ? {
+          ethereumArchiveRpcUrl: ethereumArchiveRpcUrlsResolved[0]!,
+          ethereumArchiveRpcUrls: ethereumArchiveRpcUrlsResolved,
+        }
+      : {}),
     // parseTask assigns a UUID to any entry missing an id
     tasks: parsed.tasks.map(parseTask),
     engine: {
