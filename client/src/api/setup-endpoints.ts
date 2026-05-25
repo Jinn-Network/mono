@@ -37,7 +37,7 @@ import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
 import { triggerAgentSpawn } from '../agent/agent-ws.js';
-import { DEFAULT_CONFIG_PATH, DEFAULT_SOLVER_NETS, persistTopLevelConfigValue } from '../config.js';
+import { DEFAULT_CONFIG_PATH, persistTopLevelConfigValue } from '../config.js';
 import { canonicalHarnessName } from '../harnesses/names.js';
 import {
   installClaudeCodeLocally,
@@ -390,142 +390,19 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
   });
 
-  // Edit a single SolverNet's enabled flag and/or solverType from the SPA.
-  // The operator click that triggers this is the in-app replacement for
-  // hand-editing config.json; the daemon does not hot-reload, so callers
-  // must follow up with /api/admin/restart (the existing "Restart Node"
-  // affordance) for the change to take effect. See jinn-mono-* (config-UX).
-  app.post('/v1/setup/solvernets/:name', async (c) => {
-    const name = c.req.param('name');
-    if (!name) return c.json({ error: 'invalid_invocation', detail: 'missing solvernet name' }, 400);
-
-    let body: {
-      enabled?: unknown;
-      solverType?: unknown; // deprecated; accepted for one release cycle
-      role?: unknown;       // legacy singular form, accepted for one release cycle
-      roles?: unknown;
-      harness?: unknown;
-      model?: unknown;
-      plugins?: unknown;
-    };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
-    }
-
-    const editableFields: Array<keyof typeof body> = [
-      'enabled', 'solverType', 'role', 'roles', 'harness', 'model', 'plugins',
-    ];
-    if (!editableFields.some((f) => body[f] !== undefined)) {
-      return c.json({ error: 'invalid_body', detail: 'must include at least one editable field' }, 400);
-    }
-    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
-      return c.json({ error: 'invalid_body', detail: '`enabled` must be a boolean' }, 400);
-    }
-    const KNOWN_SOLVER_TYPES = ['prediction.v0', 'prediction.v1'];
-    if (body.solverType !== undefined && (typeof body.solverType !== 'string' || !KNOWN_SOLVER_TYPES.includes(body.solverType))) {
-      return c.json({
-        error: 'invalid_body',
-        detail: `\`solverType\` must be one of ${KNOWN_SOLVER_TYPES.join(', ')}`,
-      }, 400);
-    }
-    const KNOWN_ROLES = ['solving', 'evaluating'];
-    let normalizedRoles: string[] | undefined;
-    if (body.roles !== undefined) {
-      if (
-        !Array.isArray(body.roles) ||
-        body.roles.length === 0 ||
-        !body.roles.every((r): r is string => typeof r === 'string' && KNOWN_ROLES.includes(r))
-      ) {
-        return c.json({
-          error: 'invalid_body',
-          detail: '`roles` must be a non-empty array of `solving` and/or `evaluating`',
-        }, 400);
-      }
-      // Deduplicate so the persisted shape is canonical even if the SPA double-includes a value.
-      normalizedRoles = Array.from(new Set(body.roles as string[]));
-    } else if (body.role !== undefined) {
-      // Legacy singular form. Accept it (operators on older config tooling),
-      // promote to the canonical roles array.
-      if (typeof body.role !== 'string' || !KNOWN_ROLES.includes(body.role)) {
-        return c.json({ error: 'invalid_body', detail: '`role` must be `solving` or `evaluating`' }, 400);
-      }
-      normalizedRoles = [body.role];
-    }
-    if (body.harness !== undefined && typeof body.harness !== 'string') {
-      return c.json({ error: 'invalid_body', detail: '`harness` must be a string' }, 400);
-    }
-    if (body.model !== undefined && typeof body.model !== 'string') {
-      return c.json({ error: 'invalid_body', detail: '`model` must be a string' }, 400);
-    }
-    if (body.plugins !== undefined) {
-      if (!Array.isArray(body.plugins) || !body.plugins.every((p): p is string => typeof p === 'string')) {
-        return c.json({ error: 'invalid_body', detail: '`plugins` must be an array of plugin names' }, 400);
-      }
-    }
-
-    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    let current: Record<string, unknown> = {};
-    try {
-      if (existsSync(cfgPath)) {
-        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
-      }
-    } catch (err) {
-      return c.json({
-        error: 'config_unreadable',
-        detail: err instanceof Error ? err.message : String(err),
-      }, 500);
-    }
-
-    const rawSolverNets = isRecord(current.solverNets) ? current.solverNets : {};
-    const solverNets: Record<string, Record<string, unknown>> = {};
-    for (const [netName, netConfig] of Object.entries(rawSolverNets)) {
-      if (isRecord(netConfig)) solverNets[netName] = { ...netConfig };
-    }
-    const defaultNet = DEFAULT_SOLVER_NETS[name];
-    const existing = solverNets[name] ?? (isRecord(defaultNet) ? cloneRecord(defaultNet) : undefined);
-    if (!existing) {
-      const available = [...new Set([...Object.keys(DEFAULT_SOLVER_NETS), ...Object.keys(solverNets)])];
-      return c.json({ error: 'solvernet_not_found', name, available }, 404);
-    }
-
-    if (body.enabled !== undefined) existing.enabled = body.enabled;
-    if (body.solverType !== undefined) existing.solverType = body.solverType;
-    if (normalizedRoles !== undefined) {
-      // Operator-mode patch overwrites the role array. Task 22 of
-      // spec/2026-05-05-solvernet-creation-and-launch.md retired the
-      // operator-config `'launching'` role; the previous "preserve
-      // non-operator roles" pass is no longer needed because every valid
-      // operator role is in `KNOWN_ROLES`.
-      existing.roles = Array.from(new Set(normalizedRoles));
-      // Strip any legacy singular `role` so the persisted shape is canonical.
-      // Eliminates ambiguity if a third-party tool reads the file and prefers
-      // `role` over `roles`.
-      delete existing['role'];
-    }
-    if (body.harness !== undefined) existing.harness = canonicalHarnessName(body.harness);
-    if (body.model !== undefined) existing.model = body.model;
-    if (body.plugins !== undefined) existing.plugins = body.plugins;
-    solverNets[name] = existing;
-
-    try {
-      persistConfigValue('solverNets', solverNets, cfgPath);
-      config.onSolverNetsUpdated?.(solverNets);
-    } catch (err) {
-      return c.json({
-        error: 'config_write_failed',
-        detail: err instanceof Error ? err.message : String(err),
-      }, 500);
-    }
-
-    return c.json({
-      ok: true,
-      restartRequired: true,
-      name,
-      config: existing,
-    });
-  });
+  // The legacy POST /v1/setup/solvernets/:name route persisted into the
+  // now-removed `solverNets` config field. Issue #421 retired the route;
+  // operators join SolverNets via POST /v1/operator/join/:cid (or the SPA
+  // Operator > SolverNets surface).
+  app.post('/v1/setup/solvernets/:name', (c) =>
+    c.json({
+      error: 'route_retired',
+      detail:
+        'POST /v1/setup/solvernets/:name was retired in issue #421. ' +
+        'Use POST /v1/operator/join/:cid to join a SolverNet via the registry, ' +
+        'or open Operator > SolverNets in the dashboard.',
+    }, 410),
+  );
 
   // POST /v1/operator/join/:cid — operator joins a launched SolverNet.
   //
