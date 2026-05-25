@@ -22,23 +22,42 @@ export interface HttpHfFetcherOptions {
   /** Fetch implementation. Defaults to global fetch (allows test injection). */
   fetchImpl?: typeof fetch;
   /**
-   * Per-page retry backoff schedule (ms) for transient HTTP 5xx or network
-   * errors. Default: [200, 800, 3200]. Each entry is the delay before the
-   * Nth retry; an empty array disables retries. Non-5xx responses (e.g.
-   * 404) are not retried — they're not transient.
+   * Per-page retry backoff schedule (ms) for transient HTTP 408/429/5xx
+   * responses. Default: {@link DEFAULT_RETRY_BACKOFF_MS}
+   * (`[1000, 2000, 4000, 8000]` — see issue #578 for the rationale; HF's
+   * 429 wave was longer-lived than the prior 200/800/3200 schedule could
+   * clear). Each entry is the delay before the Nth retry; an empty array
+   * disables retries. Non-retryable 4xx (e.g. 404) is not retried.
    */
   retryBackoffMs?: number[];
-  /** Minimum spacing between HF HTTP requests. Defaults to 250ms. */
+  /** Minimum spacing between HF HTTP requests. Defaults to {@link DEFAULT_MIN_REQUEST_INTERVAL_MS}. */
   minRequestIntervalMs?: number;
   /** Sleep implementation. Defaults to the shared tx-retry sleep (allows test injection). */
   sleep?: (ms: number) => Promise<void>;
   /** Shared request limiter. Defaults to the module-level HF limiter. */
   limiter?: HfRequestLimiter;
+  /** Random source for jittered backoff. Defaults to `Math.random` (test injection). */
+  random?: () => number;
 }
 
 const DEFAULT_BASE_URL = 'https://datasets-server.huggingface.co/rows';
-const DEFAULT_RETRY_BACKOFF_MS = [200, 800, 3200];
-const DEFAULT_MIN_REQUEST_INTERVAL_MS = 250;
+/**
+ * Per-attempt backoff schedule for HF datasets-server fetches. Four retries
+ * (5 total attempts), jittered ±33%, max worst-case ≈15s extra latency per
+ * failing instance. Tuned for HF's 429 envelope per issue #578.
+ */
+export const DEFAULT_RETRY_BACKOFF_MS: readonly number[] = [1000, 2000, 4000, 8000];
+/**
+ * Process-wide floor on the spacing between HF HTTP requests. Raised from
+ * 250ms after issue #578 — 250ms × 4 retries was insufficient to clear the
+ * 429 wave when validating ~700 instances in one pass. This is the AC3
+ * concurrency-cap surface: the shared limiter serialises requests at this
+ * granularity across the whole process. Tune via {@link HttpHfFetcherOptions.minRequestIntervalMs}
+ * or {@link FetchHfWithRetryOptions.minRequestIntervalMs}; see the design note
+ * at `docs/superpowers/specs/2026-05-26-issue-578-hf-429-retry-design.md`.
+ */
+export const DEFAULT_MIN_REQUEST_INTERVAL_MS = 500;
+const JITTER_FACTOR = 0.33; // ±33% symmetric uniform jitter
 
 export interface HfRequestLimiter {
   schedule<T>(fn: () => Promise<T>, opts: {
@@ -69,17 +88,106 @@ class SharedHfRequestLimiter implements HfRequestLimiter {
   }
 }
 
-const sharedHfRequestLimiter = new SharedHfRequestLimiter();
+/**
+ * Module-level shared request limiter. Serialises HF requests across the
+ * whole process (every callsite that uses {@link fetchHfWithRetry} routes
+ * through this instance by default). AC3 from issue #578: this plus the
+ * raised {@link DEFAULT_MIN_REQUEST_INTERVAL_MS} *is* the concurrency-cap
+ * knob — no separate parallel-request cap is exposed.
+ */
+export const sharedHfRequestLimiter = new SharedHfRequestLimiter();
+
+export interface FetchHfWithRetryOptions {
+  /** Fetch implementation. Defaults to `globalThis.fetch` bound to `globalThis`. */
+  fetchImpl?: typeof fetch;
+  /** Per-attempt backoff schedule (ms). Defaults to {@link DEFAULT_RETRY_BACKOFF_MS}. */
+  retryBackoffMs?: readonly number[];
+  /** Minimum spacing between requests. Defaults to {@link DEFAULT_MIN_REQUEST_INTERVAL_MS}. */
+  minRequestIntervalMs?: number;
+  /** Sleep implementation. Defaults to the shared tx-retry sleep. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Shared request limiter. Defaults to {@link sharedHfRequestLimiter}. */
+  limiter?: HfRequestLimiter;
+  /** Random source for jittered backoff. Defaults to `Math.random` (test injection). */
+  random?: () => number;
+}
+
+/**
+ * Shared retry helper for HF datasets-server requests.
+ *
+ * - Retries on `408 | 429 | 5xx` per {@link isRetryableStatus}.
+ * - Sleeps the smaller of the `Retry-After` header (when present) or a
+ *   jittered backoff drawn from `retryBackoffMs`.
+ * - Routes every attempt through the shared {@link HfRequestLimiter} so the
+ *   process-wide min-interval is honoured.
+ * - On retry exhaustion against a non-OK response, throws
+ *   `Object.assign(new Error('HF returned <status>'), { httpStatus })` so
+ *   callers can branch on the status code (issue #578: the validated-pool
+ *   pipeline keys off `httpStatus === 429` to classify transient failures).
+ *
+ * Non-retryable responses (e.g. 404) are returned to the caller untouched —
+ * caller decides how to fail.
+ */
+export async function fetchHfWithRetry(
+  url: string,
+  opts: FetchHfWithRetryOptions = {},
+): Promise<Response> {
+  const fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
+  const retryBackoffMs = opts.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+  const minRequestIntervalMs = opts.minRequestIntervalMs ?? DEFAULT_MIN_REQUEST_INTERVAL_MS;
+  const sleep = opts.sleep ?? defaultSleep;
+  const limiter = opts.limiter ?? sharedHfRequestLimiter;
+  const random = opts.random ?? Math.random;
+
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= retryBackoffMs.length; attempt += 1) {
+    let retryAfterMs: number | undefined;
+    try {
+      const res = await limiter.schedule(
+        () => fetchImpl(url),
+        { minRequestIntervalMs, sleep },
+      );
+      if (res.ok || !isRetryableStatus(res.status)) return res;
+      if (attempt >= retryBackoffMs.length) {
+        throw Object.assign(new Error(`HF returned ${res.status}`), { httpStatus: res.status });
+      }
+      retryAfterMs = retryAfterHeaderMs(res.headers.get('Retry-After'));
+      lastErr = new Error(`HF returned ${res.status}`);
+    } catch (err) {
+      // If this is the synthetic post-exhaustion throw, surface it directly.
+      if (typeof (err as { httpStatus?: number } | null)?.httpStatus === 'number') {
+        throw err;
+      }
+      lastErr = err;
+      if (attempt >= retryBackoffMs.length) {
+        if (lastErr instanceof Error) throw lastErr;
+        throw new Error('HF fetch failed after retries');
+      }
+    }
+    if (attempt < retryBackoffMs.length) {
+      const base = retryBackoffMs[attempt] ?? 0;
+      await sleep(retryAfterMs ?? withJitter(base, random));
+    }
+  }
+  if (lastErr instanceof Error) throw lastErr;
+  throw new Error('HF fetch failed after retries');
+}
+
+function withJitter(baseMs: number, random: () => number): number {
+  const jitter = (random() * 2 - 1) * JITTER_FACTOR;
+  return Math.round(baseMs * (1 + jitter));
+}
 
 export class HttpHfFetcher implements HfFetcher {
   private readonly baseUrl: string;
   private readonly pageSize: number;
   private readonly maxRows: number;
   private readonly fetchImpl: typeof fetch;
-  private readonly retryBackoffMs: number[];
+  private readonly retryBackoffMs: readonly number[];
   private readonly minRequestIntervalMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly limiter: HfRequestLimiter;
+  private readonly random: () => number;
 
   constructor(opts: HttpHfFetcherOptions = {}) {
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
@@ -90,34 +198,18 @@ export class HttpHfFetcher implements HfFetcher {
     this.minRequestIntervalMs = opts.minRequestIntervalMs ?? DEFAULT_MIN_REQUEST_INTERVAL_MS;
     this.sleep = opts.sleep ?? defaultSleep;
     this.limiter = opts.limiter ?? sharedHfRequestLimiter;
+    this.random = opts.random ?? Math.random;
   }
 
   private async fetchWithRetry(url: string): Promise<Response> {
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt <= this.retryBackoffMs.length; attempt += 1) {
-      let retryAfterMs: number | undefined;
-      try {
-        const res = await this.limiter.schedule(
-          () => this.fetchImpl(url),
-          { minRequestIntervalMs: this.minRequestIntervalMs, sleep: this.sleep },
-        );
-        if (res.ok || !isRetryableStatus(res.status)) return res;
-        if (attempt >= this.retryBackoffMs.length) return res;
-        retryAfterMs = retryAfterHeaderMs(res.headers.get('Retry-After'));
-        lastErr = new Error(`HF returned ${res.status}`);
-      } catch (err) {
-        lastErr = err;
-        if (attempt >= this.retryBackoffMs.length) {
-          if (lastErr instanceof Error) throw lastErr;
-          throw new Error('HF fetch failed after retries');
-        }
-      }
-      if (attempt < this.retryBackoffMs.length) {
-        await this.sleep(retryAfterMs ?? this.retryBackoffMs[attempt]);
-      }
-    }
-    if (lastErr instanceof Error) throw lastErr;
-    throw new Error('HF fetch failed after retries');
+    return fetchHfWithRetry(url, {
+      fetchImpl: this.fetchImpl,
+      retryBackoffMs: this.retryBackoffMs,
+      minRequestIntervalMs: this.minRequestIntervalMs,
+      sleep: this.sleep,
+      limiter: this.limiter,
+      random: this.random,
+    });
   }
 
   async fetchTaskRow(args: {
@@ -134,10 +226,27 @@ export class HttpHfFetcher implements HfFetcher {
       url.searchParams.set('offset', String(offset));
       url.searchParams.set('length', String(this.pageSize));
 
-      const res = await this.fetchWithRetry(url.toString());
+      let res: Response;
+      try {
+        res = await this.fetchWithRetry(url.toString());
+      } catch (err) {
+        // fetchHfWithRetry surfaces `httpStatus` on exhausted-retry errors.
+        // Re-shape the message to the dataset/split form callers expect, but
+        // preserve the `httpStatus` property so the validated-pool catch
+        // block can branch on it (issue #578).
+        const httpStatus = (err as { httpStatus?: number } | null)?.httpStatus;
+        if (typeof httpStatus === 'number') {
+          throw Object.assign(
+            new Error(`HF datasets-server returned ${httpStatus} for ${args.hf_dataset}/${args.hf_split}`),
+            { httpStatus },
+          );
+        }
+        throw err;
+      }
       if (!res.ok) {
-        throw new Error(
-          `HF datasets-server returned ${res.status} for ${args.hf_dataset}/${args.hf_split}`,
+        throw Object.assign(
+          new Error(`HF datasets-server returned ${res.status} for ${args.hf_dataset}/${args.hf_split}`),
+          { httpStatus: res.status },
         );
       }
       const body = (await res.json()) as { rows?: Array<{ row?: Record<string, unknown> }> };

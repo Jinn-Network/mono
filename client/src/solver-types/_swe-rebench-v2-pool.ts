@@ -7,7 +7,10 @@
  * DR: log/decisions/2026-05-06-task-generator-success-cap.md
  */
 
-import { request } from 'node:https';
+import {
+  fetchHfWithRetry,
+  type FetchHfWithRetryOptions,
+} from '../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 
 export interface PoolTask {
   instance_id: string;
@@ -75,26 +78,30 @@ export async function buildHistoricalPool(args: BuildPoolArgs): Promise<PoolTask
   return pool;
 }
 
-/** HTTP fetcher for HF datasets-server rows API. Use as fetchSplit in production. */
-export async function fetchHfSplit(args: { dataset: string; split: string; limit?: number }): Promise<any[]> {
+/**
+ * HTTP fetcher for HF datasets-server rows API. Use as `fetchSplit` in
+ * production. Routes through {@link fetchHfWithRetry} so 408/429/5xx are
+ * retried with jittered backoff and the process-wide HF min-interval is
+ * honoured (issue #578). Throws on non-2xx after retry exhaustion —
+ * previously returned `[]` silently, which is what hid the 290 lost tasks.
+ */
+export async function fetchHfSplit(
+  args: { dataset: string; split: string; limit?: number },
+  opts: FetchHfWithRetryOptions = {},
+): Promise<any[]> {
   const url = new URL('https://datasets-server.huggingface.co/rows');
   url.searchParams.set('dataset', args.dataset);
   url.searchParams.set('config', 'default');
   url.searchParams.set('split', args.split);
   url.searchParams.set('offset', '0');
   url.searchParams.set('length', String(args.limit ?? 100));
-  return new Promise((resolve, reject) => {
-    const req = request(url, { method: 'GET' }, (res) => {
-      let body = '';
-      res.on('data', (d) => { body += d; });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(body);
-          resolve((parsed.rows ?? []).map((r: any) => r.row));
-        } catch (e) { reject(e); }
-      });
-    });
-    req.on('error', reject);
-    req.end();
-  });
+  const res = await fetchHfWithRetry(url.toString(), opts);
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(`HF datasets-server returned ${res.status} for ${args.dataset}/${args.split}`),
+      { httpStatus: res.status },
+    );
+  }
+  const json = (await res.json()) as { rows?: Array<{ row?: unknown }> };
+  return (json.rows ?? []).map((r) => r.row);
 }

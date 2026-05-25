@@ -170,6 +170,8 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
       retryBackoffMs: [25],
       minRequestIntervalMs: 0,
       sleep,
+      // Deterministic centred jitter (random()=0.5 → factor 0 → exact base).
+      random: () => 0.5,
     });
 
     const row = await fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });

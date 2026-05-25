@@ -78,7 +78,16 @@ const PUBLICATION_FILE = 'vetted-pool-artifact-publication.json';
 
 export interface ValidatedPoolEntry {
   scorable: boolean;
-  /** Why scorable/unscorable — `'gold-patch-resolves'`, `'ungradeable:<reason>'`, etc. */
+  /**
+   * Why scorable/unscorable — `'gold-patch-resolves'`, `'ungradeable:<reason>'`,
+   * `'transient:HF-429:<msg>'`, `'error:HF-429-permanent-after-5-passes'`, etc.
+   *
+   * Reason prefixes:
+   *   - `transient:` — non-terminal; the next `validatePoolInstances` pass
+   *     re-processes the entry until `transientRetryCount` hits {@link MAX_TRANSIENT_PASSES}.
+   *   - everything else (including `error:`, `ungradeable:`, etc.) — terminal
+   *     under the skip-check; only re-processed when `opts.force` is set.
+   */
   reason: string;
   checkedAt: string; // ISO timestamp
   /** Canonical-JSON SHA-256 over the HF row fields used for grading. v3+. */
@@ -89,7 +98,28 @@ export interface ValidatedPoolEntry {
   imageDigest?: string;
   /** `git rev-parse HEAD` of the enabled upstream SWE-rebench repo at validation time. v3+. */
   upstreamEvalCommit?: string;
+  /**
+   * Number of consecutive `validatePoolInstances` passes that have recorded a
+   * `transient:` reason for this instance under this `evalSemanticsVersion`.
+   * Bumped on each pass; flips the reason to `error:HF-429-permanent-after-5-passes`
+   * once it hits {@link MAX_TRANSIENT_PASSES} (issue #578). Undefined for
+   * non-transient entries (treated as `0` on read).
+   */
+  transientRetryCount?: number;
+  /** ISO timestamp of the most recent transient pass. Undefined for non-transient entries. */
+  lastTransientAt?: string;
 }
+
+/**
+ * Cap on consecutive transient passes before an instance flips to the
+ * terminal `error:HF-429-permanent-after-5-passes` reason. Issue #578: the
+ * AC says "the failure is still recorded for visibility, but the validation
+ * pipeline distinguishes transient from permanent so the next run reprocesses
+ * these instances"; this is the convergence boundary that keeps a
+ * permanently-broken split from churning forever.
+ */
+export const MAX_TRANSIENT_PASSES = 5;
+const PERMANENT_HF_429_REASON = `error:HF-429-permanent-after-${MAX_TRANSIENT_PASSES}-passes`;
 
 interface ValidatedPoolFile {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -575,8 +605,19 @@ export async function validatePoolInstances(
       summary.skipped += 1;
       continue;
     }
-    if (!opts.force && (await deps.store.getEntry(task.instance_id, deps.semanticsVersion))) {
-      continue; // already validated for this semantics version
+    if (!opts.force) {
+      const priorEntry = await deps.store.getEntry(task.instance_id, deps.semanticsVersion);
+      if (priorEntry !== null) {
+        // Transient entries below the convergence boundary are intentionally
+        // re-processed on the next pass (issue #578 AC2 — "the next run
+        // reprocesses these instances"). Everything else (terminal) is
+        // skipped under the existing idempotence guard.
+        const isTransient = priorEntry.reason.startsWith('transient:');
+        const count = priorEntry.transientRetryCount ?? 0;
+        if (!(isTransient && count < MAX_TRANSIENT_PASSES)) {
+          continue; // already validated (terminal) for this semantics version
+        }
+      }
     }
     if (!task.patch || !task.test_patch) {
       await deps.store.record(task.instance_id, { scorable: false, reason: 'missing-gold-patch', checkedAt: new Date().toISOString() }, deps.semanticsVersion);
@@ -641,17 +682,44 @@ export async function validatePoolInstances(
         entry = { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, ...substrate };
       }
     } catch (err) {
-      const reason = nameOf(err) === 'EvalCouldNotGradeError'
-        ? `ungradeable:${reasonOf(err)}`
-        : `error:${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
-      entry = {
-        scorable: false,
-        reason,
-        checkedAt: new Date().toISOString(),
-        ...(rowHash ? { rowHash } : {}),
-        ...(row ? { imageName: row.image_name } : {}),
-        ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
-      };
+      const httpStatus = typeof (err as { httpStatus?: unknown } | null)?.httpStatus === 'number'
+        ? (err as { httpStatus: number }).httpStatus
+        : undefined;
+      const checkedAt = new Date().toISOString();
+      if (httpStatus === 429) {
+        // Transient HF rate-limit: classify so the next pass re-processes
+        // (issue #578). Re-read the prior entry inside the catch so the
+        // count reflects the persisted state, not a stale in-memory copy.
+        const priorEntry = await deps.store.getEntry(task.instance_id, deps.semanticsVersion);
+        const prior = priorEntry?.transientRetryCount ?? 0;
+        const next = prior + 1;
+        const msg = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+        const reason = next >= MAX_TRANSIENT_PASSES
+          ? PERMANENT_HF_429_REASON
+          : `transient:HF-429:${msg}`;
+        entry = {
+          scorable: false,
+          reason,
+          checkedAt,
+          transientRetryCount: next,
+          lastTransientAt: checkedAt,
+          ...(rowHash ? { rowHash } : {}),
+          ...(row ? { imageName: row.image_name } : {}),
+          ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+        };
+      } else {
+        const reason = nameOf(err) === 'EvalCouldNotGradeError'
+          ? `ungradeable:${reasonOf(err)}`
+          : `error:${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+        entry = {
+          scorable: false,
+          reason,
+          checkedAt,
+          ...(rowHash ? { rowHash } : {}),
+          ...(row ? { imageName: row.image_name } : {}),
+          ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+        };
+      }
     }
     await deps.store.record(task.instance_id, entry, deps.semanticsVersion);
     summary.checked += 1;

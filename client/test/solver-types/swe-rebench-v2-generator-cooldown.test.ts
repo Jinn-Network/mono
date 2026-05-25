@@ -138,11 +138,22 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
 
   beforeEach(() => {
     stateDir = mkdtempSync(join(tmpdir(), 'jinn-swe-gen-cooldown-'));
-    vi.useFakeTimers();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ splits: [{ split: '2026_02' }] }),
-    } as Response);
+    // Only fake Date so the cooldown logic sees a fixed timestamp, but leave
+    // setTimeout real — fetchHfWithRetry's shared HF limiter sleeps via
+    // setTimeout to honour the process-wide min-interval (issue #578). If we
+    // faked setTimeout the second `/rows` request would never wake up because
+    // these tests do not advance timers manually.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      // /splits and /rows are both faked through fetch now (fetchHfSplit no
+      // longer uses node:https — issue #578). Return the splits envelope for
+      // the splits URL and the rows envelope for everything else.
+      if (url.includes('/splits')) {
+        return { ok: true, json: async () => ({ splits: [{ split: '2026_02' }] }) } as Response;
+      }
+      return { ok: true, json: async () => ({ rows: DEFAULT_MOCK_ROWS }) } as Response;
+    });
   });
 
   afterEach(() => {
@@ -244,7 +255,9 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
 
   beforeEach(() => {
     stateDir = tmpDir();
-    vi.useFakeTimers();
+    // See above: only fake Date, leave setTimeout real so the shared HF
+    // limiter's min-interval sleep can finish without manual timer ticks.
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-05-14T10:00:00.000Z'));
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
@@ -254,10 +267,10 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
           text: async () => `${JSON.stringify({ Hash: 'bafy-vetted-pool-cid' })}\n`,
         } as Response;
       }
-      return {
-        ok: true,
-        json: async () => ({ splits: [{ split: '2026_02' }] }),
-      } as Response;
+      if (url.includes('/splits')) {
+        return { ok: true, json: async () => ({ splits: [{ split: '2026_02' }] }) } as Response;
+      }
+      return { ok: true, json: async () => ({ rows: DEFAULT_MOCK_ROWS }) } as Response;
     });
   });
 

@@ -48,6 +48,7 @@ import {
   listMonthlyPartitions,
   type PoolTask,
 } from './_swe-rebench-v2-pool.js';
+import { fetchHfWithRetry } from '../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PoolCacheStore, loadPoolWithCacheFallback } from './_swe-rebench-v2-pool-cache.js';
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
@@ -139,7 +140,9 @@ export function defaultStateDir(): string {
  */
 export async function loadSweRebenchV2Pool(): Promise<PoolTask[]> {
   const splitsUrl = `https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(HF_DATASET)}`;
-  const response = await fetch(splitsUrl);
+  // Route through the shared HF retry helper so the /splits endpoint gets the
+  // same jittered 429-backoff treatment as /rows (issue #578).
+  const response = await fetchHfWithRetry(splitsUrl, {});
   if (!response.ok) throw new Error(`HF splits fetch failed: ${response.status}`);
   const json = (await response.json()) as { splits?: Array<{ split: string }> };
   const months = listMonthlyPartitions((json.splits ?? []).map((s) => s.split));
