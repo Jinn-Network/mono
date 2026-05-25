@@ -49,9 +49,83 @@ Both failures are **stop** — do not proceed past precondition checks.
 
 ---
 
+## Step 1.5 — Reality check (gate Step 2)
+
+Before any worktree is created and before `Status` is flipped to `In Progress`, triage validates that the issue still describes an unfixed problem. The dispatcher's pre-flight checks the Project board fields; this gate checks whether someone has already shipped a fix while the issue sat in the queue. It runs **even when the dispatcher's pre-flight has already passed** and **even when the skill is hand-invoked**.
+
+### Invoke the CLI
+
+Run the reality-check from the primary checkout (not the worktree — the worktree doesn't exist yet):
+
+```bash
+cd <repo-root>
+yarn workspace @jinn-network/eng-loop triage:check <N>
+# Emits one line of JSON to stdout; non-zero exit on failure.
+```
+
+Parse the JSON verdict:
+
+```bash
+VERDICT_JSON=$(yarn workspace @jinn-network/eng-loop triage:check <N>)
+CLASSIFICATION=$(echo "$VERDICT_JSON" | jq -r '.classification')
+SUGGESTED_COMMENT=$(echo "$VERDICT_JSON" | jq -r '.suggestedComment')
+SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')
+```
+
+### What the CLI does under the hood
+
+For an issue numbered `<N>`, it sequences four shell commands (then `git branch -a --contains <sha>` per matching commit):
+
+1. `git fetch --all --quiet`
+2. `gh search prs "#<N> in:body" --repo Jinn-Network/mono --state all --json number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit`
+3. `gh issue view <N> --repo Jinn-Network/mono --json closedByPullRequestsReferences`
+4. `git log --all --grep="#<N>" --format="%H%x09%D%x09%s"`
+5. For each commit SHA: `git branch -a --contains <sha>` — buckets reachable refs into `{ origin/next, origin/main, origin/release/*, origin/hotfix/* }`.
+
+### Classification table
+
+| Classification | Trigger | Action |
+|---|---|---|
+| `pr-open` | An OPEN PR has `Closes/Fixes/Resolves #<N>` in its body (or is in the issue's `closedByPullRequestsReferences`) | Comment + `Blocked on: Another issue`, do NOT flip Status |
+| `fixed-on-trunk` | A commit referencing `#<N>` is reachable from `origin/next` or `origin/main` and is associated with a merged PR | Comment + `Blocked on: Human`, do NOT flip Status |
+| `fixed-pending-backmerge` | A commit referencing `#<N>` is reachable from `origin/release/*` or `origin/hotfix/*` but NOT from trunk | Comment + `Blocked on: Human`, do NOT flip Status |
+| `fixed-direct-commit` | A commit referencing `#<N>` is reachable from `origin/next` but no PR is associated | Comment + `Blocked on: Human`, do NOT flip Status |
+| `clear` | None of the above | Proceed to Step 2 |
+
+### Edge cases the classifier handles
+
+- **Revert downgrade.** If the most-recent reachable commit referencing `#<N>` on the dominant bucket has subject `^Revert "` or `^revert(`, the verdict is downgraded by one tier (so e.g. `fixed-on-trunk` collapses to `clear` when the revert wins). `evidence.revertedShas` lists the revert SHAs so a human can audit.
+- **Body-grep false-positive filter.** A PR whose body merely mentions `#<N>` (without `Closes`/`Fixes`/`Resolves`) is ignored UNLESS the PR is in the issue's `closedByPullRequestsReferences`.
+- **Squash-merge SHA.** The classifier matches a merged PR to its commit via `mergeCommit.oid`; if it isn't present, the grep-derived SHA still applies and the verdict falls through to `fixed-direct-commit`.
+- **Digit boundary.** `#5721` does not match `#572` — the gatherer re-filters parsed commit subjects with a word-boundary regex.
+- **`git fetch --all --quiet` runs once** at the top of the gather sequence so local ref state is current.
+
+### Acting on a non-clear verdict
+
+If `CLASSIFICATION != "clear"`:
+
+1. Comment on the issue with the suggested text:
+   ```bash
+   gh issue comment <N> --repo Jinn-Network/mono --body "$SUGGESTED_COMMENT"
+   ```
+2. Set the Project `Blocked on` field to the suggested value. Discover the field id and option ids via `gh project field-list 1 --owner Jinn-Network --format json` (the `file-issue` skill's `references/gh-taxonomy.md` documents the discovery pattern), then:
+   ```bash
+   gh project item-edit --id <item-id> --project-id <project-id> \
+     --field-id <blocked-on-field-id> \
+     --single-select-option-id <human-or-another-issue-option-id>
+   ```
+3. **Do not flip `Status` to `In Progress`** — the issue stays in `Todo`. A human reviews the `Blocked on: Human` (or `Blocked on: Another issue`) signal and decides whether to close the issue or reopen the work.
+4. **Exit the skill.** Step 2 onward is skipped entirely.
+
+### Fail-loud posture
+
+If the CLI exits non-zero (gh/git unavailable, network failure, JSON parse error), **abort triage entirely**. Do not fall back to "assume clear" — a swallowed failure here is exactly the bug Step 1.5 exists to prevent.
+
+---
+
 ## Step 2 — Create the worktree and branch
 
-Per handbook workflow rule 1, all implementation work happens in a dedicated git worktree.
+If Step 1.5 returned `clear`, proceed. Per handbook workflow rule 1, all implementation work happens in a dedicated git worktree.
 
 **When dispatched by the eng-loop dispatcher:** the dispatcher pre-creates the worktree and explicitly states the path and branch in the session prompt (look for the sentence "A git worktree for this issue already exists at `<path>` on branch `<branch>` — use it; do not create a new worktree."). If that sentence is present, skip directly to the "All subagents..." paragraph below — do not run `git worktree add`.
 
@@ -326,6 +400,8 @@ The headless-override block also reminds subagents not to use `--mode plan` / `-
 |---|---|
 | Issue Type not set | Fail loud; stop. Do not proceed. |
 | `Blocked on` is `Human` or `Another issue` | Fail loud; stop. Do not proceed. |
+| Reality-check CLI fails / `gh` or `git` unavailable | Fail loud; stop. Do not proceed past Step 1.5. |
+| Step 1.5 returns `pr-open` / `fixed-on-trunk` / `fixed-pending-backmerge` / `fixed-direct-commit` | Comment on the issue, set `Blocked on` to the suggested value, do NOT flip `Status`, exit the skill. |
 | Subagent reports "done" but zero commits | Dispatch a fix subagent; re-check git log. |
 | Stage 5 reviewer is same as Stage 3 implementer | Re-dispatch Stage 5 with a genuinely fresh subagent. |
 | PR does not appear after Stage 8 subagent reports success | Dispatch a fix subagent; re-check `gh pr list`. |
