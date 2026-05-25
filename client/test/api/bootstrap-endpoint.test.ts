@@ -194,7 +194,7 @@ describe('GET /v1/bootstrap', () => {
     expect(body.error).toBeUndefined();
   });
 
-  it('includes rpcUrl, defaultRpcUrl, solverNets, and joinedSolverNets when configReader is supplied', async () => {
+  it('includes rpcUrl, defaultRpcUrl, and joinedSolverNets when configReader is supplied', async () => {
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
       chain: 'base-sepolia',
@@ -206,7 +206,6 @@ describe('GET /v1/bootstrap', () => {
       configReader: () => ({
         rpcUrl: 'https://my-tenderly.example/abc',
         defaultRpcUrl: 'https://sepolia.base.org',
-        solverNets: { prediction: { enabled: true, role: 'solving' } },
         joinedSolverNets: {
           bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
         },
@@ -222,10 +221,33 @@ describe('GET /v1/bootstrap', () => {
     };
     expect(body.rpcUrl).toBe('https://my-tenderly.example/abc');
     expect(body.defaultRpcUrl).toBe('https://sepolia.base.org');
-    expect(body.solverNets).toMatchObject({ prediction: { enabled: true, role: 'solving' } });
+    // Issue #421: the response no longer echoes a legacy `solverNets` field
+    // even when configReader were to return one accidentally.
+    expect(body.solverNets).toBeUndefined();
     expect(body.joinedSolverNets).toMatchObject({
       bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
     });
+  });
+
+  it('does not echo a `solverNets` field on /v1/bootstrap (issue #421)', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'complete' }],
+    });
+    const app = new Hono();
+    // configReader returns no solverNets at all; assert the bare-bootstrap
+    // shape never produces the legacy field on the wire.
+    addBootstrapRoutes(app, {
+      earningDir,
+      configReader: () => ({
+        joinedSolverNets: {},
+      }),
+    });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).not.toHaveProperty('solverNets');
+    expect(body).toHaveProperty('joinedSolverNets');
   });
 
   it('surfaces a retire_failed envelope when migration archive has a wipe_suppressed=true entry (jinn-mono-hjex.1)', async () => {

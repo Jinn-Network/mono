@@ -18,12 +18,11 @@ import { MIGRATIONS_FILE } from '../earning/store.js';
 export interface BootstrapEndpointConfig {
   earningDir: string;
   /** Reads operator-tunable runtime fields (rpcUrl, defaultRpcUrl,
-   *  solverNets, joinedSolverNets) and merges them into the response so the SPA's
+   *  joinedSolverNets) and merges them into the response so the SPA's
    *  Configuration page can render them without a separate fetch. */
   configReader?: () => {
     rpcUrl?: string;
     defaultRpcUrl?: string;
-    solverNets?: Record<string, unknown>;
     joinedSolverNets?: Record<string, unknown>;
   };
 }
@@ -210,7 +209,6 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       ...(parsed.fleet_safe_address ? { fleet_safe_address: parsed.fleet_safe_address } : {}),
       ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
       ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
-      ...(cfg.solverNets !== undefined ? { solverNets: cfg.solverNets } : {}),
       ...(cfg.joinedSolverNets !== undefined ? { joinedSolverNets: cfg.joinedSolverNets } : {}),
       ...(fundingGateActive && fundingGate ? {
         funding: {
