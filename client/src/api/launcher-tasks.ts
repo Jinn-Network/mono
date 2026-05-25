@@ -80,7 +80,7 @@ export interface FetchPostedTasksOptions {
 }
 
 export interface GatherLauncherTasksDeps {
-  config: Pick<JinnConfig, 'solverNets'>;
+  config: Pick<JinnConfig, 'joinedSolverNets'>;
   creatorAddress: string;
   fetchPostedTasks: (
     opts: FetchPostedTasksOptions,
@@ -117,16 +117,21 @@ function claimMaxFallbackForSolverType(solverType: string | undefined): number {
  * Build a solverType → solverNet-name lookup from the live config. The v1
  * mapping is 1:1 (one SolverNet per solver-type), but we index defensively so
  * a future fork-of-prediction config doesn't silently mislabel posted Tasks.
+ *
+ * Post-issue-#421 the lookup reads `joinedSolverNets` (manifest-CID-keyed)
+ * exclusively; solverType is synthesised from `joined.contract`.
  */
 function buildSolverTypeToNetIndex(
-  solverNets: JinnConfig['solverNets'] | undefined,
+  joinedSolverNets: JinnConfig['joinedSolverNets'] | undefined,
 ): Map<string, string> {
   const index = new Map<string, string>();
-  if (!solverNets) return index;
-  for (const [name, net] of Object.entries(solverNets)) {
-    const solverType = (net as { solverType?: string } | undefined)?.solverType;
-    if (typeof solverType === 'string' && solverType.length > 0 && !index.has(solverType)) {
-      index.set(solverType, name);
+  if (!joinedSolverNets) return index;
+  for (const [cid, joined] of Object.entries(joinedSolverNets)) {
+    if (!joined.contract) continue;
+    const solverType = `${joined.contract.id}.${joined.contract.version}`;
+    const displayName = joined.name ?? cid;
+    if (!index.has(solverType)) {
+      index.set(solverType, displayName);
     }
   }
   return index;
@@ -190,7 +195,7 @@ export async function gatherLauncherTasks(
     return 0;
   });
 
-  const solverTypeIndex = buildSolverTypeToNetIndex(deps.config.solverNets);
+  const solverTypeIndex = buildSolverTypeToNetIndex(deps.config.joinedSolverNets);
   const tasks = sorted.slice(0, limit).map((record) => mapRecordToEntry(record, solverTypeIndex));
 
   const cursor =
