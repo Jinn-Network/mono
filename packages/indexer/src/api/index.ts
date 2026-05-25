@@ -31,9 +31,8 @@
  */
 import { db } from 'ponder:api';
 import schema, { pluginPublication } from 'ponder:schema';
-import { graphql } from 'ponder';
+import { graphql, and, eq, sql } from 'ponder';
 import { Hono } from 'hono';
-import { and, eq, arrayContains } from 'drizzle-orm';
 import { attributeRuns } from '../builder-attribution.js';
 import {
   listPluginsByNetwork,
@@ -155,7 +154,7 @@ app.get('/plugins', async (c) => {
     if (solverNet) {
       // Push solverNet filter: supports array must contain the requested value.
       // Also push includeRevoked=false filter into the DB query.
-      const conditions = [arrayContains(pluginPublication.supports, [solverNet])];
+      const conditions = [sql`${pluginPublication.supports} @> ARRAY[${solverNet}]::text[]`];
       if (!includeRevoked) conditions.push(eq(pluginPublication.revoked, false));
       const rows = (await db
         .select()

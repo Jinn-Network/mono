@@ -56,3 +56,21 @@ source, and testing. [`CLAUDE.md`](CLAUDE.md) has the architecture overview.
 - `contracts/` — Solidity contracts (Hardhat)
 - `spec/` — dated protocol design proposals
 - `docs/` — operator runbooks and planning docs
+
+## Licence
+
+Jinn-authored source code in this repository is licensed under the
+[Apache License, Version 2.0](LICENSE). Some files retain their
+upstream licences (notably MIT, and a small set of copyleft-vendored
+Solidity files); per-file `SPDX-License-Identifier` headers are
+authoritative. See [`NOTICE`](NOTICE) and
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+
+The names "Jinn" and "Jinn Network", the Jinn sigils, and the Jinn
+wordmark are not licensed under Apache-2.0 — see
+[`TRADEMARKS.md`](TRADEMARKS.md).
+
+Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) (every commit
+requires a [DCO](https://developercertificate.org) sign-off).
+Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Security:
+[`SECURITY.md`](SECURITY.md).

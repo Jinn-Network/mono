@@ -18,6 +18,43 @@ Per-package developer guides:
 - [`client/CONTRIBUTING.md`](client/CONTRIBUTING.md) — Jinn client (TypeScript daemon).
 - [`contracts/`](contracts/) — Solidity smart contracts (Hardhat).
 
+## Licence and sign-off
+
+The repository is licensed under **Apache License, Version 2.0** — see
+[`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and the third-party inventory
+in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+
+- **New source files** authored for this repository default to
+  Apache-2.0. Add a header where the file format supports comments:
+  ```
+  // SPDX-License-Identifier: Apache-2.0
+  ```
+- **Existing files** that already declare a per-file SPDX identifier
+  (notably MIT) retain that identifier. Do not silently relicense
+  existing files when editing them.
+- **Vendored upstream code** retains its upstream licence. Add it to
+  [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+
+Every commit must be **signed off** under the [Developer Certificate of
+Origin](https://developercertificate.org). Add the trailer to every
+commit:
+
+```
+Signed-off-by: Your Name <you@example.com>
+```
+
+`git commit -s` adds it automatically. The DCO is a contributor
+attestation that you have the right to submit the work under the
+project's licence; it intentionally replaces a CLA so that no entity
+sits between contributors and the licence.
+
+The Jinn name, sigils, and wordmark are **not** licensed under
+Apache-2.0 — see [`TRADEMARKS.md`](TRADEMARKS.md) before using them in
+any context where confusion with the Jinn Network protocol is possible.
+
+Community conduct expectations are in [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+Security issues are reported privately per [`SECURITY.md`](SECURITY.md).
+
 ## What to read before you open a PR
 
 In rough order:

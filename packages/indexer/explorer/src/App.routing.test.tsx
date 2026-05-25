@@ -152,12 +152,13 @@ describe('App routing', () => {
     vi.restoreAllMocks();
   });
 
-  it('/ → NetworkView mounts ("The ether" headline)', async () => {
+  it('/ → NetworkView mounts (Solve rate hero)', async () => {
     const Wrapper = makeWrapper('/');
     render(<App />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('The ether')).toBeInTheDocument();
+      expect(screen.getByText('Solve rate')).toBeInTheDocument();
     });
+    expect(screen.queryByText('The ether')).not.toBeInTheDocument();
   });
 
   it('/solvernets → SolverNetsListView mounts', async () => {
