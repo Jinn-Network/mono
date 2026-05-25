@@ -53,6 +53,7 @@ function snapshotItem(overrides: Partial<SnapshotItem> & Pick<SnapshotItem, 'id'
     effort: null,
     blockedOn: null,
     issueType: null,
+    sprintIterationId: null,
     ...overrides,
   };
 }
@@ -83,6 +84,7 @@ const SNAPSHOT: ProjectSnapshot = {
     }),
   ],
   rateLimit: { remaining: 4999, used: 1, resetAt: '2026-05-25T16:00:00Z' },
+  currentSprintIterationId: null,
 };
 
 /** Build a fake CommandRunner that returns canned JSON matching real gh shapes. */
@@ -173,6 +175,7 @@ describe('GhIssueSource', () => {
         }),
       ],
       rateLimit: { remaining: 4999, used: 1, resetAt: '2026-05-25T16:00:00Z' },
+      currentSprintIterationId: null,
     };
     const source = new GhIssueSource(makeFakeRunner());
     const issues = await source.poll(snapshotWithPr);

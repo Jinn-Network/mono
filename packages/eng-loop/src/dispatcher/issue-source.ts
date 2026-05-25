@@ -110,9 +110,18 @@ export class GhIssueSource implements IssueSource {
     //    never dispatched. Issue Type for off-board issues is not fetched —
     //    this is intentional, since off-board issues are never dispatchable
     //    in the first place.
+    // Pre-compute whether the snapshot has an active sprint to avoid threading
+    // it through the per-issue map. When `currentSprintIterationId` is null
+    // (no active sprint), every issue's `inCurrentSprint` is false and the
+    // ready-filter's sprint-first sort becomes a no-op (#609).
+    const currentSprintId = snapshot.currentSprintIterationId;
+
     return ghIssues.map((ghIssue): PolledIssue => {
       const boardItem = boardMap.get(ghIssue.number);
       const onBoard = boardItem != null;
+      const inCurrentSprint =
+        currentSprintId != null &&
+        boardItem?.sprintIterationId === currentSprintId;
       return {
         number: ghIssue.number,
         title: ghIssue.title,
@@ -126,6 +135,7 @@ export class GhIssueSource implements IssueSource {
         // Empty string is the unknown-author sentinel; never matches the allowlist (#497).
         author: ghIssue.author?.login ?? '',
         projectItemId: boardItem?.id ?? null,
+        inCurrentSprint,
       };
     });
   }

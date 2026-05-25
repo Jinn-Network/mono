@@ -40,6 +40,15 @@ export interface PolledIssue {
    * costing ~96 GraphQL points per dispatch.
    */
   projectItemId: string | null;
+  /**
+   * True iff the issue's `Sprint` Iteration field on the Project board points
+   * at the *current* iteration. The snapshot exposes `currentSprintIterationId`
+   * at the top level and each item's `sprintIterationId`; this field is the
+   * pre-computed equality so the ready-filter doesn't need to thread the
+   * snapshot through. When no active sprint exists (or the field is absent),
+   * every issue's value is `false` and sprint ordering becomes a no-op. (#609)
+   */
+  inCurrentSprint: boolean;
 }
 
 /** An issue that passed the ready-filter — safe to dispatch. */

@@ -44,6 +44,7 @@ function snapshotItem(overrides: Partial<SnapshotItem> & Pick<SnapshotItem, 'id'
     effort: null,
     blockedOn: null,
     issueType: null,
+    sprintIterationId: null,
     ...overrides,
   };
 }
@@ -85,6 +86,7 @@ const SNAPSHOT: ProjectSnapshot = {
     }),
   ],
   rateLimit: { remaining: 4999, used: 1, resetAt: '2026-05-25T16:00:00Z' },
+  currentSprintIterationId: null,
 };
 
 /**

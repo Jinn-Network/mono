@@ -20,7 +20,8 @@ export interface SelectReadyResult {
  * An issue is **ready** when it is triage-complete (Issue Type set),
  * `Blocked on: Nothing`, on the board, in `Todo`, not already in flight,
  * AND its author is on the allowlist (#497 trust boundary). Output is
- * ordered by Priority, then FIFO by issue number.
+ * ordered by current-sprint membership first, then Priority, then FIFO by
+ * issue number (#609).
  *
  * The author check is a *second-pass* predicate so `skippedForAuthor` only
  * surfaces issues that would otherwise be ready — operators need to see
@@ -60,11 +61,21 @@ export function selectReady(
     }
   }
 
-  ready.sort(
-    (a, b) =>
-      PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] ||
-      a.number - b.number,
-  );
+  // Sort: in-current-sprint first (sprint commitment wins over backlog
+  // discovery order), then Priority (P0 → P4 raw severity), then FIFO by
+  // issue number. Sprint membership is the highest-precedence key per #609 —
+  // a P3 sprint item beats a P0 non-sprint item. This matches the operator's
+  // expectation that the declared sprint is the commitment surface; an
+  // out-of-sprint P0 should be added to the sprint before it can race in.
+  // When no active sprint exists (or the snapshot doesn't surface Sprint),
+  // every issue's `inCurrentSprint` is false and this key is a no-op —
+  // ordering falls through to Priority + FIFO, identical to pre-#609 behaviour.
+  ready.sort((a, b) => {
+    const sprintRank = Number(b.inCurrentSprint) - Number(a.inCurrentSprint);
+    return sprintRank
+      || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]
+      || a.number - b.number;
+  });
 
   return { ready, skippedForAuthor };
 }

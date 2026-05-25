@@ -18,6 +18,7 @@ function buildSnapshot(remaining: number, resetAt: string): ProjectSnapshot {
   return {
     items: [],
     rateLimit: { remaining, used: 5000 - remaining, resetAt },
+    currentSprintIterationId: null,
   };
 }
 
@@ -28,6 +29,7 @@ function buildReport(): CycleReport {
     drift: [],
     backpressureTripped: false,
     paused: [],
+    skippedForAuthor: [],
   };
 }
 

@@ -37,6 +37,7 @@ const ISSUE: ReadyIssue = {
   onBoard: true,
   author: 'alice',
   projectItemId: 'PVTI_418',
+  inCurrentSprint: false,
 };
 
 const CFG: DispatcherConfig = {

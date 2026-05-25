@@ -6,6 +6,7 @@ const base: PolledIssue = {
   number: 1, title: 't', shape: 'fix', blockedOn: 'Nothing',
   blockedOnIssue: null, effort: 'Low', priority: 'P2',
   status: 'Todo', onBoard: true, author: 'alice', projectItemId: 'PVTI_1',
+  inCurrentSprint: false,
 };
 
 const ALLOW_ALICE: ReadonlySet<string> = new Set(['alice']);
@@ -37,6 +38,52 @@ describe('selectReady', () => {
     const c = { ...base, number: 3, priority: 'P3' as const };
     const { ready } = selectReady([a, b, c], new Set(), ALLOW_ALICE);
     expect(ready.map((i) => i.number)).toEqual([9, 3, 5]);
+  });
+
+  describe('current-sprint priority (#609)', () => {
+    it('prioritises a same-priority sprint item over a non-sprint one (FIFO no longer breaks the tie)', () => {
+      // Same priority, sprint should win regardless of issue-number FIFO.
+      // Lower issue number (non-sprint) would have won pre-#609.
+      const sprint = { ...base, number: 50, priority: 'P2' as const, inCurrentSprint: true };
+      const nonSprint = { ...base, number: 10, priority: 'P2' as const, inCurrentSprint: false };
+      const { ready } = selectReady([nonSprint, sprint], new Set(), ALLOW_ALICE);
+      expect(ready.map((i) => i.number)).toEqual([50, 10]);
+    });
+
+    it('prioritises a sprint item over a non-sprint one even when the non-sprint has higher Priority', () => {
+      // Sprint commitment trumps raw severity (#609): a P3 sprint item beats
+      // a P0 non-sprint item. Operators who want this to flip should add the
+      // P0 to the sprint instead of relying on raw priority.
+      const sprintP3 = { ...base, number: 1, priority: 'P3' as const, inCurrentSprint: true };
+      const nonSprintP0 = { ...base, number: 2, priority: 'P0' as const, inCurrentSprint: false };
+      const { ready } = selectReady([sprintP3, nonSprintP0], new Set(), ALLOW_ALICE);
+      expect(ready.map((i) => i.number)).toEqual([1, 2]);
+    });
+
+    it('falls back to Priority then FIFO within each sprint bucket', () => {
+      // Three sprint items at different priorities + one non-sprint item.
+      // Expect: sprint bucket ordered by Priority/FIFO, then non-sprint last.
+      const sprintP1 = { ...base, number: 100, priority: 'P1' as const, inCurrentSprint: true };
+      const sprintP3a = { ...base, number: 50, priority: 'P3' as const, inCurrentSprint: true };
+      const sprintP3b = { ...base, number: 75, priority: 'P3' as const, inCurrentSprint: true };
+      const nonSprintP1 = { ...base, number: 200, priority: 'P1' as const, inCurrentSprint: false };
+      const { ready } = selectReady(
+        [nonSprintP1, sprintP3b, sprintP1, sprintP3a],
+        new Set(),
+        ALLOW_ALICE,
+      );
+      expect(ready.map((i) => i.number)).toEqual([100, 50, 75, 200]);
+    });
+
+    it('preserves pre-#609 Priority+FIFO ordering when no items are in the current sprint', () => {
+      // Smoke check: with every item out-of-sprint (the no-active-sprint case),
+      // the sort behaves identically to the original Priority+FIFO order.
+      const a = { ...base, number: 5, priority: 'P3' as const, inCurrentSprint: false };
+      const b = { ...base, number: 9, priority: 'P0' as const, inCurrentSprint: false };
+      const c = { ...base, number: 3, priority: 'P3' as const, inCurrentSprint: false };
+      const { ready } = selectReady([a, b, c], new Set(), ALLOW_ALICE);
+      expect(ready.map((i) => i.number)).toEqual([9, 3, 5]);
+    });
   });
 
   describe('author allowlist', () => {

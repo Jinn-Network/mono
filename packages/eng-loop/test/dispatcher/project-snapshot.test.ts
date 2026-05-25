@@ -3,6 +3,7 @@ import {
   fetchProjectSnapshot,
   PaginationLimitError,
   ProjectFieldSchemaError,
+  resolveCurrentSprintIterationId,
   SCHEMA_DRIFT_MIN_ISSUE_COUNT,
   type CommandRunner,
   type ProjectSnapshot,
@@ -44,9 +45,18 @@ interface PageOptions {
   hasNextPage?: boolean;
   endCursor?: string;
   nodes: unknown[];
+  /** Optional `sprintField` block for the page. Omit to test the absent-field
+   *  case (snapshot's `currentSprintIterationId` collapses to null). */
+  sprintIterations?: Array<{ id: string; startDate: string; duration: number }> | null;
 }
 
 function buildPageResponse(opts: PageOptions): string {
+  const sprintField =
+    opts.sprintIterations === undefined
+      ? null
+      : opts.sprintIterations === null
+        ? null
+        : { configuration: { iterations: opts.sprintIterations } };
   return JSON.stringify({
     data: {
       rateLimit: {
@@ -56,6 +66,7 @@ function buildPageResponse(opts: PageOptions): string {
       },
       organization: {
         projectV2: {
+          sprintField,
           items: {
             pageInfo: {
               hasNextPage: opts.hasNextPage ?? false,
@@ -81,6 +92,7 @@ function issueNode(args: {
   priority?: string | null;
   effort?: string | null;
   blockedOn?: string | null;
+  sprintIterationId?: string | null;
 }): unknown {
   return {
     id: args.id,
@@ -93,6 +105,7 @@ function issueNode(args: {
     priority: singleSelect(args.priority ?? null),
     effort: singleSelect(args.effort ?? null),
     blockedOn: singleSelect(args.blockedOn ?? null),
+    sprint: args.sprintIterationId == null ? null : { iterationId: args.sprintIterationId },
   };
 }
 
@@ -107,6 +120,7 @@ function prNode(args: { id: string; number: number }): unknown {
     priority: null,
     effort: null,
     blockedOn: null,
+    sprint: null,
   };
 }
 
@@ -118,6 +132,7 @@ function draftIssueNode(args: { id: string }): unknown {
     priority: null,
     effort: null,
     blockedOn: null,
+    sprint: null,
   };
 }
 
@@ -130,6 +145,7 @@ function nullContentNode(args: { id: string }): unknown {
     priority: singleSelect('P2'),
     effort: singleSelect('Low'),
     blockedOn: singleSelect('Nothing'),
+    sprint: null,
   };
 }
 
@@ -198,6 +214,7 @@ describe('fetchProjectSnapshot — single-page parsing', () => {
       effort: 'Medium',
       blockedOn: 'Nothing',
       issueType: 'fix',
+      sprintIterationId: null,
     });
     expect(snap.items[1]).toEqual({
       id: 'PVTI_b',
@@ -208,6 +225,7 @@ describe('fetchProjectSnapshot — single-page parsing', () => {
       effort: 'Low',
       blockedOn: 'Nothing',
       issueType: 'feat',
+      sprintIterationId: null,
     });
   });
 
@@ -554,5 +572,117 @@ describe('fetchProjectSnapshot — invocation shape', () => {
     expect(calls[0]!.args[1]).toBe('graphql');
     // `query=…` form variable must be present
     expect(calls[0]!.args.some((a) => a.startsWith('query='))).toBe(true);
+  });
+});
+
+describe('fetchProjectSnapshot — Sprint field (#609)', () => {
+  // Pick a "now" that falls squarely inside Sprint 3's window (start 2026-05-25, duration 7d).
+  const NOW_IN_SPRINT_3 = Date.parse('2026-05-25T12:00:00Z');
+
+  it("populates each item's sprintIterationId from the snapshot", async () => {
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        sprintIterations: [{ id: 'd710be59', startDate: '2026-05-25', duration: 7 }],
+        nodes: [
+          issueNode({ id: 'PVTI_a', number: 1, status: 'Todo', sprintIterationId: 'd710be59' }),
+          issueNode({ id: 'PVTI_b', number: 2, status: 'Todo' }), // no sprint value
+        ],
+      }),
+    ]);
+
+    const snap = await fetchProjectSnapshot(runner, { nowMs: NOW_IN_SPRINT_3 });
+
+    expect(snap.items[0]!.sprintIterationId).toBe('d710be59');
+    expect(snap.items[1]!.sprintIterationId).toBeNull();
+  });
+
+  it('resolves currentSprintIterationId to the iteration containing nowMs', async () => {
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        sprintIterations: [{ id: 'd710be59', startDate: '2026-05-25', duration: 7 }],
+        nodes: [issueNode({ id: 'PVTI_a', number: 1, status: 'Todo' })],
+      }),
+    ]);
+
+    const snap = await fetchProjectSnapshot(runner, { nowMs: NOW_IN_SPRINT_3 });
+    expect(snap.currentSprintIterationId).toBe('d710be59');
+  });
+
+  it('resolves currentSprintIterationId to null when nowMs is before any iteration starts', async () => {
+    // nowMs is BEFORE the only iteration's startDate — not yet started ≠ current.
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        sprintIterations: [{ id: 'd710be59', startDate: '2026-05-25', duration: 7 }],
+        nodes: [issueNode({ id: 'PVTI_a', number: 1, status: 'Todo' })],
+      }),
+    ]);
+
+    const snap = await fetchProjectSnapshot(runner, {
+      nowMs: Date.parse('2026-05-24T12:00:00Z'),
+    });
+    expect(snap.currentSprintIterationId).toBeNull();
+  });
+
+  it('resolves currentSprintIterationId to null when the Sprint field is absent', async () => {
+    // sprintField is null on the page — Sprint field doesn't exist on the
+    // project. Sprint ordering becomes a no-op (#609).
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        sprintIterations: null,
+        nodes: [issueNode({ id: 'PVTI_a', number: 1, status: 'Todo' })],
+      }),
+    ]);
+
+    const snap = await fetchProjectSnapshot(runner, { nowMs: NOW_IN_SPRINT_3 });
+    expect(snap.currentSprintIterationId).toBeNull();
+    expect(snap.items[0]!.sprintIterationId).toBeNull();
+  });
+
+  it('coerces unset sprint field value on an item to null', async () => {
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        sprintIterations: [{ id: 'd710be59', startDate: '2026-05-25', duration: 7 }],
+        nodes: [issueNode({ id: 'PVTI_a', number: 1, status: 'Todo' })],
+      }),
+    ]);
+
+    const snap = await fetchProjectSnapshot(runner, { nowMs: NOW_IN_SPRINT_3 });
+    expect(snap.items[0]!.sprintIterationId).toBeNull();
+  });
+});
+
+describe('resolveCurrentSprintIterationId', () => {
+  const ITER = (id: string, startDate: string, duration = 7) => ({ id, startDate, duration });
+
+  it('returns the iteration whose window contains nowMs', () => {
+    const iters = [ITER('a', '2026-05-25')];
+    expect(resolveCurrentSprintIterationId(iters, Date.parse('2026-05-25T00:00:00Z'))).toBe('a');
+    expect(resolveCurrentSprintIterationId(iters, Date.parse('2026-05-31T23:59:59Z'))).toBe('a');
+  });
+
+  it('returns null when nowMs is before the first iteration', () => {
+    expect(
+      resolveCurrentSprintIterationId([ITER('a', '2026-05-25')], Date.parse('2026-05-20T00:00:00Z')),
+    ).toBeNull();
+  });
+
+  it('returns null when nowMs is after the last iteration ends', () => {
+    expect(
+      resolveCurrentSprintIterationId([ITER('a', '2026-05-25')], Date.parse('2026-06-05T00:00:00Z')),
+    ).toBeNull();
+  });
+
+  it('picks the iteration containing nowMs across multiple configured iterations', () => {
+    const iters = [ITER('a', '2026-05-25'), ITER('b', '2026-06-01')];
+    expect(resolveCurrentSprintIterationId(iters, Date.parse('2026-06-02T12:00:00Z'))).toBe('b');
+  });
+
+  it('returns null for an empty iteration list', () => {
+    expect(resolveCurrentSprintIterationId([], Date.now())).toBeNull();
   });
 });

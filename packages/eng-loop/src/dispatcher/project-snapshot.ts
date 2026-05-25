@@ -101,6 +101,11 @@ export interface SnapshotItem {
   /** `IssueType.name` from the underlying Issue, mapped to the canonical
    *  shape vocabulary. `null` for non-Issue content or untyped issues. */
   issueType: IssueShape | null;
+  /** Iteration id of the item's `Sprint` field value (e.g. `d710be59`).
+   *  `null` when the item has no Sprint value or the Sprint field is absent.
+   *  Compared against {@link ProjectSnapshot.currentSprintIterationId} to
+   *  derive `PolledIssue.inCurrentSprint`. (#609) */
+  sprintIterationId: string | null;
 }
 
 /**
@@ -112,6 +117,23 @@ export interface SnapshotItem {
 export interface ProjectSnapshot {
   items: SnapshotItem[];
   rateLimit: RateLimitInfo;
+  /**
+   * Iteration id of the *current* Sprint iteration on the Project board, or
+   * `null` when no sprint is active (the field is absent, has no configured
+   * iterations, or the only iterations are in the past — i.e. the
+   * `completedIterations` list rather than `iterations`).
+   *
+   * `GhIssueSource.poll` compares each item's `sprintIterationId` against
+   * this value to set `PolledIssue.inCurrentSprint`, which the ready-filter
+   * sort uses to prioritise sprint commitments (#609).
+   *
+   * If two future iterations are configured (rare, but allowed), this picks
+   * the *first* one — GitHub returns active+future iterations in start-date
+   * order, so [0] is the iteration containing today, or the next one to
+   * start. The dispatcher treats "sprint that has not yet started" as
+   * not-current; sprint commitment kicks in when the iteration is active.
+   */
+  currentSprintIterationId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +226,13 @@ const SNAPSHOT_QUERY = `query($cursor: String) {
   rateLimit { cost remaining used resetAt }
   organization(login: "${PROJECT_OWNER}") {
     projectV2(number: ${PROJECT_NUMBER}) {
+      sprintField: field(name: "Sprint") {
+        ... on ProjectV2IterationField {
+          configuration {
+            iterations { id startDate duration }
+          }
+        }
+      }
       items(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -217,6 +246,7 @@ const SNAPSHOT_QUERY = `query($cursor: String) {
           priority:  fieldValueByName(name: "Priority")   { ... on ProjectV2ItemFieldSingleSelectValue { name } }
           effort:    fieldValueByName(name: "Effort")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
           blockedOn: fieldValueByName(name: "Blocked on") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          sprint:    fieldValueByName(name: "Sprint")     { ... on ProjectV2ItemFieldIterationValue { iterationId } }
         }
       }
     }
@@ -231,6 +261,10 @@ interface SingleSelectValue {
   name: string;
 }
 
+interface IterationValue {
+  iterationId: string;
+}
+
 interface ResponseNode {
   id: string;
   content: ResponseContent | null;
@@ -238,6 +272,7 @@ interface ResponseNode {
   priority: SingleSelectValue | null;
   effort: SingleSelectValue | null;
   blockedOn: SingleSelectValue | null;
+  sprint: IterationValue | null;
 }
 
 interface ResponseContent {
@@ -246,11 +281,20 @@ interface ResponseContent {
   issueType?: { name: string } | null;
 }
 
+interface IterationConfig {
+  id: string;
+  startDate: string;   // YYYY-MM-DD
+  duration: number;    // days
+}
+
 interface SnapshotResponse {
   data: {
     rateLimit: RateLimitInfo & { cost?: number };
     organization: {
       projectV2: {
+        sprintField: {
+          configuration: { iterations: IterationConfig[] };
+        } | null;
         items: {
           pageInfo: { hasNextPage: boolean; endCursor: string | null };
           nodes: ResponseNode[];
@@ -322,7 +366,35 @@ function parseNode(node: ResponseNode): SnapshotItem | null {
     effort: parseSingleSelect<Effort>(node.effort, VALID_EFFORT),
     blockedOn: parseSingleSelect<BlockedOn>(node.blockedOn, VALID_BLOCKED_ON),
     issueType,
+    sprintIterationId: node.sprint?.iterationId ?? null,
   };
+}
+
+/**
+ * Resolve which configured iteration *contains* `nowMs`. Returns the
+ * iteration id, or `null` when no iteration's date window contains the
+ * timestamp (no active sprint right now).
+ *
+ * GitHub returns active+future iterations in `field.configuration.iterations`
+ * sorted by start date; past iterations live in `completedIterations` and
+ * are not included here (they shouldn't be picked as "current"). We still
+ * iterate through every entry rather than assuming `[0]` is current — a
+ * not-yet-started future sprint must not be treated as current.
+ *
+ * Exported for testability so the date-window logic can be exercised
+ * without freezing system time.
+ */
+export function resolveCurrentSprintIterationId(
+  iterations: IterationConfig[],
+  nowMs: number,
+): string | null {
+  for (const it of iterations) {
+    const start = Date.parse(`${it.startDate}T00:00:00Z`);
+    if (!Number.isFinite(start)) continue;
+    const end = start + it.duration * 86_400_000;
+    if (nowMs >= start && nowMs < end) return it.id;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +427,9 @@ export interface FetchOpts {
    *  deliberate decision because the snapshot's correctness depends on
    *  reading every page. */
   maxPages?: number;
+  /** Override "now" for the current-sprint resolver. Tests pass a fixed
+   *  timestamp; production calls omit this and {@link Date.now} is used. */
+  nowMs?: number;
 }
 
 export async function fetchProjectSnapshot(
@@ -362,8 +437,10 @@ export async function fetchProjectSnapshot(
   opts: FetchOpts = {},
 ): Promise<ProjectSnapshot> {
   const maxPages = opts.maxPages ?? MAX_PAGES;
+  const nowMs = opts.nowMs ?? Date.now();
   const items: SnapshotItem[] = [];
   let rateLimit: RateLimitInfo | null = null;
+  let sprintIterations: IterationConfig[] = [];
   let cursor: string | null = null;
   let issueCount = 0;
   let issuesWithAllFieldsNull = 0;
@@ -414,6 +491,15 @@ export async function fetchProjectSnapshot(
     }
 
     rateLimit = response.data.rateLimit;
+    // Sprint configuration is duplicated on every page (it's a project-level
+    // field, not a per-item value). Capture from the first page that has it;
+    // a missing/absent `Sprint` field collapses every iteration list to []
+    // and the snapshot's `currentSprintIterationId` ends up null — sprint
+    // ordering then becomes a no-op (#609).
+    const sprintField = response.data.organization.projectV2.sprintField;
+    if (sprintField != null) {
+      sprintIterations = sprintField.configuration.iterations;
+    }
 
     if (!pageItems.pageInfo.hasNextPage || pageItems.pageInfo.endCursor == null) break;
     cursor = pageItems.pageInfo.endCursor;
@@ -432,5 +518,6 @@ export async function fetchProjectSnapshot(
   return {
     items,
     rateLimit: rateLimit ?? { remaining: 0, used: 0, resetAt: '' },
+    currentSprintIterationId: resolveCurrentSprintIterationId(sprintIterations, nowMs),
   };
 }

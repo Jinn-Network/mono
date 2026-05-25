@@ -22,6 +22,7 @@ import type { ProjectSnapshot } from '../../src/dispatcher/project-snapshot.js';
 const EMPTY_SNAPSHOT: ProjectSnapshot = {
   items: [],
   rateLimit: { remaining: 5000, used: 0, resetAt: '2026-05-25T16:00:00Z' },
+  currentSprintIterationId: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ function makePolled(overrides: Partial<PolledIssue> = {}): PolledIssue {
     onBoard: true,
     author: 'alice',
     projectItemId: 'PVTI_test',
+    inCurrentSprint: false,
     ...overrides,
   };
 }
