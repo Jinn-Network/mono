@@ -20,7 +20,7 @@ The Monday cadence opens a standing **release-review PR** (`base: main`, `head: 
 
 ## Steps
 
-> **Guard recognition.** The `Main base guard` required check on `main` (`.github/workflows/main-base-guard.yml`) recognises the hotfix shape by two signals: a head branch matching `hotfix/*` AND a PR title beginning with `fix(incident)`. Both are produced by following the steps below verbatim; if the guard fails on a hotfix PR, the branch name or title is off-shape.
+> **Guard recognition.** The `Main base guard` required check on `main` (`.github/workflows/main-base-guard.yml`) recognises the hotfix shape by either of two signals: a head branch matching `hotfix/*`, or a PR title beginning with `fix(incident)`. Both are produced by following the steps below verbatim; if the guard fails on a hotfix PR, neither signal is present — fix the branch name or rename the PR title and the check re-runs.
 
 1. **Branch from `main`:** `git fetch origin && git checkout -b hotfix/<bd-id>-<slug> origin/main`.
 2. **Write the regression test first** (rule 7 — deferred-not-waived on incident). Reproduce the failure.
