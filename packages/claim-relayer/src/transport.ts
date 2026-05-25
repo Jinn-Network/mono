@@ -12,11 +12,7 @@ import { fallback, http, type FallbackTransport } from 'viem';
 export const MAX_RPC_CHAIN_LENGTH = 4;
 
 export function parseRpcUrls(input: string | readonly string[]): string[] {
-  let raw: string[];
-  if (typeof input === 'string') raw = input.split(',');
-  else if (Array.isArray(input)) raw = [...input];
-  else raw = [];
-
+  const raw = typeof input === 'string' ? input.split(',') : [...input];
   const cleaned = raw.map((u) => u.trim()).filter((u) => u.length > 0);
   if (cleaned.length === 0) {
     throw new Error('parseRpcUrls: at least one RPC URL is required');

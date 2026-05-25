@@ -57,16 +57,7 @@ export function parseRpcUrls(
   options: ParseRpcUrlsOptions = {},
 ): string[] {
   const log = options.log ?? ((m: string) => process.stderr.write(`${m}\n`));
-
-  let raw: string[];
-  if (typeof input === 'string') {
-    raw = input.split(',');
-  } else if (Array.isArray(input)) {
-    raw = [...input];
-  } else {
-    raw = [];
-  }
-
+  const raw = typeof input === 'string' ? input.split(',') : [...input];
   const cleaned = raw.map((u) => u.trim()).filter((u) => u.length > 0);
 
   if (cleaned.length === 0) {
