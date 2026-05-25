@@ -54,7 +54,7 @@ EOF
 # Flip to true via the GitHub UI if that policy stance changes.
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-  echo "Would PATCH repos/${REPO}/branches/${BRANCH}/protection with:"
+  echo "Would PUT repos/${REPO}/branches/${BRANCH}/protection with:"
   echo "${PAYLOAD}"
   exit 0
 fi
