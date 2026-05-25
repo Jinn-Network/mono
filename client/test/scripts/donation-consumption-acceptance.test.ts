@@ -24,14 +24,15 @@ describe('donation consumption acceptance config', () => {
           disabled: ['claude-mcp-hyperliquid'],
           externalImpls: [{ name: '@example/external' }],
         },
-        solverNets: {
-          'swe-rebench-v2': {
-            enabled: true,
-            solverType: 'swe-rebench-v2.v1',
-            roles: ['solving', 'evaluating'],
+        joinedSolverNets: {
+          'bafkreiswe': {
+            manifestCid: 'bafkreiswe',
+            name: 'swe-rebench-v2',
+            contract: { id: 'swe-rebench-v2', version: 'v1' },
+            roles: ['solver', 'evaluator'],
             harness: 'codex-code-learner',
             plugins: ['bundled:swe-rebench-v2-runtime'],
-            taskGenerator: { enabled: true },
+            disabledDefaultPlugins: [],
           },
         },
       },
@@ -63,11 +64,14 @@ describe('donation consumption acceptance config', () => {
         'claude-mcp-prediction-apy',
       ],
     });
-    expect(config.solverNets).toMatchObject({
-      'swe-rebench-v2': {
-        enabled: true,
-        harness: 'codex-code-learner',
-        taskGenerator: { enabled: false },
+    // Issue #421: the consumer config no longer carries a legacy
+    // `solverNets` block — only the inherited joinedSolverNets membership.
+    expect((config as Record<string, unknown>).solverNets).toBeUndefined();
+    expect(config.joinedSolverNets).toMatchObject({
+      bafkreiswe: {
+        manifestCid: 'bafkreiswe',
+        name: 'swe-rebench-v2',
+        roles: ['solver', 'evaluator'],
       },
     });
   });

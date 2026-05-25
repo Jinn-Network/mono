@@ -649,7 +649,6 @@ export function buildConsumerConfig(opts: {
   ipfsGatewayUrl: string;
 }): LocalConfig {
   const clientHome = defaultClientHome(opts.consumerHome);
-  const solverNets = cloneSolverNetsForConsumer(opts.producerConfig.solverNets);
   const base: LocalConfig = {
     network: opts.producerConfig.network ?? 'testnet',
     rpcUrl: opts.producerConfig.rpcUrl,
@@ -671,7 +670,8 @@ export function buildConsumerConfig(opts: {
     ...(opts.producerConfig.runtimeMode ? { runtimeMode: opts.producerConfig.runtimeMode } : {}),
     ...(opts.producerConfig.harness ? { harness: opts.producerConfig.harness } : {}),
     harnesses: buildConsumerHarnesses(opts.producerConfig.harnesses),
-    ...(solverNets ? { solverNets } : {}),
+    // Issue #421: the legacy `solverNets` block is retired; consumer config
+    // inherits the producer's `joinedSolverNets` only.
     ...(opts.producerConfig.joinedSolverNets ? { joinedSolverNets: opts.producerConfig.joinedSolverNets } : {}),
     engine: {
       workingDirRoot: join(clientHome, 'engine', 'work'),
@@ -738,21 +738,6 @@ export function ensureConsumerSweEvaluatorState(opts: {
   return consumerStatePath;
 }
 
-function cloneSolverNetsForConsumer(raw: unknown): JsonRecord | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const out: JsonRecord = {};
-  for (const [name, value] of Object.entries(raw as JsonRecord)) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const entry = { ...(value as JsonRecord) };
-    const taskGenerator = entry.taskGenerator && typeof entry.taskGenerator === 'object' && !Array.isArray(entry.taskGenerator)
-      ? { ...(entry.taskGenerator as JsonRecord), enabled: false }
-      : { enabled: false };
-    entry.taskGenerator = taskGenerator;
-    out[name] = entry;
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
-}
-
 function sourceName(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (value && typeof value === 'object') {
@@ -793,22 +778,11 @@ function assertConsumerConfiguredForSwe(config: LocalConfig, configPath: string)
   const joinedRuntimeEnabled = solverEntries.some((entry) => (
     !disablesSweRuntime(entry.disabledDefaultPlugins) || includesSweRuntimePlugin(entry.plugins)
   ));
-  const solverNets = config.solverNets && typeof config.solverNets === 'object' && !Array.isArray(config.solverNets)
-    ? Object.values(config.solverNets as Record<string, JsonRecord>)
-    : [];
-  const legacySweEntries = solverNets.filter((entry) => (
-    entry.enabled !== false && entry.solverType === 'swe-rebench-v2.v1'
-  ));
-  const legacyHasSolver = legacySweEntries.some((entry) => (
-    !Array.isArray(entry.roles) || entry.roles.includes('solving')
-  ));
-  const legacyHasEvaluator = legacySweEntries.some((entry) => (
-    Array.isArray(entry.roles) && entry.roles.includes('evaluating')
-  ));
-  const legacyRuntimeEnabled = legacySweEntries.some((entry) => includesSweRuntimePlugin(entry.plugins));
-  const hasSolver = solverEntries.length > 0 || legacyHasSolver;
-  const hasEvaluator = evaluatorEntries.length > 0 || legacyHasEvaluator;
-  const runtimeEnabled = joinedRuntimeEnabled || legacyRuntimeEnabled;
+  // Issue #421: legacy `solverNets` is retired; SWE-rebench v2 SolverNet
+  // membership is asserted via joinedSolverNets exclusively.
+  const hasSolver = solverEntries.length > 0;
+  const hasEvaluator = evaluatorEntries.length > 0;
+  const runtimeEnabled = joinedRuntimeEnabled;
   if (!hasSolver || !hasEvaluator || !runtimeEnabled) {
     fail('consumer_swe_join_required', 'Consumer config is not joined to SWE-rebench v2 for the live donation gate.', {
       configPath,
