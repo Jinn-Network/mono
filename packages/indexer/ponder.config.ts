@@ -58,19 +58,60 @@
  *                             // TODO(ebu7.2): tighten to the JinnDistributor deploy block
  */
 import { createConfig } from 'ponder';
+import { fallback, http } from 'viem';
 import { JINN_ROUTER_ABI } from './abis/JinnRouter.js';
 import { IDENTITY_REGISTRY_ABI } from './abis/IdentityRegistry.js';
 import { JINN_DISTRIBUTOR_ABI } from './abis/JinnDistributor.js';
+
+/**
+ * Hard cap on the number of providers in a single fallback chain (issue #592).
+ * Four covers the indexer's intended shape: Envio HyperSync (slot 0) +
+ * publicnode (slot 1) + sepolia.base.org (slot 2) + optional Tenderly
+ * fallback slot. Beyond that the boot probe gets long and slot 5+ is almost
+ * always copy-paste noise.
+ */
+const MAX_RPC_CHAIN_LENGTH = 4;
+
+function parseRpcChain(value: string | undefined, fallbackUrl: string): string[] {
+  const raw = (value ?? fallbackUrl).split(',').map((u) => u.trim()).filter(Boolean);
+  if (raw.length === 0) return [fallbackUrl];
+  if (raw.length > MAX_RPC_CHAIN_LENGTH) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[ponder] capped fallback chain to ${MAX_RPC_CHAIN_LENGTH} providers ` +
+        `(dropped ${raw.length - MAX_RPC_CHAIN_LENGTH} extra slots)`,
+    );
+    return raw.slice(0, MAX_RPC_CHAIN_LENGTH);
+  }
+  return raw;
+}
+
+function buildIndexerFallback(urls: readonly string[]) {
+  // `rank: false` preserves operator-supplied slot order. Per the issue
+  // addendum the intended ordering is paid > free-public > free-public-backup
+  // (Envio HyperSync free-tier in slot 0 when set; publicnode + sepolia.base.org
+  // as the no-account-needed backstops).
+  return fallback(urls.map((u) => http(u)), { rank: false });
+}
+
+const baseSepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_84532'], 'https://sepolia.base.org');
+const sepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_11155111'], 'https://ethereum-sepolia-rpc.publicnode.com');
 
 export default createConfig({
   chains: {
     baseSepolia: {
       id: 84532,
-      rpc: process.env['PONDER_RPC_URL_84532'] ?? 'https://sepolia.base.org',
+      rpc: buildIndexerFallback(baseSepoliaUrls),
+      // Block-range cap for eth_getLogs: 2000 (issue #592, AC4). Bounds the
+      // chunk size so the slowest fallback in the chain (sepolia.base.org at
+      // its 2k-block cap) doesn't blow up under chunking. Set per chain so
+      // the same code path works regardless of which slot in the fallback
+      // chain actually serves the request.
+      ethGetLogsBlockRange: 2000,
     },
     sepolia: {
       id: 11155111,
-      rpc: process.env['PONDER_RPC_URL_11155111'] ?? 'https://ethereum-sepolia-rpc.publicnode.com',
+      rpc: buildIndexerFallback(sepoliaUrls),
     },
   },
   contracts: {
