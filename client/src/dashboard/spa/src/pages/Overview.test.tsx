@@ -204,6 +204,34 @@ describe('OverviewPage layout', () => {
   });
 });
 
+describe('OverviewPage wave-2 SOLVING-ON empty-state (issue #421)', () => {
+  it('shows the no-active-SolverNet state when joinedSolverNets is empty', async () => {
+    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
+    getBootstrapMock.mockResolvedValue({ joinedSolverNets: {} });
+    render(withProviders(<OverviewPage />));
+    await waitFor(() => {
+      const joined = screen.getByTestId('activity-joined');
+      expect(joined.textContent).toMatch(/no solvernets joined/i);
+    });
+  });
+
+  it('ignores a stale legacy bootstrap.solverNets when joinedSolverNets is empty', async () => {
+    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
+    // Even if the daemon were to accidentally echo a legacy block (it should
+    // not after issue #421), the SPA must not fall through to it. The wave-2
+    // symptom was "SOLVING ON prediction" persisting after every join was
+    // left; this regression test pins the joined-only behaviour.
+    getBootstrapMock.mockResolvedValue({
+      solverNets: { prediction: { enabled: true, roles: ['solving'] } },
+      joinedSolverNets: {},
+    });
+    render(withProviders(<OverviewPage />));
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-joined').textContent).toMatch(/no solvernets joined/i);
+    });
+  });
+});
+
 describe('OverviewPage eviction banner', () => {
   it('renders the inline eviction banner when a service is evicted', async () => {
     getStatusMock.mockResolvedValue({

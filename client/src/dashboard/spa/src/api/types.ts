@@ -129,12 +129,6 @@ export interface BootstrapState {
      */
     targetMet?: boolean;
   };
-  solverNets?: Record<string, {
-    name?: string;
-    manifestCid?: string;
-    enabled?: boolean;
-    roles?: string[];
-  }>;
   joinedSolverNets?: Record<string, {
     name?: string;
     manifestCid?: string;

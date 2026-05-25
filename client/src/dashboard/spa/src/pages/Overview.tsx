@@ -16,23 +16,13 @@ import { Button } from '../components/ui/button.js';
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
  * payload has fleet/service/keystore plumbing we don't need here; this
- * type captures the joined-SolverNet shapes per spec §12 — both the new
- * `joinedSolverNets[<manifestCid>]` shape and the legacy `solverNets`
- * fallback during the Tasks 21/22 migration window.
+ * type captures the joined-SolverNet shape per spec §12.
+ *
+ * Issue #421 retired the legacy short-name-keyed `solverNets` block.
  */
 interface BootstrapWithSolverNets {
   /** Operator's master EOA (the address that holds custody and seeds the node). */
   master_address?: string;
-  solverNets?: Record<
-    string,
-    {
-      name?: string;
-      manifestCid?: string;
-      enabled?: boolean;
-      roles?: string[];
-      harness?: string;
-    }
-  >;
   joinedSolverNets?: Record<
     string,
     {
@@ -340,65 +330,40 @@ export function OverviewPage(): JSX.Element {
   // ── Activity card inputs ────────────────────────────────────────────
   //
   // Joined: project `bootstrap.joinedSolverNets` into the ActivityCard
-  // shape. The legacy short-name `solverNets` shape (a relic of pre-spec-§12
-  // configs) is accepted as a fallback so operators who haven't restarted
-  // since the migration still see their net.
+  // shape. Issue #421 retired the legacy short-name fallback; an empty
+  // joinedSolverNets cleanly maps to the no-active-SolverNet empty-state.
   const joinedNets: ActivityJoinedNet[] = useMemo(() => {
     const out: ActivityJoinedNet[] = [];
     const j = bootstrap?.joinedSolverNets;
-    if (j) {
-      for (const [key, entry] of Object.entries(j)) {
-        if (!entry) continue;
-        // Match the catalog entry by contract identity. The daemon's
-        // bootstrap stores only the operator's explicit overrides; the
-        // catalog supplies the default-on plugins (e.g. swe-rebench-v2-runtime).
-        const catalogEntry = entry.contract
-          ? catalog?.nets.find(
-              (n) =>
-                n.contract.id === entry.contract?.id &&
-                n.contract.version === entry.contract?.version,
-            )
-          : undefined;
-        const plugins = computeEffectivePlugins({
-          harness: entry.harness,
-          explicit: Array.isArray(entry.plugins) ? entry.plugins : [],
-          disabledDefaults: Array.isArray(entry.disabledDefaultPlugins)
-            ? entry.disabledDefaultPlugins
-            : [],
-          catalogCompatible: catalogEntry?.compatiblePlugins,
-        });
-        out.push({
-          name: entry.name ?? entry.manifestCid ?? key,
-          manifestCid: entry.manifestCid ?? key,
-          roles: Array.isArray(entry.roles) ? entry.roles : [],
-          harness: entry.harness,
-          model: entry.model,
-          plugins,
-        });
-      }
-    }
-    if (out.length > 0) return out;
-    // Fallback: legacy shape. No `contract` field here, so we can't look up
-    // the catalog entry — compute plugins from harness defaults only.
-    const legacy = bootstrap?.solverNets;
-    if (legacy) {
-      for (const [key, entry] of Object.entries(legacy)) {
-        if (!entry) continue;
-        const roles = Array.isArray(entry.roles) ? entry.roles : [];
-        if (entry.enabled !== true && roles.length === 0) continue;
-        const plugins = computeEffectivePlugins({
-          harness: entry.harness,
-          explicit: [],
-          disabledDefaults: [],
-        });
-        out.push({
-          name: entry.name ?? key,
-          manifestCid: entry.manifestCid ?? key,
-          roles,
-          harness: entry.harness,
-          plugins,
-        });
-      }
+    if (!j) return out;
+    for (const [key, entry] of Object.entries(j)) {
+      if (!entry) continue;
+      // Match the catalog entry by contract identity. The daemon's
+      // bootstrap stores only the operator's explicit overrides; the
+      // catalog supplies the default-on plugins (e.g. swe-rebench-v2-runtime).
+      const catalogEntry = entry.contract
+        ? catalog?.nets.find(
+            (n) =>
+              n.contract.id === entry.contract?.id &&
+              n.contract.version === entry.contract?.version,
+          )
+        : undefined;
+      const plugins = computeEffectivePlugins({
+        harness: entry.harness,
+        explicit: Array.isArray(entry.plugins) ? entry.plugins : [],
+        disabledDefaults: Array.isArray(entry.disabledDefaultPlugins)
+          ? entry.disabledDefaultPlugins
+          : [],
+        catalogCompatible: catalogEntry?.compatiblePlugins,
+      });
+      out.push({
+        name: entry.name ?? entry.manifestCid ?? key,
+        manifestCid: entry.manifestCid ?? key,
+        roles: Array.isArray(entry.roles) ? entry.roles : [],
+        harness: entry.harness,
+        model: entry.model,
+        plugins,
+      });
     }
     return out;
   }, [bootstrap, catalog]);
