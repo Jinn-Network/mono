@@ -9,7 +9,12 @@ import { emitResult } from '../output.js';
 import { loadConfig } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS, harnessNameMatches } from '../../harnesses/names.js';
-import { loadSolverNets } from '../../solver-nets/registry.js';
+import {
+  findJoinedByName,
+  loadSolverNets,
+  solverTypeFromJoinedContract,
+  type JoinedSolverNetConfig,
+} from '../../solver-nets/registry.js';
 import {
   buildPredictionOperatorStatus,
   runPredictionSample,
@@ -169,6 +174,66 @@ function predictionDefault(): SolverNetConfig {
     plugins: [],
     taskGenerator: { enabled: true },
   };
+}
+
+/**
+ * Project a joined-config entry into the legacy `SolverNetConfig` display
+ * shape used by the show/doctor/sample renderers. Mid-migration entries may
+ * lack `contract`, in which case `solverType` is reported as `'(unknown)'`.
+ */
+function solverNetFromJoined(net: JoinedSolverNetConfig): SolverNetConfig {
+  return {
+    enabled: true,
+    solverType: solverTypeFromJoinedContract(net) ?? '(unknown)',
+    ...(net.harness ? { harness: net.harness } : {}),
+    plugins: Array.isArray(net.plugins) ? net.plugins : [],
+    // Generator ownership is launched-record-driven (issue #421); a joined
+    // entry never carries a taskGenerator block of its own.
+    taskGenerator: { enabled: false },
+  };
+}
+
+/**
+ * Resolve the SolverNet a read-only subverb (show/doctor/sample) should
+ * operate against. Per issue #421 F4:
+ *
+ *   1. Prefer the still-on-disk legacy file shape (`cfg.solverNets[name]`)
+ *      when present, so display-time sanitization (e.g. promoting
+ *      `canonicalPlugin.source` into `plugins[]`) keeps working on configs
+ *      the operator hasn't rewritten yet. The on-disk file is untouched by
+ *      the in-memory migration; this branch surfaces what's literally on
+ *      disk.
+ *   2. Otherwise consult `loadConfig().joinedSolverNets` — the canonical
+ *      view for an operator who has rejoined via the SPA (where there is
+ *      no legacy on-disk block to fall back to).
+ *   3. Otherwise surface `undefined` so the caller can emit
+ *      `Unknown SolverNet: <name>`. The synthetic `predictionDefault()`
+ *      shim is gone — it was masking the rejoined-via-SPA case.
+ */
+function resolveReadOnlySolverNet(
+  configPath: string,
+  cfg: ConfigShape,
+  name: string,
+): SolverNetConfig | undefined {
+  // 1. Legacy on-disk file shape (untouched by in-memory migration). Keeps
+  // canonicalPlugin promotion working for operators who haven't re-saved
+  // their config yet.
+  const legacy = cfg.solverNets?.[name];
+  if (legacy) return legacy;
+
+  // 2. Joined view — the post-SPA-join authoritative shape.
+  try {
+    const loaded = loadConfig(configPath);
+    const joined = findJoinedByName(loaded.joinedSolverNets, name);
+    if (joined) return solverNetFromJoined(joined);
+  } catch {
+    // If loadConfig fails (malformed schema, missing file when configPath
+    // was explicit, etc.), surface `undefined` so the caller reports the
+    // unresolved name rather than throwing through to the operator.
+  }
+
+  // 3. Nothing matched.
+  return undefined;
 }
 
 function sourceOf(entry: SolverPluginEntry): string {
@@ -484,7 +549,9 @@ Output flags:
       return;
     }
 
-    if (subverb !== 'show' && subverb !== 'doctor' && subverb !== 'sample') {
+    const isReadOnlySubverb = subverb === 'show' || subverb === 'doctor' || subverb === 'sample';
+
+    if (!isReadOnlySubverb) {
       // Issue #421: these subverbs still edit the legacy solverNets file shape
       // for one upgrade cycle. The daemon's loadConfig migrates any on-disk
       // legacy entries into joinedSolverNets on next start; the canonical join
@@ -497,11 +564,21 @@ Output flags:
       );
     }
 
-    const solverNets = ensureSolverNets(cfg);
-    if (name === 'prediction' && !solverNets[name]) {
-      solverNets[name] = predictionDefault();
+    // Resolve the SolverNet to operate on. Read-only subverbs prefer the
+    // joined view (issue #421 F4) so an operator who has rejoined via the
+    // SPA sees their real entry rather than a synthetic predictionDefault()
+    // stub. Mutation subverbs keep the legacy on-disk shape because they
+    // write through it for the one-cycle bridge.
+    let net: SolverNetConfig | undefined;
+    if (isReadOnlySubverb) {
+      net = resolveReadOnlySolverNet(configPath, cfg, name);
+    } else {
+      const solverNets = ensureSolverNets(cfg);
+      if (name === 'prediction' && !solverNets[name]) {
+        solverNets[name] = predictionDefault();
+      }
+      net = solverNets[name];
     }
-    const net = solverNets[name];
     if (!net) {
       fail(ctx, `Unknown SolverNet: ${name}`);
       return;
