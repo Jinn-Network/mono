@@ -574,6 +574,9 @@ export interface LaunchedGeneratorState {
   lastPollAt?: Iso8601;
   lastPollSummary?: LauncherStatusGeneratorView['lastPollSummary'];
   lastError?: TimestampedError;
+  poolPublicationUpdatedAt?: Iso8601;
+  poolPublicationPriorSize?: number;
+  poolPublicationCurrentSize?: number;
 }
 
 export interface LaunchedRegistryRefs {

@@ -78,6 +78,9 @@ export interface LauncherGeneratorStateSnapshot {
   lastPollSummary?: LauncherGeneratorPollSummary;
   lastError?: { message: string; at: string };
   cadenceMs?: number;
+  poolPublicationUpdatedAt?: string;
+  poolPublicationPriorSize?: number;
+  poolPublicationCurrentSize?: number;
 }
 
 export interface GatherLauncherStatusDeps {

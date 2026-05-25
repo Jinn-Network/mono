@@ -312,6 +312,24 @@ These appear only when the operator opts into a corresponding mode. Each follows
 - **Artifact Serving** — when the operator serves paid artifacts. Inventory, pricing, access events.
 - **Peers** — when the operator connects to a peer network. Peer list, sync status.
 
+### 2.14 Generator panel (added in #570)
+
+Rendered inside a launched-SolverNet detail view, this panel surfaces the live state of the auto-generator that posts Tasks against the SolverNet's launched contract. Configuration edits are handled by the sibling config form (see `GeneratorPanel.tsx`); this entry models only the read-side state surface.
+
+- **State**
+  - generator enabled (yes/no)
+  - last poll timestamp
+  - solver type
+  - admission mode (`required` / `python-floor`, swe-rebench-v2 only)
+  - pool size
+  - entry counts (posted / unposted / live / repostable / saturated / abandoned)
+  - publication timestamp (most recent vetted-pool publication, swe-rebench-v2 only)
+- **State messages**
+  - `vetted_pool_republished` — **info** severity. Raised when `generatorState.poolPublicationUpdatedAt` is defined. Carries prior pool size, current pool size, and the publication timestamp. Purely informational — no action; the daemon has already re-published the vetted-pool artifact and pinned the new CID. (swe-rebench-v2 only.)
+  - `vetted_pool_publication_failed` — **warning** severity. Raised when `generatorState.lastError.message` starts with `"vetted pool publication failed"`. Rendered as the existing `GeneratorError` block; the daemon retries on the next tick. (swe-rebench-v2 only.)
+- **Collections** — none. The pool is a derived view rendered inline; the panel does not own a paginated collection.
+- **Actions** — none in v1. Hot-applyable config edits are owned by the sibling generator-config form on the same panel.
+
 ## 3. Cross-cutting concerns
 
 ### 3.1 Explorer URLs

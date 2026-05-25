@@ -210,6 +210,13 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
     }
   }
 
+  const poolPublicationUpdatedAt = optionalString(snapshot['poolPublicationUpdatedAt']);
+  if (poolPublicationUpdatedAt) projected.poolPublicationUpdatedAt = poolPublicationUpdatedAt;
+  const poolPublicationPriorSize = finiteNumber(snapshot['poolPublicationPriorSize']);
+  if (poolPublicationPriorSize !== undefined) projected.poolPublicationPriorSize = poolPublicationPriorSize;
+  const poolPublicationCurrentSize = finiteNumber(snapshot['poolPublicationCurrentSize']);
+  if (poolPublicationCurrentSize !== undefined) projected.poolPublicationCurrentSize = poolPublicationCurrentSize;
+
   return projected;
 }
 

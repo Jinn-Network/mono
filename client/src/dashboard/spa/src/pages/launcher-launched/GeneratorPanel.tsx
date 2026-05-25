@@ -5,6 +5,7 @@ import type {
   SolverNetManifestV1,
 } from '../../api/types.js';
 import type { CreateWizardTemplate } from '../launcher-create/templates.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
@@ -326,6 +327,8 @@ function PanelShell({
       </dl>
 
       <GeneratorPoolSummary record={record} />
+
+      <PoolRepublishedNotice record={record} />
 
       {record.generatorState?.lastError && <GeneratorError record={record} />}
 
@@ -701,6 +704,32 @@ function GeneratorError({ record }: { record: LaunchedSolverNetRecord }): JSX.El
         {record.generatorState?.lastError?.message}
       </span>
     </div>
+  );
+}
+
+function PoolRepublishedNotice({
+  record,
+}: {
+  record: LaunchedSolverNetRecord;
+}): JSX.Element | null {
+  const updatedAt = record.generatorState?.poolPublicationUpdatedAt;
+  if (!updatedAt) return null;
+  const prior = record.generatorState?.poolPublicationPriorSize;
+  const current = record.generatorState?.poolPublicationCurrentSize;
+  const sizeFragment =
+    typeof prior === 'number' && typeof current === 'number'
+      ? `Pool grew from ${prior} → ${current} scorable tasks`
+      : 'Pool re-published';
+  return (
+    <Alert
+      data-testid="launcher-launched-generator-pool-republished"
+      variant="default"
+    >
+      <AlertTitle>Vetted pool re-published</AlertTitle>
+      <AlertDescription>
+        {sizeFragment} · {formatTimestamp(updatedAt)}
+      </AlertDescription>
+    </Alert>
   );
 }
 
