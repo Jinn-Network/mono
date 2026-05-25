@@ -64,6 +64,9 @@ export const task = onchainTable(
     taskCidDigest: t.hex().notNull(),
     /** EOA/Safe that called createTask. */
     creator: t.hex().notNull(),
+    // Invariant: JinnRouter emits maxClaims and requiredVerdicts as uint16
+    // (0..65535). Postgres `integer` (int32) cannot overflow on this input.
+    // If the ABI widens, change this column to t.bigint() and re-sync.
     /** maxClaims from TaskCreated event. */
     maxClaims: t.integer().notNull(),
     /** requiredVerdicts from the TaskCreated event — verdicts needed before an attempt finalizes. */

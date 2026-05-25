@@ -42,6 +42,41 @@ The `/explorer/*` routes set `Cache-Control: public, max-age=30, stale-while-rev
 
 **GraphQL is at `/graphql` only** — the daemon already uses `/graphql`, so no client change is needed following this move. The root path `/` now serves the explorer page instead of a GraphQL catch-all.
 
+### Monitoring (`/health/task-coverage`)
+
+`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It compares the JinnRouter's authoritative on-chain `nextTaskId()` view against the indexer's `max(task.id)` and `max(attempt.taskId)` and returns 200 when both gaps are within the configured threshold, 503 otherwise.
+
+```
+GET /health/task-coverage
+```
+
+Response shape (JSON):
+
+```json
+{
+  "chainId": 84532,
+  "onchainNextTaskId": "1234",
+  "maxIndexedTaskId": "1233",
+  "maxAttemptTaskId": "1230",
+  "taskGap": 0,
+  "attemptGap": 3,
+  "status": "ok",
+  "httpStatus": 200
+}
+```
+
+- `taskGap = (onchainNextTaskId - 1) - maxIndexedTaskId` (the same shape for `attemptGap`).
+- `status: 'ok'` (HTTP 200) when both gaps ≤ threshold.
+- `status: 'degraded'` (HTTP 503) when either gap exceeds the threshold — the issue-#567 symptom.
+- `status: 'unknown'` (HTTP 503) when the on-chain RPC is unavailable (so we cannot decide).
+- Bigint values are serialised as decimal strings; `null` passes through when the indexer has no rows yet or the RPC failed.
+
+The on-chain lookup is cached for 60 s (both success and null results, to avoid retry-storming a degraded RPC), so this probe is safe to wire into a 10 s monitoring loop.
+
+Configuration:
+
+- `JINN_TASK_COVERAGE_GAP_THRESHOLD` — integer, default `5`. The maximum gap allowed before the route returns 503. Set to a higher value if your `PONDER_RPC_URL_84532` latency keeps the indexer naturally a few blocks behind realtime.
+
 ### Envelope enrichment (`JINN_INDEXER_ENRICH_ENVELOPES`, `JINN_IPFS_GATEWAY_URL`)
 
 The harness/mode/plugin/model facets, the train/frozen leaderboard split, the checkpoint timeline, and freeze integrity come from an **IPFS-enrichment step**: for each indexed `envelope:<cid>` (execution evidence), the `MetadataSet` handler fetches the envelope body from an IPFS gateway and projects its `executor` block into the `attemptEnvelopeMeta` table (joined to attempts by `requestId`). It's resilient — a fetch/parse failure for one envelope is logged and skipped (Ponder reprocesses on the next sync), never crashes the indexer.
@@ -72,6 +107,39 @@ Ponder's canonical approach for re-deploys without operator-visible downtime:
 Or use `ponder start --views-schema=jinn_indexer` on the new deployment to automate the views swap on `/ready`.
 
 This is the recommended pattern when shipping schema changes that would otherwise require a re-sync. See Ponder's "Self-hosting" docs §"Production deployment" for the canonical recipe.
+
+### The all-entities-atomic view swap
+
+`ponder db create-views` rewrites the views for **every entity in the schema in a single transaction** — there is no per-entity flag. The full set of 10 entities the indexer publishes is:
+
+```
+task, attempt, verdict, rewardDistribution, solverNetManifest,
+envelope, pluginPublication, harnessCheckpoint, attemptEnvelopeMeta,
+verdictEnvelopeMeta
+```
+
+A **partial view swap** is the suspected root cause of issue #567 — the `task` view (and only the `task` view) was left pointing at a stale schema while the rest of the entities advanced, which presented as "the `TaskCreated` handler silently stopped writing rows." If you ever hand-roll the swap (e.g. by issuing `CREATE OR REPLACE VIEW` statements directly), you **must** rewrite all 10 views in the same transaction — anything less can produce the same silent-divergence symptom.
+
+Wire `/health/task-coverage` (see §Monitoring above) into your post-deploy smoke and as a 503-paging probe; it catches the symptom within one cache window (60 s) instead of waiting for a human to notice missing task ids in the explorer.
+
+## Recovery procedure (suspected stuck-view scenario)
+
+If `/health/task-coverage` reports `status: 'degraded'` with a large `taskGap` but the indexer process is healthy (`/health` 200, `/ready` 200, logs show ongoing realtime indexing), the most likely cause is a partial view swap — the public-facing `task` view is pointing at a stale `DATABASE_SCHEMA`. Recovery:
+
+1. **Confirm** the divergence is in the views layer, not the indexer:
+   - `curl https://<indexer>/health/task-coverage` — note `maxIndexedTaskId` (from the public views) and `onchainNextTaskId`.
+   - Query the live indexing schema directly: `SELECT max(id::numeric) FROM <DATABASE_SCHEMA>.task;`. If this number matches `onchainNextTaskId - 1`, the indexer is fine and the views are stuck. If it matches `maxIndexedTaskId`, the indexer itself is behind (continue at step 4 below).
+2. **Re-run the view swap** atomically against the current `DATABASE_SCHEMA`:
+   ```bash
+   ponder db create-views --schema=<DATABASE_SCHEMA> --views-schema=jinn_indexer
+   ```
+   This rewrites all 10 entity views in a single transaction. Repeat the `/health/task-coverage` curl; the gap should close within one 60 s cache window.
+3. **If the gap does not close**, the issue is in the indexing process itself. Continue with the indexer-side recovery:
+   - Inspect the process logs for `TaskCreated`-handler errors. The handler is in `packages/indexer/src/handlers.ts`.
+   - Bounce the process: a fresh `ponder start` with the same `DATABASE_SCHEMA` resumes from its last checkpoint and will catch up.
+4. **Last-resort full re-sync**: bump `DATABASE_SCHEMA` (e.g. `jinn_indexer_v1` → `jinn_indexer_v2`), deploy, wait for `/ready`, then perform the views swap as documented above.
+
+Per the all-entities-atomic note, never re-run a swap that only touches the `task` view — that is the failure mode this recovery procedure exists to undo.
 
 ## Scaling
 
