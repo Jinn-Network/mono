@@ -20,6 +20,11 @@ import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/clie
 import { walletPrivateKeyAtIndex } from '../../earning/wallet.js';
 import { isOperationalServiceStep } from '../../earning/types.js';
 import { getConfigPathFromArgs, loadConfig } from '../../config.js';
+import {
+  findJoinedByName,
+  joinedDisplayName,
+  solverTypeFromJoinedContract,
+} from '../../solver-nets/registry.js';
 
 async function runSubmit(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -145,27 +150,18 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   // ── spec-file loading ───────────────────────────────────────────────────────
   const config = loadConfig(getConfigPathFromArgs(ctx.argv));
   // Issue #421: --solver-net resolves via joinedSolverNets (manifest-CID-keyed).
-  // The needle matches either the joined display name, the manifest CID, or
-  // the synthetic `legacy:<short-name>` key from on-disk migrations.
-  const joinedLookup = (() => {
-    if (!requestedSolverNet) return undefined;
-    const joined = config.joinedSolverNets ?? {};
-    for (const [cid, entry] of Object.entries(joined)) {
-      const displayName = entry.name ?? cid;
-      if (displayName === requestedSolverNet || cid === requestedSolverNet || entry.manifestCid === requestedSolverNet) {
-        if (!entry.contract) continue;
-        return {
-          name: displayName,
-          solverType: `${entry.contract.id}.${entry.contract.version}`,
-        };
-      }
-    }
-    return undefined;
-  })();
-  const solverTypeFromNet = joinedLookup?.solverType;
+  // `findJoinedByName` matches against the joined display name or the
+  // manifest CID — synthetic `legacy:<short-name>` keys (from on-disk
+  // migrations) are reached by either branch.
+  const matchedJoined = requestedSolverNet
+    ? findJoinedByName(config.joinedSolverNets, requestedSolverNet)
+    : undefined;
+  const solverTypeFromNet = matchedJoined
+    ? solverTypeFromJoinedContract(matchedJoined)
+    : undefined;
   if (requestedSolverNet && !solverTypeFromNet) {
     const available = Object.entries(config.joinedSolverNets ?? {})
-      .map(([cid, entry]) => entry.name ?? cid)
+      .map(([cid, entry]) => joinedDisplayName(cid, entry))
       .join('|');
     emitEnvelope(
       {
