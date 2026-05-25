@@ -56,12 +56,6 @@ function isTaskNativeService(service: ServiceState): boolean {
 }
 
 function hasConfiguredEvaluatorRole(config: JinnConfig): boolean {
-  const legacySolverNets = Object.values(config.solverNets ?? {});
-  const legacyHasEvaluator = legacySolverNets.some((entry) => (
-    entry.enabled !== false && entry.roles.includes('evaluating')
-  ));
-  if (legacyHasEvaluator) return true;
-
   const joinedSolverNets = Object.values(config.joinedSolverNets ?? {});
   return joinedSolverNets.some((entry) => entry.roles.includes('evaluator'));
 }
