@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { HttpHfFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
+import {
+  HttpHfFetcher,
+  fetchHfWithRetry,
+  DEFAULT_RETRY_BACKOFF_MS,
+} from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -263,6 +267,24 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
     expect(calls).toBe(4); // 1 initial + 3 retries
   });
 
+  it('surfaces httpStatus on the thrown error when retries are exhausted against a 429', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('rate limited', { status: 429 });
+    }) as unknown as typeof fetch;
+    const fetcher = new HttpHfFetcher({ fetchImpl, retryBackoffMs: [1, 2], minRequestIntervalMs: 0 });
+    let caught: unknown;
+    try {
+      await fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as { httpStatus?: number }).httpStatus).toBe(429);
+    expect(calls).toBe(3); // 1 initial + 2 retries
+  });
+
   it('does not retry on 4xx (client errors are not transient)', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
@@ -288,3 +310,90 @@ function makeRow(instance_id: string) {
     install_config: { install: [], test_cmd: [], log_parser: 'parse_log_pytest' },
   };
 }
+
+describe('fetchHfWithRetry — shared helper', () => {
+  it('retries 429 and succeeds on the second try, sleeping within the jittered band on the first delay', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const sleep = vi.fn(async () => undefined);
+    // Use a known-stable random for deterministic jitter check.
+    const random = () => 0.5; // jitter factor (0.5 * 2 - 1) * 0.33 = 0 → exact base
+    const res = await fetchHfWithRetry('https://example/test', {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retryBackoffMs: [1000, 2000],
+      minRequestIntervalMs: 0,
+      sleep,
+      random,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // jitter band: 1000 × [0.67, 1.33] = [670, 1330]
+    const firstSleep = sleep.mock.calls[0]?.[0] as number;
+    expect(firstSleep).toBeGreaterThanOrEqual(670);
+    expect(firstSleep).toBeLessThanOrEqual(1330);
+    // With random=0.5 (centred), expect exactly the base.
+    expect(firstSleep).toBe(1000);
+  });
+
+  it('exhausts the default schedule (1000/2000/4000/8000 ms; 4 retries → 5 attempts) and throws with httpStatus 429', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('rate limited', { status: 429 });
+    }) as unknown as typeof fetch;
+    const sleep = vi.fn(async () => undefined);
+    let caught: unknown;
+    try {
+      await fetchHfWithRetry('https://example/test', {
+        fetchImpl,
+        retryBackoffMs: DEFAULT_RETRY_BACKOFF_MS,
+        minRequestIntervalMs: 0,
+        sleep,
+        random: () => 0.5,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as { httpStatus?: number }).httpStatus).toBe(429);
+    expect(calls).toBe(5); // 1 initial + 4 retries
+    expect(DEFAULT_RETRY_BACKOFF_MS).toEqual([1000, 2000, 4000, 8000]);
+  });
+
+  it('honours Retry-After: 2 by sleeping exactly 2000 ms (header overrides jittered schedule)', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', {
+        status: 429,
+        headers: { 'Retry-After': '2' },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const sleep = vi.fn(async () => undefined);
+    await fetchHfWithRetry('https://example/test', {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retryBackoffMs: [1000, 2000],
+      minRequestIntervalMs: 0,
+      sleep,
+      random: () => 0, // would jitter very low if used
+    });
+    expect(sleep).toHaveBeenCalledWith(2000);
+  });
+
+  it('does not retry on 4xx that is not 408/429 (404)', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('', { status: 404 });
+    }) as unknown as typeof fetch;
+    const res = await fetchHfWithRetry('https://example/test', {
+      fetchImpl,
+      retryBackoffMs: [1000, 2000, 4000],
+      minRequestIntervalMs: 0,
+      sleep: async () => undefined,
+    });
+    expect(res.status).toBe(404);
+    expect(calls).toBe(1);
+  });
+});

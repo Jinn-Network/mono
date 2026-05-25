@@ -404,6 +404,124 @@ describe('validatePoolInstances — base_commit sentinel alignment', () => {
   });
 });
 
+describe('validatePoolInstances — transient HF 429 handling', () => {
+  function makeTransientFetcher() {
+    return {
+      fetchTaskRow: vi.fn(async () => {
+        throw Object.assign(
+          new Error('HF datasets-server returned 429 for nebius/SWE-rebench-leaderboard/2026_02'),
+          { httpStatus: 429 },
+        );
+      }),
+    };
+  }
+  function noopRunner() {
+    return { runEval: vi.fn(async () => ({ passed_match: true, passed: [], failed: [], log: '', exitCode: 0 })) };
+  }
+  // Minimal stub: docker/git fail. The transient catch-block fires before substrate resolution
+  // anyway because fetchTaskRow throws first, so the commandRunner doesn't matter much.
+  const commandRunner = async () => ({ exitCode: 1, stdout: '', stderr: '' });
+
+  it('records transient:HF-429:<msg> with transientRetryCount=1 on first pass', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const fetcher = makeTransientFetcher();
+    const summary = await validatePoolInstances(
+      [poolTask('a__429')],
+      { fetcher, runner: noopRunner(), store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary).toMatchObject({ checked: 1, scorable: 0, unscorable: 1 });
+    const entry = await store.getEntry('a__429', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: false,
+      reason:
+        'transient:HF-429:HF datasets-server returned 429 for nebius/SWE-rebench-leaderboard/2026_02',
+      transientRetryCount: 1,
+    });
+    expect(typeof entry?.lastTransientAt).toBe('string');
+    // Sanity: lastTransientAt is an ISO timestamp.
+    expect(entry?.lastTransientAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('re-processes a transient entry on the next pass (skip-check does NOT fire) and increments transientRetryCount', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const fetcher = makeTransientFetcher();
+    // First pass.
+    await validatePoolInstances(
+      [poolTask('a__429')],
+      { fetcher, runner: noopRunner(), store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect((await store.getEntry('a__429', EVAL_SEMANTICS_VERSION))?.transientRetryCount).toBe(1);
+    // Second pass — no force.
+    const summary2 = await validatePoolInstances(
+      [poolTask('a__429')],
+      { fetcher, runner: noopRunner(), store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary2.checked).toBe(1);
+    expect(fetcher.fetchTaskRow).toHaveBeenCalledTimes(2);
+    expect((await store.getEntry('a__429', EVAL_SEMANTICS_VERSION))?.transientRetryCount).toBe(2);
+  });
+
+  it('boundary count=4 → 5: flips to terminal reason error:HF-429-permanent-after-5-passes', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    // Seed the store with a pre-existing transient entry at count=4.
+    await store.record(
+      'a__429',
+      {
+        scorable: false,
+        reason: 'transient:HF-429:prior',
+        checkedAt: '2026-05-25T00:00:00Z',
+        transientRetryCount: 4,
+        lastTransientAt: '2026-05-25T00:00:00Z',
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const fetcher = makeTransientFetcher();
+    await validatePoolInstances(
+      [poolTask('a__429')],
+      { fetcher, runner: noopRunner(), store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    const entry = await store.getEntry('a__429', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: false,
+      reason: 'error:HF-429-permanent-after-5-passes',
+      transientRetryCount: 5,
+    });
+    expect(fetcher.fetchTaskRow).toHaveBeenCalledTimes(1);
+  });
+
+  it('boundary count=5: skip-check fires (terminal) — fetcher is not called, entry unchanged', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record(
+      'a__429',
+      {
+        scorable: false,
+        reason: 'error:HF-429-permanent-after-5-passes',
+        checkedAt: '2026-05-25T00:00:00Z',
+        transientRetryCount: 5,
+        lastTransientAt: '2026-05-25T00:00:00Z',
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const fetcher = makeTransientFetcher();
+    const summary = await validatePoolInstances(
+      [poolTask('a__429')],
+      { fetcher, runner: noopRunner(), store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary.checked).toBe(0);
+    expect(fetcher.fetchTaskRow).not.toHaveBeenCalled();
+    const entry = await store.getEntry('a__429', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: false,
+      reason: 'error:HF-429-permanent-after-5-passes',
+      transientRetryCount: 5,
+    });
+  });
+});
+
 describe('validatePoolInstances — populates substrate fields', () => {
   it('records rowHash, imageName, imageDigest, upstreamEvalCommit on a successful validation', async () => {
     const dir = tmpDir();
