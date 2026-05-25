@@ -542,10 +542,18 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const operatorLower = args.operatorAddress.toLowerCase();
     const now = args.nowSeconds ?? Math.floor(Date.now() / 1000);
     const seen = new Set<string>();
-    const out: ClaimableTaskCandidate[] = [];
+
+    // Per-CID buckets. We must not flatten + global-sort by taskId across CIDs
+    // — that lets a backlogged SolverNet monopolise the per-tick yield in the
+    // adapter (which yields one announcement per cycle), starving siblings.
+    // Each bucket holds its CID's candidates in lowest-taskId-first order (the
+    // TASKS_QUERY already orders ASC by id, so the page-merged list is also
+    // ASC). After collection we interleave the buckets round-robin.
+    const buckets: ClaimableTaskCandidate[][] = [];
 
     for (const cid of cids) {
       const manifestDigest = keccak256(toBytes(cid));
+      const bucket: ClaimableTaskCandidate[] = [];
 
       for (let page = 0; page < maxPages; page++) {
         const data = await postGql<TasksPage>(
@@ -642,15 +650,33 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
           if (claimWindowEnd !== undefined) candidate.claimWindowEnd = claimWindowEnd;
           if (maxClaims !== undefined) candidate.maxClaims = maxClaims;
 
-          out.push(candidate);
+          bucket.push(candidate);
         }
 
         const hasNextPage = data.tasks?.pageInfo?.hasNextPage ?? (rows.length === pageSize);
         if (!hasNextPage) break;
       }
+
+      // Each bucket is already ASC by taskId (the GraphQL TASKS_QUERY orders
+      // by id ASC and pages are appended in page order), but sort defensively
+      // so the round-robin always pulls the lowest unclaimed id from each CID
+      // even if upstream ordering ever changes.
+      bucket.sort((a, b) => Number(BigInt(a.taskId) - BigInt(b.taskId)));
+      buckets.push(bucket);
     }
 
-    out.sort((a, b) => Number(BigInt(a.taskId) - BigInt(b.taskId)));
+    // Round-robin interleave across CID buckets: pull index 0 from each CID
+    // first, then index 1 from each, etc. This guarantees that a backlog on
+    // one SolverNet cannot starve a sibling SolverNet that also has claimable
+    // work, because `discoverSubgraphRestorationTasks` in adapter.ts yields
+    // only one announcement per poll cycle.
+    const out: ClaimableTaskCandidate[] = [];
+    const maxBucketLen = buckets.reduce((m, b) => Math.max(m, b.length), 0);
+    for (let i = 0; i < maxBucketLen; i++) {
+      for (const bucket of buckets) {
+        if (i < bucket.length) out.push(bucket[i]);
+      }
+    }
     return out;
   }
 

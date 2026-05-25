@@ -822,12 +822,14 @@ export function loadConfig(configPath?: string): JinnConfig {
     // A URL only makes sense in http mode — when the operator points
     // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
     // default mode to 'http' so the URL is actually consulted (and isn't
-    // silently dropped by the on-chain default in createDiscoveryAPI). In that
-    // inferred-http case, also default fallbackToOnchain on (http without a
-    // floor is a footgun) unless JINN_DISCOVERY_FALLBACK overrides.
+    // silently dropped by the on-chain default in createDiscoveryAPI).
+    // `fallbackToOnchain` is NOT defaulted on here (since the 2026-05-23
+    // substrate incident): silent fall-through hides indexer outages and
+    // storms shared RPC. Operators opt in via JINN_DISCOVERY_FALLBACK=1 or
+    // the config file when they want it.
     const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
     const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
-    const resolvedFallback = fallbackToOnchain ?? (inferredHttp ? true : undefined);
+    const resolvedFallback = fallbackToOnchain;
     merged['discovery'] = {
       ...prevDiscovery,
       ...(mode ? { mode } : {}),
@@ -963,7 +965,13 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   // Testnet default: point discovery at the privately-operated Ponder indexer
   // (jinn-mono-280n.4), unless the operator has set their own `discovery` block.
-  // The on-chain RPC floor stays as the fallback.
+  //
+  // `fallbackToOnchain` is NOT defaulted on (since the 2026-05-23 substrate
+  // incident): silent fall-through to direct eth_getLogs hides indexer outages
+  // and turns every daemon into its own indexer, which storms shared RPC
+  // quota and can take the indexer down. Operators opt in explicitly when
+  // they need it (typically only when self-hosting an RPC with generous
+  // getLogs quotas).
   //
   // Only fill fields the operator left absent — never overwrite an
   // operator-set `url` / `mode` / `fallbackToOnchain`. A bare
@@ -980,7 +988,9 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...(existing ?? {}),
       mode: existing?.mode ?? 'http',
       url: existing?.url ?? DEFAULT_TESTNET_DISCOVERY_URL,
-      fallbackToOnchain: existing?.fallbackToOnchain ?? true,
+      ...(existing?.fallbackToOnchain !== undefined
+        ? { fallbackToOnchain: existing.fallbackToOnchain }
+        : {}),
     };
   }
 

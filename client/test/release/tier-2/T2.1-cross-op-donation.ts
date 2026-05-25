@@ -33,7 +33,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   concatHex,
   createPublicClient,
@@ -342,11 +342,27 @@ export async function runT21CrossOpDonation(
   try {
     // ── Step 1: substrate workspace + Anvil fork + booted op daemons ────────
     log('Step 1: setup substrate workspace + Anvil fork of Base Sepolia + op-a/op-b daemons');
-    handle = await setupTier2Scenario({ scenarioId: 'T2.1', portBase: 7750 });
+    // evidenceDir is the dir of the evidence log file. The Tier-2 helper
+    // appends `${scenarioId}-daemons/` so each spawned daemon's stdout/stderr
+    // lands in a sibling subdir of the evidence file — citeable from the
+    // evidence log itself if the scenario times out.
+    handle = await setupTier2Scenario({
+      scenarioId: 'T2.1',
+      portBase: 7750,
+      evidenceDir: dirname(opts.evidencePath),
+    });
     log(`  workspace: ${handle.workspace.workspaceRoot}`);
     log(`  anvil rpc: ${handle.anvilRpcUrl}`);
     log(`  op-a daemon api: http://127.0.0.1:${handle.daemons.daemons['op-a']!.apiPort}`);
     log(`  op-b daemon api: http://127.0.0.1:${handle.daemons.daemons['op-b']!.apiPort}`);
+    // Surface the daemon log paths up front so a timeout failure has an
+    // immediate breadcrumb to the per-daemon stdio capture instead of forcing
+    // an investigator to spelunk chain + db + harness-specific logs.
+    const opALogPath = handle.daemons.daemons['op-a']!.logPath;
+    const opBLogPath = handle.daemons.daemons['op-b']!.logPath;
+    if (opALogPath || opBLogPath) {
+      log(`  daemon logs: op-a → ${opALogPath ?? '(disabled)'}, op-b → ${opBLogPath ?? '(disabled)'}`);
+    }
     const rpcUrl = handle.anvilRpcUrl;
     await alignForkTimestampToWallClock(handle.anvil);
 
@@ -555,6 +571,18 @@ export async function runT21CrossOpDonation(
     });
   } catch (err) {
     log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    // Re-cite the daemon log paths on failure: even if the scenario crashed
+    // before they were emitted at start-of-run (e.g. setupTier2Scenario itself
+    // threw), this catch is the last point at which the evidence file is
+    // still being written, so the breadcrumb to the per-daemon stdio capture
+    // needs to land here too.
+    if (handle) {
+      const opALog = handle.daemons.daemons['op-a']?.logPath;
+      const opBLog = handle.daemons.daemons['op-b']?.logPath;
+      if (opALog || opBLog) {
+        log(`  see daemon logs for the in-flight window: op-a → ${opALog ?? '(disabled)'}, op-b → ${opBLog ?? '(disabled)'}`);
+      }
+    }
     return failVerdict({
       scenarioId: 'T2.1',
       startedAt: started,

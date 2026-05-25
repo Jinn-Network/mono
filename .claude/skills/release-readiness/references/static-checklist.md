@@ -95,3 +95,29 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 - Skills that don't yet cover new surfaces but existing surfaces are still accurate (DEFERRABLE)
 
 This is the recursion that keeps the system honest. Every release sweeps the skills.
+
+## C12 — release-gate-scenario soundness
+
+**Triggers when:** the diff adds or changes release-gate code under `client/test/release/**`
+or `client/scripts/release/**` (Tier 1/2/3 scenarios, orchestrators, helpers).
+
+**Where:** main (grep/AST) — semi-mechanical cross-reference.
+
+**Why:** Release-gate scenarios have twice shipped broken because they were authored
+against an *imagined* interface rather than the real one. T2.2 assumed an HTTP task
+control plane (`POST /v1/tasks`, `GET /v1/verdicts`) — none of it existed (issue #350,
+rewritten). T3.1 shipped the identical bug and never passed (#526). The Phase 2 audit
+had both in its diff and did not catch them: the C1-C11 checks target the *product*
+against canon, not the soundness of the *gate infrastructure* itself.
+
+**Check:** for each new/changed gate scenario, cross-reference every external interface
+it calls — `fetch()` URLs against the actual route table in `client/src/api/server.ts`;
+contract calls against deployed ABIs; CLI invocations against real commands. Any
+reference to an interface that does not exist is a finding.
+
+- Gate scenario calls a non-existent interface → **BLOCKING** (the gate cannot pass;
+  fix the scenario on the integration branch — a broken gate is a blocker, not an issue).
+- Gate scenario is sound but its budget/assumptions look stale → **DEFERRABLE**.
+
+This is the audit catching, cheaply and early, the class of bug that otherwise only
+surfaces when Phase 5 burns a real-network run on it.

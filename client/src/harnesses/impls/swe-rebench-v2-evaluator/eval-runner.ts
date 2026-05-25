@@ -99,6 +99,29 @@ export function resolveDiskFloorBytes(opt: number | undefined): number {
   return DEFAULT_EVAL_DISK_FLOOR_BYTES;
 }
 
+/**
+ * Default wall-clock limit for one upstream eval.py invocation: 2 hours. Some
+ * linux/amd64 SWE-rebench images can wedge indefinitely under Apple Silicon
+ * emulation after a native crash, so the subprocess gets a hard guardrail.
+ * Override with `JINN_SWE_REBENCH_EVAL_TIMEOUT_MS`; set `0` to disable.
+ */
+export const DEFAULT_EVAL_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+/** Resolve the eval timeout: explicit option > env > default. */
+export function resolveEvalTimeoutMs(opt: number | undefined): number {
+  if (typeof opt === 'number' && Number.isFinite(opt) && opt >= 0) return Math.floor(opt);
+  const envRaw = process.env['JINN_SWE_REBENCH_EVAL_TIMEOUT_MS'];
+  if (envRaw !== undefined) {
+    const parsed = Number(envRaw);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+    console.warn(
+      `[swe-rebench-v2] JINN_SWE_REBENCH_EVAL_TIMEOUT_MS=${JSON.stringify(envRaw)} is not a ` +
+        `non-negative number — using default ${DEFAULT_EVAL_TIMEOUT_MS} ms`,
+    );
+  }
+  return DEFAULT_EVAL_TIMEOUT_MS;
+}
+
 /** Production disk probe: free bytes on the filesystem backing the temp dir. */
 async function defaultFreeDiskBytes(): Promise<number> {
   const s = await statfs(tmpdir());
@@ -140,6 +163,12 @@ export interface PythonEvalRunnerOptions {
    * `docker system prune -f`. MUST NOT throw.
    */
   systemPrune?: () => Promise<void>;
+  /**
+   * Wall-clock timeout (ms) for one upstream eval.py invocation. Explicit value
+   * > `JINN_SWE_REBENCH_EVAL_TIMEOUT_MS` env > {@link DEFAULT_EVAL_TIMEOUT_MS}.
+   * Set to 0 to disable.
+   */
+  evalTimeoutMs?: number;
 }
 
 /**
@@ -195,6 +224,7 @@ const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
   { rx: /No virtual environment found/i, reason: 'venv_missing' },
   { rx: /exec format error|the requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
+  { rx: /Fatal Python error:\s*Illegal instruction|Illegal instruction(?:\s+\(core dumped\))?/i, reason: 'image_arch_mismatch' },
   // 2026-05-14 triage (jinn-mono-fufn) — failure fingerprints from real verdicts:
   { rx: /A virtual environment already exists at \S+\.venv\b/i, reason: 'venv_collision' },
   { rx: /No module named pytest\b/i, reason: 'pytest_missing' },
@@ -261,6 +291,7 @@ export class PythonEvalRunner implements EvalRunner {
   private readonly freeDiskBytes: () => Promise<number>;
   private readonly systemPrune: () => Promise<void>;
   private readonly resolveImageDigest: (image: string) => Promise<string | null>;
+  private readonly evalTimeoutMs: number;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
     this.pruneRound = opts.pruneRound ?? defaultPruneRound;
@@ -268,6 +299,7 @@ export class PythonEvalRunner implements EvalRunner {
     this.freeDiskBytes = opts.freeDiskBytes ?? defaultFreeDiskBytes;
     this.systemPrune = opts.systemPrune ?? (() => runDocker(['system', 'prune', '-f']));
     this.resolveImageDigest = opts.resolveImageDigest ?? defaultResolveImageDigest;
+    this.evalTimeoutMs = resolveEvalTimeoutMs(opts.evalTimeoutMs);
   }
 
   /**
@@ -356,6 +388,7 @@ export class PythonEvalRunner implements EvalRunner {
     const child = spawn(this.opts.pythonBin ?? 'python3', pyArgs, {
       cwd: this.opts.upstreamRepoDir,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
       // SWE-rebench eval images are published for linux/amd64. Pin the platform
       // so the upstream `docker run` is consistent on amd64 hosts and does not
       // silently crash under arm64 emulation on dev machines.
@@ -365,10 +398,50 @@ export class PythonEvalRunner implements EvalRunner {
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     let stdout = '';
     child.stdout.on('data', (d) => { stdout += d.toString(); });
+    let timedOut = false;
+    let closed = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const killChild = (signal: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (!pid) return;
+      try {
+        if (process.platform === 'win32') {
+          child.kill(signal);
+        } else {
+          process.kill(-pid, signal);
+        }
+      } catch {
+        try { child.kill(signal); } catch {}
+      }
+    };
+    const timeoutTimer = this.evalTimeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          killChild('SIGTERM');
+          killTimer = setTimeout(() => {
+            if (!closed) killChild('SIGKILL');
+          }, 10_000);
+          killTimer.unref?.();
+        }, this.evalTimeoutMs)
+      : undefined;
+    timeoutTimer?.unref?.();
+
     const exitCode = await new Promise<number>((resolve, reject) => {
       child.on('close', (code) => resolve(code ?? 1));
       child.on('error', reject);
+    }).finally(() => {
+      closed = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
     });
+
+    if (timedOut) {
+      await rm(tmp, { recursive: true, force: true });
+      throw new EvalCouldNotGradeError(
+        'eval_timeout',
+        `python eval timed out after ${this.evalTimeoutMs}ms; ${(stderr || stdout).slice(-800)}`,
+      );
+    }
 
     let report: { items?: Array<Record<string, unknown>> };
     try {

@@ -1005,7 +1005,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // Stop: pure exit, never respawn. The operator clicked Stop; they
         // want the daemon down until they explicitly start it again.
         onStopRequested: () => process.exit(0),
-        onRestartRequested: (opts) => requestDaemonRestart({ forceRespawn: opts.forceRespawn }),
+        onRestartRequested: (opts) =>
+          requestDaemonRestart({
+            forceRespawn: opts.forceRespawn,
+            // jinn-mono #561: close the API + OTLP listeners before the
+            // replacement spawns, so the child binds without an
+            // EADDRINUSE race. Errors are swallowed inside
+            // requestDaemonRestart so the operator is never stranded.
+            preSpawnCleanup: async () => {
+              await setupApiServer.close().catch(() => undefined);
+              if (captureReceiver) {
+                await captureReceiver.shutdown().catch(() => undefined);
+              }
+            },
+          }),
       },
       harnessStatus: {
         getStatus: async () => {

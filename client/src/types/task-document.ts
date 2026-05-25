@@ -34,6 +34,16 @@ export const TaskClaimPolicySchema = z.object({
   submissionDeadlineTs: z.number().int().optional(),
   claimLeaseTtlSeconds: z.number().int().positive().default(30 * 60),
   policyHook: HexStringSchema.optional(),
+  /**
+   * On-chain `evaluationPolicy.requiredVerdicts` — the number of verdict
+   * claim slots per attempt. Optional; the adapter defaults it to 1. A value
+   * > 1 lets an honest evaluator still claim and deliver a verdict slot when
+   * other (e.g. non-delivering) evaluators have already taken some slots —
+   * the per-evaluator cap (`maxVerdictsPerEvaluator: 1`) means no single
+   * evaluator can monopolise all of them. Useful on a shared/adversarial
+   * network where verdict slots may be squatted.
+   */
+  requiredVerdicts: z.number().int().positive().optional(),
 }).passthrough();
 
 export type TaskClaimPolicy = z.infer<typeof TaskClaimPolicySchema>;

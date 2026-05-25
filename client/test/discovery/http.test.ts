@@ -419,6 +419,109 @@ describe('findClaimableTasks', () => {
       }),
     ).rejects.toThrow(DiscoveryUnavailableError);
   });
+
+  it('round-robin interleaves candidates across joined SolverNets (no starvation)', async () => {
+    // Regression for the task-discovery starvation bug verified live on task 210
+    // (op-b, release/v2026.05.25). When an operator joins two SolverNets — one
+    // with a large unfinalized backlog (low task IDs), one with a single
+    // higher-id task — a global ASC-by-taskId sort across CIDs lets the
+    // backlogged SolverNet monopolise the per-tick yield in
+    // discoverSubgraphRestorationTasks (which yields one announcement per
+    // poll cycle, see adapter.ts ~line 721). Effect: 12 cycles of claiming
+    // backlog tasks before the lone sibling task is even considered.
+    //
+    // Fix: per-CID buckets + round-robin interleave. The lone B task must
+    // appear in slot index 1 (the second slot of the very first round),
+    // not pushed to the end behind every A backlog task.
+    const CID_A = 'bafyreichdzbacklog'; // hot SolverNet — 12 backlogged low-id tasks
+    const CID_B = 'bafyreievikisolated'; // quiet SolverNet — one higher-id task
+
+    // We need keccak256 of each CID's bytes to discriminate the GraphQL
+    // requests by `manifestDigest` (HttpDiscoveryAPI computes this client-side).
+    const { keccak256, toBytes } = await import('viem');
+    const digestA = keccak256(toBytes(CID_A));
+    const digestB = keccak256(toBytes(CID_B));
+
+    // CID A: 12 low-id backlog tasks (170 .. 181), all claimable.
+    const backlogIds = ['170', '171', '172', '173', '174', '175', '176', '177', '178', '179', '180', '181'];
+    const tasksResponseA = {
+      data: {
+        tasks: {
+          items: backlogIds.map((id) => ({
+            id,
+            taskCidDigest: '0x' + 'ab'.repeat(32),
+            manifestDigest: digestA,
+            chainId: 84532,
+          })),
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    };
+
+    // CID B: one high-id task (210), claimable.
+    const tasksResponseB = {
+      data: {
+        tasks: {
+          items: [
+            {
+              id: '210',
+              taskCidDigest: '0x' + 'cd'.repeat(32),
+              manifestDigest: digestB,
+              chainId: 84532,
+            },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    };
+
+    // No prior attempts on either side.
+    const emptyAttemptsResponse = {
+      data: { attempts: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    };
+
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      const body = JSON.parse(init?.body as string) as {
+        query: string;
+        variables: { manifestDigest?: string };
+      };
+      if (body.query.includes('query Tasks(')) {
+        // Discriminate per-CID by the manifestDigest variable.
+        const resp = body.variables.manifestDigest === digestA ? tasksResponseA : tasksResponseB;
+        return new Response(JSON.stringify(resp), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify(emptyAttemptsResponse), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const result = await client.findClaimableTasks({
+      solverNetManifestCids: [CID_A, CID_B],
+      operatorAddress: '0x3333333333333333333333333333333333333333',
+    });
+
+    // Sanity: all 13 candidates present.
+    expect(result).toHaveLength(13);
+
+    // Core fairness invariant: CID B's only task (210) must NOT be at the
+    // bottom of a global ASC-by-taskId list. With the bug it would be at
+    // index 12 (after every backlog task). With round-robin it appears
+    // immediately after CID A's first contribution.
+    const indexOf210 = result.findIndex((c) => c.taskId === '210');
+    expect(indexOf210).toBe(1);
+
+    // Stronger pin: the round-robin order is [A0, B0, A1, A2, ...] when one
+    // bucket is exhausted, so the consumer (the daemon's per-tick yield in
+    // discoverSubgraphRestorationTasks) reaches CID B within the first
+    // round-trip, not 12 cycles later.
+    expect(result[0].taskId).toBe('170');
+    expect(result[1].taskId).toBe('210');
+    expect(result[2].taskId).toBe('171');
+  });
 });
 
 // ── listLaunchedSolverNets ────────────────────────────────────────────────────

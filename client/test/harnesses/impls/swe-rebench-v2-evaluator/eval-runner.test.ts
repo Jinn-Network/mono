@@ -236,6 +236,31 @@ describe('PythonEvalRunner', () => {
       .rejects.toBeInstanceOf(EvalCouldNotGradeError);
   });
 
+  it('times out a wedged eval subprocess and reports it as ungradeable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'swe-rebench-eval-runner-test-'));
+    tempDirs.push(dir);
+    const scriptsDir = join(dir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(join(scriptsDir, '__init__.py'), '');
+    writeFileSync(join(scriptsDir, 'eval.py'), [
+      'import time',
+      'time.sleep(60)',
+    ].join('\n'));
+    chmodSync(join(scriptsDir, 'eval.py'), 0o755);
+    const pruned: string[] = [];
+
+    const err = await new PythonEvalRunner({
+      upstreamRepoDir: dir,
+      maxWorkers: 1,
+      evalTimeoutMs: 50,
+      pruneRound: async (image) => { pruned.push(image); },
+    }).runEval(REQUEST).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(EvalCouldNotGradeError);
+    expect((err as EvalCouldNotGradeError).reason).toBe('eval_timeout');
+    expect(pruned).toEqual([REQUEST.image]);
+  });
+
   // #476 — replace the LRU with per-round pruning so eval disk usage never
   // accumulates across instances. Each runEval call prunes its own Docker
   // footprint immediately after the eval (success or failure).
@@ -432,6 +457,10 @@ describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
   });
   it('classifies conftest ImportError (jinn-mono-y4ah)', () => {
     expect(matchInfraSignature(CONFTEST_IMPORT_ERROR)).toBe('conftest_import_error');
+  });
+
+  it('classifies fatal illegal-instruction crashes as arch mismatches', () => {
+    expect(matchInfraSignature('Fatal Python error: Illegal instruction\nCurrent thread 0x000000010...')).toBe('image_arch_mismatch');
   });
 
   it('still leaves a normal pytest FAIL session alone (returns null)', () => {

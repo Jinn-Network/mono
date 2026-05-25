@@ -47,6 +47,16 @@ export interface Tier3SetupOptions {
   portBase?: number;                  // daemons get portBase, portBase+1
   dailyDriverPorts?: number[];        // override the default mutex check
   extraEnv?: NodeJS.ProcessEnv;
+  /**
+   * Directory under which each spawned daemon's stdout + stderr is streamed
+   * for its full lifetime. The helper appends `${scenarioId}-daemons/` so
+   * multiple scenarios sharing a single evidenceDir do not stomp on each
+   * other's daemon logs. Omit to keep the legacy in-memory-tail-only behaviour.
+   *
+   * Typical caller pattern from a Tier-3 scenario:
+   *   evidenceDir: path.dirname(opts.evidencePath)
+   */
+  evidenceDir?: string;
 }
 
 export interface Tier3Handle {
@@ -76,6 +86,13 @@ export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3
 
   // 2. Spawn daemons against gold paths (no workspace copy)
   const portBase = opts.portBase ?? 7350;
+  // When the caller supplied an evidenceDir, stream per-daemon stdout/stderr
+  // into ${evidenceDir}/${scenarioId}-daemons/${op.name}-daemon.log for the
+  // daemon's full lifetime — Tier 3's 25-min budget makes a post-mortem log
+  // load-bearing, since the failure mode is usually a stall many minutes in.
+  const logDir = opts.evidenceDir
+    ? `${opts.evidenceDir.replace(/\/+$/, '')}/${opts.scenarioId}-daemons`
+    : undefined;
   let daemons: MultiOpHandle;
   try {
     daemons = await spawnMultiOpDaemons({
@@ -85,6 +102,7 @@ export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3
       ],
       extraEnv: opts.extraEnv,
       readyTimeoutMs: 60000,           // real chain warm-up may be slower than fork
+      logDir,
     });
   } catch (err) {
     throw new Error(`Tier 3 daemon spawn failed: ${err instanceof Error ? err.message : String(err)}`);

@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS task_runs (
   manifest_generated_at   INTEGER,
   evidence_hash           TEXT,
 
+  -- Additive column (schema migration 2026-05-23, in-flight gate fix):
+  -- solver_net_manifest_cid: the SolverNet manifest CID this task was
+  -- posted under (Task.solverNetManifestCid). Distinct from the artifact
+  -- manifest_cid above, which is the PACKAGING output CID. Used by
+  -- hasInFlightFor so distinct SolverNets that share the same routing key
+  -- (e.g. two SWE-rebench-v2 launches at different manifestCids) each hold
+  -- their own in-flight slot.
+  solver_net_manifest_cid TEXT,
+
   -- Additive column (schema migration 2026-04-17, full Task threading):
   -- task_payload: full Task JSON, captured at observe() time.
   -- NULL for pre-migration rows (legacy fallback in engine consumers).
@@ -149,6 +158,8 @@ export interface PersistedTaskRun {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   solverType: string | null;
+  /** SolverNet manifest CID this task was posted under; null for legacy rows. */
+  solverNetManifestCid: string | null;
   taskRole: 'restoration' | 'evaluation' | null;
   implName: string | null;
 
@@ -259,6 +270,7 @@ interface RawRow {
   onchain_creation_tx: string;
   onchain_creation_block: number;
   solver_type: string | null;
+  solver_net_manifest_cid: string | null;
   task_role: string | null;
   impl_name: string | null;
   state: string;
@@ -316,6 +328,11 @@ function runAdditiveMigrations(db: Database.Database): void {
     // transient maps are cleared.
     { column: 'executor_mode',         ddl: 'ALTER TABLE task_runs ADD COLUMN executor_mode TEXT' },
     { column: 'executor_code_digest',  ddl: 'ALTER TABLE task_runs ADD COLUMN executor_code_digest TEXT' },
+    // Per-SolverNet in-flight gate (2026-05-23): distinct SolverNets that
+    // share the same `contract.id.version` routing key must each hold their
+    // own in-flight slot, otherwise a task in SolverNet B is silently
+    // rejected while SolverNet A is busy. See `hasInFlightFor`.
+    { column: 'solver_net_manifest_cid', ddl: 'ALTER TABLE task_runs ADD COLUMN solver_net_manifest_cid TEXT' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -333,6 +350,28 @@ function runAdditiveMigrations(db: Database.Database): void {
       const msg = err instanceof Error ? err.message : String(err);
       if (!/duplicate column name/i.test(msg)) throw err;
     }
+  }
+
+  // Backfill `solver_net_manifest_cid` from the persisted Task JSON for rows
+  // inserted before this column existed. Idempotent: only touches rows where
+  // the column is NULL and the JSON path resolves to a string. better-sqlite3
+  // ships with the JSON1 extension, so `json_extract` is always available.
+  // Failures (e.g. malformed JSON) are non-fatal — the row keeps NULL and
+  // legacy behaviour (no per-SolverNet slot) applies for that row.
+  try {
+    db.exec(`
+      UPDATE task_runs
+      SET solver_net_manifest_cid = json_extract(task_payload, '$.solverNetManifestCid')
+      WHERE solver_net_manifest_cid IS NULL
+        AND task_payload IS NOT NULL
+        AND json_valid(task_payload) = 1
+        AND json_extract(task_payload, '$.solverNetManifestCid') IS NOT NULL
+    `);
+  } catch {
+    // Best-effort backfill: a database without JSON1 (very unlikely with
+    // better-sqlite3's bundled SQLite) just keeps NULL and reverts to legacy
+    // behaviour for those rows. The forward-going `insertDiscovered` path
+    // populates the column directly.
   }
 }
 
@@ -352,6 +391,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
     solverType: row.solver_type,
+    solverNetManifestCid: row.solver_net_manifest_cid,
     taskRole: (row.task_role ?? null) as 'restoration' | 'evaluation' | null,
     implName: row.impl_name,
     state: row.state as TaskRunState,
@@ -409,11 +449,11 @@ export class TaskRunPersistence {
       INSERT OR IGNORE INTO task_runs (
         request_id, task_id, attempt_index, task_cid, onchain_creation_tx, onchain_creation_block,
         solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts, run_started_at,
-        task_payload
+        task_payload, solver_net_manifest_cid
       ) VALUES (
         @requestId, @taskId, @attemptIndex, @taskCid, @onchainCreationTx, @onchainCreationBlock,
         @solverType, @taskRole, 'DISCOVERED', @now, @windowStartTs, @windowEndTs, @runStartedAt,
-        @taskPayload
+        @taskPayload, @solverNetManifestCid
       )
     `).run({
       requestId: input.requestId,
@@ -429,6 +469,7 @@ export class TaskRunPersistence {
       windowEndTs: input.windowEndTs,
       runStartedAt: input.runStartedAt ?? now,
       taskPayload: input.task ? JSON.stringify(input.task) : null,
+      solverNetManifestCid: input.task?.solverNetManifestCid ?? null,
     });
   }
 
@@ -624,10 +665,33 @@ export class TaskRunPersistence {
     return { terminal, inFlight };
   }
 
+  /**
+   * Single-flight gate: is there a non-terminal task_run for the given
+   * routing key + role, in the same SolverNet?
+   *
+   * `manifestCid` scopes the gate to one SolverNet:
+   *   - When a string is supplied, only rows whose `solver_net_manifest_cid`
+   *     equals it count. Two distinct SolverNets that happen to share the
+   *     same `contract.id.version` routing key (e.g. mainline SWE-rebench-v2
+   *     and an isolated SWE-rebench-v2 launched at a separate manifestCid)
+   *     each hold their own in-flight slot.
+   *   - When `null` is supplied, only rows with NULL `solver_net_manifest_cid`
+   *     count (legacy / health-check tasks form their own bucket).
+   *   - When omitted (`undefined`), the manifest filter is dropped — the
+   *     historical routing-key-only behaviour. Production callers always
+   *     pass an explicit value; this path exists for legacy tests.
+   *
+   * The bug this fix closes: an operator joined to multiple SolverNets that
+   * share the same routing key had ONE in-flight slot across all of them, so
+   * a task in SolverNet B was silently rejected with
+   * `another <routingKey>/<role> task is already in flight` whenever the
+   * operator was busy on SolverNet A.
+   */
   hasInFlightFor(args: {
     solverType: string;
     taskRole: 'restoration' | 'evaluation';
     excludeRequestId?: string;
+    manifestCid?: string | null;
   }): boolean {
     const terminalList = [...TERMINAL_STATES];
     const placeholders = terminalList.map((_, i) => `@terminal${i}`).join(', ');
@@ -639,6 +703,13 @@ export class TaskRunPersistence {
     terminalList.forEach((state, i) => {
       params[`terminal${i}`] = state;
     });
+    let manifestClause = '';
+    if (args.manifestCid === null) {
+      manifestClause = 'AND solver_net_manifest_cid IS NULL';
+    } else if (typeof args.manifestCid === 'string') {
+      manifestClause = 'AND solver_net_manifest_cid = @manifestCid';
+      params['manifestCid'] = args.manifestCid;
+    }
     const row = this.db.prepare(`
       SELECT 1
       FROM task_runs
@@ -646,6 +717,7 @@ export class TaskRunPersistence {
         AND COALESCE(task_role, 'restoration') = @taskRole
         AND state NOT IN (${placeholders})
         AND request_id != @excludeRequestId
+        ${manifestClause}
       LIMIT 1
     `).get(params) as { 1: number } | undefined;
     return row !== undefined;

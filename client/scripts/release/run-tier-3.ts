@@ -25,7 +25,7 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
     evidencePath: path.join(outputDir, 'T3.1.log'),
     mode,
     hermesModel: opts.hermesModel,
-    wallClockBudgetMs: 10 * 60 * 1000,
+    wallClockBudgetMs: 25 * 60 * 1000,   // real solve (~6 min) + Docker verdict eval — see T3.1 WALL_CLOCK_BUDGET_MS
   });
 
   ScenarioVerdictSchema.parse(verdict);

@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse as yamlParse } from 'yaml';
-import { writePerTaskHermesConfig } from '../../../../src/harnesses/impls/hermes-agent/bootstrap.js';
+import {
+  writePerTaskHermesConfig,
+  JINN_HERMES_MAX_TOKENS_CAP,
+} from '../../../../src/harnesses/impls/hermes-agent/bootstrap.js';
 
 const networkToolsRoot = fileURLToPath(new URL('../../../../plugins/network-tools/', import.meta.url));
 const sweRuntimeRoot = fileURLToPath(new URL('../../../../plugins/swe-rebench-v2-runtime/', import.meta.url));
@@ -318,6 +321,102 @@ describe('writePerTaskHermesConfig', () => {
       rmSync(operatorHome, { recursive: true, force: true });
       rmSync(taskHome, { recursive: true, force: true });
     }
+  });
+
+  // The OpenRouter pre-billing footgun: max_tokens is reserved against the
+  // operator's credit balance at request time, so a stock Hermes default
+  // (64000) drains the wallet on every claim even when the actual solve
+  // only emits a few thousand tokens. Jinn caps max_tokens at
+  // JINN_HERMES_MAX_TOKENS_CAP (32000) per the constant docstring and the
+  // 2026-05-23 production bug. These tests pin the cap so a future bump
+  // doesn't silently regress.
+  describe('max_tokens cap', () => {
+    it('pins the cap at 32000', () => {
+      expect(JINN_HERMES_MAX_TOKENS_CAP).toBe(32000);
+    });
+
+    it('writes max_tokens=cap when no operator config is seeded', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.max_tokens).toBe(JINN_HERMES_MAX_TOKENS_CAP);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('writes max_tokens=cap when a Jinn model is supplied but operator has no config', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          model: 'anthropic/claude-opus-4.6',
+          provider: 'openrouter',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.default).toBe('anthropic/claude-opus-4.6');
+        expect(cfg.model.max_tokens).toBe(JINN_HERMES_MAX_TOKENS_CAP);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('clamps an over-cap operator max_tokens to the cap', () => {
+      const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+      const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+      try {
+        // Operator pinned 64000 — exactly the value that drove the 2026-05-23
+        // 402 burn. Jinn must clamp this to the cap regardless.
+        writeFileSync(
+          join(operatorHome, 'config.yaml'),
+          'model:\n  default: "op-model"\n  max_tokens: 64000\n',
+        );
+        writePerTaskHermesConfig({
+          hermesHome: taskHome,
+          workingDir: '/work',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          seedFrom: operatorHome,
+        });
+        const cfg = readConfig(taskHome);
+        expect(cfg.model.max_tokens).toBe(JINN_HERMES_MAX_TOKENS_CAP);
+      } finally {
+        rmSync(operatorHome, { recursive: true, force: true });
+        rmSync(taskHome, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves an under-cap operator max_tokens (operators may pin lower)', () => {
+      const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+      const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+      try {
+        writeFileSync(
+          join(operatorHome, 'config.yaml'),
+          'model:\n  default: "op-model"\n  max_tokens: 8000\n',
+        );
+        writePerTaskHermesConfig({
+          hermesHome: taskHome,
+          workingDir: '/work',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          seedFrom: operatorHome,
+        });
+        const cfg = readConfig(taskHome);
+        expect(cfg.model.max_tokens).toBe(8000);
+      } finally {
+        rmSync(operatorHome, { recursive: true, force: true });
+        rmSync(taskHome, { recursive: true, force: true });
+      }
+    });
   });
 
   it('skips seeding when seedFrom equals hermesHome or does not exist', () => {

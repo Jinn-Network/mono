@@ -8,6 +8,17 @@ export interface Tier2SetupOptions {
   portBase: number;                    // op-a gets portBase, op-b gets portBase+1
   extraEnv?: NodeJS.ProcessEnv;        // additional env per daemon (e.g. JINN_HARNESS_STUB_INSTANCE)
   ops?: string[];                      // default: ['op-a', 'op-b']
+  /**
+   * Directory under which each spawned daemon's stdout + stderr is streamed
+   * for its full lifetime. The helper appends `${scenarioId}-daemons/` so
+   * multiple scenarios sharing a single evidenceDir do not stomp on each
+   * other's daemon logs. Omit to keep the legacy in-memory-tail-only behaviour
+   * (e.g. unit tests that don't care about post-bootstrap output).
+   *
+   * Typical caller pattern from a Tier-2 scenario:
+   *   evidenceDir: path.dirname(opts.evidencePath)
+   */
+  evidenceDir?: string;
 }
 
 export interface Tier2Handle {
@@ -49,6 +60,13 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
     anvil = await spawnAnvilFork({ forkUrl, chain: baseSepolia, silent: true });
 
     // 3. Spawn daemons against workspace homes with fork RPC override
+    // When the caller supplied an evidenceDir, route per-daemon stdout/stderr
+    // into ${evidenceDir}/${scenarioId}-daemons/${op.name}-daemon.log so a
+    // T2.x timeout 5+ minutes in has a readable log to point an investigator
+    // at instead of forcing them to spelunk chain + db + harness logs.
+    const logDir = opts.evidenceDir
+      ? `${opts.evidenceDir.replace(/\/+$/, '')}/${opts.scenarioId}-daemons`
+      : undefined;
     daemons = await spawnMultiOpDaemons({
       ops: ops.map((name, i) => ({
         name,
@@ -57,6 +75,7 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
       })),
       extraEnv: { ...opts.extraEnv, JINN_RPC_URL: anvil.rpcUrl },
       readyTimeoutMs: 45000,
+      logDir,
     });
 
     let torn = false;

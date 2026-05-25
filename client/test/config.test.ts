@@ -236,7 +236,10 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.discovery?.mode).toBe('http');
     expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
-    expect(config.discovery?.fallbackToOnchain).toBe(true);
+    // fallbackToOnchain is no longer defaulted on testnet (2026-05-23): silent
+    // fall-through hid indexer outages and storms shared RPC. Operators opt in
+    // explicitly when they need it.
+    expect(config.discovery?.fallbackToOnchain).toBeUndefined();
     // No legacy subgraphUrl default any more — the Railway indexer is the default.
     expect(config.subgraphUrl).toBeUndefined();
   });
@@ -254,7 +257,7 @@ describe('loadConfig RPC override handling', () => {
     expect(config.discovery?.mode).toBeUndefined();
   });
 
-  it('JINN_DISCOVERY_URL alone on testnet → that URL with mode "http" and fallback true', async () => {
+  it('JINN_DISCOVERY_URL alone on testnet → that URL with mode "http"; fallback undefined (default-off)', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_DISCOVERY_FALLBACK'];
@@ -265,7 +268,8 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.discovery?.url).toBe('https://my-indexer.example/graphql');
     expect(config.discovery?.mode).toBe('http');
-    expect(config.discovery?.fallbackToOnchain).toBe(true);
+    // 2026-05-23: fallback is now opt-in. Operator never set it → undefined.
+    expect(config.discovery?.fallbackToOnchain).toBeUndefined();
   });
 
   it('JINN_DISCOVERY_URL on mainnet → mode defaulted to "http" so the URL is consulted', async () => {
@@ -281,7 +285,7 @@ describe('loadConfig RPC override handling', () => {
     expect(config.discovery?.mode).toBe('http');
   });
 
-  it('config-file discovery: { url } without mode on testnet → url preserved, mode defaulted to "http"', async () => {
+  it('config-file discovery: { url } without mode on testnet → url preserved, mode defaulted to "http"; fallback undefined (default-off)', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       discovery: { url: 'https://operator-indexer.example/graphql' },
@@ -295,6 +299,40 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.discovery?.url).toBe('https://operator-indexer.example/graphql');
     expect(config.discovery?.mode).toBe('http');
+    // 2026-05-23: fallback is now opt-in. Operator never set it → undefined.
+    expect(config.discovery?.fallbackToOnchain).toBeUndefined();
+  });
+
+  it('config-file discovery: { fallbackToOnchain: true } on testnet → operator opt-in preserved', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      discovery: { fallbackToOnchain: true },
+    });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
+    // Explicit opt-in survives the testnet default merge.
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+  });
+
+  it('JINN_DISCOVERY_FALLBACK=1 with JINN_DISCOVERY_URL turns the floor on', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_DISCOVERY_URL'] = 'https://my-indexer.example/graphql';
+    process.env['JINN_DISCOVERY_FALLBACK'] = '1';
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe('https://my-indexer.example/graphql');
+    // Env opt-in survives the new default-off behavior.
     expect(config.discovery?.fallbackToOnchain).toBe(true);
   });
 

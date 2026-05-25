@@ -474,7 +474,17 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('discovery yields one backlog task per polling pass', async () => {
+  it('discovery yields every hydrated candidate per polling pass', async () => {
+    // Bug shape (pre-fix): the generator returned after the first successful
+    // yield, so when the engine-watcher's in-flight gate fast-skipped that
+    // candidate every subsequent candidate in the round-robin (`fc05f686`)
+    // ordering starved for the duration of the 30s skip TTL. Live-verified
+    // on task 212: iso 209/210/211/212 were claimable for 23 min while op-b's
+    // daemon kept yielding `mainB` and getting fast-skipped.
+    //
+    // The engine-watcher (daemon._runEngineWatcherLoop) is the single point
+    // of skip-state truth. The adapter's job is to surface the full
+    // candidate list per cycle and let the engine apply its gate to each.
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
@@ -504,7 +514,9 @@ describe('MechAdapter TaskCoordinator flow', () => {
       getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
       queryEnvelopes: vi.fn().mockResolvedValue([]),
     };
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'first-discovery-task' }));
+    vi.mocked(fetchSignedTaskFromIpfs)
+      .mockResolvedValueOnce(signedTask({ id: 'first-discovery-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'second-discovery-task' }));
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
@@ -520,14 +532,109 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
     const first = await iter.next();
     const second = await iter.next();
+    const third = await iter.next();
 
     expect(first.value).toMatchObject({
       taskId: '42',
       task: { id: 'first-discovery-task' },
     });
-    expect(second.done).toBe(true);
-    expect(canClaimTask).toHaveBeenCalledTimes(1);
-    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledTimes(1);
+    expect(second.value).toMatchObject({
+      taskId: '43',
+      task: { id: 'second-discovery-task' },
+    });
+    expect(third.done).toBe(true);
+    expect(canClaimTask).toHaveBeenCalledTimes(2);
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledTimes(2);
+
+    await adapter.stop();
+  });
+
+  it('discovery preserves round-robin fairness when the consumer skips earlier candidates within a cycle', async () => {
+    // Round-robin regression (post-`fc05f686`): the engine-watcher applies
+    // its admission gate to each yielded announcement and may fast-skip a
+    // candidate (e.g. an in-flight mainline task). The adapter must continue
+    // iterating its candidate list within the same cycle so that an isolated
+    // task interleaved by the round-robin still reaches the engine — without
+    // waiting a full poll cycle (or the 30s skip-recheck TTL) per skip.
+    //
+    // Mirrors the live bug shape on task 212:
+    //   candidates = [mainA, iso212, mainB, iso213]
+    //   engine fast-skips mainA and mainB (in-flight)
+    //   the adapter must still yield iso212 and iso213 in this same cycle.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        {
+          taskId: 'mainA',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 80,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: 'iso212',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 81,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: 'mainB',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 82,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: 'iso213',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 83,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs)
+      .mockResolvedValueOnce(signedTask({ id: 'mainA-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'iso212-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'mainB-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'iso213-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        // Opt out of the floor — fixtures use tiny block numbers.
+        onchainFromBlock: 0,
+      },
+    });
+    await adapter.initialize();
+
+    // Drain the generator in a single cycle. The consumer (engine-watcher
+    // surrogate) ignores `mainA` and `mainB` as if they were fast-skipped by
+    // an in-flight gate, and records the ones it "accepts".
+    const accepted: string[] = [];
+    const skipped = new Set(['mainA', 'mainB']);
+    for await (const announcement of (adapter as any).discoverSubgraphRestorationTasks()) {
+      if (skipped.has(announcement.taskId)) continue;
+      accepted.push(announcement.taskId);
+    }
+
+    expect(accepted).toEqual(['iso212', 'iso213']);
 
     await adapter.stop();
   });

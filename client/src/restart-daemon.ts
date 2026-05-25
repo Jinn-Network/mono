@@ -1,20 +1,22 @@
 /**
  * In-process respawn helper for operator-triggered daemon restarts.
  *
- * Issue #289: clicking "Restart node" in the operator panel previously called
- * `process.exit(0)`, which killed the daemon and stranded the operator outside
- * the app (the panel went 502, the terminal got a shell prompt). Every
- * restart-required config change funnelled through the same handler:
+ * Issue #289 added respawn-instead-of-exit so the operator panel survives a
+ * restart click. Issue #561 fixed the follow-on bug: the original respawn
+ * spawned the child *before* the parent had released its server sockets, so
+ * the child raced into `.listen(7332)` while the parent still held the port
+ * and died with EADDRINUSE / exitCode 11. The fix is `preSpawnCleanup` — an
+ * async hook the caller uses to close API + OTLP receivers before the child
+ * is spawned. With cleanup in place the port is free synchronously and the
+ * child binds on first try; without it (older callers, tests) the helper
+ * behaves as before.
+ *
+ * Every restart-required config change funnels through the same handler:
  *
  *   - POST /v1/setup/network              — RPC URL change
  *   - POST /v1/setup/change-password      — keystore password rotation
  *   - POST /v1/setup/solvernets/:name     — SolverNet enable/disable
  *   - POST /v1/operator/join/:cid         — SolverNet join
- *
- * The fix is the smallest thing that makes the button mean what it says:
- * before the parent exits, spawn a detached copy of the current process,
- * inheriting argv (sans node binary), env, and stdio. The child takes over
- * the port; the panel reconnects within a couple of seconds.
  *
  * Headless gate: `JINN_NO_UI=1` (already the established headless flag in
  * main.ts) skips the respawn — operators running `jinn run --no-ui` from a
@@ -61,6 +63,15 @@ export interface RequestDaemonRestartOptions {
    * supervisor stays in charge.
    */
   forceRespawn?: boolean;
+  /**
+   * Optional async hook run *before* the replacement child is spawned. The
+   * caller uses this to close listening sockets the child will need to
+   * bind — API server (7332) and OTLP receiver (4317/4318) — so the child
+   * doesn't lose an EADDRINUSE race with the parent. Errors are caught and
+   * logged; the respawn still proceeds because leaving the operator
+   * stranded is worse than a noisy close. Skipped in headless mode.
+   */
+  preSpawnCleanup?: () => Promise<void>;
 }
 
 /**
@@ -82,9 +93,9 @@ export function isHeadless(env: NodeJS.ProcessEnv = process.env): boolean {
  *
  * Returns the action taken (for tests). Production callers ignore the return.
  */
-export function requestDaemonRestart(
+export async function requestDaemonRestart(
   opts: RequestDaemonRestartOptions = {},
-): 'respawned' | 'headless-exit' {
+): Promise<'respawned' | 'headless-exit'> {
   const env = opts.env ?? process.env;
   const argv = opts.argv ?? process.argv;
   const execPath = opts.execPath ?? process.execPath;
@@ -103,6 +114,21 @@ export function requestDaemonRestart(
 
   log('[main] Restart requested via operator MCP. Spawning replacement and exiting...');
 
+  // jinn-mono #561: release server sockets BEFORE the child spawns. Without
+  // this, the child loses an EADDRINUSE race on 7332 (and OTLP 4317/4318)
+  // and dies with exitCode 11 before it can take over.
+  if (opts.preSpawnCleanup) {
+    try {
+      await opts.preSpawnCleanup();
+    } catch (err) {
+      log(
+        `[main] preSpawnCleanup error (proceeding with respawn anyway): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   // argv[0] is the node binary; argv[1..] are the script + flags. The child
   // re-runs the same script with the same flags, under the same node binary.
   const childArgs = argv.slice(1);
@@ -115,9 +141,9 @@ export function requestDaemonRestart(
   // Detach so the parent can exit without taking the child with it.
   child.unref();
 
-  // Give the child a moment to bind the API port before we vacate it.
-  // The 250ms default matches the issue body's empirical measurement; tests
-  // pass 0 for synchrony.
+  // With preSpawnCleanup the port is already free; the small delay is kept
+  // as a paranoid belt-and-suspenders against any kernel-level lingering on
+  // SO_LINGER-disabled sockets. Tests pass 0.
   if (exitDelayMs <= 0) {
     exitFn(0);
   } else {

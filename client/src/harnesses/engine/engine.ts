@@ -1008,10 +1008,21 @@ export class TaskEngine {
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
     // rows that pre-date `contractId`. See `routingKeyForTask`.
     const routingKey = this.routingKeyForTask(task, solverType);
+    // Scope the single-flight gate to one SolverNet. Two distinct SolverNets
+    // that share the same `contract.id.version` routing key (e.g. mainline
+    // SWE-rebench-v2 and an isolated SWE-rebench-v2 at a separate manifest
+    // CID) used to collide on one shared slot — fixed by adding
+    // `manifestCid` to the gate. `null` means "tasks without a manifest CID"
+    // (legacy / health-check), which form their own bucket; `undefined` (no
+    // task at all) preserves the legacy routing-key-only behaviour.
+    const manifestCidForGate: string | null | undefined = task
+      ? (task.solverNetManifestCid ?? null)
+      : undefined;
     if (routingKey && this.persistence.hasInFlightFor({
       solverType: routingKey,
       taskRole: role,
       excludeRequestId: currentRequestId,
+      manifestCid: manifestCidForGate,
     })) {
       return `another ${routingKey}/${role} task is already in flight`;
     }

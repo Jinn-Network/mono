@@ -110,52 +110,99 @@ const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
  *   ≈ 0.0046 ETH minimum; 2× gives ≈ 0.009–0.010 ETH — the bootstrap
  *   `minEoaGasEth` default.
  *
- * The multiplier only applies when no service has a persisted `service_id`
- * on-chain (i.e. the fleet is truly cold — OR migration-wiped, where
- * services exist in shape but lost their on-chain anchor). Once any service
- * has committed a `service_id`, the fleet is past the cold-start cliff and
- * 1× suffices.
+ * Used by {@link stage1MinMasterEth} to size the Stage 1 master gas budget.
  *
  * Single source of truth: imported by funding-plan.ts.
  */
 export const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
 /**
- * Compute the required master ETH gate for the standard staking mode.
+ * Self-bond mode needs much more ETH per service than standard mode because
+ * the master funds the agent which then pays for: Safe deploy, 5 service
+ * registry txs (create, activate, register, deploy, stake), and mech deploy.
+ * Roughly 15 txs at varying gas costs. 0.03 ETH per service is a safe
+ * estimate. Single source of truth: imported by funding-plan.ts.
+ */
+export const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+
+/**
+ * Single source of truth for the master-ETH cold-start funding gate.
+ *
+ * Both the mutating bootstrapper ({@link FleetBootstrapper.ensureStage1And2})
+ * and the read-only funding plan (`planFleetFunding` in funding-plan.ts) route
+ * through this helper, so a migration-wiped fleet computes an identical
+ * required-ETH gate in both views. Re-implementing the gate inline at either
+ * call site is the u34i cross-module invariant-drift hazard — do not do it.
+ *
+ * Standard-mode gate has three branches:
+ *   1. `standardFleetAlreadyComplete` — fleet already has its full target of
+ *      operational services and no deprecated-setup migration is pending →
+ *      `0n` (nothing to fund).
+ *   2. `preStage1` — no fleet identity yet (`fleet_stage === 'none'` or no
+ *      fleet state at all) → the Stage 1 gate from {@link stage1MinMasterEth},
+ *      which covers the master → agent transfer plus the master's own gas
+ *      reserve. See jinn-mono-u34i.
+ *   3. otherwise — the Stage 2 master gas budget: `minEoaGasEth` (stake gas)
+ *      plus a per-extra-service top-up transfer for services 2..N.
+ *
+ * Self-bond mode is a flat `SELF_BOND_ETH_PER_SERVICE × targetServices`
+ * regardless of stage.
  *
  * @param services         Persisted service states
  * @param minEoaGasEth     Configured minimum EOA gas target (wei)
- * @param standardMultiplier  Cold-start multiplier (defaults to {@link STANDARD_MASTER_BOOTSTRAP_MULTIPLIER})
- * @param pendingSetupMigration  True when deprecated testnet setup detected
+ * @param pendingSetupMigration  True when a deprecated testnet setup is
+ *   detected — suppresses the `standardFleetAlreadyComplete` short-circuit so a
+ *   migration-wiped fleet is correctly treated as needing funding. Both call
+ *   sites MUST pass this so the bootstrapper gate and the funding-plan view
+ *   agree for migration-wiped fleets.
  * @param targetServices   How many services the fleet is aiming for
+ * @param stakingMode      `'standard'` (default) or `'self-bond'`
+ * @param preStage1        True when fleet identity is not yet provisioned —
+ *   selects the Stage 1 gate. The bootstrapper passes `false` here because it
+ *   only computes this gate *after* `ensureStage1` succeeds.
  */
 export function computeRequiredMasterEth({
   services,
   minEoaGasEth,
-  standardMultiplier = STANDARD_MASTER_BOOTSTRAP_MULTIPLIER,
   pendingSetupMigration = false,
   targetServices = 1,
+  stakingMode = 'standard',
+  preStage1 = false,
 }: {
-  services: Array<{ service_id: number | null | undefined; step?: string }>;
+  services: Array<{ service_id?: number | null | undefined; step?: string }>;
   minEoaGasEth: bigint;
-  standardMultiplier?: bigint;
   pendingSetupMigration?: boolean;
   targetServices?: number;
+  stakingMode?: StakingMode;
+  preStage1?: boolean;
 }): bigint {
-  const completedCount = services.filter(s =>
-    s.step !== undefined && isOperationalServiceStep(s.step),
-  ).length;
+  if (stakingMode !== 'standard') {
+    return SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
+  }
+
+  // Reconciled `standardFleetAlreadyComplete` — a single definition replacing
+  // the three historic inline variants. Adopts the strictest of them (the
+  // FleetBootstrapper variant): the fleet must have at least `targetServices`
+  // rows AND every row must be operational AND no deprecated-setup migration
+  // may be pending. A migration-wiped fleet (which sets
+  // `pendingSetupMigration`) is therefore never short-circuited to `0n`.
   const standardFleetAlreadyComplete =
-    !pendingSetupMigration && completedCount >= targetServices;
+    services.length >= targetServices &&
+    services.every(s => s.step !== undefined && isOperationalServiceStep(s.step)) &&
+    !pendingSetupMigration;
   if (standardFleetAlreadyComplete) return 0n;
 
-  // "Cold in liability" = no service has an on-chain anchor yet.
-  // This includes:
-  //   1. Fresh fleet (services array is empty)
-  //   2. Migration-wiped fleet (services exist in shape but service_id === null)
-  // Apply the 2× headroom multiplier in both cases.
-  const hasPersistedOnChain = services.some(s => s.service_id != null);
-  return minEoaGasEth * (hasPersistedOnChain ? 1n : standardMultiplier);
+  if (preStage1) {
+    // Stage 1 gate: master → agent transfer (STAGE1_AGENT_ETH) + the master's
+    // own gas reserve, plus per-extra-service transfers. See jinn-mono-u34i.
+    return stage1MinMasterEth({ minEoaGasEth }, targetServices);
+  }
+
+  // Stage 2 master gas budget — covers distributor.stake() (~0.003 ETH at
+  // typical 6 gwei Base Sepolia) plus per-extra-service top-up transfers.
+  // Service 1 piggybacks on HD-1's Stage 1 funding, so the base term is a
+  // single `minEoaGasEth` (not `× 2`). See jinn-mono-u34i.
+  return minEoaGasEth + minEoaGasEth * BigInt(Math.max(0, targetServices - 1));
 }
 
 /** Master ETH required to FINISH the whole bootstrap from a fresh start (not
@@ -605,12 +652,8 @@ export class FleetBootstrapper {
       // Phase 1b: Check master funding for the full operator path.
       const masterAddress = state.master_address!;
       let masterBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
-      // Self-bond mode needs much more ETH than standard mode because the master
-      // funds the agent which then pays for: Safe deploy, 5 service registry txs
-      // (create, activate, register, deploy, stake), and mech deploy. Roughly
-      // 15 txs at varying gas costs. 0.03 ETH per service is a safe estimate.
-      // On re-runs, include ETH already held by funded agents/safes in the total.
-      const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+      // On re-runs, include ETH already held by funded agents/safes in the
+      // total for self-bond mode.
       let systemEth = masterBalance;
       if (this.stakingMode === 'self-bond') {
         for (const svc of state.services) {
@@ -632,30 +675,20 @@ export class FleetBootstrapper {
         stakingMode: this.stakingMode,
         currentStakingContract: this.config.stakingContract,
       }).services.length > 0;
-      const standardFleetAlreadyComplete =
-        this.stakingMode === 'standard' &&
-        state.services.length >= this.targetServices &&
-        state.services.every(svc =>
-          svc.step !== undefined && isOperationalServiceStep(svc.step),
-        ) &&
-        !pendingSetupMigration;
-      const requiredMasterEth = this.stakingMode === 'standard'
-        ? (
-            standardFleetAlreadyComplete
-              ? 0n
-              // Stage 2 master gas budget — covers distributor.stake() (~0.003
-              // ETH at typical 6 gwei Base Sepolia) plus per-extra-service
-              // top-up transfers. Previously this was `× 2` for fresh fleets,
-              // which double-counted a service-1 transfer that doesn't actually
-              // fire (HD-1 carries Stage 1 leftover, gets a conditional top-up
-              // only if needed). See jinn-mono-u34i: the `× 2` figure also
-              // exceeded the post-Stage-1 master balance at the operator-facing
-              // 0.020 ETH budget by ~127k gwei of Stage 1 gas burn, causing a
-              // second funding prompt.
-              : this.config.minEoaGasEth +
-                this.config.minEoaGasEth * BigInt(Math.max(0, this.targetServices - 1))
-          )
-        : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
+      // Single source of truth: the master-ETH gate is computed by
+      // `computeRequiredMasterEth` (defined above), the same helper the
+      // read-only `planFleetFunding` view routes through. Re-deriving it inline
+      // here is the u34i cross-module invariant-drift hazard. `ensureStage1And2`
+      // only reaches this point AFTER `ensureStage1` has succeeded, so the
+      // fleet is always past Stage 1 — `preStage1` is `false`.
+      const requiredMasterEth = computeRequiredMasterEth({
+        services: state.services,
+        minEoaGasEth: this.config.minEoaGasEth,
+        pendingSetupMigration,
+        targetServices: this.targetServices,
+        stakingMode: this.stakingMode,
+        preStage1: false,
+      });
       const autoFaucetEnabled = this.autoTestnetFaucet;
 
       // Re-sum system ETH (master + agent/safe balances for self-bond mode).

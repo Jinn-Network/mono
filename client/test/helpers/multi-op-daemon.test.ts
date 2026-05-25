@@ -4,6 +4,48 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawnMultiOpDaemons, type MultiOpHandle } from './multi-op-daemon';
 
+/**
+ * Source of a tiny dummy node script that satisfies the multi-op helper's
+ * spawn contract (binds a `/v1/bootstrap` route + emits the handshake-URL
+ * line) without needing the real `dist/bin/jinn.js` to be built. Used by the
+ * lifetime-log test: a real daemon spawn takes ~5-10s to bootstrap and emits
+ * gobs of unrelated stdio, both of which make the log-content assertion
+ * flaky; this dummy is deterministic and finishes in <1s.
+ *
+ * The script accepts the helper's `run --no-ui` arg pair (and ignores it)
+ * because the helper spawns with `node <bin> run --no-ui`.
+ */
+const DUMMY_DAEMON_SOURCE = `
+const http = require('node:http');
+const port = Number(process.env.JINN_API_PORT);
+const server = http.createServer((_req, res) => {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end('{"ok":true}');
+});
+server.listen(port, '127.0.0.1', () => {
+  // Lines the helper's handshake collector + lifetime log both observe.
+  process.stdout.write('bootstrap-line on stdout\\n');
+  process.stderr.write('bootstrap-line on stderr\\n');
+  // Continue emitting AFTER bootstrap so the test can assert the log keeps
+  // tracking the daemon's stdio past the handshake-collector detach point.
+  let n = 0;
+  const t = setInterval(() => {
+    n += 1;
+    process.stdout.write('post-bootstrap stdout line ' + n + '\\n');
+    process.stderr.write('post-bootstrap stderr line ' + n + '\\n');
+  }, 50);
+  // SIGTERM (from teardown) closes the server, clears the timer, and exits 0.
+  const shutdown = () => {
+    clearInterval(t);
+    server.close(() => process.exit(0));
+    // Hard backstop if close hangs (shouldn't, but tests run on CI).
+    setTimeout(() => process.exit(0), 200).unref();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+});
+`;
+
 describe('spawnMultiOpDaemons', () => {
   let tmpRoot: string;
   let opAHome: string;
@@ -72,4 +114,97 @@ describe('spawnMultiOpDaemons', () => {
     await handle.teardown();
     await expect(handle.teardown()).resolves.toBeUndefined();
   }, 60000);
+});
+
+/**
+ * Lifetime-log coverage. Uses the dummy daemon script above so the test does
+ * not depend on `dist/bin/jinn.js` being built — the `dist`-gated tests in
+ * the suite above skip on a fresh checkout, which would silently drop our
+ * coverage of the new logDir option in CI. The dummy script binds the
+ * `/v1/bootstrap` route the helper polls and keeps emitting stdio after the
+ * bootstrap window, which is the exact behaviour the lifetime log is
+ * supposed to capture (the load-bearing assertion of this fix).
+ */
+describe('spawnMultiOpDaemons — lifetime log capture', () => {
+  let tmpRoot: string;
+  let dummyBinPath: string;
+  let opAHome: string;
+
+  beforeAll(async () => {
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'multi-op-logdir-'));
+    dummyBinPath = path.join(tmpRoot, 'dummy-daemon.cjs');
+    await fs.writeFile(dummyBinPath, DUMMY_DAEMON_SOURCE);
+    opAHome = path.join(tmpRoot, 'op-a');
+    await fs.mkdir(path.join(opAHome, '.jinn-client'), { recursive: true });
+  });
+
+  afterAll(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /** Allocate a port likely to be free. Random in the ephemeral range. */
+  function pickPort(): number {
+    return 40000 + Math.floor(Math.random() * 20000);
+  }
+
+  it('streams stdout + stderr to the per-daemon log file for the full lifetime', async () => {
+    const apiPort = pickPort();
+    const logDir = path.join(tmpRoot, 'logs');
+    const handle = await spawnMultiOpDaemons({
+      ops: [{ name: 'op-a', home: opAHome, apiPort }],
+      readyTimeoutMs: 10000,
+      jinnBinPath: dummyBinPath,
+      logDir,
+    });
+
+    // Contract: logPath is surfaced on the handle.
+    const expectedLogPath = path.join(logDir, 'op-a-daemon.log');
+    expect(handle.daemons['op-a'].logPath).toBe(expectedLogPath);
+    await expect(fs.access(expectedLogPath)).resolves.toBeUndefined();
+
+    // Wait long enough for several post-bootstrap stdio cycles to land.
+    // The dummy emits every 50ms; 800ms is ~16 cycles — generous margin
+    // against CI scheduler jitter without slowing the test.
+    await new Promise((r) => setTimeout(r, 800));
+
+    // Teardown flushes + closes the log stream.
+    await handle.teardown();
+
+    const content = await fs.readFile(expectedLogPath, 'utf-8');
+
+    // Bootstrap output lands with the source-stream prefix the helper applies.
+    expect(content).toContain('[out] bootstrap-line on stdout');
+    expect(content).toContain('[err] bootstrap-line on stderr');
+
+    // Post-bootstrap output lands too — this is the load-bearing assertion of
+    // the fix: the old helper dropped these on the floor after bootstrap, so
+    // a failure 5-23 min in had no stdio trail.
+    expect(content).toContain('[out] post-bootstrap stdout line');
+    expect(content).toContain('[err] post-bootstrap stderr line');
+
+    // The header line includes spawn metadata so a debugger can identify the
+    // run that produced the log.
+    expect(content).toContain(`op-a daemon spawn`);
+
+    // The exit footer is written by the proc.exit handler; it confirms the
+    // stream stays open until the process actually exits (not just until the
+    // bootstrap window closes).
+    expect(content).toContain(`op-a daemon exit`);
+  }, 30000);
+
+  it('does not write a log file when logDir is omitted (back-compat)', async () => {
+    const apiPort = pickPort();
+    const handle = await spawnMultiOpDaemons({
+      ops: [{ name: 'op-a', home: opAHome, apiPort }],
+      readyTimeoutMs: 10000,
+      jinnBinPath: dummyBinPath,
+      // logDir intentionally omitted
+    });
+    try {
+      // Contract: handle.logPath is null when no logDir was provided.
+      expect(handle.daemons['op-a'].logPath).toBeNull();
+    } finally {
+      await handle.teardown();
+    }
+  }, 30000);
 });

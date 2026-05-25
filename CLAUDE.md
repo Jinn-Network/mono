@@ -273,7 +273,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | tasks            | JINN_TASKS               | []                                |
 | discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
 | discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
-| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true (only relevant when mode is `http`/`embedded`) |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | false — opt-in (only relevant when mode is `http`/`embedded`) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
@@ -282,7 +282,9 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 
 `JINN_PASSWORD` is env-only — never in config files.
 
-Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`) with `fallbackToOnchain: true`. Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
+Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`). Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
+
+`discovery.fallbackToOnchain` is **opt-in** (default off, since the 2026-05-23 substrate incident). When the indexer is unreachable, the daemon raises `DiscoveryUnavailableError` and the operator-app surfaces the outage; it does NOT silently fall through to direct `eth_getLogs`. Silent fall-through was hiding indexer outages and turning every daemon into its own indexer, which storms shared RPC quota and took the indexer down. Set `fallbackToOnchain: true` (or `JINN_DISCOVERY_FALLBACK=1`) only when you self-host an RPC with generous `getLogs` quotas — the factory emits a one-time boot warning so the choice is visible in logs.
 
 ## On-Chain Addresses (Base)
 

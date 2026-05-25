@@ -29,13 +29,33 @@ interface ReleasePrepInput {
 
 ## How to invoke
 
-```bash
-# Run all of Tier 1 against the current working tree
-cd client && tsx scripts/release/run-tier-1.ts <candidate-version>
+The tier runners execute under plain `tsx` and do **not** auto-load `client/.env`.
+Scenarios that need secrets — `BASE_SEPOLIA_RPC_URL` (T2.1, T2.3), `BASE_RPC_URL`,
+`OPENROUTER_API_KEY`, `TENDERLY_*` — silently **skip or fail** with an "env not set"
+error when those vars are unexported. Source `client/.env`, **then unset
+`JINN_PASSWORD`**, before every local invocation:
 
+```bash
+cd client
+set -a && . ./.env && set +a          # export the secrets the runners need
+unset JINN_PASSWORD                    # MUST unset — see warning below
+
+# Run all of Tier 1 against the current working tree
+tsx scripts/release/run-tier-1.ts <candidate-version>
 # Or via yarn
 yarn release:tier-1 <candidate-version>
 ```
+
+> **Why `unset JINN_PASSWORD`:** Tier 2 / Tier 3 spawn operator daemons against the
+> test substrate (`~/jinn-dev/operators/`). Each substrate operator carries its own
+> `.jinn-client/keystore-password` file. An inherited `JINN_PASSWORD` overrides that
+> file, fails keystore decryption, and the daemon exits with `exitCode 50` before
+> its API is reachable — surfacing as a misleading "daemon did not become reachable"
+> `real-bug` verdict on T2.1/T2.3. `client/.env` carries the *developer's own*
+> `JINN_PASSWORD`, so a blind `. ./.env` poisons every substrate scenario. Unset it.
+
+In CI the secrets are injected as GitHub Actions env vars, so the `.env` step is a
+no-op there (the file is absent) — it is only needed for local release-prep runs.
 
 ## Tier 1 scenarios
 
@@ -65,6 +85,7 @@ All three run in parallel against separate substrate workspaces. Wall-clock for 
 Tier 2 is invoked from release-readiness's Phase 5 (per spec §4). Standalone invocation:
 
 ```bash
+set -a && . ./client/.env && set +a && unset JINN_PASSWORD   # see "How to invoke"
 yarn release:tier-2 <candidate-version>
 ```
 

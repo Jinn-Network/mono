@@ -1715,34 +1715,35 @@ describe('Fleet bootstrap', () => {
   });
 });
 
-describe('computeRequiredMasterEth (jinn-mono-hjex.7)', () => {
+describe('computeRequiredMasterEth (single source of truth for the cold-start gate)', () => {
   const MIN_ETH = 5_000_000_000_000_000n; // 0.005 ETH
+  const STAGE1_AGENT_ETH = 10_000_000_000_000_000n; // 0.01 ETH
+  // Stage 1 gate for N services: STAGE1_AGENT_ETH + minEoaGasEth*2 (cold-start
+  // multiplier) + minEoaGasEth*(N-1) per-extra-service transfers.
+  const stage1Gate = (n: number) =>
+    STAGE1_AGENT_ETH + MIN_ETH * 2n + MIN_ETH * BigInt(Math.max(0, n - 1));
+  // Stage 2 gate for N services: minEoaGasEth + minEoaGasEth*(N-1).
+  const stage2Gate = (n: number) => MIN_ETH + MIN_ETH * BigInt(Math.max(0, n - 1));
 
-  it('applies 2× cold-start multiplier when services array is empty (fresh fleet)', () => {
+  it('returns the Stage 1 gate for a fresh pre-Stage-1 fleet (empty services)', () => {
     const required = computeRequiredMasterEth({
       services: [],
       minEoaGasEth: MIN_ETH,
+      preStage1: true,
     });
-    expect(required).toBe(MIN_ETH * 2n);
+    expect(required).toBe(stage1Gate(1));
   });
 
-  it('applies 2× cold-start multiplier when services are migration-wiped (service_id === null) (jinn-mono-hjex.7)', () => {
+  it('returns the Stage 2 gate for a post-Stage-1 fleet with no operational services', () => {
     const required = computeRequiredMasterEth({
       services: [{ service_id: null, step: 'awaiting_stake' }],
       minEoaGasEth: MIN_ETH,
+      preStage1: false,
     });
-    expect(required).toBe(MIN_ETH * 2n);
+    expect(required).toBe(stage2Gate(1));
   });
 
-  it('uses 1× multiplier when at least one service has a persisted service_id', () => {
-    const required = computeRequiredMasterEth({
-      services: [{ service_id: 42, step: 'staked' }],
-      minEoaGasEth: MIN_ETH,
-    });
-    expect(required).toBe(MIN_ETH);
-  });
-
-  it('returns 0n when fleet is already complete (no pending setup migration)', () => {
+  it('returns 0n when the fleet is already complete (no pending setup migration)', () => {
     const required = computeRequiredMasterEth({
       services: [{ service_id: 42, step: 'complete' }],
       minEoaGasEth: MIN_ETH,
@@ -1752,22 +1753,57 @@ describe('computeRequiredMasterEth (jinn-mono-hjex.7)', () => {
     expect(required).toBe(0n);
   });
 
-  it('applies 2× multiplier to migration-wiped services regardless of step', () => {
-    // Migration-wiped: service_id is null but step advanced (race condition)
+  it('does NOT short-circuit to 0n for a migration-wiped fleet even when every service is operational', () => {
+    // The GAP-1 bug: funding-plan.ts omitted this guard, so a migration-wiped
+    // fleet whose services were all `complete` returned 0n there while the
+    // bootstrapper still required funding. With the reconciled guard, the
+    // pendingSetupMigration flag suppresses the `alreadyComplete` short-circuit.
     const required = computeRequiredMasterEth({
-      services: [{ service_id: null, step: 'staked' }],
+      services: [{ service_id: 42, step: 'complete' }],
       minEoaGasEth: MIN_ETH,
+      targetServices: 1,
+      pendingSetupMigration: true,
+      preStage1: false,
     });
-    expect(required).toBe(MIN_ETH * 2n);
+    expect(required).toBe(stage2Gate(1));
+    expect(required).not.toBe(0n);
   });
 
-  it('respects custom standardMultiplier override', () => {
+  it('requires every service operational before short-circuiting to 0n', () => {
+    // Strictest of the three historic variants: a fleet with one complete and
+    // one in-progress service is NOT already-complete even if the operational
+    // count alone would clear targetServices.
+    const required = computeRequiredMasterEth({
+      services: [
+        { service_id: 1, step: 'complete' },
+        { service_id: 2, step: 'staked' },
+      ],
+      minEoaGasEth: MIN_ETH,
+      targetServices: 1,
+      preStage1: false,
+    });
+    expect(required).not.toBe(0n);
+  });
+
+  it('scales the Stage 2 gate with per-extra-service top-ups', () => {
     const required = computeRequiredMasterEth({
       services: [],
       minEoaGasEth: MIN_ETH,
-      standardMultiplier: 3n,
+      targetServices: 3,
+      preStage1: false,
     });
-    expect(required).toBe(MIN_ETH * 3n);
+    expect(required).toBe(stage2Gate(3));
+  });
+
+  it('uses a flat per-service budget for self-bond mode', () => {
+    const SELF_BOND_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+    const required = computeRequiredMasterEth({
+      services: [],
+      minEoaGasEth: MIN_ETH,
+      targetServices: 2,
+      stakingMode: 'self-bond',
+    });
+    expect(required).toBe(SELF_BOND_PER_SERVICE * 2n);
   });
 });
 

@@ -34,6 +34,27 @@ const TOOLSET_ALLOWLIST = [
 ] as const;
 
 /**
+ * Per-task `max_tokens` cap (Jinn-enforced, OpenRouter-bound).
+ *
+ * OpenRouter pre-bills on `max_tokens` rather than actual output tokens:
+ * the model invocation reserves credit for `max_tokens × output-cost` at
+ * request time. An operator who sets `max_tokens=64000` (Hermes's stock
+ * default for frontier models) against the priciest models needs ~$0.30+
+ * of unspent credit *per request* just to start the call — even if the
+ * actual solve uses 6k tokens. Production bug, 2026-05-23: every Hermes
+ * solve attempt returned HTTP 402 with "You requested up to 64000 tokens,
+ * but can only afford 52975."
+ *
+ * 32000 is generous for a SWE-rebench patch (whole patches typically come
+ * in well under 10k output tokens) and fits under the OpenRouter affordable
+ * cap across the model classes used in 2026-05 production. The Jinn-managed
+ * value is `min(operator_value, JINN_HERMES_MAX_TOKENS_CAP)` — operators
+ * who want a lower cap (e.g. tighter budget) keep their value; operators
+ * who set a higher cap get clamped to 32000.
+ */
+export const JINN_HERMES_MAX_TOKENS_CAP = 32000;
+
+/**
  * Files copied verbatim from the operator's real Hermes home into the per-Task
  * `$HERMES_HOME`. Hermes resolves OAuth creds from `$HERMES_HOME/auth/...` and
  * pooled creds from `$HERMES_HOME/auth.json` with NO real-home fallback, so a
@@ -102,6 +123,9 @@ function seedOperatorState(hermesHome: string, seedFrom: string): void {
 // Jinn-managed keys (per-Task authoritative; Jinn writes these every Task):
 //   - model.default        — if a daemon/SolverNet override was provided
 //   - model.provider       — if a daemon/SolverNet override was provided
+//   - model.max_tokens     — capped at JINN_HERMES_MAX_TOKENS_CAP (operators
+//                            may pin lower, never higher — OpenRouter
+//                            pre-billing footgun, see the constant docstring)
 //   - terminal.backend     — forced to `local` (the per-Task workingDir is a
 //                            host filesystem path; remote backends would need
 //                            additional setup Jinn doesn't yet do)
@@ -116,8 +140,6 @@ function seedOperatorState(hermesHome: string, seedFrom: string): void {
 // Everything else from the operator's config.yaml passes through unchanged.
 //
 // Operator-set keys that DO inherit and matter for budget-capped providers:
-//   - model.max_tokens     — OpenRouter pre-bills on max_tokens; operators
-//                            with low monthly caps must lower this to fit.
 //   - model.context_length — total context window cap.
 //   - provider_routing     — OpenRouter routing knobs (sort by price, etc.).
 //   - providers.<name>     — per-provider timeout / model-specific overrides.
@@ -147,15 +169,27 @@ function mergePerTaskConfig(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...operator };
 
-  // model: deep-merge — operator's max_tokens/context_length/base_url/
-  // provider_routing/etc. preserved; Jinn overrides default+provider only if
-  // specified by daemon/SolverNet config.
+  // model: deep-merge — operator's context_length/base_url/provider_routing/
+  // etc. preserved; Jinn overrides default+provider only if specified by
+  // daemon/SolverNet config; Jinn ALWAYS caps `max_tokens` at
+  // JINN_HERMES_MAX_TOKENS_CAP (operators may pin lower, never higher).
+  // See the JINN_HERMES_MAX_TOKENS_CAP docstring for the OpenRouter
+  // pre-billing rationale (production bug, 2026-05-23).
   if (opts.model || opts.provider || isObj(out.model)) {
     const opModel = isObj(out.model) ? out.model : {};
     const jinnModel: Record<string, unknown> = {};
     if (opts.model) jinnModel.default = opts.model;
     if (opts.provider) jinnModel.provider = opts.provider;
-    out.model = { ...opModel, ...jinnModel };
+    const merged: Record<string, unknown> = { ...opModel, ...jinnModel };
+    const opMaxTokens = typeof opModel.max_tokens === 'number' ? opModel.max_tokens : undefined;
+    merged.max_tokens = opMaxTokens != null
+      ? Math.min(opMaxTokens, JINN_HERMES_MAX_TOKENS_CAP)
+      : JINN_HERMES_MAX_TOKENS_CAP;
+    out.model = merged;
+  } else {
+    // No model block from either side — still pin the cap so a stock Hermes
+    // install (with its 64000 default) cannot ship over-budget requests.
+    out.model = { max_tokens: JINN_HERMES_MAX_TOKENS_CAP };
   }
 
   // terminal: Jinn forces backend + cwd; operator's timeout / lifetime /

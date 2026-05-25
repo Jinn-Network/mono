@@ -167,6 +167,17 @@ export class MechAdapter implements ExecutionAdapter {
   private deliveryBlockCursor = 0n;
   private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private observedTasks = new Map<string, TaskAnnouncement>();
+  /**
+   * Read-through cache for `restorationAnnouncementForTaskId` — the restoration
+   * task body looked up *while building an evaluation opportunity*. Kept
+   * SEPARATE from `observedTasks` (the `watchForTasks` discovery dedup set) on
+   * purpose: writing the restoration body into `observedTasks` made the
+   * TaskCreated scan skip that taskId as a *restoration* opportunity just
+   * because the daemon had built an *evaluation* opportunity for someone
+   * else's attempt on it. That blocked the creator's own daemon from claiming
+   * its own attempt on a multi-attempt (`maxClaims > 1`) task it posted.
+   */
+  private restorationBodyCache = new Map<string, TaskAnnouncement>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
   private claimedRestorationTaskIds = new Set<string>();
   private evaluationOpportunities = new Map<string, {
@@ -438,19 +449,21 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.evictionRecovery,
     );
 
-    const announcement: TaskAnnouncement = {
-      taskId: taskSubmission.taskId,
-      task: {
-        ...restorationState,
-        signedTask,
-        context: { ...(restorationState.context ?? {}), [SOLUTION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
-      },
-      taskCid: restorationTaskCid,
-      onchainCreationTx: taskSubmission.txHash,
-      onchainCreationBlock: taskSubmission.blockNumber,
-    };
-    this.observedTasks.set(taskSubmission.taskId, announcement);
-
+    // Deliberately do NOT seed `observedTasks` with the task we just posted.
+    // `observedTasks` is the dedup set for `watchForTasks`: the on-chain
+    // TaskCreated scan skips any taskId already in it (so a task is announced
+    // to the engine-watcher at most once). Seeding it here marked the
+    // creator's own task as "already announced" before it was ever yielded —
+    // which permanently prevented the *creator's own daemon* from discovering,
+    // claiming, and solving a task it posted. On a multi-attempt task
+    // (`maxClaims > 1`) the creator running the solver role is legitimate
+    // (the protocol forbids only self-*evaluation*, and that on a per-attempt
+    // basis), and on testnet it is the intended single-operator dogfood path
+    // — post → claim → solve → grade → settle from one daemon. The dedup is
+    // still correct: it now keys only on tasks `watchForTasks` actually
+    // yielded. `restorationAnnouncementForTaskId` re-hydrates from chain/IPFS
+    // on a cache miss, so dropping the pre-seed costs at most one redundant
+    // fetch if the creator later claims its own task.
     return {
       taskId: taskSubmission.taskId,
       taskCid: restorationTaskCid,
@@ -535,7 +548,14 @@ export class MechAdapter implements ExecutionAdapter {
       maxClaimsPerOperator: claimPolicy.maxClaimsPerOperator,
       policyHook: (claimPolicy.policyHook ?? zeroAddress) as Address,
       evaluationPolicy: {
-        requiredVerdicts: 1,
+        // `requiredVerdicts` defaults to 1 but is overridable via the task's
+        // claim policy. A value > 1 opens additional verdict claim slots per
+        // attempt; combined with the per-evaluator cap below (1), it
+        // guarantees an honest evaluator can still claim and deliver a slot
+        // even when other evaluators have squatted some — the structural fix
+        // for a shared/adversarial testnet where a non-delivering claimer
+        // would otherwise permanently lock a single-slot attempt.
+        requiredVerdicts: claimPolicy.requiredVerdicts ?? 1,
         passThreshold: 1,
         evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
         maxVerdictsPerEvaluator: 1,
@@ -578,7 +598,12 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async restorationAnnouncementForTaskId(taskId: string): Promise<TaskAnnouncement> {
-    const cached = this.observedTasks.get(taskId);
+    // Read-through `restorationBodyCache` — NOT `observedTasks`. This helper is
+    // an evaluation-path lookup of a task's restoration body; caching it into
+    // the `watchForTasks` discovery dedup set would suppress the creator's own
+    // restoration-claim discovery for the same taskId (see field comment).
+    const cached =
+      this.restorationBodyCache.get(taskId) ?? this.observedTasks.get(taskId);
     if (cached) return cached;
 
     const taskCidDigest = await getTaskCidDigest(
@@ -595,7 +620,7 @@ export class MechAdapter implements ExecutionAdapter {
       task,
       taskCid,
     };
-    this.observedTasks.set(taskId, announcement);
+    this.restorationBodyCache.set(taskId, announcement);
     return announcement;
   }
 
@@ -687,13 +712,23 @@ export class MechAdapter implements ExecutionAdapter {
       }
 
       try {
+        // Yield every hydrated candidate per cycle rather than returning after
+        // the first. The engine-watcher (daemon._runEngineWatcherLoop) is the
+        // single point of skip-state truth — when its in-flight admission gate
+        // fast-skips a candidate (~30s TTL), that skip state never flows back
+        // into the adapter's iteration cursor. Yielding only the first
+        // candidate per cycle meant a fast-skipped slot starved every
+        // subsequent candidate in the round-robin (`fc05f686`) ordering for
+        // the duration of the TTL. By driving the full candidate list per
+        // cycle we let the engine apply its gate to each one, preserving the
+        // round-robin fairness across joined SolverNets. See task 212 live
+        // verification in the fix's commit body.
         yield await this.restorationAnnouncementFromDigest({
           taskId: candidate.taskId,
           taskCidDigest: candidate.taskCidDigest,
           transactionHash: candidate.createdAtTx,
           blockNumber: candidate.createdAtBlock,
         });
-        return;
       } catch (err) {
         console.error(
           `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
