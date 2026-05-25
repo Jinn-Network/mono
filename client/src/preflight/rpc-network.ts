@@ -1,6 +1,7 @@
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, HttpRequestError } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import type { JinnConfig } from '../config.js';
+import { describeFallbackChain, maskRpcHost } from '../rpc/transport.js';
 
 export type ExpectedRpcNetwork = 'mainnet' | 'testnet';
 
@@ -168,4 +169,110 @@ export function rpcNetworkFailureHint(result: RpcNetworkPreflightFail): string {
     return 'Set rpcUrl to a Base Sepolia endpoint such as https://sepolia.base.org, or set BASE_SEPOLIA_RPC_URL.';
   }
   return 'Set rpcUrl to a Base mainnet endpoint such as https://mainnet.base.org, or set BASE_RPC_URL.';
+}
+
+// ── probeFallbackChain — boot-time per-slot eth_blockNumber probe ────────────
+
+/** Layer label for log lines and AC7 summary formatting. */
+export type ProbeLayer = 'L1' | 'L2';
+
+export type ProbeOk = {
+  ok: true;
+  host: string;
+  latencyMs: number;
+};
+
+export type ProbeFail = {
+  ok: false;
+  host: string;
+  /** HTTP status when applicable (4xx / 5xx). */
+  code?: number;
+  /** Failure shape when no HTTP status is available. */
+  reason?: 'unreachable' | 'unknown';
+  message: string;
+};
+
+export type ProbeResult = ProbeOk | ProbeFail;
+
+export interface ProbeFallbackChainOptions {
+  /** Logger for per-slot lines. Defaults to `console.error`. */
+  log?: (message: string) => void;
+}
+
+function classifyProbeError(host: string, err: unknown): ProbeFail {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof HttpRequestError && typeof err.status === 'number') {
+    return { ok: false, host, code: err.status, message };
+  }
+  // viem wraps HTTP errors inside other shapes; walk the cause chain.
+  let cur: unknown = (err as { cause?: unknown } | undefined)?.cause;
+  while (cur) {
+    if (cur instanceof HttpRequestError && typeof cur.status === 'number') {
+      return { ok: false, host, code: cur.status, message };
+    }
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return { ok: false, host, reason: 'unreachable', message };
+}
+
+/**
+ * Probe each URL in a fallback chain with a per-slot `eth_blockNumber` call.
+ * Records ok/latency or a structured failure (HTTP status / unreachable).
+ *
+ * The probe is **log-only** — it never throws on per-slot failures. Startup
+ * gating remains the job of {@link checkRpcNetwork}, which fails loud on
+ * chain-id mismatch.
+ *
+ * Per AC9 (issue #592): emits one log line per slot
+ *   `[rpc] <layer> <host> ok latency=Nms`
+ *   `[rpc] <layer> <host> warn 429`
+ *   `[rpc] <layer> <host> warn 5xx`
+ *   `[rpc] <layer> <host> warn unreachable: <message>`
+ */
+export async function probeFallbackChain(
+  urls: readonly string[],
+  network: ExpectedRpcNetwork,
+  layer: ProbeLayer,
+  options: ProbeFallbackChainOptions = {},
+): Promise<ProbeResult[]> {
+  const log = options.log ?? ((m: string) => process.stderr.write(`${m}\n`));
+  // Pick a chain only for typing; eth_blockNumber doesn't depend on chain
+  // identity, and the L1/L2 distinction here is informational.
+  const chain = layer === 'L2'
+    ? (network === 'testnet' ? baseSepolia : base)
+    : (network === 'testnet' ? baseSepolia : base);
+
+  const results: ProbeResult[] = [];
+  for (const url of urls) {
+    const host = maskRpcHost(url);
+    const client = createPublicClient({ chain, transport: http(url, { retryCount: 0 }) });
+    const t0 = performance.now();
+    try {
+      await client.getBlockNumber();
+      const latencyMs = Math.max(0, Math.round(performance.now() - t0));
+      log(`[rpc] ${layer} ${host} ok latency=${latencyMs}ms`);
+      results.push({ ok: true, host, latencyMs });
+    } catch (err) {
+      const failure = classifyProbeError(host, err);
+      if (failure.code === 429) {
+        log(`[rpc] ${layer} ${host} warn 429`);
+      } else if (failure.code !== undefined && failure.code >= 500) {
+        log(`[rpc] ${layer} ${host} warn ${failure.code}`);
+      } else if (failure.code !== undefined) {
+        log(`[rpc] ${layer} ${host} warn ${failure.code}`);
+      } else {
+        log(`[rpc] ${layer} ${host} warn unreachable: ${failure.message.split('\n')[0]}`);
+      }
+      results.push(failure);
+    }
+  }
+  return results;
+}
+
+/**
+ * Boot-log summary line for a fallback chain, formatted per AC7:
+ *   `[rpc] L2 transport: fallback chain (N providers) — primary=<host>`
+ */
+export function summarizeFallbackChain(layer: ProbeLayer, urls: readonly string[]): string {
+  return `[rpc] ${layer} transport: ${describeFallbackChain(urls)}`;
 }

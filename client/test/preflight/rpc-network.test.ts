@@ -1,10 +1,13 @@
 import { createServer, type Server } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   checkRpcNetwork,
   evmLocalDevOverrideAcceptable,
   isLoopbackRpcUrl,
   rpcHostForDisplay,
+  probeFallbackChain,
+  summarizeFallbackChain,
+  type ProbeResult,
 } from '../../src/preflight/rpc-network.js';
 
 const servers: Server[] = [];
@@ -123,5 +126,110 @@ describe('rpc network preflight', () => {
     expect(evmLocalDevOverrideAcceptable(84532, 31337, 'https://sepolia.base.org')).toBe(false);
     expect(evmLocalDevOverrideAcceptable(84532, 31337, 'https://8.8.8.8:8545')).toBe(false);
     expect(evmLocalDevOverrideAcceptable(84532, 84532, 'http://127.0.0.1:8545')).toBe(false);
+  });
+});
+
+// ── probeFallbackChain (AC7, AC9 — boot-time per-slot eth_blockNumber probe) ──
+
+function startBlockNumberServer(opts: {
+  status?: number;
+  result?: string;
+  hangMs?: number;
+}): Promise<{ url: string; close: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += String(chunk); });
+      req.on('end', () => {
+        const parsed = JSON.parse(body) as { id?: number; method?: string };
+        const reply = () => {
+          if (opts.status && opts.status !== 200) {
+            res.statusCode = opts.status;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ error: 'rate limited' }));
+            return;
+          }
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id ?? 1, result: opts.result ?? '0x100' }));
+        };
+        if (opts.hangMs) setTimeout(reply, opts.hangMs);
+        else reply();
+      });
+    });
+    server.listen(0, '127.0.0.1', () => {
+      servers.push(server);
+      const addr = server.address();
+      if (!addr || typeof addr === 'string') throw new Error('missing address');
+      resolve({
+        url: `http://127.0.0.1:${addr.port}`,
+        close: () => new Promise<void>((res) => server.close(() => res())),
+      });
+    });
+  });
+}
+
+describe('probeFallbackChain', () => {
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  });
+
+  it('records an ok result per URL with latency', async () => {
+    const a = await startBlockNumberServer({ result: '0x101' });
+    const b = await startBlockNumberServer({ result: '0x102' });
+    const results = await probeFallbackChain([a.url, b.url], 'testnet', 'L2');
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ ok: true });
+    expect(results[1]).toMatchObject({ ok: true });
+    expect(typeof results[0]!.latencyMs).toBe('number');
+    expect(results[0]!.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('classifies a 429 response as ok:false with code 429 (does NOT throw)', async () => {
+    const a = await startBlockNumberServer({ status: 429 });
+    const b = await startBlockNumberServer({ result: '0x100' });
+    // The probe must not gate startup — it logs warnings and continues.
+    const results = await probeFallbackChain([a.url, b.url], 'testnet', 'L2');
+    expect(results[0]).toMatchObject({ ok: false, code: 429 });
+    expect(results[1]).toMatchObject({ ok: true });
+  });
+
+  it('classifies a 5xx response as ok:false with the status code', async () => {
+    const a = await startBlockNumberServer({ status: 503 });
+    const results = await probeFallbackChain([a.url], 'testnet', 'L2');
+    expect(results[0]).toMatchObject({ ok: false });
+    expect(results[0]!.code).toBeGreaterThanOrEqual(500);
+  });
+
+  it('classifies a network-unreachable error as ok:false reason=unreachable', async () => {
+    // Closed port: nothing listening at this URL.
+    const results = await probeFallbackChain(
+      ['http://127.0.0.1:1/'],
+      'testnet',
+      'L2',
+    );
+    expect(results[0]).toMatchObject({ ok: false, reason: 'unreachable' });
+  });
+
+  it('emits per-slot log lines via the injected logger', async () => {
+    const a = await startBlockNumberServer({ result: '0x103' });
+    const b = await startBlockNumberServer({ status: 429 });
+    const log = vi.fn();
+    await probeFallbackChain([a.url, b.url], 'testnet', 'L2', { log });
+    const messages = log.mock.calls.map((call) => call[0] as string);
+    expect(messages.some((m) => /^\[rpc\] L2 .* ok latency=/.test(m))).toBe(true);
+    expect(messages.some((m) => /^\[rpc\] L2 .* warn 429/.test(m))).toBe(true);
+  });
+});
+
+describe('summarizeFallbackChain (AC7 boot-log format)', () => {
+  it('formats the canonical summary line', () => {
+    const line = summarizeFallbackChain('L2', [
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+      'https://tenderly.example/x',
+    ]);
+    expect(line).toBe(
+      '[rpc] L2 transport: fallback chain (3 providers) — primary=base-sepolia.publicnode.com',
+    );
   });
 });
