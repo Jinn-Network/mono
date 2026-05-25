@@ -55,7 +55,13 @@ function isTaskNativeService(service: ServiceState): boolean {
     isNonZeroAddress(service.mech_address);
 }
 
-function hasConfiguredEvaluatorRole(config: JinnConfig): boolean {
+/**
+ * Returns true iff the operator has joined at least one SolverNet with the
+ * `evaluator` role. Exported so the joined-only branch (issue #421) can be
+ * regression-tested in isolation from the wider `resolveTaskNativeReadiness`
+ * surface, which short-circuits on mainnet before reaching this helper.
+ */
+export function hasConfiguredEvaluatorRole(config: JinnConfig): boolean {
   const joinedSolverNets = Object.values(config.joinedSolverNets ?? {});
   return joinedSolverNets.some((entry) => entry.roles.includes('evaluator'));
 }
