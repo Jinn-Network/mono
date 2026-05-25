@@ -14,6 +14,7 @@ export const ALLOWED_LIFECYCLE_KINDS = [
   'jinn_claim_canonical_skip',
   'engine_transition',
   'tick_error',
+  'race_lost',
   'spend_cap_reached',
   'startup',
   'shutdown',

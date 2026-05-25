@@ -19,6 +19,7 @@ export const LIFECYCLE_KINDS = [
   'jinn_claim_canonical_skip',
   'engine_transition',
   'tick_error',
+  'race_lost',
   'startup',
   'shutdown',
 ] as const;
@@ -97,6 +98,11 @@ export const EVENT_KIND_META: Record<LifecycleKind, EventKindMeta> = {
     label: 'Tick error',
     description: 'An error occurred during a daemon polling tick.',
     tone: 'error',
+  },
+  race_lost: {
+    label: 'Race lost',
+    description: 'A claim or evaluation lost the on-chain race (task already filled or evaluation deadline passed); no action needed.',
+    tone: 'neutral',
   },
   startup: {
     label: 'Daemon started',

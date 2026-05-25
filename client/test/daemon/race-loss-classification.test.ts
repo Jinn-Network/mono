@@ -94,6 +94,9 @@ async function startHarness(adapter: LocalAdapter): Promise<Harness> {
     taskSources: [],
     dbPath: ':memory:',
     store,
+    // Random ephemeral port — avoids collisions when daemon-tests run in
+    // parallel vitest workers (each Daemon starts its own HTTP API server).
+    apiPort: 0,
     restorationEngine: minimalEngineConfig(),
   });
 

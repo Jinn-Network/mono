@@ -18,6 +18,11 @@ import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js'
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
+import {
+  SafeInnerRevertError,
+  isNonRecoverableInnerRevert,
+  formatDecodedRevert,
+} from '../adapters/mech/safe-revert.js';
 import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
 import type { Task } from '../types/index.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
@@ -27,6 +32,47 @@ import type { SpendCapDaemonConfig } from '../spend/daemon-config.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 
 const DEFAULT_API_PORT = 7331;
+
+/**
+ * Engine-watcher catch sites previously logged every error at
+ * level=error / kind=tick_error, including expected race-loss reverts
+ * (TCMaxVerdictsReached, TCAttemptAlreadyFinalized, TCEvaluationDeadlinePassed)
+ * that mean "another operator won this slot, this one is a no-op." Those
+ * reverts are normal on a multi-operator network — the contract correctly
+ * rejecting the race-loser — but at level=error they drowned out genuine
+ * failures on dashboards.
+ *
+ * Gate severity on the existing `isNonRecoverableInnerRevert` classifier:
+ * when a SafeInnerRevertError's decodedName is in the non-recoverable set,
+ * emit `kind=race_lost / outcome=ok` (which resolves to level=info via the
+ * outcome→level mapping in emitEvent). Anything else continues to emit
+ * `kind=tick_error / outcome=failed / level=error`. See #574.
+ */
+function emitTickErrorOrRaceLost(
+  store: Store,
+  err: unknown,
+  ctx: { requestId: string; solverType: string | undefined },
+  component: string,
+): void {
+  if (err instanceof SafeInnerRevertError && isNonRecoverableInnerRevert(err.decodedName)) {
+    emitEvent(store, {
+      kind: 'race_lost',
+      requestId: ctx.requestId,
+      solverType: ctx.solverType,
+      outcome: 'ok',
+      // decodedName is non-null by virtue of isNonRecoverableInnerRevert returning true.
+      detail: formatDecodedRevert(err.decodedName!, err.decodedArgs),
+    }, component);
+    return;
+  }
+  emitEvent(store, {
+    kind: 'tick_error',
+    requestId: ctx.requestId,
+    solverType: ctx.solverType,
+    outcome: 'failed',
+    detail: err instanceof Error ? err.message : String(err),
+  }, component);
+}
 
 export interface DaemonConfig {
   adapter: ExecutionAdapter;
@@ -576,13 +622,12 @@ export class Daemon {
           `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
           err instanceof Error ? err.message : err,
         );
-        emitEvent(this.store, {
-          kind: 'tick_error',
-          requestId: taskAnnouncement.taskId,
-          solverType,
-          outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
-        }, 'daemon');
+        emitTickErrorOrRaceLost(
+          this.store,
+          err,
+          { requestId: taskAnnouncement.taskId, solverType },
+          'daemon',
+        );
         continue;
       }
 
@@ -625,23 +670,21 @@ export class Daemon {
         // would serialise all task processing into a single queue.
         engine.process(request.requestId).catch(err => {
           console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
-          emitEvent(this.store, {
-            kind: 'tick_error',
-            requestId: request.requestId,
-            solverType,
-            outcome: 'failed',
-            detail: err instanceof Error ? err.message : String(err),
-          }, 'daemon');
+          emitTickErrorOrRaceLost(
+            this.store,
+            err,
+            { requestId: request.requestId, solverType },
+            'daemon',
+          );
         });
       } catch (err) {
         console.error(`[daemon] engine.observe failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
-        emitEvent(this.store, {
-          kind: 'tick_error',
-          requestId: request.requestId,
-          solverType,
-          outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
-        }, 'daemon');
+        emitTickErrorOrRaceLost(
+          this.store,
+          err,
+          { requestId: request.requestId, solverType },
+          'daemon',
+        );
       }
     }
   }

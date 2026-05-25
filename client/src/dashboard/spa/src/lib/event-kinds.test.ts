@@ -20,6 +20,7 @@ const EXPECTED_DAEMON_KINDS = [
   'jinn_claim_canonical_skip',
   'engine_transition',
   'tick_error',
+  'race_lost',
   'startup',
   'shutdown',
 ];
