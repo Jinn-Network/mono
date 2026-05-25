@@ -168,6 +168,39 @@ describe('classifyRealityCheck', () => {
     expect(verdict.evidence.branch).toBe('hotfix/v2026.05.20-x');
   });
 
+  it('returns fixed-direct-commit when a MERGED PR has mergeCommitOid:null and a trunk commit exists', () => {
+    // A merged PR that references the issue but reports `mergeCommitOid: null`
+    // (e.g. squash-merge edge cases, gh API hiccups) MUST NOT bind to the
+    // trunk commit — `relatedClosingPr` requires a non-null oid. With no PR
+    // binding, the trunk commit alone drives the verdict and we land on
+    // `fixed-direct-commit`. Locks current behaviour so future refactors
+    // don't silently regress it.
+    const verdict = classifyRealityCheck(
+      input({
+        issueNumber: 572,
+        prs: [
+          pr({
+            number: 600,
+            state: 'MERGED',
+            mergeCommitOid: null,
+            bodyClosesIssue: true,
+          }),
+        ],
+        commits: [
+          commit({
+            sha: 'abc1234',
+            subject: 'fix: foo (#572)',
+            reachableFrom: { trunk: ['next'], side: [] },
+          }),
+        ],
+      }),
+    );
+    expect(verdict.classification).toBe('fixed-direct-commit');
+    expect(verdict.evidence.sha).toBe('abc1234');
+    expect(verdict.evidence.branch).toBe('next');
+    expect(verdict.evidence.prNumber).toBeUndefined();
+  });
+
   it('returns fixed-direct-commit when no PR exists but a commit is on next', () => {
     const verdict = classifyRealityCheck(
       input({
