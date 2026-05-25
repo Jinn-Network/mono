@@ -28,6 +28,7 @@
  */
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { JinnConfig } from '../config.js';
+import { joinedDisplayName, solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 
 export type LauncherTaskState =
   | 'open'
@@ -127,12 +128,9 @@ function buildSolverTypeToNetIndex(
   const index = new Map<string, string>();
   if (!joinedSolverNets) return index;
   for (const [cid, joined] of Object.entries(joinedSolverNets)) {
-    if (!joined.contract) continue;
-    const solverType = `${joined.contract.id}.${joined.contract.version}`;
-    const displayName = joined.name ?? cid;
-    if (!index.has(solverType)) {
-      index.set(solverType, displayName);
-    }
+    const solverType = solverTypeFromJoinedContract(joined);
+    if (!solverType || index.has(solverType)) continue;
+    index.set(solverType, joinedDisplayName(cid, joined));
   }
   return index;
 }

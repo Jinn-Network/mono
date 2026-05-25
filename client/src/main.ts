@@ -86,7 +86,11 @@ import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
 import { createClients } from './adapters/mech/safe.js';
-import { loadSolverNets } from './solver-nets/registry.js';
+import {
+  findJoinedByName,
+  loadSolverNets,
+  solverTypeFromJoinedContract,
+} from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
 import { CapturesStore } from './store/captures.js';
@@ -1300,17 +1304,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           if (netName === 'prediction') {
             return predictionGeneratorRef?.getState();
           }
-          const joined = Object.values(config.joinedSolverNets ?? {})
-            .find((entry) => (entry.name ?? entry.manifestCid) === netName);
-          if (!joined?.contract) return undefined;
-          const solverType = `${joined.contract.id}.${joined.contract.version}`;
+          const joined = findJoinedByName(config.joinedSolverNets, netName);
+          const solverType = joined ? solverTypeFromJoinedContract(joined) : undefined;
+          if (!solverType) return undefined;
           return launchedGeneratorStateBySolverType.get(solverType)?.();
         },
         getOpenTaskCount: (netName) => {
-          const joined = Object.values(config.joinedSolverNets ?? {})
-            .find((entry) => (entry.name ?? entry.manifestCid) === netName);
-          if (!joined?.contract || !safeAddressForLauncher) return 0;
-          const solverType = `${joined.contract.id}.${joined.contract.version}`;
+          if (!safeAddressForLauncher) return 0;
+          const joined = findJoinedByName(config.joinedSolverNets, netName);
+          const solverType = joined ? solverTypeFromJoinedContract(joined) : undefined;
+          if (!solverType) return 0;
           return sharedStore.countPostedTasksByCreatorAndSolverType({
             creatorSafeAddress: safeAddressForLauncher,
             solverType,

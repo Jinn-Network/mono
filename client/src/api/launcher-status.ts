@@ -20,6 +20,7 @@
  * to placeholder accessors with TODO pointers at Task 7.
  */
 import type { JinnConfig } from '../config.js';
+import { joinedDisplayName, solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 
 export interface LauncherStatusGeneratorView {
   state: 'active' | 'paused' | 'errored';
@@ -147,10 +148,8 @@ export async function gatherLauncherStatus(
     // Issue #421 removed the legacy `solverNets` config block; iterate the
     // operator's joined SolverNets keyed by manifestCid. Launched-record
     // ownership filters happen at the launched-record surface, not here.
-    const displayName = joined.name ?? cid;
-    const solverType = joined.contract
-      ? `${joined.contract.id}.${joined.contract.version}`
-      : undefined;
+    const displayName = joinedDisplayName(cid, joined);
+    const solverType = solverTypeFromJoinedContract(joined);
     const snapshot = deps.getGeneratorState(displayName);
     const generatorState = deriveGeneratorState(snapshot);
     const stale = isStalePoll(snapshot, now);

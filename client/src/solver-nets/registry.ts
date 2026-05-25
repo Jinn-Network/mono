@@ -75,6 +75,48 @@ export function rolesFromJoinedConfig(net: JoinedSolverNetConfig): SolverNetOper
   return Array.from(new Set(roles));
 }
 
+/**
+ * Format a joined-entry contract back into the `<id>.<version>` solverType
+ * string the runtime uses for dispatch. Returns `undefined` when the joined
+ * entry has no contract (mid-migration synthesized entries can land here).
+ */
+export function solverTypeFromJoinedContract(
+  net: Pick<JoinedSolverNetConfig, 'contract'>,
+): string | undefined {
+  if (!net.contract) return undefined;
+  return `${net.contract.id}.${net.contract.version}`;
+}
+
+/**
+ * Operator-facing display name for a joined SolverNet — the registry
+ * `name` field if present, otherwise the manifest CID. Mirrors the same
+ * resolution the registry uses when registering entries.
+ */
+export function joinedDisplayName(
+  cid: string,
+  net: Pick<JoinedSolverNetConfig, 'name'>,
+): string {
+  return net.name ?? cid;
+}
+
+/**
+ * Find a joined SolverNet entry by its operator-facing display name. The
+ * lookup also matches against the manifest CID so callers that resolve a
+ * net by either identifier (legacy short-name or post-join CID) keep
+ * working. Returns the matched entry, or `undefined` if no match.
+ */
+export function findJoinedByName(
+  joinedSolverNets: Record<string, JoinedSolverNetConfig> | undefined,
+  needle: string,
+): JoinedSolverNetConfig | undefined {
+  if (!joinedSolverNets) return undefined;
+  for (const [cid, entry] of Object.entries(joinedSolverNets)) {
+    if (joinedDisplayName(cid, entry) === needle) return entry;
+    if (entry.manifestCid === needle) return entry;
+  }
+  return undefined;
+}
+
 function defaultRuntimePluginsForSolverType(solverType: string): SolverPluginEntry[] {
   if (solverType === 'swe-rebench-v2.v1') {
     return ['bundled:swe-rebench-v2-runtime'];

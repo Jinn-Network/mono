@@ -53,6 +53,11 @@ import {
   buildPredictionOperatorStatus,
   type PredictionOperatorStatus,
 } from '../solver-nets/prediction-operator-ux.js';
+import {
+  findJoinedByName,
+  rolesFromJoinedConfig,
+  solverTypeFromJoinedContract,
+} from '../solver-nets/registry.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -296,11 +301,8 @@ function predictionOperatorUnavailable(
 ): PredictionOperatorStatus {
   // Resolve the matching joined entry by display name (or manifestCid) so
   // the diagnostic can still surface the operator's configured roles when
-  // possible. Post-issue-#421 the legacy `config.solverNets` block is gone;
-  // this path now reads `config.joinedSolverNets` exclusively.
-  const joined = Object.values(config.joinedSolverNets ?? {}).find(
-    (entry) => (entry.name ?? entry.manifestCid) === name,
-  );
+  // possible.
+  const joined = findJoinedByName(config.joinedSolverNets, name);
   const diagnostic = {
     code: 'prediction_operator_status_unavailable',
     severity: 'error' as const,
@@ -312,19 +314,10 @@ function predictionOperatorUnavailable(
   };
 
   // Roles are best-effort: an unavailable status path means the daemon
-  // could not load the SolverNet. Translate the joined operator-role
-  // shape (`solver`/`evaluator`) into the API-facing
-  // `solving`/`evaluating` shape so downstream consumers see a consistent
-  // value.
-  const netRoles: Array<'solving' | 'evaluating'> = [];
-  for (const r of joined?.roles ?? []) {
-    if (r === 'solver') netRoles.push('solving');
-    if (r === 'evaluator') netRoles.push('evaluating');
-  }
-
-  const solverType = joined?.contract
-    ? `${joined.contract.id}.${joined.contract.version}`
-    : 'prediction.v1';
+  // could not load the SolverNet, so we surface whatever the operator
+  // joined.
+  const netRoles = joined ? rolesFromJoinedConfig(joined) : [];
+  const solverType = (joined && solverTypeFromJoinedContract(joined)) ?? 'prediction.v1';
 
   return {
     kind: 'prediction.v1.operatorStatus',
