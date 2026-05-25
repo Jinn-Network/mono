@@ -104,6 +104,39 @@ export class AllRpcsFailedError extends Error {
 }
 
 /**
+ * Detect errors that viem's `fallback()` short-circuits on (via its
+ * `shouldThrow(err)` fast-exit) — `ExecutionRevertedError`,
+ * `TransactionRejectedRpcError`, `UserRejectedRequestError`, and CAIP
+ * user-rejected (code `5000`). These are EVM- or wallet-level signals, NOT
+ * transport-level failures, so they must propagate unchanged. Wrapping them
+ * as `AllRpcsFailedError` would give the operator-app a false-positive
+ * "all RPCs failed" message when the actual problem is e.g. a contract
+ * revert on a view function.
+ *
+ * Mirrors viem's own predicate at
+ * `node_modules/viem/clients/transports/fallback.ts` (`shouldThrow`).
+ */
+export function isViemShouldThrowError(err: unknown): boolean {
+  // Walk the cause chain — viem wraps low-level RPC errors in higher-level
+  // error classes (e.g. `ContractFunctionExecutionError` → `RpcRequestError`
+  // → `ExecutionRevertedError`), so the originating shouldThrow-class error
+  // can be several `.cause` hops down.
+  const seen = new Set<unknown>();
+  let cursor: unknown = err;
+  while (cursor instanceof Error && !seen.has(cursor)) {
+    seen.add(cursor);
+    if (cursor.name === 'ExecutionRevertedError') return true;
+    if (cursor.name === 'TransactionRejectedRpcError') return true;
+    if (cursor.name === 'UserRejectedRequestError') return true;
+    if (cursor.name === 'WalletConnectSessionSettlementError') return true;
+    const code = (cursor as { code?: unknown }).code;
+    if (typeof code === 'number' && code === 5000) return true; // CAIP user-rejected
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * Mask an RPC URL down to its hostname for display / error reporting. Drops
  * the path so api-key segments in the URL don't leak into logs.
  */
@@ -167,9 +200,17 @@ buildFallbackTransport.buildFromTransports = function buildFromTransports(
       try {
         return await originalRequest(args);
       } catch (err) {
-        // viem doesn't expose a distinct "all transports failed" error class —
-        // when fallback exhausts the chain it throws the last underlying error.
-        // We always wrap so the caller gets a stable structural error.
+        // viem's fallback() short-circuits on shouldThrow-class errors
+        // (contract revert, user-rejected, CAIP 5000) — those are
+        // EVM/wallet-level, not transport-level failures. Propagate them
+        // unchanged so callers (and the operator-app's `rpc_all_failed`
+        // state message) don't misread a single-slot revert as an
+        // exhausted-chain outage.
+        if (isViemShouldThrowError(err)) throw err;
+        // Otherwise: viem doesn't expose a distinct "all transports failed"
+        // error class — when fallback exhausts the chain it throws the last
+        // underlying error. Wrap so the caller gets a stable structural
+        // error carrying the masked provider list.
         throw new AllRpcsFailedError(maskedProviders, err);
       }
     }) as typeof t.request;

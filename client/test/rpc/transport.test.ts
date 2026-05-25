@@ -169,6 +169,64 @@ describe('buildFallbackTransport', () => {
     }
   });
 
+  it('re-throws viem ExecutionRevertedError without wrapping in AllRpcsFailedError', async () => {
+    // viem's fallback() short-circuits on shouldThrow-class errors (contract
+    // revert, user-rejected, etc.) — those are EVM/wallet-level, not
+    // transport-level failures. Wrapping them as AllRpcsFailedError would
+    // give the operator-app a false "all RPCs failed" signal.
+    const reverted = Object.assign(new Error('execution reverted: bad'), {
+      name: 'ExecutionRevertedError',
+      code: 3, // viem's ExecutionRevertedError.code
+    });
+    const primary = vi.fn(async () => {
+      throw reverted;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
+  it('re-throws CAIP user-rejected (code 5000) without wrapping in AllRpcsFailedError', async () => {
+    const caip = Object.assign(new Error('user rejected'), {
+      name: 'CAIPUserRejectedError',
+      code: 5000,
+    });
+    const primary = vi.fn(async () => {
+      throw caip;
+    });
+    const secondary = vi.fn(async () => {
+      throw new Error('should not be called');
+    });
+    const transport = buildFallbackTransportFromMocks([primary, secondary], [
+      'https://a.example',
+      'https://b.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    let caught: unknown;
+    try {
+      await client.getBlockNumber();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+  });
+
   it('preserves slot order — primary is always slot 0', async () => {
     // Order matters for the "Tenderly stays in slot 3" constraint. The
     // helper sets rank: false explicitly.
