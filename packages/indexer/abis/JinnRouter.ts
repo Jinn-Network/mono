@@ -76,6 +76,17 @@ export const JINN_ROUTER_ABI = [
       { name: 'verdictAmount', type: 'uint256', indexed: false },
     ],
   },
+  // ── Next-task-id view (for the /health/task-coverage monitoring route) ───
+  // The router exposes the next unallocated taskId as a public view. Used by
+  // packages/indexer/src/api/next-task-id.ts to detect when the indexer's
+  // TaskCreated handler has fallen behind (issue #567).
+  {
+    name: 'nextTaskId',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
   // ── Task creation function (for claimWindowStart/End via createTask args) ─
   {
     name: 'createTask',
