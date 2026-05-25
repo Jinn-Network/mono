@@ -1090,7 +1090,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         configReader: () => ({
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
-          solverNets: config.solverNets as Record<string, unknown> | undefined,
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
         }),
       },
@@ -1212,13 +1211,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
         defaultRpcUrlForChain: () => CHAIN_CONFIG.rpcUrl,
         onClaudePathSelected: selectClaudePath,
-        onSolverNetsUpdated: (solverNets) => {
-          config.solverNets = solverNets as typeof config.solverNets;
-          // The prediction operator status is memoised per-`JinnConfig`
-          // reference; mutating in place leaves the cache pointing at the
-          // pre-edit snapshot. Drop the entry so the next /v1/status read
-          // (and thus Overview's `solverNet.enabled` gating) reflects the
-          // toggle immediately. (jinn-mono-l2zl.15.4.12)
+        // Issue #421 retired the legacy `solverNets` write target. Setup
+        // endpoints no longer call back into the daemon to mutate operator
+        // SolverNet config; the canonical join flow is
+        // `POST /v1/operator/join/:cid`, which mutates
+        // `config.joinedSolverNets` directly via its own write path.
+        // The cache-invalidation hook is no longer needed here.
+        onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
         },
         // hjex.3: delegate to the live callback populated once running mode starts.
@@ -1289,28 +1288,29 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
       // (sum of unconsumed claim payments across open Tasks).
       launcher: {
-        getConfig: () => ({ solverNets: config.solverNets }),
+        getConfig: () => ({ joinedSolverNets: config.joinedSolverNets }),
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
-        // Cache-invalidation hook retained for the operator-mode
-        // setup-endpoints flow; the launcher-mode PATCH route was retired
-        // by Task 22, so this currently fires only when operator mode
-        // mutates `solverNets`.
-        onSolverNetsUpdated: (solverNets) => {
-          config.solverNets = solverNets as typeof config.solverNets;
+        // Issue #421 retired the legacy `solverNets` write target. The hook
+        // only needs to invalidate the prediction-operator status cache when
+        // operator mode mutates joinedSolverNets via setup endpoints.
+        onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
         },
         getGeneratorState: (netName) => {
           if (netName === 'prediction') {
             return predictionGeneratorRef?.getState();
           }
-          const solverType = config.solverNets?.[netName]?.solverType;
-          if (!solverType) return undefined;
+          const joined = Object.values(config.joinedSolverNets ?? {})
+            .find((entry) => (entry.name ?? entry.manifestCid) === netName);
+          if (!joined?.contract) return undefined;
+          const solverType = `${joined.contract.id}.${joined.contract.version}`;
           return launchedGeneratorStateBySolverType.get(solverType)?.();
         },
         getOpenTaskCount: (netName) => {
-          const net = config.solverNets?.[netName];
-          const solverType = net?.solverType;
-          if (!solverType || !safeAddressForLauncher) return 0;
+          const joined = Object.values(config.joinedSolverNets ?? {})
+            .find((entry) => (entry.name ?? entry.manifestCid) === netName);
+          if (!joined?.contract || !safeAddressForLauncher) return 0;
+          const solverType = `${joined.contract.id}.${joined.contract.version}`;
           return sharedStore.countPostedTasksByCreatorAndSolverType({
             creatorSafeAddress: safeAddressForLauncher,
             solverType,
