@@ -80,7 +80,7 @@ export interface LauncherGeneratorStateSnapshot {
 }
 
 export interface GatherLauncherStatusDeps {
-  config: Pick<JinnConfig, 'solverNets'>;
+  config: Pick<JinnConfig, 'joinedSolverNets'>;
   /** Returns the generator's live state, or `undefined` if the SolverNet has no generator. */
   getGeneratorState: (netName: string) => LauncherGeneratorStateSnapshot | undefined;
   /** Count of Tasks created by the operator that are still in flight for the named SolverNet. */
@@ -143,18 +143,21 @@ export async function gatherLauncherStatus(
   const now = deps.now?.() ?? Date.now();
   const nets: LauncherStatusNetEntry[] = [];
 
-  for (const [name, net] of Object.entries(deps.config.solverNets ?? {})) {
-    // Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md removed
-    // the operator-config `'launching'` role; surface every loaded SolverNet
-    // entry. Launched-record ownership filters happen at the launched-record
-    // surface, not here.
-    const snapshot = deps.getGeneratorState(name);
+  for (const [cid, joined] of Object.entries(deps.config.joinedSolverNets ?? {})) {
+    // Issue #421 removed the legacy `solverNets` config block; iterate the
+    // operator's joined SolverNets keyed by manifestCid. Launched-record
+    // ownership filters happen at the launched-record surface, not here.
+    const displayName = joined.name ?? cid;
+    const solverType = joined.contract
+      ? `${joined.contract.id}.${joined.contract.version}`
+      : undefined;
+    const snapshot = deps.getGeneratorState(displayName);
     const generatorState = deriveGeneratorState(snapshot);
     const stale = isStalePoll(snapshot, now);
 
     const [openTasks, reservedBudgetWei, safeBalanceWei] = await Promise.all([
-      Promise.resolve(deps.getOpenTaskCount(name)),
-      Promise.resolve(deps.getReservedBudgetWei(name)),
+      Promise.resolve(deps.getOpenTaskCount(displayName)),
+      Promise.resolve(deps.getReservedBudgetWei(displayName)),
       Promise.resolve(deps.getSafeBalanceWei()),
     ]);
 
@@ -168,9 +171,8 @@ export async function gatherLauncherStatus(
     if (snapshot?.lastError) generator.lastError = { ...snapshot.lastError };
 
     const safeAddress = typeof deps.safeAddress === 'function' ? deps.safeAddress() : deps.safeAddress;
-    const solverType = (net as { solverType?: unknown } | undefined)?.solverType;
     nets.push({
-      name,
+      name: displayName,
       ...(typeof solverType === 'string' && solverType.length > 0 ? { solverType } : {}),
       generator,
       openTasks,

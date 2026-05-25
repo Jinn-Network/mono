@@ -10,13 +10,15 @@ describe('gatherLauncherStatus', () => {
 
     const status = await gatherLauncherStatus({
       config: {
-        solverNets: {
-          prediction: {
-            enabled: true,
-            solverType: 'prediction.v1',
-            roles: ['solving'],
+        joinedSolverNets: {
+          'legacy:prediction': {
+            manifestCid: 'legacy:prediction',
+            name: 'prediction',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
             harness: 'claude-code-learner',
             plugins: [],
+            disabledDefaultPlugins: [],
           },
         },
       },
@@ -43,13 +45,15 @@ describe('gatherLauncherStatus', () => {
   it('preserves unavailable balance as unavailable instead of coercing to zero', async () => {
     const status = await gatherLauncherStatus({
       config: {
-        solverNets: {
-          prediction: {
-            enabled: true,
-            solverType: 'prediction.v1',
-            roles: ['solving'],
+        joinedSolverNets: {
+          'legacy:prediction': {
+            manifestCid: 'legacy:prediction',
+            name: 'prediction',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
             harness: 'claude-code-learner',
             plugins: [],
+            disabledDefaultPlugins: [],
           },
         },
       },
@@ -63,5 +67,31 @@ describe('gatherLauncherStatus', () => {
 
     expect(status.nets[0]?.budget.safeBalanceWei).toBe('');
     expect(status.nets[0]?.budget.reservedBudgetWei).toBe('');
+  });
+
+  it('emits one entry per joinedSolverNets membership, keyed by display name', async () => {
+    const status = await gatherLauncherStatus({
+      config: {
+        joinedSolverNets: {
+          'legacy:prediction': {
+            manifestCid: 'legacy:prediction',
+            name: 'prediction',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
+            plugins: [],
+            disabledDefaultPlugins: [],
+          },
+        },
+      },
+      getGeneratorState: () => ({ cadenceMs: 60_000 }),
+      getOpenTaskCount: () => 0,
+      getReservedBudgetWei: () => '',
+      getSafeBalanceWei: () => '0',
+      safeAddress: '0x0000000000000000000000000000000000000000',
+      now: () => Date.parse('2026-05-08T12:00:00.000Z'),
+    });
+    expect(status.nets).toHaveLength(1);
+    expect(status.nets[0]?.name).toBe('prediction');
+    expect(status.nets[0]?.solverType).toBe('prediction.v1');
   });
 });
