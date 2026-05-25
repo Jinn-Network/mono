@@ -472,21 +472,10 @@ export async function buildPredictionOperatorStatus({
     });
   }
 
-  // Resolve roles from the synthesized net config. The joined entry's roles
-  // are already `solver`/`evaluator`; `synthesizeFromJoined` maps them to
-  // `solving`/`evaluating`. Fall back to `['solving']` for a synthesized
-  // entry with no roles (treated as a config error elsewhere — surface it
-  // explicitly on the operator-status payload).
-  const resolvedRoles: SolverNetOperatorRole[] = (() => {
-    const candidate = (net as { roles?: unknown }).roles;
-    if (Array.isArray(candidate) && candidate.length > 0) {
-      return Array.from(new Set(candidate.filter(
-        (r): r is SolverNetOperatorRole =>
-          r === 'solving' || r === 'evaluating',
-      )));
-    }
-    return ['solving'];
-  })();
+  // `synthesizeFromJoined` already guarantees a non-empty
+  // `SolverNetOperatorRole[]` (it routes through `rolesFromJoinedConfig`
+  // and falls back to `['solving']`), so the net's roles are canonical.
+  const resolvedRoles: SolverNetOperatorRole[] = net.roles ?? ['solving'];
 
   const status: PredictionOperatorStatus = {
     kind: 'prediction.v1.operatorStatus',
