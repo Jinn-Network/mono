@@ -225,8 +225,7 @@ function classifyProbeError(host: string, err: unknown): ProbeFail {
  *
  * Per AC9 (issue #592): emits one log line per slot
  *   `[rpc] <layer> <host> ok latency=Nms`
- *   `[rpc] <layer> <host> warn 429`
- *   `[rpc] <layer> <host> warn 5xx`
+ *   `[rpc] <layer> <host> warn <http-status>`     (e.g. 429, 503)
  *   `[rpc] <layer> <host> warn unreachable: <message>`
  */
 export async function probeFallbackChain(
@@ -236,11 +235,10 @@ export async function probeFallbackChain(
   options: ProbeFallbackChainOptions = {},
 ): Promise<ProbeResult[]> {
   const log = options.log ?? ((m: string) => process.stderr.write(`${m}\n`));
-  // Pick a chain only for typing; eth_blockNumber doesn't depend on chain
-  // identity, and the L1/L2 distinction here is informational.
-  const chain = layer === 'L2'
-    ? (network === 'testnet' ? baseSepolia : base)
-    : (network === 'testnet' ? baseSepolia : base);
+  // Chain is informational only — eth_blockNumber doesn't depend on chain
+  // identity. Both L1 and L2 layers reuse the same Base/Base-Sepolia pair
+  // since this is just used to satisfy viem's typing.
+  const chain = network === 'testnet' ? baseSepolia : base;
 
   const results: ProbeResult[] = [];
   for (const url of urls) {
@@ -254,11 +252,7 @@ export async function probeFallbackChain(
       results.push({ ok: true, host, latencyMs });
     } catch (err) {
       const failure = classifyProbeError(host, err);
-      if (failure.code === 429) {
-        log(`[rpc] ${layer} ${host} warn 429`);
-      } else if (failure.code !== undefined && failure.code >= 500) {
-        log(`[rpc] ${layer} ${host} warn ${failure.code}`);
-      } else if (failure.code !== undefined) {
+      if (failure.code !== undefined) {
         log(`[rpc] ${layer} ${host} warn ${failure.code}`);
       } else {
         log(`[rpc] ${layer} ${host} warn unreachable: ${failure.message.split('\n')[0]}`);
