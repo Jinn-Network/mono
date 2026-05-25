@@ -188,6 +188,16 @@ jobs:
         working-directory: contracts
         run: yarn install --immutable
 
+      # T1.4 (SPA route smoke) runs Playwright against Chromium. The yarn install
+      # above pulls @playwright/test (the JS package) but not the actual browser
+      # binaries, which live under ~/.cache/ms-playwright/. Without this step
+      # T1.4 fails with `browserType.launch: Executable doesn't exist` and the
+      # Tier 1 gate blocks the stable publish. `--with-deps` pulls the system
+      # libraries Chromium needs on ubuntu-latest.
+      - name: Install Playwright Chromium for Tier 1 T1.4
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: yarn playwright install --with-deps chromium
+
       # Tier 1 — mechanical floor (per spec/2026-05-19 §3 of release-readiness design).
       # Replaces the legacy operator-gate that saturated the Tenderly RPC under
       # multi-bootstrap load (see jinn-mono-lrey). Tier 1 runs four scenarios
