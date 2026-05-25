@@ -257,6 +257,8 @@ Components raise state messages locally. The Notifications component is the unio
 - `restart_required`
 - `update_available`
 - `rpc_unreachable`
+- `rpc_all_failed` — every slot in the RPC fallback chain has failed (`AllRpcsFailedError`). Severity: action_required. The masked host list is included.
+- `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.
 - `no_solvernets_joined`
 - `safe_binding_pending`
 - `claim_available`
@@ -267,7 +269,7 @@ Components raise state messages locally. The Notifications component is the unio
 Operator-tunable configuration.
 
 - **Static**
-  - RPC URL
+  - RPC URL — single URL OR an ordered list of URLs (the fallback chain). On testnet the default is a two-provider chain (publicnode + sepolia.base.org). When a list is configured, the daemon builds a viem fallback transport: primary → secondary on network error / HTTP 429 / 5xx; capped at 4 providers. Surface format: provider count + primary host (e.g. `fallback chain (3 providers) — primary=my-alchemy-key.example`). The full chain stays masked in any operator-visible artifact (paths and api-key query strings never appear); only hostnames do. See `CLAUDE.md` "RPC fallback chain" for the full contract.
   - peer list
   - default harness
   - faucet endpoint
@@ -278,8 +280,13 @@ Operator-tunable configuration.
 - **State messages**
   - invalid value
   - restart required to apply
+  - RPC fallback chain (N providers) — informational; no action required when every slot is healthy.
+  - RPC primary degraded — the boot-time probe (or steady-state traffic) saw HTTP 429 or 5xx from slot 0 but a secondary slot served. Informational; no action required, but operators with a paid primary may want to inspect their key's quota.
+  - All RPCs failed — `AllRpcsFailedError` raised on a recent call. Action: check internet, then either confirm the chain hosts are up or update the `rpcUrl` chain in Settings. The masked host list is included for diagnostics.
 
-Every Settings field declares whether changes hot-apply or require a daemon restart. See §3.2.
+Every Settings field declares whether changes hot-apply or require a daemon restart. See §3.2. The RPC chain is **restart-required** (transport construction happens once at boot).
+
+This RPC-transport fallback is distinct from `discovery.fallbackToOnchain` (one layer up at the read-API: Ponder indexer → direct `eth_getLogs` floor). The RPC fallback operates beneath both layers.
 
 ### 2.12 Updates
 

@@ -312,7 +312,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | Config key | Env override | Default |
 |---|---|---|
 | network | JINN_NETWORK | `testnet` (Phase 1b default; flips to `mainnet` at Phase 2 launch) |
-| rpcUrl | BASE_RPC_URL / JINN_RPC_URL | network-appropriate public RPC |
+| rpcUrl | BASE_RPC_URL / JINN_RPC_URL | testnet: two-provider fallback chain `[publicnode, sepolia.base.org]`; mainnet: single `mainnet.base.org`. Accepts string OR array; env values split on commas. See "RPC fallback chain" below. |
 | claudeModel | JINN_CLAUDE_MODEL | claude-haiku-4-5-20251001 |
 | claudePath | JINN_CLAUDE_PATH | claude |
 | pollIntervalMs | JINN_POLL_INTERVAL_MS | 5000 |
@@ -324,6 +324,72 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | tasks | JINN_TASKS | [] (testnet auto-task generator posts `prediction.v0`) |
 
 `JINN_PASSWORD` is env-only (keystore encryption, never in config files). Alternatively, use `--password-fd <N>` to read from a file descriptor.
+
+### RPC fallback chain
+
+Out of the box on testnet, `jinn run` uses a two-provider fallback chain —
+no key required, zero config:
+
+```text
+slot 0  https://base-sepolia.publicnode.com   (no-auth, 50k-block getLogs cap)
+slot 1  https://sepolia.base.org              (free public Coinbase, 2k cap)
+```
+
+If the primary returns a network error or HTTP 429 / 5xx, viem
+transparently falls through to the next slot. When every slot fails the
+daemon throws `AllRpcsFailedError` (visible in the dashboard's NetworkSection
+and in stderr).
+
+#### Bring your own paid primary
+
+Operators with a paid Alchemy / Tenderly / QuickNode endpoint should
+**prepend** their URL — the public free chain stays as automatic backup:
+
+```json
+{
+  "rpcUrl": [
+    "https://my-alchemy-key.example",
+    "https://base-sepolia.publicnode.com",
+    "https://sepolia.base.org"
+  ]
+}
+```
+
+Or via env (comma-separated, same chain capped at 4 providers):
+
+```bash
+JINN_RPC_URL='https://my-alchemy-key.example,https://base-sepolia.publicnode.com,https://sepolia.base.org' jinn run
+```
+
+The chain is built with viem's `fallback({ rank: false })` so operator slot
+order is preserved (no latency-based reshuffling).
+
+#### Automatic failure modes
+
+| Failure                                     | What used to happen           | What now happens                                |
+|---------------------------------------------|--------------------------------|-------------------------------------------------|
+| Primary RPC returns HTTP 429 (rate limit)   | Daemon hot-loops on every call | viem falls through to slot 1; daemon continues  |
+| Primary RPC unreachable                     | Daemon errors silently         | viem falls through to slot 1; daemon continues  |
+| Primary's API key quota exhausted           | Daemon silently degraded       | viem falls through to slot 1; daemon continues  |
+| Every slot fails (rare)                     | Daemon errors silently         | `AllRpcsFailedError` thrown with masked host list — surfaces as a state message in the operator app |
+
+On boot the daemon emits one log line per slot followed by the canonical
+summary line:
+
+```text
+[rpc] L2 base-sepolia.publicnode.com ok latency=87ms
+[rpc] L2 sepolia.base.org ok latency=141ms
+[rpc] L2 transport: fallback chain (2 providers) — primary=base-sepolia.publicnode.com
+```
+
+The probe is **log-only** — secondary-slot 429s warn but never gate
+startup. Only chain-id mismatch against the head URL is fail-loud
+(`checkRpcNetwork`).
+
+Note this is the JSON-RPC transport layer. It is distinct from
+`discovery.fallbackToOnchain`, which is a separate flag at the read-API
+layer (Ponder indexer → direct `eth_getLogs` floor). The RPC fallback chain
+operates beneath both.
 
 ## Tokens
 

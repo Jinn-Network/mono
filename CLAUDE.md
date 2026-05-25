@@ -279,7 +279,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 
 | Config key       | Env override             | Default                           |
 |------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet: https://mainnet.base.org · testnet: https://base-sepolia-rpc.publicnode.com |
+| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet: `https://mainnet.base.org` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", "https://sepolia.base.org"]` |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
@@ -298,6 +298,45 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 
 `JINN_PASSWORD` is env-only — never in config files.
+
+### RPC fallback chain (issue #592)
+
+The `rpcUrl`, `ethereumRpcUrl`, `archiveRpcUrl`, `l2ProofRpcUrl`, and
+`ethereumArchiveRpcUrl` config keys all accept **either a single string OR
+an array of URLs**. Comma-separated env values (`BASE_SEPOLIA_RPC_URL=a,b`,
+`JINN_RPC_URL=a,b`, `JINN_ETHEREUM_RPC_URL=a,b`) are split on commas. The
+loader builds a viem `fallback({ rank: false })` transport under the hood:
+primary is tried first, secondary on network error or HTTP 429 / 5xx,
+chain capped at 4 providers. `rank: false` is deliberate — operator slot
+order is preserved (the issue's "Tenderly stays in slot 3" constraint).
+When every slot fails the daemon throws `AllRpcsFailedError`.
+
+Testnet default is a two-provider chain: `https://base-sepolia.publicnode.com`
+(no-auth, 50k-block `getLogs` cap) followed by `https://sepolia.base.org`
+(free public Coinbase endpoint, 2k-block cap, last-resort backup). Operators
+with paid keys (Alchemy / Tenderly) should **prepend** their URL to keep
+the public chain as automatic backup:
+
+```json
+{
+  "rpcUrl": [
+    "https://my-alchemy-key.example",
+    "https://base-sepolia.publicnode.com",
+    "https://sepolia.base.org"
+  ]
+}
+```
+
+On boot the daemon emits one line per slot
+(`[rpc] L2 <host> ok latency=Nms` or `warn 429`) followed by the summary
+`[rpc] L2 transport: fallback chain (N providers) — primary=<host>`. The
+probe is log-only — secondary-slot 429s never gate startup; only
+`checkRpcNetwork`'s chain-id mismatch against the head URL is fail-loud.
+
+This is the JSON-RPC transport layer. It is **distinct from**
+`discovery.fallbackToOnchain` (next section), which sits one layer up at
+the read-API and decides whether to fall through from the Ponder indexer
+to direct `eth_getLogs`. The RPC fallback chain operates beneath both.
 
 Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`). Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
 
