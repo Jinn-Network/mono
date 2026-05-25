@@ -1148,19 +1148,16 @@ export function loadConfig(configPath?: string): JinnConfig {
     ? parseRpcUrls(parsed.ethereumArchiveRpcUrl)
     : undefined;
 
+  // Strip the union-typed (string | string[]) RPC fields from `parsed` — the
+  // returned shape carries the resolved head URL plus a `*Urls` array instead.
   const {
-    rpcUrl: _stripRpcUrl,
-    archiveRpcUrl: _stripArchive,
-    l2ProofRpcUrl: _stripL2Proof,
-    ethereumRpcUrl: _stripEth,
-    ethereumArchiveRpcUrl: _stripEthArchive,
+    rpcUrl: _rpcUrl,
+    archiveRpcUrl: _archiveRpcUrl,
+    l2ProofRpcUrl: _l2ProofRpcUrl,
+    ethereumRpcUrl: _ethereumRpcUrl,
+    ethereumArchiveRpcUrl: _ethereumArchiveRpcUrl,
     ...rest
   } = parsed;
-  void _stripRpcUrl;
-  void _stripArchive;
-  void _stripL2Proof;
-  void _stripEth;
-  void _stripEthArchive;
 
   return {
     ...rest,
