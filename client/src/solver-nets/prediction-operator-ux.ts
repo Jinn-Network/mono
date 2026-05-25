@@ -237,9 +237,17 @@ function findPredictionJoined(
  */
 function synthesizeFromJoined(
   joined: JoinedSolverNetConfig,
-  solverType = 'prediction.v1',
+  defaultSolverType = 'prediction.v1',
 ): SolverNetConfig {
   const roles = rolesFromJoinedConfig(joined);
+  // Derive solverType from the joined contract when available so the
+  // operator-status diagnostic can surface contract-version mismatches
+  // (e.g. legacy `solverType: 'prediction.v2'` migrated into a joined
+  // entry — the synthesized net's solverType is then 'prediction.v2',
+  // which the prediction.v1 mismatch check catches downstream).
+  const solverType = joined.contract
+    ? `${joined.contract.id}.${joined.contract.version}`
+    : defaultSolverType;
   return {
     enabled: true,
     solverType,

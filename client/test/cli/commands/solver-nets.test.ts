@@ -83,6 +83,11 @@ function loadPredictionTestConfig(
   return { config, configPath };
 }
 
+// Issue #421: on-disk legacy `solverNets.prediction.X` blocks are migrated to
+// `joinedSolverNets['legacy:prediction']` synthetic entries; the
+// `prediction-operator-ux` configField strings carry that synthetic key.
+const LEGACY_PREDICTION_CID = 'legacy:prediction';
+
 const operatorStatusDeps = {
   loadSolverNets: async () => ({
     get: (name: string) => name === 'prediction'
@@ -138,7 +143,9 @@ describe('solver-nets command', () => {
       enabled: true,
       solverType: 'prediction.v1',
       harness: 'prediction-v1-baseline',
-      taskGeneratorEnabled: true,
+      // Issue #421: operator config no longer carries the task-generator
+      // flag — generator ownership is launched-record-driven.
+      taskGeneratorEnabled: false,
     });
     expect(envelope['runtimePlugins']).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -172,7 +179,7 @@ describe('solver-nets command', () => {
         expect.objectContaining({
           code: 'prediction_plugin_unavailable',
           severity: 'error',
-          configField: 'solverNets.prediction.plugins',
+          configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.plugins`,
         }),
       ]),
     );
@@ -292,18 +299,6 @@ describe('solver-nets command', () => {
 
   it.each([
     {
-      label: 'disabled SolverNet',
-      fatalForSolvingNow: true,
-      warningForGeneratorOrDashboardCompleteness: false,
-      expectedOk: false,
-      expected: {
-        code: 'prediction_solvernet_disabled',
-        severity: 'error' as const,
-        configField: 'solverNets.prediction.enabled',
-      },
-      config: () => loadPredictionTestConfig({ enabled: false }),
-    },
-    {
       label: 'invalid runtime plugin',
       fatalForSolvingNow: true,
       warningForGeneratorOrDashboardCompleteness: false,
@@ -311,7 +306,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_plugin_unavailable',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.plugins',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.plugins`,
       },
       deps: {
         loadSolverNets: async () => {
@@ -330,7 +325,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_plugin_unavailable',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.plugins',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.plugins`,
       },
       deps: {
         loadSolverNets: async () => {
@@ -349,9 +344,23 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_solver_type_mismatch',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.solverType',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.contract`,
       },
-      config: () => loadPredictionTestConfig({ solverType: 'portfolio.v0' }),
+      // The legacy `solverType: 'portfolio.v0'` migrates to
+      // `contract: { id: 'portfolio', version: 'v0' }`. The joined entry
+      // is keyed by `legacy:prediction` but its contract is portfolio.v0,
+      // which is not prediction. To trigger the mismatch diagnostic the
+      // join must still be found (contract.id === 'prediction') — so we
+      // hand-mutate the joined entry to point at a non-prediction contract
+      // while keeping the prediction-contract entry's display name.
+      config: () => loadPredictionTestConfig({}, (config) => {
+        const entry = config.joinedSolverNets?.[LEGACY_PREDICTION_CID];
+        if (entry?.contract) {
+          // Keep contract.id === 'prediction' so findPredictionJoined picks
+          // it up, but advance the version so the solverType check fails.
+          entry.contract = { id: 'prediction', version: 'v2' };
+        }
+      }),
     },
     {
       label: 'missing Harness selection',
@@ -361,10 +370,11 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_missing',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.harness',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
       },
       config: () => loadPredictionTestConfig({}, (config) => {
-        config.solverNets.prediction.harness = undefined as unknown as string;
+        const entry = config.joinedSolverNets?.[LEGACY_PREDICTION_CID];
+        if (entry) entry.harness = undefined;
       }),
     },
     {
@@ -375,7 +385,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_unknown',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.harness',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
       },
       config: () => loadPredictionTestConfig({ harness: 'not-installed-prediction-harness' }),
     },
@@ -387,7 +397,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_unsupported',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.harness',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
       },
       deps: {
         buildHarnesses: () => [
@@ -407,7 +417,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_not_ready',
         severity: 'warning' as const,
-        configField: 'solverNets.prediction.harness',
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
       },
       deps: {
         buildHarnesses: () => [
@@ -424,16 +434,19 @@ describe('solver-nets command', () => {
       config: () => loadPredictionTestConfig({ harness: 'prediction-v1-needs-daemon' }),
     },
     {
-      label: 'disabled task generator',
+      label: 'task generator info (post-#421 informational diagnostic)',
       fatalForSolvingNow: false,
       warningForGeneratorOrDashboardCompleteness: true,
       expectedOk: true,
       expected: {
+        // Synthesized joined entries always set taskGenerator.enabled: false;
+        // the diagnostic surface emits an informational note (not a warning)
+        // explaining that generator ownership lives on the launcher.
         code: 'prediction_task_generator_disabled',
-        severity: 'warning' as const,
-        configField: 'solverNets.prediction.taskGenerator.enabled',
+        severity: 'info' as const,
+        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}`,
       },
-      config: () => loadPredictionTestConfig({ taskGenerator: { enabled: false } }),
+      config: () => loadPredictionTestConfig({}),
     },
   ])(
     'documents Prediction operator diagnostic matrix row: $label',
@@ -456,29 +469,13 @@ describe('solver-nets command', () => {
     },
   );
 
-  it('does not validate Prediction harness compatibility when the SolverNet is disabled', async () => {
-    const { config, configPath } = loadPredictionTestConfig({
-      enabled: false,
-      harness: 'claude-code-learner',
-    });
-
-    const status = await buildPredictionOperatorStatus({
-      config,
-      configPath,
-      ...operatorStatusDeps,
-    });
-
-    expect(status.ok).toBe(false);
-    expect(status.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      'prediction_solvernet_disabled',
-    ]);
-    expect(status.harness).toBeUndefined();
-  });
-
-  it('reports a generic operator recovery path when the legacy prediction SolverNet is missing', async () => {
-    const configPath = tempConfig({ solverNets: {} });
+  it('reports a generic operator recovery path when no joined prediction SolverNet exists', async () => {
+    // Issue #421: the legacy `solverNets` block is retired; the "missing"
+    // path now fires when no joinedSolverNets entry has contract.id ===
+    // 'prediction'. Empty joinedSolverNets is the canonical "no SolverNet
+    // joined" shape.
+    const configPath = tempConfig({});
     const config = loadConfig(configPath);
-    delete config.solverNets.prediction;
 
     const status = await buildPredictionOperatorStatus({
       config,
@@ -492,7 +489,7 @@ describe('solver-nets command', () => {
     const diagnostic = status.diagnostics.find((candidate) => candidate.code === 'prediction_solvernet_missing');
     expect(status.ok).toBe(false);
     expect(diagnostic?.message).toBe('No active SolverNet configured.');
-    expect(diagnostic?.configField).toBe('solverNets');
+    expect(diagnostic?.configField).toBe('joinedSolverNets');
     expect(diagnostic?.nextAction).toEqual({
       description: 'Open Operator > SolverNets to join or configure a SolverNet.',
       url: '/operator#solvernets',
@@ -681,22 +678,26 @@ describe('solver-nets command', () => {
     });
   });
 
-  describe('solver-nets list — joinedSolverNets enumeration (jinn-mono-hjex.2)', () => {
-    it('enumerates legacy solverNets entries with source: legacy', async () => {
+  describe('solver-nets list — joinedSolverNets enumeration (issue #421)', () => {
+    it('surfaces migrated legacy entries with source: joined and synthetic cid', async () => {
+      // After issue #421, the legacy `solverNets.prediction` block on disk
+      // is auto-migrated by loadConfig into a joinedSolverNets entry under
+      // the synthetic key `legacy:prediction`. The list output surfaces it
+      // with source='joined'.
       const configPath = tempConfig(predictionConfig());
       const result = await runSolverNets(['list', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
       expect(nets.length).toBeGreaterThan(0);
-      const legacyEntry = nets.find((n) => n['name'] === 'prediction');
-      expect(legacyEntry).toBeDefined();
-      expect(legacyEntry?.['source']).toBe('legacy');
+      const entry = nets.find((n) => n['name'] === 'prediction');
+      expect(entry).toBeDefined();
+      expect(entry?.['source']).toBe('joined');
+      expect(entry?.['manifestCid']).toBe(LEGACY_PREDICTION_CID);
     });
 
     it('enumerates joinedSolverNets entries with source: joined', async () => {
       const configPath = tempConfig({
-        solverNets: {},
         joinedSolverNets: {
           'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
             manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
@@ -717,7 +718,7 @@ describe('solver-nets command', () => {
       expect(nets[0]?.['manifestCid']).toBe('bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi');
     });
 
-    it('returns both legacy and joined entries when both are present', async () => {
+    it('returns one entry per joinedSolverNets membership (migrated + native)', async () => {
       const configPath = tempConfig({
         ...predictionConfig(),
         joinedSolverNets: {
@@ -735,14 +736,17 @@ describe('solver-nets command', () => {
       expect(result.exits).toEqual([]);
       const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
       expect(nets.length).toBe(2);
-      const sources = nets.map((n) => n['source']);
-      expect(sources).toContain('legacy');
-      expect(sources).toContain('joined');
+      // Both entries surface as source='joined' (one migrated, one native).
+      for (const n of nets) {
+        expect(n['source']).toBe('joined');
+      }
+      const cids = nets.map((n) => n['manifestCid']);
+      expect(cids).toContain(LEGACY_PREDICTION_CID);
+      expect(cids).toContain('bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi');
     });
 
     it('solver-nets list --human includes joined SolverNet name in output', async () => {
       const configPath = tempConfig({
-        solverNets: {},
         joinedSolverNets: {
           'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
             manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',

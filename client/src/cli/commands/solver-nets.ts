@@ -373,22 +373,17 @@ Output flags:
     const [name, arg2] = parsed.positionals;
 
     if (!subverb || subverb === 'list') {
+      // Issue #421: the legacy `solverNets` block has been retired. `loadConfig`
+      // migrates any on-disk legacy entries into joinedSolverNets with
+      // synthetic `legacy:<short-name>` keys, so the joined-only iteration
+      // here surfaces both modern and migrated entries.
       const loaded = loadConfig(configPath);
-      const legacy = Object.entries(loaded.solverNets).map(([netName, net]) => ({
-        name: netName,
-        source: 'legacy' as const,
-        enabled: net.enabled,
-        solverType: net.solverType,
-        harness: net.harness,
-        pluginCount: net.plugins.length,
-        taskGeneratorEnabled: net.taskGenerator.enabled,
-      }));
       const joined = Object.entries(loaded.joinedSolverNets ?? {}).map(([cid, net]) => ({
         name: net.name ?? cid,
         source: 'joined' as const,
         manifestCid: cid,
         enabled: true,
-        solverType: 'prediction.v1',
+        solverType: net.contract ? `${net.contract.id}.${net.contract.version}` : '(unknown)',
         harness: net.harness,
         pluginCount: (net.plugins ?? []).length,
         taskGeneratorEnabled: false,
@@ -396,16 +391,17 @@ Output flags:
       const value = {
         verb: 'solver-nets list',
         configPath,
-        solverNets: [...legacy, ...joined],
+        solverNets: joined,
       };
       emit(ctx, value, human, json, (v) => {
         const list = v as typeof value;
         if (list.solverNets.length === 0) return 'No SolverNets configured.';
         return list.solverNets
-          .map((n) => {
-            const base = `${n.name}  ${n.enabled ? 'enabled' : 'disabled'}  ${n.solverType}  harness=${n.harness ?? '(default)'}  plugins=${n.pluginCount}  generator=${n.taskGeneratorEnabled ? 'on' : 'off'}  source=${n.source}`;
-            return 'manifestCid' in n ? `${base}  cid=${n.manifestCid}` : base;
-          })
+          .map((n) =>
+            `${n.name}  ${n.enabled ? 'enabled' : 'disabled'}  ${n.solverType}  ` +
+            `harness=${n.harness ?? '(default)'}  plugins=${n.pluginCount}  ` +
+            `generator=${n.taskGeneratorEnabled ? 'on' : 'off'}  source=${n.source}  cid=${n.manifestCid}`,
+          )
           .join('\n');
       });
       return;
@@ -486,6 +482,19 @@ Output flags:
     if (!name) {
       fail(ctx, `solver-nets ${subverb} requires <name>`);
       return;
+    }
+
+    if (subverb !== 'show' && subverb !== 'doctor' && subverb !== 'sample') {
+      // Issue #421: these subverbs still edit the legacy solverNets file shape
+      // for one upgrade cycle. The daemon's loadConfig migrates any on-disk
+      // legacy entries into joinedSolverNets on next start; the canonical join
+      // flow is the SPA (Operator > SolverNets).
+      process.stderr.write(
+        `[solver-nets] WARNING: subverb '${subverb}' edits the legacy solverNets ` +
+        `file shape (issue #421). The daemon auto-migrates this on next load; ` +
+        `re-join via the SPA (Operator > SolverNets) to replace synthetic legacy:* ` +
+        `keys with real manifest CIDs.\n`,
+      );
     }
 
     const solverNets = ensureSolverNets(cfg);
