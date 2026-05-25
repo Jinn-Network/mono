@@ -284,8 +284,11 @@ describe('classifyRealityCheck', () => {
 
   it('downgrades fixed-pending-backmerge by one tier when the latest commit on the side branch is a revert', () => {
     // Less common but symmetrical: a revert on the side branch with no
-    // surviving fix → downgrade to clear (one tier below fixed-direct-commit
-    // is clear here because the underlying signal collapsed).
+    // surviving fix → downgrade to clear via the same `collapsedToClear`
+    // post-pass the trunk bucket uses. The classifier always collapses to
+    // `clear` here (it never emits `fixed-direct-commit` from the side-only
+    // bucket); the revert SHAs are surfaced on the evidence so the operator
+    // can see why.
     const verdict = classifyRealityCheck(
       input({
         issueNumber: 572,
@@ -311,11 +314,7 @@ describe('classifyRealityCheck', () => {
         ],
       }),
     );
-    // fixed-pending-backmerge -> fixed-direct-commit (still no surviving
-    // signal because the underlying commit doesn't reach trunk). The design
-    // note says "downgrade by one tier"; with no fix-direct-commit signal
-    // alive either, the verdict collapses to clear via the same post-pass.
-    expect(['clear', 'fixed-direct-commit']).toContain(verdict.classification);
+    expect(verdict.classification).toBe('clear');
     expect(verdict.evidence.revertedShas).toContain('revert02');
   });
 });
