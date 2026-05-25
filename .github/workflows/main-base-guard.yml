@@ -1,0 +1,39 @@
+name: Main base guard
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allow only hotfix or release-review PRs against main
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          echo "PR title: $PR_TITLE"
+          echo "Head ref: $HEAD_REF"
+          # Allowed cases:
+          #   1. Hotfix sub-flow per docs/runbooks/hotfix.md:
+          #      - title starts with "fix(incident)"
+          #      - head branch starts with "hotfix/"
+          #   2. Standing release-review PR per DR-2026-05-20:
+          #      - head branch is exactly "next"
+          if [[ "$PR_TITLE" == fix\(incident\)* ]]; then
+            echo "OK: hotfix title prefix detected."
+            exit 0
+          fi
+          if [[ "$HEAD_REF" == hotfix/* ]]; then
+            echo "OK: hotfix branch prefix detected."
+            exit 0
+          fi
+          if [[ "$HEAD_REF" == "next" ]]; then
+            echo "OK: standing release-review PR (next -> main)."
+            exit 0
+          fi
+          echo "::error::PRs to main are restricted to the hotfix sub-flow or the standing release-review PR."
+          echo "::error::See docs/runbooks/hotfix.md and docs/engineering/handbook.md §Cadence."
+          echo "::error::To proceed: retarget this PR at 'next', or rename to 'fix(incident)(<id>): ...' and branch from 'hotfix/<id>-<slug>'."
+          exit 1
