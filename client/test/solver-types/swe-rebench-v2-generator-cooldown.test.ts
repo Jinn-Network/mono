@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, unlinkSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -402,5 +403,157 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     });
     const task = await gen();
     expect(expectTaskArray(task)[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
+  });
+});
+
+describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-pool growth', () => {
+  let stateDir: string;
+  let ipfsUploadCount: number;
+
+  beforeEach(() => {
+    stateDir = tmpDir();
+    ipfsUploadCount = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-22T00:00:00.000Z'));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'POST' || url.includes('/api/v0/add')) {
+        ipfsUploadCount += 1;
+        return {
+          status: 200,
+          text: async () => `${JSON.stringify({ Hash: `bafy-vetted-pool-cid-${ipfsUploadCount}` })}\n`,
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ splits: [{ split: '2026_02' }] }),
+      } as Response;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  async function seedStalePublication(): Promise<void> {
+    const stalePublishedAt = '2026-05-20T00:00:00.000Z';
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: stalePublishedAt,
+      entries: [
+        {
+          instance_id: 'org__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: stalePublishedAt,
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-stale-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: stalePublishedAt,
+    });
+    await writeVettedPoolArtifactPublication({
+      stateDir,
+      ref,
+      artifact,
+      updatedAt: stalePublishedAt,
+    });
+  }
+
+  async function seedValidatedPoolWithTwoEntries(): Promise<void> {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record(
+      'org__repo-1',
+      { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' },
+      EVAL_SEMANTICS_VERSION,
+    );
+    await store.record(
+      'org__repo-2',
+      { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' },
+      EVAL_SEMANTICS_VERSION,
+    );
+  }
+
+  function bumpValidatedPoolMtime(): void {
+    // Force the file's mtime past the publication's updatedAt so the per-tick
+    // staleness gate fires deterministically — Node may otherwise report sub-ms
+    // mtime granularity under fakeTimers.
+    const future = new Date('2026-05-22T01:00:00.000Z');
+    utimesSync(join(stateDir, 'validated-pool.json'), future, future);
+  }
+
+  it('re-publishes when validated-pool.json mtime advances past the stale publication', async () => {
+    await seedStalePublication();
+    await seedValidatedPoolWithTwoEntries();
+    bumpValidatedPoolMtime();
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      N_max_postings_per_task: 1,
+      post_batch_size: 1,
+    });
+
+    await gen();
+    await gen();
+
+    expect(ipfsUploadCount).toBe(1);
+    expect(gen.getState()).toMatchObject({
+      poolPublicationPriorSize: 1,
+      poolPublicationCurrentSize: 2,
+    });
+    expect(gen.getState().poolPublicationUpdatedAt).toBeTypeOf('string');
+  });
+
+  it('does not re-publish when validated-pool.json mtime is unchanged across ticks', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'org__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          instance_id: 'org__repo-2',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-current-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+    await seedValidatedPoolWithTwoEntries();
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      N_max_postings_per_task: 1,
+      post_batch_size: 1,
+    });
+
+    await gen();
+    await gen();
+
+    expect(ipfsUploadCount).toBe(0);
+    expect(gen.getState().poolPublicationCurrentSize).toBeUndefined();
+    expect(gen.getState().poolPublicationPriorSize).toBeUndefined();
   });
 });

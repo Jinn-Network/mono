@@ -9,6 +9,7 @@
  * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.6
  */
 
+import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -112,6 +113,9 @@ export interface SweRebenchV2GeneratorStateSnapshot {
   totalPosted: number;
   lastPostedInstanceId?: string;
   config: GeneratorConfig;
+  poolPublicationUpdatedAt?: string;
+  poolPublicationPriorSize?: number;
+  poolPublicationCurrentSize?: number;
 }
 
 export type SweRebenchV2GeneratorTick = TaskGenerator & {
@@ -277,7 +281,10 @@ function claimPolicyForPosting(
 interface PublishedVettedPool {
   scorableIds: Set<string> | null;
   artifactRef: SolverNetArtifactRef | null;
-  mode: 'published' | 'published-from-local' | 'no-publication' | 'no-manifest';
+  mode: 'published' | 'published-from-local' | 'republished' | 'no-publication' | 'no-manifest';
+  priorSize?: number;
+  currentSize?: number;
+  publishedAt?: string;
 }
 
 async function resolvePublishedVettedPool(args: {
@@ -297,12 +304,20 @@ async function resolvePublishedVettedPool(args: {
     manifestCid: args.manifestCid,
     evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
   });
+
+  let priorSize: number | undefined;
   if (existing) {
-    return {
-      scorableIds: loadVettedPoolArtifactScorableEntries(existing.artifact).ids,
-      artifactRef: existing.ref,
-      mode: 'published',
-    };
+    const scorable = await args.store.getScorableEntries(EVAL_SEMANTICS_VERSION);
+    const validatedNewer =
+      scorable !== null && scorable.updatedAt > existing.updatedAt;
+    if (!validatedNewer) {
+      return {
+        scorableIds: loadVettedPoolArtifactScorableEntries(existing.artifact).ids,
+        artifactRef: existing.ref,
+        mode: 'published',
+      };
+    }
+    priorSize = existing.artifact.entries.length;
   }
 
   const artifact = await exportScorableVettedPoolArtifact(args.store, EVAL_SEMANTICS_VERSION, {
@@ -329,7 +344,10 @@ async function resolvePublishedVettedPool(args: {
   return {
     scorableIds: loadVettedPoolArtifactScorableEntries(artifact).ids,
     artifactRef,
-    mode: 'published-from-local',
+    mode: priorSize !== undefined ? 'republished' : 'published-from-local',
+    ...(priorSize !== undefined ? { priorSize } : {}),
+    currentSize: artifact.entries.length,
+    publishedAt: args.nowIso,
   };
 }
 
@@ -394,6 +412,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let totalPosted = 0;
   let lastPostedInstanceId: string | undefined;
   let publishedPoolCache: PublishedVettedPool | null = null;
+  let lastValidatedPoolMtimeMs = -1;
+  let lastPoolPublicationUpdatedAt: string | undefined;
+  let lastPoolPublicationPriorSize: number | undefined;
+  let lastPoolPublicationCurrentSize: number | undefined;
 
   async function refreshPool(): Promise<void> {
     const result = await loadPoolWithCacheFallback({
@@ -447,6 +469,14 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     }
     lastPollAt = new Date(now).toISOString();
 
+    const validatedPoolMtimeMs = await stat(join(config.stateDir, 'validated-pool.json'))
+      .then((s) => s.mtimeMs)
+      .catch(() => -1);
+    if (validatedPoolMtimeMs > lastValidatedPoolMtimeMs) {
+      publishedPoolCache = null;
+      lastValidatedPoolMtimeMs = validatedPoolMtimeMs;
+    }
+
     let publishedPool: PublishedVettedPool | null = publishedPoolCache;
     if (!publishedPool) {
       publishedPool = await resolvePublishedVettedPool({
@@ -470,6 +500,11 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       });
       if (publishedPool?.artifactRef) {
         publishedPoolCache = publishedPool;
+        if (publishedPool.priorSize !== undefined) {
+          lastPoolPublicationPriorSize = publishedPool.priorSize;
+          lastPoolPublicationCurrentSize = publishedPool.currentSize;
+          lastPoolPublicationUpdatedAt = publishedPool.publishedAt;
+        }
       }
     }
     if (publishedPool === null) {
@@ -656,6 +691,15 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         totalPosted,
         lastPostedInstanceId,
         config: liveConfig,
+        ...(lastPoolPublicationUpdatedAt !== undefined
+          ? { poolPublicationUpdatedAt: lastPoolPublicationUpdatedAt }
+          : {}),
+        ...(lastPoolPublicationPriorSize !== undefined
+          ? { poolPublicationPriorSize: lastPoolPublicationPriorSize }
+          : {}),
+        ...(lastPoolPublicationCurrentSize !== undefined
+          ? { poolPublicationCurrentSize: lastPoolPublicationCurrentSize }
+          : {}),
       };
     },
   });
