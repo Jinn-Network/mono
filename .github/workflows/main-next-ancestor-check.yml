@@ -1,5 +1,3 @@
-# .github/workflows/main-next-ancestor-check.yml
-#
 # Backstop for missed hotfix back-merges (issue #590).
 # Asserts `git merge-base --is-ancestor origin/main origin/next` daily and on
 # every push to main or next. On failure, opens-or-updates a single alert
@@ -63,6 +61,19 @@ jobs:
             --force \
             --repo "${{ github.repository }}" || true
 
+      - name: Find open alert issue
+        id: find-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          NUMBER="$(gh issue list \
+            --repo "${REPO}" \
+            --search "[main-next-divergence] is:open" \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+          echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Open or update divergence alert issue
         if: steps.check.outputs.result == 'fail'
         env:
@@ -71,6 +82,7 @@ jobs:
           MAIN_SHA: ${{ steps.check.outputs.main_sha }}
           NEXT_SHA: ${{ steps.check.outputs.next_sha }}
           DIVERGED: ${{ steps.check.outputs.diverged }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
         shell: bash
         run: |
           MAIN_SHORT="${MAIN_SHA:0:8}"
@@ -100,12 +112,6 @@ jobs:
 
           ${RUN_URL}
           BODY_EOF
-
-          EXISTING="$(gh issue list \
-            --repo "${REPO}" \
-            --search "[main-next-divergence] is:open" \
-            --json number \
-            --jq '.[0].number // empty' 2>/dev/null || true)"
 
           if [ -n "$EXISTING" ]; then
             COMMENT_FILE="$(mktemp)"
@@ -139,14 +145,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
         shell: bash
         run: |
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          EXISTING="$(gh issue list \
-            --repo "${REPO}" \
-            --search "[main-next-divergence] is:open" \
-            --json number \
-            --jq '.[0].number // empty' 2>/dev/null || true)"
           if [ -n "$EXISTING" ]; then
             gh issue close "$EXISTING" \
               --repo "${REPO}" \
