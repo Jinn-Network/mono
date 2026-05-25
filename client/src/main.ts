@@ -107,7 +107,13 @@ import type { StopHookPayload, StopHookTool } from './api/stop-hook.js';
 import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
-import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
+import {
+  checkRpcNetwork,
+  logRpcLocalDevToStderr,
+  probeFallbackChain,
+  rpcNetworkFailureHint,
+  summarizeFallbackChain,
+} from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
 import { keepSetupUiOnBootstrapError } from './setup/halt-mode.js';
@@ -828,6 +834,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     });
   } else {
     logRpcLocalDevToStderr(rpcPreflight);
+  }
+
+  // Boot-time RPC fallback-chain probe (issue #592, AC7 + AC9). Log-only —
+  // per-slot 429s/5xx never gate startup. checkRpcNetwork above already
+  // fail-loud on chain-id mismatch against the head provider.
+  await probeFallbackChain(config.rpcUrls, config.network, 'L2');
+  console.error(summarizeFallbackChain('L2', config.rpcUrls));
+  if (config.jinnClaimLoopEnabled && config.ethereumRpcUrls) {
+    await probeFallbackChain(config.ethereumRpcUrls, config.network, 'L1');
+    console.error(summarizeFallbackChain('L1', config.ethereumRpcUrls));
   }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
