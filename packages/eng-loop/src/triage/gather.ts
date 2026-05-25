@@ -171,8 +171,6 @@ function safeJsonObject<T>(raw: string): T {
 
 interface RawCommit {
   sha: string;
-  /** Decoration string (refs) — unused; kept for traceability. */
-  decoration: string;
   subject: string;
 }
 
@@ -180,13 +178,14 @@ function parseGitLog(raw: string): RawCommit[] {
   const out: RawCommit[] = [];
   for (const line of raw.split('\n')) {
     if (line === '') continue;
-    // Format: %H<TAB>%D<TAB>%s
+    // Format: %H<TAB>%D<TAB>%s — we only keep sha and subject; the
+    // decoration (%D) is ignored because containment is recomputed via
+    // `git branch -a --contains <sha>`.
     const parts = line.split('\t');
     if (parts.length < 3) continue;
-    const [sha, decoration, ...subjectParts] = parts;
+    const [sha, , ...subjectParts] = parts;
     out.push({
       sha: sha.trim(),
-      decoration: decoration.trim(),
       // Subject may itself contain tabs (rare but possible); rejoin them.
       subject: subjectParts.join('\t').trim(),
     });

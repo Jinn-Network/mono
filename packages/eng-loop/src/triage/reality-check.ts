@@ -33,39 +33,30 @@ export const REVERT_SUBJECT_RE = /^(Revert "|revert\()/;
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface RelevantCommits {
-  /** Commits that have at least one trunk reach. Empty if none. */
+interface Buckets {
+  /** Commits that have at least one trunk reach. */
   trunk: CommitSignal[];
   /** Commits that have at least one side-branch reach but no trunk reach. */
   sideOnly: CommitSignal[];
-  /** Commits with no reach at all (informational; not used for verdict). */
-  unreachable: CommitSignal[];
 }
 
-function bucketCommits(commits: CommitSignal[]): RelevantCommits {
+function bucketCommits(commits: CommitSignal[]): Buckets {
   const trunk: CommitSignal[] = [];
   const sideOnly: CommitSignal[] = [];
-  const unreachable: CommitSignal[] = [];
   for (const c of commits) {
     if (c.reachableFrom.trunk.length > 0) {
       trunk.push(c);
     } else if (c.reachableFrom.side.length > 0) {
       sideOnly.push(c);
-    } else {
-      unreachable.push(c);
     }
+    // Commits with no reach at all are informational only; ignored here.
   }
-  return { trunk, sideOnly, unreachable };
+  return { trunk, sideOnly };
 }
 
 /** Pick the most-recent (commits are newest-first) non-revert commit. */
 function firstNonRevert(commits: CommitSignal[]): CommitSignal | undefined {
   return commits.find((c) => !c.isRevert);
-}
-
-/** Pick the most-recent commit overall (newest-first ordering). */
-function firstAny(commits: CommitSignal[]): CommitSignal | undefined {
-  return commits[0];
 }
 
 /** Collect the SHAs of revert commits in a bucket. */
@@ -75,16 +66,14 @@ function revertShas(commits: CommitSignal[]): string[] {
 
 /**
  * Per the design note: when the most-recent reachable commit referencing
- * `#N` on a bucket is a revert, downgrade by one tier. This implementation
- * applies the downgrade by treating the bucket's effective fix as "no
- * surviving non-revert commit" — i.e. the revert wins and the verdict
- * collapses one tier (e.g. `fixed-on-trunk` -> `clear` when no surviving
- * fix exists; `fixed-pending-backmerge` -> downgraded similarly).
+ * `#N` on a bucket is a revert, downgrade by one tier. We collapse the
+ * affected bucket's verdict to `clear` and surface the revert SHAs so the
+ * operator can see why.
+ *
+ * Newest-first ordering means the dominant commit is index 0.
  */
 function isRevertDominant(commits: CommitSignal[]): boolean {
-  // Newest-first ordering; the dominant commit is index 0.
-  const head = commits[0];
-  return head != null && head.isRevert;
+  return commits[0]?.isRevert === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,19 +121,10 @@ export function classifyRealityCheck(input: RealityCheckInput): RealityCheckVerd
   if (bucketed.trunk.length > 0) {
     const reverts = revertShas(bucketed.trunk);
     if (isRevertDominant(bucketed.trunk)) {
-      // Revert wins → downgrade to clear (no surviving signal). Surface the
-      // revert SHAs so the operator can see why we collapsed.
-      return verdict('clear', {
-        blockedOn: null,
-        comment: null,
-        evidence: { revertedShas: reverts },
-      });
+      return collapsedToClear(reverts);
     }
-    const head = firstNonRevert(bucketed.trunk);
-    // Defensive — if reverts are present but `firstNonRevert` returns
-    // nothing, fall back to the head commit (shouldn't happen because
-    // `isRevertDominant` already handled an all-revert bucket).
-    const chosen = head ?? firstAny(bucketed.trunk)!;
+    // Safe: bucket is non-empty and head is not a revert, so `find` hits.
+    const chosen = firstNonRevert(bucketed.trunk)!;
     const branch = chosen.reachableFrom.trunk[0];
     const closingPr = relatedClosingPr(input, chosen);
     const classification = closingPr != null ? 'fixed-on-trunk' : 'fixed-direct-commit';
@@ -168,26 +148,20 @@ export function classifyRealityCheck(input: RealityCheckInput): RealityCheckVerd
   if (bucketed.sideOnly.length > 0) {
     const reverts = revertShas(bucketed.sideOnly);
     if (isRevertDominant(bucketed.sideOnly)) {
-      // Downgrade: pending-backmerge -> direct-commit; with no surviving
-      // commit on either bucket, the verdict collapses to clear.
-      return verdict('clear', {
-        blockedOn: null,
-        comment: null,
-        evidence: { revertedShas: reverts },
-      });
+      return collapsedToClear(reverts);
     }
-    const head = firstNonRevert(bucketed.sideOnly) ?? firstAny(bucketed.sideOnly)!;
-    const sideBranch = head.reachableFrom.side[0];
-    const closingPr = relatedClosingPr(input, head);
+    const chosen = firstNonRevert(bucketed.sideOnly)!;
+    const sideBranch = chosen.reachableFrom.side[0];
+    const closingPr = relatedClosingPr(input, chosen);
+    const prSuffix = closingPr != null ? ` (PR #${closingPr.number})` : '';
     const comment =
-      `Fix on \`${sideBranch.name}\` at ${head.sha}` +
-      (closingPr != null ? ` (PR #${closingPr.number})` : '') +
+      `Fix on \`${sideBranch.name}\` at ${chosen.sha}${prSuffix}` +
       `, pending back-merge to \`next\`. Coordinator deferring; verify before reopening.`;
     return verdict('fixed-pending-backmerge', {
       blockedOn: 'Human',
       comment,
       evidence: {
-        sha: head.sha,
+        sha: chosen.sha,
         branch: sideBranch.name,
         ...(closingPr != null ? { prNumber: closingPr.number } : {}),
         ...(reverts.length > 0 ? { revertedShas: reverts } : {}),
@@ -197,6 +171,15 @@ export function classifyRealityCheck(input: RealityCheckInput): RealityCheckVerd
 
   // ---- 5. No surviving signal. -------------------------------------------
   return verdict('clear', { blockedOn: null, comment: null, evidence: {} });
+}
+
+/** Revert-downgrade collapse: surface the reverting SHAs and report clear. */
+function collapsedToClear(revertedShas: string[]): RealityCheckVerdict {
+  return verdict('clear', {
+    blockedOn: null,
+    comment: null,
+    evidence: { revertedShas },
+  });
 }
 
 // ---------------------------------------------------------------------------
