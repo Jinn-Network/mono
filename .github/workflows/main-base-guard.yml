@@ -5,6 +5,11 @@ on:
     types: [opened, edited, synchronize, reopened, ready_for_review]
 jobs:
   guard:
+    # The check-run name reported by GitHub is the job's display `name:` below
+    # (or the job id `guard` if no name is set). The required-status-check
+    # context registered by .github/scripts/enable-main-base-guard.sh must
+    # match this string exactly — keep them in sync.
+    name: Main base guard
     runs-on: ubuntu-latest
     steps:
       - name: Allow only hotfix or release-review PRs against main

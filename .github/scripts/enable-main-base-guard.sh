@@ -17,7 +17,7 @@ set -euo pipefail
 
 REPO="${REPO:-Jinn-Network/mono}"
 BRANCH="${BRANCH:-main}"
-CONTEXT="${CONTEXT:-guard}"   # job id from main-base-guard.yml
+CONTEXT="${CONTEXT:-Main base guard}"   # must match the job's display name in main-base-guard.yml
 
 PAYLOAD=$(cat <<EOF
 {
