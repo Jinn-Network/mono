@@ -19,10 +19,13 @@ The jinn app is the operator dashboard SPA at `client/src/dashboard/spa/`, serve
 
 ## Daemon spawn (shared by both recipes)
 
-All commands assume cwd = `jinn-mono/cargo/client`.
+All commands assume cwd = `jinn-mono/client`.
 
 1. Build: `yarn build` — produces `dist/bin/jinn.js` and the SPA bundle in `dist/dashboard/`. **Re-run after every SPA source edit** — the daemon serves the bundled SPA from disk.
 2. Spawn: `node dist/bin/jinn.js run --no-ui`. **Against the operator's real `~/.jinn`, that's the whole command** — the daemon auto-reads `~/.jinn-client/keystore-password` (written at first bootstrap) when `JINN_PASSWORD` is unset. Do NOT ask the operator for a password.
+
+   > **CAVEAT — Restart-button / respawn tests must NOT use `--no-ui`.**
+   > `--no-ui` sets `JINN_NO_UI=1`, which puts the daemon into headless/supervised mode. In that mode, `requestDaemonRestart` (see `client/src/restart-daemon.ts`) skips the in-process respawn and calls `process.exit(0)` instead — it expects an external supervisor (systemd, Docker, etc.) to bring the daemon back. If you are testing the operator **Restart** button or any restart-respawn behaviour (issue #289), launch the daemon **without** `--no-ui`; otherwise the restart kills the daemon with no respawn and the test cannot pass.
 
    Env vars only matter when you're deviating from the default setup:
    - `HOME=<tmpdir>` — only set for a *fresh, clean-state* spawn (e.g. E2E test). Omit to attach to the bootstrapped fleet at `~/.jinn` (Base Sepolia master `0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF`, agent #5474, safe `0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC`).
@@ -40,7 +43,10 @@ All commands assume cwd = `jinn-mono/cargo/client`.
 1. Run `Bash` with `run_in_background: true` to start the daemon; read background output to capture handshake URL.
 2. `chrome_devtools__navigate_page` to the handshake URL.
 3. Walk surfaces and screenshot each:
-   - **Overview** (`/overview`) — HeroStats (eyebrows `tasks delivered`, `jinn earned`), NetworkCard, OperatorCard, IdentityCard, RecentActivity, QuickActions, AdvancedDetails
+   - **Overview** (`/overview`) — two-column grid (`data-testid="overview-page-grid"`): a main column holding **ActivityCard** and a right rail holding **NodeHealthCard** then **WalletCard**. (An **EvictionBanner**, `data-testid="overview-eviction-banner"`, prepends the main column only when a service is evicted.) Per-card assertion hints:
+     - **ActivityCard** (`data-testid="activity-card"`, region `aria-label="Activity"`, title `Activity`) — three sub-columns: Joined (`data-testid="activity-joined"`, `Joined` heading; empty copy `No SolverNets joined.`; `Join more SolverNets` CTA), Tasks (`data-testid="activity-tasks"`; a `Run / Task / State / Started` table with state Badges; empty copy `No task runs recorded yet.`), and Settings (`data-testid="activity-settings"`; `Roles` / `Harness` / `Model` / `Plugins` rows; `Edit` link).
+     - **NodeHealthCard** (`data-testid="node-health-card"`, `Node health` heading) — a Daemon row (`Running` / `Stopped` with a `Restart` button — `Stop` is currently commented out) and an RPC row (`Healthy` / `Unreachable` with a `Manage RPC` button).
+     - **WalletCard** (`data-testid="wallet-card"`, region `aria-label="Wallet"`, eyebrow `Wallet`) — four hairline-separated sections: Gas (`<n> ETH · <n>d runway`, `Top up from faucet (free)` button), Rewards (`Testnet JINN earned` in `tJINN`, `Lifetime claimed`), Identity (`Service` / `Agent` / `Master` / `Safe`), Password (`Change password` button).
    - **Configuration** (`/configuration`) — Network / Security sections; deep-link via hash (`#network`, `#security`). SolverNet selection no longer lives here — it moved to the Operator join flow (see below).
    - **Launcher** (`/launcher`) — owned-SolverNets list rendered from `solvernets.listLaunched`; primary `Create SolverNet` CTA; empty-state copy ("No SolverNets created yet…") when no records exist; each row links to `/launcher/launched/:solverNetId`.
    - **Launcher · Create** (`/launcher/create`) — 5-step Create wizard (Define → Review Contract → Configure Generator → Configure Pricing → Review and Launch). Step is local state, route stays `/launcher/create`. Drafts persist server-side via `solvernets.createDraft / updateDraft`; the Launch action drives the forward-only state machine (`pinning → recording → broadcasting → confirming → spawning → launched`) — see `spec/2026-05-05-solvernet-creation-and-launch.md` §10.
@@ -84,6 +90,35 @@ Live template: `client/test/dashboard/spa-config.e2e.test.ts`. The pattern:
 
 Run a single E2E file: `yarn build && playwright test --config=playwright.config.ts test/dashboard/spa-config.e2e.test.ts` (model after the `e2e:spa` script in `client/package.json`).
 
+## Multi-operator scenarios
+
+The single-op recipes above (manual smoke, automated E2E) cover testing one operator in isolation. Multi-operator scenarios — where two daemons interact via the chain and via the operator app — require additional infrastructure that this section documents. Reference docs in `references/` cover each pattern in detail.
+
+Spawn pattern: two (or more) daemons run concurrently against distinct HOMEs (substrate-derived workspaces from Plan A's `substrate-copy`, or fresh tmp HOMEs for clean-state E2Es). Each daemon gets a distinct `JINN_API_PORT`. Helpers in `client/test/helpers/multi-op-daemon.ts` wrap the spawn + teardown lifecycle.
+
+Three method-pattern reference docs cover the mechanics:
+
+- [`references/multi-op-spawn.md`](references/multi-op-spawn.md) — bash + TypeScript spawn recipes; port management; teardown.
+- [`references/multi-op-chrome-devtools.md`](references/multi-op-chrome-devtools.md) — multi-page chrome-devtools driving for cross-op manual smoke.
+- [`references/multi-op-playwright.md`](references/multi-op-playwright.md) — Playwright template for two-daemon automated tests.
+
+Four scenario reference docs are the contracts release-prep's gate runner consumes. Each describes one scenario at the level of detail an implementer needs:
+
+- [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) — T1.4: load every SPA route against a mocked daemon, assert clean.
+- [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) — T2.1: op-a produces corpus artifact, op-b consumes via x402.
+- [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) — T2.2: op-a solves task on Anvil-fork, op-b evaluates.
+- [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) — T2.3: op-a launches SolverNet via SPA, op-b joins via SPA, both observe each other.
+
+### Things to watch for (multi-op specific)
+
+In addition to the single-op concerns listed earlier:
+
+- **Cross-operator visibility lag** — op-b sees op-a's actions only after the indexer has caught up (~2 indexer-poll-intervals). Wait, don't assume instant.
+- **Identity collisions** — spawning two daemons with the same HOME means both fight for the same agentId/Safe/nonce. Always verify *both* apiPort AND source HOME directory are distinct before spawning.
+- **Workspace bleed** — substrate-derived workspaces under `~/jinn-dev/workspaces/` are auto-pruned at 7 days by `substrate-reap`. Don't leave a workspace assumed to be there between test runs; either own its lifecycle or use a fresh one each test.
+- **Substrate staleness** — if `substrate-verify` reports drift, all multi-op scenarios using substrate workspaces will fail in non-obvious ways. Run verify before any multi-op session.
+- **RPC saturation under concurrent load** — substrate ops currently share one Tenderly key (per spec §2). If both daemons hammer the RPC simultaneously, expect HTTP 429. Tracked as `jinn-mono-lrey`; for now, add jittered delays in scenarios where both daemons are RPC-active.
+
 ## Quick reference
 
 | Goal | Approach |
@@ -94,6 +129,12 @@ Run a single E2E file: `yarn build && playwright test --config=playwright.config
 | Verify hash deep-links | Navigate to `/configuration#network` etc. |
 | Test against real chain state | Reuse a bootstrapped HOME, no mocks |
 | Test pure SPA wiring | Fresh HOME + mock all `/v1/*` endpoints |
+| Spot a cross-op visibility bug | Multi-op chrome-devtools — drive two pages, [`references/multi-op-chrome-devtools.md`](references/multi-op-chrome-devtools.md) |
+| Add cross-op regression coverage | Multi-op Playwright — [`references/multi-op-playwright.md`](references/multi-op-playwright.md) |
+| Test SPA route surface (T1.4) | [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) |
+| Test cross-op donation (T2.1) | [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) |
+| Test producer/evaluator on Anvil-fork (T2.2) | [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) |
+| Test multi-op SPA flow (T2.3) | [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) |
 
 ## Common mistakes
 

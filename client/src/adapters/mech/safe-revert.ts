@@ -137,19 +137,43 @@ function extractErrorSelector(error: unknown): Hex | null {
   return match?.[1] ? match[1].toLowerCase() as Hex : null;
 }
 
-export function formatKnownRevert(error: unknown): string | null {
+/**
+ * Structured result of decoding a known inner revert from an error.
+ *
+ * `name` is the bare revert identifier (e.g. `TCAttemptAlreadyFinalized`) — use
+ * it for terminal-classification lookups (`isNonRecoverableInnerRevert`) so no
+ * caller has to regex-unformat the `reason` string. `reason` is the
+ * operator-facing formatted form (`Name(arg, arg)`), suitable for log lines.
+ */
+export interface KnownRevertDetail {
+  /** Bare revert name from `KNOWN_INNER_ERRORS`. `null` when the selector is unknown. */
+  name: string | null;
+  /** Operator-facing formatted revert string. */
+  reason: string;
+}
+
+/**
+ * Decode a known inner revert into its structured `name` plus a formatted
+ * `reason` string. Returns `null` only when no known selector can be extracted
+ * — callers fall back to `flattenErrorMessage` in that case.
+ */
+export function formatKnownRevertDetail(error: unknown): KnownRevertDetail | null {
   const data = extractRevertData(error);
   const selector = extractErrorSelector(error);
   if (!selector) return null;
   const known = KNOWN_INNER_ERRORS[selector];
   if (!known) return null;
-  if (!data || data.length <= 10) return known.name;
+  if (!data || data.length <= 10) return { name: known.name, reason: known.name };
   try {
     const args = decodeAbiParameters(parseAbiParameters(known.params), `0x${data.slice(10)}` as Hex);
-    return formatDecodedRevert(known.name, args);
+    return { name: known.name, reason: formatDecodedRevert(known.name, args) };
   } catch {
-    return known.name;
+    return { name: known.name, reason: known.name };
   }
+}
+
+export function formatKnownRevert(error: unknown): string | null {
+  return formatKnownRevertDetail(error)?.reason ?? null;
 }
 
 /**

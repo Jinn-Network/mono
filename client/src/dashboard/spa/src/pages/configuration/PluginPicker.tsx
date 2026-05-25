@@ -1,4 +1,11 @@
 import { useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Button } from '../../components/ui/button.js';
+import { Input } from '../../components/ui/input.js';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover.js';
+import { ScrollArea } from '../../components/ui/scroll-area.js';
+import { cn } from '../../lib/utils.js';
+import { canonicalHarnessName, HERMES_AGENT_HARNESS } from './harnessNames.js';
 
 export interface CatalogPluginOption {
   name: string;
@@ -19,9 +26,15 @@ export interface PluginPickerProps {
   onChange: (plugins: string[], disabledDefaultPlugins: string[]) => void;
   rowTestId: string;
   searchTestId: string;
+  /**
+   * Selected harness. Determines which bundled plugins are surfaced as
+   * defaults — e.g. Hermes owns its own learning loop (see harness.ts) so
+   * `claude-code-learner` is dropped from the Hermes default set.
+   */
+  harness?: string;
 }
 
-const INCLUDED_PLUGINS: PluginOption[] = [
+const ALL_INCLUDED_PLUGINS: PluginOption[] = [
   {
     name: 'network-tools',
     version: '0.1.0',
@@ -37,6 +50,13 @@ const INCLUDED_PLUGINS: PluginOption[] = [
     description: 'Learner loop',
   },
 ];
+
+function includedPluginsFor(harness: string | undefined): PluginOption[] {
+  if (canonicalHarnessName(harness) === HERMES_AGENT_HARNESS) {
+    return ALL_INCLUDED_PLUGINS.filter((p) => p.name !== 'claude-code-learner');
+  }
+  return ALL_INCLUDED_PLUGINS;
+}
 
 const DEFAULT_COMPATIBLE_PLUGINS = new Set([
   'swe-rebench-v2-runtime',
@@ -75,10 +95,14 @@ function uniquePluginValues(values: string[]): string[] {
   return out;
 }
 
-function buildOptions(available: CatalogPluginOption[], selected: string[]): PluginOption[] {
+function buildOptions(
+  available: CatalogPluginOption[],
+  selected: string[],
+  harness: string | undefined,
+): PluginOption[] {
   const seen = new Set<string>();
   const out: PluginOption[] = [];
-  for (const plugin of INCLUDED_PLUGINS) {
+  for (const plugin of includedPluginsFor(harness)) {
     seen.add(plugin.name);
     out.push(plugin);
   }
@@ -121,11 +145,15 @@ export function PluginPicker({
   onChange,
   rowTestId,
   searchTestId,
+  harness,
 }: PluginPickerProps): JSX.Element {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PluginOption | null>(null);
-  const options = useMemo(() => buildOptions(available, selected), [available, selected]);
+  const options = useMemo(
+    () => buildOptions(available, selected, harness),
+    [available, selected, harness],
+  );
   const selectedSet = new Set(selected.map(stripBundledPrefix));
   const disabledDefaultSet = new Set(disabledDefaultPlugins.map(stripBundledPrefix));
   const activeSet = new Set(selectedSet);
@@ -182,51 +210,36 @@ export function PluginPicker({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'relative' }}>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+    <div className="relative flex flex-col gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {selectedOptions.map((option) => (
           <span
             key={option.name}
             data-testid={`${rowTestId}-chip`}
             data-plugin={option.name}
-            style={{
-              border: '1px solid var(--border)',
-              borderRadius: '999px',
-              padding: '5px 7px 5px 9px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--fg)',
-              background: option.defaultIncluded ? 'var(--bg-sunken)' : 'transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-[5px] pl-2.5 font-mono text-[11px] text-foreground',
+              option.defaultIncluded ? 'bg-sunken' : 'bg-transparent',
+            )}
           >
             <span>
               {displayName(option.name)}
-              <span style={{ color: 'var(--fg-dim)' }}>
+              <span className="text-dim">
                 {option.defaultIncluded ? ' · default' : ' · selected'}
               </span>
             </span>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               aria-label={`Remove ${displayName(option.name)}`}
               data-testid={`${rowTestId}-remove`}
               data-plugin={option.name}
               onClick={() => removeOption(option)}
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--fg-muted)',
-                cursor: 'pointer',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                lineHeight: 1,
-                padding: '1px 3px',
-              }}
+              className="h-5 w-5 rounded-full p-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
             >
-              x
-            </button>
+              <X aria-hidden="true" className="!size-3" />
+            </Button>
           </span>
         ))}
       </div>
@@ -235,115 +248,70 @@ export function PluginPicker({
         <div
           role="alertdialog"
           data-testid={`${rowTestId}-default-warning`}
-          style={{
-            border: '1px solid var(--wane)',
-            borderRadius: '8px',
-            background: 'var(--bg-elevated)',
-            padding: '10px 12px',
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) auto',
-            gap: '12px',
-            alignItems: 'center',
-            fontFamily: "'JetBrains Mono', monospace",
-          }}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border border-wane bg-card px-3 py-2.5 font-mono"
         >
-          <span style={{ fontSize: '12px', color: 'var(--fg)' }}>
+          <span className="text-[12px] text-foreground">
             {displayName(confirmRemove.name)} is part of the default operator baseline.
             Removing it may break standard SolverNet workflows.
           </span>
-          <span style={{ display: 'flex', gap: '8px' }}>
-            <button
+          <span className="flex gap-2">
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               data-testid={`${rowTestId}-default-warning-cancel`}
               onClick={() => setConfirmRemove(null)}
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                background: 'transparent',
-                color: 'var(--fg-muted)',
-                padding: '6px 9px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                cursor: 'pointer',
-              }}
             >
               Keep
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
               data-testid={`${rowTestId}-default-warning-confirm`}
               onClick={confirmRemoveDefault}
-              style={{
-                border: '1px solid var(--wane)',
-                borderRadius: '6px',
-                background: 'transparent',
-                color: 'var(--wane)',
-                padding: '6px 9px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                cursor: 'pointer',
-              }}
             >
               Remove
-            </button>
+            </Button>
           </span>
         </div>
       )}
 
-      <button
-        type="button"
-        data-testid={`${rowTestId}-trigger`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            setOpen(false);
-            setQuery('');
-          }
-        }}
-        style={{
-          background: 'var(--bg)',
-          border: '1px solid var(--border)',
-          borderRadius: '6px',
-          padding: '9px 11px',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          color: 'var(--fg)',
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) auto',
-          gap: '12px',
-          alignItems: 'center',
-          textAlign: 'left',
-          cursor: 'pointer',
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setQuery('');
         }}
       >
-        <span style={{ minWidth: 0 }}>
-          Add plugin
-          <span style={{ color: 'var(--fg-dim)' }}>
-            {' '}
-            · {defaultCount} default{selectedCount > 0 ? ` · ${selectedCount} selected` : ''}
-          </span>
-        </span>
-        <span style={{ color: 'var(--fg-muted)' }}>{open ? '^' : 'v'}</span>
-      </button>
-
-      {open && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            left: 0,
-            right: 0,
-            zIndex: 30,
-            border: '1px solid var(--border)',
-            borderRadius: '8px',
-            background: 'var(--bg-elevated)',
-            boxShadow: '0 14px 34px rgba(0, 0, 0, 0.35)',
-            overflow: 'hidden',
-          }}
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            data-testid={`${rowTestId}-trigger`}
+            aria-haspopup="listbox"
+            className="grid h-auto grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border bg-background px-3 py-2.5 text-left font-mono text-[12px] normal-case tracking-normal text-foreground hover:bg-sunken hover:text-foreground"
+          >
+            <span className="min-w-0">
+              Add plugin
+              <span className="text-dim">
+                {' '}
+                · {defaultCount} default{selectedCount > 0 ? ` · ${selectedCount} selected` : ''}
+              </span>
+            </span>
+            {open ? (
+              <ChevronUp aria-hidden="true" className="!size-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown aria-hidden="true" className="!size-3.5 text-muted-foreground" />
+            )}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          sideOffset={6}
+          className="w-[min(28rem,90vw)] overflow-hidden p-0"
         >
-          <input
+          <Input
             type="search"
             autoFocus
             aria-label="Search plugins"
@@ -357,94 +325,56 @@ export function PluginPicker({
               }
             }}
             placeholder="Search plugins"
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              background: 'var(--bg)',
-              border: 'none',
-              borderBottom: '1px solid var(--border)',
-              padding: '10px 12px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg)',
-              outline: 'none',
-            }}
+            className="h-auto rounded-none border-0 border-b border-border bg-background px-3 py-2.5 text-[12px] focus-visible:ring-0"
           />
-          <div
-            role="listbox"
-            aria-label="Plugins"
-            style={{
-              maxHeight: '240px',
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            {filtered.length === 0 ? (
-              <span
-                style={{
-                  padding: '12px 14px',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '12px',
-                  color: 'var(--fg-dim)',
-                }}
-              >
-                {addableOptions.length === 0 ? 'No plugins available to add.' : 'No matching plugins.'}
-              </span>
-            ) : (
-              filtered.map((option, idx) => {
-                const active = activeSet.has(option.name);
-                return (
-                  <button
-                    key={option.name}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    data-testid={rowTestId}
-                    data-plugin={option.name}
-                    data-plugin-active={active ? 'true' : 'false'}
-                    data-plugin-default={option.defaultIncluded ? 'true' : 'false'}
-                    onClick={() => addOption(option)}
-                    style={{
-                      border: 'none',
-                      borderTop: idx === 0 ? 'none' : '1px solid var(--border)',
-                      background: active ? 'var(--bg-sunken)' : 'transparent',
-                      color: 'var(--fg)',
-                      padding: '10px 12px',
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(0, 1fr) auto',
-                      gap: '12px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}
-                  >
-                    <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '13px', color: 'var(--fg)' }}>
-                        {displayName(option.name)}
-                      </span>
-                      <span style={{ fontSize: '11px', color: 'var(--fg-dim)' }}>
-                        {metaFor(option)}
-                      </span>
-                    </span>
-                    <span
-                      style={{
-                        color: option.defaultIncluded ? 'var(--fg-dim)' : option.recommended ? 'var(--accent-sky)' : 'var(--fg-muted)',
-                        fontSize: '11px',
-                        alignSelf: 'center',
-                        textTransform: 'uppercase',
-                        letterSpacing: 0,
-                      }}
+          <ScrollArea className="max-h-60">
+            <div role="listbox" aria-label="Plugins" className="flex flex-col">
+              {filtered.length === 0 ? (
+                <span className="px-3.5 py-3 font-mono text-[12px] text-dim">
+                  {addableOptions.length === 0 ? 'No plugins available to add.' : 'No matching plugins.'}
+                </span>
+              ) : (
+                filtered.map((option, idx) => {
+                  const active = activeSet.has(option.name);
+                  const accentClass = option.defaultIncluded
+                    ? 'text-dim'
+                    : option.recommended
+                      ? 'text-primary'
+                      : 'text-muted-foreground';
+                  return (
+                    <Button
+                      key={option.name}
+                      type="button"
+                      variant="ghost"
+                      role="option"
+                      aria-selected={active}
+                      data-testid={rowTestId}
+                      data-plugin={option.name}
+                      data-plugin-active={active ? 'true' : 'false'}
+                      data-plugin-default={option.defaultIncluded ? 'true' : 'false'}
+                      onClick={() => addOption(option)}
+                      className={cn(
+                        'grid h-auto w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-none px-3 py-2.5 text-left font-mono normal-case tracking-normal transition-colors',
+                        idx === 0 ? '' : 'border-t border-border',
+                        active ? 'bg-sunken text-foreground' : 'bg-transparent text-foreground',
+                        'hover:bg-sunken focus-visible:bg-sunken',
+                      )}
                     >
-                      {option.defaultIncluded ? 'Default' : option.recommended ? 'Recommended' : 'Add'}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+                      <span className="flex min-w-0 flex-col gap-1">
+                        <span className="text-[13px] text-foreground">{displayName(option.name)}</span>
+                        <span className="text-[11px] text-dim">{metaFor(option)}</span>
+                      </span>
+                      <span className={cn('self-center text-[11px] uppercase', accentClass)}>
+                        {option.defaultIncluded ? 'Default' : option.recommended ? 'Recommended' : 'Add'}
+                      </span>
+                    </Button>
+                  );
+                })
+              )}
+            </div>
+          </ScrollArea>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

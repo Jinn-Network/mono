@@ -2,9 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { api } from '../../api/client.js';
 import type {
+  RegistryErrorCode,
   RegistryListResponse,
   SolverNetManifestSummary,
 } from '../../api/types.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
@@ -21,13 +26,15 @@ import { formatWeiAmount } from '../launcher-launched/helpers.js';
  * Empty state copy is locked to spec §12: "No launched SolverNets available."
  */
 
-const STATUS_TONE: Record<
+type BadgeVariant = NonNullable<Parameters<typeof Badge>[0]['variant']>;
+
+const STATUS_BADGE: Record<
   SolverNetManifestSummary['status'],
-  { fg: string; border: string; label: string }
+  { variant: BadgeVariant; label: string }
 > = {
-  launched: { fg: 'var(--vow-green)', border: 'var(--vow-green)', label: 'Launched' },
-  paused: { fg: 'var(--wane)', border: 'var(--wane)', label: 'Paused' },
-  retired: { fg: 'var(--fg-dim)', border: 'var(--border)', label: 'Retired' },
+  launched: { variant: 'success', label: 'Launched' },
+  paused: { variant: 'pill', label: 'Paused' },
+  retired: { variant: 'outline', label: 'Retired' },
 };
 
 function truncateAddress(address: string): string {
@@ -53,11 +60,35 @@ function errorCode(error: unknown): string | null {
     if (typeof code === 'string') return code;
     if (error.message.includes('subsystem_not_ready')) return 'subsystem_not_ready';
     if (error.message.includes('registry_unavailable')) return 'registry_unavailable';
+    if (error.message.includes('rpc_rate_limited')) return 'rpc_rate_limited';
   }
   return null;
 }
 
-function registryErrorCopy(error: unknown): { title: string; detail: string } {
+interface RegistryErrorCopy {
+  title: string;
+  detail: string;
+  /** When set, render an in-app link to this route (e.g. `/operator#network`). */
+  actionHref?: string;
+  /** Link text for `actionHref`. */
+  actionLabel?: string;
+}
+
+/**
+ * Operator-facing copy for a rate-limited RPC. The default Base Sepolia RPC is
+ * shared across the whole operator pool, so a 429 here is an operator-actionable
+ * condition — point them at the Network section to add their own free key
+ * rather than leaving them with a generic "catalog not found". See
+ * jinn-mono #325.
+ */
+const RPC_RATE_LIMITED_COPY: RegistryErrorCopy = {
+  title: 'Your RPC endpoint is rate-limited.',
+  detail: 'Open the Network section and add your own free key.',
+  actionHref: '/operator#network',
+  actionLabel: 'Open Network settings →',
+};
+
+function registryErrorCopy(error: unknown): RegistryErrorCopy {
   switch (errorCode(error)) {
     case 'subsystem_not_ready':
       return {
@@ -69,6 +100,8 @@ function registryErrorCopy(error: unknown): { title: string; detail: string } {
         title: 'Registry cache is unavailable.',
         detail: 'The daemon could not read the SolverNet registry cache. Retry after startup finishes; check daemon logs if it keeps failing.',
       };
+    case 'rpc_rate_limited':
+      return RPC_RATE_LIMITED_COPY;
     default:
       return {
         title: 'Failed to load registry catalog.',
@@ -77,62 +110,91 @@ function registryErrorCopy(error: unknown): { title: string; detail: string } {
   }
 }
 
+/**
+ * Stale-catalog indicator shown in the meta row. A registry refresh can fail
+ * without the HTTP query itself erroring (the endpoint returns 200 with a
+ * populated `lastError`), so this is where a rate-limited RPC actually
+ * surfaces in the steady-state UI. The `rpc_rate_limited` branch swaps the
+ * generic "stale" text for an operator-actionable line + a deep-link to the
+ * Network settings section. See jinn-mono #325.
+ */
+function RegistryStaleWarning({
+  code,
+  message,
+}: {
+  code?: RegistryErrorCode;
+  message: string;
+}): JSX.Element {
+  if (code === 'rpc_rate_limited') {
+    return (
+      <span
+        data-testid="registry-catalog-warn"
+        data-error-code="rpc_rate_limited"
+        // var(--wane) is unmapped in tailwind config (no shadcn equivalent);
+        // used here to mark the warning tone consistent with the brand pill.
+        className="inline-flex gap-2 normal-case tracking-normal text-[var(--wane)]"
+      >
+        <span>RPC rate-limited — add your own key</span>
+        <Link
+          href="/operator#network"
+          data-testid="registry-catalog-warn-action"
+          className="text-primary no-underline hover:underline"
+        >
+          Network settings →
+        </Link>
+      </span>
+    );
+  }
+  return (
+    <span
+      data-testid="registry-catalog-warn"
+      className="normal-case tracking-normal text-[var(--wane)]"
+    >
+      stale ({message})
+    </span>
+  );
+}
+
 function StatusBadge({
   status,
 }: {
   status: SolverNetManifestSummary['status'];
 }): JSX.Element {
-  const tone = STATUS_TONE[status] ?? STATUS_TONE.launched;
+  const badge = STATUS_BADGE[status] ?? STATUS_BADGE.launched;
   return (
-    <span
+    <Badge
       data-testid="registry-status-badge"
       data-status={status}
-      style={{
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-        fontWeight: 500,
-        textTransform: 'uppercase',
-        letterSpacing: '0.14em',
-        color: tone.fg,
-        border: `1px solid ${tone.border}`,
-        borderRadius: 'var(--radius-1)',
-        padding: '2px 8px',
-        whiteSpace: 'nowrap',
-      }}
+      variant={badge.variant}
+      className="whitespace-nowrap"
     >
-      {tone.label}
-    </span>
+      {badge.label}
+    </Badge>
   );
 }
 
-function RoleChips({ openRoles }: { openRoles: SolverNetManifestSummary['openRoles'] }): JSX.Element {
+function RoleChips({
+  openRoles,
+}: {
+  openRoles: SolverNetManifestSummary['openRoles'];
+}): JSX.Element {
   if (openRoles.length === 0) {
     return (
-      <span style={{ color: 'var(--fg-dim)', fontSize: '12px' }}>
-        no open roles
-      </span>
+      <span className="text-[12px] text-[var(--fg-dim)]">no open roles</span>
     );
   }
   return (
-    <span style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+    <span className="flex flex-wrap gap-1.5">
       {openRoles.map((role) => (
-        <span
+        <Badge
           key={role}
           data-testid="registry-open-role"
           data-role={role}
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg)',
-            border: '1px solid var(--border)',
-            borderRadius: '999px',
-            padding: '2px 10px',
-          }}
+          variant="outline"
+          className="rounded-full text-foreground"
         >
           {role}
-        </span>
+        </Badge>
       ))}
     </span>
   );
@@ -150,137 +212,76 @@ interface RegistryCardProps {
 function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element {
   const joinHref = `/operator/join/${encodeURIComponent(summary.manifestCid)}`;
   const isJoined = (joinedRoles ?? []).length > 0;
+  const isLaunched = summary.status === 'launched';
   return (
-    <article
+    <Card
       data-testid="registry-card"
       data-manifest-cid={summary.manifestCid}
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-2)',
-        padding: '16px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-      }}
+      className="flex flex-col gap-3 p-4"
     >
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: '16px',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '15px',
-              fontWeight: 500,
-              color: 'var(--fg)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {summary.name}
+      <article className="flex flex-col gap-3">
+        <header className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="truncate font-mono text-[15px] font-medium text-foreground">
+              {summary.name}
+            </span>
+            <span className="font-mono text-[12px] text-[var(--fg-muted)]">
+              Launcher: {truncateAddress(summary.launcherSafeAddress)} · agentId{' '}
+              {summary.launcherAgentId}
+            </span>
+          </div>
+          <StatusBadge status={summary.status} />
+        </header>
+
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[12px] text-[var(--fg-muted)]">
+          <span>Open roles</span>
+          <RoleChips openRoles={summary.openRoles} />
+          <span>Solution price</span>
+          <span className="text-foreground">
+            {formatWeiAmount(summary.solutionPriceWei)}
           </span>
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-            }}
-          >
-            Launcher: {truncateAddress(summary.launcherSafeAddress)} · agentId{' '}
-            {summary.launcherAgentId}
+          <span>Verdict price</span>
+          <span className="text-foreground">
+            {formatWeiAmount(summary.verdictPriceWei)}
           </span>
         </div>
-        <StatusBadge status={summary.status} />
-      </header>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'auto 1fr',
-          gap: '6px 12px',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          color: 'var(--fg-muted)',
-        }}
-      >
-        <span>Open roles</span>
-        <RoleChips openRoles={summary.openRoles} />
-        <span>Solution price</span>
-        <span style={{ color: 'var(--fg)' }}>
-          {formatWeiAmount(summary.solutionPriceWei)}
-        </span>
-        <span>Verdict price</span>
-        <span style={{ color: 'var(--fg)' }}>
-          {formatWeiAmount(summary.verdictPriceWei)}
-        </span>
-      </div>
-
-      <footer
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: '12px',
-        }}
-      >
-        {isJoined && (
-          <span
-            data-testid="registry-card-joined"
-            data-manifest-cid={summary.manifestCid}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              fontWeight: 500,
-              textTransform: 'uppercase',
-              letterSpacing: '0.14em',
-              color: 'var(--vow-green)',
-              border: '1px solid var(--vow-green)',
-              borderRadius: 'var(--radius-pill)',
-              padding: '4px 10px',
-            }}
-          >
-            JOINED · {(joinedRoles ?? []).join(', ')}
-          </span>
-        )}
-        <Link
-          href={joinHref}
-          data-testid="registry-join-cta"
-          data-manifest-cid={summary.manifestCid}
-          style={{
-            display: 'inline-block',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            padding: '8px 16px',
-            background:
-              summary.status === 'launched' && !isJoined
-                ? 'var(--accent-sky)'
-                : 'transparent',
-            color:
-              summary.status === 'launched' && !isJoined
-                ? 'var(--bg-sunken)'
-                : 'var(--fg-dim)',
-            border: `1px solid ${
-              summary.status === 'launched' && !isJoined
-                ? 'var(--accent-sky)'
-                : 'var(--border)'
-            }`,
-            borderRadius: 'var(--radius-2)',
-            textDecoration: 'none',
-            cursor: summary.status === 'launched' ? 'pointer' : 'not-allowed',
-            pointerEvents: summary.status === 'launched' ? 'auto' : 'none',
-          }}
-        >
-          {isJoined ? 'Edit' : 'Join'}
-        </Link>
-      </footer>
-    </article>
+        <footer className="flex items-center justify-end gap-3">
+          {isJoined && (
+            <Badge
+              data-testid="registry-card-joined"
+              data-manifest-cid={summary.manifestCid}
+              variant="success"
+              className="rounded-full px-2.5 py-1"
+            >
+              JOINED · {(joinedRoles ?? []).join(', ')}
+            </Badge>
+          )}
+          {isLaunched ? (
+            <Button
+              asChild
+              variant={isJoined ? 'secondary' : 'default'}
+              data-testid="registry-join-cta"
+              data-manifest-cid={summary.manifestCid}
+            >
+              <Link href={joinHref}>{isJoined ? 'Edit' : 'Join'}</Link>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              data-testid="registry-join-cta"
+              data-manifest-cid={summary.manifestCid}
+              disabled
+              aria-disabled
+              className="pointer-events-none"
+            >
+              {isJoined ? 'Edit' : 'Join'}
+            </Button>
+          )}
+        </footer>
+      </article>
+    </Card>
   );
 }
 
@@ -313,12 +314,7 @@ export function RegistryCatalog({
     return (
       <p
         data-testid="registry-catalog-loading"
-        style={{
-          color: 'var(--fg-muted)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-          margin: 0,
-        }}
+        className="m-0 font-mono text-[13px] text-[var(--fg-muted)]"
       >
         Loading catalog…
       </p>
@@ -329,112 +325,76 @@ export function RegistryCatalog({
     const visibleError = isError ? error : joinedQuery.error;
     const copy = registryErrorCopy(visibleError);
     return (
-      <div
+      <Alert
         data-testid="registry-catalog-error"
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--break-red)',
-          borderRadius: 'var(--radius-2)',
-          padding: '16px 20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '16px',
-        }}
+        variant="blocking"
+        className="flex items-center justify-between gap-4 border-l-0 border border-destructive p-4"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span
-            style={{
-              color: 'var(--break-red)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              fontWeight: 500,
-            }}
-          >
+        <div className="flex flex-col gap-1">
+          <AlertTitle className="font-mono text-[13px] font-medium text-destructive">
             {copy.title}
-          </span>
-          <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
+          </AlertTitle>
+          <AlertDescription className="text-[12px] text-[var(--fg-muted)]">
             {copy.detail}
-          </span>
+          </AlertDescription>
+          {copy.actionHref && copy.actionLabel && (
+            <Link
+              href={copy.actionHref}
+              data-testid="registry-catalog-error-action"
+              className="mt-0.5 font-mono text-[12px] text-primary no-underline hover:underline"
+            >
+              {copy.actionLabel}
+            </Link>
+          )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
+          data-testid="registry-catalog-retry"
           onClick={() => {
             void refetch();
           }}
-          data-testid="registry-catalog-retry"
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            padding: '8px 14px',
-            background: 'transparent',
-            color: 'var(--fg)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
-            cursor: 'pointer',
-          }}
         >
           Retry
-        </button>
-      </div>
+        </Button>
+      </Alert>
     );
   }
 
   const allSummaries = data?.summaries ?? [];
-  const summaries = allSummaries.filter((summary) => joinedByCid[summary.manifestCid] === undefined);
+  const summaries = allSummaries.filter(
+    (summary) => joinedByCid[summary.manifestCid] === undefined,
+  );
   const lastRefreshed = formatTimestamp(data?.lastRefreshedAt ?? null);
   const lastError = data?.lastError ?? null;
 
   return (
-    <div
-      data-testid="registry-catalog"
-      style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          color: 'var(--fg-muted)',
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-        }}
-      >
+    <div data-testid="registry-catalog" className="flex flex-col gap-3">
+      <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--fg-muted)]">
         <span data-testid="registry-catalog-meta">
           {summaries.length} discoverable · last refreshed{' '}
           {lastRefreshed ?? 'never'}
         </span>
         {lastError && (
-          <span
-            data-testid="registry-catalog-warn"
-            style={{ color: 'var(--wane)' }}
-          >
-            stale ({lastError.message})
-          </span>
+          <RegistryStaleWarning
+            code={lastError.code}
+            message={lastError.message}
+          />
         )}
       </div>
 
       {summaries.length === 0 ? (
-        <div
+        <Card
           data-testid="registry-catalog-empty"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
-            padding: '24px 20px',
-            color: 'var(--fg-muted)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-          }}
+          className="p-6 font-mono text-[13px] text-[var(--fg-muted)]"
         >
           {allSummaries.length === 0
             ? 'No launched SolverNets available.'
             : 'No unjoined SolverNets available.'}
-        </div>
+        </Card>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="flex flex-col gap-2.5">
           {summaries.map((summary) => (
             <RegistryCard
               key={summary.manifestCid}

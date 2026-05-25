@@ -1,4 +1,9 @@
 import type { ReactNode } from 'react';
+import { Button } from '../../components/ui/button.js';
+import { Alert, AlertDescription } from '../../components/ui/alert.js';
+import { Label } from '../../components/ui/label.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 
 /**
  * Shared step-level layout primitives for the Create wizard.
@@ -7,6 +12,12 @@ import type { ReactNode } from 'react';
  * consistent header / nav / error chrome without re-implementing it five
  * times. The wizard parent (`LauncherCreate.tsx`) owns the state machine;
  * each step only worries about its own form.
+ *
+ * Migrated to shadcn primitives:
+ *   - `<Button>` for Back / Next (replacing bespoke native-button styling)
+ *   - `<Alert variant="blocking">` for the top-level error banner
+ *   - `<Separator>` for the footer divider
+ *   - `<Label>` (composed via `FieldShell`) for field eyebrow labels
  */
 
 export const STEP_LABELS: ReadonlyArray<string> = [
@@ -27,28 +38,12 @@ export function StepProgress({ current, total = 5 }: StepProgressProps): JSX.Ele
   return (
     <div
       data-testid="launcher-create-progress"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-        letterSpacing: '0.14em',
-        textTransform: 'uppercase',
-        color: 'var(--fg-muted)',
-      }}
+      className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-fg-muted"
     >
       <span data-testid="launcher-create-step-counter">
         Step {current} of {total}
       </span>
-      <div
-        style={{
-          display: 'flex',
-          gap: '4px',
-          flex: 1,
-          maxWidth: '320px',
-        }}
-      >
+      <div className="flex max-w-[320px] flex-1 gap-1">
         {Array.from({ length: total }).map((_, idx) => {
           const i = idx + 1;
           const filled = i <= current;
@@ -57,12 +52,10 @@ export function StepProgress({ current, total = 5 }: StepProgressProps): JSX.Ele
               key={i}
               data-testid={`launcher-create-progress-pip-${i}`}
               data-filled={filled ? 'true' : 'false'}
-              style={{
-                flex: 1,
-                height: '3px',
-                background: filled ? 'var(--accent-sky)' : 'var(--border)',
-                borderRadius: 'var(--radius-1)',
-              }}
+              className={cn(
+                'h-[3px] flex-1 rounded-sm',
+                filled ? 'bg-accent-sky' : 'bg-border',
+              )}
             />
           );
         })}
@@ -98,64 +91,31 @@ export function StepShell({
   return (
     <main
       data-testid={`launcher-create-step-${step}`}
-      style={{
-        padding: '24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-        maxWidth: '720px',
-        margin: '0 auto',
-      }}
+      className="mx-auto flex max-w-[720px] flex-col gap-5 p-6"
     >
       <StepProgress current={step} total={total} />
-      <header style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <h1
-          style={{
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '32px',
-            margin: 0,
-            color: 'var(--fg)',
-            fontWeight: 400,
-            letterSpacing: '-0.01em',
-          }}
-        >
+      <header className="flex flex-col gap-1.5">
+        <h1 className="m-0 font-serif text-[32px] font-normal leading-tight tracking-[-0.01em] text-foreground">
           {title}
         </h1>
         {blurb && (
-          <p style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '14px', lineHeight: 1.5 }}>
+          <p className="m-0 text-[14px] leading-relaxed text-fg-muted">
             {blurb}
           </p>
         )}
       </header>
       {error && (
-        <div
+        <Alert
+          variant="blocking"
           data-testid="launcher-create-error"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--break-red)',
-            borderRadius: 'var(--radius-2)',
-            padding: '12px 16px',
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-          }}
+          className="font-mono text-[13px]"
         >
-          {error}
-        </div>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>{children}</div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '12px',
-          paddingTop: '12px',
-          borderTop: '1px solid var(--border)',
-        }}
-      >
-        {footer}
-      </div>
+      <div className="flex flex-col gap-4">{children}</div>
+      <Separator />
+      <div className="flex items-center justify-between gap-3">{footer}</div>
     </main>
   );
 }
@@ -182,49 +142,30 @@ export function StepNav({
     <>
       <div>
         {onBack && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="lg"
             data-testid="launcher-create-back"
             onClick={onBack}
             disabled={busy}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '10px 18px',
-              background: 'transparent',
-              color: 'var(--fg)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-2)',
-              cursor: busy ? 'wait' : 'pointer',
-            }}
           >
             Back
-          </button>
+          </Button>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div className="flex items-center gap-4">
         {right}
         {onNext && (
-          <button
+          <Button
             type="button"
+            size="lg"
             data-testid="launcher-create-next"
             onClick={onNext}
             disabled={nextDisabled || busy}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              padding: '10px 22px',
-              background:
-                nextDisabled || busy ? 'var(--bg-elevated)' : 'var(--accent-sky)',
-              color: nextDisabled || busy ? 'var(--fg-dim)' : 'var(--bg-sunken)',
-              border: '1px solid var(--accent-sky)',
-              borderRadius: 'var(--radius-2)',
-              cursor: nextDisabled || busy ? 'not-allowed' : 'pointer',
-              opacity: nextDisabled || busy ? 0.6 : 1,
-            }}
           >
             {nextLabel}
-          </button>
+          </Button>
         )}
       </div>
     </>
@@ -236,73 +177,47 @@ export interface FieldShellProps {
   helperText?: string;
   error?: string | null;
   children: ReactNode;
+  /**
+   * When `true` (the default) the wrapper renders as a `<label>`, which
+   * delegates click + focus to the inner input — appropriate for the
+   * single-input cases used by Steps 1, 3, and 4. Set `false` when the
+   * children contain multiple focusable controls (Step 5's role
+   * checkboxes) and the implicit-label association would mis-route
+   * clicks.
+   */
+  asLabel?: boolean;
 }
 
 /**
- * Form-field wrapper for the Create wizard. Reuses the visual rhythm of
- * `<ConfigField>` but with inline error rendering — Operator configuration's pattern
- * surfaces errors at the section footer, the wizard surfaces per-field.
+ * Form-field wrapper for the Create wizard. Reuses the shadcn `<Label>`
+ * eyebrow plus an inline hint/error line. Operator configuration's
+ * pattern surfaces errors at the section footer; the wizard surfaces
+ * per-field for clearer step-by-step feedback.
  */
-export function FieldShell({ label, helperText, error, children }: FieldShellProps): JSX.Element {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          fontWeight: 500,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-muted)',
-        }}
-      >
-        {label}
-      </span>
+export function FieldShell({
+  label,
+  helperText,
+  error,
+  children,
+  asLabel = true,
+}: FieldShellProps): JSX.Element {
+  const body = (
+    <>
+      <Label>{label}</Label>
       {children}
       {error ? (
-        <span
-          style={{
-            fontSize: '12px',
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-          }}
-        >
-          {error}
-        </span>
+        <span className="font-mono text-[12px] text-break-red">{error}</span>
       ) : (
         helperText && (
-          <span
-            style={{
-              fontSize: '11px',
-              color: 'var(--fg-dim)',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
-          >
+          <span className="font-mono text-[11px] text-fg-dim">
             {helperText}
           </span>
         )
       )}
-    </label>
+    </>
   );
+  if (asLabel) {
+    return <label className="flex flex-col gap-1.5">{body}</label>;
+  }
+  return <div className="flex flex-col gap-1.5">{body}</div>;
 }
-
-import type { CSSProperties } from 'react';
-
-const inputBase: CSSProperties = {
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '10px 12px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg)',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-export const inputStyle: CSSProperties = inputBase;
-
-export const inputErrorStyle: CSSProperties = {
-  ...inputBase,
-  border: '1px solid var(--break-red)',
-};

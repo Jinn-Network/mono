@@ -19,6 +19,8 @@ import { PredictionV1TaskSchema, type PredictionV1Task } from '../types/predicti
 import type { SolverPluginEntry } from '../plugins/types.js';
 import {
   loadSolverNets as defaultLoadSolverNets,
+  rolesFromJoinedConfig,
+  type JoinedSolverNetConfig,
   type LoadedSolverNet,
   type SolverNetConfig,
   type SolverNetOperatorRole,
@@ -214,6 +216,43 @@ function missingSolverNetStatus(
   };
 }
 
+/**
+ * Find the joinedSolverNets entry whose contract is the prediction SolverNet
+ * (`contract.id === 'prediction'`, i.e. solverType `prediction.v1`). Returns
+ * `undefined` when the operator has joined no prediction-contract SolverNet —
+ * the common case now that prediction is deprecated.
+ */
+function findPredictionJoined(
+  joinedSolverNets: Record<string, JoinedSolverNetConfig> | undefined,
+): JoinedSolverNetConfig | undefined {
+  if (!joinedSolverNets) return undefined;
+  return Object.values(joinedSolverNets).find(
+    (entry) => entry.contract?.id === 'prediction',
+  );
+}
+
+/**
+ * Build a synthetic SolverNetConfig from a prediction-contract joinedSolverNets
+ * entry. This lets the diagnostic loop run unchanged when an operator has joined
+ * the Prediction SolverNet via the manifest-keyed flow but has no legacy
+ * solverNets[name] entry.
+ */
+function synthesizeFromJoined(
+  joined: JoinedSolverNetConfig,
+  solverType = 'prediction.v1',
+): SolverNetConfig {
+  const roles = rolesFromJoinedConfig(joined);
+  return {
+    enabled: true,
+    solverType,
+    roles: roles.length > 0 ? roles : ['solving'],
+    harness: joined.harness ?? '',
+    model: joined.model,
+    plugins: (joined.plugins ?? []) as SolverNetConfig['plugins'],
+    taskGenerator: { enabled: false },
+  };
+}
+
 export async function buildPredictionOperatorStatus({
   config,
   configPath,
@@ -223,8 +262,20 @@ export async function buildPredictionOperatorStatus({
   loadSolverNets = defaultLoadSolverNets,
   daemonRunning = false,
 }: BuildPredictionOperatorStatusOptions): Promise<PredictionOperatorStatus> {
-  const net = config.solverNets[name];
-  if (!net) return missingSolverNetStatus(configPath, name, daemonRunning);
+  const legacy = config.solverNets[name];
+  // Prediction is a deprecated SolverNet. Only emit prediction-operator
+  // diagnostics when the operator has a *genuine* prediction config: a legacy
+  // `solverNets.prediction` entry, or a `joinedSolverNets` entry whose contract
+  // is the prediction SolverNet (`contract.id === 'prediction'`). An operator
+  // who joined only non-prediction SolverNets (the normal case) must get no
+  // prediction diagnostics — synthesizing a prediction net from a non-prediction
+  // joined entry would mislabel its harness and raise a spurious ATTENTION
+  // (dogfood finding #9, issue #328).
+  const predictionJoined = findPredictionJoined(config.joinedSolverNets);
+  if (!legacy && !predictionJoined) {
+    return missingSolverNetStatus(configPath, name, daemonRunning);
+  }
+  const net: SolverNetConfig = legacy ?? synthesizeFromJoined(predictionJoined!, 'prediction.v1');
 
   const diagnostics: PredictionOperatorDiagnostic[] = [];
   let loadedNet: LoadedSolverNet | undefined;

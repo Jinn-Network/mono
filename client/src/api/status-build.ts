@@ -7,6 +7,7 @@ import {
   isStakedLikeServiceStep,
   type FleetState,
 } from '../earning/types.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import type { EarningMigrationArchive } from '../earning/store.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
@@ -15,6 +16,44 @@ import type { TaskRunsStatus } from './task-runs-build.js';
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
+export type TjinnStatusState = 'pending' | 'ready' | 'error';
+
+export const TJINN_PUBLIC_READ_ERROR = 'Sepolia tJINN balance temporarily unavailable.';
+export const TJINN_PUBLIC_PARTIAL_ERROR = 'Some Safe tJINN balances are temporarily unavailable.';
+export const TJINN_PUBLIC_INVALID_SAFE_ERROR = 'One or more Safe addresses are invalid.';
+
+const TJINN_PUBLIC_ERRORS = new Set([
+  TJINN_PUBLIC_READ_ERROR,
+  TJINN_PUBLIC_PARTIAL_ERROR,
+  TJINN_PUBLIC_INVALID_SAFE_ERROR,
+]);
+
+export interface TjinnServiceStatus {
+  index: number;
+  serviceId: number | null;
+  safeAddress: string | null;
+  balanceWei: string | null;
+  operatorClaimedWei: string | null;
+  state: TjinnStatusState;
+  error: string | null;
+}
+
+export interface TjinnStatus {
+  state: TjinnStatusState;
+  chainId: number;
+  tokenAddress: string;
+  safeBalanceWei: string | null;
+  operatorClaimedWei: string | null;
+  /**
+   * Sum of `JinnDistributor.Claimed.operatorMinted` across the operator's
+   * services over the last 24 hours, as a base-10 wei string. Null when the
+   * window read failed or has not been resolved yet.
+   */
+  operatorMintedLast24hWei: string | null;
+  safeCount: number;
+  services: TjinnServiceStatus[];
+  error: string | null;
+}
 
 export interface ServiceBalanceErrorEntry {
   agent?: string;
@@ -56,6 +95,26 @@ export interface GatheredStatusRaw {
   };
   pendingStakingRewardsWei?: string;
   pendingRewardsError?: string;
+  /** Sepolia tJINN ERC-20 balances across fleet Safes. */
+  tJinn?: TjinnStatus;
+  /**
+   * tJINN ERC-20 token address — resolved from the bundled JINN MVI L1
+   * deployment artifact (single source of truth) and threaded through from
+   * `main.ts`. Used to build the fallback pending status when `tJinn` is absent.
+   * Optional: not meaningfully present on mainnet/older paths and absent in
+   * many test fixtures — callers must handle `undefined`.
+   */
+  tjinnTokenAddress?: string;
+  /**
+   * tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`.
+   * Optional for the same reasons as `tjinnTokenAddress`.
+   */
+  tjinnChainId?: number;
+  /**
+   * JinnDistributor address on the tJINN chain. Used to expose real
+   * operator lifetime claimed totals via `totalClaimedOperator(serviceId)`.
+   */
+  tjinnDistributorAddress?: string;
   /** ISO timestamp when the staking contract will next accept a checkpoint. */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
@@ -78,6 +137,18 @@ export interface GatheredStatusRaw {
   pendingByService?: Record<number, string>;
   claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
   migrationArchive?: EarningMigrationArchive;
+  /**
+   * Per-service eviction state keyed by display index.
+   * Populated by gather-status via on-chain getStakingState reads.
+   * `true` means the staking proxy reports state === 2 (Evicted).
+   */
+  evictedByServiceIndex?: Record<number, boolean>;
+  /**
+   * Per-service inactivity seconds keyed by display index.
+   * Populated by gather-status via on-chain getServiceInfo reads (jinn-mono-hjex.3).
+   * Value is the `inactivity` field from the ServiceInfo struct (seconds).
+   */
+  inactivityByServiceIndex?: Record<number, number>;
 }
 
 export interface StatusV1Response {
@@ -105,6 +176,8 @@ export interface StatusV1Response {
       identityRegistryAddress: string | null;
       safeBoundToAgent: boolean;
       identityBindingStatus: 'bound' | 'pending' | 'not_applicable';
+      /** True when the staking proxy reports this service as evicted (getStakingState === 2). */
+      evicted: boolean;
     }>;
     stakedLikeCount: number;
     completeCount: number;
@@ -121,6 +194,7 @@ export interface StatusV1Response {
     totalStakingRewardsWei?: string;
     pendingRewardsError?: string;
   };
+  tJinn: TjinnStatus;
   masterGas: {
     address: string | null;
     balanceWei?: string;
@@ -160,7 +234,10 @@ export function resolveMasterDailyEstimateWei(
   return fromPoll > DEFAULT_MASTER_ETH_DAILY_WEI ? fromPoll : DEFAULT_MASTER_ETH_DAILY_WEI;
 }
 
-function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
+function fleetSummary(
+  fleet: FleetState | null,
+  evictedByServiceIndex?: Record<number, boolean>,
+): StatusV1Response['fleet'] {
   if (!fleet) {
     return {
       loaded: false,
@@ -169,8 +246,10 @@ function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
       completeCount: 0,
     };
   }
-  const services = fleet.services.map(s => ({
-    index: s.index,
+  const services = fleet.services.map(s => {
+    const di = displayFleetServiceIndex(s);
+    return {
+    index: di,
     step: s.step,
     serviceId: s.service_id,
     safeAddress: s.safe_address,
@@ -186,7 +265,9 @@ function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
           ? 'pending'
           : 'not_applicable'
     ) as 'bound' | 'pending' | 'not_applicable',
-  }));
+    evicted: evictedByServiceIndex?.[di] ?? false,
+    };
+  });
   const stakedLikeCount = fleet.services.filter(s => isStakedLikeServiceStep(s.step)).length;
   const completeCount = fleet.services.filter(s => isOperationalServiceStep(s.step)).length;
   return {
@@ -226,6 +307,58 @@ function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
     }
   }
   return total;
+}
+
+/**
+ * Build a `TjinnStatus` in the `pending` state for a given token/chain.
+ *
+ * Single builder for the near-identical pending `TjinnStatus` literals that
+ * gather-status and the status assembler would otherwise hand-roll. Pass
+ * `overrides` to set `safeCount`, `services`, `error`, etc. while keeping the
+ * token/chain/`pending` defaults.
+ *
+ * `tokenAddress`/`chainId` are optional: on mainnet/older paths (and many test
+ * fixtures) the tJINN identity is not resolved. When absent, a sane empty
+ * pending status is produced — empty token address and chain id `0` — rather
+ * than a bogus address.
+ */
+export function pendingTjinnStatus(
+  tokenAddress: string | undefined,
+  chainId: number | undefined,
+  overrides?: Partial<TjinnStatus>,
+): TjinnStatus {
+  return {
+    state: 'pending',
+    chainId: chainId ?? 0,
+    tokenAddress: tokenAddress ?? '',
+    safeBalanceWei: null,
+    operatorClaimedWei: null,
+    operatorMintedLast24hWei: null,
+    safeCount: 0,
+    services: [],
+    error: null,
+    ...overrides,
+  };
+}
+
+function publicTjinnError(error: string): string {
+  return TJINN_PUBLIC_ERRORS.has(error) ? error : TJINN_PUBLIC_READ_ERROR;
+}
+
+function publicTjinnStatus(
+  status: TjinnStatus | undefined,
+  tokenAddress: string | undefined,
+  chainId: number | undefined,
+): TjinnStatus {
+  if (!status) return pendingTjinnStatus(tokenAddress, chainId);
+  return {
+    ...status,
+    error: status.error ? publicTjinnError(status.error) : null,
+    services: status.services.map((service) => ({
+      ...service,
+      error: service.error ? publicTjinnError(service.error) : null,
+    })),
+  };
 }
 
 function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string {
@@ -311,7 +444,7 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
 }
 
 export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
-  const fleetSum = fleetSummary(raw.fleet);
+  const fleetSum = fleetSummary(raw.fleet, raw.evictedByServiceIndex);
   const mode: 'full' | 'sqlite_only' = raw.hintsScope === 'sqlite_only' ? 'sqlite_only' : 'full';
   const claimedRewardsWei = sumClaimedRewardsWei(raw);
   let pendingRewardsWei: bigint | undefined;
@@ -356,6 +489,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
           : claimedRewardsWei.toString(),
       pendingRewardsError: raw.pendingRewardsError,
     },
+    tJinn: publicTjinnStatus(raw.tJinn, raw.tjinnTokenAddress, raw.tjinnChainId),
     masterGas: {
       address: raw.master.address,
       balanceWei: raw.master.balanceWei,

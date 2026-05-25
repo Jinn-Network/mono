@@ -35,6 +35,29 @@ describe('CreatorLoop', () => {
     await adapter.stop();
   });
 
+  it('posts all static configured Tasks collected in one tick', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const tasks: Task[] = [
+      { id: 'ds-1', description: 'first' },
+      { id: 'ds-2', description: 'second' },
+      { id: 'ds-3', description: 'third' },
+    ];
+
+    const postSpy = vi.spyOn(adapter, 'postTask');
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store);
+
+    const postedIds = await loop.tick();
+
+    expect(postedIds).toHaveLength(3);
+    expect(postSpy).toHaveBeenCalledTimes(3);
+    expect(postSpy.mock.calls.map(([task]) => task.id)).toEqual(['ds-1', 'ds-2', 'ds-3']);
+    store.close();
+    await adapter.stop();
+  });
+
   it('does not re-post already posted Tasks', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
@@ -156,7 +179,7 @@ describe('CreatorLoop', () => {
     await adapter.stop();
   });
 
-  it('backs off permanent create failures for the same task', async () => {
+  it('backs off permanent create failures for the same task without throwing', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
@@ -167,12 +190,44 @@ describe('CreatorLoop', () => {
       .mockRejectedValue(new PermanentError('No request IDs returned from router'));
     const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store, SAFE);
 
-    await expect(loop.tick()).rejects.toThrow(/No request IDs/);
-    await loop.tick();
+    await expect(loop.tick()).resolves.toEqual([]);
+    await expect(loop.tick()).resolves.toEqual([]);
 
     expect(postSpy).toHaveBeenCalledTimes(1);
     store.close();
     await adapter.stop();
+  });
+
+  it('continues posting later candidates after a mid-batch failure', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const states: Task[] = [
+      { id: 'before-failure', description: 'posts first' },
+      { id: 'fails', description: 'throws in the middle' },
+      { id: 'after-failure', description: 'still posts' },
+    ];
+    const postSpy = vi.spyOn(adapter, 'postTask').mockImplementation(async (task) => {
+      if (task.id === 'fails') {
+        throw new Error('unexpected adapter failure');
+      }
+      return { taskId: `task-${task.id}`, taskCid: `cid-${task.id}` };
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store, SAFE);
+
+    const postedIds = await loop.tick();
+
+    expect(postedIds).toEqual(['task-before-failure', 'task-after-failure']);
+    expect(postSpy).toHaveBeenCalledTimes(3);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[creator] Create failure for fails'),
+      expect.any(Error),
+    );
+    store.close();
+    await adapter.stop();
+    consoleSpy.mockRestore();
   });
 
   it('posts generated tasks once per bucket and again in a new bucket', async () => {
@@ -202,6 +257,69 @@ describe('CreatorLoop', () => {
     bucketStart = 600_000;
     await loop.tick();
     expect(postSpy).toHaveBeenCalledTimes(2);
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('dedupes generated same-window batch members by default', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const tasks: Task[] = [
+      { id: 'same-window-1', description: 'first', window: { startTs: 0, endTs: 600_000 } },
+      { id: 'same-window-2', description: 'second', window: { startTs: 0, endTs: 600_000 } },
+    ];
+    const generator = vi.fn(async () => tasks);
+    const postSpy = vi.spyOn(adapter, 'postTask');
+    const loop = new CreatorLoop(
+      adapter,
+      [new GeneratedTaskSource('generated:batch', generator)],
+      store,
+      SAFE,
+    );
+
+    const postedIds = await loop.tick();
+
+    expect(postedIds).toHaveLength(1);
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy.mock.calls[0][0].id).toBe('same-window-1');
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('posts generated same-window batch members when bucket override makes them distinct', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const tasks: Task[] = [
+      { id: 'same-window-1', description: 'first', window: { startTs: 0, endTs: 600_000 } },
+      { id: 'same-window-2', description: 'second', window: { startTs: 0, endTs: 600_000 } },
+    ];
+    const generator = vi.fn(async () => tasks);
+    const postSpy = vi.spyOn(adapter, 'postTask');
+    const loop = new CreatorLoop(
+      adapter,
+      [
+        new GeneratedTaskSource('generated:batch', generator, {
+          bucketKeyForTask: (task) => `batch:${task.id}`,
+        }),
+      ],
+      store,
+      SAFE,
+    );
+
+    const postedIds = await loop.tick();
+
+    expect(postedIds).toHaveLength(2);
+    expect(postSpy).toHaveBeenCalledTimes(2);
+    expect(postSpy.mock.calls.map(([task]) => task.id)).toEqual([
+      'same-window-1',
+      'same-window-2',
+    ]);
 
     store.close();
     await adapter.stop();

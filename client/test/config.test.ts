@@ -2,7 +2,12 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_TESTNET_DISCOVERY_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
+import {
+  DEFAULT_TESTNET_DISCOVERY_URL,
+  DEFAULT_TESTNET_ETHEREUM_RPC_URL,
+  loadConfig,
+  buildConfigProvenance,
+} from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -15,6 +20,9 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnDiscoveryMode = process.env['JINN_DISCOVERY_MODE'];
   const originalJinnDiscoveryUrl = process.env['JINN_DISCOVERY_URL'];
   const originalJinnDiscoveryFallback = process.env['JINN_DISCOVERY_FALLBACK'];
+  const originalJinnEthereumRpcUrl = process.env['JINN_ETHEREUM_RPC_URL'];
+  const originalJinnClaimSubmissionMode = process.env['JINN_CLAIM_SUBMISSION_MODE'];
+  const originalJinnClaimLoopEnabled = process.env['JINN_CLAIM_LOOP_ENABLED'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
@@ -72,6 +80,24 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_DISCOVERY_FALLBACK'];
     } else {
       process.env['JINN_DISCOVERY_FALLBACK'] = originalJinnDiscoveryFallback;
+    }
+
+    if (originalJinnEthereumRpcUrl === undefined) {
+      delete process.env['JINN_ETHEREUM_RPC_URL'];
+    } else {
+      process.env['JINN_ETHEREUM_RPC_URL'] = originalJinnEthereumRpcUrl;
+    }
+
+    if (originalJinnClaimSubmissionMode === undefined) {
+      delete process.env['JINN_CLAIM_SUBMISSION_MODE'];
+    } else {
+      process.env['JINN_CLAIM_SUBMISSION_MODE'] = originalJinnClaimSubmissionMode;
+    }
+
+    if (originalJinnClaimLoopEnabled === undefined) {
+      delete process.env['JINN_CLAIM_LOOP_ENABLED'];
+    } else {
+      process.env['JINN_CLAIM_LOOP_ENABLED'] = originalJinnClaimLoopEnabled;
     }
 
     if (originalTestnetL2Deployment === undefined) {
@@ -187,7 +213,16 @@ describe('loadConfig RPC override handling', () => {
 
     const config = loadConfig(configPath);
 
-    expect(config.rpcUrl).toBe('https://sepolia.base.org');
+    // Testnet default is publicnode — no-auth, no shared-key quota cliff.
+    // History: briefly flipped to a Tenderly gateway in response to the
+    // 2026-05-18 sepolia.base.org rate-limit churn, but Tenderly's shared
+    // project key hit its plan quota on 2026-05-24 and every default-config
+    // daemon got HTTP 403 simultaneously (dashboard "Runway 0d", faucet 500s,
+    // daemon hot-loops). Publicnode avoids the shared-quota cliff and is
+    // symmetric with DEFAULT_TESTNET_ETHEREUM_RPC_URL. Operators with heavy
+    // workloads are still nudged to bring their own key via the
+    // NetworkSection panel warning. See #554.
+    expect(config.rpcUrl).toBe('https://base-sepolia-rpc.publicnode.com');
   });
 
   it('defaults testnet discovery to the privately-operated Ponder indexer (http mode)', async () => {
@@ -201,7 +236,10 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.discovery?.mode).toBe('http');
     expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
-    expect(config.discovery?.fallbackToOnchain).toBe(true);
+    // fallbackToOnchain is no longer defaulted on testnet (2026-05-23): silent
+    // fall-through hid indexer outages and storms shared RPC. Operators opt in
+    // explicitly when they need it.
+    expect(config.discovery?.fallbackToOnchain).toBeUndefined();
     // No legacy subgraphUrl default any more — the Railway indexer is the default.
     expect(config.subgraphUrl).toBeUndefined();
   });
@@ -219,7 +257,7 @@ describe('loadConfig RPC override handling', () => {
     expect(config.discovery?.mode).toBeUndefined();
   });
 
-  it('JINN_DISCOVERY_URL alone on testnet → that URL with mode "http" and fallback true', async () => {
+  it('JINN_DISCOVERY_URL alone on testnet → that URL with mode "http"; fallback undefined (default-off)', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_DISCOVERY_FALLBACK'];
@@ -230,7 +268,8 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.discovery?.url).toBe('https://my-indexer.example/graphql');
     expect(config.discovery?.mode).toBe('http');
-    expect(config.discovery?.fallbackToOnchain).toBe(true);
+    // 2026-05-23: fallback is now opt-in. Operator never set it → undefined.
+    expect(config.discovery?.fallbackToOnchain).toBeUndefined();
   });
 
   it('JINN_DISCOVERY_URL on mainnet → mode defaulted to "http" so the URL is consulted', async () => {
@@ -246,7 +285,7 @@ describe('loadConfig RPC override handling', () => {
     expect(config.discovery?.mode).toBe('http');
   });
 
-  it('config-file discovery: { url } without mode on testnet → url preserved, mode defaulted to "http"', async () => {
+  it('config-file discovery: { url } without mode on testnet → url preserved, mode defaulted to "http"; fallback undefined (default-off)', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       discovery: { url: 'https://operator-indexer.example/graphql' },
@@ -260,6 +299,40 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.discovery?.url).toBe('https://operator-indexer.example/graphql');
     expect(config.discovery?.mode).toBe('http');
+    // 2026-05-23: fallback is now opt-in. Operator never set it → undefined.
+    expect(config.discovery?.fallbackToOnchain).toBeUndefined();
+  });
+
+  it('config-file discovery: { fallbackToOnchain: true } on testnet → operator opt-in preserved', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      discovery: { fallbackToOnchain: true },
+    });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
+    // Explicit opt-in survives the testnet default merge.
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+  });
+
+  it('JINN_DISCOVERY_FALLBACK=1 with JINN_DISCOVERY_URL turns the floor on', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_DISCOVERY_URL'] = 'https://my-indexer.example/graphql';
+    process.env['JINN_DISCOVERY_FALLBACK'] = '1';
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe('https://my-indexer.example/graphql');
+    // Env opt-in survives the new default-off behavior.
     expect(config.discovery?.fallbackToOnchain).toBe(true);
   });
 
@@ -383,9 +456,68 @@ describe('loadConfig RPC override handling', () => {
     expect(ds!.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 
-  it('rejects partial L1 cross-chain config (distributor without ethereumRpcUrl)', async () => {
+  it('defaults testnet L1 RPC and enables the claim loop in emit-only mode', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+    delete process.env['JINN_CLAIM_SUBMISSION_MODE'];
+    delete process.env['JINN_CLAIM_LOOP_ENABLED'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.ethereumRpcUrl).toBe(DEFAULT_TESTNET_ETHEREUM_RPC_URL);
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.jinnClaimLoopEnabled).toBe(true);
+  });
+
+  it('preserves an explicit testnet claim-loop opt-out', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
+      jinnClaimLoopEnabled: false,
+    });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_CLAIM_LOOP_ENABLED'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.jinnClaimLoopEnabled).toBe(false);
+  });
+
+  it('does not default ethereumRpcUrl on mainnet', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.network).toBe('mainnet');
+    expect(config.ethereumRpcUrl).toBeUndefined();
+    expect(config.jinnClaimLoopEnabled).toBe(false);
+  });
+
+  it('loads claim submission mode and loop enabled gate from env', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+
+    process.env['JINN_CLAIM_SUBMISSION_MODE'] = 'submit';
+    process.env['JINN_CLAIM_LOOP_ENABLED'] = 'yes';
+
+    const config = loadConfig(configPath);
+
+    expect(config.jinnClaimSubmissionMode).toBe('submit');
+    expect(config.jinnClaimLoopEnabled).toBe(true);
+  });
+
+  it('rejects mainnet partial L1 cross-chain config (distributor without ethereumRpcUrl)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'mainnet',
+      jinnClaimSubmissionMode: 'submit',
       jinnDistributorAddress: '0x1111111111111111111111111111111111111111',
       // ethereumRpcUrl intentionally missing
     });
@@ -408,6 +540,22 @@ describe('loadConfig RPC override handling', () => {
     const hit = issues.find((i) => i.path === 'ethereumRpcUrl');
     expect(hit).toBeDefined();
     expect(hit!.message).toMatch(/ethereumRpcUrl/);
+  });
+
+  it('does not require ethereumRpcUrl for emit-only config', async () => {
+    const configPath = await writeConfigFile({
+      network: 'mainnet',
+      jinnClaimSubmissionMode: 'emit-only',
+      jinnDistributorAddress: '0x1111111111111111111111111111111111111111',
+    });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.ethereumRpcUrl).toBeUndefined();
   });
 
   it('accepts L1 cross-chain config when ethereumRpcUrl is set', async () => {

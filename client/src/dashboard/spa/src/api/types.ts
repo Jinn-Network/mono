@@ -1,5 +1,50 @@
 export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'error' | 'log';
 
+// ── tJINN status (#406) ───────────────────────────────────────────────────────
+//
+// Mirror of the daemon-side `TjinnStatus` / `TjinnServiceStatus` /
+// `TjinnStatusState` from `client/src/api/status-build.ts`. Surfaced on the
+// `/v1/status` response as `tJinn` (PR #447, daemon half). Mirrored here —
+// rather than imported — to keep the SPA build off the daemon type graph,
+// matching the established pattern for `LauncherStatusResponse` etc.
+
+/** Read state for the Sepolia tJINN ERC-20 Safe balance. */
+export type TjinnStatusState = 'pending' | 'ready' | 'error';
+
+/** Per-service tJINN Safe balance entry. */
+export interface TjinnServiceStatus {
+  index: number;
+  serviceId: number | null;
+  safeAddress: string | null;
+  balanceWei: string | null;
+  operatorClaimedWei: string | null;
+  state: TjinnStatusState;
+  error: string | null;
+}
+
+/**
+ * Real Sepolia tJINN ERC-20 Safe balance, summed across the operator's fleet
+ * Safes (deduplicated on shared Safe addresses). `safeBalanceWei` is null
+ * unless `state === 'ready'`; a `ready` state with a null balance is a
+ * confirmed-empty balance and should render as `0`.
+ */
+export interface TjinnStatus {
+  state: TjinnStatusState;
+  chainId: number;
+  tokenAddress: string;
+  safeBalanceWei: string | null;
+  operatorClaimedWei: string | null;
+  /**
+   * Sum of `JinnDistributor.Claimed.operatorMinted` across the operator's
+   * services over the last 24 hours, as a base-10 wei string. Null when the
+   * window read failed or has not been resolved yet.
+   */
+  operatorMintedLast24hWei: string | null;
+  safeCount: number;
+  services: TjinnServiceStatus[];
+  error: string | null;
+}
+
 export interface StructuredEvent {
   schemaVersion: 1;
   id: string;
@@ -45,6 +90,10 @@ export interface BootstrapState {
   }>;
   master_address?: string;
   chain?: string;
+  /** Operator-configured RPC URL (absent when the default is in use). */
+  rpcUrl?: string;
+  /** Chain default RPC URL — the shared, rate-limited trial endpoint. */
+  defaultRpcUrl?: string;
   fleet_agent_id?: string;
   fleet_safe_address?: string;
   funding?: {
@@ -52,6 +101,15 @@ export interface BootstrapState {
     eth_required?: string;
     eth_balance?: string;
     targetWei?: string;
+    /**
+     * True only when master balance has met or exceeded the bootstrap target
+     * AND `currentStep` has advanced past `awaiting_funding`. Present only
+     * when the funding block is included (i.e. when the gate was recently
+     * active). When the gate clears the funding block is omitted entirely,
+     * so consumers should treat absent funding as "not blocking" and present
+     * funding with targetMet===false as "still blocking".
+     */
+    targetMet?: boolean;
   };
   solverNets?: Record<string, {
     name?: string;
@@ -71,6 +129,9 @@ export interface BootstrapState {
   }>;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
+  // Issue #367: the embedded-agent feature flag is no longer carried in this
+  // response. The operator app reads it (and every other feature flag) via the
+  // injected `window.__JINN_FEATURES__` — see `lib/features.ts` `getFeatures()`.
 }
 
 export interface ClaudeAuthState {
@@ -123,13 +184,23 @@ export interface SolverNetsCatalogResponse {
 export interface LauncherStatusGeneratorView {
   state: 'active' | 'paused' | 'errored';
   lastPollAt?: string;
-  lastPollSummary?: {
+  lastPollSummary?:
+    | {
     evaluated: number;
     posted: number;
     skipped: number;
-  };
+    }
+    | {
+      poolSize: number;
+      posted: number;
+      unposted: number;
+      live: number;
+      repostable: number;
+      saturated: number;
+      abandoned: number;
+    };
   lastError?: { message: string; at: string };
-  cadenceMs: number;
+  cadenceMs?: number;
   stale: boolean;
 }
 
@@ -443,6 +514,7 @@ export interface LifecycleProgress {
 
 export interface LaunchedGeneratorState {
   lastPollAt?: Iso8601;
+  lastPollSummary?: LauncherStatusGeneratorView['lastPollSummary'];
   lastError?: TimestampedError;
 }
 
@@ -506,6 +578,11 @@ export interface GeneratorConfig {
   maxOrderbookAgeSeconds?: number;
   N_target_successes?: number;
   N_max_postings_per_task?: number;
+  posting_window_ms?: number;
+  post_batch_size?: number;
+  maxClaimsPerOperator?: number;
+  claimLeaseTtlSeconds?: number;
+  admissionMode?: 'required' | 'python-floor';
   cooldown_ms?: number;
   claimPolicy?: {
     maxClaims?: number;
@@ -604,6 +681,7 @@ export interface SolverNetManifestV1 {
   solutionPriceWei: string;
   verdictPriceWei: string;
   openRoles: Array<'solver' | 'evaluator'>;
+  generatorConfig?: Record<string, unknown>;
   registry?: {
     manifestCid?: string;
     registryUrl?: string;
@@ -637,10 +715,18 @@ export interface LaunchAction {
 /** Response shape for `PATCH /v1/solvernets/launched/:id/lifecycle`. */
 export type LifecycleTransition = LaunchedSolverNetRecord;
 
+/**
+ * Typed reason a registry catalog refresh failed. Currently only
+ * `rpc_rate_limited` — the configured RPC endpoint returned a 429. The SPA
+ * branches on this to show an operator-actionable message ("add your own RPC
+ * key") instead of a generic failure string. See jinn-mono #325.
+ */
+export type RegistryErrorCode = 'rpc_rate_limited';
+
 export interface RegistryListResponse {
   summaries: SolverNetManifestSummary[];
   lastRefreshedAt: Iso8601 | null;
-  lastError: { message: string; at: Iso8601 } | null;
+  lastError: { message: string; at: Iso8601; code?: RegistryErrorCode } | null;
 }
 
 export interface RegistryManifestResponse {
@@ -744,4 +830,36 @@ export interface DiscoveryBuilderArtifactsResponse {
 
 export interface DiscoveryPluginScoresResponse {
   scores: PluginScoreHistoryRowDto[];
+}
+
+/**
+ * Response from `GET /v1/discovery/solvernet-operator-count?cid=<manifestCid>`.
+ * `operatorCount` is the number of distinct operators with on-chain activity
+ * (claimed tasks) on the SolverNet — see the daemon's
+ * `DiscoveryAPI.getSolverNetOperatorCount` for why this counts participating
+ * operators rather than config-level joins. Issue #351.
+ */
+export interface DiscoverySolverNetOperatorCountResponse {
+  manifestCid: string;
+  operatorCount: number;
+}
+
+// ── Per-harness readiness (vh74.2 Stage A — #248 / #332) ─────────────────────
+// Mirrors the daemon's `HarnessReadinessSnapshot` entry shape exposed at
+// `GET /v1/harnesses/:name/readiness`. The join form consults this to disable
+// harness options whose external dependencies (CLI install, provider key)
+// are unsatisfied.
+
+export interface HarnessReadinessNextStep {
+  description: string;
+  cli?: string;
+  url?: string;
+}
+
+export interface HarnessReadinessEntry {
+  harnessName: string;
+  manifestCids: string[];
+  ready: boolean;
+  reason?: string;
+  nextStep?: HarnessReadinessNextStep;
 }

@@ -28,10 +28,23 @@ export interface TestnetSetupMigrationPlan {
   services: ServiceState[];
 }
 
+export interface TestnetSetupMigrationRetireFailedEnvelope {
+  kind: 'retire_failed';
+  retire_error: string | null;
+  tx_hash: string | null;
+  message: string;
+}
+
 export interface TestnetSetupMigrationResult {
   state: FleetState;
   migratedCount: number;
   archivePaths: string[];
+  /**
+   * Set when at least one service's retire failed and the wipe was suppressed.
+   * The migration archived the failure but left local state intact.
+   * Callers should surface this to the operator.
+   */
+  retireFailedEnvelope?: TestnetSetupMigrationRetireFailedEnvelope;
 }
 
 export interface TestnetSetupMigrationParams {
@@ -251,6 +264,7 @@ export async function migrateDeprecatedTestnetSetup(
   let nextState = params.state;
   const archivePaths = new Set<string>();
   let migratedCount = 0;
+  let retireFailedEnvelope: TestnetSetupMigrationRetireFailedEnvelope | undefined;
 
   for (const svc of plan.services) {
     const id = migrationId(svc);
@@ -287,9 +301,33 @@ export async function migrateDeprecatedTestnetSetup(
         ...retire,
       });
       if (retire.retire_status === 'failed') {
+        // Retire failed — do NOT wipe local state. The operator's service is
+        // still running on-chain against the old setup. Preserve all fields so
+        // they can continue operating. Surface the error via the envelope so
+        // callers (bootstrap, /v1/bootstrap) can show an actionable message.
+        //
+        // Also mark wipe_suppressed=true on the archive entry. Pre-PR archive
+        // entries with retire_status='failed' but no wipe_suppressed flag had
+        // their state wiped anyway; consumers (bootstrap-endpoint) filter on
+        // wipe_suppressed === true to avoid surfacing a spurious retire_failed
+        // envelope for those legacy entries.
+        entry = await params.stateStore.upsertMigrationArchiveEntry({
+          ...entry,
+          wipe_suppressed: true,
+        });
         console.error(
-          'Previous Jinn setup could not be fully retired automatically; it was archived for recovery. Continuing upgrade...',
+          'Previous Jinn setup could not be fully retired automatically; it was archived for recovery. Local state is preserved — resolve the retire failure before upgrading.',
         );
+        retireFailedEnvelope = {
+          kind: 'retire_failed',
+          retire_error: retire.retire_error ?? null,
+          tx_hash: retire.retire_tx_hash ?? null,
+          message: 'We could not retire your previous setup. Your service state is preserved; resolve the retire failure before upgrading.',
+        };
+        // Count as a migration attempt even though state was not wiped, so
+        // callers know we ran the migration path.
+        migratedCount += 1;
+        continue;
       }
     }
 
@@ -319,5 +357,6 @@ export async function migrateDeprecatedTestnetSetup(
     state: nextState,
     migratedCount,
     archivePaths: [...archivePaths],
+    ...(retireFailedEnvelope ? { retireFailedEnvelope } : {}),
   };
 }

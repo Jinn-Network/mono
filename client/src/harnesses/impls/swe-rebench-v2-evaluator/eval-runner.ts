@@ -27,10 +27,14 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
+import {
+  defaultCommandRunner,
+  resolveImageDigest as resolveSubstrateImageDigest,
+} from '../../../solver-types/_swe-rebench-v2-substrate.js';
 
 /**
  * Thrown when the eval could not actually grade the solution. There is no
@@ -50,6 +54,80 @@ export class EvalCouldNotGradeError extends Error {
   }
 }
 
+/**
+ * Thrown by `runEval` when the disk cannot be brought above the eval
+ * disk-floor even after a broad prune. A clean abort — the caller stops
+ * gracefully; no instance is graded, nothing is marked. Distinct from
+ * `EvalCouldNotGradeError`: this is operator-environment, retryable, and must
+ * never be turned into a `scorable: false` admission (#476).
+ */
+export class InsufficientDiskError extends Error {
+  readonly freeBytes: number;
+  readonly floorBytes: number;
+  constructor(freeBytes: number, floorBytes: number) {
+    const gb = (n: number): string => (n / 1_000_000_000).toFixed(1);
+    super(
+      `insufficient disk for swe-rebench eval: ${gb(freeBytes)} GB free, ` +
+        `need ≥ ${gb(floorBytes)} GB`,
+    );
+    this.name = 'InsufficientDiskError';
+    this.freeBytes = freeBytes;
+    this.floorBytes = floorBytes;
+  }
+}
+
+/**
+ * Default free-disk floor required before an eval round: 20 GB. A single
+ * SWE-rebench eval image was observed to peak transiently at ~12.6 GB, so the
+ * floor clears the worst observed instance with real margin. Override with
+ * `JINN_EVAL_DISK_FLOOR_GB` on constrained hosts.
+ */
+export const DEFAULT_EVAL_DISK_FLOOR_BYTES = 20_000_000_000;
+
+/** Resolve the disk floor: explicit option > `JINN_EVAL_DISK_FLOOR_GB` env > default. */
+export function resolveDiskFloorBytes(opt: number | undefined): number {
+  if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
+  const envRaw = process.env['JINN_EVAL_DISK_FLOOR_GB'];
+  if (envRaw !== undefined) {
+    const parsed = Number(envRaw);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed * 1_000_000_000);
+    console.warn(
+      `[swe-rebench-v2] JINN_EVAL_DISK_FLOOR_GB=${JSON.stringify(envRaw)} is not a positive ` +
+        `number — using default ${DEFAULT_EVAL_DISK_FLOOR_BYTES / 1_000_000_000} GB`,
+    );
+  }
+  return DEFAULT_EVAL_DISK_FLOOR_BYTES;
+}
+
+/**
+ * Default wall-clock limit for one upstream eval.py invocation: 2 hours. Some
+ * linux/amd64 SWE-rebench images can wedge indefinitely under Apple Silicon
+ * emulation after a native crash, so the subprocess gets a hard guardrail.
+ * Override with `JINN_SWE_REBENCH_EVAL_TIMEOUT_MS`; set `0` to disable.
+ */
+export const DEFAULT_EVAL_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+/** Resolve the eval timeout: explicit option > env > default. */
+export function resolveEvalTimeoutMs(opt: number | undefined): number {
+  if (typeof opt === 'number' && Number.isFinite(opt) && opt >= 0) return Math.floor(opt);
+  const envRaw = process.env['JINN_SWE_REBENCH_EVAL_TIMEOUT_MS'];
+  if (envRaw !== undefined) {
+    const parsed = Number(envRaw);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+    console.warn(
+      `[swe-rebench-v2] JINN_SWE_REBENCH_EVAL_TIMEOUT_MS=${JSON.stringify(envRaw)} is not a ` +
+        `non-negative number — using default ${DEFAULT_EVAL_TIMEOUT_MS} ms`,
+    );
+  }
+  return DEFAULT_EVAL_TIMEOUT_MS;
+}
+
+/** Production disk probe: free bytes on the filesystem backing the temp dir. */
+async function defaultFreeDiskBytes(): Promise<number> {
+  const s = await statfs(tmpdir());
+  return s.bavail * s.bsize;
+}
+
 export interface PythonEvalRunnerOptions {
   /** Path to the cloned SWE-rebench-V2 repo (cached locally). */
   upstreamRepoDir: string;
@@ -58,91 +136,74 @@ export interface PythonEvalRunnerOptions {
   /** Workers for parallel eval (defaults to 1; we run one task at a time). */
   maxWorkers?: number;
   /**
-   * Max number of distinct eval images to keep in the local Docker cache.
-   * The runner tracks an in-process LRU keyed by image tag; once usage exceeds
-   * this cap, the least-recently-used images are removed via
-   * {@link PythonEvalRunnerOptions.cleanupImage}.
+   * Removes a completed round's entire Docker footprint — the round's image,
+   * stopped containers, and build cache — so eval disk usage never
+   * accumulates across instances (#476). Called once per `runEval`, in a
+   * `finally`, even when the eval threw.
    *
-   * The leaderboard pool has hundreds of unique instances at ~3 GB/image, so
-   * an unbounded cache fills operator disks in days (jinn-mono-uy6v.11).
-   *
-   * Default: `process.env.JINN_EVAL_IMAGE_CACHE_MAX` parsed as an integer, or
-   * `DEFAULT_EVAL_IMAGE_CACHE_MAX` (20) if unset/invalid.
+   * Defaults to {@link defaultPruneRound}. Implementations MUST NOT throw —
+   * `runEval` guards defensively, but cleanup failures should be swallowed
+   * (logged elsewhere if desired) so a flaky `docker` never escapes `runEval`.
    */
-  imageCacheMax?: number;
+  pruneRound?: (image: string) => Promise<void>;
   /**
-   * Removes an image from the local Docker cache (or no-ops if the operator
-   * has chosen not to GC). Called for each eviction from the LRU.
-   *
-   * Defaults to `docker rmi <image>` via the system `docker` binary. Test
-   * suites inject a stub to capture the eviction order without shelling out.
-   *
-   * Implementations MUST NOT throw — failures should be swallowed (logged
-   * elsewhere if desired) so a missing/failed `docker rmi` never escapes
-   * `runEval`. The runner enforces this defensively too.
+   * Resolves the eval image digest while the image is still local, before
+   * per-round pruning removes it. Defaults to `docker image inspect`.
    */
-  cleanupImage?: (image: string) => Promise<void>;
+  resolveImageDigest?: (image: string) => Promise<string | null>;
+  /**
+   * Required free disk (bytes) before an eval round starts. Explicit value >
+   * `JINN_EVAL_DISK_FLOOR_GB` env > {@link DEFAULT_EVAL_DISK_FLOOR_BYTES}.
+   */
+  diskFloorBytes?: number;
+  /** Probe of free disk (bytes). Defaults to a `statfs` on the temp dir. */
+  freeDiskBytes?: () => Promise<number>;
+  /**
+   * Broad reclaim invoked when free disk is below the floor. Defaults to
+   * `docker system prune -f`. MUST NOT throw.
+   */
+  systemPrune?: () => Promise<void>;
+  /**
+   * Wall-clock timeout (ms) for one upstream eval.py invocation. Explicit value
+   * > `JINN_SWE_REBENCH_EVAL_TIMEOUT_MS` env > {@link DEFAULT_EVAL_TIMEOUT_MS}.
+   * Set to 0 to disable.
+   */
+  evalTimeoutMs?: number;
 }
 
 /**
- * Default cap on the per-instance Docker image cache when no explicit
- * `imageCacheMax` and no `JINN_EVAL_IMAGE_CACHE_MAX` env var are configured.
- *
- * 20 images × ~3 GB/image ≈ 60 GB working set — small enough that even a
- * 256 GB disk has headroom, large enough that the steady-state loop on a
- * frequently-repeating subset of the pool rarely re-pulls.
+ * Spawn `docker <args>`, resolving regardless of outcome — a failed cleanup
+ * command is logged, never thrown (#476: cleanup must not break the eval loop).
  */
-export const DEFAULT_EVAL_IMAGE_CACHE_MAX = 20;
-
-export function resolveImageCacheMax(opt: number | undefined): number {
-  if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
-  const envRaw = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-  if (envRaw !== undefined) {
-    // `Number()` returns 0 for `""` / whitespace and NaN for strings with
-    // non-numeric content (e.g. `"garbage"`, `"1e3oops"`) — unlike `parseInt`,
-    // which would silently accept `parseInt("1e3oops") === 1`. Either way we
-    // reject anything that isn't a positive integer.
-    const parsed = Number(envRaw);
-    if (Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0) return parsed;
-    // Surface the typo so operators discover it before the disk fills,
-    // rather than silently running on the default.
-    console.warn(
-      `[swe-rebench-v2] JINN_EVAL_IMAGE_CACHE_MAX=${JSON.stringify(envRaw)} is not a positive integer — using default ${DEFAULT_EVAL_IMAGE_CACHE_MAX}`,
-    );
-  }
-  return DEFAULT_EVAL_IMAGE_CACHE_MAX;
-}
-
-/**
- * Production `cleanupImage`: spawn `docker rmi <image>`. Errors are tolerated
- * — a missing/failed `docker rmi` is operationally survivable (the image
- * stays on disk; cache stays bloated for a while; not a correctness failure)
- * — but we warn on non-zero exit and on failed-to-spawn so a persistently-flaky
- * daemon (or a permission slip) becomes visible before disks fill. Silent
- * leaks were the original failure mode `jinn-mono-uy6v.11` exists to fix.
- *
- * We listen on `'exit'` rather than `'close'` and route stdio to `'ignore'`
- * so the resolve path doesn't depend on parent-side stream draining (which
- * can fail to fire `'close'` cleanly when piped without backpressure on the
- * right tick). The image tag + exit code is sufficient signal; operators can
- * grep the docker daemon log for the underlying reason.
- */
-function defaultCleanupImage(image: string): Promise<void> {
-  return new Promise((resolve) => {
-    const child = spawn('docker', ['rmi', image], { stdio: ['ignore', 'ignore', 'ignore'] });
-    child.on('exit', (code, signal) => {
-      if (code !== 0) {
-        const status =
-          code !== null ? `exited ${code}` : `terminated by signal ${signal ?? 'unknown'}`;
-        console.warn(`[swe-rebench-v2] docker rmi ${image} ${status}`);
+function runDocker(args: string[]): Promise<void> {
+  return defaultCommandRunner('docker', args)
+    .then((res) => {
+      if (res.exitCode !== 0) {
+        const detail = (res.stderr || res.stdout).trim();
+        console.warn(
+          `[swe-rebench-v2] docker ${args.join(' ')} exited ${res.exitCode}` +
+            `${detail ? `: ${detail.slice(-500)}` : ''}`,
+        );
       }
-      resolve();
+    })
+    .catch((err: unknown) => {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${reason}`);
     });
-    child.on('error', (err) => {
-      console.warn(`[swe-rebench-v2] docker rmi ${image} failed to spawn: ${err.message}`);
-      resolve();
-    });
-  });
+}
+
+/**
+ * Production `pruneRound`: remove the round's image, then prune stopped
+ * containers and build cache. Each step is best-effort.
+ */
+async function defaultPruneRound(image: string): Promise<void> {
+  if (image) await runDocker(['rmi', '-f', image]);
+  await runDocker(['container', 'prune', '-f']);
+  await runDocker(['builder', 'prune', '-f']);
+}
+
+async function defaultResolveImageDigest(imageName: string): Promise<string | null> {
+  return resolveSubstrateImageDigest(imageName, defaultCommandRunner);
 }
 
 /**
@@ -163,6 +224,7 @@ const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
   { rx: /No virtual environment found/i, reason: 'venv_missing' },
   { rx: /exec format error|the requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
+  { rx: /Fatal Python error:\s*Illegal instruction|Illegal instruction(?:\s+\(core dumped\))?/i, reason: 'image_arch_mismatch' },
   // 2026-05-14 triage (jinn-mono-fufn) — failure fingerprints from real verdicts:
   { rx: /A virtual environment already exists at \S+\.venv\b/i, reason: 'venv_collision' },
   { rx: /No module named pytest\b/i, reason: 'pytest_missing' },
@@ -224,62 +286,62 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
 }
 
 export class PythonEvalRunner implements EvalRunner {
-  /**
-   * LRU of image tags whose Docker layers may be cached locally. Stored as a
-   * `Set<string>` because `Set` preserves insertion order; we delete-then-add
-   * to refresh recency and `next()` on the keys iterator to find the
-   * least-recently-used entry.
-   */
-  private readonly imageLru = new Set<string>();
-  private readonly imageCacheMax: number;
-  private readonly cleanupImage: (image: string) => Promise<void>;
+  private readonly pruneRound: (image: string) => Promise<void>;
+  private readonly diskFloorBytes: number;
+  private readonly freeDiskBytes: () => Promise<number>;
+  private readonly systemPrune: () => Promise<void>;
+  private readonly resolveImageDigest: (image: string) => Promise<string | null>;
+  private readonly evalTimeoutMs: number;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
-    this.imageCacheMax = resolveImageCacheMax(opts.imageCacheMax);
-    this.cleanupImage = opts.cleanupImage ?? defaultCleanupImage;
+    this.pruneRound = opts.pruneRound ?? defaultPruneRound;
+    this.diskFloorBytes = resolveDiskFloorBytes(opts.diskFloorBytes);
+    this.freeDiskBytes = opts.freeDiskBytes ?? defaultFreeDiskBytes;
+    this.systemPrune = opts.systemPrune ?? (() => runDocker(['system', 'prune', '-f']));
+    this.resolveImageDigest = opts.resolveImageDigest ?? defaultResolveImageDigest;
+    this.evalTimeoutMs = resolveEvalTimeoutMs(opts.evalTimeoutMs);
   }
 
-  async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
-    try {
-      return await this.runEvalImpl(args);
-    } finally {
-      // Always record the image and run GC — even when the eval threw. A
-      // pull-and-crash failure (Docker storage IO error, image_arch_mismatch,
-      // patch_corrupt, eval_no_report) still left an image on disk; we must
-      // count it toward the cache cap so the failure path can't leak the LRU.
-      await this.recordImageUsage(args.image);
+  /**
+   * Ensure enough free disk for an eval round. Below the floor → broad prune →
+   * re-probe; still below → `InsufficientDiskError` (clean abort). (#476)
+   */
+  private async ensureDiskHeadroom(): Promise<void> {
+    const free = await this.freeDiskBytes();
+    if (free >= this.diskFloorBytes) return;
+    console.warn(
+      `[swe-rebench-v2] low disk (${(free / 1e9).toFixed(1)} GB) — running docker system prune`,
+    );
+    await this.systemPrune();
+    const afterPrune = await this.freeDiskBytes();
+    if (afterPrune < this.diskFloorBytes) {
+      throw new InsufficientDiskError(afterPrune, this.diskFloorBytes);
     }
   }
 
-  /**
-   * Move `image` to the most-recently-used slot of the in-process LRU; if the
-   * set now exceeds {@link imageCacheMax}, evict the oldest entries via
-   * {@link cleanupImage}. Eviction failures are swallowed so a flaky
-   * `docker rmi` cannot escape `runEval`.
-   *
-   * The cap is enforced after the just-used image is inserted: the
-   * just-evaluated image is the *most* recent, so repeat-evals of recently
-   * used instances never re-pull. Only when more than N distinct images have
-   * been used does the oldest get rmi'd.
-   */
-  private async recordImageUsage(image: string): Promise<void> {
-    if (!image) return;
-    // Refresh recency: delete-then-add reinserts at the tail of the set.
-    this.imageLru.delete(image);
-    this.imageLru.add(image);
-    while (this.imageLru.size > this.imageCacheMax) {
-      const oldest = this.imageLru.values().next().value;
-      if (!oldest) break;
-      this.imageLru.delete(oldest);
+  async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
+    await this.ensureDiskHeadroom();
+    try {
+      const result = await this.runEvalImpl(args);
+      let imageDigest: string | null = null;
       try {
-        await this.cleanupImage(oldest);
+        imageDigest = await this.resolveImageDigest(args.image);
       } catch (err) {
-        // Best-effort GC: a failed rmi leaves the image on disk but mustn't
-        // break the loop. Warn so a flaky `docker` (or a permission slip)
-        // becomes visible before disks fill — silent leaks were the whole
-        // problem this bead exists to fix.
         const reason = err instanceof Error ? err.message : String(err);
-        console.warn(`[swe-rebench-v2] eval-image cleanup failed for ${oldest}: ${reason}`);
+        console.warn(`[swe-rebench-v2] resolveImageDigest failed for ${args.image}: ${reason}`);
+      }
+      return {
+        ...result,
+        ...(imageDigest ? { imageDigest } : {}),
+      };
+    } finally {
+      // Prune this round's full Docker footprint — even when the eval threw,
+      // a pull-and-crash still left an image on disk (#476).
+      try {
+        await this.pruneRound(args.image);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[swe-rebench-v2] pruneRound failed for ${args.image}: ${reason}`);
       }
     }
   }
@@ -326,6 +388,7 @@ export class PythonEvalRunner implements EvalRunner {
     const child = spawn(this.opts.pythonBin ?? 'python3', pyArgs, {
       cwd: this.opts.upstreamRepoDir,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
       // SWE-rebench eval images are published for linux/amd64. Pin the platform
       // so the upstream `docker run` is consistent on amd64 hosts and does not
       // silently crash under arm64 emulation on dev machines.
@@ -335,10 +398,50 @@ export class PythonEvalRunner implements EvalRunner {
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     let stdout = '';
     child.stdout.on('data', (d) => { stdout += d.toString(); });
+    let timedOut = false;
+    let closed = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const killChild = (signal: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (!pid) return;
+      try {
+        if (process.platform === 'win32') {
+          child.kill(signal);
+        } else {
+          process.kill(-pid, signal);
+        }
+      } catch {
+        try { child.kill(signal); } catch {}
+      }
+    };
+    const timeoutTimer = this.evalTimeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          killChild('SIGTERM');
+          killTimer = setTimeout(() => {
+            if (!closed) killChild('SIGKILL');
+          }, 10_000);
+          killTimer.unref?.();
+        }, this.evalTimeoutMs)
+      : undefined;
+    timeoutTimer?.unref?.();
+
     const exitCode = await new Promise<number>((resolve, reject) => {
       child.on('close', (code) => resolve(code ?? 1));
       child.on('error', reject);
+    }).finally(() => {
+      closed = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
     });
+
+    if (timedOut) {
+      await rm(tmp, { recursive: true, force: true });
+      throw new EvalCouldNotGradeError(
+        'eval_timeout',
+        `python eval timed out after ${this.evalTimeoutMs}ms; ${(stderr || stdout).slice(-800)}`,
+      );
+    }
 
     let report: { items?: Array<Record<string, unknown>> };
     try {

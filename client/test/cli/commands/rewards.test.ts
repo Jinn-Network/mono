@@ -59,4 +59,13 @@ describe('rewards command', () => {
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
   });
+
+  it('labels human output as staking collector claims, not operator tJINN', async () => {
+    const cmd = createRewardsCommand(fakeDeps);
+    const { raw } = await runCommand(cmd, { argv: ['--human'], tty: true });
+    const stdout = raw.join('');
+    expect(stdout).toContain('Pending staking collector claims:');
+    expect(stdout).toContain('collector-token');
+    expect(stdout).toContain('Operator tJINN/JINN earnings');
+  });
 });

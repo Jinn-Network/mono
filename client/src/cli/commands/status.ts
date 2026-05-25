@@ -66,7 +66,7 @@ function humanStatus(v: StatusPayload): string {
     `daemon=${v.daemon.state} network=${v.daemon.network} chain=${v.rpc.chainId} block=${v.rpc.blockNumber}`,
     `health=${health}`,
     `fleet: ${v.fleet.size} services, ${v.fleet.complete} complete, ${v.fleet.needsAttention} need attention`,
-    `pending: ${v.earnings.pendingTotal} reward-wei`,
+    `staking-collector-pending: ${v.earnings.pendingTotal} reward-wei`,
     v.taskNative
       ? `task-native: solver=${v.taskNative.solverReady ? 'ready' : 'not-ready'} evaluator=${v.taskNative.evaluatorReady ? 'ready' : 'not-ready'} (${v.taskNative.detail})`
       : '',

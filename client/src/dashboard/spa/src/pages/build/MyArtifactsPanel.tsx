@@ -1,24 +1,49 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type { DiscoveryBuilderArtifactsResponse } from '../../api/types.js';
-import { PanelCard } from '../../components/PanelCard.js';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from '../../components/ui/card.js';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Skeleton } from '../../components/ui/skeleton.js';
+import { Alert, AlertDescription } from '../../components/ui/alert.js';
 
-const cellStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderBottom: '1px solid var(--border)',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  color: 'var(--fg)',
-};
-const headCellStyle: React.CSSProperties = {
-  ...cellStyle,
-  color: 'var(--fg-muted)',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  fontSize: '10px',
-};
+const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
+const inlineCode =
+  'rounded-sm border border-border bg-background px-1.5 py-px font-mono text-[12px] text-primary';
 
+function PanelHeader(): JSX.Element {
+  return (
+    <CardHeader className="mb-5 flex flex-col gap-1 p-0">
+      <span className={eyebrow}>Builder</span>
+      <h3 className="m-0 font-serif text-[22px] leading-[1.25] text-foreground">
+        Your published plug-ins
+      </h3>
+    </CardHeader>
+  );
+}
+
+/**
+ * MyArtifactsPanel — builder-facing companion to PublishedPluginsPanel.
+ * Queries `/v1/discovery/builder-artifacts?builderAgentId=<id>` once the
+ * operator has a `fleet_agent_id`; before that, renders an identity-pending
+ * prompt pointing at `jinn solver-plugins publish`.
+ *
+ * Migrated to shadcn `<Card>` / `<Table>` / `<Badge>` / `<Skeleton>` /
+ * `<Alert>`. Three empty/intermediate states (identity-pending, loading,
+ * empty) all use the dashed-border affordance with eyebrow + prose. Error
+ * state lands in `<Alert variant="blocking">`.
+ */
 export function MyArtifactsPanel({ fleetAgentId }: { fleetAgentId: string | undefined }): JSX.Element {
   const enabled = Boolean(fleetAgentId);
   const { data, isLoading, error } = useQuery<DiscoveryBuilderArtifactsResponse>({
@@ -30,62 +55,107 @@ export function MyArtifactsPanel({ fleetAgentId }: { fleetAgentId: string | unde
 
   if (!enabled) {
     return (
-      <PanelCard
-        title="Your published plug-ins"
-        style={{ border: '1px dashed var(--border)', background: 'var(--surface-sunken)' }}
-      >
-        <p style={{ color: 'var(--fg-muted)' }}>
-          Complete identity bootstrap to see your published plug-ins. Run{' '}
-          <code>jinn solver-plugins publish</code> on a plug-in and the lazy stage-ensure will provision
-          your builder identity (Stage 1).
-        </p>
-      </PanelCard>
+      <Card className="bg-[var(--bg-sunken)] p-6">
+        <PanelHeader />
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-2 rounded-md border border-dashed border-border p-6">
+            <span className={eyebrow}>Identity pending</span>
+            <p className="m-0 max-w-[64ch] font-mono text-[13px] leading-[1.7] text-muted-foreground">
+              Complete identity bootstrap to see your published plug-ins. Run{' '}
+              <code className={inlineCode}>jinn solver-plugins publish</code> on a
+              plug-in and the lazy stage-ensure will provision your builder
+              identity (Stage 1).
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
   if (isLoading) {
-    return <section style={{ padding: '24px', color: 'var(--fg-muted)' }}>Loading your plug-ins…</section>;
+    return (
+      <Card className="p-6">
+        <PanelHeader />
+        <CardContent className="flex flex-col gap-2 p-0">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-4/6" />
+        </CardContent>
+      </Card>
+    );
   }
+
   if (error) {
-    return <section style={{ padding: '24px', color: 'var(--break-red)' }}>Discovery unavailable.</section>;
+    return (
+      <Card className="p-6">
+        <PanelHeader />
+        <CardContent className="p-0">
+          <Alert variant="blocking">
+            <AlertDescription>Discovery unavailable.</AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    );
   }
 
   const rows = (data?.artifacts ?? []).filter((a) => a.artifactType === 'plugin');
 
   if (rows.length === 0) {
     return (
-      <PanelCard title="Your published plug-ins">
-        <p style={{ color: 'var(--fg-dim)' }}>You have not published any plug-ins yet.</p>
-      </PanelCard>
+      <Card className="p-6">
+        <PanelHeader />
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-2 rounded-md border border-dashed border-border bg-[var(--bg-sunken)] p-6">
+            <span className={eyebrow}>Nothing yet</span>
+            <p className="m-0 max-w-[64ch] font-mono text-[13px] leading-[1.7] text-muted-foreground">
+              You have not published any plug-ins yet. Scaffold one with{' '}
+              <code className={inlineCode}>jinn create plugin</code>, then publish
+              with <code className={inlineCode}>jinn solver-plugins publish</code>.
+              It will appear here under your builder agentId.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <PanelCard title="Your published plug-ins">
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={headCellStyle}>Plug-in</th>
-              <th style={headCellStyle}>Version</th>
-              <th style={headCellStyle}>Supports</th>
-              <th style={headCellStyle}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
+    <Card className="p-6">
+      <PanelHeader />
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Plug-in</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Supports</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((r) => (
-              <tr key={`${r.builderAgentId}:${r.cid}`}>
-                <td style={cellStyle}>{r.name}</td>
-                <td style={cellStyle}>{r.version}</td>
-                <td style={{ ...cellStyle, color: 'var(--fg-muted)' }}>{r.supports.join(', ')}</td>
-                <td style={cellStyle}>
-                  {r.revoked ? <span style={{ color: 'var(--wane)' }}>revoked</span> : <span style={{ color: 'var(--vow-green)' }}>active</span>}
-                </td>
-              </tr>
+              <TableRow key={`${r.builderAgentId}:${r.cid}`}>
+                <TableCell className="font-mono text-[12px] text-foreground">{r.name}</TableCell>
+                <TableCell className="font-mono text-[12px] text-muted-foreground">{r.version}</TableCell>
+                <TableCell className="font-mono text-[12px] text-muted-foreground">
+                  {r.supports.join(', ')}
+                </TableCell>
+                <TableCell>
+                  {r.revoked ? (
+                    <Badge variant="outline" className="rounded-full border-[var(--wane)] text-[var(--wane)]">
+                      Revoked
+                    </Badge>
+                  ) : (
+                    <Badge variant="success" className="rounded-full">
+                      Active
+                    </Badge>
+                  )}
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </PanelCard>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }

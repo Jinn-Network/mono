@@ -43,6 +43,7 @@ import {
   installClaudeCodeLocally,
   type ExecFileAsync,
 } from '../setup/claude-code-install.js';
+import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -62,6 +63,11 @@ export interface SetupRoutesConfig {
   chain?: JinnOnchainNetwork;
   rpcUrl?: string;
   minEoaGasWei?: string;
+  /**
+   * Pass through from JinnConfig.targetServices so the faucet drip target
+   * scales with multi-service deployments. Defaults to 1 (testnet operators).
+   */
+  targetServices?: number;
   claudePath?: string;
   getClaudePath?: () => string;
   runtimeMode?: 'bare' | 'docker-compose' | 'container';
@@ -83,6 +89,19 @@ export interface SetupRoutesConfig {
   /** Returns the chain default RPC URL — used by POST /v1/setup/network when
    *  the operator clears the field to revert to the default. */
   defaultRpcUrlForChain?: () => string;
+  /**
+   * When set, POST /v1/setup/restake/:serviceId is enabled.
+   * Calls the provided function to re-stake an evicted service on demand
+   * (the "Re-stake now" dashboard CTA). jinn-mono-hjex.3
+   */
+  restake?: (serviceId: number) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * When set, POST /v1/setup/bootstrap/retry is enabled.
+   * Re-enters the bootstrap state machine in-process — no daemon restart
+   * required. The closure signals main()'s halt-and-resume loop to call
+   * bootstrap() again. jinn-mono-hjex.6
+   */
+  retryBootstrap?: () => Promise<void>;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -146,10 +165,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   });
 
   // POST /v1/setup/drip — user-triggered Base Sepolia faucet funding for the
-  // master EOA. One click drains the tiny CDP drip repeatedly until the wallet
-  // reaches the bootstrap floor, the faucet rate-limits, or the safety cap is
-  // hit. Mainnet rejects.
+  // master EOA. By default ("?singleDrip" absent) one click drains the tiny
+  // CDP drip repeatedly until the wallet reaches the bootstrap floor, the
+  // faucet rate-limits, or the safety cap is hit — this is the bootstrap
+  // funding gate (AwaitingFundingCard). With `?singleDrip=true` the endpoint
+  // fires the faucet EXACTLY ONCE and returns immediately with txHash +
+  // deltaWei — this is the running-mode Dashboard "Top up" button, which must
+  // require an explicit click and never auto-fire (jinn-mono #336). Mainnet
+  // rejects.
   app.post('/v1/setup/drip', async (c) => {
+    const singleDrip = c.req.query('singleDrip') === 'true';
     const earningDir =
       config.earningDir ??
       process.env['JINN_EARNING_DIR'] ??
@@ -182,14 +207,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
     // Faucet drip target. Single source of truth: stage1MinMasterEth(chain
-    // config), which is also what FleetBootstrapper.ensureStage1 gates on
-    // (jinn-mono-u34i). The optional `config.minEoaGasWei` override is for
-    // tests that want a custom target. Production callers should NOT pass
-    // it — letting the default win prevents the faucet/gate drift that hit
-    // operators in the 2026-05-18 canary run.
+    // config, targetServices), which is also what FleetBootstrapper.ensureStage1
+    // gates on (jinn-mono-u34i). The faucet drips master ETH until it can
+    // complete the ENTIRE bootstrap — operator gets one drip session, not one
+    // per stage. The optional `config.minEoaGasWei` override is for tests
+    // that want a custom target; production callers should NOT pass it.
+    // `config.targetServices` is also for tests / multi-service deployments;
+    // defaults to 1 (the testnet faucet's audience).
     const targetWei = config.minEoaGasWei
       ? BigInt(config.minEoaGasWei)
-      : stage1MinMasterEth(getChainConfig(chain));
+      : stage1MinMasterEth(getChainConfig(chain), config.targetServices ?? 1);
     const publicClient = config.rpcUrl
       ? createJinnPublicClient(config.rpcUrl, 'base-sepolia')
       : null;
@@ -229,6 +256,53 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
           balanceWei: balanceWei.toString(),
           targetWei: targetWei.toString(),
         });
+      }
+
+      // Single-drip mode (jinn-mono #336): the running-mode Dashboard "Top up"
+      // button must fire the faucet EXACTLY ONCE per click — never loop. The
+      // multi-drip loop below is for the one-time bootstrap funding gate
+      // (AwaitingFundingCard), where the wallet has to clear the entire
+      // bootstrap floor. On the running dashboard the operator just wants a
+      // single, explicit top-up they can see confirmed (amount + tx hash).
+      if (singleDrip) {
+        const balanceBefore = balanceWei;
+        const result = await requestFunding(address, 'base-sepolia');
+        if (!result.ok) {
+          return c.json(
+            {
+              ok: false,
+              address,
+              txHashes,
+              attempts: 0,
+              balanceWei: balanceWei?.toString(),
+              targetWei: targetWei?.toString(),
+              reason: result.reason,
+              rateLimited: result.rateLimited,
+            },
+            200,
+          );
+        }
+        if (result.txHash) txHashes.push(result.txHash);
+        balanceWei = await getBalance();
+        persistFundingGate(balanceWei);
+        const deltaWei =
+          balanceBefore !== null && balanceWei !== null && balanceWei > balanceBefore
+            ? balanceWei - balanceBefore
+            : null;
+        return c.json(
+          {
+            ok: txHashes.length > 0,
+            address,
+            txHash: result.txHash,
+            txHashes,
+            attempts: txHashes.length,
+            balanceWei: balanceWei?.toString(),
+            targetWei: targetWei?.toString(),
+            deltaWei: deltaWei !== null ? deltaWei.toString() : undefined,
+            reason: txHashes.length > 0 ? undefined : 'faucet_did_not_send',
+          },
+          txHashes.length > 0 ? 202 : 200,
+        );
       }
 
       const maxFaucetIters = computeFaucetDripCap({
@@ -717,14 +791,21 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
     }
 
+    // `persistConfigValue` (calling `persistTopLevelConfigValue` in
+    // config.ts) creates the parent dir + file when missing — same pattern
+    // as every other write path in this module. The pre-u34i version 404'd
+    // here on missing config.json, which broke fresh operators (who don't
+    // have config.json yet, since the daemon happily runs with defaults)
+    // from changing their RPC via the panel: the only operator-app affordance
+    // for switching off a rate-limited public RPC. Operator-never-leaves-the-app
+    // principle. See jinn-mono-u34i.
     const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    if (!existsSync(cfgPath)) {
-      return c.json({ error: 'config_not_found', path: cfgPath }, 404);
-    }
 
     let nextRpcUrl: string;
     if (body.rpcUrl === null || body.rpcUrl === '') {
-      nextRpcUrl = config.defaultRpcUrlForChain?.() ?? 'https://sepolia.base.org';
+      nextRpcUrl =
+        config.defaultRpcUrlForChain?.() ??
+        'https://base-sepolia-rpc.publicnode.com';
     } else if (typeof body.rpcUrl === 'string') {
       try {
         const parsed = new URL(body.rpcUrl);
@@ -753,6 +834,37 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       restartRequired: true,
       rpcUrl: nextRpcUrl,
     });
+  });
+
+  // POST /v1/setup/bootstrap/retry — re-enter the bootstrap state machine
+  // in-process. jinn-mono-hjex.6
+  if (config.retryBootstrap) {
+    addSetupRetryEndpoint(app, { retryBootstrap: config.retryBootstrap });
+  }
+
+  // POST /v1/setup/restake/:serviceId — operator-triggered re-stake for an
+  // evicted service. Backs the "Re-stake now" dashboard CTA. jinn-mono-hjex.3
+  app.post('/v1/setup/restake/:serviceId', async (c) => {
+    if (!config.restake) {
+      return c.json({ error: 'restake_not_configured' }, 503);
+    }
+    const raw = c.req.param('serviceId');
+    const serviceId = Number.parseInt(raw, 10);
+    if (!Number.isFinite(serviceId) || serviceId <= 0) {
+      return c.json({ error: 'invalid_service_id' }, 400);
+    }
+    try {
+      const result = await config.restake(serviceId);
+      if (!result.ok) {
+        return c.json({ ok: false, error: result.error ?? 'restake_failed' }, 500);
+      }
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        500,
+      );
+    }
   });
 
   app.post('/v1/setup/change-password', async (c) => {

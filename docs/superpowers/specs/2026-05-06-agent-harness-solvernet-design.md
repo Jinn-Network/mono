@@ -220,58 +220,100 @@ interface SWERebenchV2NetworkResult {
 
 The aggregation runs continuously (per-Verdict or per-batch) and emits a fresh structured result each time. Subgraph indexes the latest result; dashboard surfaces it.
 
-### 3.6 Task generation policy — full historical pool, post until target successes per task
+### 3.6 Task generation policy — framework knobs and SWE-rebench-v2 instantiation
 
-The launcher's Task generator runs against the **full historical pool** of SWE-rebench v2 monthly partitions, not just the current month's drop. This gives the substrate plenty of unsolved task surface even between monthly drops, and lets new operators arriving on the network train on historical content while waiting for the next fresh drop.
+The launcher Task generator is configured per SolverNet. This section defines
+the vocabulary used by current generators; it is not a commitment to a shared
+framework module.
 
-The generator implements a **post-until-target-successes** policy across the full pool. This is load-bearing for memorisation resistance — fresh-supply benchmarks (DR-b) handle cross-month memorisation, but within-month memorisation can still emerge if the same task is posted many times: the first successful trajectory enters the corpus and subsequent attempts read it and near-copy. The generator's posting policy bounds this.
+**Task-generator framework — knobs:**
 
-For each task in the **full pool** (union of all monthly partitions from `2025_01` onward, currently ~750 unique tasks across 14 months in `nebius/SWE-rebench-leaderboard`, plus next month's drop when it arrives), the generator tracks:
+| Knob | Meaning |
+|---|---|
+| `pool source` | How generator instances enter the active surface: a fixed set, a live feed, or a growing pool. |
+| `time-expiry` | Whether postings expire, and after what window. Expiry can both trigger reposting and reclaim escrow on unconsumed claim slots. |
+| `cooldown` | Optional per-instance spacing between postings when expiry alone is not the desired spacing rule. |
+| `target-success cap` | The score threshold that retires an instance from future posting. |
+| `attempt-budget policy` | How each posting's `maxClaims` and `maxClaimsPerOperator` are sized. |
 
-- `posted_count[task]` — number of times this task has been posted on JinnRouter.
-- `successful_count[task]` — number of Verdicts with `score === 1` on this task across all postings.
+For `swe-rebench-v2`, the generator runs against the **full historical pool** of
+SWE-rebench v2 monthly partitions, not just the current month's drop. The pool is
+the union of all monthly partitions from `2025_01` onward, currently ~750 unique
+tasks across 14 months in `nebius/SWE-rebench-leaderboard`, plus each new
+monthly drop as it arrives. This gives the substrate immediate work surface
+between drops and lets new operators train on historical content.
 
-The generator's main loop (illustrative pseudocode):
+`N_target_successes` is the single memorisation cap. It counts Verdicts with
+`score === 1` per instance. Once an instance reaches the cap it is **saturated**:
+retired from posting, retained in the corpus as historical substrate. Saturated
+instances are not reposted after time passes.
 
-```ts
-const fullPool = unionOfAllMonthlyPartitions(latestMonth); // ~750 tasks initially; grows monthly
+Each posting's claim capacity is sized by the generator:
 
-for (const task of fullPool) {
-  if (successful_count[task] >= N_target_successes) continue;       // saturated; remove from active pool
-  if (taskInFlightOnChain(task))                    continue;       // wait for resolution
-  if (posted_count[task] >= N_max_postings_per_task) continue;      // capped on impossible tasks
-  if (now - last_posted_at[task] < cooldown_window)  continue;      // operator availability window
+- `maxClaims = N_target_successes - successful_count` at posting time.
+- `maxClaimsPerOperator = maxClaims` unless the launcher pins a lower
+  `maxClaimsPerOperator` override.
 
-  await postTaskOnJinnRouter(task);
-  posted_count[task] += 1;
-  last_posted_at[task] = now;
-}
-```
+`TaskCoordinator` enforces `maxClaims` on-chain, so the posting itself caps the
+number of trajectories it can produce. The old flat `maxClaims: 50` /
+`maxClaimsPerOperator: 5` defaults are removed.
 
-Saturated tasks remain in the corpus as historical artifacts: their (up to N) successful trajectories are read by future operators attempting *unsaturated* tasks — that's the producer-consumer overlap doing its job. Saturated tasks are not posted again even after months have passed (the corpus has reached "enough training" on them; reposting would only invite copying).
+Posting is **fill-the-pool, no cadence**. On each tick the generator posts every
+scorable, unposted, unsaturated instance up to `post_batch_size`; the default is
+25. There is no `cadenceMs` or `cooldown_ms` for `swe-rebench-v2`. The daemon's
+creator loop supplies the outer tick; long posting batches self-throttle because
+posts are sequential.
 
-When the next month's drop arrives (~50 new tasks added to `nebius/SWE-rebench-leaderboard`), they are added to the active pool with fresh counters. The pool grows monthly; the saturated subset grows with operator participation. Equilibrium emerges: as fast as new tasks are added, similar numbers are saturated and retired.
+There is exactly one live posting per instance. The window is the launcher knob
+`posting_window_ms`, with a v1 default of 1 day. The generator
+derives live/expired state from local counters only:
+
+- `posted_count[instance]`
+- `successful_count[instance]`
+- `last_posted_at[instance]`
+
+When `last_posted_at + posting_window_ms` passes, an unsaturated instance becomes
+**repostable**. If `posted_count < N_max_postings_per_task`, the generator reposts
+it with a fresh `maxClaims = N_target_successes - successful_count` budget. If
+`posted_count >= N_max_postings_per_task`, the instance is **abandoned** and
+retired from posting as an impossible-task tail. This expiry→repost path is
+load-bearing because on-chain claim slots are a one-way budget: expired attempts
+do not decrement `claimCount`.
+
+No v1 in-flight accounting is added. A verdict that lands just after expiry may
+push an instance slightly past `N_target_successes`, and thin operator supply may
+cause 1-day repost churn. Both are accepted for simplicity; the generator does
+not query the indexer for open attempts or pending verdicts.
 
 **v1 defaults:**
 
 | Parameter | Default | Rationale |
 |---|---|---|
-| `N_target_successes` | 3 | Diversity of successful approaches without excessive memorisation surface. After 1-2 successes additional successes contribute diminishing corpus value (they tend to converge); 3 is the sweet spot. |
-| `N_max_postings_per_task` | 10 | Cap on impossible tasks. If 10 postings yield zero successes, the task is genuinely beyond current network capability; move on. |
-| `cooldown_window` | 24 hours | Operators need time to claim and attempt before reposting. Avoids spam while keeping iteration cadence reasonable. |
-| `pool_ordering` | round-robin balanced by language + month | Avoids starvation of older tasks; rotates languages so harnesses can specialise without one-language saturation blocking the rest. |
+| `N_target_successes` | 5 | Diversity of successful approaches without excessive memorisation surface. |
+| `N_max_postings_per_task` | 10 | Cap on impossible tasks; abandon after repeated unsaturated postings. |
+| `posting_window_ms` | 1 day | Expiry window, repost trigger, and escrow-reclaim deadline. |
+| `post_batch_size` | 25 | Fill the pool quickly while keeping each tick's on-chain posting batch bounded. |
+| `cooldown` | off | Expiry is the repost spacing rule for SWE-rebench-v2. |
+| `maxClaims` | derived | `N_target_successes - successful_count` per posting. |
+| `maxClaimsPerOperator` | derived | Equals `maxClaims` unless a launcher pins a lower override. |
 
-These are launcher-set parameters in the launched manifest; different launchers can pick different values for their own instance.
+**Volume implication.** Full pool ≈ 750 unsaturated tasks at v1 launch × N=5
+target successes = up to ~3,750 successful Solutions during the initial
+saturation phase, plus failed attempts. After initial saturation, equilibrium is
+~150 successful Solutions/month from new monthly drops plus residual unsaturated
+tasks.
 
-**Volume implication.** Full pool ≈ 750 unsaturated tasks at v1 launch × N=3 target successes = up to ~2,250 successful Solutions during the initial saturation phase, plus failed attempts (~5-10× successful counts on hard tasks). Substrate volume on `swe-rebench-v2` is meaningfully larger than I'd estimated under "current-month-only" framing. After initial saturation, equilibrium is ~150 successful Solutions/month from the new monthly drop plus residual unsaturated tasks (impossible-task tail). Operators run `prediction.v1` in parallel for additional Polymarket-fresh substrate flow.
+**Why include historical months in the active pool.** Two reasons. (1) New
+operators should not wait for next month's drop to find work. (2) The corpus
+compounds across the full monthly partition history: a 2026-02 task attempted
+today benefits from trajectories on similar 2025-08 tasks.
 
-**Why "don't stop at first success."** The first successful Solution is rarely the only good approach; different Harnesses might solve the same task in genuinely different ways (different test-discovery strategy, different patch-generation approach, different multi-file edit ordering). Diversity of successful trajectories in the corpus is itself substrate value. Stopping at N=1 throws this away. N=3 captures most of the diversity surface.
-
-**Why "stop at all."** The corpus's accumulating successful trajectories are the memorisation vector. After 3 successful trajectories appear in the corpus for a task, the marginal copyability outweighs the marginal diversity. Operators 4+ attempting the same task would predominantly read-and-copy. Bounding the surface at N=3 preserves the producer-consumer mechanism's substrate value while capping the copying surface.
-
-**Why include historical months in the active pool.** Two reasons. (1) **Bootstrap volume.** New operators joining the network shouldn't have to wait for next month's drop to find work; ~750 unsaturated tasks across 14 months gives them immediate training surface. (2) **The corpus compounds across the full history.** A 2026-02 task being attempted today benefits from peer trajectories on similar 2025-08 tasks already in the corpus. The producer-consumer overlap operates across the full monthly partition history, not just within one month. Limiting the pool to one month would artificially throw away that compounding surface.
-
-**Multi-launcher concern.** If multiple launchers each launch independent `swe-rebench-v2` SolverNet instances, each runs its own generator policy. Aggregate memorisation surface = N × num_launched_instances. For v1 we expect one canonical launched instance (Jinn-team-operated or aligned launcher); cross-launcher coordination of task assignment is filed as future work for v1.5+ when multiple launchers are demonstrably in flight. Ratified in DR-i.
+**Multi-launcher concern.** If multiple launchers each launch independent
+`swe-rebench-v2` SolverNet instances, each runs its own generator policy.
+Aggregate memorisation surface = N × num_launched_instances. For v1 we expect
+one canonical launched instance; cross-launcher coordination remains future work
+for v1.5+ when multiple launchers are demonstrably in flight. Ratified in DR-i
+and amended by DR-2026-05-22-a.
 
 ---
 
@@ -680,7 +722,7 @@ The following DRs are filed alongside this spec at `log/decisions/2026-05-06-…
 - **DR-2026-05-06-f — Reward function: task-complexity-weighted escrow (R2).** Rejects flat per-Solution rewards; selects launcher-set complexity-proxy escrow weighting; aligns operator incentives with task value.
 - **DR-2026-05-06-g — Vocabulary: train / frozen / HarnessCheckpoint.** Rejects `'learning' | 'frozen'` (less ML-native); rejects `'train' | 'eval'` (overloads Evaluator role); selects `'train' | 'frozen'` + `HarnessCheckpoint`. Aligns with PyTorch + ML transfer-learning + universal ML checkpoint vocabulary.
 - **DR-2026-05-06-h — Phase placement: A.5 (post-A.4 campaign launch).** Rejects parallel-to-A.3 (splits recruitment focus); selects sequential-after-A.4 (substrate generalisation story; freeze mechanism back-applies to `prediction.v1`).
-- **DR-2026-05-06-i — Task generation policy: full historical pool, post until target successes per task.** Generator runs against the union of all monthly partitions (~750 tasks at v1 launch, growing ~50/month) minus saturated tasks. Rejects current-month-only (artificially low volume; ignores compounding across the full history). Rejects post-each-task-once (low volume; operators idle) and post-each-task-many-times (memorisation vector). Selects: post until N successful Solutions per task (default N=3) with `N_max_postings_per_task` cap and cooldown window. Saturated tasks remain in corpus as historical training data. Bounds within-task memorisation surface; preserves diversity of successful approaches; bootstraps substrate volume via the full 14-month history.
+- **DR-2026-05-06-i — Task generation policy: full historical pool, post until target successes per task.** Generator runs against the union of all monthly partitions (~750 tasks at v1 launch, growing ~50/month) minus saturated tasks. Rejects current-month-only (artificially low volume; ignores compounding across the full history). Rejects post-each-task-once (low volume; operators idle) and post-each-task-many-times (memorisation vector). Selects: post until N successful Solutions per task, with `N_max_postings_per_task` cap. DR-2026-05-22-a amends the v1 default to `N_target_successes = 5` and `posting_window_ms = 1 day`, with cooldown off for `swe-rebench-v2`. Saturated tasks remain in corpus as historical training data. Bounds within-task memorisation surface; preserves diversity of successful approaches; bootstraps substrate volume via the full 14-month history.
 
 ---
 

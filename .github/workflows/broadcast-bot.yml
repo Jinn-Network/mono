@@ -1,0 +1,109 @@
+# Open-source Jinn broadcast bot — posts mechanically-sourced network state to X.
+#
+# The canonical instance runs from this workflow. Anyone can fork the repo,
+# set their own X credentials + Claude OAuth token as repository secrets, and
+# run their own instance — there is no single "official" account.
+#
+# State (watermarks + posted IDs) lives in the `bot-state` branch so the cron
+# is stateless. The workflow checks out main, fetches the latest state from
+# `bot-state`, runs a pass, commits the new state back.
+#
+# Tracks issue #258.
+name: broadcast-bot
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '*/15 * * * *'   # every 15 min — enable after a manual run validates secrets.
+
+permissions:
+  contents: write
+
+concurrency:
+  group: broadcast-bot
+  cancel-in-progress: false
+
+jobs:
+  broadcast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install dependencies
+        working-directory: apps/broadcast-bot
+        run: yarn install --immutable
+
+      - name: Build
+        working-directory: apps/broadcast-bot
+        run: yarn build
+
+      - name: Restore state from bot-state branch
+        run: |
+          set -e
+          mkdir -p apps/broadcast-bot/state
+          git fetch origin bot-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/bot-state; then
+            git show origin/bot-state:state.json > apps/broadcast-bot/state/state.json 2>/dev/null || echo '{}' > apps/broadcast-bot/state/state.json
+          else
+            echo '{}' > apps/broadcast-bot/state/state.json
+          fi
+
+      - name: Run broadcast pass
+        working-directory: apps/broadcast-bot
+        env:
+          # Claude CLI auth. The OAuth token is the subscription path (year-long
+          # validity from `claude setup-token`); the API key is the fallback.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # X poster auth.
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          # GitHub token raises the 60/hr unauthenticated cap.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional RPC override.
+          JINN_RPC_URL: ${{ secrets.JINN_RPC_URL }}
+        run: node dist/bin/jinn-broadcast.js run-once --config ./broadcast-bot.example.toml --state ./state/state.json
+
+      - name: Commit state to bot-state branch
+        run: |
+          set -e
+          cd apps/broadcast-bot
+          if ! git diff --quiet state/state.json 2>/dev/null && [ -f state/state.json ]; then :; fi
+          # Stage just the state file onto an orphan/tracked bot-state branch.
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Use a worktree so we can switch branches without disturbing the build artifacts.
+          rm -rf .bot-state-worktree
+          git fetch origin bot-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/bot-state; then
+            git worktree add .bot-state-worktree origin/bot-state
+            cd .bot-state-worktree
+            git checkout -B bot-state
+          else
+            git worktree add --detach .bot-state-worktree
+            cd .bot-state-worktree
+            git checkout --orphan bot-state
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp "$GITHUB_WORKSPACE/apps/broadcast-bot/state/state.json" state.json
+          git add state.json
+          if git diff --cached --quiet; then
+            echo "no state changes"
+          else
+            git commit -m "bot: update broadcast state $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push origin bot-state
+          fi

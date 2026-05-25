@@ -20,6 +20,7 @@ import {
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
+import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
   canonicalHarnessName,
   canonicalHarnessNameSet,
@@ -68,6 +69,11 @@ export interface HarnessEnv {
   codexPath?: string;
   /** Default Codex model when a SolverNet does not specify one. */
   codexModel?: string;
+  /**
+   * Timeout (ms) for the `codex --version` probe in the Codex variant of
+   * `LearnerHarness.isReady`.
+   */
+  codexDoctorTimeoutMs?: number;
   /** Optional Polymarket Gamma API override for acceptance or private mirrors. */
   polymarketGammaBaseUrl?: string;
   /** Optional Polymarket CLOB API override for acceptance or private mirrors. */
@@ -104,6 +110,8 @@ export interface HarnessEnv {
   hermesModel?: string;
   /** Hermes provider (e.g. 'anthropic'). */
   hermesProvider?: string;
+  /** Timeout (ms) for the `hermes doctor` probe in HermesHarness.isReady. */
+  hermesDoctorTimeoutMs?: number;
 }
 
 /**
@@ -211,6 +219,13 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     }),
   );
 
+  // Env-gated stub harness for T2.2 release gate. Active only when
+  // JINN_HARNESS_STUB_INSTANCE is set; no-op otherwise.
+  const stub = maybeCreateStubHarnessFromEnv();
+  if (stub) {
+    out.push(stub);
+  }
+
   // Operator-supplied external Harnesses are appended before the default learner
   // so explicit SolverNet harness settings can select them.
   if (env.externalImpls && env.externalImpls.length > 0) {
@@ -247,6 +262,10 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
     claudePath: env.claudePath,
+    ...(env.codexPath !== undefined ? { codexPath: env.codexPath } : {}),
+    ...(env.codexDoctorTimeoutMs !== undefined
+      ? { codexDoctorTimeoutMs: env.codexDoctorTimeoutMs }
+      : {}),
   }));
 
   const hermesAdapter = new HermesHarnessAdapter({
@@ -258,7 +277,11 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     storePath: env.storePath,
     corpusEnv: env.corpusEnv ?? {},
   });
-  out.push(new HermesHarness({ adapter: hermesAdapter }));
+  out.push(new HermesHarness({
+    adapter: hermesAdapter,
+    ...(env.hermesPath !== undefined ? { hermesPath: env.hermesPath } : {}),
+    ...(env.hermesDoctorTimeoutMs !== undefined ? { hermesDoctorTimeoutMs: env.hermesDoctorTimeoutMs } : {}),
+  }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {
     const disabled = canonicalHarnessNameSet(env.disabledNames);

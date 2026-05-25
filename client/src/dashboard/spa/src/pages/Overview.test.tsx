@@ -1,34 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from '../components/ui/sonner.js';
 
 /**
- * Overview's empty-state gating depends on two payloads now: the
- * `predictionV1` operator status and the `bootstrap.solverNets` map
- * (spec §12, the operator's joined-SolverNets dictionary). We mock both
- * per-test so the page receives the shape we want to assert against.
- *
- * `detectJoinedSolverNet` accepts:
- *   1. the manifest-keyed `joinedSolverNets` shape — wins
- *   2. the new manifestCid-keyed shape (`solverNets[<cid>].roles`)
- *   3. the legacy short-name shape (`solverNets.prediction.enabled` or roles)
- *   4. the predictionV1 status flag/roles as a last-resort signal
+ * Overview integration tests. With the IA reshuffle, the per-card behaviour
+ * (Activity / Wallet / Node Health) is covered by each card's own test file
+ * under `./overview/*.test.tsx`. This file covers the wiring inside
+ * Overview itself: the eviction banner, the dashboard-action notice, and
+ * the SPA-level action plumbing (top-up, claim, restart) through their
+ * respective wallet/node-health surfaces.
  */
+
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
-const claimRewardsMock = vi.fn();
 const triggerDripMock = vi.fn();
 const restartDaemonMock = vi.fn();
+const stopDaemonMock = vi.fn();
+const restakeMock = vi.fn();
+const retryAgentBindingMock = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
-    claimRewards: () => claimRewardsMock(),
-    triggerDrip: () => triggerDripMock(),
-    restartDaemon: () => restartDaemonMock(),
+    triggerDrip: (opts?: { singleDrip?: boolean }) => triggerDripMock(opts),
+    restartDaemon: (opts?: { forceRespawn?: boolean }) => restartDaemonMock(opts),
+    stopDaemon: () => stopDaemonMock(),
+    restake: (serviceId: number) => restakeMock(serviceId),
+    retryAgentBinding: (opts: { serviceIndex: number }) => retryAgentBindingMock(opts),
   },
 }));
 
@@ -38,276 +40,35 @@ const { OverviewPage } = await import('./Overview.js');
 beforeEach(() => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
-  claimRewardsMock.mockReset();
   triggerDripMock.mockReset();
   restartDaemonMock.mockReset();
-  claimRewardsMock.mockResolvedValue({ ok: true });
+  stopDaemonMock.mockReset();
+  restakeMock.mockReset();
+  retryAgentBindingMock.mockReset();
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
+  stopDaemonMock.mockResolvedValue({ ok: true });
+  restakeMock.mockResolvedValue({ ok: true });
 });
 
-function withProviders(node: JSX.Element): JSX.Element {
-  const { hook } = memoryLocation({ path: '/overview' });
+function withProviders(node: JSX.Element, path = '/overview'): JSX.Element {
+  const { hook } = memoryLocation({ path });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <Router hook={hook}>{node}</Router>
+      {/* sonner Toaster mounted so toast() calls render under jsdom; matches
+          App.tsx's root-level Toaster placement. */}
+      <Toaster />
     </QueryClientProvider>
   );
 }
 
-function renderOverviewWithMemory(): { history: string[] } {
-  const memory = memoryLocation({ path: '/overview', record: true });
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <Router hook={memory.hook}><OverviewPage /></Router>
-    </QueryClientProvider>,
-  );
-  return { history: memory.history };
-}
-
-/** Match the OperatorCard's active SolverNet name exactly. */
-function operatorCardName(name: string): (_: string, el: Element | null) => boolean {
-  return (_, el) =>
-    el?.tagName === 'SPAN' && el.textContent?.trim() === name;
-}
-
-describe('OverviewPage empty-state gating', () => {
-  it('shows the "Pick a SolverNet" prompt when the operator has joined nothing', async () => {
-    getStatusMock.mockResolvedValue({
-      predictionV1: {
-        operator: {
-          ok: true,
-          solverNet: { name: 'prediction', enabled: false },
-          diagnostics: [],
-          nextAction: { description: 'Waiting for Tasks. SolverNet active, Harness loaded; no incoming Tasks since startup.' },
-        },
-        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({ solverNets: {} });
-    render(withProviders(<OverviewPage />));
-
-    expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
-    expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-  });
-
-  it('shows the OperatorCard from the legacy `enabled` flag (predecessor compat)', async () => {
-    getStatusMock.mockResolvedValue({
-      predictionV1: {
-        operator: {
-          ok: true,
-          solverNet: { name: 'prediction', enabled: true },
-          diagnostics: [],
-          nextAction: { description: 'Waiting for tasks.' },
-        },
-        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({
-      solverNets: {
-        prediction: { enabled: true, roles: ['solving'] },
-      },
-    });
-    render(withProviders(<OverviewPage />));
-
-    await waitFor(() =>
-      expect(screen.getByText(operatorCardName('prediction'))).toBeTruthy(),
-    );
-    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
-    expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
-  });
-
-  it('shows the OperatorCard from operator roles even when legacy enabled is false', async () => {
-    getStatusMock.mockResolvedValue({
-      predictionV1: {
-        operator: {
-          ok: true,
-          solverNet: { name: 'prediction', enabled: false, roles: ['solving'] },
-          diagnostics: [],
-        },
-        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    await waitFor(() =>
-      expect(screen.getByText(operatorCardName('prediction'))).toBeTruthy(),
-    );
-    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
-    expect(screen.getByText(/^solver$/i)).toBeTruthy();
-  });
-
-  it('shows the OperatorCard for the new manifestCid-keyed shape (spec §12)', async () => {
-    getStatusMock.mockResolvedValue({
-      predictionV1: {
-        operator: {
-          ok: true,
-          // Crucially: the predictionV1 flag is `false` — the new shape
-          // must light up the card on its own.
-          solverNet: { name: 'prediction', enabled: false },
-          diagnostics: [],
-        },
-        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({
-      solverNets: {
-        bafybeiaaa: {
-          name: 'Prediction Markets',
-          manifestCid: 'bafybeiaaa',
-          roles: ['solver'],
-        },
-      },
-    });
-    render(withProviders(<OverviewPage />));
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(operatorCardName('Prediction Markets')),
-      ).toBeTruthy(),
-    );
-    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
-    // Solver pill (the new schema's 'solver' maps to OperatorCard's 'solving').
-    expect(screen.getByText(/^solver$/i)).toBeTruthy();
-  });
-
-  it('prefers joinedSolverNets over legacy prediction status for SWE-rebench v2', async () => {
-    getStatusMock.mockResolvedValue({
-      predictionV1: {
-        operator: {
-          ok: true,
-          solverNet: { name: 'prediction', enabled: false },
-          diagnostics: [],
-        },
-        totals: { observedTasks: 2, activeTaskRuns: 1, solutions: 1, verdicts: 1, failed: 0 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({
-      joinedSolverNets: {
-        bafkreiswe: {
-          manifestCid: 'bafkreiswe',
-          name: 'SWE-rebench v2',
-          roles: ['solver', 'evaluator'],
-        },
-      },
-      solverNets: {
-        prediction: { enabled: true, roles: ['solving'] },
-      },
-    });
-    render(withProviders(<OverviewPage />));
-
-    await waitFor(() =>
-      expect(screen.getByText(operatorCardName('SWE-rebench v2'))).toBeTruthy(),
-    );
-    expect(screen.getByText(/network · swe-rebench v2/i)).toBeTruthy();
-    expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-    const change = screen.getByText(/change/i).closest('a');
-    expect(change?.getAttribute('href')).toBe('/operator#solvernets');
-  });
-
-  it('uses generic task-run totals before stale prediction counters', async () => {
-    getStatusMock.mockResolvedValue({
-      taskRuns: {
-        totals: {
-          observedTasks: 102,
-          activeTaskRuns: 3,
-          completed: 87,
-          solutions: 45,
-          verdicts: 42,
-          failed: 63,
-        },
-        inFlight: [],
-        recentTasks: [],
-      },
-      predictionV1: {
-        operator: {
-          ok: true,
-          solverNet: { name: 'prediction', enabled: false },
-          diagnostics: [],
-        },
-        totals: { observedTasks: 10, activeTaskRuns: 0, solutions: 5, verdicts: 0, failed: 5 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({
-      joinedSolverNets: {
-        bafkreiswe: {
-          manifestCid: 'bafkreiswe',
-          name: 'SWE-rebench v2',
-          roles: ['solver', 'evaluator'],
-        },
-      },
-    });
-    render(withProviders(<OverviewPage />));
-
-    const networkTitle = await screen.findByText(/network · swe-rebench v2/i);
-    const network = networkTitle.closest('section');
-    expect(network).not.toBeNull();
-    expect(within(network as HTMLElement).getByText('102')).toBeTruthy();
-    expect(within(network as HTMLElement).getByText('3')).toBeTruthy();
-    expect(within(network as HTMLElement).getByText('45')).toBeTruthy();
-    expect(within(network as HTMLElement).getByText('42')).toBeTruthy();
-    expect(within(network as HTMLElement).getByText('63')).toBeTruthy();
-    expect(within(network as HTMLElement).queryByText('10')).toBeNull();
-    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText(/working on current run/i)).toBeTruthy();
-    expect(screen.queryByText(/no incoming tasks since startup/i)).toBeNull();
-  });
-
-  it('shows the OperatorCard from the predictionV1 status as a back-compat signal', async () => {
-    // No bootstrap.solverNets at all; predictionV1.solverNet.enabled wins.
-    getStatusMock.mockResolvedValue({
-      predictionV1: {
-        operator: {
-          ok: true,
-          solverNet: { name: 'prediction', enabled: true },
-          diagnostics: [],
-        },
-        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-      },
-      fleet: { services: [] },
-    });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    await waitFor(() =>
-      expect(screen.getByText(operatorCardName('prediction'))).toBeTruthy(),
-    );
-    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
-  });
-
-  it('shows the prompt when both payloads are empty', async () => {
-    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
-    expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
-  });
-
-  it('CTA on empty-state deep-links into /operator#solvernets', async () => {
-    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    const cta = await screen.findByText(/configure\s*→/i);
-    expect(cta.closest('a')?.getAttribute('href')).toBe(
-      '/operator#solvernets',
-    );
-  });
-
-  it('shows compact live status in the HeroStats row', async () => {
+describe('OverviewPage layout', () => {
+  it('renders the two-column page shell with Activity card + Node Health + Wallet', async () => {
     getStatusMock.mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
-      activity: { recent: [] },
+      taskRuns: { totals: {}, inFlight: [], recentTasks: [] },
       predictionV1: {
         operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
         totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
@@ -317,20 +78,33 @@ describe('OverviewPage empty-state gating', () => {
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    await waitFor(() => expect(screen.getByTestId('overview-status-stat')).toBeTruthy());
-    expect(screen.getByTestId('overview-status-stat').getAttribute('data-state')).toBe('idle');
-    expect(screen.queryByTestId('live-now-band')).toBeNull();
+    expect(await screen.findByTestId('overview-page-grid')).toBeTruthy();
+    expect(screen.getByTestId('activity-card')).toBeTruthy();
+    expect(screen.getByTestId('node-health-card')).toBeTruthy();
+    expect(screen.getByTestId('wallet-card')).toBeTruthy();
   });
 
-  it('wires dashboard card actions to their real actions', async () => {
+  it('passes joined SolverNets and task rows into the ActivityCard', async () => {
+    const now = Date.now();
     getStatusMock.mockResolvedValue({
-      rewards: { pendingStakingRewardsWei: '1000000000000000000' },
-      masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
       fleet: { services: [] },
-      predictionV1: {
-        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
-        totals: { observedTasks: 1, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      taskRuns: {
+        totals: {},
+        inFlight: [],
+        recentTasks: [
+          {
+            requestId: 'task-alpha-1234567',
+            manifestCid: 'bafkreiswe',
+            taskRole: 'restoration',
+            state: 'COMPLETE',
+            implName: 'hermes-agent',
+            windowStartTs: now - 60_000,
+            stateUpdatedAt: now - 30_000,
+            deliveryTxHash: '0xabc',
+          },
+        ],
       },
+      predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
     });
     getBootstrapMock.mockResolvedValue({
       joinedSolverNets: {
@@ -338,23 +112,226 @@ describe('OverviewPage empty-state gating', () => {
           manifestCid: 'bafkreiswe',
           name: 'SWE-rebench v2',
           roles: ['solver', 'evaluator'],
+          harness: 'hermes-agent',
         },
       },
     });
-    const { history } = renderOverviewWithMemory();
+    render(withProviders(<OverviewPage />));
 
-    expect(await screen.findByText(/jinn claimable/i)).toBeTruthy();
-    expect(screen.queryByText(/quick actions/i)).toBeNull();
-    expect(screen.queryByRole('button', { name: /manage wallet/i })).toBeNull();
+    // Both queries need to settle — Activity reads status (5s poll) AND
+    // bootstrap (30s poll). waitFor gives both a chance to land.
+    await waitFor(() =>
+      expect(screen.getByTestId('activity-joined').textContent).toContain('SWE-rebench v2'),
+    );
+    const tasks = await screen.findByTestId('activity-tasks-table');
+    expect(tasks.textContent).toContain('task-a');
+    expect(tasks.textContent).toMatch(/succeeded/i);
+  });
+});
 
-    fireEvent.click(screen.getByRole('button', { name: /claim now/i }));
-    await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
+describe('OverviewPage eviction banner', () => {
+  it('renders the inline eviction banner when a service is evicted', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: {
+        services: [
+          { index: 0, step: 'complete', serviceId: 99, evicted: true },
+        ],
+      },
+      predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
 
-    fireEvent.click(screen.getByRole('button', { name: /top up/i }));
+    const banner = await screen.findByTestId('overview-eviction-banner');
+    expect(banner.textContent).toMatch(/service evicted/i);
+  });
+
+  it('invokes api.restake with the evicted service id when Re-stake is clicked', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: {
+        services: [
+          { index: 0, step: 'complete', serviceId: 42, evicted: true },
+        ],
+      },
+      predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('overview-eviction-restake'));
+    await waitFor(() => expect(restakeMock).toHaveBeenCalledWith(42));
+  });
+});
+
+describe('OverviewPage Wallet wiring', () => {
+  const baseStatus = {
+    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+    masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
+    fleet: { services: [] },
+    predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
+  };
+
+  it('wires the Top up button on the Wallet card to api.triggerDrip with singleDrip', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    triggerDripMock.mockResolvedValue({
+      ok: true,
+      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      deltaWei: '5000000000000000',
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
+    expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: /restart/i }));
+  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei and ignores pending staking rewards', async () => {
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      rewards: { pendingStakingRewardsWei: '999000000000000000000' },
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '1500000000000000000',
+        operatorClaimedWei: '2750000000000000000',
+        operatorMintedLast24hWei: '250000000000000000',
+        safeCount: 1,
+        services: [],
+        error: null,
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    // The tJINN-earned value derives from status.tJinn.safeBalanceWei
+    // (1.5 tJINN), not rewards.pendingStakingRewardsWei (999 collector-token).
+    await waitFor(() =>
+      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
+    );
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
+    expect(screen.getByText(/jinn earned last 24hrs/i)).toBeTruthy();
+    const tjinnValue = screen.getByTestId('tjinn-earned-value');
+    expect(tjinnValue.textContent).not.toBe('999.0000');
+    expect(screen.queryByText('999.0000')).toBeNull();
+    expect(screen.queryByText(/collector/i)).toBeNull();
+    expect(screen.queryByTestId('wallet-claim')).toBeNull();
+    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
+  });
+
+  it('renders a confirmed-empty tJINN balance (ready + null) as 0', async () => {
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: null,
+        operatorClaimedWei: '0',
+        safeCount: 1,
+        services: [],
+        error: null,
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('0.0000'),
+    );
+    // A confirmed-empty balance is distinguishable from loading — no state copy.
+    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
+  });
+
+  it('shows pending tJINN copy when status.tJinn is absent (older daemon)', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending'),
+    );
+    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
+      /waiting for sepolia balance/i,
+    );
+  });
+
+  it('surfaces a one-line gas top-up confirmation with the tx hash + amount', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    triggerDripMock.mockResolvedValue({
+      ok: true,
+      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      deltaWei: '5000000000000000', // 0.005 ETH
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
+    // Toast surface: amount + truncated tx hash both rendered in the
+    // sonner portal, queried by text rather than testid (sonner doesn't
+    // surface testids on individual toasts).
+    expect(await screen.findByText(/0\.005000 ETH/)).toBeTruthy();
+    expect(screen.getByText(/0xabc0…1234/)).toBeTruthy();
+  });
+
+  it('surfaces a faucet failure as an error notice', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    triggerDripMock.mockResolvedValue({
+      ok: false,
+      rateLimited: true,
+      reason: 'Faucet rate limited (1 claim per 24 hours per address).',
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
+    expect(await screen.findByText(/rate limited/i)).toBeTruthy();
+  });
+
+  it('auto-clears the gas top-up confirmation after the autoClearMs window', async () => {
+    vi.useFakeTimers();
+    try {
+      getStatusMock.mockResolvedValue(baseStatus);
+      getBootstrapMock.mockResolvedValue({});
+      triggerDripMock.mockResolvedValue({
+        ok: true,
+        txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+        deltaWei: '5000000000000000',
+      });
+      render(withProviders(<OverviewPage />));
+
+      const topUp = await vi.waitFor(() => screen.getByTestId('wallet-topup'));
+      fireEvent.click(topUp);
+      const notice = await vi.waitFor(() => screen.getByText(/topped up|top-up sent/i));
+      expect(notice.textContent).toMatch(/topped up|top-up sent/i);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      // Sonner's default dismiss is timer-driven; with fake timers + the
+      // explicit 5s autoClearMs in runAction, the toast unmounts.
+      expect(screen.queryByText(/topped up|top-up sent/i)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('OverviewPage Node Health wiring', () => {
+  const baseStatus = {
+    fleet: { services: [] },
+    predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
+  };
+
+  it('wires the Restart button to api.restartDaemon with forceRespawn', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('node-health-restart'));
     await waitFor(() => expect(restartDaemonMock).toHaveBeenCalledOnce());
-    expect(history.at(-1)).toBe('/overview');
+    expect(restartDaemonMock).toHaveBeenCalledWith({ forceRespawn: true });
   });
 });

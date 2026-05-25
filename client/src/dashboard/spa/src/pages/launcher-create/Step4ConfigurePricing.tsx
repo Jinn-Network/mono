@@ -3,14 +3,12 @@ import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
 } from '../../api/types.js';
+import { Card, CardContent } from '../../components/ui/card.js';
+import { Input } from '../../components/ui/input.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 import { ensureCompletedStep, formatEthFromWei, parseWei } from './draft-helpers.js';
-import {
-  FieldShell,
-  StepNav,
-  StepShell,
-  inputErrorStyle,
-  inputStyle,
-} from './StepShell.js';
+import { FieldShell, StepNav, StepShell } from './StepShell.js';
 import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.js';
 
 /**
@@ -204,38 +202,30 @@ export function Step4ConfigurePricing({
       <FieldShell
         label="Funding Safe"
         helperText="Tasks are funded from this Safe at launch. Defaults to your launcher master Safe."
+        asLabel={false}
       >
         <div
           data-testid="launcher-create-fundingSafe"
-          style={{
-            background: 'var(--bg-sunken)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
-            padding: '10px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            color: 'var(--fg-muted)',
-            wordBreak: 'break-all',
-          }}
+          className="rounded-md border border-border bg-surface-sunken px-3 py-2.5 font-mono text-[13px] text-fg-muted break-all"
         >
           {fundingSafeAddress ?? '— (master Safe will be picked at launch)'}
         </div>
       </FieldShell>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
         <FieldShell
           label="Solution price (wei)"
           helperText={`≈ ${formatEthFromWei(validation.solutionWei?.toString())}`}
           error={showErrors.solutionPriceWei ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-solutionPriceWei"
             type="text"
             inputMode="numeric"
             value={solutionPriceWei}
             onChange={(e) => setSolutionPriceWei(e.target.value)}
             placeholder="e.g. 100000000000000 (0.0001 ETH)"
-            style={showErrors.solutionPriceWei ? inputErrorStyle : inputStyle}
+            className={cn(showErrors.solutionPriceWei && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -244,14 +234,14 @@ export function Step4ConfigurePricing({
           helperText={`≈ ${formatEthFromWei(validation.verdictWei?.toString())}`}
           error={showErrors.verdictPriceWei ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-verdictPriceWei"
             type="text"
             inputMode="numeric"
             value={verdictPriceWei}
             onChange={(e) => setVerdictPriceWei(e.target.value)}
             placeholder="e.g. 50000000000000 (0.00005 ETH)"
-            style={showErrors.verdictPriceWei ? inputErrorStyle : inputStyle}
+            className={cn(showErrors.verdictPriceWei && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -260,64 +250,43 @@ export function Step4ConfigurePricing({
       {showErrors.combined && (
         <div
           data-testid="launcher-create-pricing-combined-error"
-          style={{
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-          }}
+          className="font-mono text-[12px] text-break-red"
         >
           {showErrors.combined}
         </div>
       )}
 
-      <section
-        data-testid="launcher-create-projection"
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-3)',
-          padding: '16px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '10px',
-        }}
-      >
-        <h3
-          style={{
-            margin: 0,
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-muted)',
-          }}
-        >
-          Runway projection
-        </h3>
-        <SummaryRow
-          label="Safe balance"
-          value={
-            fundingSafeBalanceWei
-              ? `${formatEthFromWei(fundingSafeBalanceWei)} (${fundingSafeBalanceWei} wei)`
-              : '—'
-          }
-        />
-        <SummaryRow
-          label="Per-Task cost"
-          value={
-            projection
-              ? `${formatEthFromWei(projection.perTaskWei.toString())} (${projection.perTaskWei} wei)`
-              : '—'
-          }
-          hint={`solution + verdict × maxClaimsPerOperator (${maxClaimsPerOperator})`}
-        />
-        <SummaryRow
-          label="Projected Tasks"
-          value={projection ? `~${projection.tasks.toLocaleString('en-US')}` : '—'}
-          hint="Approximate; ignores gas and any in-flight reservations."
-          testId="launcher-create-projected-tasks"
-        />
-      </section>
+      <Card data-testid="launcher-create-projection">
+        <CardContent className="flex flex-col gap-2.5 p-5">
+          <h3 className="m-0 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+            Runway projection
+          </h3>
+          <Separator />
+          <SummaryRow
+            label="Safe balance"
+            value={
+              fundingSafeBalanceWei
+                ? `${formatEthFromWei(fundingSafeBalanceWei)} (${fundingSafeBalanceWei} wei)`
+                : '—'
+            }
+          />
+          <SummaryRow
+            label="Per-Task cost"
+            value={
+              projection
+                ? `${formatEthFromWei(projection.perTaskWei.toString())} (${projection.perTaskWei} wei)`
+                : '—'
+            }
+            hint={`solution + verdict × maxClaimsPerOperator (${maxClaimsPerOperator})`}
+          />
+          <SummaryRow
+            label="Projected Tasks"
+            value={projection ? `~${projection.tasks.toLocaleString('en-US')}` : '—'}
+            hint="Approximate; ignores gas and any in-flight reservations."
+            testId="launcher-create-projected-tasks"
+          />
+        </CardContent>
+      </Card>
     </StepShell>
   );
 }
@@ -336,30 +305,14 @@ function SummaryRow({
   return (
     <div
       data-testid={testId}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '160px 1fr',
-        alignItems: 'baseline',
-        gap: '12px',
-      }}
+      className="grid grid-cols-[160px_1fr] items-baseline gap-3"
     >
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          color: 'var(--fg-dim)',
-          letterSpacing: '0.06em',
-        }}
-      >
+      <span className="font-mono text-[11px] tracking-[0.06em] text-fg-dim">
         {label}
       </span>
-      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: 'var(--fg)' }}>
-          {value}
-        </span>
-        {hint && (
-          <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>{hint}</span>
-        )}
+      <span className="flex flex-col gap-0.5">
+        <span className="font-mono text-[13px] text-foreground">{value}</span>
+        {hint && <span className="text-[12px] text-fg-muted">{hint}</span>}
       </span>
     </div>
   );

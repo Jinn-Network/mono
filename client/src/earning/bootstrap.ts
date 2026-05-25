@@ -89,6 +89,7 @@ import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
+import { displayFleetServiceIndex } from './fleet-display-index.js';
 import { rpcHostForDisplay } from '../preflight/rpc-network.js';
 import {
   detectDeprecatedTestnetSetup,
@@ -99,15 +100,155 @@ import type { Account } from 'viem/accounts';
 const addr = (value: string): Address => getAddress(value) as Address;
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
-/** Stage 1 master ETH requirement: the agent-funding transfer (STAGE1_AGENT_ETH)
- *  plus master's own gas reserve (minEoaGasEth). Centralized so the daemon's
- *  ensureStage1 gate, the read-side funding-plan, and gather-status all agree.
- *  See jinn-mono-u34i. */
+/**
+ * 2× cold-start headroom for master ETH target on a fresh bootstrap.
+ *
+ * Gas accounting for a single standard-mode service on first run:
+ *   ~1.3M gas for the Safe deploy + stake + mech (at 2 gwei ≈ 0.0026 ETH)
+ *   + 0.002 ETH Safe seed (sent to the Safe so it can pay mech fees)
+ *   ≈ 0.0046 ETH minimum; 2× gives ≈ 0.009–0.010 ETH — the bootstrap
+ *   `minEoaGasEth` default.
+ *
+ * Used by {@link stage1MinMasterEth} to size the Stage 1 master gas budget.
+ *
+ * Single source of truth: imported by funding-plan.ts.
+ */
+export const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
+/**
+ * Self-bond mode needs much more ETH per service than standard mode because
+ * the master funds the agent which then pays for: Safe deploy, 5 service
+ * registry txs (create, activate, register, deploy, stake), and mech deploy.
+ * Roughly 15 txs at varying gas costs. 0.03 ETH per service is a safe
+ * estimate. Single source of truth: imported by funding-plan.ts.
+ */
+export const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+
+/**
+ * Single source of truth for the master-ETH cold-start funding gate.
+ *
+ * Both the mutating bootstrapper ({@link FleetBootstrapper.ensureStage1And2})
+ * and the read-only funding plan (`planFleetFunding` in funding-plan.ts) route
+ * through this helper, so a migration-wiped fleet computes an identical
+ * required-ETH gate in both views. Re-implementing the gate inline at either
+ * call site is the u34i cross-module invariant-drift hazard — do not do it.
+ *
+ * Standard-mode gate has three branches:
+ *   1. `standardFleetAlreadyComplete` — fleet already has its full target of
+ *      operational services and no deprecated-setup migration is pending →
+ *      `0n` (nothing to fund).
+ *   2. `preStage1` — no fleet identity yet (`fleet_stage === 'none'` or no
+ *      fleet state at all) → the Stage 1 gate from {@link stage1MinMasterEth},
+ *      which covers the master → agent transfer plus the master's own gas
+ *      reserve. See jinn-mono-u34i.
+ *   3. otherwise — the Stage 2 master gas budget: `minEoaGasEth` (stake gas)
+ *      plus a per-extra-service top-up transfer for services 2..N.
+ *
+ * Self-bond mode is a flat `SELF_BOND_ETH_PER_SERVICE × targetServices`
+ * regardless of stage.
+ *
+ * @param services         Persisted service states
+ * @param minEoaGasEth     Configured minimum EOA gas target (wei)
+ * @param pendingSetupMigration  True when a deprecated testnet setup is
+ *   detected — suppresses the `standardFleetAlreadyComplete` short-circuit so a
+ *   migration-wiped fleet is correctly treated as needing funding. Both call
+ *   sites MUST pass this so the bootstrapper gate and the funding-plan view
+ *   agree for migration-wiped fleets.
+ * @param targetServices   How many services the fleet is aiming for
+ * @param stakingMode      `'standard'` (default) or `'self-bond'`
+ * @param preStage1        True when fleet identity is not yet provisioned —
+ *   selects the Stage 1 gate. The bootstrapper passes `false` here because it
+ *   only computes this gate *after* `ensureStage1` succeeds.
+ */
+export function computeRequiredMasterEth({
+  services,
+  minEoaGasEth,
+  pendingSetupMigration = false,
+  targetServices = 1,
+  stakingMode = 'standard',
+  preStage1 = false,
+}: {
+  services: Array<{ service_id?: number | null | undefined; step?: string }>;
+  minEoaGasEth: bigint;
+  pendingSetupMigration?: boolean;
+  targetServices?: number;
+  stakingMode?: StakingMode;
+  preStage1?: boolean;
+}): bigint {
+  if (stakingMode !== 'standard') {
+    return SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
+  }
+
+  // Reconciled `standardFleetAlreadyComplete` — a single definition replacing
+  // the three historic inline variants. Adopts the strictest of them (the
+  // FleetBootstrapper variant): the fleet must have at least `targetServices`
+  // rows AND every row must be operational AND no deprecated-setup migration
+  // may be pending. A migration-wiped fleet (which sets
+  // `pendingSetupMigration`) is therefore never short-circuited to `0n`.
+  const standardFleetAlreadyComplete =
+    services.length >= targetServices &&
+    services.every(s => s.step !== undefined && isOperationalServiceStep(s.step)) &&
+    !pendingSetupMigration;
+  if (standardFleetAlreadyComplete) return 0n;
+
+  if (preStage1) {
+    // Stage 1 gate: master → agent transfer (STAGE1_AGENT_ETH) + the master's
+    // own gas reserve, plus per-extra-service transfers. See jinn-mono-u34i.
+    return stage1MinMasterEth({ minEoaGasEth }, targetServices);
+  }
+
+  // Stage 2 master gas budget — covers distributor.stake() (~0.003 ETH at
+  // typical 6 gwei Base Sepolia) plus per-extra-service top-up transfers.
+  // Service 1 piggybacks on HD-1's Stage 1 funding, so the base term is a
+  // single `minEoaGasEth` (not `× 2`). See jinn-mono-u34i.
+  return minEoaGasEth + minEoaGasEth * BigInt(Math.max(0, targetServices - 1));
+}
+
+/** Master ETH required to FINISH the whole bootstrap from a fresh start (not
+ *  just to enter Stage 1). Centralized so the daemon's ensureStage1 gate,
+ *  the read-side funding-plan, gather-status, and the panel faucet target
+ *  all agree on a single "one-shot fund the operator" number.
+ *
+ *  Components for a 1-service standard-mode bootstrap:
+ *    - STAGE1_AGENT_ETH (0.010 ETH): master → HD-1 fleet-agent transfer.
+ *      HD-1 pays for its own Safe deploy + register + setAgentWallet out
+ *      of this; leftover covers service 1's Stage 2 work (mech deploy +
+ *      rebind). May get a conditional minEoaGasEth top-up from master if
+ *      Stage 1's gas eats too much of the original transfer.
+ *    - minEoaGasEth × STANDARD_MASTER_BOOTSTRAP_MULTIPLIER (0.010 ETH):
+ *      master gas budget across both stages. Real spend (~0.0025 ETH at
+ *      typical 6 gwei Base Sepolia) leaves room for ~4× gas-spike margin
+ *      plus the conditional HD-1 top-up.
+ *    - minEoaGasEth × (targetServices - 1): per-extra-service top-up for
+ *      services 2..N. Service 1 piggybacks on HD-1's Stage 1 funding.
+ *
+ *  Total for N=1: 0.010 + 0.010 = 0.020 ETH.
+ *  Total for N=2: 0.025 ETH.
+ *  Total for N=3: 0.030 ETH.
+ *
+ *  This number works ONLY when Stage 2's internal gate is `minEoaGasEth ×
+ *  1n` (0.005 ETH) — not the historic `× 2n`. After Stage 1 transfers 0.010
+ *  out, master sits at ~0.0099 ETH (0.020 minus transfer minus Stage 1
+ *  funding-tx gas). The 0.005 gate clears that with margin; the 0.010 gate
+ *  did not. See the Stage 2 gate at ensureStage1And2 line ~484.
+ *
+ *  Operator may see a "low runway" warning after bootstrap — that's
+ *  intentional. The operator-facing 0.020 ETH covers bootstrap completion,
+ *  not multi-week post-bootstrap runway. Top-up is a separate concern.
+ */
 export const STAGE1_AGENT_ETH = 10_000_000_000_000_000n; // 0.01 ETH (moved out of stepFleetSafeDeploy)
-export function stage1MinMasterEth(config: { minEoaGasEth: bigint }): bigint {
-  return STAGE1_AGENT_ETH + config.minEoaGasEth;
+export function stage1MinMasterEth(
+  config: { minEoaGasEth: bigint },
+  targetServices: number = 1,
+): bigint {
+  const extraServiceTransfers =
+    config.minEoaGasEth * BigInt(Math.max(0, targetServices - 1));
+  return (
+    STAGE1_AGENT_ETH +
+    config.minEoaGasEth * STANDARD_MASTER_BOOTSTRAP_MULTIPLIER +
+    extraServiceTransfers
+  );
 }
 
 /** Conservative default: ~0.001 ETH/day master gas if not configured. */
@@ -249,6 +390,76 @@ export class FleetBootstrapper {
   }
 
   /**
+   * Run `bindAgentWalletToSafe` with the freshly-deployed-Safe race retry
+   * (jinn-mono-h74p, corrected in jinn-mono-k1ng).
+   *
+   * The race: against a fresh 1/1 Safe on Base Sepolia, the first
+   * setAgentWallet attempt reverts with "Execution reverted for an unknown
+   * reason"; the same Safe + same agentId a few seconds later succeeds.
+   *
+   * The h74p version of the retry only wrapped the call in a try/catch.
+   * In production, `bindAgentWalletToSafe` doesn't throw on revert — it
+   * returns a `{ ok: false, error }` outcome — so the catch never fired
+   * and the retry was dead code. The per-service path "worked" anyway
+   * because it persists `safe_binding_pending` and the next bootstrap
+   * resumes the bind. Stage 1 had no equivalent safety net, so a single
+   * `ok: false` halted bootstrap (the 2026-05-18 canary failure).
+   *
+   * This wrapper:
+   *   - Retries on returned `ok: false` (the way the race actually
+   *     manifests in production).
+   *   - Also retries on thrown exceptions (defense-in-depth in case viem
+   *     error handling changes).
+   *   - Returns the final outcome; callers decide whether to throw, mark
+   *     pending, or proceed.
+   *
+   * Single attempt budget: `safeBindingMaxAttempts` × `safeBindingRetryDelayMs`
+   * (defaults: 3 × 3 s = ~9 s).
+   */
+  private async bindAgentWalletWithRetry(
+    args: Parameters<typeof bindAgentWalletToSafe>[0],
+    label: string,
+  ): Promise<Awaited<ReturnType<typeof bindAgentWalletToSafe>>> {
+    const maxAttempts = Math.max(1, this.safeBindingMaxAttempts);
+    let lastResult: Awaited<ReturnType<typeof bindAgentWalletToSafe>> | undefined;
+    let lastThrowError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        lastResult = await bindAgentWalletToSafe(args);
+        if (lastResult.ok) return lastResult;
+        if (attempt < maxAttempts) {
+          console.error(
+            `[fleet-bootstrap] ${label}: setAgentWallet attempt ` +
+              `${attempt}/${maxAttempts} returned ok=false (${lastResult.error.shortMessage}); ` +
+              `retrying in ${this.safeBindingRetryDelayMs}ms...`,
+          );
+          if (this.safeBindingRetryDelayMs > 0) {
+            await sleep(this.safeBindingRetryDelayMs);
+          }
+        }
+      } catch (err) {
+        lastThrowError = err;
+        if (attempt < maxAttempts) {
+          const reason = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[fleet-bootstrap] ${label}: setAgentWallet attempt ` +
+              `${attempt}/${maxAttempts} threw (${reason}); retrying in ` +
+              `${this.safeBindingRetryDelayMs}ms...`,
+          );
+          if (this.safeBindingRetryDelayMs > 0) {
+            await sleep(this.safeBindingRetryDelayMs);
+          }
+        }
+      }
+    }
+    if (lastResult) return lastResult; // final ok:false propagated to caller
+    // Only thrown all the way through — no successful response or returned outcome.
+    throw lastThrowError instanceof Error
+      ? lastThrowError
+      : new Error(String(lastThrowError));
+  }
+
+  /**
    * Conservative daily master gas (wei): max(DEFAULT, rough tx count from poll interval × cost).
    */
   private estimateMasterDailyGasWei(pollIntervalMs?: number): bigint {
@@ -340,7 +551,7 @@ export class FleetBootstrapper {
       // which equaled the transfer amount and left no gas headroom, so a
       // master holding the gate's minimum would fail eth_estimateGas with
       // "gas required exceeds allowance (0)".
-      const requiredMasterEth = stage1MinMasterEth(this.config);
+      const requiredMasterEth = stage1MinMasterEth(this.config, this.targetServices);
       const masterAddress = state.master_address!;
       const masterBalance = await this.publicClient.getBalance({
         address: masterAddress as Address,
@@ -441,12 +652,8 @@ export class FleetBootstrapper {
       // Phase 1b: Check master funding for the full operator path.
       const masterAddress = state.master_address!;
       let masterBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
-      // Self-bond mode needs much more ETH than standard mode because the master
-      // funds the agent which then pays for: Safe deploy, 5 service registry txs
-      // (create, activate, register, deploy, stake), and mech deploy. Roughly
-      // 15 txs at varying gas costs. 0.03 ETH per service is a safe estimate.
-      // On re-runs, include ETH already held by funded agents/safes in the total.
-      const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+      // On re-runs, include ETH already held by funded agents/safes in the
+      // total for self-bond mode.
       let systemEth = masterBalance;
       if (this.stakingMode === 'self-bond') {
         for (const svc of state.services) {
@@ -468,22 +675,20 @@ export class FleetBootstrapper {
         stakingMode: this.stakingMode,
         currentStakingContract: this.config.stakingContract,
       }).services.length > 0;
-      const completedCountBeforeFunding = state.services.filter(s =>
-        isOperationalServiceStep(s.step),
-      ).length;
-      const standardFleetAlreadyComplete =
-        this.stakingMode === 'standard' &&
-        !pendingSetupMigration &&
-        completedCountBeforeFunding >= this.targetServices;
-      const standardFleetHasInProgressServices =
-        this.stakingMode === 'standard' && state.services.length > 0;
-      const requiredMasterEth = this.stakingMode === 'standard'
-        ? (
-            standardFleetAlreadyComplete
-              ? 0n
-              : this.config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
-          )
-        : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
+      // Single source of truth: the master-ETH gate is computed by
+      // `computeRequiredMasterEth` (defined above), the same helper the
+      // read-only `planFleetFunding` view routes through. Re-deriving it inline
+      // here is the u34i cross-module invariant-drift hazard. `ensureStage1And2`
+      // only reaches this point AFTER `ensureStage1` has succeeded, so the
+      // fleet is always past Stage 1 — `preStage1` is `false`.
+      const requiredMasterEth = computeRequiredMasterEth({
+        services: state.services,
+        minEoaGasEth: this.config.minEoaGasEth,
+        pendingSetupMigration,
+        targetServices: this.targetServices,
+        stakingMode: this.stakingMode,
+        preStage1: false,
+      });
       const autoFaucetEnabled = this.autoTestnetFaucet;
 
       // Re-sum system ETH (master + agent/safe balances for self-bond mode).
@@ -647,7 +852,7 @@ export class FleetBootstrapper {
         message: `Fleet bootstrap complete. ${state.services.filter(s => isOperationalServiceStep(s.step)).length}/${this.targetServices} services running.`,
       };
     } catch (error) {
-      const { summary, hint, rawMessage } = formatBootstrapOperatorMessage(error);
+      const { summary, hint, rawMessage, category } = formatBootstrapOperatorMessage(error);
       const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
       if (this.debug) {
         console.error(`[fleet-bootstrap] Bootstrap failed:`, error);
@@ -661,11 +866,21 @@ export class FleetBootstrapper {
           console.error(`[fleet-bootstrap] raw: ${rawMessage.split('\n')[0]}`);
         }
       }
+      // Extract a tx hash embedded in the error message by the on-chain revert
+      // paths (format: "...tx failed for service N: 0x<hash>" or
+      // "...tx reverted: 0x<hash>"). Surfaced in the fatal envelope so the SPA
+      // can render a block-explorer link. jinn-mono-hjex reviewer fix.
+      const txHashMatch = /(0x[a-fA-F0-9]{64})/.exec(rawMessage);
+      const txHash = txHashMatch ? txHashMatch[1] : null;
       return {
         ok: false,
         fleet_state: state,
         message: userMessage,
         rawErrorMessage: rawMessage,
+        // Preserve the structured category so the error envelope in main.ts
+        // can surface it in `details.category` for SPA consumers. jinn-mono-hjex.6
+        ...(category !== undefined ? { errorCategory: category } : {}),
+        ...(txHash !== null ? { txHash } : {}),
       };
     }
   }
@@ -911,22 +1126,29 @@ export class FleetBootstrapper {
     });
 
     // Bind the Safe via setAgentWallet (ERC-1271).
+    // Wrapped in the freshly-deployed-Safe retry (jinn-mono-k1ng). The
+    // pre-k1ng single-attempt version halted bootstrap when the documented
+    // race fired on the first attempt — exactly the 2026-05-18 canary's
+    // second-time-around failure mode.
     console.error(
       `[fleet-bootstrap] Stage 1: binding fleet Safe ${fleetSafe} to agentId=${fleetAgentId}`,
     );
-    const bindResult = await bindAgentWalletToSafe({
-      identityRegistryAddress: addr(identityRegistry),
-      agentId: BigInt(fleetAgentId),
-      safeAddress: addr(fleetSafe),
-      agentEoaAccount: agentSigner,
-      agentEoaWalletClient: agentWallet,
-      publicClient: this.publicClient,
-      chainId: this.config.chainId,
-    });
+    const bindResult = await this.bindAgentWalletWithRetry(
+      {
+        identityRegistryAddress: addr(identityRegistry),
+        agentId: BigInt(fleetAgentId),
+        safeAddress: addr(fleetSafe),
+        agentEoaAccount: agentSigner,
+        agentEoaWalletClient: agentWallet,
+        publicClient: this.publicClient,
+        chainId: this.config.chainId,
+      },
+      'Stage 1',
+    );
     if (!bindResult.ok) {
       const bindErr = bindResult.error;
       throw new Error(
-        `Fleet setAgentWallet failed: ${bindErr.shortMessage}` +
+        `Fleet setAgentWallet failed after ${this.safeBindingMaxAttempts} attempts: ${bindErr.shortMessage}` +
           (bindErr.revertReason ? ` (revert: ${bindErr.revertReason})` : ''),
       );
     }
@@ -1262,6 +1484,41 @@ export class FleetBootstrapper {
       }
     }
 
+    // Pre-stake precondition: if migration cleared service_id but kept agent_address,
+    // check the EOA is not already registered on-chain as an agent instance. If it is,
+    // calling stake() again would revert with AgentInstanceRegistered (selector 0x631695bd)
+    // and there is nothing useful the operator can do without rotating the agent EOA.
+    // Fail fast with a typed error instead of letting the contract revert.
+    //
+    // ServiceRegistryL2 exposes the `mapAgentInstanceOperators(address) → address` mapping:
+    // it returns the operator address that registered the given agent instance, or the
+    // zero address when no operator has bound that instance. A non-zero return means the
+    // EOA is already bound. (There is no `mapAgentInstances(address) → uint256` getter on
+    // the deployed registry — an earlier draft of this guard referenced one and was a
+    // permanent no-op.)
+    if (svc.agent_address && svc.service_id === null && this.config.serviceRegistry) {
+      let alreadyBound = false;
+      try {
+        const boundOperator = (await this.publicClient.readContract({
+          address: getAddress(this.config.serviceRegistry) as Address,
+          abi: SERVICE_REGISTRY_L2_ABI,
+          functionName: 'mapAgentInstanceOperators',
+          args: [getAddress(svc.agent_address) as Address],
+        })) as Address;
+        alreadyBound = boundOperator !== '0x0000000000000000000000000000000000000000';
+      } catch {
+        // Registry read failure is non-fatal — proceed and let stake() surface
+        // the error if the agent really is bound.
+      }
+      if (alreadyBound) {
+        throw new Error(
+          `agent_already_bound: agent EOA ${svc.agent_address} is already registered as an agent instance on-chain. ` +
+          `The previous setup retirement may have been incomplete. ` +
+          `Contact support or rotate the agent EOA to continue.`,
+        );
+      }
+    }
+
     // Fresh distributor stake() creates a new on-chain service. If state still
     // references an old Safe (e.g. hand-edited JSON), sweep it before replacing.
     if (svc.service_id === null && svc.safe_address && state.master_address) {
@@ -1346,46 +1603,20 @@ export class FleetBootstrapper {
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
     const stakingAddress = this.stakingAddressForService(svc);
+    const di = displayFleetServiceIndex(svc);
 
-    // `reStake()` is operator-scoped: the master EOA must match the
-    // distributor's recorded `mapServiceIdCuratingAgents[serviceId]` entry.
-    // If it doesn't, the operator is likely using the wrong earning dir or
-    // password, or the service needs owner / managing-agent recovery.
-    const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
-
-    const reStakeData = encodeFunctionData({
-      abi: STOLAS_DISTRIBUTOR_ABI,
-      functionName: 'reStake',
-      args: [stakingAddress, BigInt(serviceId)],
-    }) as Hex;
-
-    console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
-    let reStakeHash: Hex;
-    try {
-      reStakeHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
-        account: masterAccount as Account,
-        to: addr(this.config.distributorAddress),
-        data: reStakeData,
-        gas: 1_500_000n,
-      });
-    } catch (err) {
-      const message = flattenErrorMessage(err);
-      if (isUnauthorizedAccountError(message)) {
-        throw new Error(
-          `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ${masterAccount.address} is not authorized to reStake it. ` +
-          `The distributor only permits the recorded service operator, a managing agent, or the owner. ` +
-          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service, then re-run jinn bootstrap; otherwise request owner / managing-agent recovery or abandon-and-rebootstrap. ` +
-          `reStake revert: ${message}`,
-        );
-      }
-      throw err;
-    }
-    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, reStakeHash);
-    if (receipt.status !== 'success') {
-      throw new Error(`reStake failed for service ${index}: ${reStakeHash}`);
-    }
-    console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${reStakeHash})`);
+    // Delegate to the standalone exported helper (shared with EvictionLoop /
+    // the dashboard "Re-stake now" CTA). This eliminates the duplicate
+    // implementation (jinn-mono-hjex.3).
+    await recoverEvictedService({
+      serviceDisplayIndex: di,
+      serviceId,
+      stakingAddress: stakingAddress,
+      distributorAddress: this.config.distributorAddress,
+      rpcUrl: this.config.rpcUrl,
+      chain: this.chain,
+      mnemonic,
+    });
 
     // Service is now Staked again with the same service_id, safe_address, and mech_address.
     // Step back to `mech_deployed` so the resume loop advances through
@@ -1653,22 +1884,19 @@ export class FleetBootstrapper {
         step: 'safe_binding_pending',
         error: null,
       });
-      // Combined h74p (retry-on-transient-throw) + hjex.4 (Result-typed
-      // structured errors) policy:
-      //   - bindAgentWalletToSafe now returns a BindAgentWalletOutcome
-      //     (ok=true | ok=false with structured SafeBindingError).
-      //   - A returned Result.ok=false is a deterministic contract revert —
-      //     don't retry; record the structured diagnostic.
-      //   - A *thrown* exception is the freshly-deployed-Safe RPC race
-      //     window h74p targets — retry up to safeBindingMaxAttempts with a
-      //     small delay; if every attempt throws we fall through to a plain
-      //     reason log (no structured fields available).
-      const maxAttempts = Math.max(1, this.safeBindingMaxAttempts);
+      // Unified retry policy (jinn-mono-k1ng — supersedes h74p's throw-only
+      // retry): retry on `ok: false` and on thrown exceptions. The h74p
+      // version only caught throws, but `bindAgentWalletToSafe` returns
+      // `ok: false` for the documented freshly-deployed-Safe revert race —
+      // so the retry was dead code under real RPC. Per-service "worked"
+      // anyway because the next bootstrap resumes from `safe_binding_pending`;
+      // k1ng makes the in-process retry actually do its job so we don't
+      // depend on the operator restarting the daemon.
       let bindResult: Awaited<ReturnType<typeof bindAgentWalletToSafe>> | undefined;
       let lastBindError: unknown;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          bindResult = await bindAgentWalletToSafe({
+      try {
+        bindResult = await this.bindAgentWalletWithRetry(
+          {
             identityRegistryAddress: addr(identityRegistry),
             agentId: BigInt(agentId),
             safeAddress: addr(safeAddress),
@@ -1676,22 +1904,11 @@ export class FleetBootstrapper {
             agentEoaWalletClient: agentWallet,
             publicClient: this.publicClient,
             chainId: this.config.chainId,
-          });
-          break;
-        } catch (err) {
-          lastBindError = err;
-          if (attempt < maxAttempts) {
-            const reason = err instanceof Error ? err.message : String(err);
-            console.error(
-              `[fleet-bootstrap] Service ${index}: setAgentWallet attempt ` +
-              `${attempt}/${maxAttempts} failed (${reason}); retrying in ` +
-              `${this.safeBindingRetryDelayMs}ms...`,
-            );
-            if (this.safeBindingRetryDelayMs > 0) {
-              await sleep(this.safeBindingRetryDelayMs);
-            }
-          }
-        }
+          },
+          `Service ${index}`,
+        );
+      } catch (err) {
+        lastBindError = err;
       }
       if (bindResult?.ok === true) {
         console.error(
@@ -1708,8 +1925,8 @@ export class FleetBootstrapper {
       } else if (bindResult && !bindResult.ok) {
         const bindErr = bindResult.error;
         console.error(
-          `[fleet-bootstrap] Service ${index}: setAgentWallet failed; continuing with ` +
-          `safe_bound_to_agent=false (${bindErr.shortMessage}` +
+          `[fleet-bootstrap] Service ${index}: setAgentWallet failed after retries; ` +
+          `continuing with safe_bound_to_agent=false (${bindErr.shortMessage}` +
           `${bindErr.revertReason ? `, revert: ${bindErr.revertReason}` : ''}).`,
         );
         svc = await this.firstServiceUpdate(index, {
@@ -1723,8 +1940,8 @@ export class FleetBootstrapper {
         const reason =
           lastBindError instanceof Error ? lastBindError.message : String(lastBindError);
         console.error(
-          `[fleet-bootstrap] Service ${index}: setAgentWallet failed after ` +
-          `${maxAttempts} attempts; continuing with safe_bound_to_agent=false (${reason}).`,
+          `[fleet-bootstrap] Service ${index}: setAgentWallet threw on every attempt; ` +
+          `continuing with safe_bound_to_agent=false (${reason}).`,
         );
         svc = await this.firstServiceUpdate(index, {
           safe_bound_to_agent: false,
@@ -2338,3 +2555,83 @@ export class FleetBootstrapper {
 
 /** @deprecated Use FleetBootstrapper */
 export const EarningBootstrapper = FleetBootstrapper;
+
+// ---------------------------------------------------------------------------
+// Standalone recovery helper — callable from the eviction loop (hjex.3)
+// ---------------------------------------------------------------------------
+
+export interface RecoverEvictedServiceOptions {
+  /** Display index of the service (used only for log messages). */
+  serviceDisplayIndex: number;
+  serviceId: number;
+  stakingAddress: string;
+  distributorAddress: string;
+  rpcUrl: string;
+  chain: JinnOnchainNetwork;
+  mnemonic: string;
+}
+
+/**
+ * Re-stake an evicted service by calling `distributor.reStake(stakingProxy, serviceId)`.
+ *
+ * Extracted from `FleetBootstrapper.recoverEvictedService` so it can be called
+ * from the in-process `EvictionLoop` without requiring a full bootstrapper
+ * context (jinn-mono-hjex.3).
+ *
+ * The caller is responsible for advancing the local service step back to
+ * `mech_deployed` after this returns (just like the bootstrapper resume path does).
+ */
+export async function recoverEvictedService(
+  opts: RecoverEvictedServiceOptions,
+): Promise<void> {
+  const {
+    serviceDisplayIndex,
+    serviceId,
+    stakingAddress,
+    distributorAddress,
+    rpcUrl,
+    chain,
+    mnemonic,
+  } = opts;
+
+  const masterAccount = deriveMasterSigner(mnemonic);
+  const publicClient = createJinnPublicClient(rpcUrl, chain);
+  const masterWallet = createJinnWalletClient(rpcUrl, chain, masterAccount);
+
+  const reStakeData = encodeFunctionData({
+    abi: STOLAS_DISTRIBUTOR_ABI,
+    functionName: 'reStake',
+    args: [addr(stakingAddress), BigInt(serviceId)],
+  }) as Hex;
+
+  console.error(
+    `[eviction-recovery] Service ${serviceDisplayIndex}: calling distributor.reStake() for evicted service ${serviceId}`,
+  );
+  let reStakeHash: Hex;
+  try {
+    reStakeHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+      account: masterAccount as Account,
+      to: addr(distributorAddress),
+      data: reStakeData,
+      gas: 1_500_000n,
+    });
+  } catch (err) {
+    const message = flattenErrorMessage(err);
+    if (isUnauthorizedAccountError(message)) {
+      throw new Error(
+        `Service ${serviceDisplayIndex} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ` +
+        `${masterAccount.address} is not authorized to reStake it. ` +
+        `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service. ` +
+        `reStake revert: ${message}`,
+      );
+    }
+    throw err;
+  }
+  const receipt = await waitForTransactionReceiptWithRetry(publicClient, reStakeHash);
+  if (receipt.status !== 'success') {
+    throw new Error(`reStake failed for service ${serviceDisplayIndex}: ${reStakeHash}`);
+  }
+  console.error(
+    `[eviction-recovery] Service ${serviceDisplayIndex}: reStake confirmed (tx: ${reStakeHash})`,
+  );
+}

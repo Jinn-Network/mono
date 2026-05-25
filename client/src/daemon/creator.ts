@@ -40,7 +40,7 @@ export class CreatorLoop {
     });
   }
 
-  async tick(): Promise<string | null> {
+  async tick(): Promise<string[]> {
     const now = Date.now();
     const candidates = [];
     for (const source of this.taskSources) {
@@ -52,6 +52,7 @@ export class CreatorLoop {
       }
     }
 
+    const postedTaskIds: string[] = [];
     for (const candidate of candidates) {
       const state = candidate.task;
       const failureKey = CreatorLoop.failureCacheKey(state, this.safeAddress);
@@ -76,7 +77,7 @@ export class CreatorLoop {
           taskId,
           status: 'pending',
         });
-        return taskId;
+        postedTaskIds.push(taskId);
       } catch (err) {
         if (err instanceof TransientError) continue;
         if (err instanceof PermanentError) {
@@ -85,11 +86,17 @@ export class CreatorLoop {
             `[creator] Permanent create failure for ${state.id}; backing off for ` +
             `${Math.round(CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS / 60000)} min: ${err.message}`,
           );
+          continue;
         }
-        throw err;
+        this.store.setConfigValue(failureKey, String(now));
+        console.error(
+          `[creator] Create failure for ${state.id}; backing off for ` +
+          `${Math.round(CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS / 60000)} min`,
+          err,
+        );
       }
     }
-    return null;
+    return postedTaskIds;
   }
 
   async run(): Promise<void> {

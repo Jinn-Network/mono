@@ -48,12 +48,22 @@ describe('launched-record generator dispatcher', () => {
       getState: () => ({
         kind: 'swe-rebench-v2',
         lastPollAt: '2026-05-08T10:10:00.000Z',
-        lastPollSummary: { poolSize: 42, posted: 1, skipped: 41 },
+        lastPollSummary: {
+          poolSize: 42,
+          posted: 1,
+          unposted: 10,
+          live: 20,
+          repostable: 3,
+          saturated: 4,
+          abandoned: 5,
+        },
         totalPosted: 4,
         config: {
           N_target_successes: 5,
           N_max_postings_per_task: 15,
-          cooldown_ms: 86_400_000,
+          posting_window_ms: 604_800_000,
+          post_batch_size: 25,
+          claimLeaseTtlSeconds: 3_600,
         },
       }),
     });
@@ -72,7 +82,8 @@ describe('launched-record generator dispatcher', () => {
       generatorConfig: {
         N_target_successes: 5,
         N_max_postings_per_task: 15,
-        cooldown_ms: 86_400_000,
+        posting_window_ms: 604_800_000,
+        post_batch_size: 25,
       },
     });
     const unknownRecord = record('5474_unknown-v1_deadbeef');
@@ -110,9 +121,16 @@ describe('launched-record generator dispatcher', () => {
     ]);
     expect(result.predictionGeneratorRef).toBe(predictionGenerator);
     expect(result.generatorStatesBySolverType.get('swe-rebench-v2.v1')?.()).toEqual({
-      cadenceMs: 86_400_000,
       lastPollAt: '2026-05-08T10:10:00.000Z',
-      lastPollSummary: { evaluated: 42, posted: 1, skipped: 41 },
+      lastPollSummary: {
+        poolSize: 42,
+        posted: 1,
+        unposted: 10,
+        live: 20,
+        repostable: 3,
+        saturated: 4,
+        abandoned: 5,
+      },
     });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unknown.v1'));
     expect(logger.info).toHaveBeenCalledWith(

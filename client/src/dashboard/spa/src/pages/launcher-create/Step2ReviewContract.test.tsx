@@ -98,8 +98,8 @@ describe('Step2ReviewContract', () => {
     expect(screen.getByText(/SWE-rebench v2/)).toBeTruthy();
     expect(screen.getByText(/swe-rebench-v2\.docker-test-suite\.v1/)).toBeTruthy();
     expect(screen.getByText(/swe-rebench-v2\.multi-winrate\.v1/)).toBeTruthy();
-    // claim policy: parallel mode + 50 max claims
-    expect(screen.getByText('50')).toBeTruthy();
+    // claim policy: parallel mode + 5 max claims / 5 per-operator claims
+    expect(screen.getAllByText('5')).toHaveLength(2);
     fireEvent.click(screen.getByTestId('launcher-create-next'));
     expect(onAdvance).toHaveBeenCalledWith({
       templateContractId: 'swe-rebench-v2',

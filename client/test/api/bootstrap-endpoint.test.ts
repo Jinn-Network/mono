@@ -67,7 +67,17 @@ describe('GET /v1/bootstrap', () => {
     expect(body.mode).toBe('uninitialized');
   });
 
-  it('reports awaiting_funding after master wallet creation before service rows exist', async () => {
+  it('advances past awaiting_funding once master wallet exists with no persisted funding gate (jinn-mono-u34i)', async () => {
+    // Pre-u34i this case returned 'awaiting_funding' even when no funding
+    // gate file existed — leaving the panel on phase 2 ("Fund your wallet")
+    // during the entire post-funding Stage 1 window (Safe deploy, agentId
+    // mint, setAgentWallet bind), 30-60s of stale "still awaiting funds"
+    // copy while the daemon was actively deploying contracts.
+    //
+    // The fix: when no funding-gate file is persisted and master_address is
+    // set, currentStep advances to 'safe_deployed' — the first phase-3 step
+    // in Onboarding.tsx's phase map ('Joining Jinn · Deploying'). The panel
+    // transitions immediately, accurately reflecting the daemon's state.
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
       chain: 'base-sepolia',
@@ -79,7 +89,7 @@ describe('GET /v1/bootstrap', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { mode: string; currentStep: string; services: unknown[] };
     expect(body.mode).toBe('setup');
-    expect(body.currentStep).toBe('awaiting_funding');
+    expect(body.currentStep).toBe('safe_deployed');
     expect(body.services).toHaveLength(0);
   });
 
@@ -216,5 +226,114 @@ describe('GET /v1/bootstrap', () => {
     expect(body.joinedSolverNets).toMatchObject({
       bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
     });
+  });
+
+  it('surfaces a retire_failed envelope when migration archive has a wipe_suppressed=true entry (jinn-mono-hjex.1)', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'complete', safe_address: '0xsafe', service_id: 42 }],
+    });
+    writeFileSync(
+      join(earningDir, 'earning_migrations.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updated_at: new Date().toISOString(),
+        entries: [
+          {
+            migration_id: 'm1',
+            retire_status: 'failed',
+            retire_error: 'distributor.unstakeAndWithdraw reverted with InsufficientStake',
+            retire_tx_hash: '0x' + 'ab'.repeat(32),
+            state_reset_at: null,
+            wipe_suppressed: true,
+          },
+        ],
+      }),
+    );
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { retire_failed?: { retire_error: string; tx_hash: string | null } };
+    expect(body.retire_failed).toBeDefined();
+    expect(body.retire_failed!.retire_error).toContain('InsufficientStake');
+    expect(body.retire_failed!.tx_hash).toBe('0x' + 'ab'.repeat(32));
+  });
+
+  it('does NOT surface a retire_failed envelope for pre-PR archive entries lacking wipe_suppressed (jinn-mono-hjex.1)', async () => {
+    // Pre-PR entries had retire_status='failed' but state was actually wiped.
+    // The legacy `!state_reset_at` filter would falsely surface these. The
+    // `wipe_suppressed === true` filter must suppress them.
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'complete', safe_address: '0xsafe', service_id: 42 }],
+    });
+    writeFileSync(
+      join(earningDir, 'earning_migrations.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updated_at: new Date().toISOString(),
+        entries: [
+          // Three legacy shapes: undefined, null, and empty-string state_reset_at
+          // — all WITHOUT wipe_suppressed. None should surface a retire_failed
+          // envelope; the legacy `!state_reset_at` filter would have falsely
+          // matched all three.
+          {
+            migration_id: 'legacy-undef',
+            retire_status: 'failed',
+            retire_error: 'legacy undefined reset',
+            // state_reset_at intentionally omitted
+          },
+          {
+            migration_id: 'legacy-null',
+            retire_status: 'failed',
+            retire_error: 'legacy null reset',
+            state_reset_at: null,
+          },
+          {
+            migration_id: 'legacy-empty',
+            retire_status: 'failed',
+            retire_error: 'legacy empty reset',
+            state_reset_at: '',
+          },
+        ],
+      }),
+    );
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { retire_failed?: unknown };
+    expect(body.retire_failed).toBeUndefined();
+  });
+});
+
+// Issue #367: `/v1/bootstrap` no longer carries the embedded-agent feature
+// flag. The operator app reads it (and every feature flag) via the injected
+// `window.__JINN_FEATURES__` — see `test/api/feature-flags-inject.test.ts`
+// (`isEmbeddedAgentEnabled` + `resolveFeatureFlags`) and the SPA's
+// `lib/features.test.ts`.
+describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
+  it('does not include embeddedAgentEnabled in the response', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as Record<string, unknown>;
+    expect('embeddedAgentEnabled' in body).toBe(false);
+  });
+
+  it('does not include embeddedAgentEnabled on the uninitialized branch', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-bootstrap-empty-367-'));
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as Record<string, unknown>;
+    expect(body['mode']).toBe('uninitialized');
+    expect('embeddedAgentEnabled' in body).toBe(false);
   });
 });

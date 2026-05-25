@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HermesPrecheckPanel } from './HermesPrecheckPanel.js';
 import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type {
+  HarnessReadinessEntry,
   RegistryManifestResponse,
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
 } from '../../api/types.js';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
+import { Label } from '../../components/ui/label.js';
+import { cn } from '../../lib/utils.js';
 import {
   defaultModelForHarness,
   modelOptionsForHarness,
@@ -21,10 +28,20 @@ import {
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
 import { PluginPicker } from '../configuration/PluginPicker.js';
+import { CostEstimatePanel, useCostSurfaceDecision } from '../configuration/CostEstimatePanel.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
+import { InlineHelp } from '../../components/InlineHelp.js';
 
 const HERMES_AGENT_DESCRIPTION =
-  'Self-improving agent by Nous Research. Built-in learning loop, 200+ models via OpenRouter plus Nous Portal, NVIDIA NIM, GLM, Kimi, and more.';
+  'Self-improving agent by Nous Research. Built-in learning loop.';
+
+/**
+ * Long-form decision context for the join form lives in
+ * `client/docs/operator/join-form-context.md`. Inline help points operators
+ * there for the full picture (Issue #334).
+ */
+const JOIN_FORM_CONTEXT_DOC =
+  'https://github.com/Jinn-Network/mono/blob/next/client/docs/operator/join-form-context.md';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
@@ -43,6 +60,14 @@ const HERMES_AGENT_DESCRIPTION =
 
 const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
 
+const pageClass = 'mx-auto flex max-w-[880px] flex-col gap-4 p-6';
+const cardLabelClass =
+  'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
+const fieldLabelClass = cardLabelClass;
+const labelRowClass = 'flex items-start gap-2';
+const selectClass =
+  'rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[14px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
+
 export interface JoinFlowProps {
   /** Override the manifest cid for tests (skips wouter route param lookup). */
   manifestCid?: string;
@@ -58,6 +83,19 @@ interface JoinFormState {
   plugins: string[];
   disabledDefaultPlugins: string[];
   model: string;
+}
+
+/**
+ * Result of a successful join, retained so the flow can render an explicit
+ * success affordance on the join page rather than redirecting silently to
+ * `/operator` — the v0.1.6 dogfood paper cut where rvx couldn't tell the join
+ * had succeeded (#333).
+ */
+interface JoinSuccess {
+  manifestCid: string;
+  name: string;
+  roles: Role[];
+  restartRequired: boolean;
 }
 
 /**
@@ -80,6 +118,51 @@ function truncateAddress(address: string): string {
   if (!address) return '';
   if (address.length <= 13) return address;
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/**
+ * Readiness lookup keyed by harness name. `undefined` for a name means the
+ * probe is still in flight or the harness is absent from the daemon's
+ * readiness snapshot (404 — treated as not-yet-known, not a hard failure).
+ */
+type ReadinessMap = Map<string, HarnessReadinessEntry | undefined>;
+
+/**
+ * Probes `GET /v1/harnesses/:name/readiness` for each candidate harness so
+ * the join form (#332) can disable harness options whose external
+ * dependencies (CLI install, provider API key) are unsatisfied — and gate
+ * Save & Join on the selected harness reporting ready.
+ *
+ * The daemon's readiness snapshot covers every registered harness (not just
+ * joined ones — see `readiness-registry.ts` `_doRefresh`), so an unjoined
+ * harness still resolves here. A 404 is swallowed to `undefined` rather than
+ * thrown: a harness the daemon does not know about should not crash the form.
+ */
+function useReadiness(harnessNames: string[]): { readiness: ReadinessMap } {
+  // Sort + dedupe for a stable query key regardless of catalog ordering.
+  const sortedNames = [...new Set(harnessNames)].sort();
+  const query = useQuery<ReadinessMap>({
+    queryKey: ['harness-readiness', sortedNames.join(',')],
+    enabled: sortedNames.length > 0,
+    // Re-probe periodically so an operator who installs a CLI / adds a key
+    // in another window sees the option un-disable without a full reload.
+    refetchInterval: 5_000,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        sortedNames.map(async (name): Promise<[string, HarnessReadinessEntry | undefined]> => {
+          try {
+            return [name, await api.harnessReadiness(name)];
+          } catch (err) {
+            const code = (err as { code?: string }).code;
+            if (code === 'harness_not_found') return [name, undefined];
+            throw err;
+          }
+        }),
+      );
+      return new Map(entries);
+    },
+  });
+  return { readiness: query.data ?? new Map() };
 }
 
 export function JoinFlow({
@@ -126,27 +209,46 @@ export function JoinFlow({
     model: defaultModel,
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<JoinSuccess | null>(null);
   const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
+  // Tracks whether the operator has explicitly picked a harness in this
+  // session. Once true, the catalog-arrival effect below MUST NOT stomp
+  // their choice — that was the cause of issue #329, where SWE-rebench v2
+  // (whose catalog default is Hermes) re-overrode every Claude Code click.
+  const operatorPickedHarness = useRef(false);
+  const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
-  // the operator hasn't picked a harness yet (`form.harness` still equal to
-  // the seed default) and the catalog's first compatible option differs,
-  // shift to that. This is render-time-safe because we only call setForm
-  // when the values are unequal — React queues the re-render and bails out
-  // from infinite loops automatically.
+  // the operator hasn't picked a harness yet, shift the seed default to the
+  // catalog's first compatible option. Once-per-catalog-load via useEffect
+  // (NOT a render-time setState) so subsequent dropdown selections don't
+  // get reverted on every re-render.
   const catalogPreferredHarness = solverCompatibleHarnesses[0]?.name;
-  if (
-    catalogPreferredHarness &&
-    form.harness === DEFAULT_HARNESS &&
-    catalogPreferredHarness !== DEFAULT_HARNESS
-  ) {
-    setForm({
-      ...form,
+  useEffect(() => {
+    if (operatorPickedHarness.current) return;
+    if (!catalogPreferredHarness) return;
+    if (catalogPreferredHarness === form.harness) return;
+    setForm((prev) => ({
+      ...prev,
       harness: catalogPreferredHarness,
       model: defaultModelForHarness(catalogPreferredHarness),
-    });
-  }
+    }));
+    // form.harness intentionally omitted: we only react to the catalog
+    // value changing (initial load / contract switch). Including form.harness
+    // would re-fire this effect after the operator picks something and
+    // bounce them back to the catalog default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogPreferredHarness]);
   const modelOptions = modelOptionsForHarness(form.harness);
+
+  // Per-harness readiness (#332). Probe every solver-compatible harness so
+  // not-ready options render disabled, and Save & Join can gate on the
+  // selected harness reporting ready. The daemon keys the readiness endpoint
+  // by `Harness.name` — the same canonical name `form.harness` carries.
+  const { readiness } = useReadiness(
+    solverCompatibleHarnesses.map((h) => h.name),
+  );
+  const selectedHarnessReadiness = readiness.get(form.harness);
 
   const submitMutation = useMutation({
     mutationFn: () =>
@@ -165,11 +267,21 @@ export function JoinFlow({
             }
           : {}),
       }),
-    onSuccess: () => {
-      // Invalidate so the catalog's joined-indicator badge appears on the
+    onSuccess: (result) => {
+      // Invalidate so the catalog's joined-indicator badge and the Operator
+      // page's joined list / LiveNow banner pick the new entry up on the
       // next tick instead of waiting up to 30s for the next refetch.
       void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
-      navigate('/operator#solvernets');
+      void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+      // Render an explicit success state on this page rather than a silent
+      // redirect to /operator — the v0.1.6 dogfood paper cut (#333). The
+      // operator confirms the join landed, then chooses where to go next.
+      setJoinSuccess({
+        manifestCid: result.manifestCid,
+        name: result.config.name ?? manifest?.name ?? result.manifestCid,
+        roles: result.config.roles,
+        restartRequired: result.restartRequired,
+      });
     },
     onError: (err) => {
       setSubmitError(err instanceof Error ? err.message : String(err));
@@ -178,7 +290,7 @@ export function JoinFlow({
 
   if (!cid) {
     return (
-      <main data-testid="join-flow-missing-cid" style={pageStyle}>
+      <main data-testid="join-flow-missing-cid" className={pageClass}>
         <ErrorBanner
           message="No manifest cid supplied."
           onBack={() => navigate('/operator#solvernets')}
@@ -189,8 +301,10 @@ export function JoinFlow({
 
   if (manifestQuery.isLoading) {
     return (
-      <main data-testid="join-flow-loading" style={pageStyle}>
-        <p style={mutedTextStyle}>Loading manifest…</p>
+      <main data-testid="join-flow-loading" className={pageClass}>
+        <p className="m-0 font-mono text-[13px] text-[var(--fg-muted)]">
+          Loading manifest…
+        </p>
       </main>
     );
   }
@@ -201,7 +315,7 @@ export function JoinFlow({
         ? manifestQuery.error.message
         : 'Unknown error';
     return (
-      <main data-testid="join-flow-error" style={pageStyle}>
+      <main data-testid="join-flow-error" className={pageClass}>
         <ErrorBanner
           message={`Failed to load manifest: ${message}`}
           onBack={() => navigate('/operator#solvernets')}
@@ -209,6 +323,17 @@ export function JoinFlow({
             void manifestQuery.refetch();
           }}
         />
+      </main>
+    );
+  }
+
+  // Successful join — show an explicit confirmation on this page instead of
+  // a silent redirect to /operator (#333). The operator sees the SolverNet
+  // they just joined, the restart hint, and clear next-step CTAs.
+  if (joinSuccess) {
+    return (
+      <main data-testid="join-flow-success" className={pageClass}>
+        <JoinSuccessCard success={joinSuccess} navigate={navigate} />
       </main>
     );
   }
@@ -227,95 +352,102 @@ export function JoinFlow({
 
   const showSolverFields = form.roles.includes('solver');
   const showEvaluatorInfo = form.roles.includes('evaluator');
-  const canSubmit = form.roles.length > 0 && !submitMutation.isPending;
+
+  // Cost-protection surface (Issue #331). Only consulted when the solver
+  // role is selected — the evaluator role binds to a manifest-supplied
+  // implementation and bypasses operator harness choice entirely.
+  const costDecision = useCostSurfaceDecision(
+    showSolverFields ? form.harness : undefined,
+    showSolverFields ? form.model : undefined,
+  );
+  const requiresCostConfirmation = showSolverFields && costDecision.requiresConfirmation;
+  const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
+
+  // Readiness gate (#332): block Save & Join when the selected solver harness
+  // reports a definitive `ready: false`. A still-loading or unknown probe
+  // (`undefined`) does NOT block — the not-ready *options* are disabled in
+  // the select, so an operator cannot land on a known-not-ready harness, and
+  // we avoid flashing a disabled button before the first probe resolves.
+  const harnessReadinessBlocked =
+    showSolverFields && selectedHarnessReadiness?.ready === false;
+
+  const canSubmit =
+    form.roles.length > 0 &&
+    !submitMutation.isPending &&
+    !costGateBlocked &&
+    !harnessReadinessBlocked;
 
   return (
-    <main data-testid="join-flow" data-manifest-cid={cid} style={pageStyle}>
-      <header style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <main
+      data-testid="join-flow"
+      data-manifest-cid={cid}
+      className={pageClass}
+    >
+      <header className="flex flex-col gap-1.5">
         <span
           data-testid="join-flow-title"
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '20px',
-            fontWeight: 500,
-            color: 'var(--fg)',
-          }}
+          className="font-mono text-[20px] font-medium text-foreground"
         >
           Join {manifest.name}
         </span>
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-          }}
-        >
+        <span className="font-mono text-[12px] text-[var(--fg-muted)]">
           {manifest.description}
         </span>
       </header>
 
-      <section
-        data-testid="join-flow-summary"
-        style={cardStyle}
-      >
-        <span style={cardLabelStyle}>Manifest</span>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'auto 1fr',
-            gap: '6px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg-muted)',
-          }}
-        >
+      <Card data-testid="join-flow-summary" className="flex flex-col gap-3 p-4">
+        <span className={cardLabelClass}>Manifest</span>
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[12px] text-[var(--fg-muted)]">
           <span>Contract</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {manifest.contract.id} · {manifest.contract.version}
           </span>
           <span>Solution price</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {formatWeiAmount(manifest.solutionPriceWei)}
           </span>
           <span>Verdict price</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {formatWeiAmount(manifest.verdictPriceWei)}
           </span>
           <span>Open roles</span>
-          <span data-testid="join-flow-open-roles" style={{ color: 'var(--fg)' }}>
+          <span data-testid="join-flow-open-roles" className="text-foreground">
             {openRoles.join(', ') || 'none'}
           </span>
           <span>Launcher</span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span className="text-foreground">
             {truncateAddress(manifest.launcher.safeAddress)} · agentId{' '}
             {manifest.launcher.agentId}
           </span>
           <span>Manifest CID</span>
           <span
             data-testid="join-flow-manifest-cid"
-            style={{
-              color: 'var(--fg-dim)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="truncate text-[var(--fg-dim)]"
           >
             {cid}
           </span>
         </div>
-      </section>
+      </Card>
 
-      <section style={cardStyle}>
-        <span style={cardLabelStyle}>Roles</span>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${openRoles.length || 1}, 1fr)`,
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
-            overflow: 'hidden',
-          }}
-        >
+      <Card className="flex flex-col gap-3 p-4">
+        <span className={labelRowClass}>
+          <span className={cardLabelClass}>Roles</span>
+          <InlineHelp
+            label="Roles help"
+            docHref={`${JOIN_FORM_CONTEXT_DOC}#solver-vs-evaluator`}
+          >
+            Solver attempts tasks and submits solutions. It is the spending
+            role: you pay for model inference and gas. It also has the most
+            upside per task.
+            {'\n\n'}
+            Evaluator checks other operators' solutions. Lower spend, steadier
+            returns, less variance.
+            {'\n\n'}
+            You can take either role, or both. New here? Start as a solver on
+            one SolverNet, using a model you already pay for.
+          </InlineHelp>
+        </span>
+        <div className="flex overflow-hidden rounded-md border border-border">
           {openRoles.map((role, idx) => {
             const active = form.roles.includes(role);
             const checkboxId = `join-role-${role}`;
@@ -326,40 +458,30 @@ export function JoinFlow({
                 data-testid="join-role-option"
                 data-role={role}
                 data-role-active={active ? 'true' : 'false'}
-                style={{
-                  padding: '12px 16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px',
-                  background: active ? 'var(--bg)' : 'transparent',
-                  color: active ? 'var(--fg)' : 'var(--fg-muted)',
-                  borderRight:
-                    idx < openRoles.length - 1
-                      ? '1px solid var(--border)'
-                      : 'none',
-                  cursor: 'pointer',
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}
+                className={cn(
+                  'flex flex-1 cursor-pointer flex-col gap-1.5 p-3 font-mono',
+                  active ? 'bg-[var(--bg)] text-foreground' : 'bg-transparent text-[var(--fg-muted)]',
+                  idx < openRoles.length - 1 && 'border-r border-border',
+                )}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="flex items-center gap-2">
                   <input
                     id={checkboxId}
                     type="checkbox"
                     checked={active}
                     onChange={() => toggleRole(role)}
                     aria-label={role === 'solver' ? 'Solver' : 'Evaluator'}
-                    style={{ accentColor: 'var(--accent-sky)', width: '14px', height: '14px' }}
+                    className="size-3.5 accent-primary"
                   />
-                  <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                  <span className="text-[14px] font-medium">
                     {role === 'solver' ? 'Solver' : 'Evaluator'}
                   </span>
                 </span>
                 <span
-                  style={{
-                    fontSize: '11px',
-                    color: active ? 'var(--fg-muted)' : 'var(--fg-dim)',
-                    paddingLeft: '22px',
-                  }}
+                  className={cn(
+                    'pl-[22px] text-[11px]',
+                    active ? 'text-[var(--fg-muted)]' : 'text-[var(--fg-dim)]',
+                  )}
                 >
                   {role === 'solver'
                     ? 'attempt tasks; submit solutions'
@@ -369,39 +491,76 @@ export function JoinFlow({
             );
           })}
         </div>
-      </section>
+      </Card>
 
       {showSolverFields && (
-        <section data-testid="join-flow-solver-fields" style={cardStyle}>
-          <span style={cardLabelStyle}>Solver configuration</span>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '16px',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={fieldLabelStyle}>Harness</span>
+        <Card
+          data-testid="join-flow-solver-fields"
+          className="flex flex-col gap-3 p-4"
+        >
+          <span className={cardLabelClass}>Solver configuration</span>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <span className={labelRowClass}>
+                <Label htmlFor="join-harness-select" className={fieldLabelClass}>
+                  Harness
+                </Label>
+                <InlineHelp
+                  label="Harness help"
+                  docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
+                >
+                  The harness is the runtime that runs a task.
+                  {'\n\n'}
+                  You only need credentials for one harness — the harness, not
+                  the harness and the model separately.
+                  {'\n\n'}
+                  Claude Code uses whatever the `claude` CLI is signed in with:
+                  a Claude subscription or an Anthropic API key. Hermes Agent is
+                  a separate package; the join form checks it is installed.
+                  {'\n\n'}
+                  The default is the SolverNet's first compatible harness. Pick
+                  one. You do not need to pay for two.
+                </InlineHelp>
+              </span>
               <select
+                id="join-harness-select"
                 aria-label="Harness"
                 data-testid="join-harness-select"
                 value={form.harness}
                 onChange={(e) => {
                   const harness = e.target.value;
+                  // Mark the choice as operator-driven so the catalog-arrival
+                  // effect above doesn't bounce them back to the catalog
+                  // default on the next render (issue #329).
+                  operatorPickedHarness.current = true;
                   setForm({
                     ...form,
                     harness,
                     model: defaultModelForHarness(harness),
                   });
+                  setHighCostAcknowledged(false);
                 }}
-                style={selectStyle}
+                className={selectClass}
               >
-                {solverCompatibleHarnesses.map((h) => (
-                  <option key={h.name} value={h.name}>
-                    {harnessOptionLabel(h.name, h.version)}
-                  </option>
-                ))}
+                {solverCompatibleHarnesses.map((h) => {
+                  const entry = readiness.get(h.name);
+                  const notReady = entry?.ready === false;
+                  return (
+                    <option
+                      key={h.name}
+                      value={h.name}
+                      disabled={notReady}
+                      data-testid="join-harness-option"
+                      data-harness={h.name}
+                      data-harness-ready={
+                        entry === undefined ? 'unknown' : entry.ready ? 'true' : 'false'
+                      }
+                    >
+                      {harnessOptionLabel(h.name, h.version)}
+                      {notReady ? ' — setup required' : ''}
+                    </option>
+                  );
+                })}
                 {(!catalogEntry || solverCompatibleHarnesses.length === 0) && (
                   <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
                 )}
@@ -409,26 +568,70 @@ export function JoinFlow({
               {form.harness === HERMES_AGENT_HARNESS && (
                 <span
                   data-testid="join-harness-hermes-description"
-                  style={{
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '11px',
-                    color: 'var(--fg-muted)',
-                  }}
+                  className="font-mono text-[11px] text-[var(--fg-muted)]"
                 >
-                  {HERMES_AGENT_DESCRIPTION}{' '}
-                  <span style={{ color: 'var(--break-amber)' }}>(requires separate install)</span>
+                  {HERMES_AGENT_DESCRIPTION}
                 </span>
+              )}
+              {selectedHarnessReadiness?.ready === false && (
+                <div
+                  data-testid="join-harness-not-ready"
+                  data-harness={form.harness}
+                  role="status"
+                  className="flex flex-col gap-1 rounded-md border border-destructive bg-[var(--bg)] p-2.5 font-mono text-[11px] text-foreground"
+                >
+                  <span className="text-destructive">
+                    {harnessDisplayName(form.harness)} is not ready
+                    {selectedHarnessReadiness.reason
+                      ? `: ${selectedHarnessReadiness.reason}`
+                      : ''}
+                  </span>
+                  {selectedHarnessReadiness.nextStep && (
+                    <span
+                      data-testid="join-harness-not-ready-next-step"
+                      className="text-[var(--fg-muted)]"
+                    >
+                      {selectedHarnessReadiness.nextStep.description}
+                      {selectedHarnessReadiness.nextStep.cli
+                        ? ` (${selectedHarnessReadiness.nextStep.cli})`
+                        : ''}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={fieldLabelStyle}>Model</span>
+            <div className="flex flex-col gap-1.5">
+              <span className={labelRowClass}>
+                <Label htmlFor="join-model-select" className={fieldLabelClass}>
+                  Model
+                </Label>
+                <InlineHelp
+                  label="Model help"
+                  docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
+                >
+                  The model is the LLM the harness runs.
+                  {'\n\n'}
+                  This list only shows models the selected harness supports.
+                  Change the harness and the model resets to that harness's
+                  default.
+                  {'\n\n'}
+                  You pay for the model through the harness's credentials. There
+                  is no extra model subscription on top.
+                  {'\n\n'}
+                  Check the cost estimate below before you join.
+                </InlineHelp>
+              </span>
               <select
+                id="join-model-select"
                 aria-label="Model"
                 data-testid="join-model-select"
                 value={form.model}
-                onChange={(e) => setForm({ ...form, model: e.target.value })}
-                style={selectStyle}
+                onChange={(e) => {
+                  setForm({ ...form, model: e.target.value });
+                  setHighCostAcknowledged(false);
+                }}
+                className={selectClass}
               >
                 {modelOptions.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -450,8 +653,52 @@ export function JoinFlow({
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span style={fieldLabelStyle}>Plugins</span>
+          <CostEstimatePanel
+            harness={form.harness}
+            modelId={form.model}
+            testIdPrefix="join-flow-cost"
+          />
+
+          {requiresCostConfirmation && (
+            <label
+              data-testid="join-flow-cost-confirmation"
+              data-cost-confirmation-checked={highCostAcknowledged ? 'true' : 'false'}
+              className="flex cursor-pointer items-start gap-2.5 rounded-md border border-destructive bg-[var(--bg)] p-3 font-mono text-[12px] text-foreground"
+            >
+              <input
+                type="checkbox"
+                data-testid="join-flow-cost-confirmation-checkbox"
+                checked={highCostAcknowledged}
+                onChange={(e) => setHighCostAcknowledged(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-destructive"
+                aria-label="I understand the per-task cost and have a budget for this"
+              />
+              <span>
+                I understand — I have a budget for this. The selected model is estimated at more than $1
+                per task; I am responsible for the API spend on my own provider key.
+              </span>
+            </label>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <span className={labelRowClass}>
+              <span className={fieldLabelClass}>Plugins</span>
+              <InlineHelp
+                label="Plugins help"
+                docHref={`${JOIN_FORM_CONTEXT_DOC}#plug-ins`}
+              >
+                Plug-ins are optional. On your first run you do not need to
+                touch this section.
+                {'\n\n'}
+                A plug-in is reusable AI tooling — MCP servers, skills,
+                extensions — that the harness can load while it solves.
+                {'\n\n'}
+                This SolverNet already enables the plug-ins its tasks need. Add
+                your own only if you have built one.
+                {'\n\n'}
+                You can re-join later with more plug-ins.
+              </InlineHelp>
+            </span>
             <PluginPicker
               available={catalogEntry?.compatiblePlugins ?? []}
               selected={form.plugins}
@@ -461,49 +708,71 @@ export function JoinFlow({
               }
               rowTestId="join-plugin-option"
               searchTestId="join-plugin-search"
+              harness={form.harness}
             />
           </div>
-        </section>
+        </Card>
       )}
 
       {showEvaluatorInfo && !showSolverFields && (
-        <section data-testid="join-flow-evaluator-info" style={cardStyle}>
-          <span style={cardLabelStyle}>Evaluator configuration</span>
-          <p
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              margin: 0,
-            }}
-          >
+        <Card
+          data-testid="join-flow-evaluator-info"
+          className="flex flex-col gap-3 p-4"
+        >
+          <span className={labelRowClass}>
+            <span className={cardLabelClass}>Evaluator configuration</span>
+            <InlineHelp
+              label="Evaluator configuration help"
+              docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
+            >
+              The evaluator role has no harness or model picker. That is by
+              design.
+              {'\n\n'}
+              Every evaluator on a SolverNet must run the same evaluation
+              function, so verdicts can be compared. The SolverNet's manifest
+              sets it for you.
+              {'\n\n'}
+              For many SolverNets that function is deterministic and uses no
+              model at all.
+            </InlineHelp>
+          </span>
+          <p className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
             The evaluator harness is bound to{' '}
-            <code style={{ color: 'var(--fg)' }}>
+            <code className="text-foreground">
               {manifest.contract.evaluationFunction.implementation}
             </code>{' '}
             by the manifest's contract; no operator selection required.
           </p>
-        </section>
+        </Card>
       )}
 
       {showEvaluatorInfo && showSolverFields && (
-        <section data-testid="join-flow-evaluator-info" style={cardStyle}>
-          <span style={cardLabelStyle}>Evaluator binding</span>
-          <p
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              margin: 0,
-            }}
-          >
+        <Card
+          data-testid="join-flow-evaluator-info"
+          className="flex flex-col gap-3 p-4"
+        >
+          <span className={labelRowClass}>
+            <span className={cardLabelClass}>Evaluator binding</span>
+            <InlineHelp
+              label="Evaluator binding help"
+              docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
+            >
+              The SolverNet's manifest sets the evaluator harness for you.
+              {'\n\n'}
+              Every evaluator runs the same evaluation function, so verdicts can
+              be compared and trusted.
+              {'\n\n'}
+              The harness and model fields above apply only to the solver role.
+            </InlineHelp>
+          </span>
+          <p className="m-0 font-mono text-[12px] text-[var(--fg-muted)]">
             Evaluator harness is bound to{' '}
-            <code style={{ color: 'var(--fg)' }}>
+            <code className="text-foreground">
               {manifest.contract.evaluationFunction.implementation}
             </code>{' '}
             by the manifest. The fields above only configure the solver role.
           </p>
-        </section>
+        </Card>
       )}
 
       {showHermesPrecheck && (
@@ -522,35 +791,24 @@ export function JoinFlow({
         <p
           data-testid="join-flow-submit-error"
           role="alert"
-          style={{
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            margin: 0,
-          }}
+          className="m-0 font-mono text-[13px] text-destructive"
         >
           {submitError}
         </p>
       )}
 
-      <footer
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: '12px',
-        }}
-      >
-        <button
+      <footer className="flex items-center justify-end gap-3">
+        <Button
           type="button"
+          variant="secondary"
           data-testid="join-flow-cancel"
           onClick={() => navigate('/operator#solvernets')}
-          style={ghostButtonStyle}
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="default"
           data-testid="join-flow-submit"
           disabled={!canSubmit}
           onClick={() => {
@@ -563,16 +821,9 @@ export function JoinFlow({
             }
             submitMutation.mutate();
           }}
-          style={{
-            ...ghostButtonStyle,
-            background: canSubmit ? 'var(--accent-sky)' : 'transparent',
-            color: canSubmit ? 'var(--bg-sunken)' : 'var(--fg-dim)',
-            border: `1px solid ${canSubmit ? 'var(--accent-sky)' : 'var(--border)'}`,
-            cursor: canSubmit ? 'pointer' : 'not-allowed',
-          }}
         >
           {submitMutation.isPending ? 'Joining…' : 'Join SolverNet'}
-        </button>
+        </Button>
       </footer>
     </main>
   );
@@ -588,112 +839,153 @@ function ErrorBanner({
   onRetry?: () => void;
 }): JSX.Element {
   return (
-    <div
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--break-red)',
-        borderRadius: 'var(--radius-2)',
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: '16px',
-      }}
+    <Alert
+      variant="blocking"
+      className="flex items-center justify-between gap-4 border-l-0 border border-destructive p-4"
     >
-      <span
-        style={{
-          color: 'var(--break-red)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-        }}
-      >
+      <AlertDescription className="font-mono text-[13px] text-destructive">
         {message}
-      </span>
-      <div style={{ display: 'flex', gap: '8px' }}>
+      </AlertDescription>
+      <div className="flex gap-2">
         {onRetry && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             data-testid="join-flow-retry"
             onClick={onRetry}
-            style={ghostButtonStyle}
           >
             Retry
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           data-testid="join-flow-back"
           onClick={onBack}
-          style={ghostButtonStyle}
         >
           Back
-        </button>
+        </Button>
       </div>
-    </div>
+    </Alert>
   );
 }
 
-const pageStyle: React.CSSProperties = {
-  padding: '24px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '16px',
-  maxWidth: '880px',
-  margin: '0 auto',
-};
-
-const mutedTextStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg-muted)',
-  margin: 0,
-};
-
-const cardStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '16px 20px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-};
-
-const cardLabelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const fieldLabelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  fontWeight: 500,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-muted)',
-};
-
-const selectStyle: React.CSSProperties = {
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '10px 12px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '14px',
-  color: 'var(--fg)',
-};
-
-const ghostButtonStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  padding: '8px 16px',
-  background: 'transparent',
-  color: 'var(--fg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  cursor: 'pointer',
-};
+/**
+ * Post-join success affordance (#333). Renders in place of the form once the
+ * join config write succeeds: a green-bordered confirmation naming the
+ * SolverNet just joined, the restart hint when the daemon needs a restart to
+ * pick the config up, and explicit CTAs into the joined list / catalog. This
+ * replaces the silent redirect to `/operator` that left v0.1.6 operators
+ * unsure whether their join had landed.
+ */
+function JoinSuccessCard({
+  success,
+  navigate,
+}: {
+  success: JoinSuccess;
+  navigate: (path: string) => void;
+}): JSX.Element {
+  const roleLabel = success.roles
+    .map((r) => (r === 'solver' ? 'Solver' : 'Evaluator'))
+    .join(' + ');
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const handleRestart = async (): Promise<void> => {
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      const res = await api.restartDaemon();
+      if (!res.ok) {
+        throw new Error('Restart request failed.');
+      }
+      // Send the operator to the overview so they can watch the node
+      // come back up after the restart.
+      navigate('/overview');
+    } catch (err) {
+      setRestartError(
+        err instanceof Error ? err.message : 'Restart request failed.',
+      );
+      setRestarting(false);
+    }
+  };
+  return (
+    <>
+      <Card
+        data-testid="join-flow-success-card"
+        role="status"
+        // var(--vow-green) is unmapped in tailwind config (no shadcn
+        // equivalent for the protocol "vow" tone); used to signal a
+        // successful join visually distinct from default green.
+        className="flex flex-col gap-2.5 border-[var(--vow-green)] p-5"
+      >
+        <Badge variant="success" className="self-start">
+          Joined
+        </Badge>
+        <span
+          data-testid="join-flow-success-name"
+          className="font-mono text-[18px] font-medium text-foreground"
+        >
+          You joined {success.name}
+        </span>
+        <span className="font-mono text-[12px] leading-relaxed text-[var(--fg-muted)]">
+          You're in as {roleLabel || 'an operator'}. This SolverNet now shows in
+          your joined list.
+        </span>
+        {success.restartRequired && (
+          <span
+            data-testid="join-flow-success-restart"
+            // var(--accent-gold) is unmapped in tailwind config; used here as
+            // the canonical "attention required" tone (matches the design
+            // system's wane/gold ramp for advisory messaging).
+            className="font-mono text-[12px] leading-relaxed text-[var(--accent-gold)]"
+          >
+            Restart the node to start participating — the daemon picks up
+            SolverNet config on restart.
+          </span>
+        )}
+      </Card>
+      {restartError && (
+        <AlertTitle
+          role="alert"
+          data-testid="join-flow-success-restart-error"
+          className="font-mono text-[12px] leading-relaxed text-destructive"
+        >
+          {restartError}
+        </AlertTitle>
+      )}
+      <footer className="flex items-center justify-end gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          data-testid="join-flow-success-browse"
+          onClick={() => navigate('/operator#solvernets')}
+        >
+          Browse SolverNets
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          data-testid="join-flow-success-view"
+          onClick={() =>
+            navigate(`/operator#solvernets/${success.manifestCid}`)
+          }
+        >
+          View joined SolverNet
+        </Button>
+        <Button
+          type="button"
+          variant="default"
+          data-testid="join-flow-success-restart-button"
+          onClick={() => {
+            void handleRestart();
+          }}
+          disabled={restarting}
+        >
+          {restarting ? 'Restarting…' : 'Restart node now'}
+        </Button>
+      </footer>
+    </>
+  );
+}

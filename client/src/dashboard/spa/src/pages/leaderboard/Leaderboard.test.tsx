@@ -37,7 +37,11 @@ describe('LeaderboardPage', () => {
   it('switches to Frozen tab on click', () => {
     render(withQuery(<LeaderboardPage solverNet="prediction" />));
     const frozenTab = screen.getByRole('tab', { name: /frozen/i });
-    fireEvent.click(frozenTab);
+    // Radix Tabs activates on mousedown, not click — fireEvent.click in
+    // jsdom does not dispatch a synthesized pointer/mousedown sequence,
+    // so we drive the activation explicitly. The real-browser interaction
+    // (mouse click) still works because the browser fires mousedown first.
+    fireEvent.mouseDown(frozenTab);
     expect(frozenTab.getAttribute('aria-selected')).toBe('true');
     const trainTab = screen.getByRole('tab', { name: /train/i });
     expect(trainTab.getAttribute('aria-selected')).toBe('false');
@@ -54,7 +58,7 @@ describe('LeaderboardPage', () => {
 
   it('fetches from frozen leaderboard endpoint after switching to Frozen', () => {
     render(withQuery(<LeaderboardPage solverNet="prediction" />));
-    fireEvent.click(screen.getByRole('tab', { name: /frozen/i }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /frozen/i }));
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(
       expect.stringContaining('mode=frozen'),
       expect.any(Object),

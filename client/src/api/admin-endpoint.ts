@@ -2,15 +2,28 @@
  * Admin endpoints for operator MCP write tools.
  *
  * Mounted only when ui auth is configured (so they're token-gated). Currently
- * supports: daemon_restart (real, exits the process gracefully), manual reward
- * claims, and loop pause/resume (stubbed — returns not_implemented).
+ * supports: daemon_restart (real, exits the process gracefully — see
+ * `restart-daemon.ts` for the respawn / headless semantics), daemon_stop
+ * (exits the process and stays down — never respawns), manual reward claims,
+ * and loop pause/resume (stubbed — returns not_implemented).
  */
 import type { Hono } from 'hono';
 import type { CommandContext, CommandModule } from '../cli/command.js';
 import claimRewardsCommand from '../cli/commands/claim-rewards.js';
 
+export interface AdminRestartOptions {
+  /**
+   * When true, the daemon respawns even under a supervisor (`JINN_NO_UI=1`).
+   * The operator dashboard sets this — when the operator clicks Restart they
+   * explicitly want the daemon back. Default is `false`, which preserves the
+   * supervisor-driven flow other callers (MCP tools, signals) depend on.
+   */
+  forceRespawn?: boolean;
+}
+
 export interface AdminEndpointConfig {
-  onRestartRequested: () => void;
+  onRestartRequested: (opts: AdminRestartOptions) => void;
+  onStopRequested: () => void;
 }
 
 async function runCommandJson(
@@ -45,13 +58,34 @@ async function runCommandJson(
 }
 
 export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
-  app.post('/api/admin/restart', (c) => {
+  app.post('/api/admin/restart', async (c) => {
+    let body: unknown = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      // No body / non-JSON — that's fine, treat as default options.
+    }
+    const forceRespawn = (body as { forceRespawn?: unknown })?.forceRespawn === true;
     // Defer the actual exit so the response can flush first.
     setTimeout(() => {
       try {
-        cfg.onRestartRequested();
+        cfg.onRestartRequested({ forceRespawn });
       } catch (err) {
         console.error('[admin] restart hook threw:', err);
+      }
+    }, 50);
+    return c.json({ ok: true, scheduled: true });
+  });
+
+  app.post('/api/admin/stop', (c) => {
+    // Same flush-then-exit pattern as restart, but always a pure exit — no
+    // respawn under any env. The operator clicked Stop; they want the daemon
+    // down until they explicitly start it again.
+    setTimeout(() => {
+      try {
+        cfg.onStopRequested();
+      } catch (err) {
+        console.error('[admin] stop hook threw:', err);
       }
     }, 50);
     return c.json({ ok: true, scheduled: true });

@@ -46,6 +46,80 @@ describe('gatherTaskRunsStatus', () => {
         solutions: 1,
         verdicts: 1,
         failed: 1,
+        settledFailed: 0,
+        localErrors: 1,
+      });
+    });
+  });
+
+  it('splits FAILED runs into on-chain settled failures and local engine errors', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      // local error: failed before reaching the marketplace (no delivery tx).
+      insertTask(persistence, {
+        requestId: 'local-error',
+        taskId: 'task-local',
+        taskRole: 'restoration',
+      });
+      // settled failure: delivery tx landed on-chain but the run terminated FAILED.
+      insertTask(persistence, {
+        requestId: 'settled-fail',
+        taskId: 'task-settled',
+        taskRole: 'restoration',
+      });
+      // settled failure for an evaluation run — same split logic applies.
+      insertTask(persistence, {
+        requestId: 'settled-fail-eval',
+        taskId: 'task-settled-eval',
+        taskRole: 'evaluation',
+      });
+
+      store.db
+        .prepare(
+          `UPDATE task_runs
+             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?
+             WHERE request_id = ?`,
+        )
+        .run(1_100, 'SkippableError', 'local-error');
+      store.db
+        .prepare(
+          `UPDATE task_runs
+             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, delivery_tx_hash = ?
+             WHERE request_id = ?`,
+        )
+        .run(1_200, 'claimDelivery reverted', '0xdeadbeef', 'settled-fail');
+      store.db
+        .prepare(
+          `UPDATE task_runs
+             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, delivery_tx_hash = ?
+             WHERE request_id = ?`,
+        )
+        .run(1_300, 'verdict rejected', '0xfeedface', 'settled-fail-eval');
+
+      const status = gatherTaskRunsStatus(store);
+
+      expect(status.totals.failed).toBe(3);
+      expect(status.totals.settledFailed).toBe(2);
+      expect(status.totals.localErrors).toBe(1);
+    });
+  });
+
+  it('includes runStartedAt in task run summaries distinct from windowStartTs', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      insertTask(persistence, {
+        requestId: 'fresh-claim',
+        taskId: 'task-fresh',
+        taskRole: 'restoration',
+        runStartedAt: 10_000,
+      });
+
+      const status = gatherTaskRunsStatus(store);
+
+      expect(status.inFlight[0]).toMatchObject({
+        requestId: 'fresh-claim',
+        windowStartTs: 1_000,
+        runStartedAt: 10_000,
       });
     });
   });
@@ -57,6 +131,7 @@ function insertTask(
     requestId: string;
     taskId: string;
     taskRole: 'restoration' | 'evaluation';
+    runStartedAt?: number;
   },
 ): void {
   persistence.insertDiscovered({
@@ -67,6 +142,7 @@ function insertTask(
     onchainCreationBlock: 1,
     solverType: 'swe-rebench-v2.v1',
     taskRole: input.taskRole,
+    runStartedAt: input.runStartedAt,
     windowStartTs: 1_000,
     windowEndTs: 2_000,
     task: {

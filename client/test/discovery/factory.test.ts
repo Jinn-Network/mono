@@ -80,6 +80,45 @@ describe('createDiscoveryAPI(mode=http)', () => {
     expect(typeof api.findClaimableTasks).toBe('function');
   });
 
+  it('defaults to NO fallback (2026-05-23 regression): http without explicit fallbackToOnchain returns the primary directly, no boot warning', () => {
+    // Capture console.warn to assert the opt-in banner is NOT emitted when
+    // the operator left fallbackToOnchain unset (the new default-off path).
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warns.push(args.map(String).join(' '));
+    };
+    try {
+      const api = createDiscoveryAPI(
+        { mode: 'http', url: 'https://discovery.example.com' },
+        baseDeps,
+      );
+      expect(typeof api.findClaimableTasks).toBe('function');
+    } finally {
+      console.warn = originalWarn;
+    }
+    // No fallback opt-in banner — the wrapper is not installed.
+    expect(warns.some((w) => w.includes('fallbackToOnchain=true'))).toBe(false);
+  });
+
+  it('emits a one-time boot warning when fallbackToOnchain is explicitly true', () => {
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warns.push(args.map(String).join(' '));
+    };
+    try {
+      createDiscoveryAPI(
+        { mode: 'http', url: 'https://discovery.example.com', fallbackToOnchain: true },
+        baseDeps,
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+    // The opt-in banner makes the choice visible in logs.
+    expect(warns.some((w) => w.includes('fallbackToOnchain=true'))).toBe(true);
+  });
+
   it('throws DiscoveryUnavailableError when url is missing', () => {
     expect(() =>
       createDiscoveryAPI({ mode: 'http' }, baseDeps),

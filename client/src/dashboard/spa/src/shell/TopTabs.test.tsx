@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -18,6 +18,10 @@ vi.mock('../api/client.js', () => ({
 beforeEach(() => {
   listLaunchedMock.mockReset();
   listLaunchedMock.mockResolvedValue({ records: [] });
+});
+
+afterEach(() => {
+  delete (window as { __JINN_FEATURES__?: unknown }).__JINN_FEATURES__;
 });
 
 function renderTabs(path: string): void {
@@ -84,12 +88,19 @@ describe('TopTabs', () => {
     expect(settings.getAttribute('data-active')).toBe('true');
   });
 
-  it('renders the Build tab', () => {
+  it('hides the Build tab when the pluginBuilderUi flag is off (default)', () => {
+    renderTabs('/overview');
+    expect(screen.queryByText('Build')).toBeNull();
+  });
+
+  it('renders the Build tab when the pluginBuilderUi flag is on', () => {
+    window.__JINN_FEATURES__ = { pluginBuilderUi: true };
     renderTabs('/overview');
     expect(screen.getByText('Build')).toBeTruthy();
   });
 
-  it('marks Build tab active on /build', () => {
+  it('marks Build tab active on /build when the pluginBuilderUi flag is on', () => {
+    window.__JINN_FEATURES__ = { pluginBuilderUi: true };
     renderTabs('/build');
     expect(screen.getByText('Build').getAttribute('data-active')).toBe('true');
   });

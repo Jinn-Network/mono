@@ -9,6 +9,7 @@
  * silently grading against a missing instance.
  */
 
+import { sleep as defaultSleep } from '../../../tx-retry.js';
 import type { HfFetcher, HfRow } from './index.js';
 
 export interface HttpHfFetcherOptions {
@@ -27,10 +28,48 @@ export interface HttpHfFetcherOptions {
    * 404) are not retried — they're not transient.
    */
   retryBackoffMs?: number[];
+  /** Minimum spacing between HF HTTP requests. Defaults to 250ms. */
+  minRequestIntervalMs?: number;
+  /** Sleep implementation. Defaults to the shared tx-retry sleep (allows test injection). */
+  sleep?: (ms: number) => Promise<void>;
+  /** Shared request limiter. Defaults to the module-level HF limiter. */
+  limiter?: HfRequestLimiter;
 }
 
 const DEFAULT_BASE_URL = 'https://datasets-server.huggingface.co/rows';
 const DEFAULT_RETRY_BACKOFF_MS = [200, 800, 3200];
+const DEFAULT_MIN_REQUEST_INTERVAL_MS = 250;
+
+export interface HfRequestLimiter {
+  schedule<T>(fn: () => Promise<T>, opts: {
+    minRequestIntervalMs: number;
+    sleep: (ms: number) => Promise<void>;
+  }): Promise<T>;
+}
+
+class SharedHfRequestLimiter implements HfRequestLimiter {
+  private tail: Promise<void> = Promise.resolve();
+  private lastStartedAt = 0;
+
+  schedule<T>(fn: () => Promise<T>, opts: {
+    minRequestIntervalMs: number;
+    sleep: (ms: number) => Promise<void>;
+  }): Promise<T> {
+    const run = this.tail.catch(() => undefined).then(async () => {
+      const elapsed = Date.now() - this.lastStartedAt;
+      const waitMs = Math.max(0, opts.minRequestIntervalMs - elapsed);
+      if (waitMs > 0) {
+        await opts.sleep(waitMs);
+      }
+      this.lastStartedAt = Date.now();
+      return fn();
+    });
+    this.tail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+}
+
+const sharedHfRequestLimiter = new SharedHfRequestLimiter();
 
 export class HttpHfFetcher implements HfFetcher {
   private readonly baseUrl: string;
@@ -38,6 +77,9 @@ export class HttpHfFetcher implements HfFetcher {
   private readonly maxRows: number;
   private readonly fetchImpl: typeof fetch;
   private readonly retryBackoffMs: number[];
+  private readonly minRequestIntervalMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly limiter: HfRequestLimiter;
 
   constructor(opts: HttpHfFetcherOptions = {}) {
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
@@ -45,21 +87,33 @@ export class HttpHfFetcher implements HfFetcher {
     this.maxRows = opts.maxRows ?? 1000;
     this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
     this.retryBackoffMs = opts.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+    this.minRequestIntervalMs = opts.minRequestIntervalMs ?? DEFAULT_MIN_REQUEST_INTERVAL_MS;
+    this.sleep = opts.sleep ?? defaultSleep;
+    this.limiter = opts.limiter ?? sharedHfRequestLimiter;
   }
 
   private async fetchWithRetry(url: string): Promise<Response> {
     let lastErr: unknown = null;
     for (let attempt = 0; attempt <= this.retryBackoffMs.length; attempt += 1) {
+      let retryAfterMs: number | undefined;
       try {
-        const res = await this.fetchImpl(url);
-        if (res.ok || (res.status >= 400 && res.status < 500)) return res;
-        // 5xx → retry-eligible
+        const res = await this.limiter.schedule(
+          () => this.fetchImpl(url),
+          { minRequestIntervalMs: this.minRequestIntervalMs, sleep: this.sleep },
+        );
+        if (res.ok || !isRetryableStatus(res.status)) return res;
+        if (attempt >= this.retryBackoffMs.length) return res;
+        retryAfterMs = retryAfterHeaderMs(res.headers.get('Retry-After'));
         lastErr = new Error(`HF returned ${res.status}`);
       } catch (err) {
         lastErr = err;
+        if (attempt >= this.retryBackoffMs.length) {
+          if (lastErr instanceof Error) throw lastErr;
+          throw new Error('HF fetch failed after retries');
+        }
       }
       if (attempt < this.retryBackoffMs.length) {
-        await new Promise((r) => setTimeout(r, this.retryBackoffMs[attempt]));
+        await this.sleep(retryAfterMs ?? this.retryBackoffMs[attempt]);
       }
     }
     if (lastErr instanceof Error) throw lastErr;
@@ -151,4 +205,21 @@ function stringField(v: unknown): string | undefined {
 function arrayOfStrings(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.filter((s): s is string => typeof s === 'string');
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function retryAfterHeaderMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const dateMs = Date.parse(value);
+  if (!Number.isNaN(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return undefined;
 }

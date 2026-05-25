@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createUpdateCommand } from '@/cli/commands/update.js';
+import { createUpdateCommand, formatUpdateSuccessLine } from '@/cli/commands/update.js';
 import { runCommand } from '@test/cli.js';
 import type { CommandContext } from '@/cli/command.js';
 import { FleetStateStore } from '@/earning/store.js';
@@ -255,10 +255,22 @@ describe('update command', () => {
         network: 'testnet',
         earningDir,
         dbPath: ':memory:',
+        solverNets: {
+          swe: {
+            enabled: true,
+            solverType: 'swe-rebench-v2.v1',
+            roles: ['solving', 'evaluating'],
+            harness: 'codex-code-learner',
+            plugins: [],
+            taskGenerator: { enabled: true },
+          },
+        },
       } as any);
       expect(readiness.ok).toBe(true);
       expect(readiness.solverReady).toBe(true);
       expect(readiness.evaluatorReady).toBe(true);
+      expect(readiness.evaluatorRoleReady).toBe(true);
+      expect(readiness.distinctEvaluatorServiceReady).toBe(true);
       expect(readiness.source).toBe(DEFAULT_TESTNET_ARTIFACTS.taskCoordinatorRouterV3);
       expect(readiness.contracts).toEqual({
         taskCoordinator: artifact.contracts.taskCoordinator,
@@ -466,5 +478,67 @@ describe('update command', () => {
     expect(earningStep).toMatchObject({ status: 'skipped' });
     expect(earningStep?.detail).toContain('not bootstrapped');
     expect(await new FleetStateStore(earningDir).tryLoadExisting()).toBeNull();
+  });
+
+  // #337 — clear all-good indicator after `jinn update`.
+  describe('all-good success indicator', () => {
+    it('formats a plain success line when stderr is not a TTY', () => {
+      expect(formatUpdateSuccessLine('1.2.3', { stderrIsTty: false, noColor: false }))
+        .toBe('✓ jinn updated to v1.2.3');
+    });
+
+    it('wraps the success line in ANSI green when stderr is a TTY and NO_COLOR is unset', () => {
+      expect(formatUpdateSuccessLine('1.2.3', { stderrIsTty: true, noColor: false }))
+        .toBe('\x1b[32m✓ jinn updated to v1.2.3\x1b[0m');
+    });
+
+    it('drops color when NO_COLOR is set even on a TTY', () => {
+      expect(formatUpdateSuccessLine('1.2.3', { stderrIsTty: true, noColor: true }))
+        .toBe('✓ jinn updated to v1.2.3');
+    });
+
+    it('prints the success line to stderr on the happy path', async () => {
+      const earningDir = await makeEarningDir();
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const cmd = makeUpdateCommand(earningDir);
+        const { envelopes } = await runCommand(cmd, {
+          argv: ['--json', '--skip-npm', '--skip-plugins'],
+        });
+        const payload = envelopes[envelopes.length - 1] as { ok: boolean };
+        expect(payload.ok).toBe(true);
+
+        const stderrText = errSpy.mock.calls.map((args) => String(args[0])).join('\n');
+        expect(stderrText).toMatch(/✓ jinn updated to v/);
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    it('does not print the success line when an update step fails', async () => {
+      const earningDir = await makeEarningDir();
+      const store = new FleetStateStore(earningDir);
+      // Trigger a state-integrity error so allOk is false.
+      await store.save({
+        ...createDefaultFleetState('base'),
+        master_address: '0x9999999999999999999999999999999999999999',
+        services: [{ ...completeService(), mech_address: null }],
+      });
+
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const cmd = makeUpdateCommand(earningDir);
+        const { envelopes } = await runCommand(cmd, {
+          argv: ['--json', '--skip-npm', '--skip-plugins'],
+        });
+        const payload = envelopes[envelopes.length - 1] as { ok: boolean };
+        expect(payload.ok).toBe(false);
+
+        const stderrText = errSpy.mock.calls.map((args) => String(args[0])).join('\n');
+        expect(stderrText).not.toMatch(/✓ jinn updated to v/);
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
   });
 });

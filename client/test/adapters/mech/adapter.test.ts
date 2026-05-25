@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
+import { VerdictCode } from '../../../src/adapters/mech/verdict-code.js';
 import type { SignedTaskV1 } from '../../../src/types/task-document.js';
 import type { DiscoveryAPI, ClaimableTaskCandidate } from '../../../src/discovery/types.js';
 import { DiscoveryUnavailableError } from '../../../src/discovery/types.js';
@@ -112,6 +113,7 @@ vi.mock('../../../src/harnesses/engine/canonical-json.js', () => ({
 
 // MOCK_JUSTIFICATION: envelope schema validation is covered in envelope tests; here we isolate adapter routing logic.
 vi.mock('../../../src/types/envelope.js', () => ({
+  normalizeEnvelopeRole: vi.fn((role: unknown) => role === 'restoration' ? 'solution' : role),
   SignedEnvelopeSchema: {
     parse: vi.fn(),
   },
@@ -147,8 +149,12 @@ const TEST_CONFIG: MechAdapterConfig = {
 
 function makeConfigStore(initial: Record<string, string> = {}, lastProcessedBlock: bigint | null = null) {
   const values = new Map(Object.entries(initial));
+  let storedBlock: bigint | null = lastProcessedBlock;
   return {
-    getLastProcessedBlock: vi.fn().mockReturnValue(lastProcessedBlock),
+    getLastProcessedBlock: vi.fn(() => storedBlock),
+    setLastProcessedBlock: vi.fn((block: bigint) => {
+      storedBlock = block;
+    }),
     getConfigValue: vi.fn((key: string) => values.get(key) ?? null),
     setConfigValue: vi.fn((key: string, value: string) => {
       values.set(key, value);
@@ -316,6 +322,11 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
+        // Opt out of the ghost-task floor for this test — the
+        // fixture candidates use tiny block numbers that pre-date the
+        // production default floor; this test is about discovery
+        // yielding, not floor filtering.
+        onchainFromBlock: 0,
       },
     });
     await adapter.initialize();
@@ -357,7 +368,123 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('discovery yields one backlog task per polling pass', async () => {
+  it('discovery filters out pre-floor candidates (ghost-task floor)', async () => {
+    // The DiscoveryAPI (Ponder indexer or onchain-floor listClaimableTasks)
+    // returns all claimable tasks regardless of when they were created.
+    // Without a parallel floor filter here, the floor on the on-chain
+    // TaskCreated backlog scan is bypassed by the DiscoveryAPI path. This
+    // test pins that filter: a candidate with `createdAtBlock` below the
+    // configured floor must be skipped before canClaimTask is called.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        // Pre-floor candidate — should be filtered out.
+        {
+          taskId: '42',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 50,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        // Post-floor candidate — should be yielded.
+        {
+          taskId: '43',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 150,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'post-floor-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 100,
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter.next();
+
+    // Only the post-floor candidate (taskId 43) should be yielded; the
+    // pre-floor candidate (taskId 42) is filtered before canClaimTask runs.
+    expect(first.value).toMatchObject({ taskId: '43' });
+    expect(canClaimTask).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(canClaimTask).mock.calls[0][3]).toBe('43');
+
+    await adapter.stop();
+  });
+
+  it('discovery passes through candidates with missing createdAtBlock (cannot filter without it)', async () => {
+    // Defensive: if the DiscoveryAPI omits createdAtBlock for some reason
+    // (legacy indexer schema, partial response), we let the candidate
+    // through rather than dropping it silently. canClaimTask then enforces
+    // claimability and signed-task fetch validates the rest.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        {
+          taskId: '99',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          // No createdAtBlock.
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'no-block-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 100,
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter.next();
+    expect(first.value).toMatchObject({ taskId: '99' });
+
+    await adapter.stop();
+  });
+
+  it('discovery yields every hydrated candidate per polling pass', async () => {
+    // Bug shape (pre-fix): the generator returned after the first successful
+    // yield, so when the engine-watcher's in-flight gate fast-skipped that
+    // candidate every subsequent candidate in the round-robin (`fc05f686`)
+    // ordering starved for the duration of the 30s skip TTL. Live-verified
+    // on task 212: iso 209/210/211/212 were claimable for 23 min while op-b's
+    // daemon kept yielding `mainB` and getting fast-skipped.
+    //
+    // The engine-watcher (daemon._runEngineWatcherLoop) is the single point
+    // of skip-state truth. The adapter's job is to surface the full
+    // candidate list per cycle and let the engine apply its gate to each.
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
@@ -387,13 +514,17 @@ describe('MechAdapter TaskCoordinator flow', () => {
       getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
       queryEnvelopes: vi.fn().mockResolvedValue([]),
     };
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'first-discovery-task' }));
+    vi.mocked(fetchSignedTaskFromIpfs)
+      .mockResolvedValueOnce(signedTask({ id: 'first-discovery-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'second-discovery-task' }));
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
+        // Opt out of the floor — fixtures use tiny block numbers.
+        onchainFromBlock: 0,
       },
     });
     await adapter.initialize();
@@ -401,14 +532,109 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
     const first = await iter.next();
     const second = await iter.next();
+    const third = await iter.next();
 
     expect(first.value).toMatchObject({
       taskId: '42',
       task: { id: 'first-discovery-task' },
     });
-    expect(second.done).toBe(true);
-    expect(canClaimTask).toHaveBeenCalledTimes(1);
-    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledTimes(1);
+    expect(second.value).toMatchObject({
+      taskId: '43',
+      task: { id: 'second-discovery-task' },
+    });
+    expect(third.done).toBe(true);
+    expect(canClaimTask).toHaveBeenCalledTimes(2);
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledTimes(2);
+
+    await adapter.stop();
+  });
+
+  it('discovery preserves round-robin fairness when the consumer skips earlier candidates within a cycle', async () => {
+    // Round-robin regression (post-`fc05f686`): the engine-watcher applies
+    // its admission gate to each yielded announcement and may fast-skip a
+    // candidate (e.g. an in-flight mainline task). The adapter must continue
+    // iterating its candidate list within the same cycle so that an isolated
+    // task interleaved by the round-robin still reaches the engine — without
+    // waiting a full poll cycle (or the 30s skip-recheck TTL) per skip.
+    //
+    // Mirrors the live bug shape on task 212:
+    //   candidates = [mainA, iso212, mainB, iso213]
+    //   engine fast-skips mainA and mainB (in-flight)
+    //   the adapter must still yield iso212 and iso213 in this same cycle.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        {
+          taskId: 'mainA',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 80,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: 'iso212',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 81,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: 'mainB',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 82,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: 'iso213',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 83,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs)
+      .mockResolvedValueOnce(signedTask({ id: 'mainA-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'iso212-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'mainB-task' }))
+      .mockResolvedValueOnce(signedTask({ id: 'iso213-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        // Opt out of the floor — fixtures use tiny block numbers.
+        onchainFromBlock: 0,
+      },
+    });
+    await adapter.initialize();
+
+    // Drain the generator in a single cycle. The consumer (engine-watcher
+    // surrogate) ignores `mainA` and `mainB` as if they were fast-skipped by
+    // an in-flight gate, and records the ones it "accepts".
+    const accepted: string[] = [];
+    const skipped = new Set(['mainA', 'mainB']);
+    for await (const announcement of (adapter as any).discoverSubgraphRestorationTasks()) {
+      if (skipped.has(announcement.taskId)) continue;
+      accepted.push(announcement.taskId);
+    }
+
+    expect(accepted).toEqual(['iso212', 'iso213']);
 
     await adapter.stop();
   });
@@ -451,6 +677,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
         allowedTaskIds: ['43'],
+        // Opt out of the floor — fixtures use tiny block numbers.
+        onchainFromBlock: 0,
       },
     });
     await adapter.initialize();
@@ -689,8 +917,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
       ok: false,
       reason: 'TCAttemptAlreadyFinalized(1, 0)',
+      revertName: 'TCAttemptAlreadyFinalized',
     });
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
@@ -716,11 +944,189 @@ describe('MechAdapter TaskCoordinator flow', () => {
       0,
       TEST_CONFIG.mechContractAddress,
     );
+    // The claimability gate runs before the restoration lookup — a terminal
+    // opportunity never pays the restoration / delivery / IPFS cost.
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
     expect(getMarketplaceRequestDeliveryMech).not.toHaveBeenCalled();
     expect(findLatestDeliveryDataHexForRequest).not.toHaveBeenCalled();
     expect(fetchFromIpfs).not.toHaveBeenCalled();
 
     await adapter.stop();
+  });
+
+  it('classifies a terminal opportunity from the structured revertName even when the formatted reason contains a "("', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    // The formatted `reason` here is intentionally pathological: a leading "("
+    // in the arg rendering. The old code regex-stripped `reason` (`/\(.*$/`)
+    // to recover the bare name — that strip would corrupt this string and the
+    // terminal check would silently fail, re-scanning a dead opportunity
+    // forever. Classification now reads the structured `revertName` directly,
+    // so the "(" in `reason` is irrelevant.
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCAttemptAlreadyFinalized((corrupt) 1, 0)',
+      revertName: 'TCAttemptAlreadyFinalized',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Terminal — classified via the structured name, pruned despite the "(" in reason.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    expect(getTaskCidDigest).not.toHaveBeenCalled();
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('prunes a terminal-reason evaluation opportunity before the expensive restoration lookup', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCMaxVerdictsReached(1, 0)',
+      revertName: 'TCMaxVerdictsReached',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Terminal reason -> pruned from the working set so the loop never re-scans it.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    // The claimability gate runs FIRST; the restoration lookup is never attempted.
+    expect(getTaskCidDigest).not.toHaveBeenCalled();
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('retains a transient-reason evaluation opportunity for retry', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'HTTP request failed: 429 Too Many Requests',
+      revertName: null,
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Transient reason -> kept in the working set; it must be retried next cycle.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+  });
+
+  it('retryPendingEvaluationSolutions drops terminal opportunities and keeps re-checking transient ones', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    const TERMINAL_REQUEST_ID = ('0x' + 'ce'.repeat(32)) as `0x${string}`;
+    const TRANSIENT_REQUEST_ID = ('0x' + 'cf'.repeat(32)) as `0x${string}`;
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const mkSolution = (taskId: string, requestId: `0x${string}`) => ({
+      taskId,
+      attemptIndex: 0,
+      requestId,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    });
+    (adapter as any).pendingEvaluationSolutions.set(TERMINAL_REQUEST_ID, mkSolution('1', TERMINAL_REQUEST_ID));
+    (adapter as any).pendingEvaluationSolutions.set(TRANSIENT_REQUEST_ID, mkSolution('2', TRANSIENT_REQUEST_ID));
+
+    // canClaimEvaluation: terminal task -> non-recoverable revert; transient task -> generic RPC error.
+    // mockImplementation persists across tests (vi.clearAllMocks only resets call
+    // data, not the implementation), so it is restored before this test returns.
+    const claimImpl = async (
+      _pc: unknown,
+      _safe: unknown,
+      _router: unknown,
+      taskId: unknown,
+    ): Promise<{ ok: true } | { ok: false; reason: string; revertName: string | null }> => {
+      if (String(taskId) === '1') {
+        return { ok: false, reason: 'TCEvaluationDeadlinePassed(1)', revertName: 'TCEvaluationDeadlinePassed' };
+      }
+      return { ok: false, reason: 'execution reverted: connection timeout', revertName: null };
+    };
+    vi.mocked(canClaimEvaluation).mockImplementation(claimImpl as never);
+
+    const drain = async () => {
+      for await (const _ of (adapter as any).retryPendingEvaluationSolutions()) {
+        // nothing claimable in this scenario
+      }
+    };
+
+    // Cycle 1: both opportunities are checked.
+    await drain();
+    expect(canClaimEvaluation).toHaveBeenCalledTimes(2);
+    // Terminal one is pruned; transient one survives.
+    expect((adapter as any).pendingEvaluationSolutions.has(TERMINAL_REQUEST_ID)).toBe(false);
+    expect((adapter as any).pendingEvaluationSolutions.has(TRANSIENT_REQUEST_ID)).toBe(true);
+
+    // Cycle 2: only the transient opportunity is re-checked — terminal history is not re-scanned.
+    vi.mocked(canClaimEvaluation).mockClear();
+    await drain();
+    expect(canClaimEvaluation).toHaveBeenCalledTimes(1);
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '2',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
+    expect((adapter as any).pendingEvaluationSolutions.has(TRANSIENT_REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+    // Restore the default so the persisted mockImplementation does not leak.
+    vi.mocked(canClaimEvaluation).mockReset();
+    vi.mocked(canClaimEvaluation).mockResolvedValue({ ok: true });
   });
 
   it('bounds the default delivery-log scan around delayed SolutionDeliveryClaimed events', async () => {
@@ -1072,6 +1478,213 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('watchForDeliveries still claims recovery deliveries while the submission deadline remains open', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-18T12:30:00.000Z'));
+
+    try {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+      const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+      const claimWindowEndTs = Date.parse('2026-05-18T12:00:00.000Z');
+      const submissionDeadlineTs = Date.parse('2026-05-18T12:20:00.000Z');
+      const blockTimestampSeconds = Math.floor(Date.parse('2026-05-18T12:10:00.000Z') / 1000);
+
+      vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+        requestId: REQUEST_ID,
+        deliveryDataHex: TASK_CID_DIGEST,
+        mechAddress: TEST_CONFIG.safeAddress,
+        blockNumber: 101n,
+      }]);
+      vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'result' });
+
+      const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 1 });
+      await adapter.initialize();
+      (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+      (adapter as any).publicClient.getBlock = vi.fn().mockResolvedValue({ timestamp: BigInt(blockTimestampSeconds) });
+      (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+      (adapter as any).deliveryBlockCursor = 100n;
+      const taskWithinLease = {
+        id: 'prediction-task-1',
+        description: 'recovery task still within submission deadline',
+        claimPolicy: {
+          mode: 'exclusive',
+          maxClaims: 1,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+          claimWindowEndTs,
+          submissionDeadlineTs,
+        },
+      };
+      (adapter as any).pendingEvaluations.set(REQUEST_ID, taskWithinLease);
+      (adapter as any).originalStates.set(REQUEST_ID, taskWithinLease);
+      (adapter as any).requestKinds.set(REQUEST_ID, 'solution');
+
+      const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+      const { value } = await gen.next();
+
+      expect((adapter as any).publicClient.getBlock).toHaveBeenCalledWith({ blockNumber: 101n });
+      expect(claimDelivery).toHaveBeenCalledOnce();
+      expect(fetchFromIpfs).toHaveBeenCalledOnce();
+      expect(value).toMatchObject({
+        requestId: REQUEST_ID,
+        task: taskWithinLease,
+        result: { data: 'result' },
+        deliveryMechAddress: TEST_CONFIG.safeAddress,
+      });
+
+      await adapter.stop();
+      const donePromise = gen.next();
+      await vi.advanceTimersByTimeAsync(5);
+      await expect(donePromise).resolves.toMatchObject({ done: true, value: undefined });
+
+      expect((adapter as any).pendingEvaluations.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).originalStates.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).requestKinds.has(REQUEST_ID)).toBe(false);
+
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('watchForDeliveries still claims recovery deliveries emitted before expiry even when processed after expiry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-18T12:30:00.000Z'));
+
+    try {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+      const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+      const claimWindowEndTs = Date.parse('2026-05-18T12:00:00.000Z');
+      const submissionDeadlineTs = Date.parse('2026-05-18T12:20:00.000Z');
+      const deliveryBlockNumber = 101n;
+      const scanHeadBlockNumber = 105n;
+      const deliveryBlockTimestampSeconds = Math.floor(Date.parse('2026-05-18T12:10:00.000Z') / 1000);
+      const scanHeadTimestampSeconds = Math.floor(Date.parse('2026-05-18T12:25:00.000Z') / 1000);
+
+      vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+        requestId: REQUEST_ID,
+        deliveryDataHex: TASK_CID_DIGEST,
+        mechAddress: TEST_CONFIG.safeAddress,
+        blockNumber: deliveryBlockNumber,
+      }]);
+      vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'result' });
+
+      const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 1 });
+      await adapter.initialize();
+      (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(scanHeadBlockNumber);
+      (adapter as any).publicClient.getBlock = vi.fn(async ({ blockNumber }: { blockNumber: bigint }) => {
+        if (blockNumber === deliveryBlockNumber) {
+          return { timestamp: BigInt(deliveryBlockTimestampSeconds) };
+        }
+        if (blockNumber === scanHeadBlockNumber) {
+          return { timestamp: BigInt(scanHeadTimestampSeconds) };
+        }
+        throw new Error(`unexpected block lookup: ${blockNumber}`);
+      });
+      (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+      (adapter as any).deliveryBlockCursor = 100n;
+      const taskWithinDeadlineAtEmit = {
+        id: 'prediction-task-1',
+        description: 'recovery task emitted before expiry',
+        claimPolicy: {
+          mode: 'exclusive',
+          maxClaims: 1,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+          claimWindowEndTs,
+          submissionDeadlineTs,
+        },
+      };
+      (adapter as any).pendingEvaluations.set(REQUEST_ID, taskWithinDeadlineAtEmit);
+      (adapter as any).originalStates.set(REQUEST_ID, taskWithinDeadlineAtEmit);
+      (adapter as any).requestKinds.set(REQUEST_ID, 'solution');
+
+      const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+      const { value } = await gen.next();
+
+      expect((adapter as any).publicClient.getBlock).toHaveBeenCalledWith({ blockNumber: deliveryBlockNumber });
+      expect((adapter as any).publicClient.getBlock).not.toHaveBeenCalledWith({ blockNumber: scanHeadBlockNumber });
+      expect(claimDelivery).toHaveBeenCalledOnce();
+      expect(fetchFromIpfs).toHaveBeenCalledOnce();
+      expect(value).toMatchObject({
+        requestId: REQUEST_ID,
+        task: taskWithinDeadlineAtEmit,
+        result: { data: 'result' },
+        deliveryMechAddress: TEST_CONFIG.safeAddress,
+      });
+
+      await adapter.stop();
+      const donePromise = gen.next();
+      await vi.advanceTimersByTimeAsync(5);
+      await expect(donePromise).resolves.toMatchObject({ done: true, value: undefined });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('watchForDeliveries skips recovery deliveries once the submission deadline has passed on chain', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-18T12:05:00.000Z'));
+
+    try {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+      const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+      const claimWindowEndTs = Date.parse('2026-05-18T12:00:00.000Z');
+      const submissionDeadlineTs = Date.parse('2026-05-18T12:20:00.000Z');
+      const blockTimestampSeconds = Math.floor(Date.parse('2026-05-18T12:20:01.000Z') / 1000);
+
+      vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+        requestId: REQUEST_ID,
+        deliveryDataHex: TASK_CID_DIGEST,
+        mechAddress: TEST_CONFIG.safeAddress,
+        blockNumber: 101n,
+      }]);
+
+      const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 1 });
+      await adapter.initialize();
+      (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+      (adapter as any).publicClient.getBlock = vi.fn().mockResolvedValue({ timestamp: BigInt(blockTimestampSeconds) });
+      (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+      (adapter as any).deliveryBlockCursor = 100n;
+      const expiredTask = {
+        id: 'prediction-task-1',
+        description: 'expired recovery task',
+        claimPolicy: {
+          mode: 'exclusive',
+          maxClaims: 1,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+          claimWindowEndTs,
+          submissionDeadlineTs,
+        },
+      };
+      (adapter as any).pendingEvaluations.set(REQUEST_ID, expiredTask);
+      (adapter as any).originalStates.set(REQUEST_ID, expiredTask);
+      (adapter as any).requestKinds.set(REQUEST_ID, 'solution');
+
+      const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+      const nextPromise = gen.next();
+
+      await vi.advanceTimersByTimeAsync(5);
+
+      expect((adapter as any).publicClient.getBlock).toHaveBeenCalledWith({ blockNumber: 101n });
+      expect(claimDelivery).not.toHaveBeenCalled();
+      expect(fetchFromIpfs).not.toHaveBeenCalled();
+      expect((adapter as any).pendingEvaluations.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).originalStates.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).requestKinds.has(REQUEST_ID)).toBe(false);
+
+      await adapter.stop();
+      await vi.advanceTimersByTimeAsync(5);
+
+      await expect(nextPromise).resolves.toMatchObject({ done: true, value: undefined });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('V2 claimDelivery derives evidenceHash from the signed execution envelope', async () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
@@ -1098,6 +1711,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       requestId: REQUEST_ID,
       deliveryDataHex: TASK_CID_DIGEST,
       mechAddress: '0x9999999999999999999999999999999999999999',
+      blockNumber: 101n,
     }]);
 
     const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v2' });
@@ -1123,5 +1737,208 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
 
     await adapter.stop();
+  });
+
+  it('watchForDeliveries derives verdict claim metadata from the signed verdict envelope on retry', async () => {
+    const { keccak256 } = await import('viem');
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+
+    const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
+    const fakeEnvelope = {
+      schemaVersion: 'jinn.execution.v1',
+      solverType: 'prediction.v1',
+      role: 'verdict',
+      payload: {
+        verdict: 'REJECTED',
+      },
+      signature: {
+        algo: 'secp256k1',
+        signer: '0xabc',
+        hash: expectedHash,
+        sig: '0xsig',
+      },
+    };
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'verdict' });
+    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+      requestId: REQUEST_ID,
+      deliveryDataHex: TASK_CID_DIGEST,
+      mechAddress: '0x9999999999999999999999999999999999999999',
+    }]);
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v3' });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).deliveryBlockCursor = 100n;
+    (adapter as any).pendingEvaluations.set(REQUEST_ID, { id: 'prediction-task-1', description: 'test', role: 'evaluation' });
+    (adapter as any).originalStates.set(REQUEST_ID, { id: 'prediction-task-1', description: 'test', role: 'evaluation' });
+
+    const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+    await gen.next();
+
+    expect(claimDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      REQUEST_ID,
+      {
+        variant: 'v3',
+        kind: 'verdict',
+        evidenceHash: expectedHash,
+        verdictCode: VerdictCode.Fail,
+      },
+      undefined,
+    );
+    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
+
+    await adapter.stop();
+  });
+
+  // ── issue #552: watchForDeliveries chunked log scan ─────────────────────────
+  // The mech adapter's delivery-polling loop must paginate `getLogs` so a
+  // multi-100k-block cursor → head gap can drain without hitting RPC block-range
+  // limits (Tenderly base-sepolia caps at 100k; sepolia.base.org ~1k). Before the
+  // fix a single unchunked call wedged the loop for ~9 days on a live operator
+  // and the cursor never advanced. Persistence must happen per chunk so a
+  // mid-scan RPC failure doesn't strand the cursor.
+
+  it('scanDeliveryLogChunks chunks getLogs when the cursor lags head by more than the chunk window', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    vi.mocked(decodeDeliverLogs).mockReturnValue([]);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const getLogs = vi.fn().mockResolvedValue([]);
+    (adapter as any).publicClient.getLogs = getLogs;
+    (adapter as any).deliveryBlockCursor = 0n;
+
+    // Drive the chunked scan directly — no setTimeout / generator scheduling
+    // to fight. cursor=0, head=30_000, chunk=9_999 → 3 chunks.
+    for await (const _ of (adapter as any).scanDeliveryLogChunks(30_000n)) {
+      // decoded is [] each chunk; nothing to process
+    }
+
+    expect(getLogs).toHaveBeenCalledTimes(3);
+    const ranges = getLogs.mock.calls.map((c: unknown[]) => ({
+      fromBlock: (c[0] as { fromBlock: bigint }).fromBlock,
+      toBlock: (c[0] as { toBlock: bigint }).toBlock,
+    }));
+    expect(ranges).toEqual([
+      { fromBlock: 1n, toBlock: 10_000n },
+      { fromBlock: 10_001n, toBlock: 20_000n },
+      { fromBlock: 20_001n, toBlock: 30_000n },
+    ]);
+    // Each call queries the mech contract address — must not be the router.
+    for (const call of getLogs.mock.calls) {
+      expect((call[0] as { address: string }).address).toBe(TEST_CONFIG.mechContractAddress);
+    }
+    expect((adapter as any).deliveryBlockCursor).toBe(30_000n);
+  });
+
+  it('scanDeliveryLogChunks persists per-chunk progress so a mid-scan RPC failure does not strand the cursor', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    vi.mocked(decodeDeliverLogs).mockReturnValue([]);
+
+    const store = makeConfigStore();
+    const adapter = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter.initialize();
+    const getLogs = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('query exceeds max block range 100000'));
+    (adapter as any).publicClient.getLogs = getLogs;
+    (adapter as any).deliveryBlockCursor = 0n;
+
+    // Drive the chunked scan until the second chunk throws.
+    await expect((async () => {
+      for await (const _ of (adapter as any).scanDeliveryLogChunks(20_000n)) {
+        // first chunk yields []; second chunk throws before yielding
+      }
+    })()).rejects.toThrow(/exceeds max block range/);
+
+    expect(getLogs).toHaveBeenCalledTimes(2);
+    // First chunk succeeded → cursor advanced to its end and was persisted.
+    // Second chunk threw and the cursor was NOT advanced — partial progress is durable.
+    expect((adapter as any).deliveryBlockCursor).toBe(10_000n);
+    expect(store.setLastProcessedBlock).toHaveBeenCalledWith(10_000n);
+    expect(store.setLastProcessedBlock).toHaveBeenCalledTimes(1);
+  });
+
+  // ── issue #553: prune evaluation opportunities whose Deliver event is gone ─
+  // When the Deliver event lookup exhausts its configured lookback without
+  // finding the event (e.g. the event is older than the 100k-block default,
+  // which happens after a long daemon outage), the retry is deterministically
+  // futile — toBlock is fixed at solution.blockNumber, so re-running the same
+  // window can never start finding the event. Before the fix the solution
+  // stayed in `pendingEvaluationSolutions` and logged "No Deliver event data
+  // found" forever, every poll cycle.
+
+  it('prunes a pending evaluation solution when the Deliver event is not found within the lookback', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({ ok: true });
+    vi.mocked(getMarketplaceRequestDeliveryMech)
+      .mockResolvedValueOnce(('0x' + 'aa'.repeat(20)) as `0x${string}`);
+    // The lookup returns null — Deliver event is not in the lookback window.
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValueOnce(null);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Solution is pruned: the retry would deterministically re-query the same
+    // [333 - 100_000, 333] window with the same null result.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    // We never paid the IPFS fetch cost — pruning happens before that.
+    expect(fetchFromIpfs).not.toHaveBeenCalled();
+    // Restoration lookup did run (`getTaskCidDigest`, etc. via
+    // `restorationAnnouncementForTaskId`) — that's expected: the cheap
+    // claimability gate passed, so we paid the restoration lookup before
+    // discovering the Deliver event is gone. Subsequent cycles will not
+    // re-pay it because the solution is now pruned.
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalled();
+  });
+});
+
+describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (ghost-task floor)', () => {
+  // The Base Sepolia floor sits just after the 2026-05-14T17:28Z rebuild of
+  // the fufn validated-pool to `EVAL_SEMANTICS_VERSION='3'`. Tasks created
+  // before that rebuild are admitted under a prior semantics regime and the
+  // current evaluators refuse to score them ("admission_missing_or_unscorable
+  // under semanticsVersion=3"). A fresh operator must not waste compute
+  // claiming them. This is the regression guard against accidentally rolling
+  // the floor back to a pre-rebuild block.
+  it('Base Sepolia floor is set after the v3 pool rebuild', async () => {
+    const { DEFAULT_TASK_DISCOVERY_FROM_BLOCK } = await import('../../../src/adapters/mech/adapter.js');
+    expect(DEFAULT_TASK_DISCOVERY_FROM_BLOCK[84532]).toBe(41_510_000n);
+  });
+
+  it('Base mainnet floor is unchanged (no v3-rebuild equivalent on mainnet)', async () => {
+    const { DEFAULT_TASK_DISCOVERY_FROM_BLOCK } = await import('../../../src/adapters/mech/adapter.js');
+    expect(DEFAULT_TASK_DISCOVERY_FROM_BLOCK[8453]).toBe(25_000_000n);
   });
 });

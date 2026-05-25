@@ -1,12 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
-import { selectNextPostingCandidate, type GeneratorConfig } from '../../src/solver-types/swe-rebench-v2-auto.js';
+import {
+  selectNextPostingCandidate,
+  selectNextPostingCandidates,
+  summarizePoolState,
+  type GeneratorConfig,
+} from '../../src/solver-types/swe-rebench-v2-auto.js';
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 
 const config: GeneratorConfig = {
-  N_target_successes: 3,
+  N_target_successes: 5,
   N_max_postings_per_task: 10,
-  cooldown_ms: 24 * 60 * 60 * 1000,
+  posting_window_ms: 24 * 60 * 60 * 1000,
+  post_batch_size: 25,
+  claimLeaseTtlSeconds: 60 * 60,
 };
 
 describe('selectNextPostingCandidate', () => {
@@ -25,7 +32,7 @@ describe('selectNextPostingCandidate', () => {
     expect(next?.instance_id).toBe('b');
   });
 
-  it('skips tasks within cooldown window', () => {
+  it('skips tasks with a live posting inside the posting window', () => {
     const now = 1_000_000;
     const counters = new Map([
       ['a', { posted: 1, successful: 0, last_posted_at: now - 1000 }],
@@ -44,11 +51,43 @@ describe('selectNextPostingCandidate', () => {
     expect(next?.instance_id).toBe('b');
   });
 
+  it('selects expired unsaturated instances as repostable', () => {
+    const now = 1_000_000_000;
+    const counters = new Map([
+      ['a', { posted: 1, successful: 0, last_posted_at: now - config.posting_window_ms - 1 }],
+      ['b', { posted: 0, successful: 0, last_posted_at: 0 }],
+    ]);
+    const next = selectNextPostingCandidate({ pool, counters, config, now });
+    expect(next?.instance_id).toBe('b');
+    const batch = selectNextPostingCandidates({ pool, counters, config, now });
+    expect(batch.map((task) => task.instance_id)).toContain('a');
+    expect(summarizePoolState({ pool, counters, config, now })).toMatchObject({
+      unposted: 2,
+      repostable: 1,
+      live: 0,
+    });
+  });
+
+  it('does not select saturated or abandoned instances', () => {
+    const counters = new Map([
+      ['a', { posted: 2, successful: 5, last_posted_at: 0 }],
+      ['b', { posted: 10, successful: 0, last_posted_at: 0 }],
+      ['c', { posted: 1, successful: 0, last_posted_at: 1 }],
+    ]);
+    const batch = selectNextPostingCandidates({
+      pool,
+      counters,
+      config: { ...config, posting_window_ms: 1 },
+      now: 3,
+    });
+    expect(batch.map((task) => task.instance_id)).toEqual(['c']);
+  });
+
   it('returns undefined when all tasks are saturated or capped', () => {
     const counters = new Map([
-      ['a', { posted: 10, successful: 3, last_posted_at: 0 }],
+      ['a', { posted: 10, successful: 5, last_posted_at: 0 }],
       ['b', { posted: 10, successful: 0, last_posted_at: 0 }],
-      ['c', { posted: 10, successful: 3, last_posted_at: 0 }],
+      ['c', { posted: 10, successful: 5, last_posted_at: 0 }],
     ]);
     const next = selectNextPostingCandidate({ pool, counters, config, now: 1_000_000_000 });
     expect(next).toBeUndefined();
@@ -58,7 +97,7 @@ describe('selectNextPostingCandidate', () => {
     const counters = new Map();
     counters.set('a', { posted: 1, successful: 0, last_posted_at: 1 });
     const next = selectNextPostingCandidate({
-      pool, counters, config, now: 2 + config.cooldown_ms,
+      pool, counters, config, now: 2 + config.posting_window_ms,
       lastPostedLanguage: 'python',
     });
     expect(next?.language).toBe('go');
@@ -95,7 +134,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord', () => {
       current: {
         N_target_successes: 5,
         N_max_postings_per_task: 15,
-        cooldown_ms: 300_000,
+        posting_window_ms: 300_000,
       },
     };
     const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
@@ -111,7 +150,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord', () => {
     expect(gen.getState()).toMatchObject({
       kind: 'swe-rebench-v2',
       totalPosted: 0,
-      config: configRef.current,
+      config: expect.objectContaining(configRef.current),
     });
     fetchSpy.mockRestore();
   });

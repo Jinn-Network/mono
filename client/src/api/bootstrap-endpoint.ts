@@ -13,6 +13,7 @@ import type { Hono } from 'hono';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
+import { MIGRATIONS_FILE } from '../earning/store.js';
 
 export interface BootstrapEndpointConfig {
   earningDir: string;
@@ -61,6 +62,57 @@ interface FleetStateOnDisk {
   services?: ServiceState[];
   fleet_agent_id?: string | null;
   fleet_safe_address?: string | null;
+}
+
+interface MigrationArchiveEntryOnDisk {
+  retire_status?: string;
+  retire_error?: string | null;
+  retire_tx_hash?: string | null;
+  state_reset_at?: string | null;
+  /**
+   * True iff the migration explicitly suppressed the local-state wipe because
+   * the on-chain retire failed (jinn-mono-hjex.1). Pre-PR archive entries do
+   * NOT carry this field, so `wipe_suppressed === true` is the correct filter
+   * — `!state_reset_at` would falsely match legacy entries (where state was
+   * wiped even though retire failed) and surface a spurious envelope.
+   */
+  wipe_suppressed?: boolean;
+}
+
+interface MigrationArchiveOnDisk {
+  entries?: MigrationArchiveEntryOnDisk[];
+}
+
+/**
+ * Reads the migration archive and returns the most recent retire_error from
+ * any entry where the migration explicitly suppressed the local-state wipe
+ * (`wipe_suppressed === true`). Pre-PR archive entries lack the field — they
+ * are intentionally NOT surfaced because their local state was wiped, so
+ * showing a "service state preserved" envelope would mislead the operator.
+ */
+function readLatestRetireError(earningDir: string): { retire_error: string; tx_hash: string | null } | null {
+  const archivePath = join(earningDir, MIGRATIONS_FILE);
+  if (!existsSync(archivePath)) return null;
+  let archive: MigrationArchiveOnDisk;
+  try {
+    archive = JSON.parse(readFileSync(archivePath, 'utf-8')) as MigrationArchiveOnDisk;
+  } catch {
+    return null;
+  }
+  const entries = archive.entries ?? [];
+  // Only surface entries where the wipe was *explicitly* suppressed by this
+  // PR's guard. Pre-PR entries have wipe_suppressed=undefined (falsy) and are
+  // ignored even though retire_status==='failed' — their state was reset, so
+  // the envelope would not apply.
+  const failed = entries.filter(
+    e => e.retire_status === 'failed' && e.wipe_suppressed === true && e.retire_error,
+  );
+  if (failed.length === 0) return null;
+  const latest = failed[failed.length - 1]!;
+  return {
+    retire_error: latest.retire_error!,
+    tx_hash: latest.retire_tx_hash ?? null,
+  };
 }
 
 interface FundingGateOnDisk {
@@ -116,10 +168,21 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       Boolean(parsed.master_address) &&
       fundingGate?.master_address?.toLowerCase() === parsed.master_address?.toLowerCase() &&
       !allRunning;
+    // Three states map to currentStep:
+    //   1. fundingGateActive → 'awaiting_funding' (phase 2 in the panel).
+    //   2. funding cleared, services.length === 0 → 'safe_deployed' (phase 3,
+    //      subState 'Deploying'). This is the "Stage 1 in flight" window —
+    //      the daemon is deploying the fleet Safe, minting agentId, and
+    //      binding via setAgentWallet, none of which creates a service row
+    //      until Stage 2's distributor.stake() lands. Previously this branch
+    //      also returned 'awaiting_funding' which left the panel lying for
+    //      30-60s of post-funding bootstrap work. jinn-mono-u34i UX fix.
+    //   3. services.length > 0 → first service's step (the normal post-
+    //      Stage-2 path).
     const currentStepIdx = fundingGateActive
       ? STEP_INDEX.get('awaiting_funding')!
       : services.length === 0
-      ? (parsed.master_address ? STEP_INDEX.get('awaiting_funding')! : 0)
+      ? (parsed.master_address ? STEP_INDEX.get('safe_deployed')! : 0)
       : Math.min(...services.map((s) => STEP_INDEX.get(s.step) ?? 0));
     const currentStep = STEPS[currentStepIdx];
 
@@ -127,6 +190,11 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
     // can render a "Bootstrap failed at X" state instead of staying frozen on
     // the last persisted step. Cleared at the start of each bootstrap attempt.
     const error = readBootstrapError(config.earningDir);
+
+    // Surface a retire_failed envelope when migration archived a failure but
+    // preserved local state. The BootstrapErrorCard (PR-6) will render it;
+    // for now we just expose the field so the dashboard can act on it.
+    const retireFailed = readLatestRetireError(config.earningDir);
 
     const cfg = config.configReader?.() ?? {};
 
@@ -150,9 +218,21 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
           eth_required: fundingGate.eth_required,
           eth_balance: fundingGate.eth_balance,
           targetWei: fundingTargetWei(fundingGate),
+          // targetMet is false whenever the funding gate is active: the gate
+          // fires only when master balance < target. Once the gate clears the
+          // daemon advances past awaiting_funding and the funding block is
+          // omitted entirely (allRunning path or currentStep > awaiting_funding).
+          targetMet: false,
         },
       } : {}),
       ...(error ? { error } : {}),
+      ...(retireFailed ? {
+        retire_failed: {
+          retire_error: retireFailed.retire_error,
+          tx_hash: retireFailed.tx_hash,
+          message: 'We could not retire your previous setup. Your service state is preserved; resolve the retire failure before upgrading.',
+        },
+      } : {}),
     });
   });
 }

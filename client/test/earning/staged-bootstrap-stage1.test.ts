@@ -183,14 +183,16 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
     expect((bootstrapper as any).stepFleetIdentityRegister).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects funding at the gate when master has exactly the old (pre-u34i) threshold but not enough for transfer + gas (jinn-mono-u34i)', async () => {
+  it('rejects funding at the gate when master has only enough for Stage 1 transfer (jinn-mono-u34i)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage1-'));
     dirs.push(earningDir);
     const bootstrapper = buildBootstrapper(earningDir);
-    // 0.011 ETH on the master — above the OLD 0.01 ETH gate, below the NEW
-    // STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH gate. Pre-fix this would
-    // pass the gate and then revert in the funding tx with
-    // "gas required exceeds allowance (0)".
+    // 0.011 ETH on the master — above the pre-u34i 0.010 ETH gate (which
+    // equaled the transfer amount → zero gas headroom → revert), and BELOW
+    // the new full-bootstrap budget of 0.020 ETH. Pre-fix this either
+    // halted in the funding tx OR halted at Stage 2's separate gate after
+    // Stage 1 succeeded. Now the daemon refuses to even enter Stage 1
+    // until the operator funds the whole bootstrap up front.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
       11_000_000_000_000_000n, // 0.011 ETH
     );
@@ -201,7 +203,26 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
     expect(result.fleet_state.fleet_stage).toBe('none');
   });
 
-  it('accepts funding when master has STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i)', async () => {
+  it('rejects funding at the gate when master is one wei below the full-bootstrap budget (jinn-mono-u34i boundary)', async () => {
+    // Boundary test for the new full-bootstrap gate: STAGE1_AGENT_ETH (0.010)
+    // + minEoaGasEth*2 (0.010) = 0.020 ETH for N=1. Below this by even one
+    // wei must be rejected — otherwise Stage 1 would succeed, drain master
+    // to (gate - STAGE1_AGENT_ETH - 1 wei = 0.010 - 1 wei), and Stage 2's
+    // existing gate (also 0.010) would re-prompt. The whole point of bumping
+    // Stage 1's gate is that this scenario can never reach Stage 2 with
+    // insufficient master ETH.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage1-'));
+    dirs.push(earningDir);
+    const bootstrapper = buildBootstrapper(earningDir);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      20_000_000_000_000_000n - 1n, // 0.020 ETH minus one wei
+    );
+    const result = await bootstrapper.ensureStage1('test-password');
+    expect(result.ok).toBe(false);
+    expect(result.funding?.eth_required).toBe('1'); // shortfall = exactly 1 wei
+  });
+
+  it('accepts funding when master has the full-bootstrap budget (jinn-mono-u34i one-shot funding)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage1-'));
     dirs.push(earningDir);
 
@@ -212,12 +233,12 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
 
     const bootstrapper = buildBootstrapper(earningDir);
 
-    // Exactly 0.015 ETH — the new gate's minimum. Pre-fix this would have
-    // sailed past the old 0.01 ETH gate too, but the funding tx (transfer
-    // 0.01 ETH + gas) had no headroom. With the new gate, this is the
-    // minimum balance that should allow Stage 1 to proceed.
+    // Exactly 0.020 ETH — the full-bootstrap budget for N=1 standard mode.
+    // After Stage 1 transfers 0.010 ETH to HD-1, master sits at 0.010 ETH
+    // which exactly satisfies Stage 2's existing 0.010 ETH gate. End result:
+    // operator funds once, daemon completes both stages without re-prompting.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
-      15_000_000_000_000_000n, // 0.015 ETH
+      20_000_000_000_000_000n, // 0.020 ETH
     );
     let safeDeployed = false;
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>
@@ -294,5 +315,172 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
     expect(result.ok).toBe(true);
     expect(result.fleet_state.fleet_stage).toBe('stage1');
     expect(olasSpy).not.toHaveBeenCalled();
+  });
+
+  // ── Stage 1 setAgentWallet retry (jinn-mono-k1ng) ────────────────────────
+  //
+  // The freshly-deployed-Safe race: against a fresh 1/1 Safe on Base Sepolia,
+  // the first setAgentWallet attempt reverts with "Execution reverted for an
+  // unknown reason"; the same Safe + agentId a few seconds later succeeds.
+  //
+  // CRITICAL: bindAgentWalletToSafe RETURNS `{ ok: false, error }` for this
+  // race — it does NOT throw. The h74p retry only caught throws, so it was
+  // dead code in production. Per-service "worked" via the `safe_binding_pending`
+  // resume safety net; Stage 1 had no such net, so a single `ok: false`
+  // halted bootstrap (the 2026-05-18 canary's second-time-around failure).
+  //
+  // These tests use `mockResolvedValueOnce({ ok: false, ... })` — matching
+  // production behavior — to assert the unified bindAgentWalletWithRetry
+  // helper actually retries. mockRejectedValueOnce (what h74p used) is
+  // documented as the OTHER path the retry handles, but is NOT how the race
+  // actually manifests.
+  it('Stage 1 setAgentWallet retries on ok:false (production race shape) and succeeds (jinn-mono-k1ng)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-k1ng-stage1-bind-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    // Pre-seed predicted Safe so stepFleetSafeDeploy can be skipped via mock.
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      // Fast retry delay so the test doesn't burn seconds.
+      safeBindingRetryDelayMs: 0,
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      50_000_000_000_000_000n, // 0.05 ETH — well above any gate
+    );
+    let safeDeployed = false;
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>
+      safeDeployed ? '0xdeadbeef' : '0x',
+    );
+
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => {
+      safeDeployed = true;
+      return store.load('base');
+    });
+
+    // Mock the on-chain register tx so we can drive stepFleetIdentityRegister
+    // all the way to the bind step (which is what we're actually testing).
+    const txMod = await import('../../src/tx-retry.js');
+    vi.spyOn(txMod, 'viemSendTransactionWithRetry').mockResolvedValue(
+      ('0x' + 'aa'.repeat(32)) as `0x${string}`,
+    );
+    vi.spyOn(txMod, 'waitForTransactionReceiptWithRetry').mockResolvedValue({
+      status: 'success',
+      logs: [],
+    } as any);
+    vi.spyOn(bootstrapper as any, 'parseAgentIdFromReceipt').mockReturnValue(FLEET_AGENT_ID);
+
+    // Bind: two transient `ok: false` (the production race), then success.
+    // This is what bindAgentWalletToSafe ACTUALLY returns on Sepolia.
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const bindSpy = vi
+      .spyOn(bindingMod, 'bindAgentWalletToSafe')
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          kind: 'safe_binding_failed',
+          message: 'Execution reverted for an unknown reason.',
+          shortMessage: 'Execution reverted for an unknown reason.',
+          revertReason: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          kind: 'safe_binding_failed',
+          message: 'Execution reverted for an unknown reason.',
+          shortMessage: 'Execution reverted for an unknown reason.',
+          revertReason: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        txHash: ('0x' + 'bb'.repeat(32)) as `0x${string}`,
+        identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
+        safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
+        signature: ('0x' + '33'.repeat(65)) as `0x${string}`,
+        deadline: 9_999_999_999n,
+      });
+
+    const result = await bootstrapper.ensureStage1('test-password');
+
+    expect(bindSpy).toHaveBeenCalledTimes(3);
+    expect(result.ok).toBe(true);
+    expect(result.fleet_state.fleet_stage).toBe('stage1');
+    expect(result.fleet_state.fleet_agent_id).toBe(FLEET_AGENT_ID);
+  });
+
+  it('Stage 1 setAgentWallet halts after maxAttempts when ok:false persists (jinn-mono-k1ng)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-k1ng-stage1-bind-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      safeBindingRetryDelayMs: 0,
+      safeBindingMaxAttempts: 2, // small budget so the test exits fast
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      50_000_000_000_000_000n,
+    );
+    let safeDeployed = false;
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>
+      safeDeployed ? '0xdeadbeef' : '0x',
+    );
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => {
+      safeDeployed = true;
+      return store.load('base');
+    });
+    const txMod = await import('../../src/tx-retry.js');
+    vi.spyOn(txMod, 'viemSendTransactionWithRetry').mockResolvedValue(
+      ('0x' + 'aa'.repeat(32)) as `0x${string}`,
+    );
+    vi.spyOn(txMod, 'waitForTransactionReceiptWithRetry').mockResolvedValue({
+      status: 'success',
+      logs: [],
+    } as any);
+    vi.spyOn(bootstrapper as any, 'parseAgentIdFromReceipt').mockReturnValue(FLEET_AGENT_ID);
+
+    // All attempts return ok:false — deterministic revert, no transient.
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const bindSpy = vi.spyOn(bindingMod, 'bindAgentWalletToSafe').mockResolvedValue({
+      ok: false,
+      error: {
+        kind: 'safe_binding_failed',
+        message: 'deterministic revert',
+        shortMessage: 'deterministic revert',
+        revertReason: 'NotAuthorized',
+      },
+    });
+
+    const result = await bootstrapper.ensureStage1('test-password');
+
+    // After maxAttempts (2) all returning ok:false, Stage 1 halts with
+    // a structured error. Bootstrap surfaces the failure with the actual
+    // revert reason (operator can see "NotAuthorized" instead of a generic
+    // OOG-shaped message).
+    expect(bindSpy).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('Fleet setAgentWallet failed');
+    expect(result.rawErrorMessage ?? '').toContain('NotAuthorized');
   });
 });

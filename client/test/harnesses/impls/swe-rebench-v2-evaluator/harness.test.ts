@@ -3,12 +3,16 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SweRebenchV2EvaluatorHarness } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
+import { HttpHfFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import {
   ValidatedPoolStore,
   EVAL_SEMANTICS_VERSION,
+  createVettedPoolArtifactRef,
+  hashVettedPoolArtifact,
   type ValidatedPoolEntry,
+  type SweRebenchV2VettedPoolArtifact,
 } from '../../../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../../../src/solver-types/_swe-rebench-v2-substrate.js';
 
@@ -552,11 +556,11 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     await expect(harness.run(ctx)).rejects.toThrow(/not enabled/);
   });
 
-  it('reuses a single EvalRunner across run() calls so the LRU image cache accumulates (jinn-mono-uy6v.11)', async () => {
+  it('reuses a single EvalRunner across run() calls so per-round pruning fires on the shared runner (jinn-mono-uy6v.11)', async () => {
     // Regression: pre-fix, `new PythonEvalRunner(...)` was constructed inside
-    // each `run()` call, so the in-process LRU image cache was rebuilt empty
-    // every invocation and `cleanupImage` never fired in production. The
-    // existing LRU-eviction tests didn't catch this because they exercise
+    // each `run()` call, so the in-process runner was rebuilt empty every
+    // invocation and per-round pruning never fired in production. The
+    // existing pruning tests didn't catch this because they exercise
     // PythonEvalRunner directly. This test pins the harness→runner wiring:
     // the runner factory must be invoked exactly once across multiple run()
     // calls, regardless of how many distinct tasks the harness grades.
@@ -599,6 +603,58 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     // exercising the cached runner, not falling back to anything else.
     const runner = makeRunner.mock.results[0]?.value as { runEval: ReturnType<typeof vi.fn> };
     expect(runner.runEval).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a transient HF 429 during substrate recheck and still emits a verdict', async () => {
+    const hfRow = {
+      instance_id: 'unidata__netcdf-c-1925',
+      repo: 'Unidata/netcdf-c',
+      image_name: 'docker.io/swerebenchv2/test:latest',
+      FAIL_TO_PASS: ['test_a'],
+      PASS_TO_PASS: ['test_b'],
+      test_patch: 'diff --git ...',
+      install_config: { test_cmd: 'make test', log_parser: 'pytest' },
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        rows: [{ row: hfRow }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetcher = new HttpHfFetcher({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retryBackoffMs: [0],
+      minRequestIntervalMs: 0,
+      sleep: vi.fn(async () => undefined),
+    });
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok after retry',
+        exitCode: 0,
+      }),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        fetcher,
+        runner,
+        uploadToIpfs: vi.fn().mockResolvedValue('bafy-retry-log'),
+        stateDir: implStateDir,
+      },
+    });
+
+    const sol = await harness.run(buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    ));
+
+    expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(true);
   });
 });
 
@@ -804,5 +860,134 @@ describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () =
     expect(sol.gating).toMatchObject({ verdict: 'PASS' });
     // Confirm the runner was actually invoked (grading happened).
     expect(runner.runEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the evaluator pool once and shares it across run() calls', async () => {
+    await seedAdmission(stateDir, INSTANCE_ID, {
+      scorable: true,
+      rowHash: MATCHING_ROW_HASH,
+    });
+    const loadPool = makeMatchingPoolLoader();
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    };
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      loadPool,
+      runner,
+      uploadToIpfs: vi.fn().mockResolvedValue('bafy-ok'),
+    });
+
+    await harness.run(makeCtx());
+    await harness.run(makeCtx());
+
+    expect(loadPool).toHaveBeenCalledTimes(1);
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
+  });
+
+  it('grades launcher-posted tasks from the published pool ref without local admission data', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: INSTANCE_ID,
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+          rowHash: MATCHING_ROW_HASH,
+          imageName: IMAGE_NAME,
+          imageDigest: IMAGE_DIGEST,
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: 'bafy-launch-manifest',
+      artifactCid: 'bafy-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    const task = buildEvaluationTask(buildSolverEnvelope());
+    task.solverNetManifestCid = 'bafy-launch-manifest';
+    task.eligibility = { vettedPoolRef: ref };
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    };
+    const loadPool = makeMatchingPoolLoader();
+    const runCommand = makeMatchingDockerInspect();
+    const fetchFromIpfs = vi.fn().mockResolvedValue(artifact);
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      fetchFromIpfs,
+      loadPool,
+      runCommand: runCommand as unknown as typeof import('../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js').runCommand,
+      runner,
+      uploadToIpfs: vi.fn().mockResolvedValue('bafy-ok'),
+    });
+
+    const ctx = buildHarnessContext(implStateDir, task);
+    const sol = await harness.run(ctx);
+    const second = await harness.run(ctx);
+
+    expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    expect(second.gating).toMatchObject({ verdict: 'PASS' });
+    expect(fetchFromIpfs).toHaveBeenCalledTimes(1);
+    expect(fetchFromIpfs).toHaveBeenCalledWith(expect.any(String), 'bafy-vetted-pool');
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
+    expect(loadPool).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it('skips launcher-posted tasks when the published pool ref omits the instance', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'other__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: 'bafy-launch-manifest',
+      artifactCid: 'bafy-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    const task = buildEvaluationTask(buildSolverEnvelope());
+    task.solverNetManifestCid = 'bafy-launch-manifest';
+    task.eligibility = { vettedPoolRef: ref };
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn() },
+      fetchFromIpfs: vi.fn().mockResolvedValue(artifact),
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+
+    const err = await harness.run(buildHarnessContext(implStateDir, task)).catch((e) => e);
+
+    expect(err).toBeInstanceOf(SkippableError);
+    expect(err.reason).toBe('vetted_pool_instance_missing_or_unscorable');
+    expect(err.reason).not.toBe('admission_missing_or_unscorable');
   });
 });

@@ -249,7 +249,18 @@ const BASE_CONFIG: ChainConfig = {
 
 const BASE_SEPOLIA_CONFIG: ChainConfig = {
   chainId: 84532,
-  rpcUrl: 'https://sepolia.base.org',
+  // Default testnet RPC: a Tenderly gateway with a free public key. Higher
+  // rate limits than `https://sepolia.base.org` (the prior default) — the
+  // public node throttled SolverNet manifest discovery and balance polls
+  // during/after bootstrap (operators hit 404 + rate-limit churn until
+  // retries happened to land). Default flipped to publicnode after the
+  // Tenderly shared-project key hit its plan quota on 2026-05-24 and every
+  // default-config daemon got HTTP 403 simultaneously (see #554). The panel
+  // surfaces a "shared RPC — bring your own" warning when the operator is
+  // still on this default; operators with heavier workloads should get their
+  // own key (Tenderly / Alchemy / QuickNode free tiers) for reliable
+  // steady-state operation.
+  rpcUrl: 'https://base-sepolia-rpc.publicnode.com',
 
   // Autonolas protocol contracts (Base Sepolia)
   serviceRegistry: '0x31D3202d8744B16A120117A053459DDFAE93c855',
@@ -529,6 +540,13 @@ export const SERVICE_REGISTRY_L2_ABI = [
         ],
       },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'agentInstance', type: 'address' }],
+    name: 'mapAgentInstanceOperators',
+    outputs: [{ name: 'operator', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -827,6 +845,8 @@ export const STOLAS_STAKING_SLOTS_ABI = [
  */
 export interface JinnMviConfig {
   jinn?: string;
+  /** L1 chain id from the L1 artifact (e.g. 11155111 for Sepolia). */
+  l1ChainId?: number;
   timelock?: string;
   governor?: string;
   distributor?: string;
@@ -882,6 +902,7 @@ export function loadJinnMviConfig(args: {
     }
     const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL1Artifact;
     out.jinn = artifact.contracts?.JINN;
+    if (typeof artifact.chainId === 'number') out.l1ChainId = artifact.chainId;
     out.timelock = artifact.contracts?.TimelockController;
     out.governor = artifact.contracts?.JinnGovernor;
     out.distributor = artifact.contracts?.JinnDistributor;

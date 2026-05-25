@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client.js';
 import type { BootstrapState } from '../api/types.js';
+import { Separator } from '../components/ui/separator.js';
 import { IntroCard } from './build/IntroCard.js';
 import { ShapeCatalogue } from './build/ShapeCatalogue.js';
 import { PublishedPluginsPanel } from './build/PublishedPluginsPanel.js';
@@ -30,21 +31,33 @@ export function BuildPage(): JSX.Element {
   const [artifactType, setArtifactType] = useState<ArtifactTypeFilter>('plugin');
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '24px',
-        padding: '24px',
-        maxWidth: 1100,
-        margin: '0 auto',
-      }}
-    >
+    <div className="mx-auto flex max-w-[1100px] flex-col gap-6 px-6 pb-12 pt-8">
+      <header className="flex flex-col gap-2 pb-2">
+        {/* Single Gold-as-Hint emphasis on this surface — the page eyebrow.
+            The page-level H1 ("Build a plug-in") is rendered by IntroCard
+            from the quickstart markdown; we don't repeat it here so there
+            is exactly one H1 on the page. */}
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--accent-gold)]">
+          Build · Plug-ins
+        </span>
+        <p className="m-0 max-w-[64ch] font-mono text-[14px] leading-[1.7] text-muted-foreground">
+          Scaffold a SolverPlugin, publish it to npm and IPFS, watch it appear
+          in the registry under your builder identity. Anchored on the
+          SWE-rebench v2 SolverNet for v0.
+        </p>
+      </header>
+
       <IntroCard />
       <ShapeCatalogue />
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+
+      <Separator />
+      <div className="flex items-center justify-between gap-4 pt-2">
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]">
+          Registry
+        </span>
         <ArtifactTypeFilterChip value={artifactType} onChange={setArtifactType} />
       </div>
+
       {artifactType === 'plugin' ? (
         <>
           <PublishedPluginsPanel solverType={DEFAULT_SOLVER_TYPE} />

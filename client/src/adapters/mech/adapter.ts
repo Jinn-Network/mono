@@ -24,7 +24,7 @@ import {
   digestHexToGatewayUrl,
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
-import { SignedEnvelopeSchema } from '../../types/envelope.js';
+import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
@@ -44,7 +44,8 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
-import { VerdictCode } from './verdict-code.js';
+import { isNonRecoverableInnerRevert } from './safe-revert.js';
+import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
@@ -70,9 +71,51 @@ interface PendingEvaluationSolution {
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
+
+/** Yield to the event loop every N evaluation opportunities so a large retry
+ *  backlog can't starve the HTTP API mid-cycle. */
+const EVALUATION_RETRY_YIELD_EVERY = 10;
+
+/**
+ * Decide whether a `canClaimEvaluation` failure means the opportunity can NEVER
+ * become claimable (terminal, prune it) versus one that could still clear later
+ * (transient, keep retrying).
+ *
+ * Classification is done on the *structured* `revertName` decoded straight from
+ * the inner revert data — not by regex-unformatting the operator-facing `reason`
+ * string. The format→regex round-trip was fragile: an arg value containing a
+ * `(` corrupted the strip, and the `flattenErrorMessage` fallback produced
+ * arbitrary text the regex mangled, silently mis-classifying opportunities.
+ *
+ * A false-keep (re-checking a dead opportunity) only costs one more RPC; a
+ * false-prune (dropping a still-claimable opportunity) loses real work — so
+ * when in doubt we keep. Anything without a known non-recoverable revert name
+ * is treated as transient.
+ */
+function isTerminalEvaluationReason(revertName: string | null | undefined): boolean {
+  return isNonRecoverableInnerRevert(revertName);
+}
 const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
-const DEFAULT_TASK_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
-  84532: 41_153_291n,
+/**
+ * Floor block for the on-chain TaskCreated backlog scan, per chain.
+ *
+ * A daemon with no joined-SolverNet store cursor (fresh bootstrap) will scan
+ * from this block forward. Existing operators with a persisted cursor are
+ * unaffected — their cursor is used as long as it's already past this floor.
+ *
+ * Base Sepolia (84532): 41_510_000 lands at 2026-05-14T19:51Z, ~2h after the
+ * fufn validated-pool was rebuilt to `EVAL_SEMANTICS_VERSION='3'` (2026-05-14
+ * T17:28Z). Everything created before that rebuild is a "ghost" — admitted
+ * under a prior semantics regime that the current evaluators can't score —
+ * so a fresh operator should not waste compute claiming them.
+ * See gh #300 for the proper fix (symmetric solver-side admission filter and
+ * generalised scan-age window).
+ *
+ * Base mainnet (8453): unchanged at 25_000_000 — Phase 0 era, no v3-rebuild
+ * equivalent on mainnet.
+ */
+export const DEFAULT_TASK_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
+  84532: 41_510_000n,
   8453: 25_000_000n,
 };
 const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
@@ -124,6 +167,17 @@ export class MechAdapter implements ExecutionAdapter {
   private deliveryBlockCursor = 0n;
   private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private observedTasks = new Map<string, TaskAnnouncement>();
+  /**
+   * Read-through cache for `restorationAnnouncementForTaskId` — the restoration
+   * task body looked up *while building an evaluation opportunity*. Kept
+   * SEPARATE from `observedTasks` (the `watchForTasks` discovery dedup set) on
+   * purpose: writing the restoration body into `observedTasks` made the
+   * TaskCreated scan skip that taskId as a *restoration* opportunity just
+   * because the daemon had built an *evaluation* opportunity for someone
+   * else's attempt on it. That blocked the creator's own daemon from claiming
+   * its own attempt on a multi-attempt (`maxClaims > 1`) task it posted.
+   */
+  private restorationBodyCache = new Map<string, TaskAnnouncement>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
   private claimedRestorationTaskIds = new Set<string>();
   private evaluationOpportunities = new Map<string, {
@@ -312,6 +366,44 @@ export class MechAdapter implements ExecutionAdapter {
     this.persistPendingEvaluationSolutions();
   }
 
+  private clearPendingDeliveryRecoveryState(requestId: string): void {
+    this.originalStates.delete(requestId);
+    this.pendingEvaluations.delete(requestId);
+    this.requestKinds.delete(requestId);
+  }
+
+  private recoveryDeliveryExpirySeconds(requestId: string): number | undefined {
+    const task = this.originalStates.get(requestId) ?? this.pendingEvaluations.get(requestId);
+    const claimPolicy = task?.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
+    const normalizeTsToSeconds = (value: number | undefined): number | undefined => {
+      if (value == null) return undefined;
+      return value > 10_000_000_000 ? Math.floor(value / 1000) : value;
+    };
+    const submissionDeadlineSeconds = normalizeTsToSeconds(claimPolicy.submissionDeadlineTs);
+    if (submissionDeadlineSeconds != null) return submissionDeadlineSeconds;
+
+    const claimWindowEndSeconds = normalizeTsToSeconds(
+      claimPolicy.claimWindowEndTs ?? task?.window?.endTs,
+    );
+    if (claimWindowEndSeconds == null) return undefined;
+    return claimWindowEndSeconds + claimPolicy.claimLeaseTtlSeconds;
+  }
+
+  private shouldSkipExpiredRecoveryDelivery(
+    requestId: string,
+    currentChainTimestampSeconds: number,
+    recoveryExpirySeconds: number,
+  ): boolean {
+    if (currentChainTimestampSeconds <= recoveryExpirySeconds) return false;
+
+    console.error(
+      `[mech] skipping recovery delivery for ${requestId}: ` +
+      `submission deadline expired at ${new Date(recoveryExpirySeconds * 1000).toISOString()}`,
+    );
+    this.clearPendingDeliveryRecoveryState(requestId);
+    return true;
+  }
+
   async postTask(state: Task): Promise<PostedTask> {
     const restorationState: Task = {
       ...state,
@@ -357,19 +449,21 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.evictionRecovery,
     );
 
-    const announcement: TaskAnnouncement = {
-      taskId: taskSubmission.taskId,
-      task: {
-        ...restorationState,
-        signedTask,
-        context: { ...(restorationState.context ?? {}), [SOLUTION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
-      },
-      taskCid: restorationTaskCid,
-      onchainCreationTx: taskSubmission.txHash,
-      onchainCreationBlock: taskSubmission.blockNumber,
-    };
-    this.observedTasks.set(taskSubmission.taskId, announcement);
-
+    // Deliberately do NOT seed `observedTasks` with the task we just posted.
+    // `observedTasks` is the dedup set for `watchForTasks`: the on-chain
+    // TaskCreated scan skips any taskId already in it (so a task is announced
+    // to the engine-watcher at most once). Seeding it here marked the
+    // creator's own task as "already announced" before it was ever yielded —
+    // which permanently prevented the *creator's own daemon* from discovering,
+    // claiming, and solving a task it posted. On a multi-attempt task
+    // (`maxClaims > 1`) the creator running the solver role is legitimate
+    // (the protocol forbids only self-*evaluation*, and that on a per-attempt
+    // basis), and on testnet it is the intended single-operator dogfood path
+    // — post → claim → solve → grade → settle from one daemon. The dedup is
+    // still correct: it now keys only on tasks `watchForTasks` actually
+    // yielded. `restorationAnnouncementForTaskId` re-hydrates from chain/IPFS
+    // on a cache miss, so dropping the pre-seed costs at most one redundant
+    // fetch if the creator later claims its own task.
     return {
       taskId: taskSubmission.taskId,
       taskCid: restorationTaskCid,
@@ -454,7 +548,14 @@ export class MechAdapter implements ExecutionAdapter {
       maxClaimsPerOperator: claimPolicy.maxClaimsPerOperator,
       policyHook: (claimPolicy.policyHook ?? zeroAddress) as Address,
       evaluationPolicy: {
-        requiredVerdicts: 1,
+        // `requiredVerdicts` defaults to 1 but is overridable via the task's
+        // claim policy. A value > 1 opens additional verdict claim slots per
+        // attempt; combined with the per-evaluator cap below (1), it
+        // guarantees an honest evaluator can still claim and deliver a slot
+        // even when other evaluators have squatted some — the structural fix
+        // for a shared/adversarial testnet where a non-delivering claimer
+        // would otherwise permanently lock a single-slot attempt.
+        requiredVerdicts: claimPolicy.requiredVerdicts ?? 1,
         passThreshold: 1,
         evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
         maxVerdictsPerEvaluator: 1,
@@ -497,7 +598,12 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async restorationAnnouncementForTaskId(taskId: string): Promise<TaskAnnouncement> {
-    const cached = this.observedTasks.get(taskId);
+    // Read-through `restorationBodyCache` — NOT `observedTasks`. This helper is
+    // an evaluation-path lookup of a task's restoration body; caching it into
+    // the `watchForTasks` discovery dedup set would suppress the creator's own
+    // restoration-claim discovery for the same taskId (see field comment).
+    const cached =
+      this.restorationBodyCache.get(taskId) ?? this.observedTasks.get(taskId);
     if (cached) return cached;
 
     const taskCidDigest = await getTaskCidDigest(
@@ -514,7 +620,7 @@ export class MechAdapter implements ExecutionAdapter {
       task,
       taskCid,
     };
-    this.observedTasks.set(taskId, announcement);
+    this.restorationBodyCache.set(taskId, announcement);
     return announcement;
   }
 
@@ -567,9 +673,27 @@ export class MechAdapter implements ExecutionAdapter {
       return;
     }
 
+    const discoveryFloorBlock = this.onchainTaskDiscoveryFromBlock();
+
     for (const candidate of candidates) {
       if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
       if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
+
+      // gh #300 ghost-task floor — same floor as the on-chain TaskCreated
+      // backlog scan, applied to the DiscoveryAPI path too. Without this,
+      // the Ponder indexer (or onchain floor's listClaimableTasks) returns
+      // pre-floor tasks that are still claimable on-chain but unscorable
+      // under the current admission regime, defeating the floor's
+      // intent. Candidates without `createdAtBlock` are passed through
+      // (DiscoveryAPI is allowed to omit that field; we can't filter
+      // without it).
+      if (
+        discoveryFloorBlock != null &&
+        candidate.createdAtBlock != null &&
+        BigInt(candidate.createdAtBlock) < discoveryFloorBlock
+      ) {
+        continue;
+      }
 
       // Verify claimability per backend: HttpSubgraphDiscoveryAPI cannot run
       // canClaimTask (no on-chain simulation), so this check is load-bearing
@@ -588,13 +712,23 @@ export class MechAdapter implements ExecutionAdapter {
       }
 
       try {
+        // Yield every hydrated candidate per cycle rather than returning after
+        // the first. The engine-watcher (daemon._runEngineWatcherLoop) is the
+        // single point of skip-state truth — when its in-flight admission gate
+        // fast-skips a candidate (~30s TTL), that skip state never flows back
+        // into the adapter's iteration cursor. Yielding only the first
+        // candidate per cycle meant a fast-skipped slot starved every
+        // subsequent candidate in the round-robin (`fc05f686`) ordering for
+        // the duration of the TTL. By driving the full candidate list per
+        // cycle we let the engine apply its gate to each one, preserving the
+        // round-robin fairness across joined SolverNets. See task 212 live
+        // verification in the fix's commit body.
         yield await this.restorationAnnouncementFromDigest({
           taskId: candidate.taskId,
           taskCidDigest: candidate.taskCidDigest,
           transactionHash: candidate.createdAtTx,
           blockNumber: candidate.createdAtBlock,
         });
-        return;
       } catch (err) {
         console.error(
           `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
@@ -604,10 +738,21 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  /**
+   * Look up the Deliver-event envelope CID for a pending evaluation solution.
+   *
+   * Returns `null` when the Deliver event is not present in the configured
+   * lookback window. This is a terminal signal for the caller — re-running the
+   * same lookup later is deterministically futile when `solution.blockNumber`
+   * is set (toBlock is fixed at the SolutionDeliveryClaimed block), and is
+   * monotonically less likely to find the event when toBlock follows chain head
+   * (the window slides forward, away from any older Deliver event). Callers
+   * should prune the pending solution on `null` rather than retry — see #553.
+   */
   private async deliveryEnvelopeCidForSolution(solution: {
     requestId: string;
     blockNumber?: number;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const deliveryMech = await getMarketplaceRequestDeliveryMech(
       this.publicClient,
       this.config.mechMarketplaceAddress,
@@ -628,10 +773,7 @@ export class MechAdapter implements ExecutionAdapter {
       toBlock,
     );
     if (!deliveryDataHex) {
-      throw new Error(
-        `No Deliver event data found for solution ${solution.requestId} on mech ${deliveryMech} ` +
-        `between blocks ${fromBlock} and ${toBlock}`,
-      );
+      return null;
     }
     const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
     return `f01551220${digest}`;
@@ -648,7 +790,12 @@ export class MechAdapter implements ExecutionAdapter {
       return undefined;
     }
 
-    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
+    // Cheap claimability gate FIRST — before the restoration lookup + IPFS
+    // fetch. A backlog of terminal opportunities (finalized / evaluation
+    // deadline passed / max verdicts reached) must not pay the expensive
+    // restoration-announcement cost on every poll cycle. Terminal reasons are
+    // pruned from the working set so the loop never re-scans on-chain history;
+    // transient reasons are left in place to be retried next cycle.
     const claimable = await canClaimEvaluation(
       this.publicClient,
       this.config.safeAddress,
@@ -658,14 +805,31 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.mechContractAddress,
     );
     if (!claimable.ok) {
+      const terminal = isTerminalEvaluationReason(claimable.revertName);
       console.log(
-        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}`,
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}` +
+          (terminal ? ' (terminal — pruned)' : ' (transient — will retry)'),
+      );
+      if (terminal) {
+        this.forgetPendingEvaluationSolution(solution.requestId);
+      }
+      return undefined;
+    }
+
+    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
+    const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
+    if (solutionEnvelopeCid == null) {
+      // #553: Deliver event is not within the configured lookback window. A
+      // retry with the same toBlock cannot reach an older event, so this is
+      // terminal — prune so the loop never re-pays the canClaimEvaluation +
+      // restoration lookup cost on a deterministically-failing opportunity.
+      console.log(
+        `[mech] pruning evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ` +
+          `no Deliver event found within configured lookback (terminal — pruned)`,
       );
       this.forgetPendingEvaluationSolution(solution.requestId);
       return undefined;
     }
-
-    const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
       solutionEnvelopeCid,
@@ -697,14 +861,21 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async *retryPendingEvaluationSolutions(): AsyncIterable<TaskAnnouncement> {
+    let processed = 0;
     for (const [requestId, solution] of Array.from(this.pendingEvaluationSolutions)) {
+      // Yield to the event loop periodically so a large backlog of pending
+      // evaluation solutions can't starve the HTTP API mid-cycle.
+      if (processed > 0 && processed % EVALUATION_RETRY_YIELD_EVERY === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      processed++;
       try {
         const announcement = await this.evaluationAnnouncementForSolution(solution);
         if (announcement) {
           yield announcement;
-        } else {
-          this.forgetPendingEvaluationSolution(requestId);
         }
+        // No announcement does NOT mean "forget" — pruning is owned by
+        // evaluationAnnouncementForSolution, which only removes terminal cases.
       } catch (err) {
         console.error(
           `[mech] evaluation opportunity retry failed for ${requestId}:`,
@@ -910,9 +1081,17 @@ export class MechAdapter implements ExecutionAdapter {
     );
   }
 
-  private async evidenceHashForDelivery(requestId: string, deliveryDataHex: string): Promise<Hex | undefined> {
+  private async deliveryClaimForDelivery(requestId: string, deliveryDataHex: string): Promise<{
+    evidenceHash: Hex | undefined;
+    kind: 'solution' | 'verdict';
+    verdictCode?: VerdictCode;
+  }> {
+    const fallbackKind = this.requestKinds.get(requestId) ?? 'solution';
     if (this.config.routerClaimDeliveryVariant !== 'v2' && this.config.routerClaimDeliveryVariant !== 'v3') {
-      return undefined;
+      return {
+        evidenceHash: undefined,
+        kind: fallbackKind,
+      };
     }
 
     const deliveryDigest = deliveryDataHex.startsWith('0x')
@@ -924,11 +1103,6 @@ export class MechAdapter implements ExecutionAdapter {
       envelopeCid,
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-    // Strip signature to recompute the hash over the unsigned body.
-    //
-    // Important: compute over the fetched wire object, not over the parsed
-    // schema result. The schema normalizes some nested objects and may strip
-    // extension metadata that was present when the envelope was signed.
     const rawSigned = rawEnvelope as Record<string, unknown>;
     const { signature: _rawSignature, ...unsignedBody } = rawSigned;
     const signature = parsed.signature;
@@ -939,19 +1113,38 @@ export class MechAdapter implements ExecutionAdapter {
         `recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
       );
     }
-    return recomputed as Hex;
+
+    const role = normalizeEnvelopeRole(parsed.role);
+    if (role === 'capture') {
+      throw new Error(`unsupported delivery envelope role=capture for requestId ${requestId}`);
+    }
+    const kind = role === 'verdict' ? 'verdict' : 'solution';
+    const payload = rawSigned['payload'];
+    const rawVerdict = payload != null && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)['verdict']
+      : undefined;
+
+    return {
+      evidenceHash: recomputed as Hex,
+      kind,
+      verdictCode: kind === 'verdict' ? verdictCodeFromValue(rawVerdict) : undefined,
+    };
   }
 
   private async ensureDeliveryClaimed(
     requestId: string,
     deliveryDataHex: string,
   ): Promise<'claimed' | 'already-claimed' | 'skipped' | 'retry'> {
-    let evidenceHash: Hex | undefined;
+    let claimOptions: {
+      evidenceHash: Hex | undefined;
+      kind: 'solution' | 'verdict';
+      verdictCode?: VerdictCode;
+    };
     try {
-      evidenceHash = await this.evidenceHashForDelivery(requestId, deliveryDataHex);
+      claimOptions = await this.deliveryClaimForDelivery(requestId, deliveryDataHex);
     } catch (err) {
       console.error(
-        `[mech] evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+        `[mech] delivery claim metadata derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
         err,
       );
       return 'retry';
@@ -966,8 +1159,9 @@ export class MechAdapter implements ExecutionAdapter {
         requestId as Hex,
         {
           variant: this.config.routerClaimDeliveryVariant,
-          kind: this.requestKinds.get(requestId) ?? 'solution',
-          evidenceHash,
+          kind: claimOptions.kind,
+          evidenceHash: claimOptions.evidenceHash,
+          verdictCode: claimOptions.verdictCode,
         },
         this.config.evictionRecovery,
       );
@@ -986,20 +1180,52 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  /**
+   * Paginate `getLogs` over `[deliveryBlockCursor+1, currentBlock]` chunked by
+   * `DEFAULT_ROUTER_LOG_CHUNK_BLOCKS` to honor RPC provider block-range limits
+   * (Tenderly base-sepolia caps at 100k; sepolia.base.org ~1k). Advances +
+   * persists `deliveryBlockCursor` per chunk so a mid-scan RPC failure on a
+   * later chunk does not strand the cursor at the pre-poll value (#552).
+   *
+   * Yields each chunk's decoded Deliver entries so the consumer can process
+   * them with the live "current block" context (needed for the recovery-
+   * delivery timestamp cache).
+   */
+  private async *scanDeliveryLogChunks(
+    currentBlock: bigint,
+  ): AsyncIterable<ReturnType<typeof decodeDeliverLogs>> {
+    while (currentBlock > this.deliveryBlockCursor) {
+      const chunkStart = this.deliveryBlockCursor + 1n;
+      const chunkEnd = chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > currentBlock
+        ? currentBlock
+        : chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      const logs = await this.publicClient.getLogs({
+        address: this.config.mechContractAddress,
+        fromBlock: chunkStart,
+        toBlock: chunkEnd,
+      });
+      // Advance + persist BEFORE yielding so partial progress is durable even
+      // if a downstream throw escapes back through the for-await consumer.
+      this.deliveryBlockCursor = chunkEnd;
+      if (this.store) {
+        this.store.setLastProcessedBlock(this.deliveryBlockCursor);
+      }
+      yield decodeDeliverLogs(logs);
+    }
+  }
+
   async *watchForDeliveries(): AsyncIterable<DeliveredResult> {
     while (!this.stopped) {
       try {
         const currentBlock = await this.publicClient.getBlockNumber();
-        if (currentBlock > this.deliveryBlockCursor) {
-          const logs = await this.publicClient.getLogs({
-            address: this.config.mechContractAddress,
-            fromBlock: this.deliveryBlockCursor + 1n,
-            toBlock: currentBlock,
-          });
-          this.deliveryBlockCursor = currentBlock;
+        // Caches scoped to the whole poll iteration: the "current block"
+        // reference does not change across chunks.
+        const blockTimestampSecondsByNumber = new Map<bigint, number>();
+        let currentBlockTimestampSeconds: number | undefined;
 
-          const decoded = decodeDeliverLogs(logs);
-          for (const { requestId, deliveryDataHex, mechAddress } of decoded) {
+        for await (const decoded of this.scanDeliveryLogChunks(currentBlock)) {
+          if (this.stopped) break;
+          for (const { requestId, deliveryDataHex, mechAddress, blockNumber } of decoded) {
             // Two concerns, independent:
             //   (a) Did this Safe DELIVER this? → claim it (counter credit goes to msg.sender)
             //       The Deliver event's mechAddress is mechServiceMultisig (the Safe that owns
@@ -1008,6 +1234,35 @@ export class MechAdapter implements ExecutionAdapter {
             const iDelivered = mechAddress.toLowerCase() === this.config.safeAddress.toLowerCase();
             const iCreatedRestoration = this.pendingEvaluations.has(requestId);
             if (!iDelivered && !iCreatedRestoration) continue;
+            if (iCreatedRestoration) {
+              const recoveryExpirySeconds = this.recoveryDeliveryExpirySeconds(requestId);
+              if (recoveryExpirySeconds != null) {
+                let deliveryTimestampSeconds: number | undefined;
+                if (blockNumber != null) {
+                  deliveryTimestampSeconds = blockTimestampSecondsByNumber.get(blockNumber);
+                  if (deliveryTimestampSeconds == null) {
+                    const deliveryBlockData = await this.publicClient.getBlock({ blockNumber });
+                    deliveryTimestampSeconds = Number(deliveryBlockData.timestamp);
+                    blockTimestampSecondsByNumber.set(blockNumber, deliveryTimestampSeconds);
+                  }
+                } else {
+                  if (currentBlockTimestampSeconds == null) {
+                    const currentBlockData = await this.publicClient.getBlock({ blockNumber: currentBlock });
+                    currentBlockTimestampSeconds = Number(currentBlockData.timestamp);
+                  }
+                  deliveryTimestampSeconds = currentBlockTimestampSeconds;
+                }
+                if (
+                  this.shouldSkipExpiredRecoveryDelivery(
+                    requestId,
+                    deliveryTimestampSeconds,
+                    recoveryExpirySeconds,
+                  )
+                ) {
+                  continue;
+                }
+              }
+            }
 
             // (a) Deliverer-side claim path: if this Safe delivered the request,
             //     claim it first so router counters credit the deliverer.
@@ -1048,9 +1303,7 @@ export class MechAdapter implements ExecutionAdapter {
               };
 
               // Clean up after yielding
-              this.originalStates.delete(requestId);
-              this.pendingEvaluations.delete(requestId);
-              this.requestKinds.delete(requestId);
+              this.clearPendingDeliveryRecoveryState(requestId);
             } catch (err) {
               console.error(`[mech] Failed to parse delivery ${requestId}:`, err);
             }
@@ -1066,10 +1319,8 @@ export class MechAdapter implements ExecutionAdapter {
         }));
       }
 
-      // Persist block cursor for crash recovery
-      if (this.store && this.deliveryBlockCursor > 0n) {
-        this.store.setLastProcessedBlock(this.deliveryBlockCursor);
-      }
+      // Cursor persistence is per-chunk inside the loop above (#552). A poll
+      // that did no chunked work has no progress to persist.
 
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }

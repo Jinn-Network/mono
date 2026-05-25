@@ -1,4 +1,7 @@
 // client/test/harnesses/impls/hermes-agent/config-builder.test.ts
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { hermesConfigFromSolverPlugins } from '../../../../src/harnesses/impls/hermes-agent/config-builder.js';
@@ -69,6 +72,66 @@ describe('hermesConfigFromSolverPlugins', () => {
     // a providedBy branch.
     expect(true).toBe(true);
   });
+
+  it('includes JINN_NETWORK_TOOLS_CLIENT_ROOT pointing at a directory containing dist/mcp/server.js or src/mcp/server.ts', () => {
+    // gh #294: the network-tools MCP launcher (`mcp/jinn-client-server.mjs`)
+    // walks `<pluginRoot>/../..` looking for `dist/mcp/server.js` or
+    // `src/mcp/server.ts`. When the daemon copies the plugin into
+    // `$HOME/.jinn-client/solver-plugins/network-tools/`, that walk lands at
+    // `$HOME/.jinn-client/` and fails. The fix: inject
+    // `JINN_NETWORK_TOOLS_CLIENT_ROOT` so the launcher short-circuits the
+    // walk and uses the daemon's actual install root.
+    //
+    // This test asserts the resolved root has the expected layout — if the
+    // resolver's `../../../..` count is off-by-one, this test fails.
+    const out = hermesConfigFromSolverPlugins([networkToolsRoot], fakeEnv());
+
+    const jinnClient = out.mcp_servers!['jinn-client'] as { env?: Record<string, string> };
+    const root = jinnClient.env?.JINN_NETWORK_TOOLS_CLIENT_ROOT;
+    expect(root).toBeTruthy();
+    expect(typeof root).toBe('string');
+
+    const distServer = join(root!, 'dist', 'mcp', 'server.js');
+    const sourceServer = join(root!, 'src', 'mcp', 'server.ts');
+    // At least one must exist — `src/` is always present in a working tree,
+    // `dist/` is present after `yarn build`.
+    expect(existsSync(distServer) || existsSync(sourceServer)).toBe(true);
+  });
+
+  it('launcher resolves the MCP server entry without the "Unable to find" error when JINN_NETWORK_TOOLS_CLIENT_ROOT is set', async () => {
+    // gh #294 integration smoke: spawn the actual launcher script with the
+    // env block this module produces and assert it doesn't bail with the
+    // resolver error. The launcher itself goes on to exec the daemon's MCP
+    // server (which then waits for stdio protocol traffic) — we time-bound
+    // the spawn at 2s and only check stderr.
+    const out = hermesConfigFromSolverPlugins([networkToolsRoot], fakeEnv());
+    const jinnClient = out.mcp_servers!['jinn-client'] as {
+      command: string;
+      args: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+    };
+
+    const child = spawn(jinnClient.command, jinnClient.args, {
+      cwd: jinnClient.cwd,
+      env: { ...process.env, ...(jinnClient.env ?? {}) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    let stdout = '';
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+    // Give the launcher up to 2s to either fail-fast with the resolver error
+    // or proceed to spawn the MCP server (which would block on stdio).
+    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    child.kill('SIGTERM');
+    // Allow the kill to land.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    expect(stderr).not.toMatch(/Unable to find the Jinn client MCP server/);
+    expect(stdout).not.toMatch(/Unable to find the Jinn client MCP server/);
+  }, 10_000);
 
   it('passes HTTP MCP url/headers through unchanged', () => {
     const httpRoot = fileURLToPath(new URL('./fixtures/http-mcp-plugin/', import.meta.url));

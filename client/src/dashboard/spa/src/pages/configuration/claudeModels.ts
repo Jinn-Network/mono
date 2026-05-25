@@ -31,16 +31,31 @@ export const CODEX_MODELS: readonly LearnerModelOption[] = [
   { label: 'GPT-5.3 Codex Spark', id: 'gpt-5.3-codex-spark' },
 ] as const;
 
-// Hermes routes models through providers (Nous Portal, OpenRouter, …) using
-// `<provider>/<model>` ids. The first entry is the dashboard default —
-// `anthropic/claude-opus-4.6` matches Hermes's own recommended default
-// (cli-config.yaml.example). Operators wanting a different provider/model can
-// pick from this list or override via `hermes model` (which the adapter
-// inherits when the join config leaves `model` unset).
+// Hermes routes every model through OpenRouter using `<provider>/<model>`
+// ids — OpenRouter is Hermes's single model provider. The first entry is the
+// dashboard default. Operators wanting a different model can pick from this
+// list or override via `hermes model` (which the adapter inherits when the
+// join config leaves `model` unset).
+//
+// Set sized + ordered for v0: Anthropic flagships first (operator default;
+// historically Hermes's own recommended default), then the OpenRouter
+// programming leaderboard top-8 (token-volume, verified live via
+// /api/v1/models 2026-05-18 — see jinn-mono-u34i thread). Single-provider
+// (OpenRouter) by design: `HermesHarness.isReady()` gates on OpenRouter
+// auth, so every surfaced model must route through OpenRouter. Operators
+// pinned to an id outside this list (e.g. `anthropic/claude-opus-4.6` from
+// an older config) still work — `resolveModelOption` surfaces them as
+// `Custom (<id>)`.
 export const HERMES_MODELS: readonly LearnerModelOption[] = [
-  { label: 'Claude Opus 4.6 (OpenRouter)', id: 'anthropic/claude-opus-4.6' },
-  { label: 'Claude Sonnet 4.6 (OpenRouter)', id: 'anthropic/claude-sonnet-4.6' },
-  { label: 'Hermes 4 405B (Nous)', id: 'nousresearch/hermes-4-405b' },
+  { label: 'Claude Opus 4.7 (OpenRouter)',   id: 'anthropic/claude-opus-4.7'    },
+  { label: 'Claude Sonnet 4.6 (OpenRouter)', id: 'anthropic/claude-sonnet-4.6'  },
+  { label: 'Hy3 Preview',                    id: 'tencent/hy3-preview'          },
+  { label: 'DeepSeek V4 Pro',                id: 'deepseek/deepseek-v4-pro'     },
+  { label: 'DeepSeek V4 Flash',              id: 'deepseek/deepseek-v4-flash'   },
+  { label: 'Gemini 3.1 Flash Lite',          id: 'google/gemini-3.1-flash-lite' },
+  { label: 'Kimi K2.6',                      id: 'moonshotai/kimi-k2.6'         },
+  { label: 'Owl Alpha',                      id: 'openrouter/owl-alpha'         },
+  { label: 'MiniMax M2.7',                   id: 'minimax/minimax-m2.7'         },
 ] as const;
 
 function isCodexHarness(harness: string | undefined): boolean {

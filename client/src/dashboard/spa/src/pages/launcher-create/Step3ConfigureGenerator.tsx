@@ -3,14 +3,10 @@ import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
 } from '../../api/types.js';
+import { Input } from '../../components/ui/input.js';
+import { cn } from '../../lib/utils.js';
 import { ensureCompletedStep } from './draft-helpers.js';
-import {
-  FieldShell,
-  StepNav,
-  StepShell,
-  inputErrorStyle,
-  inputStyle,
-} from './StepShell.js';
+import { FieldShell, StepNav, StepShell } from './StepShell.js';
 import {
   PREDICTION_V1_TEMPLATE,
   SWE_REBENCH_V2_V1_TEMPLATE,
@@ -25,8 +21,9 @@ import {
  * on `template.id`:
  *   - `prediction`     — Polymarket polling cadence + market filters
  *                        (mirrors `prediction-v1-auto.ts` defaults).
- *   - `swe-rebench-v2` — Three counters: `N_target_successes`,
- *                        `N_max_postings_per_task`, `cooldown_ms`
+ *   - `swe-rebench-v2` — Fill-the-pool posting knobs:
+ *                        target successes, max postings, posting window,
+ *                        batch size, optional per-operator cap, claim lease
  *                        (mirrors `swe-rebench-v2-auto.ts` defaults).
  *
  * Adding a new template means adding a new branch here. The validated
@@ -48,6 +45,9 @@ export interface Step3ConfigureGeneratorProps {
   busy?: boolean;
   error?: string | null;
 }
+
+const textareaBase =
+  'flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[13px] text-foreground placeholder:text-fg-dim focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-y';
 
 export function Step3ConfigureGenerator(
   props: Step3ConfigureGeneratorProps,
@@ -246,19 +246,19 @@ function PredictionGeneratorForm({
         />
       }
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
         <FieldShell
           label="Cadence (ms)"
           helperText="How often the generator polls Polymarket. Minimum 60s."
           error={fieldErrors.cadenceMs ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-cadenceMs"
             type="text"
             inputMode="numeric"
             value={form.cadenceMs}
             onChange={(e) => set('cadenceMs', e.target.value)}
-            style={fieldErrors.cadenceMs ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.cadenceMs && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -267,13 +267,13 @@ function PredictionGeneratorForm({
           helperText="How long Tasks stay open for solving."
           error={fieldErrors.windowMs ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-windowMs"
             type="text"
             inputMode="numeric"
             value={form.windowMs}
             onChange={(e) => set('windowMs', e.target.value)}
-            style={fieldErrors.windowMs ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.windowMs && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -282,13 +282,13 @@ function PredictionGeneratorForm({
           helperText="Cushion between window-close and resolution."
           error={fieldErrors.resolveGapMs ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-resolveGapMs"
             type="text"
             inputMode="numeric"
             value={form.resolveGapMs}
             onChange={(e) => set('resolveGapMs', e.target.value)}
-            style={fieldErrors.resolveGapMs ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.resolveGapMs && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -297,13 +297,13 @@ function PredictionGeneratorForm({
           helperText="Cap on new Tasks per generator tick."
           error={fieldErrors.maxNewRoundsPerPoll ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-maxNewRoundsPerPoll"
             type="text"
             inputMode="numeric"
             value={form.maxNewRoundsPerPoll}
             onChange={(e) => set('maxNewRoundsPerPoll', e.target.value)}
-            style={fieldErrors.maxNewRoundsPerPoll ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.maxNewRoundsPerPoll && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -312,13 +312,13 @@ function PredictionGeneratorForm({
           helperText="Daily ceiling across all polls."
           error={fieldErrors.maxNewRoundsPerDay ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-maxNewRoundsPerDay"
             type="text"
             inputMode="numeric"
             value={form.maxNewRoundsPerDay}
             onChange={(e) => set('maxNewRoundsPerDay', e.target.value)}
-            style={fieldErrors.maxNewRoundsPerDay ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.maxNewRoundsPerDay && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -327,13 +327,13 @@ function PredictionGeneratorForm({
           helperText="Concurrent open Tasks before back-off kicks in."
           error={fieldErrors.maxOpenRounds ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-maxOpenRounds"
             type="text"
             inputMode="numeric"
             value={form.maxOpenRounds}
             onChange={(e) => set('maxOpenRounds', e.target.value)}
-            style={fieldErrors.maxOpenRounds ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.maxOpenRounds && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -349,7 +349,7 @@ function PredictionGeneratorForm({
           onChange={(e) => set('allowlistConditionIds', e.target.value)}
           rows={2}
           placeholder="0xabc…, 0xdef…"
-          style={{ ...inputStyle, resize: 'vertical', fontFamily: "'JetBrains Mono', monospace" }}
+          className={textareaBase}
           disabled={busy}
         />
       </FieldShell>
@@ -363,7 +363,7 @@ function PredictionGeneratorForm({
           onChange={(e) => set('blocklistConditionIds', e.target.value)}
           rows={2}
           placeholder="0xabc…"
-          style={{ ...inputStyle, resize: 'vertical', fontFamily: "'JetBrains Mono', monospace" }}
+          className={textareaBase}
           disabled={busy}
         />
       </FieldShell>
@@ -376,7 +376,10 @@ function PredictionGeneratorForm({
 export interface SweRebenchV2GeneratorConfigDraft {
   N_target_successes: string;
   N_max_postings_per_task: string;
-  cooldown_ms: string;
+  posting_window_ms: string;
+  post_batch_size: string;
+  maxClaimsPerOperator: string;
+  claimLeaseTtlSeconds: string;
 }
 
 interface SweRebenchV2ValidationResult {
@@ -385,19 +388,29 @@ interface SweRebenchV2ValidationResult {
   generatorConfig?: Record<string, unknown>;
 }
 
-const SWE_REBENCH_V2_MIN_COOLDOWN_MS = 60_000;
-
 function buildSweRebenchV2Initial(
   existing: Record<string, unknown> | undefined,
 ): SweRebenchV2GeneratorConfigDraft {
   const d = SWE_REBENCH_V2_V1_TEMPLATE.generatorDefaults;
+  const legacyPolicy = typeof existing?.claimPolicy === 'object' && existing.claimPolicy !== null
+    ? existing.claimPolicy as Record<string, unknown>
+    : {};
   return {
     N_target_successes: asString(existing?.N_target_successes, d.N_target_successes),
     N_max_postings_per_task: asString(
       existing?.N_max_postings_per_task,
       d.N_max_postings_per_task,
     ),
-    cooldown_ms: asString(existing?.cooldown_ms, d.cooldown_ms),
+    posting_window_ms: asString(existing?.posting_window_ms, d.posting_window_ms),
+    post_batch_size: asString(existing?.post_batch_size, d.post_batch_size),
+    maxClaimsPerOperator: asString(
+      existing?.maxClaimsPerOperator ?? legacyPolicy.maxClaimsPerOperator,
+      d.maxClaimsPerOperator ?? d.N_target_successes,
+    ),
+    claimLeaseTtlSeconds: asString(
+      existing?.claimLeaseTtlSeconds ?? legacyPolicy.claimLeaseTtlSeconds,
+      d.claimLeaseTtlSeconds,
+    ),
   };
 }
 
@@ -421,10 +434,21 @@ export function validateSweRebenchV2GeneratorConfig(
       'Max postings must be ≥ target successes — otherwise saturation is unreachable.';
   }
 
-  const cooldown_ms = parsePositiveInt(draft.cooldown_ms);
-  if (cooldown_ms === null) errors.cooldown_ms = 'Must be a positive integer (ms).';
-  else if (cooldown_ms < SWE_REBENCH_V2_MIN_COOLDOWN_MS)
-    errors.cooldown_ms = `Cooldown must be at least ${SWE_REBENCH_V2_MIN_COOLDOWN_MS / 1000}s.`;
+  const posting_window_ms = parsePositiveInt(draft.posting_window_ms);
+  if (posting_window_ms === null)
+    errors.posting_window_ms = 'Must be a positive integer (ms).';
+
+  const post_batch_size = parsePositiveInt(draft.post_batch_size);
+  if (post_batch_size === null)
+    errors.post_batch_size = 'Must be a positive integer.';
+
+  const maxClaimsPerOperator = parsePositiveInt(draft.maxClaimsPerOperator);
+  if (maxClaimsPerOperator === null)
+    errors.maxClaimsPerOperator = 'Must be a positive integer.';
+
+  const claimLeaseTtlSeconds = parsePositiveInt(draft.claimLeaseTtlSeconds);
+  if (claimLeaseTtlSeconds === null)
+    errors.claimLeaseTtlSeconds = 'Must be a positive integer (seconds).';
 
   if (Object.keys(errors).length > 0) {
     return { ok: false, errors };
@@ -436,7 +460,10 @@ export function validateSweRebenchV2GeneratorConfig(
     generatorConfig: {
       N_target_successes,
       N_max_postings_per_task,
-      cooldown_ms,
+      posting_window_ms,
+      post_batch_size,
+      maxClaimsPerOperator,
+      claimLeaseTtlSeconds,
     },
   };
 }
@@ -492,19 +519,19 @@ function SweRebenchV2GeneratorForm({
         />
       }
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
         <FieldShell
           label="Target successful Verdicts per instance"
           helperText="How many score=1 Verdicts saturate a SWE instance and stop further Task posting."
           error={fieldErrors.N_target_successes ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-N_target_successes"
             type="text"
             inputMode="numeric"
             value={form.N_target_successes}
             onChange={(e) => set('N_target_successes', e.target.value)}
-            style={fieldErrors.N_target_successes ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.N_target_successes && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
@@ -513,28 +540,73 @@ function SweRebenchV2GeneratorForm({
           helperText="Hard ceiling on Task postings to bound spend on impossible SWE instances."
           error={fieldErrors.N_max_postings_per_task ?? null}
         >
-          <input
+          <Input
             data-testid="launcher-create-N_max_postings_per_task"
             type="text"
             inputMode="numeric"
             value={form.N_max_postings_per_task}
             onChange={(e) => set('N_max_postings_per_task', e.target.value)}
-            style={fieldErrors.N_max_postings_per_task ? inputErrorStyle : inputStyle}
+            className={cn(fieldErrors.N_max_postings_per_task && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>
         <FieldShell
-          label="Cooldown between task postings (ms)"
-          helperText="Minimum gap before posting another Task for the same SWE instance. Minimum 60s."
-          error={fieldErrors.cooldown_ms ?? null}
+          label="Posting window (ms)"
+          helperText="A posting stays live for this long; expired unsaturated instances can be reposted."
+          error={fieldErrors.posting_window_ms ?? null}
         >
-          <input
-            data-testid="launcher-create-cooldown_ms"
+          <Input
+            data-testid="launcher-create-posting_window_ms"
             type="text"
             inputMode="numeric"
-            value={form.cooldown_ms}
-            onChange={(e) => set('cooldown_ms', e.target.value)}
-            style={fieldErrors.cooldown_ms ? inputErrorStyle : inputStyle}
+            value={form.posting_window_ms}
+            onChange={(e) => set('posting_window_ms', e.target.value)}
+            className={cn(fieldErrors.posting_window_ms && 'border-break-red')}
+            disabled={busy}
+          />
+        </FieldShell>
+        <FieldShell
+          label="Post batch size"
+          helperText="Maximum number of SWE instances to post in one creator tick."
+          error={fieldErrors.post_batch_size ?? null}
+        >
+          <Input
+            data-testid="launcher-create-post_batch_size"
+            type="text"
+            inputMode="numeric"
+            value={form.post_batch_size}
+            onChange={(e) => set('post_batch_size', e.target.value)}
+            className={cn(fieldErrors.post_batch_size && 'border-break-red')}
+            disabled={busy}
+          />
+        </FieldShell>
+        <FieldShell
+          label="Max claims per operator"
+          helperText="Optional cap; each posting is still limited by remaining target successes."
+          error={fieldErrors.maxClaimsPerOperator ?? null}
+        >
+          <Input
+            data-testid="launcher-create-maxClaimsPerOperator"
+            type="text"
+            inputMode="numeric"
+            value={form.maxClaimsPerOperator}
+            onChange={(e) => set('maxClaimsPerOperator', e.target.value)}
+            className={cn(fieldErrors.maxClaimsPerOperator && 'border-break-red')}
+            disabled={busy}
+          />
+        </FieldShell>
+        <FieldShell
+          label="Claim lease (seconds)"
+          helperText="How long a claimed SWE task slot stays leased."
+          error={fieldErrors.claimLeaseTtlSeconds ?? null}
+        >
+          <Input
+            data-testid="launcher-create-claimLeaseTtlSeconds"
+            type="text"
+            inputMode="numeric"
+            value={form.claimLeaseTtlSeconds}
+            onChange={(e) => set('claimLeaseTtlSeconds', e.target.value)}
+            className={cn(fieldErrors.claimLeaseTtlSeconds && 'border-break-red')}
             disabled={busy}
           />
         </FieldShell>

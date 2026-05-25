@@ -63,6 +63,31 @@ describe('TaskV1Schema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts an optional claimPolicy.requiredVerdicts and round-trips it', () => {
+    // requiredVerdicts opens additional on-chain verdict claim slots per
+    // attempt so a squatted slot cannot lock the verdict leg. It is optional;
+    // the adapter defaults it to 1 when absent.
+    const parsed = TaskV1Schema.parse({
+      ...valid,
+      claimPolicy: { ...DEFAULT_CLAIM_POLICY, requiredVerdicts: 3 },
+    });
+    expect(parsed.claimPolicy.requiredVerdicts).toBe(3);
+  });
+
+  it('rejects a non-positive claimPolicy.requiredVerdicts', () => {
+    expect(() =>
+      TaskV1Schema.parse({
+        ...valid,
+        claimPolicy: { ...DEFAULT_CLAIM_POLICY, requiredVerdicts: 0 },
+      }),
+    ).toThrow();
+  });
+
+  it('leaves claimPolicy.requiredVerdicts undefined when omitted', () => {
+    const parsed = TaskV1Schema.parse(valid);
+    expect(parsed.claimPolicy.requiredVerdicts).toBeUndefined();
+  });
 });
 
 describe('SignedTaskV1Schema', () => {

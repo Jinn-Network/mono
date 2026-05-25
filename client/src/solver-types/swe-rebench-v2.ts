@@ -1,7 +1,7 @@
 /**
  * SolverTypeDefinition for swe-rebench-v2.v1.
  *
- * Wires the pool builder, state store, and selectNextPostingCandidate
+ * Wires the pool builder, state store, and selectNextPostingCandidates
  * policy from the supporting modules (_swe-rebench-v2-pool, _swe-rebench-v2-state,
  * swe-rebench-v2-auto) into the SolverTypeDefinition interface consumed by
  * collectTestnetAutoTaskGenerators.
@@ -19,9 +19,11 @@ import type { TaskGenerator } from '../tasks/sources.js';
 import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
+import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import type { SolverTypeDefinition } from './solver-type.js';
 import {
-  selectNextPostingCandidate,
+  selectNextPostingCandidates,
+  summarizePoolState,
   DEFAULT_GENERATOR_CONFIG,
   type GeneratorConfig,
 } from './swe-rebench-v2-auto.js';
@@ -30,7 +32,15 @@ import {
   ValidatedPoolStore,
   filterToScorablePool,
   EVAL_SEMANTICS_VERSION,
+  VETTED_POOL_REF_ELIGIBILITY_KEY,
+  createVettedPoolArtifactRef,
+  exportScorableVettedPoolArtifact,
+  hashVettedPoolArtifact,
+  loadVettedPoolArtifactScorableEntries,
+  readVettedPoolArtifactPublication,
+  writeVettedPoolArtifactPublication,
   type AdmissionMode,
+  type SolverNetArtifactRef,
 } from './_swe-rebench-v2-validated-pool.js';
 import {
   buildHistoricalPool,
@@ -38,22 +48,30 @@ import {
   listMonthlyPartitions,
   type PoolTask,
 } from './_swe-rebench-v2-pool.js';
+import { PoolCacheStore, loadPoolWithCacheFallback } from './_swe-rebench-v2-pool-cache.js';
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
 const CONTRACT_ID = 'swe-rebench-v2';
 const CONTRACT_VERSION = 'v1';
+const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 
 /** How long the pool is cached before a full refresh (24 h). */
 const POOL_REFRESH_MS = 24 * 60 * 60 * 1000;
 
 export interface SweRebenchV2ClaimPolicyRuntimeConfig {
+  /** @deprecated maxClaims is derived per posting from remaining target successes. */
   maxClaims?: number;
+  /** @deprecated use top-level maxClaimsPerOperator. */
   maxClaimsPerOperator?: number;
+  /** @deprecated use top-level claimLeaseTtlSeconds. */
   claimLeaseTtlSeconds?: number;
 }
 
 export type SweRebenchV2GeneratorRuntimeConfig = Partial<GeneratorConfig> & {
+  /** @deprecated ignored; posting_window_ms controls repost timing. */
+  cooldown_ms?: number;
+  /** @deprecated legacy nested shape tolerated on read and flattened on write. */
   claimPolicy?: SweRebenchV2ClaimPolicyRuntimeConfig;
 };
 
@@ -65,6 +83,7 @@ export interface SweRebenchV2AutoConfig {
 
 export interface SweRebenchV2GeneratorStaticConfig {
   stateDir?: string;
+  ipfsRegistryUrl?: string;
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
@@ -79,7 +98,15 @@ export interface MakeSweRebenchV2GeneratorForLaunchedRecordOpts {
 export interface SweRebenchV2GeneratorStateSnapshot {
   kind: 'swe-rebench-v2';
   lastPollAt?: string;
-  lastPollSummary?: { poolSize: number; posted: number; skipped: number };
+  lastPollSummary?: {
+    poolSize: number;
+    posted: number;
+    unposted: number;
+    live: number;
+    repostable: number;
+    saturated: number;
+    abandoned: number;
+  };
   lastError?: { message: string; at: string };
   totalPosted: number;
   lastPostedInstanceId?: string;
@@ -93,6 +120,7 @@ export type SweRebenchV2GeneratorTick = TaskGenerator & {
 interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
   getGeneratorConfig?: () => SweRebenchV2GeneratorRuntimeConfig | unknown;
   solverNetManifestCid?: string;
+  ipfsRegistryUrl?: string;
   creator?: {
     agentEoa?: `0x${string}`;
     safeAddress?: `0x${string}`;
@@ -133,15 +161,14 @@ function positiveInt(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
-function nonNegativeInt(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
-}
-
 const DEFAULT_ADMISSION_MODE: AdmissionMode = 'required';
 
 function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
   const cfg = typeof raw === 'object' && raw !== null
     ? raw as Record<string, unknown>
+    : {};
+  const legacyPolicy = typeof cfg['claimPolicy'] === 'object' && cfg['claimPolicy'] !== null
+    ? cfg['claimPolicy'] as Record<string, unknown>
     : {};
   const N_target_successes = positiveInt(
     cfg['N_target_successes'],
@@ -157,10 +184,26 @@ function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
   const rawMode = cfg['admissionMode'];
   const admissionMode: AdmissionMode =
     rawMode === 'python-floor' ? 'python-floor' : DEFAULT_ADMISSION_MODE;
+  const maxClaimsPerOperator = positiveInt(
+    cfg['maxClaimsPerOperator'] ?? legacyPolicy['maxClaimsPerOperator'],
+    0,
+  );
   return {
     N_target_successes,
     N_max_postings_per_task,
-    cooldown_ms: nonNegativeInt(cfg['cooldown_ms'], DEFAULT_GENERATOR_CONFIG.cooldown_ms),
+    posting_window_ms: positiveInt(
+      cfg['posting_window_ms'],
+      DEFAULT_GENERATOR_CONFIG.posting_window_ms,
+    ),
+    post_batch_size: positiveInt(
+      cfg['post_batch_size'],
+      DEFAULT_GENERATOR_CONFIG.post_batch_size,
+    ),
+    ...(maxClaimsPerOperator > 0 ? { maxClaimsPerOperator } : {}),
+    claimLeaseTtlSeconds: positiveInt(
+      cfg['claimLeaseTtlSeconds'] ?? legacyPolicy['claimLeaseTtlSeconds'],
+      DEFAULT_GENERATOR_CONFIG.claimLeaseTtlSeconds,
+    ),
     admissionMode,
   };
 }
@@ -204,33 +247,86 @@ function sweRebenchDefaultClaimPolicy(): TaskClaimPolicy {
   const defaults = contract?.claimPolicyDefaults;
   return {
     mode: defaults?.mode === 'serial' ? 'exclusive' : 'parallel',
-    maxClaims: defaults?.maxClaims ?? 50,
-    maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? 5,
+    maxClaims: defaults?.maxClaims ?? DEFAULT_GENERATOR_CONFIG.N_target_successes,
+    maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? DEFAULT_GENERATOR_CONFIG.N_target_successes,
     claimLeaseTtlSeconds: defaults?.claimLeaseTtlSeconds ?? 60 * 60,
   };
 }
 
-function normalizeClaimPolicy(raw: unknown): TaskClaimPolicy {
+function claimPolicyForPosting(
+  genConfig: GeneratorConfig,
+  remainingTargetSuccesses: number,
+): TaskClaimPolicy {
   const defaults = sweRebenchDefaultClaimPolicy();
-  const cfg = typeof raw === 'object' && raw !== null
-    ? raw as { claimPolicy?: unknown }
-    : {};
-  const policy = typeof cfg.claimPolicy === 'object' && cfg.claimPolicy !== null
-    ? cfg.claimPolicy as Record<string, unknown>
-    : {};
-  const maxClaims = positiveInt(policy.maxClaims, defaults.maxClaims);
+  const maxClaims = Math.max(1, remainingTargetSuccesses);
   const maxClaimsPerOperator = Math.min(
     maxClaims,
-    positiveInt(policy.maxClaimsPerOperator, defaults.maxClaimsPerOperator),
+    genConfig.maxClaimsPerOperator ?? maxClaims,
   );
   return {
     ...defaults,
     maxClaims,
     maxClaimsPerOperator,
-    claimLeaseTtlSeconds: positiveInt(
-      policy.claimLeaseTtlSeconds,
-      defaults.claimLeaseTtlSeconds,
-    ),
+    claimLeaseTtlSeconds: genConfig.claimLeaseTtlSeconds,
+  };
+}
+
+interface PublishedVettedPool {
+  scorableIds: Set<string> | null;
+  artifactRef: SolverNetArtifactRef | null;
+  mode: 'published' | 'published-from-local' | 'no-publication' | 'no-manifest';
+}
+
+async function resolvePublishedVettedPool(args: {
+  stateDir: string;
+  manifestCid: string | undefined;
+  store: ValidatedPoolStore;
+  nowIso: string;
+  ipfsRegistryUrl: string;
+  upload: typeof uploadToIpfs;
+}): Promise<PublishedVettedPool> {
+  if (!args.manifestCid) {
+    return { scorableIds: null, artifactRef: null, mode: 'no-manifest' };
+  }
+
+  const existing = await readVettedPoolArtifactPublication({
+    stateDir: args.stateDir,
+    manifestCid: args.manifestCid,
+    evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+  });
+  if (existing) {
+    return {
+      scorableIds: loadVettedPoolArtifactScorableEntries(existing.artifact).ids,
+      artifactRef: existing.ref,
+      mode: 'published',
+    };
+  }
+
+  const artifact = await exportScorableVettedPoolArtifact(args.store, EVAL_SEMANTICS_VERSION, {
+    generatedAt: args.nowIso,
+  });
+  if (!artifact || artifact.entries.length === 0) {
+    return { scorableIds: null, artifactRef: null, mode: 'no-publication' };
+  }
+
+  const artifactCid = await args.upload(args.ipfsRegistryUrl, artifact);
+  const artifactRef = createVettedPoolArtifactRef({
+    manifestCid: args.manifestCid,
+    artifactCid,
+    artifactHash: hashVettedPoolArtifact(artifact),
+    evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+    publishedAt: args.nowIso,
+  });
+  await writeVettedPoolArtifactPublication({
+    stateDir: args.stateDir,
+    ref: artifactRef,
+    artifact,
+    updatedAt: args.nowIso,
+  });
+  return {
+    scorableIds: loadVettedPoolArtifactScorableEntries(artifact).ids,
+    artifactRef,
+    mode: 'published-from-local',
   };
 }
 
@@ -261,7 +357,7 @@ async function maybeSignTask(
     window: task.window!,
     spec: task.spec ?? {},
     eligibility: task.eligibility ?? {},
-    claimPolicy: task.claimPolicy ?? normalizeClaimPolicy(undefined),
+    claimPolicy: task.claimPolicy ?? sweRebenchDefaultClaimPolicy(),
     creator: {
       safeAddress: opts.creator.safeAddress,
       agentEoa: opts.creator.agentEoa,
@@ -282,57 +378,129 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   const stateStore = new GeneratorStateStore({ stateDir: config.stateDir });
   const validatedPoolStore = new ValidatedPoolStore({ stateDir: config.stateDir });
 
+  const poolCache = new PoolCacheStore({ stateDir: config.stateDir });
   let pool: PoolTask[] = [];
   let poolLoadedAt = 0;
+  let poolFromCache = false;
   let floorWarned = false;
+  let publicationWarned = false;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
   let lastPollSummary: SweRebenchV2GeneratorStateSnapshot['lastPollSummary'];
   let lastError: SweRebenchV2GeneratorStateSnapshot['lastError'];
   let totalPosted = 0;
   let lastPostedInstanceId: string | undefined;
+  let publishedPoolCache: PublishedVettedPool | null = null;
 
   async function refreshPool(): Promise<void> {
-    try {
-      pool = await loadSweRebenchV2Pool();
+    const result = await loadPoolWithCacheFallback({
+      loadPool: loadSweRebenchV2Pool,
+      cache: poolCache,
+      currentPool: pool,
+    });
+    pool = result.pool;
+    poolFromCache = result.fromCache;
+    lastError = result.error;
+    if (!result.error) {
+      // Fresh HF load — hold it for the full POOL_REFRESH_MS window.
       poolLoadedAt = Date.now();
-    } catch (err) {
-      // Non-fatal: keep the existing pool if already loaded
-      lastError = {
-        message: err instanceof Error ? err.message : String(err),
-        at: new Date().toISOString(),
-      };
+    }
+    if (result.fromCache) {
       console.warn(
-        `[swe-rebench-v2-gen] pool refresh failed (using ${pool.length} cached tasks):`,
-        err instanceof Error ? err.message : String(err),
+        `[swe-rebench-v2-gen] HF pool refresh failed; serving ${pool.length} tasks from disk cache — ` +
+        `generator stays live, will retry HF next poll: ${result.error?.message}`,
+      );
+    } else if (result.error) {
+      console.warn(
+        `[swe-rebench-v2-gen] pool refresh failed (pool size ${pool.length}): ${result.error.message}`,
       );
     }
   }
 
-  const tick = async (): Promise<Task | null> => {
+  const tick = async (): Promise<Task[] | null> => {
     const now = Date.now();
     const runtimeConfig = config.getGeneratorConfig
       ? config.getGeneratorConfig()
       : config.generatorConfig;
     const genConfig = normalizeGeneratorConfig(runtimeConfig);
-    const claimPolicy = normalizeClaimPolicy(runtimeConfig);
 
-    // Refresh pool if stale or empty
-    if (pool.length === 0 || now - poolLoadedAt > POOL_REFRESH_MS) {
+    // Refresh pool if stale, empty, or currently served from the disk cache
+    // (a cache-served pool retries HF every poll so the generator self-heals
+    // as soon as HF recovers — #466).
+    if (pool.length === 0 || poolFromCache || now - poolLoadedAt > POOL_REFRESH_MS) {
       await refreshPool();
     }
     if (pool.length === 0) {
-      lastPollSummary = { poolSize: 0, posted: 0, skipped: 0 };
+      lastPollSummary = {
+        poolSize: 0,
+        posted: 0,
+        unposted: 0,
+        live: 0,
+        repostable: 0,
+        saturated: 0,
+        abandoned: 0,
+      };
       return null;
     }
     lastPollAt = new Date(now).toISOString();
 
-    // Restrict to instances we can actually score (validated gold-patch pool).
-    // In required mode (default): absent or stale admission data → empty pool,
-    // emit a startup warning. In python-floor mode (local/dev opt-in): fall
-    // back to Python-only instances when no validation data exists.
-    // See jinn-mono-uy6v.9.
-    const scorableIds = await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION);
+    let publishedPool: PublishedVettedPool | null = publishedPoolCache;
+    if (!publishedPool) {
+      publishedPool = await resolvePublishedVettedPool({
+        stateDir: config.stateDir,
+        manifestCid: config.solverNetManifestCid,
+        store: validatedPoolStore,
+        nowIso: lastPollAt,
+        ipfsRegistryUrl:
+          config.ipfsRegistryUrl ??
+          process.env['JINN_IPFS_REGISTRY_URL'] ??
+          DEFAULT_IPFS_REGISTRY_URL,
+        upload: uploadToIpfs,
+      }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = {
+          message: `vetted pool publication failed: ${message}`,
+          at: new Date().toISOString(),
+        };
+        console.warn(`[swe-rebench-v2-gen] ${lastError.message}`);
+        return null;
+      });
+      if (publishedPool?.artifactRef) {
+        publishedPoolCache = publishedPool;
+      }
+    }
+    if (publishedPool === null) {
+      lastPollSummary = {
+        poolSize: 0,
+        posted: 0,
+        unposted: 0,
+        live: 0,
+        repostable: 0,
+        saturated: 0,
+        abandoned: 0,
+      };
+      return null;
+    }
+    if (
+      genConfig.admissionMode === 'required' &&
+      publishedPool.mode === 'no-manifest' &&
+      !publicationWarned
+    ) {
+      publicationWarned = true;
+      console.warn(
+        `[swe-rebench-v2-gen] no solverNetManifestCid is available, so the launcher cannot stamp a vetted pool artifact ref; admissionMode='required' is fail-closed.`,
+      );
+    }
+
+    // Restrict to instances in the launcher's published pool artifact. If the
+    // launcher has no publication yet but local scorable data exists, the
+    // helper above publishes it once before this filter runs. Python-floor is
+    // preserved only for local/dev generators.
+    const scorableIds = publishedPool.artifactRef
+      ? publishedPool.scorableIds
+      : genConfig.admissionMode === 'python-floor'
+        ? await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION)
+        : null;
     const { pool: eligiblePool, mode: poolMode } = filterToScorablePool(
       pool,
       scorableIds,
@@ -354,7 +522,15 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       );
     }
     if (eligiblePool.length === 0) {
-      lastPollSummary = { poolSize: 0, posted: 0, skipped: 0 };
+      lastPollSummary = {
+        poolSize: 0,
+        posted: 0,
+        unposted: 0,
+        live: 0,
+        repostable: 0,
+        saturated: 0,
+        abandoned: 0,
+      };
       lastError = undefined;
       return null;
     }
@@ -365,83 +541,103 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       counters.set(task.instance_id, await stateStore.getCounters(task.instance_id));
     }
 
-    const mostRecentPostedAt = Math.max(
-      0,
-      ...Array.from(counters.values(), (c) => c.last_posted_at),
-    );
-    if (mostRecentPostedAt > 0 && now - mostRecentPostedAt < genConfig.cooldown_ms) {
-      lastPollSummary = { poolSize: eligiblePool.length, posted: 0, skipped: eligiblePool.length };
-      lastError = undefined;
-      return null;
-    }
-
-    const candidate = selectNextPostingCandidate({
+    const candidates = selectNextPostingCandidates({
       pool: eligiblePool,
       counters,
       config: genConfig,
       now,
       lastPostedLanguage,
     });
-    if (!candidate) {
-      lastPollSummary = { poolSize: eligiblePool.length, posted: 0, skipped: eligiblePool.length };
+    if (candidates.length === 0) {
+      lastPollSummary = summarizePoolState({
+        pool: eligiblePool,
+        counters,
+        config: genConfig,
+        now,
+        lastPostedLanguage,
+      });
       lastError = undefined;
       return null;
     }
 
-    // Record the posting
-    await stateStore.recordPosted(candidate.instance_id, now);
-    lastPostedLanguage = candidate.language;
-    totalPosted += 1;
-    lastPostedInstanceId = candidate.instance_id;
+    const tasks: Task[] = [];
+    for (const candidate of candidates) {
+      await stateStore.recordPosted(candidate.instance_id, now);
+      const afterRecord = await stateStore.getCounters(candidate.instance_id);
+      counters.set(candidate.instance_id, afterRecord);
+      lastPostedLanguage = candidate.language;
+      totalPosted += 1;
+      lastPostedInstanceId = candidate.instance_id;
 
-    // Build the Task
-    const deadlineUnix = Math.floor((now + 7 * 24 * 60 * 60 * 1000) / 1000); // 7-day window
-    const roundMonth = candidate.hf_split.replace('_', '-');
-    const windowEndTs = deadlineUnix * 1000;
+      const remainingTargetSuccesses = genConfig.N_target_successes - afterRecord.successful;
+      const deadlineUnix = Math.floor((now + genConfig.posting_window_ms) / 1000);
+      const roundMonth = candidate.hf_split.replace('_', '-');
+      const windowEndTs = deadlineUnix * 1000;
 
-    const spec = SweRebenchV2TaskSchema.parse({
-      schemaVersion: 'swe-rebench-v2.v1',
-      instance_id: candidate.instance_id,
-      repo: candidate.repo ?? repoFromInstanceId(candidate.instance_id),
-      base_commit: candidate.base_commit ?? '0000000000000000000000000000000000000000',
-      language: normalizeLanguage(candidate),
-      problem_statement:
-        candidate.problem_statement ?? `SWE-rebench v2 instance: ${candidate.instance_id}`,
-      interface: candidate.interface ?? '',
-      hf_dataset: candidate.hf_dataset,
-      hf_split: candidate.hf_split,
-      deadline_unix: deadlineUnix,
-      round_month: roundMonth,
-    });
-
-    const task: Task = {
-      id: randomUUID(),
-      description: `SWE-rebench v2: ${candidate.instance_id}`,
-      solverType: SOLVER_TYPE,
-      contractId: CONTRACT_ID,
-      contractVersion: CONTRACT_VERSION,
-      ...(config.solverNetManifestCid
-        ? { solverNetManifestCid: config.solverNetManifestCid }
-        : {}),
-      role: 'restoration',
-      window: {
-        startTs: now,
-        endTs: windowEndTs,
-      },
-      claimPolicy,
-      spec,
-      eligibility: {
+      const spec = SweRebenchV2TaskSchema.parse({
+        schemaVersion: 'swe-rebench-v2.v1',
+        instance_id: candidate.instance_id,
+        repo: candidate.repo ?? repoFromInstanceId(candidate.instance_id),
+        base_commit: candidate.base_commit ?? '0000000000000000000000000000000000000000',
+        language: normalizeLanguage(candidate),
+        problem_statement:
+          candidate.problem_statement ?? `SWE-rebench v2 instance: ${candidate.instance_id}`,
+        interface: candidate.interface ?? '',
         hf_dataset: candidate.hf_dataset,
         hf_split: candidate.hf_split,
-        instance_id: candidate.instance_id,
-        generatorConfig: genConfig,
-      },
-    };
+        deadline_unix: deadlineUnix,
+        round_month: roundMonth,
+      });
 
-    console.log(`[swe-rebench-v2-gen] posting ${candidate.instance_id}`);
-    lastPollSummary = { poolSize: eligiblePool.length, posted: 1, skipped: 0 };
+      tasks.push({
+        id: randomUUID(),
+        description: `SWE-rebench v2: ${candidate.instance_id}`,
+        solverType: SOLVER_TYPE,
+        contractId: CONTRACT_ID,
+        contractVersion: CONTRACT_VERSION,
+        ...(config.solverNetManifestCid
+          ? { solverNetManifestCid: config.solverNetManifestCid }
+          : {}),
+        role: 'restoration',
+        window: {
+          startTs: now,
+          endTs: windowEndTs,
+        },
+        claimPolicy: claimPolicyForPosting(genConfig, remainingTargetSuccesses),
+        spec,
+        eligibility: {
+          hf_dataset: candidate.hf_dataset,
+          hf_split: candidate.hf_split,
+          instance_id: candidate.instance_id,
+          posted_count_after_record: afterRecord.posted,
+          generatorConfig: genConfig,
+          ...(publishedPool.artifactRef
+            ? { [VETTED_POOL_REF_ELIGIBILITY_KEY]: publishedPool.artifactRef }
+            : {}),
+        },
+      });
+    }
+
+    console.log(
+      `[swe-rebench-v2-gen] posting ${candidates.length} instance(s): ` +
+      candidates.map((candidate) => candidate.instance_id).join(', '),
+    );
+    lastPollSummary = {
+      ...summarizePoolState({
+        pool: eligiblePool,
+        counters,
+        config: genConfig,
+        now,
+        lastPostedLanguage,
+      }),
+      posted: tasks.length,
+    };
     lastError = undefined;
-    return maybeSignTask(task, { creator: config.creator, createdAt: now });
+    const signed: Task[] = [];
+    for (const task of tasks) {
+      signed.push(await maybeSignTask(task, { creator: config.creator, createdAt: now }));
+    }
+    return signed.length > 0 ? signed : null;
   };
 
   return Object.assign(tick, {
@@ -501,6 +697,7 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
     stateDir,
     getGeneratorConfig: () => configRef.current,
     solverNetManifestCid: recordRef.current.manifestCid,
+    ipfsRegistryUrl: staticConfig.ipfsRegistryUrl,
     creator: {
       agentEoa: staticConfig.agentEoa,
       safeAddress: staticConfig.safeAddress,

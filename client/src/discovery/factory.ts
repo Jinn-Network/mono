@@ -1,9 +1,18 @@
 /**
  * createDiscoveryAPI factory — builds a DiscoveryAPI from the daemon config.
  *
- * Selects the primary implementation per config.discovery.mode, always builds
- * an OnchainDiscoveryAPI floor, and returns a withFallback composition when
- * fallbackToOnchain is true (the default).
+ * Selects the primary implementation per config.discovery.mode, builds an
+ * OnchainDiscoveryAPI floor *only* when `fallbackToOnchain` is explicitly
+ * `true`, and returns a withFallback composition in that case.
+ *
+ * `fallbackToOnchain` defaults to `false` (since the 2026-05-23 substrate
+ * incident): silent fall-through to direct `eth_getLogs` masks indexer
+ * outages and turns every daemon into its own indexer, which storms shared
+ * RPC quota. Operators opt in explicitly when they want the fallback —
+ * usually only when they self-host an alternate RPC with generous getLogs
+ * quotas. When `false`, an indexer outage propagates as
+ * DiscoveryUnavailableError so the operator-app surfaces it and the daemon
+ * stops claiming until the indexer is back.
  *
  * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.1–9.2.
  */
@@ -56,31 +65,33 @@ export interface DiscoveryConfig {
  *   - 'http'      → HttpDiscoveryAPI backed by a Ponder GraphQL endpoint (280n.4)
  *   - 'embedded'  → not yet shipped (280n.5); throws at boot
  *
- * When `fallbackToOnchain` is true (default), the primary is wrapped in
- * withFallback(primary, floor). When false, the primary is returned directly.
+ * When `fallbackToOnchain` is true (explicit opt-in), the primary is wrapped
+ * in withFallback(primary, floor) and a boot warning is logged so operators
+ * can see they're in fall-through mode. The default is false: the primary is
+ * returned directly and an indexer outage surfaces as
+ * DiscoveryUnavailableError.
  */
 export function createDiscoveryAPI(
   config: DiscoveryConfig,
   deps: DiscoveryFactoryDeps,
 ): DiscoveryAPI {
   const mode = config.mode ?? 'onchain';
-  const fallbackToOnchain = config.fallbackToOnchain ?? true;
-
-  // Always build the on-chain floor — it's the always-live fallback.
-  const floor = createOnchainDiscoveryAPI({
-    rpcUrl: deps.rpcUrl,
-    chainId: deps.chainId,
-    routerAddress: deps.routerAddress,
-    identityRegistryAddress: deps.identityRegistryAddress,
-    safeAddress: deps.safeAddress,
-    mechAddress: deps.mechAddress,
-    taskDiscoveryFromBlock: deps.taskDiscoveryFromBlock,
-  });
+  // Default-off (since the 2026-05-23 substrate incident): silent fall-through
+  // to on-chain getLogs is opt-in. See docstring above.
+  const fallbackToOnchain = config.fallbackToOnchain ?? false;
 
   if (mode === 'onchain') {
-    // For the floor-only mode, return directly — withFallback(floor, floor)
+    // For the floor-only mode, return the floor alone — withFallback(floor, floor)
     // would be pointless overhead.
-    return floor;
+    return createOnchainDiscoveryAPI({
+      rpcUrl: deps.rpcUrl,
+      chainId: deps.chainId,
+      routerAddress: deps.routerAddress,
+      identityRegistryAddress: deps.identityRegistryAddress,
+      safeAddress: deps.safeAddress,
+      mechAddress: deps.mechAddress,
+      taskDiscoveryFromBlock: deps.taskDiscoveryFromBlock,
+    });
   }
 
   if (mode === 'http') {
@@ -102,6 +113,26 @@ export function createDiscoveryAPI(
     if (!fallbackToOnchain) {
       return primary;
     }
+
+    // Operator explicitly opted in to silent fall-through. Log once at boot
+    // so the choice is visible — without this, operators can't tell from
+    // logs whether they're in indexer-only or indexer-with-fallback mode.
+    console.warn(
+      '[discovery] fallbackToOnchain=true — daemon will silently fall through to ' +
+      'eth_getLogs when the indexer is unreachable. This trades observability of ' +
+      'indexer outages for availability. Only recommended when you self-host an RPC ' +
+      'with generous getLogs quotas.',
+    );
+
+    const floor = createOnchainDiscoveryAPI({
+      rpcUrl: deps.rpcUrl,
+      chainId: deps.chainId,
+      routerAddress: deps.routerAddress,
+      identityRegistryAddress: deps.identityRegistryAddress,
+      safeAddress: deps.safeAddress,
+      mechAddress: deps.mechAddress,
+      taskDiscoveryFromBlock: deps.taskDiscoveryFromBlock,
+    });
 
     return withFallback(primary, floor);
   }

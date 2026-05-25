@@ -5,34 +5,26 @@ import { memoryLocation } from 'wouter/memory-location';
 import { Header } from './Header.js';
 
 describe('Header', () => {
-  it('renders brand, network chip, RPC health, and master address', () => {
+  it('renders the brand and network chip', () => {
     const { hook } = memoryLocation({ path: '/overview' });
     render(
       <Router hook={hook}>
-        <Header
-          network="testnet"
-          rpcHealthy={true}
-          masterAddress="0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF"
-        />
+        <Header network="testnet" />
       </Router>,
     );
     expect(screen.getByText(/jinn operator/i)).toBeTruthy();
     expect(screen.getByText(/testnet/i)).toBeTruthy();
-    expect(screen.getByText(/rpc healthy/i)).toBeTruthy();
-    expect(screen.getByText(/0xE64b…B5CF/)).toBeTruthy();
   });
 
-  it('shows rpc unreachable when not healthy', () => {
+  it('does not surface RPC health or the master address — both moved into the right rail cards', () => {
     const { hook } = memoryLocation({ path: '/overview' });
     render(
       <Router hook={hook}>
-        <Header
-          network="testnet"
-          rpcHealthy={false}
-          masterAddress="0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF"
-        />
+        <Header network="testnet" />
       </Router>,
     );
-    expect(screen.getByText(/rpc unreachable/i)).toBeTruthy();
+    expect(screen.queryByText(/rpc healthy/i)).toBeNull();
+    expect(screen.queryByText(/rpc unreachable/i)).toBeNull();
+    expect(screen.queryByText(/master /i)).toBeNull();
   });
 });

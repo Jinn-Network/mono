@@ -1,12 +1,36 @@
 // client/src/harnesses/impls/hermes-agent/harness.ts
-import type { Harness, HarnessContext, Solution } from '../../types.js';
+import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
 import { HERMES_AGENT_HARNESS } from '../../names.js';
 import type { HermesHarnessAdapter } from './adapter.js';
 import { harvestOutput } from '../learner/harvest.js';
+import {
+  probeHermesDoctor,
+  probeHermesAuthStatus,
+  probeOpenRouterCredit,
+  DEFAULT_OPENROUTER_CREDIT_FLOOR_USD,
+  type OpenRouterCreditConfig,
+} from '../../../api/hermes-doctor-endpoint.js';
 
 export interface HermesHarnessConfig {
   adapter: HermesHarnessAdapter;
   version?: string;
+  /** Hermes binary path used by `isReady()`. Defaults to `hermes` (PATH lookup). */
+  hermesPath?: string;
+  /** Timeout for the `hermes doctor` probe. Defaults to 30s. */
+  hermesDoctorTimeoutMs?: number;
+  /**
+   * Per-task OpenRouter credit floor in USD. Below this, `isReady()` reports
+   * not-ready with a top-up nextStep. Defaults to
+   * {@link DEFAULT_OPENROUTER_CREDIT_FLOOR_USD}. Tests can inject a custom
+   * `creditProbe` to bypass the network probe entirely.
+   */
+  openrouterCreditFloorUsd?: number;
+  /**
+   * Optional injection point for the OpenRouter credit probe — tests use this
+   * to mock the network round-trip. Production code lets the harness call the
+   * exported `probeOpenRouterCredit` directly.
+   */
+  creditProbe?: (config: OpenRouterCreditConfig) => Promise<Awaited<ReturnType<typeof probeOpenRouterCredit>>>;
 }
 
 /**
@@ -26,10 +50,116 @@ export class HermesHarness implements Harness {
   readonly version: string;
   readonly freezeStateHashIgnore = ['auth', 'auth.json', 'bin/tirith', '.env', 'config.yaml'] as const;
   private readonly adapter: HermesHarnessAdapter;
+  private readonly hermesPath: string | undefined;
+  private readonly hermesDoctorTimeoutMs: number | undefined;
+  private readonly openrouterCreditFloorUsd: number;
+  private readonly creditProbe: (config: OpenRouterCreditConfig) => Promise<Awaited<ReturnType<typeof probeOpenRouterCredit>>>;
 
   constructor(config: HermesHarnessConfig) {
     this.adapter = config.adapter;
     this.version = config.version ?? '0.1.0';
+    this.hermesPath = config.hermesPath;
+    this.hermesDoctorTimeoutMs = config.hermesDoctorTimeoutMs;
+    this.openrouterCreditFloorUsd = config.openrouterCreditFloorUsd ?? DEFAULT_OPENROUTER_CREDIT_FLOOR_USD;
+    this.creditProbe = config.creditProbe ?? probeOpenRouterCredit;
+  }
+
+  /**
+   * Readiness probe — shells out to `hermes doctor` via the shared
+   * `probeHermesDoctor` helper (same logic the SPA precheck endpoint
+   * uses). Reports:
+   *   - `installed: false` → binary not on PATH → ready=false with install
+   *     nextStep so the operator sees an actionable message instead of
+   *     N/N failed claims (#330).
+   *   - `exitCode !== 0` → binary exists but `hermes doctor` reports a
+   *     configuration problem (e.g. provider not signed in) → ready=false
+   *     with a nextStep that points at the SPA precheck panel.
+   *   - OpenRouter has no usable credential → ready=false. `hermes doctor`
+   *     exits 0 even when every provider is logged out (it treats missing
+   *     providers as warnings), so this third gate probes `hermes auth list
+   *     openrouter` directly. `auth list` reads the credential pool, so it
+   *     recognises API-key credentials (the normal `OPENROUTER_API_KEY`
+   *     setup) as well as OAuth — unlike `auth status`, which only reflects
+   *     interactive-OAuth-login state. Hermes is OpenRouter-only, so an
+   *     OpenRouter with no usable credential means Hermes has no model
+   *     provider and every claim would burn (#332/#330/#348).
+   *   - OpenRouter credential is present but credit is exhausted → ready=false.
+   *     Production bug, 2026-05-23: `auth list openrouter` reported the
+   *     api_key credential as healthy, but every solve attempt for the day
+   *     returned HTTP 402 ("This request requires more credits, or fewer
+   *     max_tokens.") and the harness silently burned 12 claims. The fourth
+   *     gate probes `GET https://openrouter.ai/api/v1/key` to verify the
+   *     credential has spendable credit at or above the per-task floor.
+   *     Fail-safe: network errors and non-200 responses are treated as
+   *     unknown (ready), not exhausted, so a transient OpenRouter outage
+   *     doesn't shut every operator down. Only a clearly-confirmed
+   *     insufficient-credit signal flips ready=false.
+   *   - all four gates pass → ready=true.
+   */
+  async isReady(_ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<ReadyStatus> {
+    const config: { hermesPath?: string; hermesDoctorTimeoutMs?: number } = {};
+    if (this.hermesPath !== undefined) config.hermesPath = this.hermesPath;
+    if (this.hermesDoctorTimeoutMs !== undefined) config.hermesDoctorTimeoutMs = this.hermesDoctorTimeoutMs;
+    const result = probeHermesDoctor(config);
+    if (!result.installed) {
+      return {
+        ready: false,
+        reason: 'hermes binary not installed',
+        nextStep: {
+          description:
+            'Install the Hermes agent runner — see the Hermes precheck panel in the operator dashboard for the install command.',
+        },
+      };
+    }
+    if (result.exitCode !== 0) {
+      const stderr = result.stderr.trim();
+      const stdout = result.stdout.trim();
+      const detail = stderr.length > 0 ? stderr : stdout;
+      return {
+        ready: false,
+        reason: `hermes doctor exit ${result.exitCode}${detail ? `: ${detail}` : ''}`,
+        nextStep: {
+          description:
+            'Run `hermes doctor` locally to surface the configuration problem, or open the Hermes precheck panel in the operator dashboard to sign in / select a provider.',
+        },
+      };
+    }
+    // Third gate: `hermes doctor` exits 0 even when every model provider is
+    // logged out. Hermes is OpenRouter-only, so probe OpenRouter auth
+    // directly — a logged-out OpenRouter means Hermes cannot run a task.
+    const auth = probeHermesAuthStatus('openrouter', config);
+    if (!auth.authed) {
+      return {
+        ready: false,
+        reason: 'OpenRouter not connected — Hermes has no usable model provider',
+        nextStep: {
+          description:
+            'Connect OpenRouter — sign in via the Hermes precheck panel in the operator dashboard, or run `hermes login` locally.',
+        },
+      };
+    }
+    // Fourth gate: probe OpenRouter's `/api/v1/key` for spendable credit.
+    // Catches the case where the credential is present and pool-healthy but
+    // the account is out of money — without this, the harness burns claims
+    // on 402 responses (production bug, 2026-05-23). Fail-safe: only a
+    // clearly-confirmed exhausted state flips ready=false.
+    const credit = await this.creditProbe({ floorUsd: this.openrouterCreditFloorUsd });
+    if (credit.state === 'exhausted') {
+      const remaining = typeof credit.remainingUsd === 'number'
+        ? `$${credit.remainingUsd.toFixed(2)}`
+        : 'below floor';
+      const floor = `$${credit.floorUsd.toFixed(2)}`;
+      return {
+        ready: false,
+        reason: `OpenRouter credit insufficient for the next solve — remaining ${remaining} < floor ${floor}`,
+        nextStep: {
+          description:
+            'OpenRouter credit insufficient for the next solve — top up at https://openrouter.ai/credits, then re-check readiness.',
+          url: 'https://openrouter.ai/credits',
+        },
+      };
+    }
+    return { ready: true };
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {

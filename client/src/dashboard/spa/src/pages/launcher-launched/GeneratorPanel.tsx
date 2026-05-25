@@ -5,6 +5,13 @@ import type {
   SolverNetManifestV1,
 } from '../../api/types.js';
 import type { CreateWizardTemplate } from '../launcher-create/templates.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Button } from '../../components/ui/button.js';
+import { Card } from '../../components/ui/card.js';
+import { Input } from '../../components/ui/input.js';
+import { Label } from '../../components/ui/label.js';
+import { Separator } from '../../components/ui/separator.js';
+import { cn } from '../../lib/utils.js';
 import { formatTimestamp } from './helpers.js';
 
 /**
@@ -24,7 +31,6 @@ import { formatTimestamp } from './helpers.js';
  */
 
 const MIN_CADENCE_MS = 60_000;
-const SWE_REBENCH_V2_MIN_COOLDOWN_MS = 60_000;
 
 export interface GeneratorPanelProps {
   record: LaunchedSolverNetRecord;
@@ -47,8 +53,8 @@ interface FormState {
 interface SweRebenchV2FormState {
   N_target_successes: string;
   N_max_postings_per_task: string;
-  cooldown_ms: string;
-  maxClaims: string;
+  posting_window_ms: string;
+  post_batch_size: string;
   maxClaimsPerOperator: string;
   claimLeaseTtlSeconds: string;
 }
@@ -80,20 +86,20 @@ function initialSweRebenchV2Form(
   const c = config ?? {};
   const policy = readClaimPolicyConfig(c.claimPolicy);
   const defaults = manifest?.contract.claimPolicyDefaults ?? {
-    maxClaims: 50,
+    maxClaims: 5,
     maxClaimsPerOperator: 5,
     claimLeaseTtlSeconds: 60 * 60,
   };
   return {
     N_target_successes: stringField(c.N_target_successes),
     N_max_postings_per_task: stringField(c.N_max_postings_per_task),
-    cooldown_ms: stringField(c.cooldown_ms),
-    maxClaims: stringField(policy.maxClaims ?? defaults.maxClaims),
+    posting_window_ms: stringField(c.posting_window_ms),
+    post_batch_size: stringField(c.post_batch_size),
     maxClaimsPerOperator: stringField(
-      policy.maxClaimsPerOperator ?? defaults.maxClaimsPerOperator,
+      c.maxClaimsPerOperator ?? policy.maxClaimsPerOperator ?? defaults.maxClaimsPerOperator,
     ),
     claimLeaseTtlSeconds: stringField(
-      policy.claimLeaseTtlSeconds ?? defaults.claimLeaseTtlSeconds,
+      c.claimLeaseTtlSeconds ?? policy.claimLeaseTtlSeconds ?? defaults.claimLeaseTtlSeconds,
     ),
   };
 }
@@ -195,33 +201,12 @@ export function buildSweRebenchV2Patch(
 
   const parsedTarget = parsePositiveInt(form.N_target_successes);
   const parsedMaxPostings = parsePositiveInt(form.N_max_postings_per_task);
-  const parsedMaxClaims = parsePositiveInt(form.maxClaims);
-  const parsedMaxClaimsPerOperator = parsePositiveInt(form.maxClaimsPerOperator);
 
   for (const key of [
     'N_target_successes',
     'N_max_postings_per_task',
-    'cooldown_ms',
-  ] as const) {
-    if (form[key] === prior[key]) continue;
-    if (form[key].trim().length === 0) continue;
-    const parsed = parsePositiveInt(form[key]);
-    if (parsed === null) {
-      errors[key] = key === 'cooldown_ms'
-        ? 'Must be a positive integer (ms).'
-        : 'Must be a positive integer.';
-      continue;
-    }
-    if (key === 'cooldown_ms' && parsed < SWE_REBENCH_V2_MIN_COOLDOWN_MS) {
-      errors[key] = `Cooldown must be at least ${SWE_REBENCH_V2_MIN_COOLDOWN_MS / 1000}s.`;
-      continue;
-    }
-    patch[key] = parsed;
-  }
-
-  const claimPolicyPatch: Record<string, unknown> = {};
-  for (const key of [
-    'maxClaims',
+    'posting_window_ms',
+    'post_batch_size',
     'maxClaimsPerOperator',
     'claimLeaseTtlSeconds',
   ] as const) {
@@ -229,15 +214,14 @@ export function buildSweRebenchV2Patch(
     if (form[key].trim().length === 0) continue;
     const parsed = parsePositiveInt(form[key]);
     if (parsed === null) {
-      errors[key] = key === 'claimLeaseTtlSeconds'
-        ? 'Must be a positive integer (seconds).'
+      errors[key] = key === 'posting_window_ms'
+        ? 'Must be a positive integer (ms).'
+        : key === 'claimLeaseTtlSeconds'
+          ? 'Must be a positive integer (seconds).'
         : 'Must be a positive integer.';
       continue;
     }
-    claimPolicyPatch[key] = parsed;
-  }
-  if (Object.keys(claimPolicyPatch).length > 0) {
-    patch.claimPolicy = claimPolicyPatch;
+    patch[key] = parsed;
   }
 
   if (
@@ -247,14 +231,6 @@ export function buildSweRebenchV2Patch(
   ) {
     errors.N_max_postings_per_task =
       'Max postings must be >= target successes.';
-  }
-  if (
-    parsedMaxClaims !== null &&
-    parsedMaxClaimsPerOperator !== null &&
-    parsedMaxClaimsPerOperator > parsedMaxClaims
-  ) {
-    errors.maxClaimsPerOperator =
-      'Claims per operator must be <= max claims.';
   }
 
   return {
@@ -281,6 +257,7 @@ function isSweRebenchV2Record(
   return (
     Object.prototype.hasOwnProperty.call(config, 'N_target_successes') ||
     Object.prototype.hasOwnProperty.call(config, 'N_max_postings_per_task') ||
+    Object.prototype.hasOwnProperty.call(config, 'posting_window_ms') ||
     Object.prototype.hasOwnProperty.call(config, 'cooldown_ms')
   );
 }
@@ -295,6 +272,66 @@ export function GeneratorPanel({
     return <SweRebenchV2GeneratorPanel record={record} manifest={manifest} onSave={onSave} />;
   }
   return <PredictionGeneratorPanel record={record} onSave={onSave} />;
+}
+
+function PanelShell({
+  record,
+  configExpanded,
+  setConfigExpanded,
+  children,
+}: {
+  record: LaunchedSolverNetRecord;
+  configExpanded: boolean;
+  setConfigExpanded: (next: boolean | ((prev: boolean) => boolean)) => void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <Card
+      data-testid="launcher-launched-generator-panel"
+      role="region"
+      aria-label="Generator"
+      className="flex flex-col gap-4 p-6"
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <h2 className="m-0 font-serif text-[22px] font-normal text-foreground">
+            Generator
+          </h2>
+          <GeneratorStatusBadge record={record} />
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          data-testid="launcher-launched-generator-toggle"
+          aria-expanded={configExpanded}
+          aria-controls="launcher-launched-generator-config"
+          onClick={() => setConfigExpanded((expanded) => !expanded)}
+        >
+          {configExpanded ? 'Hide config' : 'Edit config'}
+        </Button>
+      </header>
+
+      <dl className="m-0 grid gap-y-2 gap-x-4 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+        <MetaItem
+          label="Last poll"
+          value={formatTimestamp(record.generatorState?.lastPollAt)}
+          testid="launcher-launched-generator-last-poll"
+        />
+        <MetaItem
+          label="Generator enabled"
+          value={record.generatorEnabled ? 'yes' : 'no'}
+          testid="launcher-launched-generator-enabled"
+        />
+      </dl>
+
+      <GeneratorPoolSummary record={record} />
+
+      {record.generatorState?.lastError && <GeneratorError record={record} />}
+
+      {children}
+    </Card>
+  );
 }
 
 function PredictionGeneratorPanel({ record, onSave }: GeneratorPanelProps): JSX.Element {
@@ -345,84 +382,23 @@ function PredictionGeneratorPanel({ record, onSave }: GeneratorPanelProps): JSX.
   };
 
   return (
-    <section
-      data-testid="launcher-launched-generator-panel"
-      style={panelStyle}
+    <PanelShell
+      record={record}
+      configExpanded={configExpanded}
+      setConfigExpanded={setConfigExpanded}
     >
-      <header style={headerStyle}>
-        <div style={titleRowStyle}>
-          <h2 style={titleStyle}>Generator</h2>
-          <GeneratorStatusBadge record={record} />
-        </div>
-        <button
-          type="button"
-          data-testid="launcher-launched-generator-toggle"
-          aria-expanded={configExpanded}
-          aria-controls="launcher-launched-generator-config"
-          onClick={() => setConfigExpanded((expanded) => !expanded)}
-          style={toggleButtonStyle}
-        >
-          {configExpanded ? 'Hide config' : 'Edit config'}
-        </button>
-      </header>
-
-      <dl style={metaGridStyle}>
-        <MetaItem
-          label="Last poll"
-          value={formatTimestamp(record.generatorState?.lastPollAt)}
-          testid="launcher-launched-generator-last-poll"
-        />
-        <MetaItem
-          label="Generator enabled"
-          value={record.generatorEnabled ? 'yes' : 'no'}
-          testid="launcher-launched-generator-enabled"
-        />
-      </dl>
-
-      {record.generatorState?.lastError && (
-        <div
-          data-testid="launcher-launched-generator-error"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--break-red)',
-            borderRadius: 'var(--radius-2)',
-            padding: '12px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-          }}
-        >
-          <span
-            style={{
-              color: 'var(--break-red)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              fontWeight: 500,
-            }}
-          >
-            Last error · {formatTimestamp(record.generatorState.lastError.at)}
-          </span>
-          <span
-            style={{
-              color: 'var(--fg-muted)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-            }}
-          >
-            {record.generatorState.lastError.message}
-          </span>
-        </div>
-      )}
-
       {configExpanded && (
         <div
           id="launcher-launched-generator-config"
           data-testid="launcher-launched-generator-config"
-          style={configBodyStyle}
+          className="flex flex-col gap-3.5 pt-3.5"
         >
-          <h3 style={sectionHeadingStyle}>Hot-apply config</h3>
+          <Separator />
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--fg-dim)]">
+            Hot-apply config
+          </h3>
 
-          <div style={twoColumnGridStyle}>
+          <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
             <NumField
               label="Cadence (ms)"
               testid="launcher-launched-generator-cadenceMs"
@@ -497,7 +473,7 @@ function PredictionGeneratorPanel({ record, onSave }: GeneratorPanelProps): JSX.
           />
         </div>
       )}
-    </section>
+    </PanelShell>
   );
 }
 
@@ -549,51 +525,23 @@ function SweRebenchV2GeneratorPanel({
   };
 
   return (
-    <section
-      data-testid="launcher-launched-generator-panel"
-      style={panelStyle}
+    <PanelShell
+      record={record}
+      configExpanded={configExpanded}
+      setConfigExpanded={setConfigExpanded}
     >
-      <header style={headerStyle}>
-        <div style={titleRowStyle}>
-          <h2 style={titleStyle}>Generator</h2>
-          <GeneratorStatusBadge record={record} />
-        </div>
-        <button
-          type="button"
-          data-testid="launcher-launched-generator-toggle"
-          aria-expanded={configExpanded}
-          aria-controls="launcher-launched-generator-config"
-          onClick={() => setConfigExpanded((expanded) => !expanded)}
-          style={toggleButtonStyle}
-        >
-          {configExpanded ? 'Hide config' : 'Edit config'}
-        </button>
-      </header>
-
-      <dl style={metaGridStyle}>
-        <MetaItem
-          label="Last poll"
-          value={formatTimestamp(record.generatorState?.lastPollAt)}
-          testid="launcher-launched-generator-last-poll"
-        />
-        <MetaItem
-          label="Generator enabled"
-          value={record.generatorEnabled ? 'yes' : 'no'}
-          testid="launcher-launched-generator-enabled"
-        />
-      </dl>
-
-      {record.generatorState?.lastError && <GeneratorError record={record} />}
-
       {configExpanded && (
         <div
           id="launcher-launched-generator-config"
           data-testid="launcher-launched-generator-config"
-          style={configBodyStyle}
+          className="flex flex-col gap-3.5 pt-3.5"
         >
-          <h3 style={sectionHeadingStyle}>Hot-apply config</h3>
+          <Separator />
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--fg-dim)]">
+            Hot-apply config
+          </h3>
 
-          <div style={twoColumnGridStyle}>
+          <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
             <NumField
               label="Target successful Verdicts per instance"
               testid="launcher-launched-generator-N_target_successes"
@@ -611,29 +559,31 @@ function SweRebenchV2GeneratorPanel({
               disabled={saving}
             />
             <NumField
-              label="Cooldown between task postings (ms)"
-              testid="launcher-launched-generator-cooldown_ms"
-              value={form.cooldown_ms}
-              onChange={(v) => set('cooldown_ms', v)}
-              error={validation.errors.cooldown_ms}
+              label="Posting window (ms)"
+              testid="launcher-launched-generator-posting_window_ms"
+              value={form.posting_window_ms}
+              onChange={(v) => set('posting_window_ms', v)}
+              error={validation.errors.posting_window_ms}
+              disabled={saving}
+            />
+            <NumField
+              label="Post batch size"
+              testid="launcher-launched-generator-post_batch_size"
+              value={form.post_batch_size}
+              onChange={(v) => set('post_batch_size', v)}
+              error={validation.errors.post_batch_size}
               disabled={saving}
             />
           </div>
 
-          <h3 style={sectionHeadingStyle}>Claim policy</h3>
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--fg-dim)]">
+            Claim policy
+          </h3>
 
-          <div style={threeColumnGridStyle}>
-            <NumField
-              label="Max claims per Task"
-              testid="launcher-launched-generator-claimPolicy-maxClaims"
-              value={form.maxClaims}
-              onChange={(v) => set('maxClaims', v)}
-              error={validation.errors.maxClaims}
-              disabled={saving}
-            />
+          <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
             <NumField
               label="Max claims per operator"
-              testid="launcher-launched-generator-claimPolicy-maxClaimsPerOperator"
+              testid="launcher-launched-generator-maxClaimsPerOperator"
               value={form.maxClaimsPerOperator}
               onChange={(v) => set('maxClaimsPerOperator', v)}
               error={validation.errors.maxClaimsPerOperator}
@@ -641,7 +591,7 @@ function SweRebenchV2GeneratorPanel({
             />
             <NumField
               label="Claim lease (seconds)"
-              testid="launcher-launched-generator-claimPolicy-claimLeaseTtlSeconds"
+              testid="launcher-launched-generator-claimLeaseTtlSeconds"
               value={form.claimLeaseTtlSeconds}
               onChange={(v) => set('claimLeaseTtlSeconds', v)}
               error={validation.errors.claimLeaseTtlSeconds}
@@ -658,7 +608,7 @@ function SweRebenchV2GeneratorPanel({
           />
         </div>
       )}
-    </section>
+    </PanelShell>
   );
 }
 
@@ -677,64 +627,77 @@ function GeneratorSaveRow({
 }): JSX.Element {
   const canSave = dirty && validationOk && !saving;
   return (
-    <div style={saveRowStyle}>
+    <div className="flex flex-col gap-2 pt-2">
+      <Separator />
+      <div className="flex items-center justify-between gap-3 pt-1">
       <SaveStatusLine status={saveStatus} />
-      <button
+      <Button
         type="button"
+        variant="default"
         data-testid="launcher-launched-generator-save"
         onClick={() => {
           void onSubmit();
         }}
         disabled={!canSave}
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-          padding: '10px 18px',
-          background: canSave ? 'var(--accent-sky)' : 'var(--bg-elevated)',
-          color: canSave ? 'var(--bg-sunken)' : 'var(--fg-dim)',
-          border: '1px solid var(--accent-sky)',
-          borderRadius: 'var(--radius-2)',
-          cursor: canSave ? 'pointer' : 'not-allowed',
-          opacity: canSave ? 1 : 0.7,
-        }}
       >
         {saving ? 'Saving…' : 'Save'}
-      </button>
+      </Button>
+      </div>
     </div>
   );
+}
+
+function GeneratorPoolSummary({ record }: { record: LaunchedSolverNetRecord }): JSX.Element | null {
+  const summary = record.generatorState?.lastPollSummary;
+  if (!isPoolSummary(summary)) return null;
+  return (
+    <dl
+      data-testid="launcher-launched-generator-pool-summary"
+      className="m-0 grid gap-y-2 gap-x-4 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]"
+    >
+      <MetaItem label="Pool" value={String(summary.poolSize)} testid="launcher-launched-generator-poolSize" />
+      <MetaItem label="Posted" value={String(summary.posted)} testid="launcher-launched-generator-posted" />
+      <MetaItem label="Unposted" value={String(summary.unposted)} testid="launcher-launched-generator-unposted" />
+      <MetaItem label="Live" value={String(summary.live)} testid="launcher-launched-generator-live" />
+      <MetaItem label="Repostable" value={String(summary.repostable)} testid="launcher-launched-generator-repostable" />
+      <MetaItem label="Saturated" value={String(summary.saturated)} testid="launcher-launched-generator-saturated" />
+      <MetaItem label="Abandoned" value={String(summary.abandoned)} testid="launcher-launched-generator-abandoned" />
+    </dl>
+  );
+}
+
+function isPoolSummary(value: unknown): value is {
+  poolSize: number;
+  posted: number;
+  unposted: number;
+  live: number;
+  repostable: number;
+  saturated: number;
+  abandoned: number;
+} {
+  if (typeof value !== 'object' || value === null) return false;
+  const summary = value as Record<string, unknown>;
+  return [
+    'poolSize',
+    'posted',
+    'unposted',
+    'live',
+    'repostable',
+    'saturated',
+    'abandoned',
+  ].every((key) => typeof summary[key] === 'number');
 }
 
 function GeneratorError({ record }: { record: LaunchedSolverNetRecord }): JSX.Element {
   return (
     <div
       data-testid="launcher-launched-generator-error"
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--break-red)',
-        borderRadius: 'var(--radius-2)',
-        padding: '12px 14px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px',
-      }}
+      className="flex flex-col gap-1 rounded-md border border-destructive bg-card p-3"
     >
-      <span
-        style={{
-          color: 'var(--break-red)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-          fontWeight: 500,
-        }}
-      >
+      <span className="font-mono text-[12px] font-medium text-destructive">
         Last error · {formatTimestamp(record.generatorState?.lastError?.at)}
       </span>
-      <span
-        style={{
-          color: 'var(--fg-muted)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-        }}
-      >
+      <span className="font-mono text-[12px] text-[var(--fg-muted)]">
         {record.generatorState?.lastError?.message}
       </span>
     </div>
@@ -748,28 +711,19 @@ function GeneratorStatusBadge({
 }): JSX.Element {
   const enabled = record.generatorEnabled;
   const errored = Boolean(record.generatorState?.lastError);
-  const tone = errored
-    ? { fg: 'var(--break-red)', label: 'Errored' }
-    : enabled
-      ? { fg: 'var(--vow-green)', label: 'Enabled' }
-      : { fg: 'var(--fg-dim)', label: 'Disabled' };
+  const tone: { variant: NonNullable<Parameters<typeof Badge>[0]['variant']>; label: string } =
+    errored
+      ? { variant: 'destructive', label: 'Errored' }
+      : enabled
+        ? { variant: 'success', label: 'Enabled' }
+        : { variant: 'outline', label: 'Disabled' };
   return (
-    <span
+    <Badge
       data-testid="launcher-launched-generator-state-badge"
-      style={{
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-        fontWeight: 500,
-        textTransform: 'uppercase',
-        letterSpacing: '0.14em',
-        color: tone.fg,
-        border: `1px solid ${tone.fg}`,
-        borderRadius: 'var(--radius-1)',
-        padding: '2px 8px',
-      }}
+      variant={tone.variant}
     >
       {tone.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -778,11 +732,7 @@ function SaveStatusLine({ status }: { status: SaveStatus }): JSX.Element {
     return (
       <span
         data-testid="launcher-launched-generator-save-status"
-        style={{
-          color: 'var(--fg-muted)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-        }}
+        className="font-mono text-[12px] text-[var(--fg-muted)]"
       >
         Saving…
       </span>
@@ -793,11 +743,9 @@ function SaveStatusLine({ status }: { status: SaveStatus }): JSX.Element {
     return (
       <span
         data-testid="launcher-launched-generator-save-status"
-        style={{
-          color: 'var(--vow-green)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-        }}
+        // var(--vow-green) is unmapped in tailwind config (no shadcn equivalent
+        // for the protocol "vow" tone); used here to mark a successful save.
+        className="font-mono text-[12px] text-[var(--vow-green)]"
       >
         Saved at {ts} UTC
       </span>
@@ -807,11 +755,7 @@ function SaveStatusLine({ status }: { status: SaveStatus }): JSX.Element {
     return (
       <span
         data-testid="launcher-launched-generator-save-status"
-        style={{
-          color: 'var(--break-red)',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px',
-        }}
+        className="font-mono text-[12px] text-destructive"
       >
         Save failed: {status.message}
       </span>
@@ -820,11 +764,7 @@ function SaveStatusLine({ status }: { status: SaveStatus }): JSX.Element {
   return (
     <span
       data-testid="launcher-launched-generator-save-status"
-      style={{
-        color: 'var(--fg-dim)',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '11px',
-      }}
+      className="font-mono text-[11px] text-[var(--fg-dim)]"
     >
       Edits hot-apply without restart.
     </span>
@@ -849,30 +789,32 @@ function NumField({
   disabled,
 }: NumFieldProps): JSX.Element {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <span style={fieldLabelStyle}>{label}</span>
-      <input
+    <div className="flex flex-col gap-1">
+      <Label
+        htmlFor={testid}
+        className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-dim)]"
+      >
+        {label}
+      </Label>
+      <Input
+        id={testid}
         data-testid={testid}
         type="text"
         inputMode="numeric"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        style={error ? inputErrorStyle : inputStyle}
+        className={cn(error && 'border-destructive')}
       />
       {error && (
         <span
           data-testid={`${testid}-error`}
-          style={{
-            fontSize: '11px',
-            color: 'var(--break-red)',
-            fontFamily: "'JetBrains Mono', monospace",
-          }}
+          className="font-mono text-[11px] text-destructive"
         >
           {error}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -892,18 +834,24 @@ function ListField({
   disabled,
 }: ListFieldProps): JSX.Element {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <span style={fieldLabelStyle}>{label}</span>
+    <div className="flex flex-col gap-1">
+      <Label
+        htmlFor={testid}
+        className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-dim)]"
+      >
+        {label}
+      </Label>
       <textarea
+        id={testid}
         data-testid={testid}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         rows={2}
         placeholder="0xabc…, 0xdef…"
-        style={{ ...inputStyle, resize: 'vertical' }}
+        className="flex w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[13px] text-foreground transition-colors placeholder:text-[var(--fg-dim)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       />
-    </label>
+    </div>
   );
 }
 
@@ -917,133 +865,16 @@ function MetaItem({
   testid?: string;
 }): JSX.Element {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-      <dt style={fieldLabelStyle}>{label}</dt>
+    <div className="flex flex-col gap-0.5">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-dim)]">
+        {label}
+      </dt>
       <dd
         data-testid={testid}
-        style={{
-          margin: 0,
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '13px',
-          color: 'var(--fg)',
-        }}
+        className="m-0 font-mono text-[13px] text-foreground"
       >
         {value}
       </dd>
     </div>
   );
 }
-
-const panelStyle: React.CSSProperties = {
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-3)',
-  padding: '20px 22px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '14px',
-};
-
-const headerStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '12px',
-  flexWrap: 'wrap',
-};
-
-const titleRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-  minWidth: 0,
-};
-
-const titleStyle: React.CSSProperties = {
-  margin: 0,
-  fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-  fontSize: '22px',
-  color: 'var(--fg)',
-  fontWeight: 400,
-};
-
-const toggleButtonStyle: React.CSSProperties = {
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  color: 'var(--fg)',
-  cursor: 'pointer',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '12px',
-  padding: '8px 12px',
-};
-
-const configBodyStyle: React.CSSProperties = {
-  borderTop: '1px solid var(--border)',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '14px',
-  paddingTop: '14px',
-};
-
-const sectionHeadingStyle: React.CSSProperties = {
-  margin: 0,
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-dim)',
-};
-
-const twoColumnGridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: '14px',
-};
-
-const threeColumnGridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-  gap: '14px',
-};
-
-const saveRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '12px',
-  paddingTop: '8px',
-  borderTop: '1px solid var(--border)',
-};
-
-const fieldLabelStyle: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '10px',
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  color: 'var(--fg-dim)',
-};
-
-const metaGridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-  gap: '8px 16px',
-  margin: 0,
-};
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-2)',
-  padding: '10px 12px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '13px',
-  color: 'var(--fg)',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const inputErrorStyle: React.CSSProperties = {
-  ...inputStyle,
-  border: '1px solid var(--break-red)',
-};

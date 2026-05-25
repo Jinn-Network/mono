@@ -342,6 +342,36 @@ describe('<JoinedNetCard />', () => {
     expect(screen.queryByTestId('joined-net-card-orphaned')).toBeNull();
   });
 
+  // Regression for #338: rvx in the v0.1.6 dogfood asked "what does 'stops
+  // claims' mean? and 'on the next restart' — does this mean it'll keep going
+  // until I restart?" The pre-fix copy said only "Leaving stops claims for
+  // this SolverNet on the next daemon restart." which was ambiguous on three
+  // axes: (a) what happens right now to the config, (b) what the running
+  // daemon does in the meantime, (c) what happens to in-flight tasks. The
+  // copy must now say all three explicitly.
+  it('Leave explainer covers immediate config removal, the until-restart behaviour, and the in-flight caveat (#338)', () => {
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={CATALOG} defaultExpanded />);
+    const explainer = screen.getByTestId('joined-net-card-leave-explainer');
+    const text = explainer.textContent ?? '';
+    // (a) immediate effect on config.
+    expect(text).toMatch(/removes this SolverNet from your config right away/i);
+    // (b) running daemon keeps going until restart.
+    expect(text).toMatch(/keeps? .*loaded copy in memory/i);
+    expect(text).toMatch(/until you restart/i);
+    // (c) in-flight task caveat.
+    expect(text).toMatch(/already in flight/i);
+  });
+
+  it('Retired-banner copy explains the post-leave restart step (#338)', async () => {
+    wrap(<JoinedNetCard joined={ENTRY} defaultExpanded />);
+    const banner = await waitFor(() =>
+      screen.getByTestId('joined-net-card-orphaned'),
+    );
+    const text = banner.textContent ?? '';
+    expect(text).toMatch(/removes the entry from your config/i);
+    expect(text).toMatch(/restart the daemon/i);
+  });
+
   describe('orphaned state (manifest fetch fails)', () => {
     it('shows the RETIRED banner and a Leave button, no edit form, when manifest fetch fails', async () => {
       // Card resolves internally; the suite-level mock makes both queries fail.
@@ -416,5 +446,81 @@ describe('<JoinedNetCard />', () => {
     fireEvent.click(screen.getByTestId('joined-net-card-save'));
     await waitFor(() => expect(api.operator.join).toHaveBeenCalled());
     expect(onRestart).not.toHaveBeenCalled();
+  });
+});
+
+describe('<JoinedNetCard /> — cost surfacing + confirmation gate (Issue #331 P0)', () => {
+  const HERMES_CATALOG: SolverNetCatalogEntry = {
+    name: 'Prediction Markets',
+    description: 'Predict things',
+    state: 'live',
+    contract: { id: 'prediction', version: 'v1' },
+    supportedRoles: ['solving', 'evaluating'],
+    compatibleHarnesses: [
+      { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+      { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving'] },
+    ],
+    compatiblePlugins: [],
+  };
+
+  it('renders the subscription reassurance row for Claude Code (no false-positive gate)', () => {
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={HERMES_CATALOG} defaultExpanded />);
+    expect(screen.getByTestId('joined-net-card-cost-subscription')).toBeTruthy();
+    expect(screen.getByTestId('joined-net-card-cost-subscription').textContent).toMatch(
+      /subscription/i,
+    );
+    expect(screen.queryByTestId('joined-net-card-cost-confirmation')).toBeNull();
+    expect(screen.queryByTestId('joined-net-card-cost-panel')).toBeNull();
+  });
+
+  it('shows the cost panel + confirmation when the operator switches to Hermes + Opus 4.7', async () => {
+    vi.mocked(api.operator.join).mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver', 'evaluator'] },
+    });
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={HERMES_CATALOG} defaultExpanded />);
+
+    fireEvent.change(screen.getByTestId('joined-net-card-harness-select'), {
+      target: { value: 'hermes-agent' },
+    });
+
+    // Hermes default model is anthropic/claude-opus-4.7 (Opus 4.7 via
+    // OpenRouter), well above the $1/task gate.
+    await waitFor(() =>
+      expect(screen.getByTestId('joined-net-card-cost-panel')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('joined-net-card-cost-panel').getAttribute('data-cost-high-cost')).toBe(
+      'true',
+    );
+    expect(screen.getByTestId('joined-net-card-cost-amount').textContent).toMatch(/\$2\.25/);
+    expect(screen.getByTestId('joined-net-card-cost-confirmation')).toBeTruthy();
+
+    // Save disabled until acknowledged.
+    const save = screen.getByTestId('joined-net-card-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.click(
+      screen.getByTestId('joined-net-card-cost-confirmation-checkbox'),
+    );
+    await waitFor(() => expect(save.disabled).toBe(false));
+
+    fireEvent.click(save);
+    await waitFor(() => expect(api.operator.join).toHaveBeenCalled());
+  });
+
+  it('does NOT show the confirmation gate when the model stays under $1/task', () => {
+    const sonnetEntry: JoinedNetEntry = {
+      ...ENTRY,
+      harness: 'hermes-agent',
+      model: 'deepseek/deepseek-v4-flash',
+    };
+    wrap(<JoinedNetCard joined={sonnetEntry} catalogEntry={HERMES_CATALOG} defaultExpanded />);
+    expect(screen.getByTestId('joined-net-card-cost-panel')).toBeTruthy();
+    expect(screen.getByTestId('joined-net-card-cost-panel').getAttribute('data-cost-high-cost')).toBe(
+      'false',
+    );
+    expect(screen.queryByTestId('joined-net-card-cost-confirmation')).toBeNull();
   });
 });

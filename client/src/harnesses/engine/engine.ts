@@ -15,6 +15,11 @@ import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput }
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
+  reapWorkDirs,
+  DEFAULT_ORPHAN_MAX_AGE_MS,
+  type ReapWorkDirsReport,
+} from './work-dir-reaper.js';
+import {
   provisionWorkingDir,
   provisionImplStateDir,
   walkArtifacts,
@@ -308,6 +313,28 @@ export interface TaskEngineOptions {
    * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.3
    */
   harnessMode?: 'train' | 'frozen';
+  /**
+   * Working-directory reaper tuning (issue #320). Each task run provisions a
+   * heavy scratch directory under `paths.workingDirRoot`; without cleanup an
+   * operator accumulates hundreds of dirs / tens of GB. The engine reaps a
+   * task's directory once it reaches a terminal state (COMPLETE / FAILED),
+   * and periodically sweeps the root for crash-orphaned dirs.
+   *
+   * Optional — sensible defaults apply when absent.
+   */
+  workDirReaper?: {
+    /**
+     * Age above which a directory with no DB row (orphaned by a crash or an
+     * older daemon) is removed. Defaults to {@link DEFAULT_ORPHAN_MAX_AGE_MS}
+     * (24h). Set to a large value to keep orphans for forensic inspection.
+     */
+    orphanMaxAgeMs?: number;
+    /**
+     * Disable the reaper entirely (escape hatch for debugging a stuck task).
+     * Defaults to false — the reaper runs.
+     */
+    disabled?: boolean;
+  };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -393,6 +420,9 @@ export class TaskEngine {
     this.stopResolve = resolve;
   });
 
+  /** Working-dir reaper tuning (issue #320). */
+  protected readonly workDirReaperOpts: { orphanMaxAgeMs: number; disabled: boolean };
+
   constructor(opts: TaskEngineOptions) {
     this.persistence = new TaskRunPersistence(opts.store.db);
     this.store = opts.store;
@@ -408,6 +438,10 @@ export class TaskEngine {
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
     this.harnessMode = opts.harnessMode ?? 'train';
+    this.workDirReaperOpts = {
+      orphanMaxAgeMs: opts.workDirReaper?.orphanMaxAgeMs ?? DEFAULT_ORPHAN_MAX_AGE_MS,
+      disabled: opts.workDirReaper?.disabled ?? false,
+    };
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -424,12 +458,39 @@ export class TaskEngine {
     }
   }
 
+  /**
+   * Pre-claim acceptance check used by the daemon's engine-watcher loop.
+   *
+   * Performance contract (issue #398): this runs once per task announcement,
+   * on the engine-watcher hot path, for every observed task. It MUST NOT
+   * perform per-task blocking I/O. In particular it does not probe
+   * `impl.isReady()` — for the Hermes harness that runs two blocking
+   * `spawnSync` child processes, so a backlog would pay per-task blocking
+   * spawns and starve the daemon event loop.
+   *
+   * Harness readiness for the claim gate is instead served O(1) from the
+   * daemon's cached `HarnessReadinessRegistry` snapshot: the engine-watcher
+   * loop calls `gateClaimByReadiness(...)` immediately after `canAcceptTask`
+   * returns. A ~tickIntervalMs-stale snapshot is acceptable — harness
+   * readiness changes on a minutes scale (auth/config) and the daemon
+   * already trusts that cached registry for its post-`canAcceptTask` gate.
+   *
+   * `claim()` (the DISCOVERED → CLAIMED transition) still probes
+   * `impl.isReady()` directly — it runs once per claimed task, not per
+   * announcement, and is the authoritative pre-execution gate.
+   */
   async canAcceptTask(input: {
     solverType?: string;
     taskRole?: 'restoration' | 'evaluation';
     task?: Task;
   }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const reason = await this.runnableFailureReason(input.solverType, input.taskRole ?? 'restoration', input.task);
+    const reason = await this.runnableFailureReason(
+      input.solverType,
+      input.taskRole ?? 'restoration',
+      input.task,
+      undefined,
+      { skipReadinessProbe: true },
+    );
     return reason ? { ok: false, reason } : { ok: true };
   }
 
@@ -483,12 +544,58 @@ export class TaskEngine {
       }
     }
 
+    // Reap the working directories of tasks that have reached a terminal
+    // state. Cheap (one readdir + a few rmSync) and idempotent, so it runs
+    // every tick — there is no separate reaper loop to keep alive or crash.
+    this.reapWorkDirsNow();
+
     if (!wait) return;
 
     const reports = await Promise.all(scheduled);
     for (const report of reports) {
       this.logProcessReport('tick', report);
     }
+  }
+
+  /**
+   * Reap on-disk per-task working directories (issue #320).
+   *
+   * Removes the scratch directory of every task in a terminal state
+   * (COMPLETE / FAILED) and any crash-orphaned directory older than the
+   * configured max age. In-flight tasks are never touched. Safe to call at
+   * any time; never throws (filesystem errors are collected into the report).
+   *
+   * Called automatically every `tick()`; also exposed for the one-shot
+   * cleanup script and for tests.
+   */
+  reapWorkDirsNow(): ReapWorkDirsReport {
+    const empty: ReapWorkDirsReport = { removed: [], protected: [], scanned: 0, errors: [] };
+    if (this.workDirReaperOpts.disabled) return empty;
+
+    // Read the in-flight / terminal partition as a single atomic snapshot.
+    // Two separate queries would leave a TOCTOU window: a task transitioning
+    // DELIVERING → COMPLETE between the reads could be classified terminal and
+    // have its working directory deleted while deliver() still needs it.
+    const { terminal: terminalRequestIds, inFlight: inFlightRequestIds } =
+      this.persistence.getReaperPartition();
+
+    const report = reapWorkDirs({
+      workingDirRoot: this.paths.workingDirRoot,
+      terminalRequestIds,
+      inFlightRequestIds,
+      orphanMaxAgeMs: this.workDirReaperOpts.orphanMaxAgeMs,
+    });
+
+    if (report.removed.length > 0) {
+      console.log(
+        `[harness-engine] work-dir reaper removed ${report.removed.length} ` +
+        `terminal/orphaned task dir(s) under ${this.paths.workingDirRoot}`,
+      );
+    }
+    for (const e of report.errors) {
+      console.warn(`[harness-engine] work-dir reaper failed to remove ${e.requestId}: ${e.error}`);
+    }
+    return report;
   }
 
   /**
@@ -673,6 +780,7 @@ export class TaskEngine {
     }
     if (current.state === TaskRunState.DISCOVERED) {
       this.persistence.transition(task.requestId, TaskRunState.CLAIMED);
+      console.log(`[harness-engine] ${task.requestId} DISCOVERED → CLAIMED`);
     } else {
       console.log(
         `[harness-engine] ${task.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
@@ -862,11 +970,23 @@ export class TaskEngine {
     return null;
   }
 
+  /**
+   * Shared eligibility evaluation behind both `canAcceptTask` and `claim`.
+   *
+   * `opts.skipReadinessProbe` (issue #398): when true, the per-task
+   * `impl.isReady()` probe is skipped. The engine-watcher's `canAcceptTask`
+   * sets this — it relies on the daemon's cached `HarnessReadinessRegistry`
+   * (via `gateClaimByReadiness`) for the readiness gate instead of a
+   * blocking per-announcement probe. `claim()` leaves it false so the
+   * DISCOVERED → CLAIMED transition still runs the authoritative readiness
+   * probe (once per claimed task, not per announcement).
+   */
   private async runnableFailureReason(
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
     currentRequestId?: string,
+    opts: { skipReadinessProbe?: boolean } = {},
   ): Promise<string | null> {
     // Per-launch operator-eligibility filter (Task 28 of
     // `spec/2026-05-05-solvernet-creation-and-launch.md` §14). When the
@@ -888,10 +1008,21 @@ export class TaskEngine {
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
     // rows that pre-date `contractId`. See `routingKeyForTask`.
     const routingKey = this.routingKeyForTask(task, solverType);
+    // Scope the single-flight gate to one SolverNet. Two distinct SolverNets
+    // that share the same `contract.id.version` routing key (e.g. mainline
+    // SWE-rebench-v2 and an isolated SWE-rebench-v2 at a separate manifest
+    // CID) used to collide on one shared slot — fixed by adding
+    // `manifestCid` to the gate. `null` means "tasks without a manifest CID"
+    // (legacy / health-check), which form their own bucket; `undefined` (no
+    // task at all) preserves the legacy routing-key-only behaviour.
+    const manifestCidForGate: string | null | undefined = task
+      ? (task.solverNetManifestCid ?? null)
+      : undefined;
     if (routingKey && this.persistence.hasInFlightFor({
       solverType: routingKey,
       taskRole: role,
       excludeRequestId: currentRequestId,
+      manifestCid: manifestCidForGate,
     })) {
       return `another ${routingKey}/${role} task is already in flight`;
     }
@@ -931,7 +1062,12 @@ export class TaskEngine {
         }
       }
     }
-    if (impl.isReady) {
+    // The per-task `impl.isReady()` probe is the only blocking I/O on this
+    // path (the Hermes harness spawns child processes synchronously). The
+    // engine-watcher's `canAcceptTask` skips it — readiness is gated O(1) by
+    // the daemon's cached `HarnessReadinessRegistry` right after this call.
+    // `claim()` keeps it as the authoritative pre-execution check.
+    if (!opts.skipReadinessProbe && impl.isReady) {
       const status = await impl.isReady({ solverType: routingKey, role });
       if (!status.ready) {
         return `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
@@ -1969,13 +2105,15 @@ export class TaskEngine {
     task: PersistedTaskRun,
     fn: () => Promise<void>,
   ): Promise<void> {
-    const oldState = task.state;
+    // Each transition method (claim, takePreSnapshot, runImpl, pack, deliver)
+    // logs its own domain-specific line on success (e.g. with manifestCid,
+    // deliveryTx, impl name). We deliberately don't emit a generic
+    // `oldState → newState` line here: doing so produced duplicate
+    // transition lines in the operator log (jinn-mono-kzan). On failure,
+    // the catch below marks the task FAILED and rethrows so the caller can
+    // surface the error.
     try {
       await fn();
-      const updated = this.persistence.getByRequestId(task.requestId);
-      if (updated && updated.state !== oldState) {
-        console.log(`[harness-engine] ${task.requestId} ${oldState} → ${updated.state}`);
-      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       this.persistence.markFailed(task.requestId, reason);

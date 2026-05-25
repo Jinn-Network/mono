@@ -1,14 +1,27 @@
-# CHANGELOG auto-mirror on Release publish — implements jinn-mono-2cl.10.
+# CHANGELOG auto-mirror on Release publish.
 #
 # On a GitHub Release publish, upsert the Release body as a section under the Unreleased
-# heading in cargo/client/CHANGELOG.md, then open or update a PR. Captain stops
+# heading in client/CHANGELOG.md, then open or update a PR. Captain stops
 # hand-editing CHANGELOG.md; the GitHub Release body is the single source of
 # truth. npm consumers still get CHANGELOG.md in the package tarball.
 #
 # Reference:
-# - cargo/docs/engineering/handbook.md §Building in public — substrate
-# - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md Thread 7
-# - cargo/client/CHANGELOG.md (current hand-maintained state)
+# - docs/engineering/handbook.md §Building in public — substrate
+# - client/CHANGELOG.md (current hand-maintained state)
+#
+# Permissions note (issue #309):
+# The `permissions:` block below grants `pull-requests: write` to the
+# workflow-scoped GITHUB_TOKEN, which is the workflow-level half of the
+# Actions PR-creation contract. The repo-level half — Settings > Actions >
+# General > Workflow permissions > "Allow GitHub Actions to create and
+# approve pull requests" — must also be enabled, otherwise `gh pr create`
+# fails with "GitHub Actions is not permitted to create or approve pull
+# requests (createPullRequest)" regardless of this block.
+#
+# When the repo setting is off, this workflow still pushes the mirror branch
+# (`changelog/mirror-<tag>`) and surfaces a clear `::warning::` with the
+# manual recovery command, then exits 0 so the failure does not block the
+# release pipeline (the workflow is informational, not a publish gate).
 
 name: CHANGELOG mirror
 
@@ -76,5 +89,26 @@ jobs:
           if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh pr edit "$BRANCH" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
           else
-            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$TITLE" --body "$BODY"
+            # `gh pr create` with the workflow GITHUB_TOKEN is gated behind the
+            # repo-level setting "Allow GitHub Actions to create and approve
+            # pull requests" (see the permissions note in the header + issue
+            # #309). When that toggle is off, GitHub rejects creation with a
+            # recognisable error. Degrade gracefully rather than failing the
+            # release pipeline: the mirror branch is already pushed, so a
+            # maintainer can open the PR by hand from the warning below.
+            CREATE_ERR="$(mktemp)"
+            if gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" 2>"$CREATE_ERR"; then
+              cat "$CREATE_ERR" >&2 || true
+              rm -f "$CREATE_ERR"
+            else
+              cat "$CREATE_ERR" >&2 || true
+              if grep -qi 'not permitted to create or approve pull requests' "$CREATE_ERR"; then
+                echo "::warning title=CHANGELOG mirror PR not created::GitHub Actions is not permitted to create pull requests. A Captain must enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (issue #309). The mirror branch '${BRANCH}' has been pushed; open the PR manually with: gh pr create --repo ${GITHUB_REPOSITORY} --base main --head ${BRANCH} --title \"${TITLE}\""
+                rm -f "$CREATE_ERR"
+                exit 0
+              fi
+              # Any other failure is a genuine error — surface it and fail.
+              rm -f "$CREATE_ERR"
+              exit 1
+            fi
           fi

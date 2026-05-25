@@ -16,21 +16,24 @@
  *      Sepolia / Ethereum. The distributor verifies, applies channel
  *      weights, and mints to the operator multisig + DAO Timelock.
  *
- * The loop is disabled when no `distributorAddress` is configured. Each
- * tick iterates over staked services in the FleetStateStore. Failures are
- * logged and surfaced via `tick_error` observability events; they don't
- * crash the daemon. Replay protection lives entirely in the distributor's
- * accumulators — repeated submissions are no-ops on the second mint.
+ * The loop is disabled unless the operator explicitly enables it. Each tick
+ * iterates over staked services in the FleetStateStore. Failures are logged
+ * and surfaced via `tick_error` observability events; they don't crash the
+ * daemon. Replay protection lives entirely in the distributor's accumulators
+ * — repeated submissions are no-ops on the second mint.
  *
- * Configuration: `jinnClaimLoopIntervalMs` (default 1h), `jinnMessengerMode`
- * (`canonical` | `mock`). The `mock` path requires the daemon's L1 wallet to
- * be the MockMessenger's owner (set at deploy).
+ * Configuration: `jinnClaimLoopEnabled`, `jinnClaimLoopIntervalMs` (default
+ * 1h), `jinnClaimSubmissionMode` (`emit-only` | `submit`),
+ * `jinnMessengerMode` (`canonical` | `mock`). The `mock` submit path requires
+ * the daemon's L1 wallet to be the MockMessenger's owner (set at deploy).
  *
- * Automated `run()` / `runOnce()` **only execute mock-mode** emit→fixture→claim.
- * When `jinnMessengerMode === 'canonical'`, scheduled ticks **skip** emitting:
- * canonical OP-Stack finality is multi-day (see R-1); operators should use mock
- * for burn-in and run `tsx scripts/verify-canonical-canary.ts` for
- * verifier-only proofs after an intentional L2 emit.
+ * Automated submit-mode `run()` / `runOnce()` **only execute mock-mode**
+ * emit→fixture→claim. When `jinnMessengerMode === 'canonical'`, scheduled
+ * submit ticks **skip** emitting: canonical OP-Stack finality is multi-day
+ * (see R-1); operators should use mock for burn-in and run
+ * `tsx scripts/verify-canonical-canary.ts` for verifier-only proofs after an
+ * intentional L2 emit. Emit-only mode stops after the L2 ticket and can run
+ * without L1 wiring.
  */
 
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
@@ -56,9 +59,12 @@ import {
 } from './jinn-claim-loop-canonical.js';
 
 export type JinnMessengerMode = 'canonical' | 'mock';
+export type JinnClaimSubmissionMode = 'emit-only' | 'submit';
 
 export interface JinnClaimLoopConfig {
   intervalMs: number;
+  /** 'emit-only' records L2 tickets only; 'submit' continues to L1. */
+  submissionMode: JinnClaimSubmissionMode;
   /** PublicClient bound to the L2 measurement chain (Base / Base Sepolia). */
   l2Client: PublicClient;
   /**
@@ -70,18 +76,18 @@ export interface JinnClaimLoopConfig {
   /** WalletClient bound to L2 — pays gas for `emitClaim`. */
   l2Wallet: WalletClient;
   /** PublicClient bound to the L1 governance chain (Ethereum / Sepolia). */
-  l1Client: PublicClient;
+  l1Client?: PublicClient;
   /** WalletClient bound to L1 — pays gas for `setFixture` (mock) + `claim`. */
-  l1Wallet: WalletClient;
+  l1Wallet?: WalletClient;
   /** Per-service state. We tick each service with a stake. */
   store: FleetStateStore;
   chain: 'base' | 'base-sepolia';
   /** L2 TaskClaimEmitter address. Required. */
   claimEmitterAddress: Address;
   /** L1 JinnDistributor address. Required. */
-  distributorAddress: Address;
+  distributorAddress?: Address;
   /** L1 messenger address. Required (MockMessenger or CanonicalOpStackMessenger). */
-  messengerAddress: Address;
+  messengerAddress?: Address;
   /** 'canonical' or 'mock'. Defaults to 'canonical'. */
   messengerMode: JinnMessengerMode;
   /** Canonical-mode only — L1 OptimismPortal2 anchoring L2 output roots. */
@@ -121,8 +127,10 @@ export class JinnClaimLoop {
     const result: JinnClaimTickResult = { ticks: 0, emits: 0, submits: 0, errors: 0 };
 
     // Spec / Phase D: MockMessenger drives automated Sepolia burn-in; canonical
-    // verification is verifier-only and must not spam emitClaim each interval.
-    if (this.config.messengerMode === 'canonical') {
+    // submit verification is verifier-only and must not spam emitClaim each
+    // interval. Emit-only mode intentionally stops after recording the L2
+    // ticket, so it is allowed to run with any messenger mode.
+    if (this.config.submissionMode === 'submit' && this.config.messengerMode === 'canonical') {
       const detail =
         '[jinn-claim] Automated runOnce skips messengerMode=canonical (multi-day OP finality). ' +
         'Set jinnMessengerMode=mock for Sepolia burn-in, or run `tsx scripts/verify-canonical-canary.ts` ' +
@@ -195,6 +203,31 @@ export class JinnClaimLoop {
       }, 'jinn-claim');
     }
 
+    if (this.config.submissionMode === 'emit-only') {
+      const snapshot = await this.readSnapshot(serviceId, emitTxHash);
+      if (snapshot.multisig.toLowerCase() !== multisig.toLowerCase()) {
+        throw new Error(
+          `[jinn-claim] L2 ClaimTicket multisig ${snapshot.multisig} does not match ` +
+            `service multisig ${multisig} — refusing to record emit-only ticket`,
+        );
+      }
+      const detail =
+        `Recorded ClaimTicket claimId=${snapshot.claimId} service=${serviceId} ` +
+        `weights=${snapshot.taskCreationWeight}/${snapshot.solutionDeliveryWeight}/` +
+        `${snapshot.verdictDeliveryWeight}`;
+      console.log(`[jinn-claim] Service ${serviceId}: ${detail}`);
+      if (this.config.jinnStore) {
+        emitEvent(this.config.jinnStore, {
+          kind: 'jinn_claim_ticket_recorded',
+          serviceIndex: displayIndex,
+          txHash: emitTxHash,
+          outcome: 'ok',
+          detail,
+        }, 'jinn-claim');
+      }
+      return;
+    }
+
     // Step B + C — diverge by mode.
     let submitTxHash: Hex;
     if (this.config.messengerMode === 'mock') {
@@ -246,6 +279,7 @@ export class JinnClaimLoop {
     emitTxHash: Hex;
     multisig: Address;
   }): Promise<Hex> {
+    const { l1Client, l1Wallet, messengerAddress, distributorAddress } = this.requireL1SubmitConfig();
     const snapshot = await this.readSnapshot(args.serviceId, args.emitTxHash);
     if (snapshot.multisig.toLowerCase() !== args.multisig.toLowerCase()) {
       throw new Error(
@@ -256,26 +290,27 @@ export class JinnClaimLoop {
 
     // Plant the fixture (daemon wallet must be MockMessenger.owner).
     const fixtureTx = await plantMockFixture(
-      this.config.l1Client,
-      this.config.l1Wallet,
-      this.config.messengerAddress,
+      l1Client,
+      l1Wallet,
+      messengerAddress,
       snapshot,
     );
-    await waitForTransactionReceiptWithRetry(this.config.l1Client, fixtureTx);
+    await waitForTransactionReceiptWithRetry(l1Client, fixtureTx);
 
     // Submit the claim on L1.
     const claimTx = await submitMockClaim(
-      this.config.l1Client,
-      this.config.l1Wallet,
-      this.config.distributorAddress,
+      l1Client,
+      l1Wallet,
+      distributorAddress,
       snapshot.claimId,
     );
-    await waitForTransactionReceiptWithRetry(this.config.l1Client, claimTx);
+    await waitForTransactionReceiptWithRetry(l1Client, claimTx);
     return claimTx;
   }
 
   /** Canonical-mode Step B + C: build OP-Stack proof, submit on L1. */
   async submitCanonical(args: { serviceId: bigint; emitTxHash: Hex }): Promise<Hex> {
+    const { l1Client, messengerAddress } = this.requireL1SubmitConfig();
     if (!this.config.optimismPortalAddress || !this.config.disputeGameFactoryAddress) {
       throw new Error(
         '[jinn-claim-loop] canonical mode requires optimismPortalAddress + disputeGameFactoryAddress',
@@ -299,7 +334,7 @@ export class JinnClaimLoop {
 
     const result = await buildCanonicalProof(
       {
-        l1Client: this.config.l1Client,
+        l1Client,
         l2ProofClient: this.config.l2ProofClient ?? this.config.l2Client,
         targetChain: this.config.chain === 'base-sepolia' ? baseSepolia : base,
         optimismPortal: this.config.optimismPortalAddress,
@@ -310,8 +345,8 @@ export class JinnClaimLoop {
     );
 
     await verifyCanonicalClaimCanary(
-      this.config.l1Client,
-      this.config.messengerAddress,
+      l1Client,
+      messengerAddress,
       result.proof,
     );
     // Verifier-only canary path: no L1 transaction submitted; return the L2 emit tx.
@@ -327,14 +362,35 @@ export class JinnClaimLoop {
     // can return "receipt not found" briefly after the tx lands when the
     // request hits a backend that hasn't propagated the receipt yet.
     const receipt = await waitForTransactionReceiptWithRetry(this.config.l2Client, emitTxHash);
+    const claimLog = receipt.logs.find((log) =>
+      log.address.toLowerCase() === this.config.claimEmitterAddress.toLowerCase()
+      && log.topics[0]?.toLowerCase() === CLAIM_TICKET_TOPIC0.toLowerCase()
+    );
+    if (claimLog) {
+      const snapshot = decodeClaimTicketFromReceipt(
+        receipt.logs,
+        this.config.claimEmitterAddress,
+        claimLog.logIndex ?? 0,
+      );
+      if (snapshot.serviceId !== serviceId) {
+        throw new Error(
+          `[jinn-claim] ClaimTicket service ${snapshot.serviceId} does not match expected service ${serviceId}`,
+        );
+      }
+      return {
+        ...snapshot,
+        emitTxHash,
+        emitBlockNumber: receipt.blockNumber,
+      };
+    }
+
     // Search a small window around the emit block.
     const fromBlock = receipt.blockNumber > 5n ? receipt.blockNumber - 5n : 0n;
-    const toBlock = receipt.blockNumber + 5n;
     const snapshot = await fetchLatestClaimTicket(
       this.config.l2Client,
       this.config.claimEmitterAddress,
       serviceId,
-      { fromBlock, toBlock },
+      { fromBlock, toBlock: 'latest' },
     );
     if (!snapshot) {
       throw new Error(
@@ -342,6 +398,30 @@ export class JinnClaimLoop {
       );
     }
     return snapshot;
+  }
+
+  private requireL1SubmitConfig(): {
+    l1Client: PublicClient;
+    l1Wallet: WalletClient;
+    distributorAddress: Address;
+    messengerAddress: Address;
+  } {
+    if (
+      !this.config.l1Client ||
+      !this.config.l1Wallet ||
+      !this.config.distributorAddress ||
+      !this.config.messengerAddress
+    ) {
+      throw new Error(
+        '[jinn-claim-loop] submit mode requires L1 client, L1 wallet, distributor, and messenger wiring',
+      );
+    }
+    return {
+      l1Client: this.config.l1Client,
+      l1Wallet: this.config.l1Wallet,
+      distributorAddress: this.config.distributorAddress,
+      messengerAddress: this.config.messengerAddress,
+    };
   }
 
   /** Loop forever, sleeping `intervalMs` between ticks. */

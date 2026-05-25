@@ -110,6 +110,22 @@ export const JinnConfigSchema = z.object({
    */
   balanceTopupIntervalMs: z.number().int().min(0).default(300_000),
 
+  /**
+   * Interval between eviction-state polls for the staking proxy (ms).
+   * Default 60000 (1 min). Set to 0 to disable. Env: JINN_EVICTION_CHECK_INTERVAL_MS
+   */
+  evictionCheckIntervalMs: z.number().int().min(0).default(60_000),
+
+  /**
+   * Interval between proactive `checkpoint()` tx calls to each staked
+   * proxy (ms). Keeps `tsCheckpoint` advancing so the activity-rate window
+   * stays narrow — without it operators silently fail liveness on realistic
+   * cadence (issue #505). Default 300_000 (5 min), matching the standard
+   * `livenessPeriod` on stOLAS staking proxies. Set to 0 to disable.
+   * Env: JINN_CHECKPOINT_INTERVAL_MS.
+   */
+  checkpointIntervalMs: z.number().int().min(0).default(300_000),
+
   /** HTTP API port */
   apiPort: z.number().int().positive().default(7331),
 
@@ -144,6 +160,15 @@ export const JinnConfigSchema = z.object({
    * Default 30 000 ms. Env: JINN_HERMES_DOCTOR_TIMEOUT_MS.
    */
   hermesDoctorTimeoutMs: z.number().int().positive().default(30_000),
+
+  /** Path to the `codex` executable. Defaults to `codex` when unset. */
+  codexPath: z.string().optional(),
+
+  /**
+   * Timeout in ms for `codex --version` health-check runs.
+   * Default 30 000 ms. Env: JINN_CODEX_DOCTOR_TIMEOUT_MS.
+   */
+  codexDoctorTimeoutMs: z.number().int().positive().default(30_000),
 
   /**
    * How the operator runs the daemon. Set once by app-guided setup or the
@@ -239,7 +264,8 @@ export const JinnConfigSchema = z.object({
 
   /**
    * RPC endpoint for the L1 governance chain (Ethereum / Sepolia) where the
-   * JinnDistributor lives. Required when jinnDistributorAddress is set.
+   * JinnDistributor lives. Testnet defaults to a public Sepolia RPC; mainnet
+   * requires an operator override when L1 submit mode is configured.
    * Env: JINN_ETHEREUM_RPC_URL.
    */
   ethereumRpcUrl: z.string().url().optional(),
@@ -259,10 +285,10 @@ export const JinnConfigSchema = z.object({
   jinnL1Network: z.enum(['sepolia', 'ethereum']).default('sepolia'),
 
   /**
-   * JinnDistributor address on the L1 governance chain. Setting this enables
-   * the cross-chain claim loop. When set, ethereumRpcUrl MUST also be set.
-   * Resolved from jinnMviL1DeploymentPath when omitted; otherwise a manual
-   * override. Env: JINN_DISTRIBUTOR_ADDRESS.
+   * JinnDistributor address on the L1 governance chain. Required for
+   * jinnClaimSubmissionMode='submit'. When set for submit mode, ethereumRpcUrl
+   * MUST also be set. Resolved from jinnMviL1DeploymentPath when omitted;
+   * otherwise a manual override. Env: JINN_DISTRIBUTOR_ADDRESS.
    */
   jinnDistributorAddress: z
     .string()
@@ -299,6 +325,22 @@ export const JinnConfigSchema = z.object({
    * Env: JINN_MESSENGER_MODE.
    */
   jinnMessengerMode: z.enum(['canonical', 'mock']).default('canonical'),
+
+  /**
+   * Claim submission mode. `emit-only` only submits TaskClaimEmitter.emitClaim
+   * on L2 and records the resulting ticket. `submit` continues into the L1
+   * messenger/distributor path.
+   * Env: JINN_CLAIM_SUBMISSION_MODE.
+   */
+  jinnClaimSubmissionMode: z.enum(['emit-only', 'submit']).default('emit-only'),
+
+  /**
+   * Explicit operator gate for the cross-chain JINN claim loop. The schema
+   * default stays off for mainnet/unknown networks; loadConfig defaults this
+   * on for testnet now that the emitter and standing relayer are live.
+   * Env: JINN_CLAIM_LOOP_ENABLED=1|true|yes.
+   */
+  jinnClaimLoopEnabled: z.boolean().default(false),
 
   /**
    * How often the daemon ticks the cross-chain JINN claim loop (ms). Default
@@ -640,10 +682,13 @@ export const JinnConfigSchema = z.object({
    */
   reputationEnabled: z.boolean().default(false),
 }).refine(
-  (cfg) => !cfg.jinnDistributorAddress || !!cfg.ethereumRpcUrl,
+  (cfg) =>
+    cfg.jinnClaimSubmissionMode !== 'submit' ||
+    !cfg.jinnDistributorAddress ||
+    !!cfg.ethereumRpcUrl,
   {
     message:
-      'ethereumRpcUrl must be set when jinnDistributorAddress is configured ' +
+      'ethereumRpcUrl must be set when jinnDistributorAddress is configured in submit mode ' +
       '(env JINN_ETHEREUM_RPC_URL or config field). The cross-chain claim loop ' +
       'cannot reach the L1 governance chain without it.',
     path: ['ethereumRpcUrl'],
@@ -675,6 +720,8 @@ export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
  * historical sync — see ponder.config.ts).
  */
 export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
+
+export const DEFAULT_TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 
 export type ConfigLoadErrorCode =
@@ -743,6 +790,10 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.rewardClaimIntervalMs = parseInt(env['JINN_REWARD_CLAIM_INTERVAL_MS'], 10);
   }
   if (env['JINN_BALANCE_TOPUP_INTERVAL_MS']) merged.balanceTopupIntervalMs = Number.parseInt(env['JINN_BALANCE_TOPUP_INTERVAL_MS'], 10);
+  if (env['JINN_EVICTION_CHECK_INTERVAL_MS']) merged.evictionCheckIntervalMs = Number.parseInt(env['JINN_EVICTION_CHECK_INTERVAL_MS'], 10);
+  if (env['JINN_CHECKPOINT_INTERVAL_MS'] !== undefined) {
+    merged.checkpointIntervalMs = Number.parseInt(env['JINN_CHECKPOINT_INTERVAL_MS'], 10);
+  }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
@@ -752,6 +803,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_HERMES_PROVIDER'])   merged.hermesProvider = env['JINN_HERMES_PROVIDER'];
   if (env['JINN_HERMES_DOCTOR_TIMEOUT_MS']) {
     merged.hermesDoctorTimeoutMs = parseInt(env['JINN_HERMES_DOCTOR_TIMEOUT_MS'], 10);
+  }
+  if (env['JINN_CODEX_PATH'])        merged.codexPath = env['JINN_CODEX_PATH'];
+  if (env['JINN_CODEX_DOCTOR_TIMEOUT_MS']) {
+    merged.codexDoctorTimeoutMs = parseInt(env['JINN_CODEX_DOCTOR_TIMEOUT_MS'], 10);
   }
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
@@ -767,12 +822,14 @@ export function loadConfig(configPath?: string): JinnConfig {
     // A URL only makes sense in http mode — when the operator points
     // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
     // default mode to 'http' so the URL is actually consulted (and isn't
-    // silently dropped by the on-chain default in createDiscoveryAPI). In that
-    // inferred-http case, also default fallbackToOnchain on (http without a
-    // floor is a footgun) unless JINN_DISCOVERY_FALLBACK overrides.
+    // silently dropped by the on-chain default in createDiscoveryAPI).
+    // `fallbackToOnchain` is NOT defaulted on here (since the 2026-05-23
+    // substrate incident): silent fall-through hides indexer outages and
+    // storms shared RPC. Operators opt in via JINN_DISCOVERY_FALLBACK=1 or
+    // the config file when they want it.
     const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
     const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
-    const resolvedFallback = fallbackToOnchain ?? (inferredHttp ? true : undefined);
+    const resolvedFallback = fallbackToOnchain;
     merged['discovery'] = {
       ...prevDiscovery,
       ...(mode ? { mode } : {}),
@@ -795,6 +852,13 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_CLAIM_EMITTER_ADDRESS']) merged.jinnClaimEmitterAddress = env['JINN_CLAIM_EMITTER_ADDRESS'];
   if (env['JINN_MESSENGER_ADDRESS']) merged.jinnMessengerAddress = env['JINN_MESSENGER_ADDRESS'];
   if (env['JINN_MESSENGER_MODE']) merged.jinnMessengerMode = env['JINN_MESSENGER_MODE'];
+  if (env['JINN_CLAIM_SUBMISSION_MODE']) {
+    merged.jinnClaimSubmissionMode = env['JINN_CLAIM_SUBMISSION_MODE'];
+  }
+  if (env['JINN_CLAIM_LOOP_ENABLED'] !== undefined) {
+    const v = env['JINN_CLAIM_LOOP_ENABLED'].trim().toLowerCase();
+    merged.jinnClaimLoopEnabled = v === '1' || v === 'true' || v === 'yes';
+  }
   if (env['JINN_CLAIM_LOOP_INTERVAL_MS'] !== undefined) {
     merged.jinnClaimLoopIntervalMs = parseInt(env['JINN_CLAIM_LOOP_INTERVAL_MS'], 10);
   }
@@ -901,7 +965,13 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   // Testnet default: point discovery at the privately-operated Ponder indexer
   // (jinn-mono-280n.4), unless the operator has set their own `discovery` block.
-  // The on-chain RPC floor stays as the fallback.
+  //
+  // `fallbackToOnchain` is NOT defaulted on (since the 2026-05-23 substrate
+  // incident): silent fall-through to direct eth_getLogs hides indexer outages
+  // and turns every daemon into its own indexer, which storms shared RPC
+  // quota and can take the indexer down. Operators opt in explicitly when
+  // they need it (typically only when self-hosting an RPC with generous
+  // getLogs quotas).
   //
   // Only fill fields the operator left absent — never overwrite an
   // operator-set `url` / `mode` / `fallbackToOnchain`. A bare
@@ -918,8 +988,18 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...(existing ?? {}),
       mode: existing?.mode ?? 'http',
       url: existing?.url ?? DEFAULT_TESTNET_DISCOVERY_URL,
-      fallbackToOnchain: existing?.fallbackToOnchain ?? true,
+      ...(existing?.fallbackToOnchain !== undefined
+        ? { fallbackToOnchain: existing.fallbackToOnchain }
+        : {}),
     };
+  }
+
+  if (resolvedNetwork === 'testnet' && !merged.ethereumRpcUrl) {
+    merged.ethereumRpcUrl = DEFAULT_TESTNET_ETHEREUM_RPC_URL;
+  }
+
+  if (resolvedNetwork === 'testnet' && merged.jinnClaimLoopEnabled === undefined) {
+    merged.jinnClaimLoopEnabled = true;
   }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
@@ -976,10 +1056,18 @@ export function loadConfig(configPath?: string): JinnConfig {
     );
   }
 
-  // 4. Resolve rpcUrl default based on network (if not explicitly set)
+  // 4. Resolve rpcUrl default based on network (if not explicitly set).
+  // Testnet default is publicnode — no-auth, no shared-key quota cliff. The
+  // previous default was a Tenderly gateway with a shared project key; when
+  // aggregate operator traffic hit the plan quota every default-config daemon
+  // got HTTP 403 simultaneously (dashboard "Runway 0d", faucet 500s, daemon
+  // hot-loops on every eth_*). See #554 + the panel's "shared RPC" warning in
+  // NetworkSection.tsx for the operator-facing pitch to bring their own key.
+  // The sibling Ethereum L1 default (DEFAULT_TESTNET_ETHEREUM_RPC_URL above)
+  // is already publicnode — this keeps the two L1/L2 defaults symmetric.
   const parsed = result.data;
   const defaultRpcUrl = parsed.network === 'testnet'
-    ? 'https://sepolia.base.org'
+    ? 'https://base-sepolia-rpc.publicnode.com'
     : 'https://mainnet.base.org';
 
   return {
@@ -1038,6 +1126,7 @@ const TRACKED_ENV_VARS = [
   'JINN_DB_PATH',
   'JINN_POLL_INTERVAL_MS',
   'JINN_REWARD_CLAIM_INTERVAL_MS',
+  'JINN_CHECKPOINT_INTERVAL_MS',
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
   'JINN_API_BIND_HOST',
@@ -1068,6 +1157,8 @@ const TRACKED_ENV_VARS = [
   'JINN_CLAIM_EMITTER_ADDRESS',
   'JINN_MESSENGER_ADDRESS',
   'JINN_MESSENGER_MODE',
+  'JINN_CLAIM_SUBMISSION_MODE',
+  'JINN_CLAIM_LOOP_ENABLED',
   'JINN_CLAIM_LOOP_INTERVAL_MS',
   'JINN_STAKING_MODE',
   'JINN_TARGET_SERVICES',

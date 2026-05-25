@@ -36,6 +36,11 @@ jobs:
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.sha }}
+      # Use the high-quota Tenderly Base Sepolia gateway for CI e2e gates.
+      # Without this, the e2e falls back to the public `https://sepolia.base.org`
+      # which is heavily rate-limited and bites the `Base Sepolia fork
+      # SolverNet creation + launch + lifecycle` phase. See #313 thread.
+      BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
     steps:
       - uses: actions/checkout@v5
 
@@ -128,23 +133,48 @@ jobs:
         run: |
           node <<'NODE'
           const body = process.env.RELEASE_BODY ?? '';
-          const required = [
+          // Fixed substrings — must match exactly.
+          const requiredExact = [
             ['schema marker', '<!-- jinn-release-evidence:v1'],
             ['release tag', `release-tag=${process.env.RELEASE_TAG}`],
             ['release commit', `release-commit=${process.env.RELEASE_SHA}`],
-            ['release client prepare', 'release-client-prepare=passed'],
-            ['donation consumption', 'donation-consumption=passed'],
-            ['app-first testnet acceptance', 'app-first-testnet-acceptance=passed'],
             ['marker close', '-->'],
           ];
-          const missing = required
-            .filter(([, needle]) => !body.includes(needle))
-            .map(([label, needle]) => `${label}: ${needle}`);
+          // Gate entries — accept either `=passed` (clean) OR
+          // `=skipped:#<issue-num>` (documented exception with audit trail).
+          // The skipped form is intentionally explicit: it requires a paired
+          // GitHub issue describing why the gate couldn't be satisfied for
+          // this release. Captain owns each individual skip; the issue link
+          // is the audit record. See #312 for the relaxation rationale.
+          const gateEntries = [
+            ['release client prepare', 'release-client-prepare'],
+            ['donation consumption', 'donation-consumption'],
+            ['app-first testnet acceptance', 'app-first-testnet-acceptance'],
+          ];
+
+          const missing = [];
+          for (const [label, needle] of requiredExact) {
+            if (!body.includes(needle)) missing.push(`${label}: ${needle}`);
+          }
+          for (const [label, key] of gateEntries) {
+            const passedRe = new RegExp(`${key}=passed\\b`);
+            const skippedRe = new RegExp(`${key}=skipped:#\\d+\\b`);
+            if (!passedRe.test(body) && !skippedRe.test(body)) {
+              missing.push(`${label}: ${key}=passed (or =skipped:#<issue-num>)`);
+            }
+          }
+
           if (missing.length > 0) {
             console.error('Stable publish requires a jinn-release-evidence:v1 marker in the GitHub Release body.');
             console.error('Missing required evidence entries:');
             for (const item of missing) console.error(`- ${item}`);
             process.exit(1);
+          }
+
+          // Surface any skips so they're visible in the workflow log even on success.
+          for (const [label, key] of gateEntries) {
+            const m = body.match(new RegExp(`${key}=(skipped:#\\d+)`));
+            if (m) console.warn(`::warning::Gate '${label}' marked as ${m[1]} for this release.`);
           }
           NODE
 
@@ -158,9 +188,36 @@ jobs:
         working-directory: contracts
         run: yarn install --immutable
 
-      - name: Release gate — operator-gate (staking + e2e on Anvil fork)
+      # T1.4 (SPA route smoke) runs Playwright against Chromium. The yarn install
+      # above pulls @playwright/test (the JS package) but not the actual browser
+      # binaries, which live under ~/.cache/ms-playwright/. Without this step
+      # T1.4 fails with `browserType.launch: Executable doesn't exist` and the
+      # Tier 1 gate blocks the stable publish. `--with-deps` pulls the system
+      # libraries Chromium needs on ubuntu-latest.
+      - name: Install Playwright Chromium for Tier 1 T1.4
         if: steps.meta.outputs.dist_tag == 'latest'
-        run: yarn release:operator-gate
+        run: yarn playwright install --with-deps chromium
+
+      # Tier 1 — mechanical floor (per spec/2026-05-19 §3 of release-readiness design).
+      # Replaces the legacy operator-gate that saturated the Tenderly RPC under
+      # multi-bootstrap load (see jinn-mono-lrey). Tier 1 runs four scenarios
+      # (T1.1-T1.4) in parallel against a single Anvil fork; per-scenario budgets
+      # cap wall-clock; verdicts feed the release-evidence marker.
+      - name: Release gate — Tier 1 mechanical floor
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: yarn release:tier-1 "${{ steps.meta.outputs.publish_version }}"
+
+      # Upload tier-1-evidence so the Captain can inspect per-scenario logs on
+      # CI failures without re-running locally. `if: always()` ensures the
+      # artifact is captured even when the Tier 1 gate exits non-zero.
+      - name: Upload Tier 1 evidence
+        if: always() && steps.meta.outputs.dist_tag == 'latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier-1-evidence-${{ github.event.release.tag_name || github.sha }}
+          path: client/tier-1-evidence/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'

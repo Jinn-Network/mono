@@ -1,3 +1,5 @@
+import { Button } from '../../components/ui/button.js';
+
 export type ArtifactTypeFilter = 'plugin';
 
 export interface ArtifactTypeFilterChipProps {
@@ -5,38 +7,42 @@ export interface ArtifactTypeFilterChipProps {
   onChange: (v: ArtifactTypeFilter) => void;
 }
 
-const chipStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
-  padding: '6px 12px',
-  borderRadius: 'var(--radius-pill, 999px)',
-  border: `1px solid ${active ? 'var(--accent-sky)' : 'var(--border)'}`,
-  background: active ? 'var(--accent-sky-tint, transparent)' : 'transparent',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  color: disabled ? 'var(--fg-dim)' : active ? 'var(--fg)' : 'var(--fg-muted)',
-  cursor: disabled ? 'not-allowed' : 'pointer',
-});
-
+/**
+ * Two-state filter for the /build registry. Renders Plug-ins (active by
+ * default) and Harnesses (disabled placeholder). Built on shadcn `<Button>`
+ * with `outline` / `ghost` variants and pill-rounded shape; the
+ * `aria-pressed` semantics survive the migration so the existing tests and
+ * screen readers keep working.
+ */
 export function ArtifactTypeFilterChip({ value, onChange }: ArtifactTypeFilterChipProps): JSX.Element {
+  const pluginActive = value === 'plugin';
   return (
-    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-      <button
-        aria-pressed={value === 'plugin' ? 'true' : 'false'}
-        style={chipStyle(value === 'plugin', false)}
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant={pluginActive ? 'outline' : 'ghost'}
+        size="sm"
+        aria-pressed={pluginActive ? 'true' : 'false'}
+        className="rounded-full"
         onClick={() => {
-          if (value !== 'plugin') onChange('plugin');
+          if (!pluginActive) onChange('plugin');
         }}
       >
         Plug-ins
-      </button>
-      <button
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
         disabled
         aria-pressed="false"
-        style={chipStyle(false, true)}
+        className="rounded-full opacity-60"
       >
-        Harnesses <span style={{ marginLeft: 6, fontSize: 9 }}>coming soon</span>
-      </button>
+        Harnesses
+        <span className="ml-1 border-l border-border pl-2 text-[9px] tracking-[0.14em] text-[var(--fg-dim)]">
+          Coming soon
+        </span>
+      </Button>
     </div>
   );
 }

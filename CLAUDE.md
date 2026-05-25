@@ -21,6 +21,7 @@ Other canonical docs:
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
+- [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md) — read before designing, extending, or reasoning about the operator app's data model, actions, or notification taxonomy (referenced from `SPEC.md` Roles → Operator)
 
 ## Engineering handbook
 
@@ -28,7 +29,7 @@ How this team ships — cadence, dist-tags, work-shape taxonomy, AI workflow rul
 
 ### Work shape (declare it before executing)
 
-Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes. Declare the shape in the bd issue's `Run-mode` field; replicate it as the PR title prefix.
+Seven shapes plus one emergency sub-flow plus one meta-shape (`INTERACTIVE DESIGN`, for design-only sessions whose output is a spec or DR, not implementation), keyed to Conventional Commits prefixes. Declare the shape in the GitHub Issue body's `## Run-mode` section; replicate it as the PR title prefix.
 
 - **`fix`** — bug fix. Regression test first. Skill chain: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`.
 - **`feat`** — feature. TDD. Skill chain: (`brainstorming` if ambiguous) → `writing-plans` → `test-driven-development` → `executing-plans` / `dispatching-parallel-agents` → `verification-before-completion` → `receiving-code-review`.
@@ -37,17 +38,17 @@ Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes
 - **`chore`** — deps, CI, dev tooling. Integration tests if touches a dep.
 - **`docs`** — documentation. Canonical-doc changes need Discussion + CODEOWNERS approval.
 - **`test`** — test-only. Meta test discipline.
-- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up bead before closing the incident.
+- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up Issue before closing the incident.
 
-If a bd issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a bd under `jinn-mono-2cl` when friction surfaces).
+If an Issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a GitHub Issue under the engineering handbook umbrella when friction surfaces).
 
 ### Eight ratified AI workflow rules
 
-1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses `git worktree add cargo/.tasks/<id>`.
-2. **Beads frame problems, not solutions.** bd body = context + impact + acceptance criteria. Solutions go in design sessions.
-3. **bd-as-SoR, not `MEMORY.md`.** Use `bd remember` / `bd memories`.
+1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`), not the primary checkout.
+2. **Issues frame problems, not solutions.** GitHub Issue body = context + impact + acceptance criteria. Solutions go in design sessions or implementation plans, not the Issue body.
+3. **GitHub Issues are the single SoR for engineering work.** Per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Parent/child use native sub-issues; sprint/epic/status live on the "Jinn engineering" Project (v2) board. The `.beads/` checkout stays in-tree as read-only archive of historical `jinn-mono-<id>` references.
 4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exception: `fix(incident)` with reviewer justification.
-5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
+5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
 7. **TDD for new features, regression test for fixes.**
 8. **Auto-canary on push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy.
@@ -63,7 +64,9 @@ If a bd issue does not fit one of these shapes, it is mis-scoped — split or re
 
 ### Daily entry point
 
-`eng-day` skill (in `cargo/.claude/skills/eng-day/`) is the canonical daily brief. Fallback when the GitHub Project board doesn't exist yet: `bd ready` + `gh pr list --search 'is:open draft:false'`.
+`eng-day` skill (in `.claude/skills/eng-day/`) is the canonical daily brief. Fallback: `gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'`.
+
+**Operator-local cleanup (one-time, per DR-2026-05-18):** if your `.claude/settings.json` has a `bd prime` SessionStart or PreCompact hook (the legacy beads workflow primer), remove it. `.claude/settings.json` is gitignored, so this cleanup is per-operator. The hook is no longer recommended; CLAUDE.md auto-load covers session start.
 
 ## Repository Structure
 
@@ -259,7 +262,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 
 | Config key       | Env override             | Default                           |
 |------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| https://mainnet.base.org          |
+| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet: https://mainnet.base.org · testnet: https://base-sepolia-rpc.publicnode.com |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
@@ -270,16 +273,18 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | tasks            | JINN_TASKS               | []                                |
 | discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
 | discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
-| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true (only relevant when mode is `http`/`embedded`) |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | false — opt-in (only relevant when mode is `http`/`embedded`) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
-| _(none — env-only)_  | JINN_EVAL_IMAGE_CACHE_MAX | 20 (cap on the swe-rebench-v2 per-instance Docker image LRU) |
+| _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 
 `JINN_PASSWORD` is env-only — never in config files.
 
-Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`) with `fallbackToOnchain: true`. Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
+Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`). Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
+
+`discovery.fallbackToOnchain` is **opt-in** (default off, since the 2026-05-23 substrate incident). When the indexer is unreachable, the daemon raises `DiscoveryUnavailableError` and the operator-app surfaces the outage; it does NOT silently fall through to direct `eth_getLogs`. Silent fall-through was hiding indexer outages and turning every daemon into its own indexer, which storms shared RPC quota and took the indexer down. Set `fallbackToOnchain: true` (or `JINN_DISCOVERY_FALLBACK=1`) only when you self-host an RPC with generous `getLogs` quotas — the factory emits a one-time boot warning so the choice is visible in logs.
 
 ## On-Chain Addresses (Base)
 
@@ -381,6 +386,41 @@ To add a new **in-repo** SolverType (typed `spec`, `jinn tasks submit --spec-fil
 
 Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a version, date, and author in the header.
 
+## Frontends
+
+All frontends in this repo follow the rules below. They exist so that any operator, contributor, or agent can reason about a frontend by reading its spec and the canonical design docs — without spelunking the component tree.
+
+### Every frontend ships with a spec
+
+Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
+
+### Spec must include a domain model
+
+The domain model enumerates every component the frontend exposes (in the product sense — "Wallet", "Daemon", "SolverNet", not the React-component sense). Each component is described along four axes:
+
+- **State** — point-in-time values about the component. E.g. *daemon status: running | not running*; *wallet balance: 12.4 OLAS*; *staking epoch: 38*. State is read-only, derivable from the underlying data source, and rendered as-is.
+- **State messages** — information about the component's state that requires human attention. E.g. *"Node requires restart to pick up new config"*; *"Safe is under-funded for the next checkpoint"*. Each state message MAY map to one or more **optional actions** (see Actions below) that resolve or acknowledge it. Messages without actions are purely informational and must say so.
+- **Collections** — lists of data items owned by or pertaining to the component. E.g. *wallet transactions*, *recent tasks*, *peer list*, *delivery history*. Each collection declares its item shape, ordering, and any pagination/filtering rules.
+- **Actions** — verbs a human can invoke against the component. E.g. *node → restart*; *task → cancel*; *wallet → withdraw*. Each action declares its **action states/events** — the lifecycle the UI must render. Example for *restart*: `idle → restarting → restarted` (with `failed` as a terminal alternative). Actions that mutate on-chain state or move funds must list their confirmation and error states explicitly.
+
+A component may have zero entries on any axis (e.g. a read-only component has no actions), but the spec must say so — silence is ambiguous.
+
+### Stack: Next.js + shadcn/ui exclusively
+
+- All new frontends use Next.js (App Router unless the spec calls out otherwise).
+- All UI primitives come from [shadcn/ui](https://ui.shadcn.com). Compose, don't reinvent.
+- **No custom components without attempting shadcn first.** Before authoring a custom component, search the shadcn catalog and document the attempt in the PR description.
+- If no suitable shadcn component exists, request **"snowflake" approval** from a human maintainer before writing the custom component. The request must include:
+  - Why no shadcn primitive (or composition of primitives) fits.
+  - The ongoing **maintenance costs** of owning the snowflake: who maintains it, what it depends on, what breaks if shadcn ships an equivalent later, what the migration path back to shadcn looks like.
+  - The smallest possible surface — snowflakes stay narrow.
+
+Snowflake approvals are recorded in the PR thread; recurring patterns should graduate to a shared internal package rather than living as one-offs per app.
+
+### Design system
+
+See §Design System below — `BRAND.md` for voice and posture, `DESIGN.md` / `DESIGN.json` for tokens, and the non-negotiables (no emoji, no decorative gradients, softened-brutalist corners).
+
 ## Design System
 
 Voice and posture are canonical in [`BRAND.md`](BRAND.md) — read it before any user-facing artifact. The visual sidecar (tokens, spec) is below; folding it into `BRAND.md` is a separate spec.
@@ -426,3 +466,45 @@ Jinn's brand is **headless** in the specific sense defined by Other Internet's [
 **Operational rule, restated:** **keep the words, loosen the visuals.** The lexicon and non-negotiables are the protocol; everything else is narrative. If you're about to invent new vow-language, that's a protocol change — mark it as a proposal. If you're about to change a color or swap a sigil, that's a narrative move — just document what you changed.
 
 The received design bundle (palette, sigils, type pairing) is one narrative — a well-reasoned starting point, not the canonical Jinn. Treat it as such.
+
+## External Communication
+
+Rules for any external-facing artifact about Jinn — press releases, blog posts, threads, talks, slides, public-channel announcements, anything a non-contributor will read.
+
+Read first:
+- [`PRINCIPLES.md`](PRINCIPLES.md) — every public claim must satisfy Legibility (independently verifiable, on-chain where possible) and stay coherent with Neutral, Learning Maximised, Governance Minimal, Permissionless, Prestige.
+- [`BRAND.md`](BRAND.md) — voice, headless-brand posture, protocol-vs-narrative split, content non-negotiables.
+
+Operate the workflow through the `create-press-release` skill (`.claude/skills/create-press-release/SKILL.md`) when the artifact is release-shaped; the skill composes `distil-writing` and enforces these rules.
+
+### Framing and structure
+
+- **Frame Jinn as "an open agentic knowledge economy."** Use this exact phrase in About-blocks, boilerplate, and headline framings of what Jinn *is*. Older phrasings ("decentralised training protocol", "agentic intent network") are superseded.
+- **There is no "team", no "co-founder", no "executive".** Do not use these words in any external artifact. Jinn is headless in the Other Internet sense (see `BRAND.md`); there is no corporate structure for the brand to point at.
+- **Attribution is role-only by default.** Quote attribution: `— Jinn contributor`. Named attribution only on explicit sign-off from the contributor concerned, and prefer affiliation over name unless naming is independently load-bearing.
+
+### Verbs
+
+- **Never use `paid` / `pays` / `payment for` / `compensation`** in protocol-action context. The contract does not pay anyone. Use, in order of preference:
+  - `mints to` — when the contract is literally minting (most accurate for JinnDistributor)
+  - `emits tokens to` — when describing the protocol pattern abstractly
+  - `settles with` / `settles for` — for the cross-chain settlement frame
+  - `distributes to` / `issues to` — for governance / treasury framings
+- `Earned` (operator-side, active voice) is acceptable and matches the dashboard label `TESTNET JINN EARNED`. Avoid `earned` for the protocol's action ("the protocol earned the operator…" — wrong).
+
+### Claim discipline (Legibility)
+
+- **Every claim about Jinn must be independently verifiable**, on chain where possible. Cite the address, the tx hash, the indexer endpoint, the canonical-doc line. If a claim isn't on-chain-verifiable, say so explicitly and name what closes the gap.
+- **Distinct vs independent.** The chain proves *distinctness* (different addresses, different transactions). It does not prove *independence* (different real-world parties). Use `distinct` in the body; only use `independent` where it's the actual news, and back-stop it with a caveats section that names the trust step.
+- **Always include a "What this does not yet prove" section** for any milestone release. Name the mock components, the testnet status, the social assertions that aren't yet on-chain-provable. Naming the gap is more Legible than papering over it.
+
+### PII
+
+- **No dateline city.** Use the date alone: `**25 May 2026** —`. No city, no country.
+- **No personal locations, schedules, family details, or other identifying material.** This applies even if the contributor is publicly identifiable elsewhere; the artifact should not add identifying surface.
+- **Multisig and wallet addresses are pseudonymous, not PII.** Public on-chain addresses are slashable and discoverable; they are valid receipts. Names attached to addresses are PII; keep them separate unless consent is explicit.
+
+### Where releases live
+
+- `docs/press/YYYY-MM-DD-<slug>.md` — standalone press releases.
+- The release file is the canonical source; X threads / Discussion posts / blog versions derive from it.

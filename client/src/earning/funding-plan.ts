@@ -19,7 +19,8 @@ import {
   getChainConfig,
 } from './contracts.js';
 import { FleetStateStore } from './store.js';
-import { stage1MinMasterEth } from './bootstrap.js';
+import { computeRequiredMasterEth } from './bootstrap.js';
+import { detectDeprecatedTestnetSetup } from './testnet-setup-migration.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
 import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
@@ -88,9 +89,6 @@ export interface FundingPlan {
   /** Snapshot of the fleet state used for evaluation, when available. */
   fleetState?: FleetState;
 }
-
-const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
 const addr = (value: string): Address => getAddress(value) as Address;
 
@@ -223,25 +221,37 @@ export async function planFleetFunding(
     }
   }
 
-  const completedCount = fleetState?.services.filter((svc) => isOperationalServiceStep(svc.step)).length ?? 0;
-  const standardFleetAlreadyComplete = stakingMode === 'standard' && completedCount >= targetServices;
-  const standardFleetHasInProgressServices =
-    stakingMode === 'standard' && (fleetState?.services.length ?? 0) > 0;
   // Pre-Stage-1: fleet state missing or fleet_stage === 'none' (no fleet
   // identity yet). The Stage 1 gate must cover the master → agent transfer
   // (STAGE1_AGENT_ETH = 0.01 ETH) plus the master's own gas reserve
   // (minEoaGasEth). See jinn-mono-u34i.
   const isPreStage1 = !fleetState || fleetState.fleet_stage === 'none';
-  const requiredMasterEth =
-    stakingMode === 'standard'
-      ? (
-          standardFleetAlreadyComplete
-            ? 0n
-            : isPreStage1
-              ? stage1MinMasterEth(config)
-              : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
-        )
-      : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
+  // A migration-wiped fleet must be treated as needing funding rather than
+  // short-circuited to 0n. Detecting the deprecated testnet setup here keeps
+  // this read-only view in agreement with the mutating bootstrapper gate —
+  // omitting it was the GAP-1 wiring-seam drift. `detectDeprecatedTestnetSetup`
+  // is a pure function over state + config (no chain calls), so it is safe in
+  // this read-only path.
+  const pendingSetupMigration =
+    fleetState !== null &&
+    detectDeprecatedTestnetSetup({
+      state: fleetState,
+      chain,
+      stakingMode,
+      currentStakingContract: config.stakingContract,
+    }).services.length > 0;
+  // Single source of truth: the master-ETH gate is computed by
+  // `computeRequiredMasterEth` in bootstrap.ts — the same helper the mutating
+  // `FleetBootstrapper.ensureStage1And2` gate routes through. Re-deriving it
+  // inline here is the u34i cross-module invariant-drift hazard.
+  const requiredMasterEth = computeRequiredMasterEth({
+    services: fleetState?.services ?? [],
+    minEoaGasEth: config.minEoaGasEth,
+    pendingSetupMigration,
+    targetServices,
+    stakingMode,
+    preStage1: isPreStage1,
+  });
 
   let master: FundingRequirement | undefined;
   if (systemEth < requiredMasterEth) {

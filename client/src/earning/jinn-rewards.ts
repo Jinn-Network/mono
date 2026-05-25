@@ -32,6 +32,38 @@ export const JINN_STAKING_ABI = [
     inputs: [
       { name: 'serviceId', type: 'uint256' },
     ],
+    name: 'getStakingState',
+    outputs: [{ name: 'stakingState', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'serviceId', type: 'uint256' },
+    ],
+    name: 'getServiceInfo',
+    outputs: [
+      {
+        name: 'sInfo',
+        type: 'tuple',
+        components: [
+          { name: 'multisig', type: 'address' },
+          { name: 'owner', type: 'address' },
+          { name: 'nonces', type: 'uint256[]' },
+          { name: 'tsStart', type: 'uint256' },
+          { name: 'reward', type: 'uint256' },
+          { name: 'inactivity', type: 'uint256' },
+          { name: 'rewardDistributionInfo', type: 'uint256' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'serviceId', type: 'uint256' },
+    ],
     name: 'claim',
     outputs: [{ name: 'amount', type: 'uint256' }],
     stateMutability: 'nonpayable',

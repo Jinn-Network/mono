@@ -1,4 +1,6 @@
 import type { CaptureSummary } from '../api/types.js';
+import { Button } from '../components/ui/button.js';
+import { cn } from '../lib/utils.js';
 
 export interface CapturesListProps {
   captures: CaptureSummary[];
@@ -6,42 +8,55 @@ export interface CapturesListProps {
   onSelect: (sessionId: string) => void;
 }
 
-export function CapturesList({ captures, selectedSessionId, onSelect }: CapturesListProps): JSX.Element {
+/**
+ * CapturesList — stack of selectable capture rows.
+ *
+ * Each row is a `<Button variant="ghost">` styled as a left-aligned card.
+ * The active row gets a primary left-border accent — matches the
+ * ActivityCard "joined SolverNets" pattern.
+ */
+export function CapturesList({
+  captures,
+  selectedSessionId,
+  onSelect,
+}: CapturesListProps): JSX.Element {
   if (captures.length === 0) {
     return (
-      <div style={{ padding: 24, color: 'var(--fg-muted)' }}>
+      <div className="p-6 font-mono text-[12px] text-muted-foreground">
         No pending execution data.
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div className="flex flex-col gap-2">
       {captures.map((capture) => {
         const active = capture.sessionId === selectedSessionId;
         return (
-          <button
+          <Button
             key={capture.sessionId}
-            type="button"
+            variant="ghost"
+            data-state={active ? 'active' : undefined}
+            aria-current={active ? 'true' : undefined}
             onClick={() => onSelect(capture.sessionId)}
-            style={{
-              textAlign: 'left',
-              padding: '14px 16px',
-              border: `1px solid ${active ? 'var(--accent-sky)' : 'var(--border)'}`,
-              borderRadius: 8,
-              background: active ? 'rgba(56, 189, 248, 0.08)' : 'var(--panel)',
-              color: 'var(--fg)',
-              cursor: 'pointer',
-            }}
+            className={cn(
+              'flex h-auto w-full flex-col items-stretch gap-1.5 rounded-md border border-border bg-card px-4 py-3 text-left font-mono text-[12px] normal-case tracking-normal hover:bg-accent',
+              active && 'border-primary bg-primary/[0.06]',
+            )}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-              <strong>{capture.originatingTool.name}</strong>
-              <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>{capture.capturePath}</span>
+            <div className="flex items-center justify-between gap-3">
+              <strong className="min-w-0 truncate font-medium text-foreground">
+                {capture.originatingTool.name}
+              </strong>
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {capture.capturePath}
+              </span>
             </div>
-            <div style={{ marginTop: 6, color: 'var(--fg-muted)', fontSize: 12 }}>
-              {capture.repoRemoteUrl ?? 'No repo'} · {capture.spanCount} spans · {capture.redactedSpanCount} redacted
+            <div className="text-[11px] text-muted-foreground">
+              {capture.repoRemoteUrl ?? 'No repo'} · {capture.spanCount} spans ·{' '}
+              {capture.redactedSpanCount} redacted
             </div>
-          </button>
+          </Button>
         );
       })}
     </div>

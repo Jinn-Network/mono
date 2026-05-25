@@ -280,7 +280,7 @@ describe('Step5ReviewLaunch', () => {
     expect(onBack).toHaveBeenCalled();
   });
 
-  it('renders the swe-rebench-v2 manifest summary with target/cooldown fields', () => {
+  it('renders the swe-rebench-v2 manifest summary with target/window fields', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft({
@@ -289,7 +289,8 @@ describe('Step5ReviewLaunch', () => {
           generatorConfig: {
             N_target_successes: 5,
             N_max_postings_per_task: 10,
-            cooldown_ms: 86_400_000,
+            posting_window_ms: 86_400_000,
+            post_batch_size: 25,
           },
         })}
         template={SWE_REBENCH_V2_V1_TEMPLATE}
@@ -302,6 +303,8 @@ describe('Step5ReviewLaunch', () => {
     expect(summary.textContent).toContain('Target successes');
     expect(summary.textContent).toContain('5');
     expect(summary.textContent).toContain('86400000 ms');
+    expect(summary.textContent).toContain('Batch size');
+    expect(summary.textContent).toContain('25');
     // No prediction-only labels
     expect(summary.textContent).not.toContain('Cadence');
     expect(summary.textContent).not.toContain('Allowlist');

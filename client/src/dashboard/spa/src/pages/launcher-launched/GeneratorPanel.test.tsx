@@ -47,14 +47,12 @@ function buildSweRebenchRecord(
 ): LaunchedSolverNetRecord {
   return buildRecord({
     generatorConfig: {
-      N_target_successes: 1,
-      N_max_postings_per_task: 1,
-      cooldown_ms: 86_400_000,
-      claimPolicy: {
-        maxClaims: 50,
-        maxClaimsPerOperator: 5,
-        claimLeaseTtlSeconds: 3_600,
-      },
+      N_target_successes: 5,
+      N_max_postings_per_task: 10,
+      posting_window_ms: 86_400_000,
+      post_batch_size: 25,
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 3_600,
     },
     summary: {
       manifestCid: 'bafybeig',
@@ -277,33 +275,57 @@ describe('GeneratorPanel', () => {
     });
   });
 
+  it('surfaces swe-rebench-v2 pool saturation progress', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            lastPollAt: '2026-05-05T15:00:00Z',
+            lastPollSummary: {
+              poolSize: 42,
+              posted: 3,
+              unposted: 10,
+              live: 11,
+              repostable: 4,
+              saturated: 5,
+              abandoned: 6,
+            },
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(screen.getByTestId('launcher-launched-generator-pool-summary')).toBeTruthy();
+    expect(screen.getByTestId('launcher-launched-generator-repostable').textContent).toBe('4');
+    expect(screen.getByTestId('launcher-launched-generator-abandoned').textContent).toBe('6');
+  });
+
   it('renders swe-rebench-v2 generator fields for swe launched records', () => {
     render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={async () => undefined} />);
     expandGeneratorConfig();
     expect(
       (screen.getByTestId('launcher-launched-generator-N_target_successes') as HTMLInputElement).value,
-    ).toBe('1');
+    ).toBe('5');
     expect(
       (screen.getByTestId(
         'launcher-launched-generator-N_max_postings_per_task',
       ) as HTMLInputElement).value,
-    ).toBe('1');
+    ).toBe('10');
     expect(
-      (screen.getByTestId('launcher-launched-generator-cooldown_ms') as HTMLInputElement).value,
+      (screen.getByTestId('launcher-launched-generator-posting_window_ms') as HTMLInputElement).value,
     ).toBe('86400000');
     expect(
-      (screen.getByTestId(
-        'launcher-launched-generator-claimPolicy-maxClaims',
-      ) as HTMLInputElement).value,
-    ).toBe('50');
+      (screen.getByTestId('launcher-launched-generator-post_batch_size') as HTMLInputElement).value,
+    ).toBe('25');
     expect(
       (screen.getByTestId(
-        'launcher-launched-generator-claimPolicy-maxClaimsPerOperator',
+        'launcher-launched-generator-maxClaimsPerOperator',
       ) as HTMLInputElement).value,
     ).toBe('5');
     expect(
       (screen.getByTestId(
-        'launcher-launched-generator-claimPolicy-claimLeaseTtlSeconds',
+        'launcher-launched-generator-claimLeaseTtlSeconds',
       ) as HTMLInputElement).value,
     ).toBe('3600');
     expect(screen.queryByTestId('launcher-launched-generator-cadenceMs')).toBeNull();
@@ -317,22 +339,22 @@ describe('GeneratorPanel', () => {
       target: { value: '3' },
     });
     fireEvent.change(screen.getByTestId('launcher-launched-generator-N_max_postings_per_task'), {
-      target: { value: '10' },
+      target: { value: '11' },
     });
-    fireEvent.change(screen.getByTestId('launcher-launched-generator-cooldown_ms'), {
+    fireEvent.change(screen.getByTestId('launcher-launched-generator-posting_window_ms'), {
       target: { value: '300000' },
     });
-    fireEvent.change(screen.getByTestId('launcher-launched-generator-claimPolicy-maxClaims'), {
-      target: { value: '10' },
+    fireEvent.change(screen.getByTestId('launcher-launched-generator-post_batch_size'), {
+      target: { value: '7' },
     });
     fireEvent.change(
-      screen.getByTestId('launcher-launched-generator-claimPolicy-maxClaimsPerOperator'),
+      screen.getByTestId('launcher-launched-generator-maxClaimsPerOperator'),
       {
         target: { value: '2' },
       },
     );
     fireEvent.change(
-      screen.getByTestId('launcher-launched-generator-claimPolicy-claimLeaseTtlSeconds'),
+      screen.getByTestId('launcher-launched-generator-claimLeaseTtlSeconds'),
       {
         target: { value: '1800' },
       },
@@ -341,13 +363,11 @@ describe('GeneratorPanel', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
       N_target_successes: 3,
-      N_max_postings_per_task: 10,
-      cooldown_ms: 300000,
-      claimPolicy: {
-        maxClaims: 10,
-        maxClaimsPerOperator: 2,
-        claimLeaseTtlSeconds: 1800,
-      },
+      N_max_postings_per_task: 11,
+      posting_window_ms: 300000,
+      post_batch_size: 7,
+      maxClaimsPerOperator: 2,
+      claimLeaseTtlSeconds: 1800,
     });
   });
 });
@@ -391,10 +411,10 @@ describe('buildPatch', () => {
 
 describe('buildSweRebenchV2Patch', () => {
   const prior = {
-    N_target_successes: '1',
-    N_max_postings_per_task: '1',
-    cooldown_ms: '86400000',
-    maxClaims: '50',
+    N_target_successes: '5',
+    N_max_postings_per_task: '10',
+    posting_window_ms: '86400000',
+    post_batch_size: '25',
     maxClaimsPerOperator: '5',
     claimLeaseTtlSeconds: '3600',
   };
@@ -402,13 +422,13 @@ describe('buildSweRebenchV2Patch', () => {
   it('returns only changed swe-rebench fields', () => {
     const r = buildSweRebenchV2Patch({
       ...prior,
-      N_target_successes: '3',
-      N_max_postings_per_task: '10',
+      N_target_successes: '6',
+      N_max_postings_per_task: '12',
     }, prior);
     expect(r.ok).toBe(true);
     expect(r.patch).toEqual({
-      N_target_successes: 3,
-      N_max_postings_per_task: 10,
+      N_target_successes: 6,
+      N_max_postings_per_task: 12,
     });
   });
 
@@ -422,36 +442,22 @@ describe('buildSweRebenchV2Patch', () => {
     expect(r.errors.N_max_postings_per_task).toMatch(/target successes/);
   });
 
-  it('rejects sub-60s cooldown', () => {
-    const r = buildSweRebenchV2Patch({ ...prior, cooldown_ms: '5000' }, prior);
+  it('rejects invalid posting window', () => {
+    const r = buildSweRebenchV2Patch({ ...prior, posting_window_ms: 'fast' }, prior);
     expect(r.ok).toBe(false);
-    expect(r.errors.cooldown_ms).toMatch(/at least 60s/);
+    expect(r.errors.posting_window_ms).toMatch(/positive integer/);
   });
 
-  it('returns nested claim policy edits', () => {
+  it('returns flattened claim policy edits', () => {
     const r = buildSweRebenchV2Patch({
       ...prior,
-      maxClaims: '10',
       maxClaimsPerOperator: '2',
       claimLeaseTtlSeconds: '1800',
     }, prior);
     expect(r.ok).toBe(true);
     expect(r.patch).toEqual({
-      claimPolicy: {
-        maxClaims: 10,
-        maxClaimsPerOperator: 2,
-        claimLeaseTtlSeconds: 1800,
-      },
+      maxClaimsPerOperator: 2,
+      claimLeaseTtlSeconds: 1800,
     });
-  });
-
-  it('requires claims per operator to fit under max claims', () => {
-    const r = buildSweRebenchV2Patch({
-      ...prior,
-      maxClaims: '3',
-      maxClaimsPerOperator: '5',
-    }, prior);
-    expect(r.ok).toBe(false);
-    expect(r.errors.maxClaimsPerOperator).toMatch(/max claims/);
   });
 });

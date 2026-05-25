@@ -1,13 +1,22 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
+import {
+  ValidatedPoolStore,
+  EVAL_SEMANTICS_VERSION,
+  createVettedPoolArtifactRef,
+  hashVettedPoolArtifact,
+  writeVettedPoolArtifactPublication,
+  type SweRebenchV2VettedPoolArtifact,
+} from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+import { GeneratorStateStore } from '../../src/solver-types/_swe-rebench-v2-state.js';
 import type { AdmissionMode } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
-import { ValidatedPoolStore, EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
+import type { Task } from '../../src/types/task.js';
 
 const DEFAULT_MOCK_ROWS = [
   {
@@ -88,17 +97,27 @@ interface MakeTestGeneratorOpts {
   admissionMode?: AdmissionMode;
   poolTasks?: PoolTask[];
   N_max_postings_per_task?: number;
-  cooldown_ms?: number;
+  N_target_successes?: number;
+  posting_window_ms?: number;
+  post_batch_size?: number;
 }
 
 function makeTestGenerator(opts: MakeTestGeneratorOpts) {
-  const { stateDir, admissionMode, N_max_postings_per_task = 3, cooldown_ms = 0 } = opts;
+  const {
+    stateDir,
+    admissionMode,
+    N_target_successes = 1,
+    N_max_postings_per_task = 3,
+    posting_window_ms = 24 * 60 * 60 * 1000,
+    post_batch_size = 25,
+  } = opts;
   const recordRef = { current: launchedRecord() };
   const configRef = {
     current: {
-      N_target_successes: 1,
+      N_target_successes,
       N_max_postings_per_task,
-      cooldown_ms,
+      posting_window_ms,
+      post_batch_size,
       ...(admissionMode !== undefined ? { admissionMode } : {}),
     },
   };
@@ -109,7 +128,12 @@ function makeTestGenerator(opts: MakeTestGeneratorOpts) {
   });
 }
 
-describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
+function expectTaskArray(value: Task | Task[] | null): Task[] {
+  expect(Array.isArray(value)).toBe(true);
+  return value as Task[];
+}
+
+describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
   let stateDir: string;
 
   beforeEach(() => {
@@ -127,14 +151,15 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
     rmSync(stateDir, { recursive: true, force: true });
   });
 
-  it('does not drain multiple candidates within one global cooldown window', async () => {
+  it('does not let one live posting stall the rest of the pool', async () => {
     vi.setSystemTime(new Date('2026-05-08T12:00:00.000Z'));
     const recordRef = { current: launchedRecord() };
     const configRef = {
       current: {
         N_target_successes: 1,
         N_max_postings_per_task: 1,
-        cooldown_ms: 86_400_000,
+        posting_window_ms: 86_400_000,
+        post_batch_size: 1,
         admissionMode: 'python-floor',
       },
     };
@@ -147,31 +172,51 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
     const first = await gen();
     const second = await gen();
 
-    expect(first).toMatchObject({
-      solverType: 'swe-rebench-v2.v1',
-      spec: expect.objectContaining({ instance_id: 'org__repo-1' }),
-    });
-    expect(second).toBeNull();
+    expect(expectTaskArray(first)[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(expectTaskArray(second)[0].spec).toMatchObject({ instance_id: 'org__repo-2' });
     expect(gen.getState()).toMatchObject({
-      totalPosted: 1,
-      lastPollSummary: { posted: 0 },
+      totalPosted: 2,
+      lastPollSummary: { posted: 1, abandoned: 2, unposted: 0 },
     });
   });
 
-  it('applies launched-record claim policy overrides to newly posted tasks', async () => {
+  it('sizes maxClaims to remaining target successes', async () => {
+    vi.setSystemTime(new Date('2026-05-08T12:00:00.000Z'));
+    const stateStore = new GeneratorStateStore({ stateDir });
+    await stateStore.recordSuccess('org__repo-1');
+    await stateStore.recordSuccess('org__repo-1');
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'python-floor',
+      N_target_successes: 3,
+      N_max_postings_per_task: 3,
+      post_batch_size: 2,
+    });
+
+    const tasks = expectTaskArray(await gen());
+    const partiallySolved = tasks.find((task) => task.spec?.instance_id === 'org__repo-1');
+
+    expect(partiallySolved).toMatchObject({
+      solverType: 'swe-rebench-v2.v1',
+      claimPolicy: {
+        maxClaims: 1,
+        maxClaimsPerOperator: 1,
+      },
+    });
+  });
+
+  it('applies maxClaimsPerOperator and claimLeaseTtlSeconds overrides to newly posted tasks', async () => {
     vi.setSystemTime(new Date('2026-05-08T12:00:00.000Z'));
     const recordRef = { current: launchedRecord() };
     const configRef = {
       current: {
-        N_target_successes: 1,
+        N_target_successes: 3,
         N_max_postings_per_task: 1,
-        cooldown_ms: 86_400_000,
+        posting_window_ms: 86_400_000,
+        post_batch_size: 1,
         admissionMode: 'python-floor',
-        claimPolicy: {
-          maxClaims: 10,
-          maxClaimsPerOperator: 2,
-          claimLeaseTtlSeconds: 1_800,
-        },
+        maxClaimsPerOperator: 2,
+        claimLeaseTtlSeconds: 1_800,
       },
     };
     const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
@@ -180,13 +225,13 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
       staticConfig: { stateDir },
     });
 
-    const task = await gen();
+    const task = expectTaskArray(await gen())[0];
 
     expect(task).toMatchObject({
       solverType: 'swe-rebench-v2.v1',
       claimPolicy: {
         mode: 'parallel',
-        maxClaims: 10,
+        maxClaims: 3,
         maxClaimsPerOperator: 2,
         claimLeaseTtlSeconds: 1_800,
       },
@@ -201,10 +246,19 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     stateDir = tmpDir();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-14T10:00:00.000Z'));
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ splits: [{ split: '2026_02' }] }),
-    } as Response);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'POST' || url.includes('/api/v0/add')) {
+        return {
+          status: 200,
+          text: async () => `${JSON.stringify({ Hash: 'bafy-vetted-pool-cid' })}\n`,
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ splits: [{ split: '2026_02' }] }),
+      } as Response;
+    });
   });
 
   afterEach(() => {
@@ -232,7 +286,116 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     await store.record('org__repo-1', { scorable: true, reason: 'ok', checkedAt: '2026-05-14T00:00:00Z' }, EVAL_SEMANTICS_VERSION);
     const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
     const task = await gen();
-    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(expectTaskArray(task)[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
+  });
+
+  it('publishes the local scorable pool before posting and stamps the artifact ref', async () => {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record(
+      'org__repo-1',
+      {
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-05-14T00:00:00Z',
+        rowHash: 'sha256:' + '1'.repeat(64),
+        imageDigest: 'sha256:' + 'a'.repeat(64),
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+
+    const task = expectTaskArray(await gen())[0];
+
+    expect(task.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(task.eligibility?.['vettedPoolRef']).toMatchObject({
+      schemaVersion: 'solvernet.artifact-ref.v1',
+      manifestCid: launchedRecord().manifestCid,
+      artifactType: 'swe-rebench-v2-vetted-pool.v1',
+      artifactCid: 'bafy-vetted-pool-cid',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+    });
+    expect(task.context?.['vettedPoolRef']).toBeUndefined();
+  });
+
+  it('uses the published artifact pool, not unpublished local scorable entries', async () => {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record(
+      'org__repo-1',
+      { scorable: true, reason: 'locally validated only', checkedAt: '2026-05-14T00:00:00Z' },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'org__repo-2',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:01Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-existing-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+    const task = expectTaskArray(await gen())[0];
+
+    expect(task.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(task.eligibility?.['vettedPoolRef']).toEqual(ref);
+  });
+
+  it('caches the write-once vetted-pool publication after first resolution', async () => {
+    const artifact: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      entries: [
+        {
+          instance_id: 'org__repo-1',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:00Z',
+        },
+        {
+          instance_id: 'org__repo-2',
+          scorable: true,
+          reason: 'gold-patch-resolves',
+          checkedAt: '2026-05-14T00:00:01Z',
+        },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-existing-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T00:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      N_max_postings_per_task: 1,
+      post_batch_size: 1,
+    });
+
+    const first = expectTaskArray(await gen())[0];
+    unlinkSync(join(stateDir, 'vetted-pool-artifact-publication.json'));
+    const second = expectTaskArray(await gen())[0];
+
+    expect(first.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(second.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(second.eligibility?.['vettedPoolRef']).toEqual(ref);
   });
 
   it('falls back to python-floor when admissionMode is python-floor and no validation data exists', async () => {
@@ -241,6 +404,6 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
       admissionMode: 'python-floor',
     });
     const task = await gen();
-    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(expectTaskArray(task)[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
   });
 });

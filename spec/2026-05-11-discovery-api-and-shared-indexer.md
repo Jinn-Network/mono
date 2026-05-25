@@ -181,14 +181,16 @@ Two new fields under a single `discovery` block (replaces today's loose `subgrap
 ```jsonc
 {
   "discovery": {
-    "mode": "http" | "onchain",              // default: "http"
+    "mode": "http" | "onchain",              // default: "http" on testnet, "onchain" on mainnet
     "url": "https://<operator-chosen-host>", // when mode = http
-    "fallbackToOnchain": true                // default: true; on-chain floor always honored
+    "fallbackToOnchain": false               // default: false (opt-in; see addendum below)
   }
 }
 ```
 
 Env overrides: `JINN_DISCOVERY_MODE`, `JINN_DISCOVERY_URL`, `JINN_DISCOVERY_FALLBACK`. `subgraphUrl` is removed (breaking config change — flagged in release notes; `DEFAULT_TESTNET_SUBGRAPH_URL` deletion in `config.ts:825` is part of the migration).
+
+**Addendum (2026-05-23 — substrate incident):** `fallbackToOnchain` was originally specified as default-true. After the 2026-05-20 indexer outage cascade — the indexer's Tenderly key hit its monthly quota, every operator daemon silently fell through to direct `eth_getLogs`, which then prevented the indexer from recovering on the same exhausted key for three days — the default is flipped to `false`. Silent fall-through hides indexer outages and turns every daemon into its own indexer, which storms shared RPC quota. Operators opt in explicitly when they need it (typically only when self-hosting an RPC with generous `getLogs` quotas). The factory emits a one-time `console.warn` at boot when the opt-in is active so the choice is visible. With the default-off setting, an indexer outage propagates as `DiscoveryUnavailableError` to the operator-app, which is the correct observable failure mode.
 
 ### 9.2 Callsite migration
 

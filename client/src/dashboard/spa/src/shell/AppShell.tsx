@@ -1,53 +1,48 @@
 import type { ReactNode } from 'react';
+import { NotificationsList } from '../notifications/components/NotificationsList.js';
+import { useNotifications } from '../notifications/useNotifications.js';
+import { cn } from '../lib/utils.js';
 
 /**
- * Three-region grid for the running-mode operator dashboard. The header +
- * tabs span both columns; the main outlet flows in the left column; the
- * agent rail is sticky on the right. Onboarding still owns the screen
- * before bootstrap completes.
+ * Three-region shell for the running-mode operator dashboard. Header + tabs
+ * span both columns; the main outlet flows in the left column; the agent
+ * rail is sticky on the right. Onboarding still owns the screen before
+ * bootstrap completes.
  */
 export interface AppShellProps {
   header: ReactNode;
   tabs: ReactNode;
-  rail: ReactNode;
+  /**
+   * Right-rail content (the embedded agent panel). Optional — when omitted
+   * the shell collapses to a single column and renders no aside.
+   */
+  rail?: ReactNode;
   children: ReactNode;
 }
 
 export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.Element {
+  const showRail = rail != null;
+  const notices = useNotifications();
+  const rows = notices.length > 0 ? 'grid-rows-[auto_auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_auto_minmax(0,1fr)]';
   return (
     <div
-      className="w-full"
-      style={{
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        display: 'grid',
-        gridTemplateRows: 'auto auto minmax(0, 1fr)',
-        gridTemplateColumns: '1fr 320px',
-        // Lock the outer shell to the viewport so internal regions (main,
-        // aside) can scroll independently. Without this, the agent rail's
-        // xterm scrollback expands the document height past 800kpx and the
-        // page becomes unscrollable in any meaningful way.
-        height: '100vh',
-        overflow: 'hidden',
-      }}
+      className={cn(
+        'grid h-screen w-full overflow-hidden bg-background text-foreground',
+        showRail ? 'grid-cols-[1fr_320px]' : 'grid-cols-1',
+        rows,
+      )}
     >
-      <div style={{ gridColumn: '1 / -1', borderBottom: '1px solid var(--border)' }}>
-        {header}
-      </div>
-      <div style={{ gridColumn: '1 / -1', borderBottom: '1px solid var(--border)' }}>
-        {tabs}
-      </div>
-      <main style={{ overflowY: 'auto', minHeight: 0 }}>{children}</main>
-      <aside
-        style={{
-          borderLeft: '1px solid var(--border)',
-          overflowY: 'auto',
-          minHeight: 0,
-          height: '100%',
-        }}
-      >
-        {rail}
-      </aside>
+      <div className="col-span-full border-b border-border">{header}</div>
+      <div className="col-span-full border-b border-border">{tabs}</div>
+      {notices.length > 0 && (
+        <div className="col-span-full border-b border-border">
+          <NotificationsList notices={notices} />
+        </div>
+      )}
+      <main className="min-h-0 overflow-y-auto">{children}</main>
+      {showRail && (
+        <aside className="h-full min-h-0 overflow-y-auto border-l border-border">{rail}</aside>
+      )}
     </div>
   );
 }

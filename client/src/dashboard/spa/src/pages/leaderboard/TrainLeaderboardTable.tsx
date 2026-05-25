@@ -1,4 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table.js';
+import { Skeleton } from '../../components/ui/skeleton.js';
 
 interface TrainRollup {
   implName: string;
@@ -12,23 +21,15 @@ interface LeaderboardResponse {
   rollups: TrainRollup[];
 }
 
-const cellStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderBottom: '1px solid var(--border)',
-  fontFamily: "'JetBrains Mono', ui-monospace, SF Mono, Menlo, monospace",
-  fontSize: '12px',
-  color: 'var(--fg)',
-};
-
-const headCellStyle: React.CSSProperties = {
-  ...cellStyle,
-  color: 'var(--fg-muted)',
-  fontWeight: 500,
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  fontSize: '10px',
-};
-
+/**
+ * Train-mode leaderboard table. One row per harness/codeDigest with the
+ * mean resolved %, run count, and unique-operator count. Rolled up server-
+ * side at `/api/solvernets/<solverNet>/leaderboard?mode=train` and refreshed
+ * every 15s.
+ *
+ * Migrated to shadcn `<Table>` with right-aligned numeric columns; loading
+ * state is a small `<Skeleton>` stack; empty state is a plain muted line.
+ */
 export function TrainLeaderboardTable({ solverNet }: { solverNet: string }): JSX.Element {
   const { data, isLoading } = useQuery<LeaderboardResponse>({
     queryKey: ['leaderboard', solverNet, 'train'],
@@ -47,48 +48,52 @@ export function TrainLeaderboardTable({ solverNet }: { solverNet: string }): JSX
 
   if (isLoading) {
     return (
-      <div style={{ padding: '24px', color: 'var(--fg-muted)', fontSize: '13px' }}>
-        Loading…
+      <div className="flex flex-col gap-2 p-6">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-4/6" />
       </div>
     );
   }
 
   if (rollups.length === 0) {
     return (
-      <div style={{ padding: '24px', color: 'var(--fg-dim)', fontSize: '13px' }}>
+      <div className="p-6 font-mono text-[13px] text-[var(--fg-dim)]">
         No train-mode verdicts recorded yet.
       </div>
     );
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={headCellStyle}>Harness</th>
-            <th style={headCellStyle}>codeDigest</th>
-            <th style={{ ...headCellStyle, textAlign: 'right' }}>Mean resolved</th>
-            <th style={{ ...headCellStyle, textAlign: 'right' }}>n</th>
-            <th style={{ ...headCellStyle, textAlign: 'right' }}>Operators</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rollups.map((r) => (
-            <tr key={r.codeDigest}>
-              <td style={cellStyle}>{r.implName}</td>
-              <td style={{ ...cellStyle, color: 'var(--fg-muted)' }}>
-                {r.codeDigest.slice(0, 16)}…
-              </td>
-              <td style={{ ...cellStyle, textAlign: 'right' }}>
-                {(r.meanResolved * 100).toFixed(1)}%
-              </td>
-              <td style={{ ...cellStyle, textAlign: 'right' }}>{r.verdictCount}</td>
-              <td style={{ ...cellStyle, textAlign: 'right' }}>{r.uniqueOperators}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Harness</TableHead>
+          <TableHead>codeDigest</TableHead>
+          <TableHead className="text-right">Mean resolved</TableHead>
+          <TableHead className="text-right">n</TableHead>
+          <TableHead className="text-right">Operators</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rollups.map((r) => (
+          <TableRow key={r.codeDigest}>
+            <TableCell className="font-mono text-[12px] text-foreground">{r.implName}</TableCell>
+            <TableCell className="font-mono text-[12px] text-muted-foreground">
+              {r.codeDigest.slice(0, 16)}…
+            </TableCell>
+            <TableCell className="text-right font-mono text-[12px] text-foreground">
+              {(r.meanResolved * 100).toFixed(1)}%
+            </TableCell>
+            <TableCell className="text-right font-mono text-[12px] text-foreground">
+              {r.verdictCount}
+            </TableCell>
+            <TableCell className="text-right font-mono text-[12px] text-foreground">
+              {r.uniqueOperators}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

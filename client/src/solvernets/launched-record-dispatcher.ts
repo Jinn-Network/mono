@@ -152,10 +152,14 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
   const config = typeof snapshot['config'] === 'object' && snapshot['config'] !== null
     ? snapshot['config'] as Record<string, unknown>
     : undefined;
-  const cadenceMs = finiteNumber(snapshot['cadenceMs']) ?? finiteNumber(config?.['cooldown_ms']);
-  if (cadenceMs === undefined) return undefined;
+  const kind = optionalString(snapshot['kind']);
+  const cadenceMs = finiteNumber(snapshot['cadenceMs']) ?? (
+    kind === 'swe-rebench-v2' ? undefined : finiteNumber(config?.['cadenceMs'])
+  );
+  if (cadenceMs === undefined && kind !== 'swe-rebench-v2') return undefined;
 
-  const projected: LauncherGeneratorStateSnapshot = { cadenceMs };
+  const projected: LauncherGeneratorStateSnapshot = {};
+  if (cadenceMs !== undefined) projected.cadenceMs = cadenceMs;
   const lastPollAt = optionalString(snapshot['lastPollAt']);
   if (lastPollAt) projected.lastPollAt = lastPollAt;
 
@@ -172,11 +176,37 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
     ? snapshot['lastPollSummary'] as Record<string, unknown>
     : undefined;
   if (rawSummary) {
-    const evaluated = finiteNumber(rawSummary['evaluated']) ?? finiteNumber(rawSummary['poolSize']);
+    const poolSize = finiteNumber(rawSummary['poolSize']);
+    const unposted = finiteNumber(rawSummary['unposted']);
+    const live = finiteNumber(rawSummary['live']);
+    const repostable = finiteNumber(rawSummary['repostable']);
+    const saturated = finiteNumber(rawSummary['saturated']);
+    const abandoned = finiteNumber(rawSummary['abandoned']);
     const posted = finiteNumber(rawSummary['posted']);
-    const skipped = finiteNumber(rawSummary['skipped']);
-    if (evaluated !== undefined && posted !== undefined && skipped !== undefined) {
-      projected.lastPollSummary = { evaluated, posted, skipped };
+    if (
+      poolSize !== undefined &&
+      posted !== undefined &&
+      unposted !== undefined &&
+      live !== undefined &&
+      repostable !== undefined &&
+      saturated !== undefined &&
+      abandoned !== undefined
+    ) {
+      projected.lastPollSummary = {
+        poolSize,
+        posted,
+        unposted,
+        live,
+        repostable,
+        saturated,
+        abandoned,
+      };
+    } else {
+      const evaluated = finiteNumber(rawSummary['evaluated']) ?? poolSize;
+      const skipped = finiteNumber(rawSummary['skipped']);
+      if (evaluated !== undefined && posted !== undefined && skipped !== undefined) {
+        projected.lastPollSummary = { evaluated, posted, skipped };
+      }
     }
   }
 

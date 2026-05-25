@@ -12,29 +12,8 @@ export interface AgentRailProps {
 
 export function AgentRail({ agentGated }: AgentRailProps): JSX.Element {
   return (
-    <div
-      className="agent-rail"
-      style={{
-        padding: '16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-        height: '100%',
-        minWidth: 0,
-        overflow: 'hidden',
-      }}
-    >
-      <span
-        style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          fontWeight: 500,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--fg-muted)',
-          overflowWrap: 'anywhere',
-        }}
-      >
+    <div className="agent-rail flex h-full min-w-0 flex-col gap-3 overflow-hidden p-4">
+      <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground [overflow-wrap:anywhere]">
         Claude
       </span>
       <Agent agentGated={agentGated} />

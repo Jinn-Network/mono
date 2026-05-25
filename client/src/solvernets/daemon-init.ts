@@ -72,7 +72,8 @@ import {
   type LifecycleTransitionDeps,
 } from './lifecycle-transitions.js';
 import type { SolverNetRegistryClient, SolverNetManifestSummary } from './registry-client.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
+import type { DiscoveryAPI, DiscoveryUnavailableCode } from '../discovery/types.js';
+import { DiscoveryUnavailableError } from '../discovery/types.js';
 import type { LaunchedSolverNetRecord, SolverNetStore } from './store.js';
 
 // Import viem types lazily-named — keep the runtime import scoped so unit
@@ -113,8 +114,15 @@ export interface SolverNetCatalogCache {
   stop(): void;
   /** Last successful refresh. `null` until the first refresh lands. */
   lastRefreshedAt(): Date | null;
-  /** Last refresh error, if any. Cleared on the next successful refresh. */
-  lastError(): { message: string; at: Date } | null;
+  /**
+   * Last refresh error, if any. Cleared on the next successful refresh.
+   *
+   * `code` carries a typed reason when one can be classified — currently only
+   * `rpc_rate_limited` (the configured RPC returned a 429). The operator UI
+   * branches on this to render a distinct, actionable message instead of a
+   * generic "catalog failed to load". See jinn-mono #325.
+   */
+  lastError(): { message: string; at: Date; code?: DiscoveryUnavailableCode } | null;
 }
 
 /**
@@ -367,6 +375,20 @@ export async function initSolverNetSubsystem(
 
 // ── Catalog cache ───────────────────────────────────────────────────────────
 
+/**
+ * Recover the typed `DiscoveryUnavailableError.code` from a refresh failure.
+ * In every current production path the on-chain floor throws the
+ * DiscoveryUnavailableError directly; the `cause` lookup is defensive — should
+ * an enrichment layer ever wrap the error, the typed signal is still recovered
+ * rather than collapsed to a generic failure. See jinn-mono #325.
+ */
+function discoveryCodeOf(err: unknown): DiscoveryUnavailableCode | undefined {
+  if (err instanceof DiscoveryUnavailableError) return err.code;
+  const cause = err instanceof Error ? (err as { cause?: unknown }).cause : undefined;
+  if (cause instanceof DiscoveryUnavailableError) return cause.code;
+  return undefined;
+}
+
 interface CatalogCacheConfig {
   registryClient: SolverNetRegistryClient;
   network: 'base-sepolia' | 'base';
@@ -380,7 +402,7 @@ interface CatalogCacheConfig {
 function createCatalogCache(config: CatalogCacheConfig): SolverNetCatalogCache {
   let snapshot: SolverNetManifestSummary[] = [];
   let lastRefreshedAt: Date | null = null;
-  let lastError: { message: string; at: Date } | null = null;
+  let lastError: { message: string; at: Date; code?: DiscoveryUnavailableCode } | null = null;
   const now = config.now ?? (() => new Date());
 
   const setInt = config.scheduler?.setInterval ?? ((cb, ms) => setInterval(cb, ms));
@@ -396,8 +418,13 @@ function createCatalogCache(config: CatalogCacheConfig): SolverNetCatalogCache {
       lastError = null;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      lastError = { message, at: now() };
-      config.logger.warn(`[solvernet] catalog refresh failed: ${message}`);
+      // Preserve the typed `rpc_rate_limited` signal so the operator UI can
+      // tell a throttled RPC apart from a generic catalog failure.
+      const code = discoveryCodeOf(err);
+      lastError = { message, at: now(), ...(code !== undefined ? { code } : {}) };
+      config.logger.warn(
+        `[solvernet] catalog refresh failed${code ? ` (${code})` : ''}: ${message}`,
+      );
     }
   }
 

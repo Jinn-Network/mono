@@ -118,20 +118,67 @@ describe('automatic testnet setup migration', () => {
     expect(entry.state_reset_at).toBeTruthy();
   });
 
-  it('continues to the new setup when old setup retirement fails', async () => {
+  it('preserves local state when old setup retirement fails (jinn-mono-hjex.1)', async () => {
     const { earningDir, store, result, sendTransaction } = await runMigration({
       sendThrows: new Error('retire rejected'),
     });
     dirs.push(earningDir);
 
     expect(sendTransaction).toHaveBeenCalledTimes(1);
-    expect(result.state.services[0]!.step).toBe('awaiting_stake');
-    expect(result.state.services[0]!.agent_id).toBe('123');
 
+    // State must be preserved — wipe is guarded on retire success
+    const svc = result.state.services[0]!;
+    expect(svc.service_id).toBe(42);
+    expect(svc.safe_address).toBe('0x3333333333333333333333333333333333333333');
+    expect(svc.mech_address).toBe('0x4444444444444444444444444444444444444444');
+    expect(svc.staking_address).toBe(DEPRECATED_BASE_SEPOLIA_STAKING_PROXY);
+    expect(svc.step).toBe('complete');
+    expect(svc.agent_id).toBe('123');
+
+    // Archive records the failure
     const archive = await store.loadMigrationArchive();
     expect(archive.entries).toHaveLength(1);
     expect(archive.entries[0]!.retire_status).toBe('failed');
     expect(archive.entries[0]!.retire_error).toContain('retire rejected');
+    // wipe_suppressed must be set so consumers (bootstrap-endpoint) can
+    // distinguish this entry from pre-PR archive rows where state was wiped.
+    expect(archive.entries[0]!.wipe_suppressed).toBe(true);
+    expect(archive.entries[0]!.state_reset_at).toBeNull();
+
+    // Envelope is surfaced in the result
+    expect(result.retireFailedEnvelope).toBeDefined();
+    expect(result.retireFailedEnvelope!.kind).toBe('retire_failed');
+    expect(result.retireFailedEnvelope!.retire_error).toContain('retire rejected');
+  });
+
+  it('does not mutate local state when retire_status === "failed" (jinn-mono-hjex.1)', async () => {
+    const initial = legacyState();
+
+    // Run migration where retire throws with the specific InsufficientStake message
+    const { earningDir, store, result } = await runMigration({
+      state: initial,
+      sendThrows: new Error('distributor.unstakeAndWithdraw reverted with InsufficientStake'),
+    });
+    dirs.push(earningDir);
+
+    // All runtime fields preserved
+    const svc = result.state.services[0]!;
+    expect(svc.service_id).toBe(42);
+    expect(svc.safe_address).toBe('0x3333333333333333333333333333333333333333');
+    expect(svc.mech_address).toBe('0x4444444444444444444444444444444444444444');
+    expect(svc.staking_address).toBe(DEPRECATED_BASE_SEPOLIA_STAKING_PROXY);
+    expect(svc.step).toBe('complete');
+
+    // Envelope present with correct fields
+    expect(result.retireFailedEnvelope).toBeDefined();
+    expect(result.retireFailedEnvelope!.kind).toBe('retire_failed');
+    expect(result.retireFailedEnvelope!.retire_error).toContain('InsufficientStake');
+
+    // Archive records the failure, state_reset_at is null, wipe_suppressed=true
+    const archive = await store.loadMigrationArchive();
+    expect(archive.entries[0]!.retire_status).toBe('failed');
+    expect(archive.entries[0]!.state_reset_at).toBeNull();
+    expect(archive.entries[0]!.wipe_suppressed).toBe(true);
   });
 
   it('records the retirement tx hash when receipt waiting fails after broadcast', async () => {

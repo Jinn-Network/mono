@@ -21,6 +21,9 @@ node_modules/
 # Per-operator dev helpers (not collaborative)
 client/start-daemon.sh
 
+# Per-operator Claude context (personal profile, not collaborative)
+CLAUDE.local.md
+
 # macOS
 .DS_Store
 

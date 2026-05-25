@@ -27,6 +27,8 @@ import type {
   DiscoveryPluginPublicationsResponse,
   DiscoveryBuilderArtifactsResponse,
   DiscoveryPluginScoresResponse,
+  DiscoverySolverNetOperatorCountResponse,
+  HarnessReadinessEntry,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -94,7 +96,18 @@ export const api = {
     jfetch<{ ok: boolean; reason?: string }>('/v1/auth/claude/spawn', {
       method: 'POST',
     }),
-  triggerDrip: () =>
+  /**
+   * Trigger a Base Sepolia faucet drip for the master EOA.
+   *
+   * - Default (bootstrap funding gate): the daemon loops the tiny CDP drip
+   *   until the wallet clears the entire bootstrap floor.
+   * - `{ singleDrip: true }` (running-mode Dashboard "Top up"): the daemon
+   *   fires the faucet EXACTLY ONCE and returns immediately with a `deltaWei`
+   *   reporting how much the balance moved. This is what makes the Dashboard
+   *   Gas top-up an explicit, one-shot action with no re-firing loop
+   *   (jinn-mono #336).
+   */
+  triggerDrip: (opts?: { singleDrip?: boolean }) =>
     jfetch<{
       ok: boolean;
       address?: string;
@@ -103,10 +116,11 @@ export const api = {
       attempts?: number;
       balanceWei?: string;
       targetWei?: string;
+      deltaWei?: string;
       reason?: string;
       rateLimited?: boolean;
     }>(
-      '/v1/setup/drip',
+      opts?.singleDrip ? '/v1/setup/drip?singleDrip=true' : '/v1/setup/drip',
       { method: 'POST' },
     ),
   changeKeystorePassword: (current: string, next: string) =>
@@ -115,13 +129,26 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ current, next }),
     }),
-  claimRewards: () =>
-    jfetch<{ ok: boolean; result?: unknown; exitCode?: number | null; error?: string }>(
-      '/api/admin/claim-rewards',
-      { method: 'POST' },
-    ),
-  restartDaemon: () =>
+  /**
+   * Trigger a daemon restart. The Node Health card's Restart button passes
+   * `forceRespawn: true` so the daemon comes back even under a supervisor
+   * (`JINN_NO_UI=1`) — without it the operator clicks Restart in `--no-ui`
+   * mode and the daemon stops dead. Other callers (MCP tools, config-change
+   * flows) leave `forceRespawn` unset so the supervisor keeps its contract.
+   */
+  restartDaemon: (opts?: { forceRespawn?: boolean }) =>
     jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/restart', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(opts ?? {}),
+    }),
+  /**
+   * Stop the daemon process. The operator clicked Stop; the daemon exits and
+   * stays down until they explicitly start it again (from the terminal,
+   * since there's no out-of-band Start endpoint by design).
+   */
+  stopDaemon: () =>
+    jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/stop', {
       method: 'POST',
     }),
   getSolverNets: () => jfetch<SolverNetsCatalogResponse>('/v1/solvernets'),
@@ -161,6 +188,11 @@ export const api = {
         body: JSON.stringify(patch),
       },
     ),
+  restake: (serviceId: number) =>
+    jfetch<{ ok: boolean; error?: string }>(
+      `/v1/setup/restake/${encodeURIComponent(String(serviceId))}`,
+      { method: 'POST' },
+    ),
   retryAgentBinding: (patch?: { serviceIndex?: number }) =>
     jfetch<{
       ok: boolean;
@@ -169,6 +201,11 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch ?? {}),
+    }),
+  /** Re-enter the bootstrap state machine in-process. jinn-mono-hjex.6 */
+  retryBootstrap: () =>
+    jfetch<{ ok: boolean; error?: string }>('/v1/setup/bootstrap/retry', {
+      method: 'POST',
     }),
   updateHarnessMode: (mode: 'train' | 'frozen') =>
     jfetch<{ ok: boolean; restartRequired: boolean; mode: 'train' | 'frozen' }>(
@@ -183,6 +220,18 @@ export const api = {
   hermesDoctor: () =>
     jfetch<{ installed: boolean; exitCode: number | null; stdout: string; stderr: string }>(
       '/api/hermes/doctor',
+    ),
+
+  /**
+   * Per-harness readiness snapshot (vh74.2 Stage A — #248 / #332).
+   * `GET /v1/harnesses/:name/readiness` keys by the daemon's `Harness.name`,
+   * which is the canonical harness name the join form already carries in
+   * `form.harness`. A 404 (`harness_not_found`) propagates as a thrown Error
+   * with `code === 'harness_not_found'`.
+   */
+  harnessReadiness: (name: string) =>
+    jfetch<HarnessReadinessEntry>(
+      `/v1/harnesses/${encodeURIComponent(name)}/readiness`,
     ),
 
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
@@ -437,6 +486,13 @@ export const api = {
       if (limit !== undefined) q.set('limit', String(limit));
       return jfetch<DiscoveryPluginScoresResponse>(
         `/v1/discovery/plugin-scores?${q.toString()}`,
+      );
+    },
+    // Distinct operators with on-chain activity on a SolverNet (issue #351).
+    getSolverNetOperatorCount: (cid: string) => {
+      const q = new URLSearchParams({ cid });
+      return jfetch<DiscoverySolverNetOperatorCountResponse>(
+        `/v1/discovery/solvernet-operator-count?${q.toString()}`,
       );
     },
   },

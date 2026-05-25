@@ -166,7 +166,7 @@ export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   },
   claimPolicyDefaults: {
     mode: 'parallel',
-    maxClaims: 50,
+    maxClaims: 5,
     maxClaimsPerOperator: 5,
     claimLeaseTtlSeconds: 60 * 60, // 1 hour per Task — coding tasks need more time than predictions
   },

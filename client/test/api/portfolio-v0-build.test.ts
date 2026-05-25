@@ -61,6 +61,127 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
+  it('splits FAILED runs into settled fails and local errors via delivery_tx_hash', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      seedIntent(persistence, 'req-local-error');
+      seedIntent(persistence, 'req-settled-fail');
+      persistence.markFailed('req-local-error', 'SkippableError');
+      persistence.markFailed('req-settled-fail', 'claimDelivery reverted');
+      store.db
+        .prepare('UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?')
+        .run('0xdeadbeef', 'req-settled-fail');
+
+      const result = gatherPortfolioV0Status(store);
+      expect(result.totals.failed).toBe(2);
+      expect(result.totals.settledFailed).toBe(1);
+      expect(result.totals.localErrors).toBe(1);
+    });
+  });
+
+  it('scopes totals and lists to solverType=portfolio.v0 — other solvers do not leak', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      // portfolio.v0 — should be counted.
+      seedIntent(persistence, 'pv0-failed');
+      persistence.markFailed('pv0-failed', 'portfolio failure');
+      seedIntent(persistence, 'pv0-delivered');
+      store.db.prepare(`UPDATE task_runs SET state = 'COMPLETE' WHERE request_id = ?`).run('pv0-delivered');
+      seedIntent(persistence, 'pv0-running');
+      store.db.prepare(`UPDATE task_runs SET state = 'RUNNING' WHERE request_id = ?`).run('pv0-running');
+
+      // Foreign solverType — must NOT leak into portfolio.v0 counters.
+      persistence.insertDiscovered({
+        requestId: 'pred-failed',
+        taskCid: 'bafy-pred-failed',
+        onchainCreationTx: '0xpred',
+        onchainCreationBlock: 1,
+        solverType: 'prediction.v1',
+        windowStartTs: 1_000,
+        windowEndTs: 2_000,
+        task: { id: 'pred-failed', description: 'prediction task', solverType: 'prediction.v1' },
+      });
+      persistence.markFailed('pred-failed', 'prediction failure');
+      store.db
+        .prepare('UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?')
+        .run('0xpredfail', 'pred-failed');
+
+      persistence.insertDiscovered({
+        requestId: 'swe-failed',
+        taskCid: 'bafy-swe-failed',
+        onchainCreationTx: '0xswe',
+        onchainCreationBlock: 1,
+        solverType: 'swe-rebench-v2.v1',
+        windowStartTs: 1_000,
+        windowEndTs: 2_000,
+        task: { id: 'swe-failed', description: 'swe task', solverType: 'swe-rebench-v2.v1' },
+      });
+      persistence.markFailed('swe-failed', 'swe failure');
+
+      const result = gatherPortfolioV0Status(store);
+
+      // Only portfolio.v0 rows are counted.
+      expect(result.totals.delivered).toBe(1);
+      expect(result.totals.failed).toBe(1);
+      expect(result.totals.settledFailed).toBe(0);
+      expect(result.totals.localErrors).toBe(1);
+      expect(result.totals.active).toBe(1);
+
+      // Foreign-solver requestIds must not appear in the surfaced lists.
+      const inFlightIds = result.inFlight.map((row) => row.requestId);
+      const verdictIds = result.recentVerdicts.map((row) => row.requestId);
+      expect(inFlightIds).toContain('pv0-running');
+      expect(inFlightIds).not.toContain('swe-failed');
+      expect(verdictIds).toContain('pv0-failed');
+      expect(verdictIds).not.toContain('pred-failed');
+      expect(verdictIds).not.toContain('swe-failed');
+    });
+  });
+
+  it('keeps portfolio rows when solver_type is missing but task_payload still identifies the net', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      seedIntent(persistence, 'canonical-pv0');
+      store.db.prepare(
+        `UPDATE task_runs
+         SET solver_type = NULL,
+             task_payload = ?
+         WHERE request_id = ?`,
+      ).run(
+        JSON.stringify({
+          id: 'canonical-pv0',
+          description: 'test',
+          contractId: 'portfolio',
+          contractVersion: 'v0',
+        }),
+        'canonical-pv0',
+      );
+
+      seedIntent(persistence, 'legacy-pv0');
+      persistence.markFailed('legacy-pv0', 'legacy failure');
+      store.db.prepare(
+        `UPDATE task_runs
+         SET solver_type = NULL,
+             task_payload = ?
+         WHERE request_id = ?`,
+      ).run(
+        JSON.stringify({
+          id: 'legacy-pv0',
+          description: 'test',
+          solverType: 'portfolio.v0',
+        }),
+        'legacy-pv0',
+      );
+
+      const result = gatherPortfolioV0Status(store);
+
+      expect(result.totals.active).toBe(1);
+      expect(result.totals.failed).toBe(1);
+      expect(result.inFlight.map((row) => row.requestId)).toContain('canonical-pv0');
+      expect(result.recentVerdicts.map((row) => row.requestId)).toContain('legacy-pv0');
+    });
+  });
+
   it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
       const persistence = new TaskRunPersistence(store.db);

@@ -1,14 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { Router, Route, Switch } from 'wouter';
+import { Router, Route, Switch, Redirect, useLocation } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
-import { OverviewActivityPage } from './pages/OverviewActivity.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
+import { getFeatures } from './lib/features.js';
+import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { MembershipsTab } from './pages/operator/MembershipsTab.js';
+import { RegistryTab } from './pages/operator/RegistryTab.js';
+import { NetworkTab } from './pages/operator/NetworkTab.js';
+import { SecurityTab } from './pages/operator/SecurityTab.js';
+
+// ActivitySections now uses SSE — mock so routing tests don't open EventSource.
+vi.mock('./api/events.js', () => ({
+  useEventStream: vi.fn(() => ({ events: [], connected: false })),
+}));
 
 // Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
@@ -17,7 +27,6 @@ vi.mock('./api/client.js', () => ({
     getBootstrap: async () => ({}),
     getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
-    claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
     operator: {
       listArtifacts: async () => ({
@@ -102,32 +111,18 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
-          <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview"><OverviewPage /></Route>
           <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
         '/overview',
       ),
     );
-    // Overview renders HeroStats with these canonical eyebrows.
-    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText(/jinn claimable/i)).toBeTruthy();
-  });
-
-  it('renders OverviewActivityPage on /overview/activity', async () => {
-    render(
-      withProviders(
-        <Switch>
-          <Route path="/overview/activity"><OverviewActivityPage /></Route>
-          <Route path="/overview"><OverviewPage /></Route>
-        </Switch>,
-        '/overview/activity',
-      ),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId('overview-activity')).toBeTruthy();
-    });
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
+    // Overview renders the Node Health card in the right rail and the
+    // consolidated Wallet card (Gas + Rewards + Identity + Password) in
+    // the main column.
+    expect(screen.getByText(/^node health$/i)).toBeTruthy();
+    expect(screen.getByText(/^wallet$/i)).toBeTruthy();
+    expect(screen.getByText(/^rewards$/i)).toBeTruthy();
   });
 
   it('renders OperatorPage on /operator', async () => {
@@ -141,17 +136,41 @@ describe('App routes', () => {
       ),
     );
     expect(screen.getByTestId('operator-page')).toBeTruthy();
-    expect(screen.getByTestId('live-now-band')).toBeTruthy();
-    expect(screen.getByText(/launcher tools/i).closest('section')).toBeTruthy();
+    // The launcher-tools panel migrated from a styled <section> to shadcn
+    // <Card>; assert by testid + link href instead of element name.
+    expect(screen.getByText(/launcher tools/i)).toBeTruthy();
     expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
-    // Operator is the configuration surface (SolverNets / Harness / Network /
-    // Security). The SolverNets head is the most stable assertion since it
-    // never collapses to nothing.
-    await waitFor(() => expect(
-      screen.getByText((_, el) =>
-        el?.tagName === 'SPAN' && el.textContent === 'SolverNets',
+  });
+
+  // Issue #219: the live activity surface belongs on /overview (the
+  // Dashboard), not on /operator (Settings). After the IA reshuffle the
+  // surface is the Activity card.
+  it('renders the activity surface on /overview, not on /operator', async () => {
+    const { unmount } = render(
+      withProviders(
+        <Switch>
+          <Route path="/overview"><OverviewPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
+        </Switch>,
+        '/overview',
       ),
-    ).toBeTruthy());
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-card')).toBeTruthy();
+    });
+    unmount();
+
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/overview"><OverviewPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
+        </Switch>,
+        '/operator',
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('operator-page')).toBeTruthy());
+    expect(screen.queryByTestId('activity-card')).toBeNull();
   });
 
   it('renders LauncherPage on /launcher', async () => {
@@ -199,6 +218,46 @@ describe('App routes', () => {
     );
   });
 
+  // ── /build feature gate (issue #327) ──
+  // The /build route mirrors App.tsx: BuildPage when the pluginBuilderUi flag
+  // is on, else a redirect to /overview. The substrate stays live; only the
+  // operator-app promotion is gated.
+
+  afterEach(() => {
+    delete (window as { __JINN_FEATURES__?: unknown }).__JINN_FEATURES__;
+  });
+
+  function LocationProbe(): JSX.Element {
+    const [location] = useLocation();
+    return <div data-testid="location">{location}</div>;
+  }
+
+  function BuildRoute(): JSX.Element {
+    const pluginBuilderUi = getFeatures().pluginBuilderUi;
+    return (
+      <Switch>
+        <Route path="/build">
+          {pluginBuilderUi ? <div data-testid="build-page" /> : <Redirect to="/overview" />}
+        </Route>
+        <Route path="/overview"><LocationProbe /></Route>
+      </Switch>
+    );
+  }
+
+  it('redirects /build to /overview when the pluginBuilderUi flag is off (default)', async () => {
+    render(withProviders(<BuildRoute />, '/build'));
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/overview'),
+    );
+    expect(screen.queryByTestId('build-page')).toBeNull();
+  });
+
+  it('renders the build page on /build when the pluginBuilderUi flag is on', () => {
+    window.__JINN_FEATURES__ = { pluginBuilderUi: true };
+    render(withProviders(<BuildRoute />, '/build'));
+    expect(screen.getByTestId('build-page')).toBeTruthy();
+  });
+
   it('renders LauncherLaunchedPage on /launcher/launched/:solverNetId and exposes the param', async () => {
     render(
       withProviders(
@@ -222,6 +281,72 @@ describe('App routes', () => {
           screen.queryByTestId('launcher-launched-error') ??
           screen.queryByTestId('launcher-launched'),
       ).toBeTruthy(),
+    );
+  });
+
+  // ── Operator sub-routes (Task 5.1) ──
+  // The four new sub-routes resolve to their stub tabs wrapped in OperatorShell.
+  // Bare /operator redirects to /operator/memberships.
+
+  function OperatorSubSwitch(): JSX.Element {
+    return (
+      <Switch>
+        <Route path="/operator/memberships">
+          <OperatorShell><MembershipsTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/registry">
+          <OperatorShell><RegistryTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/network">
+          <OperatorShell><NetworkTab /></OperatorShell>
+        </Route>
+        <Route path="/operator/security">
+          <OperatorShell><SecurityTab /></OperatorShell>
+        </Route>
+        <Route path="/operator">
+          <Redirect to="/operator/memberships" />
+        </Route>
+        <Route path="/overview"><LocationProbe /></Route>
+      </Switch>
+    );
+  }
+
+  it('renders MembershipsTab on /operator/memberships', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/memberships'));
+    expect(screen.getByTestId('memberships-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders RegistryTab on /operator/registry', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/registry'));
+    expect(screen.getByTestId('registry-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders NetworkTab on /operator/network', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/network'));
+    expect(screen.getByTestId('network-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('renders SecurityTab on /operator/security', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/security'));
+    expect(screen.getByTestId('security-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
+
+  it('redirects bare /operator to /operator/memberships', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/operator/memberships"><LocationProbe /></Route>
+          <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+        </Switch>,
+        '/operator',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/operator/memberships'),
     );
   });
 });

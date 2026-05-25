@@ -67,6 +67,7 @@ describe('runAdditiveMigrations', () => {
     expect(columns).toContain('manifest_generated_at');
     expect(columns).toContain('evidence_hash');
     expect(columns).toContain('task_payload');
+    expect(columns).toContain('run_started_at');
 
     db.close();
   });
@@ -116,6 +117,25 @@ describe('TaskRunPersistence', () => {
       p.insertDiscovered(makeInput({ solverType: undefined }));
       const intent = p.getByRequestId('req-001');
       expect(intent!.solverType).toBeNull();
+    });
+
+    it('persists an explicit runStartedAt distinct from the task window start', () => {
+      p.insertDiscovered(makeInput({
+        runStartedAt: 1_700_000,
+        windowStartTs: 2_000_000,
+      }));
+      const intent = p.getByRequestId('req-001');
+      expect(intent!.runStartedAt).toBe(1_700_000);
+      expect(intent!.windowStartTs).toBe(2_000_000);
+    });
+
+    it('defaults runStartedAt to observe time when omitted', () => {
+      const before = Date.now();
+      p.insertDiscovered(makeInput({ runStartedAt: undefined }));
+      const after = Date.now();
+      const intent = p.getByRequestId('req-001');
+      expect(intent!.runStartedAt).toBeGreaterThanOrEqual(before);
+      expect(intent!.runStartedAt).toBeLessThanOrEqual(after);
     });
   });
 

@@ -34,6 +34,8 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         'solver-type': { type: 'string' },
         'spec-file': { type: 'string' },
         'manifest-cid': { type: 'string' },
+        'max-claims': { type: 'string' },
+        'required-verdicts': { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
       },
@@ -84,6 +86,61 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
 
   const dryRun = parsed.values['dry-run'] as boolean;
   const yes = parsed.values.yes as boolean;
+
+  // ── claim-policy override: --max-claims ─────────────────────────────────────
+  // The on-chain `claimPolicy` defaults to a single attempt slot
+  // (`maxClaims: 1`). That is correct for one-shot SolverTypes, but it makes a
+  // task brittle on a shared testnet: whoever wins the single solution claim
+  // also holds the single verdict slot (`requiredVerdicts: 1`), and a claimer
+  // that never delivers a verdict permanently dead-locks the task — no other
+  // operator can ever get an attempt. SWE-rebench v2's auto-generator already
+  // posts `maxClaims: 5` for exactly this reason. `--max-claims` lets a caller
+  // (e.g. the T3.1 release-readiness gate) post a multi-slot task so a
+  // controlled operator can always get its own attempt to solve and grade.
+  let maxClaimsOverride: number | undefined;
+  const rawMaxClaims = parsed.values['max-claims'] as string | undefined;
+  if (rawMaxClaims !== undefined) {
+    const n = Number(rawMaxClaims);
+    if (!Number.isInteger(n) || n < 1) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `--max-claims must be a positive integer, got '${rawMaxClaims}'`,
+          exampleCli: 'jinn tasks submit --id my-task --description "..." --max-claims 5 --dry-run',
+          details: { field: '--max-claims', expected: 'positive integer' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    maxClaimsOverride = n;
+  }
+
+  // ── claim-policy override: --required-verdicts ──────────────────────────────
+  // The on-chain `evaluationPolicy.requiredVerdicts` defaults to 1 — a single
+  // verdict slot per attempt. On a shared/adversarial network a claimer that
+  // never delivers can squat that one slot and permanently lock the attempt's
+  // verdict leg. `--required-verdicts N` opens N slots; with the protocol's
+  // per-evaluator cap of 1, an honest evaluator can always claim and deliver
+  // one even when others squat the rest.
+  let requiredVerdictsOverride: number | undefined;
+  const rawRequiredVerdicts = parsed.values['required-verdicts'] as string | undefined;
+  if (rawRequiredVerdicts !== undefined) {
+    const n = Number(rawRequiredVerdicts);
+    if (!Number.isInteger(n) || n < 1) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `--required-verdicts must be a positive integer, got '${rawRequiredVerdicts}'`,
+          exampleCli: 'jinn tasks submit --id my-task --description "..." --required-verdicts 3 --dry-run',
+          details: { field: '--required-verdicts', expected: 'positive integer' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    requiredVerdictsOverride = n;
+  }
 
   // ── spec-file loading ───────────────────────────────────────────────────────
   const config = loadConfig(getConfigPathFromArgs(ctx.argv));
@@ -271,6 +328,25 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     const dotIdx = taskKind.lastIndexOf('.');
     const contractId = dotIdx > 0 ? taskKind.slice(0, dotIdx) : taskKind;
     const contractVersion = dotIdx > 0 ? taskKind.slice(dotIdx + 1) : 'v0';
+    // `--max-claims > 1` posts a multi-attempt task: `mode: 'parallel'` so
+    // attempts are not serialized, with `maxClaimsPerOperator` widened to match
+    // so a single controlled operator can take its own attempt even if other
+    // operators are also claiming. This mirrors the SWE-rebench v2
+    // auto-generator's policy (parallel, maxClaims = maxClaimsPerOperator). The
+    // default (no flag) stays single-attempt exclusive — unchanged production
+    // behaviour for one-shot SolverTypes.
+    const claimPolicy: TaskV1['claimPolicy'] = {
+      mode: maxClaimsOverride && maxClaimsOverride > 1 ? 'parallel' : 'exclusive',
+      maxClaims: maxClaimsOverride ?? 1,
+      maxClaimsPerOperator: maxClaimsOverride ?? 1,
+      claimWindowStartTs: taskWindow.startTs,
+      claimWindowEndTs: taskWindow.endTs,
+      submissionDeadlineTs: taskWindow.endTs,
+      claimLeaseTtlSeconds: Math.max(60, Math.floor((taskWindow.endTs - taskWindow.startTs) / 1000)),
+      ...(requiredVerdictsOverride !== undefined
+        ? { requiredVerdicts: requiredVerdictsOverride }
+        : {}),
+    };
     const taskDoc: TaskV1 = {
       schemaVersion: 'task.v1',
       id,
@@ -283,15 +359,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       window: taskWindow,
       spec: ((overlay.spec as Record<string, unknown> | undefined) ?? {}) as TaskV1['spec'],
       eligibility: overlay.eligibility ?? {},
-      claimPolicy: {
-        mode: 'exclusive',
-        maxClaims: 1,
-        maxClaimsPerOperator: 1,
-        claimWindowStartTs: taskWindow.startTs,
-        claimWindowEndTs: taskWindow.endTs,
-        submissionDeadlineTs: taskWindow.endTs,
-        claimLeaseTtlSeconds: Math.max(60, Math.floor((taskWindow.endTs - taskWindow.startTs) / 1000)),
-      },
+      claimPolicy,
       creator: {
         safeAddress: getAddress(safe),
         agentEoa: agentEoaAddress,
@@ -307,6 +375,12 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       contractId,
       contractVersion,
       solverNetManifestCid,
+      // The MechAdapter's `postTask` reads the on-chain claim policy from the
+      // top-level `Task.claimPolicy`, falling back to a `maxClaims: 1` default
+      // when absent — it does NOT derive it from `signedTask.claimPolicy`. The
+      // object literal here bypasses `parseTask` (which would copy it across),
+      // so set it explicitly or the `--max-claims` override is silently lost.
+      claimPolicy,
       signedTask,
     };
     const postResult = await postingService.postCandidate(
@@ -450,6 +524,17 @@ existing request id from the shared task-posting store without sending a new
 transaction.
 
 Options:
+  --max-claims <n>    Number of on-chain attempt slots for the task (default 1).
+                      The default single-slot policy is brittle on a shared
+                      network: one non-delivering claimer permanently locks the
+                      task. Pass a value > 1 (e.g. 5) to post a parallel
+                      multi-attempt task so other operators can still claim.
+  --required-verdicts <n>
+                      Number of verdict claim slots per attempt (default 1).
+                      A value > 1 lets an honest evaluator still claim and
+                      deliver a verdict slot when others have been squatted —
+                      the per-evaluator cap is 1, so no claimer can take them
+                      all. Use on shared/adversarial networks.
   --spec-file <path>  Path to a JSON file containing typed task fields (window, spec, eligibility).
                       Supports registered SolverTypes: portfolio.v0, prediction.v1, prediction.apy.v0.
 

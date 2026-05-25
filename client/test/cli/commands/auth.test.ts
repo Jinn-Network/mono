@@ -58,9 +58,11 @@ describe('auth command', () => {
       });
       await auth.run(ctx);
       const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+      // Testnet default is publicnode (no-auth, no shared-key quota cliff).
+      // See client/src/config.ts comment and #554 for the Tenderly history.
       expect(persisted).toMatchObject({
         network: 'testnet',
-        rpcUrl: 'https://sepolia.base.org',
+        rpcUrl: 'https://base-sepolia-rpc.publicnode.com',
         runtimeMode: 'bare',
       });
     } finally {

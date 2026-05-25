@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Store } from '../store/store.js';
 import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
 import type { PersistedTaskRun } from '../harnesses/engine/persistence.js';
+import { taskRunRoutingKey } from './task-run-routing.js';
 
 /** Default per-task engine work root; kept in sync with `config.engine.workingDirRoot`. */
 export const DEFAULT_ENGINE_WORKING_DIR_ROOT = join(homedir(), '.jinn-client', 'engine', 'work');
@@ -79,7 +80,17 @@ export interface PortfolioV0Status {
   totals: {
     /** Tasks that reached terminal success and delivered their result. */
     delivered: number;
+    /**
+     * Sum of `settledFailed` and `localErrors`. Retained for callers that
+     * still want a single failure count; new surfaces should prefer the
+     * split fields to distinguish on-chain settled fails from local
+     * engine errors.
+     */
     failed: number;
+    /** FAILED runs whose delivery tx landed on-chain (settled failure). */
+    settledFailed: number;
+    /** FAILED runs that never reached the marketplace (local engine error). */
+    localErrors: number;
     active: number;
   };
   /** Tasks currently being processed (not in a terminal state). */
@@ -143,19 +154,29 @@ export function gatherPortfolioV0Status(
 ): PortfolioV0Status {
   const persistence = new TaskRunPersistence(store.db);
 
-  // In-flight: all non-terminal task runs
-  const inFlight = persistence.getInFlight().map(toInFlightTask);
+  // portfolio.v0 is a solver-specific status payload — filter task_runs by
+  // the daemon's internal routing key so other SolverNets' runs don't leak
+  // into these counters (jinn-mono-0t6p) while historical rows can still be
+  // classified from canonical `contractId` / `contractVersion` or the legacy
+  // `task_payload.solverType` alias.
+  const inFlight = persistence.getInFlight().filter(isPortfolioV0Run);
+  const complete = persistence.getByState('COMPLETE').filter(isPortfolioV0Run);
+  const failed = persistence.getByState('FAILED').filter(isPortfolioV0Run);
+
+  const inFlightSummaries = inFlight.map(toInFlightTask);
 
   // Recent verdicts: last N COMPLETE + FAILED task runs combined, newest first
-  const complete = persistence.getByState('COMPLETE');
-  const failed = persistence.getByState('FAILED');
   const allTerminal = [...complete, ...failed].sort(
     (a, b) => b.stateUpdatedAt - a.stateUpdatedAt,
   );
   const recentVerdicts = allTerminal.slice(0, RECENT_VERDICTS_LIMIT).map(toVerdict);
+  const settledFailed = failed.filter((task) => task.deliveryTxHash !== null);
+  const localErrors = failed.filter((task) => task.deliveryTxHash === null);
   const totals = {
     delivered: complete.length,
     failed: failed.length,
+    settledFailed: settledFailed.length,
+    localErrors: localErrors.length,
     active: inFlight.length,
   };
 
@@ -180,7 +201,17 @@ export function gatherPortfolioV0Status(
 
   const recentClaudeOutcomes = gatherRecentClaudeOutcomes(workingDirRoot);
 
-  return { totals, inFlight, recentVerdicts, recentSnapshots, recentClaudeOutcomes };
+  return {
+    totals,
+    inFlight: inFlightSummaries,
+    recentVerdicts,
+    recentSnapshots,
+    recentClaudeOutcomes,
+  };
+}
+
+function isPortfolioV0Run(run: PersistedTaskRun): boolean {
+  return taskRunRoutingKey(run) === 'portfolio.v0';
 }
 
 /**

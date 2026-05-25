@@ -46,20 +46,52 @@ export class StaticConfiguredTaskSource implements TaskSource {
   }
 }
 
+/**
+ * Filter a config-level tasks[] array to only entries that can be posted via
+ * the production adapter (i.e. those with a solverNetManifestCid).
+ *
+ * This is the guard for issue #415: a tasks[] entry without a manifest CID
+ * will always throw PermanentError in signTaskDocument, causing the creator loop
+ * to backoff and retry indefinitely. Filtering here prevents the entry from ever
+ * entering the posting cycle and emits a one-time warning per dropped entry at
+ * startup.
+ *
+ * Only call this on the config-level tasks[] array (the production path). Do not
+ * apply it to Task objects created in tests or via other in-memory sources.
+ */
+export function filterBindableTasks(tasks: Task[]): Task[] {
+  return tasks.filter((task) => {
+    if (!task.solverNetManifestCid) {
+      console.warn(
+        `[creator] Skipping configured task "${task.id}": missing solverNetManifestCid. ` +
+        `Legacy tasks[] entries without a SolverNet manifest binding can never be posted ` +
+        `(spec §14 BINDING rule). Remove this entry from your config or add a solverNetManifestCid.`,
+      );
+      return false;
+    }
+    return true;
+  });
+}
+
 export class GeneratedTaskSource implements TaskSource {
   constructor(
     readonly sourceKey: string,
     private readonly generator: TaskGenerator,
+    private readonly opts: {
+      bucketKeyForTask?: (task: Task, index: number) => string | undefined;
+    } = {},
   ) {}
 
   async collect(_now: Date): Promise<TaskCandidate[]> {
     const generated = await this.generator();
     if (!generated) return [];
     const tasks = Array.isArray(generated) ? generated : [generated];
-    return tasks.map((task) => {
-      const bucketKey = task.window
-        ? `${task.window.startTs}:${task.window.endTs}`
-        : task.id;
+    return tasks.map((task, index) => {
+      const overrideBucketKey = this.opts.bucketKeyForTask?.(task, index);
+      const bucketKey = overrideBucketKey
+        ?? (task.window
+          ? `${task.window.startTs}:${task.window.endTs}`
+          : task.id);
       return {
         task,
         sourceKey: this.sourceKey,

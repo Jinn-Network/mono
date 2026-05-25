@@ -8,10 +8,10 @@
  * spec/2026-05-05-solvernet-creation-and-launch.md dropped that enum value);
  * the launched-record subsystem owns that signal now.
  *
- * Stale-poll detection is computed here from the generator's reported
- * `lastPollAt` and `cadenceMs`: a poll is stale when the wall clock has
- * advanced past `lastPollAt + 2 * cadenceMs`. The 2× factor matches
- * spec/2026-05-05-launcher-role-and-mode.md §5.3.
+ * Stale-poll detection is computed here when a generator reports a cadence:
+ * a poll is stale when the wall clock has advanced past `lastPollAt + 2 *
+ * cadenceMs`. Fill-the-pool generators may omit cadence and are never marked
+ * stale by this generic status surface.
  *
  * The deps shape is intentionally narrow — every external surface is a
  * function so tests can inject deterministic state without standing up the
@@ -24,15 +24,27 @@ import type { JinnConfig } from '../config.js';
 export interface LauncherStatusGeneratorView {
   state: 'active' | 'paused' | 'errored';
   lastPollAt?: string;
-  lastPollSummary?: {
+  lastPollSummary?: LauncherGeneratorPollSummary;
+  lastError?: { message: string; at: string };
+  cadenceMs?: number;
+  stale: boolean;
+}
+
+export type LauncherGeneratorPollSummary =
+  | {
     evaluated: number;
     posted: number;
     skipped: number;
+  }
+  | {
+    poolSize: number;
+    posted: number;
+    unposted: number;
+    live: number;
+    repostable: number;
+    saturated: number;
+    abandoned: number;
   };
-  lastError?: { message: string; at: string };
-  cadenceMs: number;
-  stale: boolean;
-}
 
 export interface LauncherStatusBudgetView {
   safeAddress: string;
@@ -62,13 +74,9 @@ export interface LauncherStatusResponse {
  */
 export interface LauncherGeneratorStateSnapshot {
   lastPollAt?: string;
-  lastPollSummary?: {
-    evaluated: number;
-    posted: number;
-    skipped: number;
-  };
+  lastPollSummary?: LauncherGeneratorPollSummary;
   lastError?: { message: string; at: string };
-  cadenceMs: number;
+  cadenceMs?: number;
 }
 
 export interface GatherLauncherStatusDeps {
@@ -152,9 +160,9 @@ export async function gatherLauncherStatus(
 
     const generator: LauncherStatusGeneratorView = {
       state: generatorState,
-      cadenceMs: snapshot?.cadenceMs ?? 0,
       stale,
     };
+    if (snapshot?.cadenceMs !== undefined) generator.cadenceMs = snapshot.cadenceMs;
     if (snapshot?.lastPollAt) generator.lastPollAt = snapshot.lastPollAt;
     if (snapshot?.lastPollSummary) generator.lastPollSummary = { ...snapshot.lastPollSummary };
     if (snapshot?.lastError) generator.lastError = { ...snapshot.lastError };

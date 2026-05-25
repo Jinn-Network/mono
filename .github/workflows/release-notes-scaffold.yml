@@ -1,18 +1,18 @@
-# Monday release-notes scaffold cron — implements jinn-mono-2cl.2.
+# Monday release-notes scaffold cron.
 #
 # Creates a GitHub Release **draft** every Monday at 09:00 UTC with the mechanical inputs for the
 # named Build Notes release (merged PRs since the previous stable client semver tag with authors,
-# closed bd issues, contributor list, line-change stats, suggested semver bump = patch). Captain edits the draft in
-# the GitHub Release UI to fill in <build name>, ## Highlights, and ## Known issues, then clicks
-# Publish. Publish triggers npm `latest` (already wired in `npm-publish.yml` on release: published)
-# and the CHANGELOG auto-mirror (`changelog-mirror.yml`, jinn-mono-2cl.10).
+# closed-Issue references, contributor list, line-change stats, suggested semver bump = patch).
+# Captain edits the draft in the GitHub Release UI to fill in <build name>, ## Highlights, and
+# ## Known issues, then clicks Publish. Publish triggers npm `latest` (already wired in
+# `npm-publish.yml` on release: published) and the CHANGELOG auto-mirror (`changelog-mirror.yml`).
 #
 # v0 status: shipped with `workflow_dispatch` only — cron schedule below is commented out.
 # Promote to scheduled cron after first manual run validates output.
 #
 # Reference:
-# - cargo/docs/engineering/handbook.md §The shipping machine
-# - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md Threads 5 + 6
+# - docs/engineering/handbook.md §The shipping machine
+# - log/decisions/2026-05-18-bd-vs-gh-substrate.md (DR-2026-05-18 — issue substrate retirement)
 # - Hermes v0.13.0 release notes for the shape reference
 #
 # Two-train cadence: this workflow targets `next` (integration branch). Captain's Publish
@@ -28,7 +28,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write  # open-or-update the standing release-review PR (issue #307)
   issues: read
 
 jobs:
@@ -99,7 +99,7 @@ jobs:
           echo "base=$BASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "suggested=$SUGGESTED" >> "$GITHUB_OUTPUT"
 
-      - name: Gather merged PRs + closed-bd references since last tag
+      - name: Gather merged PRs + closed-Issue references since last tag
         id: prs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -121,18 +121,37 @@ jobs:
           echo "$PRS_JSON" | jq -r 'sort_by(.number) | .[] | "\(.number)\t\(.title)\t\(.author.login)"' > /tmp/prs.txt
           echo "$PRS_JSON" | jq -r '.[].author.login' | sort -u > /tmp/contributors.txt
 
-          # Closed-bd list: parse each PR body for `closes/fixes/resolves jinn-mono-<id>`
-          # (GitHub's close-keyword set, `\b`-anchored to avoid substring matches like `disclosed`).
-          # This is a proxy for "bd issues closed in this window" that needs no bd CLI on the runner.
-          # PRs that *document* close-keyword syntax (rare) can produce false-positives — the
-          # Captain edits this list before publishing the Release, so that's acceptable.
+          # Closed-Issue references: parse each PR body for close-keyword + Issue ref.
+          # Per DR-2026-05-18 the canonical Issue substrate is GitHub Issues (`#N`); the legacy
+          # `jinn-mono-<id>` form is recognised so historical PR bodies during the migration
+          # window still aggregate cleanly. Both forms are emitted in a single unified list.
+          # `\b` anchors prevent substring matches like `disclosed`.
           echo "$PRS_JSON" | jq -r '.[].body // ""' \
-            | grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
-            | grep -oiE 'jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' | sort -u > /tmp/bd-ids-raw.txt || true
-          if [ -s /tmp/bd-ids-raw.txt ]; then
-            sed 's/^/- /' /tmp/bd-ids-raw.txt > /tmp/bd-closed.txt
+            | grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+(jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*|#[0-9]+)' \
+            | grep -oiE '(jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*|#[0-9]+)' | sort -u > /tmp/closed-refs-raw.txt || true
+
+          # Filter `#<N>` refs: PRs and Issues share the same number space on GitHub, so the
+          # regex can't tell them apart. Drop any `#<N>` that resolves to a PR rather than an
+          # Issue (PRs already appear in the "Changes" section above; double-listing is noise).
+          : > /tmp/closed-refs.txt.new
+          while IFS= read -r ref; do
+            case "$ref" in
+              \#[0-9]*)
+                N="${ref#\#}"
+                if gh issue view "$N" --repo "${{ github.repository }}" --json number >/dev/null 2>&1; then
+                  printf -- "- %s\n" "$ref" >> /tmp/closed-refs.txt.new
+                fi
+                ;;
+              *)
+                printf -- "- %s\n" "$ref" >> /tmp/closed-refs.txt.new
+                ;;
+            esac
+          done < /tmp/closed-refs-raw.txt
+
+          if [ -s /tmp/closed-refs.txt.new ]; then
+            mv /tmp/closed-refs.txt.new /tmp/closed-refs.txt
           else
-            echo "- (none referenced via \`Closes jinn-mono-<id>\` in merged PRs this window — Captain may add manually)" > /tmp/bd-closed.txt
+            echo "- (none referenced via \`Closes #<N>\` or legacy \`Closes jinn-mono-<id>\` in merged PRs this window — Captain may add manually)" > /tmp/closed-refs.txt
           fi
 
       - name: Compute stats
@@ -192,7 +211,7 @@ jobs:
             fi
             echo ""
             echo "## Closed this week"
-            cat /tmp/bd-closed.txt
+            cat /tmp/closed-refs.txt
             echo ""
             echo "## Stats"
             echo "- Window: $PREV_TAG → HEAD ($TODAY)"
@@ -204,6 +223,7 @@ jobs:
           echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create or update the Release draft
+        id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SUGGESTED: ${{ steps.version.outputs.suggested }}
@@ -214,7 +234,7 @@ jobs:
           # git tag until the draft is published, so multiple unpublished drafts with different
           # tags (one per scheduled cut) coexist safely. When Captain clicks Publish, the tag
           # `v<SUGGESTED>` is created in git, which is what npm-publish.yml (release: published)
-          # and the dual-tag policy (jinn-mono-2cl.6) expect.
+          # and the dual-tag policy (see handbook §Cadence) expect.
           TAG="v${SUGGESTED}"
           EXISTING="$(gh release view "$TAG" --json id,isDraft --jq '.id' 2>/dev/null || true)"
           if [ -n "$EXISTING" ]; then
@@ -230,4 +250,96 @@ jobs:
               --target next
             echo "Created new draft: $TAG"
           fi
+          # `gh release view --json url` returns the canonical /releases/tag/<tag> URL.
+          # While the release is still a draft this URL 404s for anyone but a repo
+          # collaborator (the git tag does not exist yet) — it resolves publicly only
+          # once Captain publishes. The release-review PR body links it as the eventual
+          # destination. Fall back to the releases index if the lookup fails.
+          RELEASE_URL="$(gh release view "$TAG" --json url --jq '.url' 2>/dev/null \
+            || echo "https://github.com/${{ github.repository }}/releases")"
+          {
+            echo "tag=$TAG"
+            echo "release_url=$RELEASE_URL"
+          } >> "$GITHUB_OUTPUT"
           echo "::notice::Release draft v$SUGGESTED ready for Captain review at https://github.com/${{ github.repository }}/releases"
+
+      - name: Open or update the release-review PR (holistic-review gate — issue #307)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUGGESTED: ${{ steps.version.outputs.suggested }}
+          PREV_TAG: ${{ steps.window.outputs.prev_tag }}
+          RELEASE_URL: ${{ steps.draft.outputs.release_url }}
+        shell: bash
+        run: |
+          # Holistic-review gate (issue #307): the per-PR review surface and the release-notes
+          # title list both miss bugs that are only visible in the *cumulative* main...next diff
+          # (v0.1.6 shipped #301 silently shadowed by hardcoded values in main.ts — invisible
+          # per-PR, invisible in the title list, visible only in the whole-window diff).
+          #
+          # This step opens-or-updates a single standing PR with base:main head:next. GitHub
+          # keeps exactly one open PR per base/head pair and auto-refreshes its diff as `next`
+          # advances, so the idempotency contract is: create only if absent, otherwise
+          # refresh the existing PR's title + body.
+          #
+          # Soft convention (DR-2026-05-20): nothing mechanically blocks publish. The value is
+          # the whole-window diff existing and being looked at before Captain clicks Publish.
+          # promote-main.yml's fast-forward of `main` to `next` auto-closes this PR as merged.
+          TITLE="release-review: v${SUGGESTED} window (${PREV_TAG} → next)"
+          BODY_FILE="/tmp/release-review-pr-body.md"
+          {
+            echo "## Holistic release-window review"
+            echo ""
+            echo "This PR is the **holistic-review surface** for the v${SUGGESTED} release window."
+            echo "Its diff is the entire \`${PREV_TAG} → next\` window (\`main...next\`) in one"
+            echo "reviewable view — the diff that per-PR review and the release-notes title list"
+            echo "both miss."
+            echo ""
+            echo "- Release draft: ${RELEASE_URL}"
+            echo "- Before publishing the release, review **this diff as a whole**, not just the"
+            echo "  list of merged PR titles. Cross-PR interactions (a later PR silently shadowing"
+            echo "  an earlier one) are only visible here."
+            echo ""
+            echo "### How this PR closes"
+            echo ""
+            echo "Do **not** merge this PR by hand. When Captain publishes the release,"
+            echo "\`promote-main.yml\` fast-forwards \`main\` to \`next\`, which auto-closes this PR"
+            echo "as merged. A new release-review PR is opened by the next Monday scaffold run."
+            echo ""
+            echo "### Soft gate"
+            echo ""
+            echo "This is a **soft convention** (DR-2026-05-20): nothing mechanically blocks"
+            echo "\`npm-publish.yml\`. The gate is the diff existing and being looked at."
+            echo ""
+            echo "Hotfixes do not open a release-review PR — their diff review is the hotfix"
+            echo "PR-to-\`main\` itself (see \`docs/runbooks/hotfix.md\`)."
+            echo ""
+            echo "_Opened automatically by \`release-notes-scaffold.yml\` — issue #307._"
+          } > "$BODY_FILE"
+
+          # GitHub keeps at most one open PR per base/head pair. Query first; create only if
+          # absent. If one already exists, refresh its title + body (the window version may
+          # have advanced since it was opened) — the diff itself auto-tracks `next`.
+          EXISTING_PR="$(gh pr list --repo "${{ github.repository }}" \
+            --base main --head next --state open \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [ -n "$EXISTING_PR" ]; then
+            gh pr edit "$EXISTING_PR" --repo "${{ github.repository }}" \
+              --title "$TITLE" --body-file "$BODY_FILE"
+            echo "::notice::Updated existing release-review PR #$EXISTING_PR (base:main head:next)"
+          else
+            # `gh pr create` errors if there are no commits between base and head. This
+            # happens right after a promotion (main == next) before any new work merges.
+            # Skip cleanly with a notice rather than failing the scaffold run. Fetch both
+            # refs first — checkout only materialises the workflow's own branch.
+            git fetch --quiet origin main next 2>/dev/null || true
+            AHEAD="$(git rev-list --count origin/main..origin/next 2>/dev/null || echo 0)"
+            if [ "${AHEAD:-0}" -eq 0 ]; then
+              echo "::notice::next has no commits ahead of main — skipping release-review PR creation (nothing to review yet)"
+            else
+              gh pr create --repo "${{ github.repository }}" \
+                --base main --head next \
+                --title "$TITLE" --body-file "$BODY_FILE" \
+                || echo "::notice::could not open release-review PR (base:main head:next) — non-fatal"
+              echo "::notice::Opened release-review PR (base:main head:next) for v$SUGGESTED"
+            fi
+          fi

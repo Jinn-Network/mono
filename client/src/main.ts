@@ -27,17 +27,20 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
-import { startApiServer, type ApiServer } from './api/server.js';
+import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
+import { setDefaultTxSubmissionLedger } from './tx-retry.js';
 // addHarnessReadinessRoutes is wired through startApiServer's holder ref now
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
+import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
+import { requestDaemonRestart } from './restart-daemon.js';
 import { buildEnvelope, emitEnvelope, type ErrorCode, type ErrorEnvelope } from './errors/envelope.js';
 import {
   clearBootstrapError,
@@ -46,7 +49,7 @@ import {
 import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
-import { FleetBootstrapper } from './earning/bootstrap.js';
+import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
@@ -61,6 +64,10 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildJinnClaimLoopConfig,
+  shouldWireJinnClaimL1Signer,
+} from './daemon/jinn-claim-loop-wiring.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
@@ -73,6 +80,7 @@ import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
+import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
@@ -97,10 +105,11 @@ import type { TranscriptParser } from './trajectory/transcript-parsers/types.js'
 import type { StopHookPayload, StopHookTool } from './api/stop-hook.js';
 import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
+import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
+import { keepSetupUiOnBootstrapError } from './setup/halt-mode.js';
 import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
@@ -167,8 +176,20 @@ const config = loadConfig(CONFIG_PATH);
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
   config.network = 'testnet';
-  config.rpcUrl = 'https://sepolia.base.org';
+  config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
 }
+// Issue #326: the embedded Claude agent chat surface (right rail + onboarding
+// "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
+// action-authority / plugin-scope shape is still in design. Set
+// `JINN_ENABLE_EMBEDDED_AGENT=1` to re-enable it for development. This does
+// NOT affect Claude-Code-as-a-solver-harness — that path is independent.
+//
+// Issue #367: the SPA reads this flag via the injected `window.__JINN_FEATURES__`
+// (`resolveFeatureFlags` in api/server.ts) like every other operator-app flag.
+// This `embeddedAgentEnabled` const is the daemon-side consumer only — it gates
+// whether the `/api/agent/ws` bridge is mounted below.
+const embeddedAgentEnabled = isEmbeddedAgentEnabled();
+
 let activeClaudePath = config.claudePath ?? 'claude';
 const selectClaudePath = (claudePath: string): void => {
   activeClaudePath = claudePath;
@@ -567,11 +588,17 @@ async function bootstrap(): Promise<{
         hint: 'Fund the listed address and re-run this command.',
         exampleCli: 'jinn fund-requirements --json',
         details: {
-          role: 'master',
+          // jinn-mono-hjex.6: structured envelope so SPA can render the
+          // specific address + amount instead of a prose disjunction.
+          category: 'insufficient_funds',
+          step: 'awaiting_funding',
           address: result.funding.master_address,
+          requiredWei: result.funding.eth_required,
+          haveWei: result.funding.eth_balance,
+          // Legacy aliases kept for any external consumers that read these.
+          role: 'master',
           asset: 'native',
           needWei: result.funding.eth_required,
-          haveWei: result.funding.eth_balance,
         },
       });
     }
@@ -590,11 +617,17 @@ async function bootstrap(): Promise<{
       hint: 'Bootstrap failed before the fleet reached a runnable state.',
       details: {
         cause: result.message,
+        // jinn-mono-hjex.6: propagate structured category from the bootstrapper
+        // so the SPA can render category-specific UI (e.g. funding shortfall).
+        ...(result.errorCategory !== undefined ? { category: result.errorCategory } : {}),
         // Preserve the raw underlying error so a misclassified summary can
         // be diagnosed without re-running with JINN_DEBUG. See jinn-mono-jz9f.
         ...(result.rawErrorMessage && result.rawErrorMessage !== result.message
           ? { rawErrorMessage: result.rawErrorMessage }
           : {}),
+        // jinn-mono-hjex reviewer fix: propagate tx hash so the SPA can render
+        // a block-explorer link for failed on-chain revert transactions.
+        ...(result.txHash != null ? { txHash: result.txHash } : {}),
       },
     });
   }
@@ -717,8 +750,9 @@ class SetupBootstrapHalted extends Error {
   }
 }
 
-const keepSetupUiOnBootstrapError = (): boolean =>
-  process.env['JINN_NO_UI'] !== '1' && process.env['JINN_NO_DAEMON'] !== '1';
+// hjex.6: gate for the halt-and-resume loop. Lives in ./setup/halt-mode.ts
+// so it can be unit-tested without dragging main.ts's top-level side
+// effects (password resolution, config load) into the test.
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
@@ -828,6 +862,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // /v1/bootstrap + /v1/events + /v1/status here. The same Store instance is
   // later passed into Daemon so we don't double-open the SQLite file.
   const sharedStore = new Store(config.dbPath);
+  setDefaultTxSubmissionLedger(sharedStore);
   const capturesStore = new CapturesStore(sharedStore);
   let captureReceiver: Receiver | undefined;
   try {
@@ -895,7 +930,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     | undefined;
   const launchedGeneratorStateBySolverType = new Map<
     string,
-    () => import('./api/launcher-status.js').LauncherGeneratorStateSnapshot | undefined
+    () => LauncherGeneratorStateSnapshot | undefined
   >();
   let safeAddressForLauncher: `0x${string}` | undefined;
   let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
@@ -919,6 +954,31 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
   } = { current: undefined };
 
+  // jinn-mono-u34i: same eager-register / late-populate pattern for the
+  // DiscoveryAPI. Pre-fix, /v1/discovery/* routes only mounted when
+  // `config.discovery` was set at startApiServer time — but main.ts builds
+  // `sharedDiscoveryApi` post-bootstrap, so the routes were never registered
+  // and the panel's /build page got a permanent 404 on plugin-publications +
+  // builder-artifacts. Holder ref lets the routes register eagerly and
+  // start returning real data the moment main.ts assigns holder.current.
+  const discoveryApiHolder: {
+    current: import('./discovery/types.js').DiscoveryAPI | undefined;
+  } = { current: undefined };
+
+  // hjex.3: holder for the restake callback. Populated in running mode after
+  // bootstrap completes (when mnemonic + distributorAddress are available).
+  const restakeCallbackRef: { current: ((serviceId: number) => Promise<{ ok: boolean; error?: string }>) | undefined } = {
+    current: undefined,
+  };
+
+  // hjex.6: retry signal for the bootstrap halt-and-resume loop.
+  // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
+  // timeout), main() waits on this promise instead of returning, so the setup
+  // API stays alive and the operator can click Retry in the SPA.
+  // The retry endpoint resolves this promise to trigger a re-run.
+  let retryBootstrapResolve: (() => void) | null = null;
+  let retryBootstrapReject: ((err: unknown) => void) | null = null;
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -932,11 +992,33 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
       },
+      codexDoctor: {
+        codexPath: config.codexPath,
+        codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
+      },
       admin: {
-        onRestartRequested: () => {
-          console.log('[main] Restart requested via operator MCP. Exiting...');
-          process.exit(0);
-        },
+        // jinn-mono #289: in interactive mode (the dashboard SPA case),
+        // spawn a detached replacement before exiting so the panel reconnects
+        // to a live daemon instead of seeing a 502 + terminal prompt. In
+        // headless mode (`JINN_NO_UI=1`), exit without respawning so the
+        // supervisor / systemd / docker entrypoint decides what to do.
+        // Stop: pure exit, never respawn. The operator clicked Stop; they
+        // want the daemon down until they explicitly start it again.
+        onStopRequested: () => process.exit(0),
+        onRestartRequested: (opts) =>
+          requestDaemonRestart({
+            forceRespawn: opts.forceRespawn,
+            // jinn-mono #561: close the API + OTLP listeners before the
+            // replacement spawns, so the child binds without an
+            // EADDRINUSE race. Errors are swallowed inside
+            // requestDaemonRestart so the operator is never stranded.
+            preSpawnCleanup: async () => {
+              await setupApiServer.close().catch(() => undefined);
+              if (captureReceiver) {
+                await captureReceiver.shutdown().catch(() => undefined);
+              }
+            },
+          }),
       },
       harnessStatus: {
         getStatus: async () => {
@@ -1045,6 +1127,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // harness readiness routes. Until main.ts sets the holder, requests
       // return 503 subsystem_not_ready (the panel handles that gracefully).
       harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
+      // jinn-mono-u34i: see discoveryApiHolder comment above.
+      discovery: { holder: discoveryApiHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1096,12 +1180,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         chain: NETWORK_CHAIN,
         rpcUrl: config.rpcUrl,
         // Note: do NOT pass minEoaGasWei here. setup-endpoints.ts derives
-        // its faucet target from stage1MinMasterEth(getChainConfig(chain)) —
-        // the same helper the daemon's ensureStage1 gate uses. Passing a
-        // computed value from here would re-introduce the drift seam that
-        // hit operators in the 2026-05-18 canary (jinn-mono-u34i): faucet
-        // dripped to one target while the daemon waited for a different one.
-        // The override field remains for tests that want a custom target.
+        // its faucet target from stage1MinMasterEth(getChainConfig(chain),
+        // targetServices) — the same helper the daemon's ensureStage1 gate
+        // uses. Passing a computed value from here would re-introduce the
+        // drift seam that hit operators in the 2026-05-18 canary
+        // (jinn-mono-u34i): faucet dripped to one target while the daemon
+        // waited for a different one. The override field remains for tests
+        // that want a custom target.
+        // targetServices DOES need to flow through so the faucet drips enough
+        // ETH to cover ALL services for the operator's chosen targetServices.
+        targetServices: config.targetServices,
         claudePath: activeClaudePath,
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -1116,10 +1204,40 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           // toggle immediately. (jinn-mono-l2zl.15.4.12)
           invalidatePredictionOperatorStatusCache(config);
         },
+        // hjex.3: delegate to the live callback populated once running mode starts.
+        restake: (serviceId) => {
+          if (!restakeCallbackRef.current) {
+            return Promise.resolve({ ok: false, error: 'restake_not_available_in_setup_mode' });
+          }
+          return restakeCallbackRef.current(serviceId);
+        },
+        // hjex.6: re-trigger the bootstrap state machine from the SPA Retry button.
+        // Resolves the halt-and-resume promise; main() will loop back and call
+        // bootstrap() again. Rejects if the daemon is not currently halted.
+        retryBootstrap: () => {
+          return new Promise<void>((resolve, reject) => {
+            if (!retryBootstrapResolve) {
+              reject(new Error('daemon_not_halted'));
+              return;
+            }
+            const prevResolve = retryBootstrapResolve;
+            // The resolve will unblock the main loop's await. When bootstrap
+            // completes (success or new halt), the caller receives the result
+            // via the /v1/bootstrap polling endpoint.
+            prevResolve();
+            resolve();
+          });
+        },
       },
       status: {
         earningDir: config.earningDir,
         rpcUrl: config.rpcUrl,
+        // tJINN identity comes from the bundled JINN MVI L1 artifact
+        // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
+        // is read from `config.ethereumRpcUrl` via the threaded `config`.
+        tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
+        tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
+        tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
         network: config.network,
         pollIntervalMs: config.pollIntervalMs,
         masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -1270,38 +1388,52 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // can attach to a long-lived embedded `claude` subprocess. The embedded
   // session reads MCP config we materialise to disk so it can reach the
   // operator MCP server (`jinn mcp`) for tool calls.
-  const operatorMcpConfigPath = join(homedir(), '.jinn-client', 'operator-mcp-config.json');
-  try {
-    mkdirSync(dirname(operatorMcpConfigPath), { recursive: true });
-    writeFileSyncMain(
-      operatorMcpConfigPath,
-      JSON.stringify(
-        {
-          mcpServers: {
-            'jinn-operator': {
-              command: 'jinn',
-              args: ['mcp'],
+  //
+  // Issue #326: the embedded agent chat surface is hidden by default. The WS
+  // bridge mounts only when `JINN_ENABLE_EMBEDDED_AGENT=1` so the dev-time
+  // path stays end-to-end; with the flag off there is no /api/agent/ws route
+  // and the SPA never renders the chat panel. Claude-Code-as-solver-harness
+  // is independent of this bridge and unaffected.
+  if (embeddedAgentEnabled) {
+    const operatorMcpConfigPath = join(homedir(), '.jinn-client', 'operator-mcp-config.json');
+    try {
+      mkdirSync(dirname(operatorMcpConfigPath), { recursive: true });
+      writeFileSyncMain(
+        operatorMcpConfigPath,
+        JSON.stringify(
+          {
+            mcpServers: {
+              'jinn-operator': {
+                command: 'jinn',
+                args: ['mcp'],
+              },
             },
           },
-        },
-        null,
-        2,
-      ),
+          null,
+          2,
+        ),
+      );
+    } catch (err) {
+      console.warn(
+        `[main] Failed to write operator MCP config at ${operatorMcpConfigPath}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+    attachAgentWs({
+      httpServer: setupApiServer.server,
+      uiToken,
+      claudePath: activeClaudePath,
+      cwd: process.cwd(),
+      mcpConfigPath: operatorMcpConfigPath,
+    });
+    console.log(
+      `[main] Agent WS bridge mounted at ws://127.0.0.1:${setupApiServer.port}/api/agent/ws`,
     );
-  } catch (err) {
-    console.warn(
-      `[main] Failed to write operator MCP config at ${operatorMcpConfigPath}: ` +
-        (err instanceof Error ? err.message : String(err)),
+  } else {
+    console.log(
+      '[main] Embedded agent surface disabled (set JINN_ENABLE_EMBEDDED_AGENT=1 to enable).',
     );
   }
-  attachAgentWs({
-    httpServer: setupApiServer.server,
-    uiToken,
-    claudePath: activeClaudePath,
-    cwd: process.cwd(),
-    mcpConfigPath: operatorMcpConfigPath,
-  });
-  console.log(`[main] Agent WS bridge mounted at ws://127.0.0.1:${setupApiServer.port}/api/agent/ws`);
 
   // ── Init-if-missing ──────────────────────────────────────────────────────
   // If the keystore is missing but we have a password, run `jinn init` now so
@@ -1344,29 +1476,95 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     setupController.refresh({ keystoreExists: true, allComplete: false });
   }
 
+  // hjex.6: halt-and-resume loop for bootstrap retries.
+  // When failBootstrap() throws SetupBootstrapHalted, we wait for the operator
+  // to click Retry in the SPA (which resolves retryBootstrapResolve) rather
+  // than returning and exiting. On each retry, we loop back and call bootstrap()
+  // again. bootstrap() is idempotent — completed steps are no-ops.
   let bootstrapResult;
-  try {
-    bootstrapResult = await bootstrap();
-  } catch (err) {
-    if (err instanceof SetupBootstrapHalted) {
-      return {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        kind: 'setup_halted',
-        pid: process.pid,
-        network: config.network,
-        phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
-        apiPort: setupApiServer.port,
-        dashboardUrl: `http://127.0.0.1:${setupApiServer.port}`,
-        error: err.envelope,
-      };
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      bootstrapResult = await bootstrap();
+      break; // success — exit the retry loop
+    } catch (err) {
+      if (err instanceof SetupBootstrapHalted) {
+        // Install the retry signal so the endpoint can unblock us.
+        const retrySignal = new Promise<void>((resolve, reject) => {
+          retryBootstrapResolve = resolve;
+          retryBootstrapReject = reject;
+        });
+        console.log('[main] Bootstrap halted. Waiting for retry signal from the dashboard...');
+
+        // hjex.6: Auto-resume funding poller.
+        // When the halt is a funding shortfall, poll the master EOA balance
+        // every JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance
+        // meets or exceeds the required amount, auto-signal the retry loop.
+        // Only runs while the halt signal is pending; stops on any signal.
+        let fundingPollHandle: ReturnType<typeof setTimeout> | null = null;
+        const isHaltedOnFunding = err.envelope.code === 'funding_required';
+        const haltDetails = err.envelope.details as Record<string, unknown> | undefined;
+        const haltAddress = typeof haltDetails?.['address'] === 'string'
+          ? haltDetails['address'] as `0x${string}`
+          : null;
+        const haltRequired = typeof haltDetails?.['requiredWei'] === 'string'
+          ? BigInt(haltDetails['requiredWei'])
+          : typeof haltDetails?.['needWei'] === 'string'
+            ? BigInt(haltDetails['needWei'])
+            : null;
+        const fundingPollIntervalMs = (() => {
+          const raw = process.env['JINN_FUNDING_POLL_INTERVAL_MS'];
+          if (!raw) return 15_000;
+          const n = Number.parseInt(raw, 10);
+          return Number.isFinite(n) && n > 0 ? n : 15_000;
+        })();
+        if (isHaltedOnFunding && haltAddress && haltRequired !== null) {
+          const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+          const schedulePoll = (): void => {
+            fundingPollHandle = setTimeout(async () => {
+              // Guard: if the signal was already fired, stop polling.
+              if (!retryBootstrapResolve) return;
+              try {
+                const balance = await publicClient.getBalance({ address: haltAddress });
+                if (balance >= haltRequired) {
+                  console.log(
+                    `[main] Funding shortfall cleared (have ${balance}, required ${haltRequired}). ` +
+                    `Auto-resuming bootstrap...`,
+                  );
+                  retryBootstrapResolve?.();
+                  return; // don't schedule the next poll
+                }
+              } catch (pollErr) {
+                // Balance read failed — not fatal, just skip this tick.
+                const msg = pollErr instanceof Error ? pollErr.message : String(pollErr);
+                console.log(`[main] Funding poller balance read failed (will retry): ${msg}`);
+              }
+              schedulePoll(); // reschedule
+            }, fundingPollIntervalMs);
+          };
+          schedulePoll();
+        }
+
+        try {
+          await retrySignal;
+        } finally {
+          retryBootstrapResolve = null;
+          retryBootstrapReject = null;
+          if (fundingPollHandle !== null) {
+            clearTimeout(fundingPollHandle);
+            fundingPollHandle = null;
+          }
+        }
+        console.log('[main] Retry triggered — re-running bootstrap...');
+        continue; // loop back to the bootstrap() call
+      }
+      // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
+      // tear down the API we just started so we don't leave a dangling listener.
+      await setupApiServer.close().catch(() => undefined);
+      await closeCaptureReceiver();
+      sharedStore.close();
+      throw err;
     }
-    // If bootstrap throws (vs. emitEnvelope-exits), tear down the API we
-    // just started so we don't leave a dangling listener on the port.
-    await setupApiServer.close().catch(() => undefined);
-    await closeCaptureReceiver();
-    sharedStore.close();
-    throw err;
   }
 
   // Bootstrap completed — flip the controller into 'running' so any waiters
@@ -1442,6 +1640,31 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
 
+  // hjex.3: populate the restake callback now that mnemonic is available.
+  if (config.stakingMode === 'standard' && CHAIN_CONFIG.distributorAddress) {
+    const fleetStore = earningStore;
+    restakeCallbackRef.current = async (serviceId: number) => {
+      try {
+        const state = await fleetStore.load(NETWORK_CHAIN);
+        const svc = state.services.find(s => s.service_id === serviceId);
+        if (!svc) return { ok: false, error: `service_not_found:${serviceId}` };
+        if (!svc.staking_address) return { ok: false, error: 'staking_address_missing' };
+        await recoverEvictedServiceFn({
+          serviceDisplayIndex: Math.max(0, svc.index - 1),
+          serviceId,
+          stakingAddress: svc.staking_address,
+          distributorAddress: CHAIN_CONFIG.distributorAddress!,
+          rpcUrl: config.rpcUrl,
+          chain: NETWORK_CHAIN,
+          mnemonic: mnemonicForMaster,
+        });
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    };
+  }
+
   const evictionRecovery =
     config.stakingMode === 'standard' &&
     serviceId !== null &&
@@ -1497,6 +1720,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   }
 
+  // jinn-mono-u34i: populate the holder so the /v1/discovery/* routes
+  // registered eagerly at server-start time start returning real data on
+  // the panel's next refetch. Before this, the routes 404'd forever and
+  // the /build page rendered "Discovery unavailable" permanently.
+  discoveryApiHolder.current = sharedDiscoveryApi;
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1514,7 +1743,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       ? {
           discoveryApi: sharedDiscoveryApi,
           solverNetManifestCids: taskDiscoveryManifestCids,
-          onchainFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+          // No explicit `onchainFromBlock` — let `MechAdapter`'s
+          // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow
+          // through. Hardcoding here shadowed the adapter's default and
+          // re-introduced the ghost-task floor every release; removing the
+          // shadow makes `adapter.ts` the single source of truth. See gh
+          // #300.
           ...(config.taskDiscoveryAllowedTaskIds?.length
             ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
             : {}),
@@ -1546,8 +1780,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
   // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
   // Same key as L2; only the chain differs.
+  const shouldWireJinnClaimL1 = shouldWireJinnClaimL1Signer({
+    enabled: config.jinnClaimLoopEnabled,
+    intervalMs: config.jinnClaimLoopIntervalMs,
+    submissionMode: config.jinnClaimSubmissionMode,
+    distributorAddress: JINN_MVI_CONFIG.distributor,
+    ethereumRpcUrl: config.ethereumRpcUrl,
+  });
   const l1ClientsForJinnClaim =
-    JINN_MVI_CONFIG.distributor && config.ethereumRpcUrl
+    shouldWireJinnClaimL1 && config.ethereumRpcUrl
       ? {
           public: createJinnL1PublicClient(config.ethereumRpcUrl, config.jinnL1Network),
           wallet: createJinnL1WalletClient(
@@ -1557,15 +1798,33 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ),
         }
       : undefined;
-  if (l1ClientsForJinnClaim) {
+  const jinnClaimLoopConfig = buildJinnClaimLoopConfig({
+    enabled: config.jinnClaimLoopEnabled,
+    intervalMs: config.jinnClaimLoopIntervalMs,
+    submissionMode: config.jinnClaimSubmissionMode,
+    messengerMode: JINN_CLAIM_MESSENGER_MODE,
+    mvi: JINN_MVI_CONFIG,
+    l2Client: agentClients.publicClient,
+    l2ProofClient,
+    l2Wallet: agentClients.walletClient,
+    l1Clients: l1ClientsForJinnClaim,
+    store: earningStore,
+    chain: NETWORK_CHAIN,
+    optimismPortalAddress,
+    disputeGameFactoryAddress,
+  });
+  if (jinnClaimLoopConfig) {
     console.log(
-      `[main] JinnClaimLoop: enabled (mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
+      `[main] JinnClaimLoop: enabled (submission=${config.jinnClaimSubmissionMode}, ` +
+      `mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
       `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${JINN_MVI_CONFIG.distributor}, ` +
       `emitter=${JINN_MVI_CONFIG.claimEmitter})`,
     );
+  } else if (!config.jinnClaimLoopEnabled) {
+    console.log('[main] JinnClaimLoop: disabled (jinnClaimLoopEnabled=false)');
   } else {
     console.log(
-      `[main] JinnClaimLoop: disabled (JinnDistributor artifact/override or JINN_ETHEREUM_RPC_URL not set)`,
+      `[main] JinnClaimLoop: disabled (missing claim-loop artifacts, interval disabled, or L1 submit wiring)`,
     );
   }
 
@@ -1669,6 +1928,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesPath: config.hermesPath,
     hermesModel: config.hermesModel,
     hermesProvider: config.hermesProvider,
+    hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
+    codexPath: config.codexPath,
+    codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
   })) {
     implRegistry.register(impl);
   }
@@ -1979,11 +2241,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         if (!safeAddressForLauncher) {
           throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
         }
+        const getGeneratorState = (
+          solverNetId: string,
+        ): LauncherGeneratorStateSnapshot | undefined => {
+          const entry = pendingGeneratorsRef.current.find(
+            (g) => g.recordRef.current.solverNetId === solverNetId,
+          );
+          const resolved = resolveContractFromSolverNetId(
+            entry?.recordRef.current.solverNetId ?? solverNetId,
+          );
+          if (!resolved) return undefined;
+          return launchedGeneratorStateBySolverType.get(resolved.solverType)?.();
+        };
         solverNetEndpointsDepsHolder.current = {
           store: solverNetStore,
           launch: {
             launchAction,
             lifecycleTransition,
+            getGeneratorState,
             pendingGenerators: pendingGeneratorsRef,
             signer: launcherSigner,
             network: 'base-sepolia',
@@ -2067,10 +2342,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
   }
 
+  // filterBindableTasks (issue #415): drop config-level tasks[] entries without
+  // solverNetManifestCid before they enter the creator loop. Such entries would
+  // throw a PermanentError on every attempt and retry every 30 min indefinitely.
+  const bindableConfigTasks = filterBindableTasks(config.tasks);
   const taskSources = [
-    new StaticConfiguredTaskSource(config.tasks),
+    new StaticConfiguredTaskSource(bindableConfigTasks),
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
-      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator),
+      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
+        bucketKeyForTask: (task) => {
+          if (task.solverType !== 'swe-rebench-v2.v1') return undefined;
+          const instanceId = task.spec?.['instance_id'];
+          const postedCount = task.eligibility?.['posted_count_after_record'];
+          if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
+          return `swe-rebench-v2:${instanceId}:${postedCount}`;
+        },
+      }),
     ),
   ];
 
@@ -2128,6 +2415,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
+      // tJINN identity comes from the bundled JINN MVI L1 artifact
+      // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
+      // is read from `config.ethereumRpcUrl` via the threaded `config`.
+      tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
+      tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
+      tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
       network: config.network,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -2151,29 +2444,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    jinnClaim:
-      l1ClientsForJinnClaim &&
-      JINN_MVI_CONFIG.claimEmitter &&
-      JINN_MVI_CONFIG.messenger &&
-      JINN_MVI_CONFIG.distributor &&
-      config.jinnClaimLoopIntervalMs > 0
-        ? {
-            intervalMs: config.jinnClaimLoopIntervalMs,
-            l2Client: agentClients.publicClient,
-            l2ProofClient,
-            l2Wallet: agentClients.walletClient,
-            l1Client: l1ClientsForJinnClaim.public,
-            l1Wallet: l1ClientsForJinnClaim.wallet,
-            store: earningStore,
-            chain: NETWORK_CHAIN,
-            claimEmitterAddress: JINN_MVI_CONFIG.claimEmitter as `0x${string}`,
-            distributorAddress: JINN_MVI_CONFIG.distributor as `0x${string}`,
-            messengerAddress: JINN_MVI_CONFIG.messenger as `0x${string}`,
-            messengerMode: JINN_CLAIM_MESSENGER_MODE,
-            optimismPortalAddress,
-            disputeGameFactoryAddress,
-          }
-        : undefined,
+    jinnClaim: jinnClaimLoopConfig,
     restorationEngine: {
       paths: {
         workingDirRoot: config.engine.workingDirRoot,
@@ -2217,6 +2488,62 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             eoaTopupTarget: CHAIN_CONFIG.minEoaGasEth,
             safeTopupTrigger: CHAIN_CONFIG.safeTopupTrigger,
             safeTopupTarget: CHAIN_CONFIG.minSafeEth,
+          }
+        : undefined,
+    // Eviction-check loop — only in standard staking mode (requires distributorAddress).
+    // Running mode only: setup-halted daemons must not try to restake services that
+    // haven't been staked yet (hjex.3).
+    evictionCheck:
+      config.evictionCheckIntervalMs > 0 &&
+      config.stakingMode === 'standard' &&
+      CHAIN_CONFIG.distributorAddress
+        ? {
+            intervalMs: config.evictionCheckIntervalMs,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            readContract: (opts) => publicClient.readContract(opts as Parameters<typeof publicClient.readContract>[0]) as Promise<bigint>,
+            recoverEvictedService: async (svc) => {
+              if (!svc.service_id || !svc.staking_address) return;
+              await recoverEvictedServiceFn({
+                serviceDisplayIndex: Math.max(0, svc.index - 1),
+                serviceId: svc.service_id,
+                stakingAddress: svc.staking_address,
+                distributorAddress: CHAIN_CONFIG.distributorAddress!,
+                rpcUrl: config.rpcUrl,
+                chain: NETWORK_CHAIN,
+                mnemonic: mnemonicForMaster,
+              });
+            },
+          }
+        : undefined,
+    // Checkpoint loop — proactively advances `tsCheckpoint` on each staked
+    // proxy so the activity-rate window stays narrow (issue #505).
+    // `checkpoint()` is permissionless; master EOA pays gas. No-op for
+    // non-standard staking modes.
+    checkpoint:
+      config.checkpointIntervalMs > 0 && config.stakingMode === 'standard'
+        ? {
+            intervalMs: config.checkpointIntervalMs,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            writeCheckpoint: async ({ stakingProxy }) => {
+              const txHash = await masterWallet.writeContract({
+                address: stakingProxy,
+                abi: [
+                  {
+                    type: 'function',
+                    name: 'checkpoint',
+                    stateMutability: 'nonpayable',
+                    inputs: [],
+                    outputs: [],
+                  },
+                ] as const,
+                functionName: 'checkpoint',
+                account: masterAccount,
+                chain: null,
+              });
+              return { txHash };
+            },
           }
         : undefined,
   });

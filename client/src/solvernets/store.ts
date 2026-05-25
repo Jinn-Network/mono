@@ -56,6 +56,7 @@ const LifecycleProgressSchema = z.object({
 
 const GeneratorStateSchema = z.object({
   lastPollAt: z.string().optional(),
+  lastPollSummary: z.record(z.string(), z.unknown()).optional(),
   lastError: TimestampedError.optional(),
 });
 

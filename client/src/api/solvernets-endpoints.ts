@@ -78,6 +78,7 @@ import {
   resolveLaunchedRecordContract,
   type LaunchedRecordContractRef,
 } from '../solvernets/launched-record-dispatcher.js';
+import type { LauncherGeneratorStateSnapshot } from './launcher-status.js';
 import type {
   SignerWithAgentEoa,
   SolverNetManifestSummary,
@@ -92,6 +93,13 @@ import type {
 export interface SolverNetsLaunchDeps {
   launchAction: LaunchAction;
   lifecycleTransition: LifecycleTransition;
+  /**
+   * Live generator-state reader, keyed by `solverNetId`. Returns the running
+   * generator's current poll/error snapshot, or `undefined` when the record
+   * has no active generator. When omitted, responses fall back to the
+   * record's persisted `generatorState`. See #471.
+   */
+  getGeneratorState?: (solverNetId: string) => LauncherGeneratorStateSnapshot | undefined;
   /** Live mirror of the daemon's per-record generator state. The endpoint
    * mutates `configRef.current` for the matching record so the next
    * generator tick sees hot-applied config. Lookups by `solverNetId`. */
@@ -128,6 +136,21 @@ export interface SolverNetsEndpointsDeps {
    * one but not the other (in practice they ship together).
    */
   registry?: SolverNetRegistryClient;
+}
+
+/**
+ * Overlay the live generator-state snapshot onto a launched record. The live
+ * snapshot wins over the persisted `generatorState`, which is only a
+ * best-effort checkpoint. Without a live reader or active generator, keep the
+ * persisted value unchanged. See #471.
+ */
+function withLiveGeneratorState(
+  record: LaunchedSolverNetRecord,
+  getGeneratorState: SolverNetsLaunchDeps['getGeneratorState'],
+): LaunchedSolverNetRecord {
+  const live = getGeneratorState?.(record.solverNetId);
+  if (!live) return record;
+  return { ...record, generatorState: live };
 }
 
 // ── Draft CRUD validation schemas ──────────────────────────────────────────
@@ -279,7 +302,14 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
   .object({
     N_target_successes: z.number().int().positive().optional(),
     N_max_postings_per_task: z.number().int().positive().optional(),
+    posting_window_ms: z.number().int().positive().optional(),
+    post_batch_size: z.number().int().positive().optional(),
+    maxClaimsPerOperator: z.number().int().positive().max(65_535).optional(),
+    claimLeaseTtlSeconds: z.number().int().positive().optional(),
+    admissionMode: z.enum(['required', 'python-floor']).optional(),
+    /** @deprecated tolerated legacy key; ignored on canonical write. */
     cooldown_ms: z.number().int().nonnegative().optional(),
+    /** @deprecated tolerated legacy nested shape; flattened on canonical write. */
     claimPolicy: z
       .object({
         maxClaims: z.number().int().positive().max(65_535).optional(),
@@ -302,17 +332,6 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
         message: 'must be >= N_target_successes',
       });
     }
-    if (
-      value.claimPolicy?.maxClaims !== undefined &&
-      value.claimPolicy.maxClaimsPerOperator !== undefined &&
-      value.claimPolicy.maxClaimsPerOperator > value.claimPolicy.maxClaims
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['claimPolicy', 'maxClaimsPerOperator'],
-        message: 'must be <= claimPolicy.maxClaims',
-      });
-    }
   });
 
 function isContractRefFor(
@@ -323,20 +342,40 @@ function isContractRefFor(
   return contract?.id === id && contract.version === version;
 }
 
-function defaultSweRebenchV2ClaimPolicy(): {
-  maxClaims: number;
-  maxClaimsPerOperator: number;
-  claimLeaseTtlSeconds: number;
-} {
-  const defaults = getSolverNetContract({
-    id: 'swe-rebench-v2',
-    version: 'v1',
-  })?.claimPolicyDefaults;
-  return {
-    maxClaims: defaults?.maxClaims ?? 50,
-    maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? 5,
-    claimLeaseTtlSeconds: defaults?.claimLeaseTtlSeconds ?? 60 * 60,
-  };
+function canonicalSweRebenchV2GeneratorConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const legacyPolicy =
+    typeof config.claimPolicy === 'object' && config.claimPolicy !== null
+      ? config.claimPolicy as Record<string, unknown>
+      : {};
+  const next: Record<string, unknown> = {};
+  for (const key of [
+    'N_target_successes',
+    'N_max_postings_per_task',
+    'posting_window_ms',
+    'post_batch_size',
+  ] as const) {
+    if (typeof config[key] === 'number') next[key] = config[key];
+  }
+  const maxClaimsPerOperator =
+    typeof config.maxClaimsPerOperator === 'number'
+      ? config.maxClaimsPerOperator
+      : legacyPolicy.maxClaimsPerOperator;
+  if (typeof maxClaimsPerOperator === 'number') {
+    next.maxClaimsPerOperator = maxClaimsPerOperator;
+  }
+  const claimLeaseTtlSeconds =
+    typeof config.claimLeaseTtlSeconds === 'number'
+      ? config.claimLeaseTtlSeconds
+      : legacyPolicy.claimLeaseTtlSeconds;
+  if (typeof claimLeaseTtlSeconds === 'number') {
+    next.claimLeaseTtlSeconds = claimLeaseTtlSeconds;
+  }
+  if (config.admissionMode === 'required' || config.admissionMode === 'python-floor') {
+    next.admissionMode = config.admissionMode;
+  }
+  return next;
 }
 
 function mergeGeneratorConfigPatchForRecord(
@@ -344,7 +383,7 @@ function mergeGeneratorConfigPatchForRecord(
   contract: LaunchedRecordContractRef | null,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
-  const nextConfig: Record<string, unknown> = {
+  let nextConfig: Record<string, unknown> = {
     ...(record.generatorConfig ?? {}),
     ...patch,
   };
@@ -362,6 +401,9 @@ function mergeGeneratorConfigPatchForRecord(
       ...existingPolicy,
       ...patch.claimPolicy as Record<string, unknown>,
     };
+  }
+  if (isContractRefFor(contract, 'swe-rebench-v2', 'v1')) {
+    nextConfig = canonicalSweRebenchV2GeneratorConfig(nextConfig);
   }
   return nextConfig;
 }
@@ -385,23 +427,6 @@ function validateSweRebenchV2EffectiveConfig(
     return {
       path: 'N_max_postings_per_task',
       message: 'must be >= N_target_successes',
-    };
-  }
-  const defaults = defaultSweRebenchV2ClaimPolicy();
-  const rawPolicy =
-    typeof config.claimPolicy === 'object' && config.claimPolicy !== null
-      ? config.claimPolicy as Record<string, unknown>
-      : {};
-  const maxClaims = typeof rawPolicy.maxClaims === 'number'
-    ? rawPolicy.maxClaims
-    : defaults.maxClaims;
-  const maxClaimsPerOperator = typeof rawPolicy.maxClaimsPerOperator === 'number'
-    ? rawPolicy.maxClaimsPerOperator
-    : defaults.maxClaimsPerOperator;
-  if (maxClaimsPerOperator > maxClaims) {
-    return {
-      path: 'claimPolicy.maxClaimsPerOperator',
-      message: 'claimPolicy.maxClaimsPerOperator must be <= claimPolicy.maxClaims',
     };
   }
   return undefined;
@@ -522,6 +547,7 @@ function buildUnsignedManifest(args: {
     solutionPriceWei: draft.solutionPriceWei!,
     verdictPriceWei: draft.verdictPriceWei!,
     openRoles: draft.openRoles!,
+    ...(draft.generatorConfig ? { generatorConfig: draft.generatorConfig } : {}),
     createdAt: draft.createdAt,
     launchedAt: nowIso,
   };
@@ -1093,12 +1119,13 @@ export function registerSolverNetsEndpoints(
         (g) => g.recordRef.current.solverNetId === id,
       );
       if (entry) {
-        const summary = await tryGetSummary(
+        const liveRecord = withLiveGeneratorState(
           entry.recordRef.current,
-          deps.registry,
+          deps.launch.getGeneratorState,
         );
+        const summary = await tryGetSummary(liveRecord, deps.registry);
         return c.json({
-          ...entry.recordRef.current,
+          ...liveRecord,
           ...(summary !== undefined ? { summary } : {}),
         });
       }
@@ -1119,9 +1146,10 @@ export function registerSolverNetsEndpoints(
     if (!record) {
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
-    const summary = await tryGetSummary(record, deps.registry);
+    const liveRecord = withLiveGeneratorState(record, deps.launch?.getGeneratorState);
+    const summary = await tryGetSummary(liveRecord, deps.registry);
     return c.json({
-      ...record,
+      ...liveRecord,
       ...(summary !== undefined ? { summary } : {}),
     });
   });
@@ -1415,8 +1443,9 @@ export function registerSolverNetsEndpoints(
     // day-1 implementation is a synchronous Map read.
     const enriched = await Promise.all(
       records.map(async (record) => {
-        const summary = await tryGetSummary(record, deps.registry);
-        return summary !== undefined ? { ...record, summary } : record;
+        const liveRecord = withLiveGeneratorState(record, deps.launch?.getGeneratorState);
+        const summary = await tryGetSummary(liveRecord, deps.registry);
+        return summary !== undefined ? { ...liveRecord, summary } : liveRecord;
       }),
     );
 
@@ -1488,7 +1517,14 @@ export function registerSolverNetsEndpoints(
       lastError:
         lastError === null
           ? null
-          : { message: lastError.message, at: lastError.at.toISOString() },
+          : {
+              message: lastError.message,
+              at: lastError.at.toISOString(),
+              // Forward the typed reason (currently only `rpc_rate_limited`)
+              // so the SPA can render an operator-actionable message rather
+              // than a generic "catalog failed" string. See jinn-mono #325.
+              ...(lastError.code !== undefined ? { code: lastError.code } : {}),
+            },
     });
   });
 

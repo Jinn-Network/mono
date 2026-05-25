@@ -18,8 +18,9 @@ const PRODUCTION_DEPS: RewardsDeps = {
 
 function formatRewardAmount(wei: string): string {
   try {
-    // stOLAS / JINN / OLAS all use 18 decimals.
-    return `${formatUnits(BigInt(wei), 18)} stOLAS`;
+    // stOLAS / JINN / OLAS all use 18 decimals. This command reports the
+    // staking collector queue, not spendable operator tJINN.
+    return `${formatUnits(BigInt(wei), 18)} collector-token`;
   } catch {
     return `${wei} wei`;
   }
@@ -31,10 +32,15 @@ function humanRewards(payload: RewardsV1Response): string {
     lines.push('No services staked yet. Run `jinn bootstrap` to stake one.');
   } else {
     const anyPending = payload.services.some((s) => s.pending !== '0');
-    lines.push(anyPending ? 'Pending rewards:' : 'Pending rewards: none yet.');
+    lines.push(
+      anyPending
+        ? 'Pending staking collector claims:'
+        : 'Pending staking collector claims: none yet.',
+    );
     for (const s of payload.services) {
       lines.push(`  Service #${s.index}: ${formatRewardAmount(s.pending)} pending · ${formatRewardAmount(s.claimed)} claimed`);
     }
+    lines.push('Operator tJINN/JINN earnings are reported from the Sepolia tJINN Safe balance, not this collector queue.');
   }
   lines.push(
     `Last claim tick: ${payload.lastClaimAt ?? 'never (daemon not yet run the claim loop)'}`,
@@ -48,12 +54,12 @@ function humanRewards(payload: RewardsV1Response): string {
 export function createRewardsCommand(deps: RewardsDeps = PRODUCTION_DEPS): CommandModule {
   return {
     name: 'rewards',
-    summary: 'Earned vs claimed per service, per asset; next checkpoint time',
+    summary: 'Staking collector queue per service; next checkpoint time',
     helpText: `Usage: jinn rewards [--human]
 
-Returns the current pending reward balance per service, per asset
-role. Uses \`reward\` as the asset name; look up the concrete token
-in \`jinn version\`.
+Returns the current staking collector claim queue per service. This is
+the OLAS-style distributor maintenance path; operator tJINN/JINN earnings
+are the Sepolia tJINN Safe balance shown in status / the app.
 
 Examples:
   jinn rewards

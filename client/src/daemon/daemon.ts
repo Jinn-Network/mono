@@ -13,6 +13,8 @@ import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
+import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
+import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
@@ -20,6 +22,7 @@ import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js
 import type { Task } from '../types/index.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { gateClaimByReadiness } from './readiness-gate.js';
+import { SkipLogDeduper } from './skip-log-dedup.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -70,6 +73,22 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   balanceTopup?: BalanceTopupLoopConfig;
+
+  /**
+   * Periodic eviction-check + auto-restake loop (jinn-mono-hjex.3).
+   * Polls getStakingState for each service; restakes automatically when evicted.
+   * Omitted or interval 0 → loop not started.
+   */
+  evictionCheck?: EvictionLoopConfig;
+
+  /**
+   * Periodic `checkpoint()` loop (issue #505). Advances `tsCheckpoint` on
+   * each unique staking proxy so the activity-rate window stays narrow
+   * (default 5 min, matching `livenessPeriod`). Without this, operators on
+   * realistic cadence silently fail every liveness check.
+   * Omitted or interval 0 → loop not started.
+   */
+  checkpoint?: CheckpointLoopConfig;
 
   /**
    * Cross-chain JINN claim loop (jinn-mono-7x5). Emits ClaimTicket on L2,
@@ -168,7 +187,10 @@ export class Daemon {
   private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
+  private evictionLoop?: EvictionLoop;
+  private checkpointLoop?: CheckpointLoop;
   private jinnClaimLoop?: JinnClaimLoop;
+  private skipLogDeduper = new SkipLogDeduper();
 
   constructor(private readonly config: DaemonConfig) {
     if (config.store) {
@@ -214,6 +236,12 @@ export class Daemon {
         ...config.balanceTopup,
         jinnStore: this.store,
       });
+    }
+    if (config.evictionCheck && config.evictionCheck.intervalMs > 0) {
+      this.evictionLoop = new EvictionLoop(config.evictionCheck);
+    }
+    if (config.checkpoint && config.checkpoint.intervalMs > 0) {
+      this.checkpointLoop = new CheckpointLoop(config.checkpoint);
     }
     if (config.jinnClaim && config.jinnClaim.intervalMs > 0) {
       this.jinnClaimLoop = new JinnClaimLoop({
@@ -340,6 +368,32 @@ export class Daemon {
         }),
       );
     }
+    if (this.evictionLoop) {
+      this.loopPromises.push(
+        this.evictionLoop.run().catch(err => {
+          console.error('[daemon] eviction-check crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'eviction-check loop crashed',
+            errorCode: 'eviction_check_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.checkpointLoop) {
+      this.loopPromises.push(
+        this.checkpointLoop.run().catch(err => {
+          console.error('[daemon] checkpoint-loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'checkpoint loop crashed',
+            errorCode: 'checkpoint_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.jinnClaimLoop) {
       this.loopPromises.push(
         this.jinnClaimLoop.run().catch(err => {
@@ -374,6 +428,8 @@ export class Daemon {
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
+    this.evictionLoop?.stop();
+    this.checkpointLoop?.stop();
     this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
 
@@ -417,18 +473,47 @@ export class Daemon {
    */
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
+    // Yield to the macrotask queue every N announcements so even the first full
+    // scan of a large backlog hands control back to the HTTP server (so /health
+    // doesn't spike) instead of running as one uninterruptible contiguous block.
+    const YIELD_EVERY = 10;
+    let scanned = 0;
 
     for await (const taskAnnouncement of this.adapter.watchForTasks()) {
       if (this.engineStopped) break;
       if (!taskAnnouncement.taskId) continue;
 
+      if (++scanned % YIELD_EVERY === 0) {
+        // setImmediate schedules a macrotask: the event loop drains pending I/O
+        // callbacks (HTTP requests) before resuming this loop.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        if (this.engineStopped) break;
+      }
+
+      // canAcceptTask() resolves manifests, validates schemas, and probes
+      // impl.isReady() — expensive enough that re-running it for every
+      // persistently-unacceptable task each pass starves the HTTP API. Fast-skip
+      // tasks skipped within the bounded SKIP_RECHECK_TTL_MS; once the TTL
+      // elapses we fall through so a now-acceptable task is still picked up.
+      if (!this.skipLogDeduper.shouldRecheck(taskAnnouncement.taskId)) {
+        continue;
+      }
+
       const solverType = taskAnnouncement.task.solverType ?? undefined;
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
       const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
-        console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
+        this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason);
+        // Log once per (taskId, reason) — the engine-watcher re-observes every
+        // pending task each pass, so an unguarded log here floods the console.
+        if (this.skipLogDeduper.shouldLog(taskAnnouncement.taskId, accept.reason)) {
+          console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
+        }
         continue;
       }
+      // Task is acceptable now; reset skip state so a future skip logs once and
+      // is re-checked immediately rather than fast-skipped.
+      this.skipLogDeduper.forget(taskAnnouncement.taskId);
 
       // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
       // skip this task without blocking other loops. Logs once per ready↔not-ready transition.
@@ -445,9 +530,11 @@ export class Daemon {
       }
 
       let request;
+      let runStartedAt: number;
       try {
         request = await this.adapter.claimTask(taskAnnouncement.taskId);
         this.store.recordOwnActivity(request.requestId, 'claimed');
+        runStartedAt = Date.now();
       } catch (err) {
         console.error(
           `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
@@ -489,6 +576,7 @@ export class Daemon {
           taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
+          runStartedAt,
           task: request.task,
         });
 

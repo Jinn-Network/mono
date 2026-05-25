@@ -20,6 +20,7 @@ import {
   registerSolverNetsEndpoints,
   type SolverNetsEndpointsDeps,
 } from '../../src/api/solvernets-endpoints.js';
+import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
 import { requireUiToken } from '../../src/api/handshake.js';
 import {
   createSolverNetStore,
@@ -1185,27 +1186,19 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(await res.json()).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
-      cooldown_ms: 300_000,
-      claimPolicy: {
-        maxClaims: 10,
-        maxClaimsPerOperator: 5,
-        claimLeaseTtlSeconds: 1_800,
-      },
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 1_800,
     });
     expect(configRef.current).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
-      cooldown_ms: 300_000,
-      claimPolicy: {
-        maxClaims: 10,
-        maxClaimsPerOperator: 5,
-        claimLeaseTtlSeconds: 1_800,
-      },
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 1_800,
     });
     const onDisk = await store.loadRecord(launched.solverNetId);
-    expect(onDisk?.generatorConfig?.cooldown_ms).toBe(300_000);
-    expect(onDisk?.generatorConfig?.claimPolicy).toEqual({
-      maxClaims: 10,
+    expect(onDisk?.generatorConfig).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
       maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 1_800,
     });
@@ -1254,11 +1247,10 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(await res.json()).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
-      cooldown_ms: 300_000,
     });
   });
 
-  it('rejects swe-rebench-v2 claim policy with per-operator claims above max claims', async () => {
+  it('tolerates legacy swe-rebench-v2 claimPolicy.maxClaims and normalizes it away', async () => {
     const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
     const launchBundle = makeLaunchDeps({ store, pendingGenerators });
     const { app } = buildTestApp({ store, launch: launchBundle.launch });
@@ -1281,13 +1273,23 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
       {
         method: 'PATCH',
         headers: authHeaders(),
-        body: JSON.stringify({ claimPolicy: { maxClaims: 3 } }),
+        body: JSON.stringify({
+          claimPolicy: {
+            maxClaims: 3,
+            maxClaimsPerOperator: 4,
+            claimLeaseTtlSeconds: 1_800,
+          },
+        }),
       },
     );
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { message?: string };
-    expect(body.message).toMatch(/maxClaimsPerOperator/);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
+      maxClaimsPerOperator: 4,
+      claimLeaseTtlSeconds: 1_800,
+    });
   });
 
   it('rejects partial swe-rebench-v2 patches that violate merged posting invariants', async () => {
@@ -1463,6 +1465,92 @@ describe('GET /v1/solvernets/launched/:id (Task 14)', () => {
     expect(res.status).toBe(401);
   });
 
+  it('overlays live generatorState on single-record and list responses', async () => {
+    const persistedState = {
+      lastPollAt: '2026-05-06T00:00:00.000Z',
+      lastError: { message: 'persisted failure', at: '2026-05-06T00:01:00.000Z' },
+    };
+    const liveState: LauncherGeneratorStateSnapshot = {
+      cadenceMs: 120000,
+      lastPollAt: '2026-05-06T00:10:00.000Z',
+      lastPollSummary: { evaluated: 8, posted: 2, skipped: 6 },
+    };
+    const record: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({ solverNetId: 'rec-live', status: 'launched' }),
+      generatorState: persistedState,
+    };
+    const pendingGenerators = {
+      current: [
+        {
+          record,
+          recordRef: { current: record },
+          configRef: { current: {} as PredictionV1GeneratorRuntimeConfig },
+        },
+      ] as PendingGeneratorSpawn[],
+    };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const launch = {
+      ...launchBundle.launch!,
+      getGeneratorState: (solverNetId: string) =>
+        solverNetId === 'rec-live' ? liveState : undefined,
+    } as SolverNetsEndpointsDeps['launch'];
+    const { app } = buildTestApp({ store, launch });
+    await store.writeRecord(record);
+
+    const singleRes = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(singleRes.status).toBe(200);
+    const singleBody = (await singleRes.json()) as LaunchedSolverNetRecord;
+    expect(singleBody.generatorState).toEqual(liveState);
+
+    const listRes = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as { records: LaunchedSolverNetRecord[] };
+    expect(listBody.records).toHaveLength(1);
+    expect(listBody.records[0]?.generatorState).toEqual(liveState);
+  });
+
+  it('falls back to persisted generatorState when no live generator snapshot exists', async () => {
+    const persistedState = {
+      lastPollAt: '2026-05-06T00:00:00.000Z',
+      lastError: { message: 'persisted failure', at: '2026-05-06T00:01:00.000Z' },
+    };
+    const record: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({ solverNetId: 'rec-persisted', status: 'launched' }),
+      generatorState: persistedState,
+    };
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const launch = {
+      ...launchBundle.launch!,
+      getGeneratorState: () => undefined,
+    } as SolverNetsEndpointsDeps['launch'];
+    const { app } = buildTestApp({ store, launch });
+    await store.writeRecord(record);
+
+    const singleRes = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(singleRes.status).toBe(200);
+    const singleBody = (await singleRes.json()) as LaunchedSolverNetRecord;
+    expect(singleBody.generatorState).toEqual(persistedState);
+
+    const listRes = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as { records: LaunchedSolverNetRecord[] };
+    expect(listBody.records).toHaveLength(1);
+    expect(listBody.records[0]?.generatorState).toEqual(persistedState);
+  });
+
   // ── Summary enrichment (follow-up .35) ──────────────────────────────────
 
   it('embeds `summary` on the single-record response when the cache has the manifest', async () => {
@@ -1551,22 +1639,24 @@ function makeOwnedRecord(args: {
  * as the real cache from `daemon-init.ts`; refresh() is a noop unless the test
  * supplies a `refreshHandler`.
  */
+type MockCatalogError = { message: string; at: Date; code?: 'rpc_rate_limited' };
+
 interface MockCatalog extends SolverNetCatalogCache {
   refreshCalls: number;
   setSnapshot: (snapshot: SolverNetManifestSummary[]) => void;
-  setError: (err: { message: string; at: Date } | null) => void;
+  setError: (err: MockCatalogError | null) => void;
   setLastRefreshedAt: (at: Date | null) => void;
 }
 
 function makeMockCatalog(initial: {
   snapshot?: SolverNetManifestSummary[];
   lastRefreshedAt?: Date | null;
-  lastError?: { message: string; at: Date } | null;
+  lastError?: MockCatalogError | null;
   refreshHandler?: () => Promise<void>;
 } = {}): MockCatalog {
   let snapshot: SolverNetManifestSummary[] = initial.snapshot ?? [];
   let lastRefreshedAt: Date | null = initial.lastRefreshedAt ?? null;
-  let lastError: { message: string; at: Date } | null = initial.lastError ?? null;
+  let lastError: MockCatalogError | null = initial.lastError ?? null;
   let refreshCalls = 0;
   const refreshHandler = initial.refreshHandler;
 
@@ -2022,6 +2112,31 @@ describe('GET /v1/solvernets/registry (Task 15)', () => {
       message: 'subgraph timed out',
       at: errAt.toISOString(),
     });
+  });
+
+  it('passes the rpc_rate_limited code through in the lastError payload', async () => {
+    // jinn-mono #325: the typed throttle signal must survive the daemon→SPA
+    // hop so the operator UI can render an actionable message.
+    const errAt = new Date('2026-05-06T01:00:00.000Z');
+    const catalog = makeMockCatalog({
+      snapshot: [],
+      lastError: {
+        message: 'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
+        at: errAt,
+        code: 'rpc_rate_limited',
+      },
+    });
+    const { app } = buildTestApp({ store, catalog });
+
+    const res = await app.request('/v1/solvernets/registry', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lastError: { message: string; at: string; code?: string } | null;
+    };
+    expect(body.lastError?.code).toBe('rpc_rate_limited');
   });
 
   it('forces a refresh when ?refresh=1 is supplied', async () => {

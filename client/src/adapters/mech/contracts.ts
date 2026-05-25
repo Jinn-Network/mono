@@ -20,7 +20,7 @@ import { VerdictCode } from './verdict-code.js';
 import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js';
 import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
 import { executeSafeTransaction } from './safe.js';
-import { formatKnownRevert } from './safe-revert.js';
+import { formatKnownRevert, formatKnownRevertDetail } from './safe-revert.js';
 import {
   flattenErrorMessage,
   isRecoverableTransactionError,
@@ -385,6 +385,22 @@ export async function canClaimTask(
 const DUMMY_EVALUATION_TASK_CID_DIGEST =
   '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex;
 
+/**
+ * Result of a failed `canClaimEvaluation` simulation.
+ *
+ * `reason` is the operator-facing formatted revert string (kept for log lines).
+ * `revertName` is the *structured* bare revert name decoded straight from the
+ * inner revert data — `null` when no known selector could be extracted. Callers
+ * deciding whether an opportunity is permanently unclaimable should classify on
+ * `revertName` (via `isNonRecoverableInnerRevert`), never by regex-unformatting
+ * `reason`.
+ */
+export interface CanClaimEvaluationFailure {
+  ok: false;
+  reason: string;
+  revertName: string | null;
+}
+
 export async function canClaimEvaluation(
   publicClient: PublicClient,
   safeAddress: Address,
@@ -393,7 +409,7 @@ export async function canClaimEvaluation(
   attemptIndex: number,
   evaluatorMech: Address,
   evaluationTaskCidDigest: Hex = DUMMY_EVALUATION_TASK_CID_DIGEST,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<{ ok: true } | CanClaimEvaluationFailure> {
   const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
   try {
     await publicClient.simulateContract({
@@ -405,7 +421,12 @@ export async function canClaimEvaluation(
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, reason: formatKnownRevert(err) ?? flattenErrorMessage(err) };
+    const detail = formatKnownRevertDetail(err);
+    return {
+      ok: false,
+      reason: detail?.reason ?? flattenErrorMessage(err),
+      revertName: detail?.name ?? null,
+    };
   }
 }
 
@@ -894,6 +915,7 @@ export interface DecodedDeliverEvent {
   requestId: string;
   deliveryDataHex: string;
   mechAddress: string;
+  blockNumber?: bigint;
 }
 
 export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
@@ -917,6 +939,7 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
           requestId: String(args.requestId),
           deliveryDataHex: String(args.data),
           mechAddress: String(args.mechServiceMultisig),
+          blockNumber: log.blockNumber ?? undefined,
         });
       }
     } catch {

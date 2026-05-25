@@ -4,12 +4,17 @@
  * Verifies that both StaticConfiguredTaskSource and GeneratedTaskSource
  * pass the Task through to TaskCandidate.task unchanged,
  * including an embedded SignedTaskV1 when present.
+ *
+ * Also covers the un-bindable-entry guard (issue #415): filterBindableTasks
+ * drops tasks[] entries without a solverNetManifestCid with a one-time warning,
+ * preventing them from entering the creator loop and causing recurring TICK ERRORs.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import {
   StaticConfiguredTaskSource,
   GeneratedTaskSource,
+  filterBindableTasks,
 } from '../../src/tasks/sources.js';
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
 import type { Task } from '../../src/types/task.js';
@@ -38,6 +43,79 @@ const STUB_INTENT: SignedTaskV1 = {
     sig: '0xcafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe01',
   },
 };
+
+// ── Regression: issue #415 — un-bindable tasks[] entries ─────────────────────
+//
+// filterBindableTasks is the production guard called in main.ts before passing
+// config.tasks to StaticConfiguredTaskSource. It drops entries without
+// solverNetManifestCid at startup (one-time warning per dropped entry) so they
+// never enter the creator loop and cause recurring TICK ERRORs.
+
+describe('filterBindableTasks — un-bindable entry guard (issue #415)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('drops a tasks[] entry missing solverNetManifestCid and emits one warning', () => {
+    const unbindable: Task = { id: 'legacy-health-check', description: 'health check' };
+    const result = filterBindableTasks([unbindable]);
+
+    expect(result).toHaveLength(0);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [msg] = warnSpy.mock.calls[0] as [string, ...unknown[]];
+    expect(msg).toContain('legacy-health-check');
+    expect(msg).toContain('solverNetManifestCid');
+  });
+
+  it('does not warn or drop an entry that has solverNetManifestCid', () => {
+    const bindable: Task = {
+      id: 'valid-task',
+      description: 'has a manifest',
+      solverNetManifestCid: 'bafyfixturecid',
+    };
+    const result = filterBindableTasks([bindable]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe(bindable);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('drops un-bindable entries while keeping bindable ones in a mixed list', () => {
+    const legacy: Task = { id: 'old-entry', description: 'no manifest' };
+    const valid: Task = {
+      id: 'new-entry',
+      description: 'has manifest',
+      solverNetManifestCid: 'bafyfixturecid2',
+    };
+    const result = filterBindableTasks([legacy, valid]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('new-entry');
+    // One warning for the one un-bindable entry
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits one warning per dropped entry, not per tick', () => {
+    const legacy: Task = { id: 'no-manifest', description: 'legacy' };
+    // filterBindableTasks is called once at startup — verify it warns once per entry
+    filterBindableTasks([legacy]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockClear();
+
+    // Calling again with the same list (simulating a second daemon startup)
+    // also warns once — confirming the warning is per-call, not accumulating
+    filterBindableTasks([legacy]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Existing tests ─────────────────────────────────────────────────────────────
 
 describe('StaticConfiguredTaskSource', () => {
   it('emits one candidate per configured Task with once_per_safe policy', async () => {
@@ -138,6 +216,36 @@ describe('GeneratedTaskSource', () => {
 
     const policy = candidate.postingPolicy as { kind: 'once_per_bucket'; bucketKey: string };
     expect(policy.bucketKey).toBe('1700000000000:1700003600000');
+  });
+
+  it('uses configured bucket override when supplied', async () => {
+    const jobs: Task[] = [
+      {
+        id: 'generated-a',
+        description: 'first generated',
+        window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+      },
+      {
+        id: 'generated-b',
+        description: 'second generated',
+        window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+      },
+    ];
+    const generator = vi.fn(async () => jobs);
+    const source = new GeneratedTaskSource('gen:batch', generator, {
+      bucketKeyForTask: (task, index) => `override:${task.id}:${index}`,
+    });
+
+    const candidates = await source.collect(new Date());
+
+    expect(candidates.map((candidate) => candidate.sourceMeta?.bucketKey)).toEqual([
+      'override:generated-a:0',
+      'override:generated-b:1',
+    ]);
+    expect(candidates.map((candidate) => candidate.postingPolicy)).toEqual([
+      { kind: 'once_per_bucket', bucketKey: 'override:generated-a:0' },
+      { kind: 'once_per_bucket', bucketKey: 'override:generated-b:1' },
+    ]);
   });
 
   it('falls back to id as bucketKey when no window', async () => {

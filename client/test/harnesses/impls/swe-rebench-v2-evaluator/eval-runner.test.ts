@@ -1,12 +1,11 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   PythonEvalRunner,
   EvalCouldNotGradeError,
-  DEFAULT_EVAL_IMAGE_CACHE_MAX,
-  resolveImageCacheMax,
+  InsufficientDiskError,
   matchInfraSignature,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
@@ -237,93 +236,73 @@ describe('PythonEvalRunner', () => {
       .rejects.toBeInstanceOf(EvalCouldNotGradeError);
   });
 
-  // jinn-mono-uy6v.11 — bound the per-instance Docker image cache so a
-  // long-running operator daemon does not accumulate ~3 GB/image until the
-  // disk fills. The runner keeps an in-process LRU of image names; when more
-  // than `imageCacheMax` distinct images have been used, the least-recently
-  // used ones are removed via the injected `cleanupImage` hook (which
-  // defaults to `docker rmi <image>` in production).
-  describe('LRU image cache GC (jinn-mono-uy6v.11)', () => {
-    it('does NOT remove any image while distinct usages ≤ cap (keeps repeat-evals fast)', async () => {
+  it('times out a wedged eval subprocess and reports it as ungradeable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'swe-rebench-eval-runner-test-'));
+    tempDirs.push(dir);
+    const scriptsDir = join(dir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(join(scriptsDir, '__init__.py'), '');
+    writeFileSync(join(scriptsDir, 'eval.py'), [
+      'import time',
+      'time.sleep(60)',
+    ].join('\n'));
+    chmodSync(join(scriptsDir, 'eval.py'), 0o755);
+    const pruned: string[] = [];
+
+    const err = await new PythonEvalRunner({
+      upstreamRepoDir: dir,
+      maxWorkers: 1,
+      evalTimeoutMs: 50,
+      pruneRound: async (image) => { pruned.push(image); },
+    }).runEval(REQUEST).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(EvalCouldNotGradeError);
+    expect((err as EvalCouldNotGradeError).reason).toBe('eval_timeout');
+    expect(pruned).toEqual([REQUEST.image]);
+  });
+
+  // #476 — replace the LRU with per-round pruning so eval disk usage never
+  // accumulates across instances. Each runEval call prunes its own Docker
+  // footprint immediately after the eval (success or failure).
+  describe('prune-after-every-round (#476)', () => {
+    it('prunes the round image after a successful eval', async () => {
       const upstreamRepoDir = makeUpstreamFixture();
-      const removed: string[] = [];
+      const pruned: string[] = [];
       const runner = new PythonEvalRunner({
         upstreamRepoDir,
         maxWorkers: 1,
-        imageCacheMax: 3,
-        cleanupImage: async (image) => { removed.push(image); },
+        pruneRound: async (image) => { pruned.push(image); },
       });
-      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
-      await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
-      await runner.runEval({ ...REQUEST, instance_id: 'i3', image: 'img-3:latest' });
-      // Cache is full but not over capacity — nothing should be GC'd yet.
-      expect(removed).toEqual([]);
+      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-A' });
+      expect(pruned).toEqual(['img-A']);
     });
 
-    it('evicts the least-recently-used image once usage exceeds the cap', async () => {
+    it('carries the image digest resolved before pruning removes the local image', async () => {
       const upstreamRepoDir = makeUpstreamFixture();
-      const removed: string[] = [];
+      const events: string[] = [];
+      const digest = 'sha256:' + 'a'.repeat(64);
       const runner = new PythonEvalRunner({
         upstreamRepoDir,
         maxWorkers: 1,
-        imageCacheMax: 2,
-        cleanupImage: async (image) => { removed.push(image); },
+        resolveImageDigest: async (image) => {
+          events.push(`digest:${image}`);
+          return digest;
+        },
+        pruneRound: async (image) => {
+          events.push(`prune:${image}`);
+        },
       });
-      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
-      await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
-      // Third distinct image — must evict the oldest (img-1).
-      await runner.runEval({ ...REQUEST, instance_id: 'i3', image: 'img-3:latest' });
-      expect(removed).toEqual(['img-1:latest']);
-      // Fourth — must evict the now-oldest (img-2).
-      await runner.runEval({ ...REQUEST, instance_id: 'i4', image: 'img-4:latest' });
-      expect(removed).toEqual(['img-1:latest', 'img-2:latest']);
+
+      const result = await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-A' });
+
+      expect(result.imageDigest).toBe(digest);
+      expect(events).toEqual(['digest:img-A', 'prune:img-A']);
     });
 
-    it('refreshes LRU order on repeat-eval — re-using an image protects it from eviction', async () => {
-      const upstreamRepoDir = makeUpstreamFixture();
-      const removed: string[] = [];
-      const runner = new PythonEvalRunner({
-        upstreamRepoDir,
-        maxWorkers: 1,
-        imageCacheMax: 2,
-        cleanupImage: async (image) => { removed.push(image); },
-      });
-      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
-      await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
-      // Re-use img-1 — now img-2 is the oldest.
-      await runner.runEval({ ...REQUEST, instance_id: 'i1-repeat', image: 'img-1:latest' });
-      expect(removed).toEqual([]);
-      // A new distinct image evicts img-2, not img-1.
-      await runner.runEval({ ...REQUEST, instance_id: 'i3', image: 'img-3:latest' });
-      expect(removed).toEqual(['img-2:latest']);
-    });
-
-    it('records the image in the LRU even when the eval throws EvalCouldNotGradeError', async () => {
-      // Cap of 1 — every new distinct image evicts the previous one. This
-      // proves cleanup runs in the failure path too (acceptance: cleanup must
-      // not be conditional on the success path).
-      const failingFixture = makeUpstreamFixture({
-        reportItem: { error: 'Task missing top-level image_name.' },
-      });
-      const removed: string[] = [];
-      const runner = new PythonEvalRunner({
-        upstreamRepoDir: failingFixture,
-        maxWorkers: 1,
-        imageCacheMax: 1,
-        cleanupImage: async (image) => { removed.push(image); },
-      });
-      await expect(runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' }))
-        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
-      // A second distinct image — even after a failure — must evict the first.
-      await expect(runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' }))
-        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
-      expect(removed).toEqual(['img-1:latest']);
-    });
-
-    it('also records the image in the LRU when the report is missing/unparseable (no-report failure path)', async () => {
-      // eval.py exits non-zero with no report file — runEval throws
+    it('prunes the round image even when the eval throws EvalCouldNotGradeError', async () => {
+      // eval.py exits non-zero without writing a report — runEval throws
       // EvalCouldNotGradeError('eval_no_report'). The image must still be
-      // tracked for GC, otherwise pull-and-crash failures leak the cache.
+      // pruned, otherwise pull-and-crash failures leave images on disk.
       const dir = mkdtempSync(join(tmpdir(), 'swe-rebench-eval-runner-test-'));
       tempDirs.push(dir);
       const scriptsDir = join(dir, 'scripts');
@@ -332,137 +311,84 @@ describe('PythonEvalRunner', () => {
       writeFileSync(join(scriptsDir, 'eval.py'), 'import sys\nsys.exit(2)\n');
       chmodSync(join(scriptsDir, 'eval.py'), 0o755);
 
-      const removed: string[] = [];
+      const pruned: string[] = [];
       const runner = new PythonEvalRunner({
         upstreamRepoDir: dir,
         maxWorkers: 1,
-        imageCacheMax: 1,
-        cleanupImage: async (image) => { removed.push(image); },
+        pruneRound: async (image) => { pruned.push(image); },
       });
-      await expect(runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' }))
+      await expect(runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-B' }))
         .rejects.toBeInstanceOf(EvalCouldNotGradeError);
-      await expect(runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' }))
-        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
-      expect(removed).toEqual(['img-1:latest']);
+      expect(pruned).toEqual(['img-B']);
     });
 
-    it('swallows cleanupImage errors so a failing docker rmi never escapes runEval', async () => {
+    it('a throwing pruneRound never escapes runEval', async () => {
+      // pruneRound throwing must not propagate — cleanup failures should be
+      // swallowed so a flaky `docker` never breaks the eval loop.
       const upstreamRepoDir = makeUpstreamFixture();
       const runner = new PythonEvalRunner({
         upstreamRepoDir,
         maxWorkers: 1,
-        imageCacheMax: 1,
-        cleanupImage: async () => { throw new Error('rmi blew up'); },
+        pruneRound: async () => { throw new Error('docker rmi blew up'); },
       });
-      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
-      // The second call would trigger cleanupImage(img-1). It must complete
-      // normally and return the graded result.
-      const result = await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+      // runEval must still resolve with the graded result.
+      const result = await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-C' });
+      expect(result.passed_match).toBe(true);
+    });
+  });
+
+  // #476 — pre-eval disk-floor guard: probe free disk before each eval; if
+  // below the floor, broad-prune and re-probe; if still below, abort cleanly
+  // with InsufficientDiskError (distinct from EvalCouldNotGradeError).
+  describe('disk-floor guard (#476)', () => {
+    const GB = 1_000_000_000;
+
+    it('proceeds without pruning when free disk is above the floor', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      let systemPruneCalled = false;
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        pruneRound: async () => { /* no-op */ },
+        freeDiskBytes: async () => 50 * GB,
+        systemPrune: async () => { systemPruneCalled = true; },
+        diskFloorBytes: 10 * GB,
+      });
+      await runner.runEval(REQUEST);
+      expect(systemPruneCalled).toBe(false);
+    });
+
+    it('prunes and proceeds when a low disk recovers above the floor after system prune', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const diskReadings = [5 * GB, 20 * GB];
+      let systemPruneCalled = false;
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        pruneRound: async () => { /* no-op */ },
+        freeDiskBytes: async () => diskReadings.shift() ?? 20 * GB,
+        systemPrune: async () => { systemPruneCalled = true; },
+        diskFloorBytes: 10 * GB,
+      });
+      const result = await runner.runEval(REQUEST);
+      expect(systemPruneCalled).toBe(true);
       expect(result.passed_match).toBe(true);
     });
 
-    it('reads the default cap from JINN_EVAL_IMAGE_CACHE_MAX when neither imageCacheMax nor cleanupImage is configured', async () => {
+    it('throws InsufficientDiskError (clean abort) when disk stays below the floor after system prune', async () => {
       const upstreamRepoDir = makeUpstreamFixture();
-      const prev = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-      const prevPath = process.env['PATH'];
-      // Stub `docker` on PATH with a script that records the rmi target and
-      // returns 0. Cap=1 → second distinct image triggers rmi of the first.
-      const stubDir = mkdtempSync(join(tmpdir(), 'swe-rebench-docker-stub-'));
-      tempDirs.push(stubDir);
-      const logPath = join(stubDir, 'rmi.log');
-      writeFileSync(join(stubDir, 'docker'), `#!/usr/bin/env bash\necho "$@" >> ${JSON.stringify(logPath)}\nexit 0\n`);
-      chmodSync(join(stubDir, 'docker'), 0o755);
-
-      process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '1';
-      process.env['PATH'] = `${stubDir}:${prevPath}`;
-      try {
-        const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
-        await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
-        await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
-      } finally {
-        if (prev === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-        else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prev;
-        if (prevPath === undefined) delete process.env['PATH'];
-        else process.env['PATH'] = prevPath;
-      }
-      const log = readFileSync(logPath, 'utf8');
-      expect(log).toContain('rmi');
-      expect(log).toContain('img-1:latest');
-      expect(log).not.toContain('img-2:latest');
-    });
-
-    it('falls back to DEFAULT_EVAL_IMAGE_CACHE_MAX when the env var is invalid (0 / negative / non-numeric / empty)', () => {
-      const prev = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        const invalidInputs = ['0', '-5', 'garbage', '', '  ', '1e3oops'];
-        for (const garbage of invalidInputs) {
-          warn.mockClear();
-          process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = garbage;
-          expect(resolveImageCacheMax(undefined)).toBe(DEFAULT_EVAL_IMAGE_CACHE_MAX);
-          // Operators who mistype the env var get a loud signal — silent
-          // fallback was the original review finding here. The literal value
-          // is interpolated so trailing whitespace / empty-string typos are
-          // unambiguous in the log.
-          expect(warn).toHaveBeenCalledTimes(1);
-          expect(warn).toHaveBeenCalledWith(
-            expect.stringContaining(`JINN_EVAL_IMAGE_CACHE_MAX=${JSON.stringify(garbage)}`),
-          );
-        }
-        // Sanity: a valid positive integer is honored and does NOT warn.
-        warn.mockClear();
-        process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '7';
-        expect(resolveImageCacheMax(undefined)).toBe(7);
-        expect(warn).not.toHaveBeenCalled();
-        // Explicit option always wins over env (positive option short-circuits).
-        process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '999';
-        expect(resolveImageCacheMax(3)).toBe(3);
-        // Invalid explicit option falls through to the env.
-        expect(resolveImageCacheMax(0)).toBe(999);
-        expect(resolveImageCacheMax(-1)).toBe(999);
-      } finally {
-        if (prev === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-        else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prev;
-        warn.mockRestore();
-      }
-    });
-
-    it('warns when the production docker rmi cleanup exits non-zero so a flaky daemon is visible (jinn-mono-uy6v.11)', async () => {
-      // Stub `docker` on PATH with a script that exits non-zero — simulating
-      // "image is in use by container", "permission denied", or a daemon
-      // restart. Pre-fix, `defaultCleanupImage` swallowed errors silently, so
-      // operators had zero visibility into a persistently-failing `docker rmi`
-      // until the disk filled.
-      const upstreamRepoDir = makeUpstreamFixture();
-      const prevPath = process.env['PATH'];
-      const prevCacheMax = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-      const stubDir = mkdtempSync(join(tmpdir(), 'swe-rebench-docker-rmi-fail-stub-'));
-      tempDirs.push(stubDir);
-      writeFileSync(join(stubDir, 'docker'), '#!/usr/bin/env bash\nexit 1\n');
-      chmodSync(join(stubDir, 'docker'), 0o755);
-
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      process.env['PATH'] = `${stubDir}:${prevPath ?? ''}`;
-      process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '1';
-      let warnCalls: string[] = [];
-      try {
-        const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
-        await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
-        // Second distinct image → triggers cleanup of img-1 → docker stub exits 1.
-        await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
-        warnCalls = warn.mock.calls.map((c) => String(c[0]));
-      } finally {
-        if (prevPath === undefined) delete process.env['PATH'];
-        else process.env['PATH'] = prevPath;
-        if (prevCacheMax === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
-        else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prevCacheMax;
-        warn.mockRestore();
-      }
-      // Warn fired with the image tag + non-zero exit code. (Captured before
-      // mockRestore so a captures-after-restore quirk can't be the failure.)
-      const cleanupWarn = warnCalls.find((m) => m.includes('docker rmi img-1:latest'));
-      expect(cleanupWarn).toBeTruthy();
-      expect(cleanupWarn).toContain('exited 1');
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        pruneRound: async () => { /* no-op */ },
+        freeDiskBytes: async () => 2 * GB,
+        systemPrune: async () => { /* no-op */ },
+        diskFloorBytes: 10 * GB,
+      });
+      const err = await runner.runEval(REQUEST).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(InsufficientDiskError);
+      expect((err as InsufficientDiskError).freeBytes).toBe(2 * GB);
+      expect((err as InsufficientDiskError).floorBytes).toBe(10 * GB);
     });
   });
 
@@ -531,6 +457,10 @@ describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
   });
   it('classifies conftest ImportError (jinn-mono-y4ah)', () => {
     expect(matchInfraSignature(CONFTEST_IMPORT_ERROR)).toBe('conftest_import_error');
+  });
+
+  it('classifies fatal illegal-instruction crashes as arch mismatches', () => {
+    expect(matchInfraSignature('Fatal Python error: Illegal instruction\nCurrent thread 0x000000010...')).toBe('image_arch_mismatch');
   });
 
   it('still leaves a normal pytest FAIL session alone (returns null)', () => {

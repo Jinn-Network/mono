@@ -12,6 +12,13 @@
  * operators can see why their daemon is running slowly. After the window
  * elapses the wrapper probes the primary again on the next call.
  *
+ * NOTE (2026-05-23): this wrapper is no longer engaged by default. The
+ * factory installs it only when `discovery.fallbackToOnchain === true` (an
+ * explicit opt-in). Without the opt-in, indexer outages propagate as
+ * DiscoveryUnavailableError so the operator-app surfaces them rather than the
+ * daemon silently storming shared RPC. The wrapper itself is unchanged for
+ * operators who still want it.
+ *
  * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.3.
  */
 
@@ -199,6 +206,13 @@ export function withFallback(
       return dispatch(
         () => primary.getLifecycleStatus(manifestCid),
         () => floor.getLifecycleStatus(manifestCid),
+      );
+    },
+
+    getSolverNetOperatorCount(manifestCid) {
+      return dispatch(
+        () => primary.getSolverNetOperatorCount(manifestCid),
+        () => floor.getSolverNetOperatorCount(manifestCid),
       );
     },
 

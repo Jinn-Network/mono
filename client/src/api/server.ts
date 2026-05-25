@@ -45,6 +45,7 @@ import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
+import { addCodexDoctorRoutes, type CodexDoctorConfig } from './codex-doctor-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
@@ -125,7 +126,10 @@ export interface ApiServerConfig {
   /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
-  admin?: { onRestartRequested: () => void };
+  admin?: {
+    onRestartRequested: (opts: { forceRespawn?: boolean }) => void;
+    onStopRequested: () => void;
+  };
   /**
    * When set, mounts `GET /api/harness/status` under the UI token gate.
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
@@ -150,6 +154,11 @@ export interface ApiServerConfig {
    * Powers the dashboard's Hermes install precheck panel in the join flow.
    */
   hermesDoctor?: HermesDoctorConfig;
+  /**
+   * When set, mounts `GET /api/codex/doctor` under the UI token gate.
+   * Powers the dashboard's Codex install precheck panel in the join flow.
+   */
+  codexDoctor?: CodexDoctorConfig;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
@@ -157,12 +166,22 @@ export interface ApiServerConfig {
   /** Operator review API for pending captures. */
   captures?: CapturesRoutesDeps;
   /**
-   * Discovery API instance. When set, mounts GET /v1/discovery/* routes
-   * that proxy DiscoveryAPI methods (listPluginPublications, listBuilderArtifacts,
-   * getPluginScores) so the SPA's /build route can fetch them without direct
-   * GraphQL or RPC access.
+   * Discovery API. Mounts GET /v1/discovery/* routes that proxy DiscoveryAPI
+   * methods (listPluginPublications, listBuilderArtifacts, getPluginScores)
+   * so the SPA's /build route can fetch them without direct GraphQL or RPC
+   * access.
+   *
+   * Accepts either a direct instance or a holder ref (same pattern as
+   * solverNetsLauncher / harnessReadinessRegistry). main.ts uses the holder
+   * shape because the daemon's DiscoveryAPI is constructed post-bootstrap;
+   * routes register eagerly at server start so Hono's matcher includes them
+   * before the first request. Without this, every /v1/discovery/* request
+   * gets a 404 forever, and the /build page renders "Discovery unavailable"
+   * permanently (jinn-mono-u34i field repro).
    */
-  discovery?: DiscoveryAPI;
+  discovery?:
+    | DiscoveryAPI
+    | { holder: { current: DiscoveryAPI | undefined } };
 }
 
 export interface ApiServer {
@@ -210,9 +229,76 @@ function resolveDashboardDir(): string | null {
 const dashboardDir = resolveDashboardDir() ?? join(__dirname, '..', 'dashboard');
 const assetsDir = join(dashboardDir, 'assets');
 
+/**
+ * Resolve the `JINN_ENABLE_EMBEDDED_AGENT` env var. Default off. Anything
+ * other than `1` / `true` (case-insensitive) is treated as off so a stray
+ * value can't accidentally re-enable the surface.
+ *
+ * Issue #367: this also has a daemon-side consumer (`main.ts` gates the
+ * `/api/agent/ws` bridge on it), so it stays a standalone helper rather than
+ * being inlined into `resolveFeatureFlags`.
+ */
+export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env['JINN_ENABLE_EMBEDDED_AGENT'];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+/**
+ * Resolve the operator-app feature flags from the daemon environment.
+ *
+ * Each flag is derived from a `JINN_ENABLE_*` env var ("1" enables). The SPA
+ * reads the injected `window.__JINN_FEATURES__` via `lib/features.ts`; absent
+ * or partial injection is treated as all-off there, so this can stay a flat
+ * boolean record.
+ *
+ * Issue #327: `pluginBuilderUi` gates the operator-app builder surfaces
+ * (`/build` route + Build top-tab). Default-off until the first-run UX is
+ * solid; the plug-in substrate (CLI verbs, indexer, Discovery API, docs)
+ * stays live regardless.
+ *
+ * Issue #326 / #367: `embeddedAgent` gates the embedded Claude agent chat
+ * surface (operating-shell rail + onboarding "Ask Claude" panel). Migrated
+ * here from the `/v1/bootstrap` JSON response so the operator app has a single
+ * feature-flag channel — see #367.
+ */
+function resolveFeatureFlags(): Record<string, boolean> {
+  return {
+    pluginBuilderUi: process.env['JINN_ENABLE_PLUGIN_BUILDER_UI'] === '1',
+    embeddedAgent: isEmbeddedAgentEnabled(),
+  };
+}
+
+/**
+ * Inject the feature-flag bootstrap script into the SPA `index.html`.
+ *
+ * The script sets `window.__JINN_FEATURES__` before the SPA module loads, so
+ * the first render already sees the flags. Inserted immediately before the
+ * SPA's `<script type="module">` tag; if that tag is missing the script is
+ * appended before `</head>` (or `</body>`) so the SPA still gets it.
+ *
+ * Exported for unit testing — the runtime call lives in `readSpaIndex`.
+ */
+export function injectFeatureFlags(html: string, features: Record<string, boolean>): string {
+  const script = `<script>window.__JINN_FEATURES__=${JSON.stringify(features)};</script>`;
+  const moduleTagMatch = html.match(/<script\b[^>]*type=["']module["'][^>]*>/i);
+  if (moduleTagMatch?.index !== undefined) {
+    return html.slice(0, moduleTagMatch.index) + script + html.slice(moduleTagMatch.index);
+  }
+  if (html.includes('</head>')) {
+    return html.replace('</head>', `${script}</head>`);
+  }
+  if (html.includes('</body>')) {
+    return html.replace('</body>', `${script}</body>`);
+  }
+  return html + script;
+}
+
 function readSpaIndex(): string {
   try {
-    return readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
+    const html = readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
+    return injectFeatureFlags(html, resolveFeatureFlags());
   } catch {
     return [
       '<!doctype html><html><body style="font-family:system-ui;padding:2rem;max-width:48rem;line-height:1.5">',
@@ -385,8 +471,18 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   }
 
   if (config.discovery) {
-    const discoveryInstance = config.discovery;
-    addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
+    const disc = config.discovery;
+    if ('holder' in disc) {
+      // Lazy holder shape — register routes eagerly; handler returns 503
+      // subsystem_not_ready until main.ts populates holder.current after
+      // bootstrap. Same pattern as harnessReadinessRegistry.
+      addDiscoveryRoutes(app, {
+        getDiscovery: () => disc.holder.current ?? null,
+      });
+    } else {
+      const discoveryInstance = disc;
+      addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
+    }
   }
 
   if (config.solverNets) {
@@ -449,6 +545,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.ui) {
     addHermesDoctorRoutes(app, config.hermesDoctor ?? {});
+    addCodexDoctorRoutes(app, config.codexDoctor ?? {});
   }
 
   if (config.ui) {

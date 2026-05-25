@@ -62,8 +62,11 @@ describe('BuildPage (hfmf)', () => {
 
   it('renders the my-artifacts panel', async () => {
     render(withQuery(<BuildPage />));
+    // Match the panel's heading specifically; the same phrase appears
+    // inside the quickstart markdown <p> rendered by IntroCard, so a
+    // bare getByText would race against the disabled-state transition.
     await waitFor(() => {
-      expect(screen.getByText(/your published plug-ins/i)).toBeTruthy();
+      expect(screen.getByRole('heading', { name: /your published plug-ins/i })).toBeTruthy();
     });
   });
 
