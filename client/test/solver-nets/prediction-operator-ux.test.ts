@@ -13,7 +13,6 @@ const minimalDeps = {
 /** A minimal JinnConfig-shaped stub that satisfies the diagnostic loop. */
 function minimalConfig(overrides: Partial<JinnConfig> = {}): JinnConfig {
   return {
-    solverNets: {},
     joinedSolverNets: undefined,
     engine: {
       workingDirRoot: '/tmp',
@@ -22,7 +21,7 @@ function minimalConfig(overrides: Partial<JinnConfig> = {}): JinnConfig {
     harnesses: undefined,
     trustedImplSigners: [],
     ...overrides,
-  } as unknown as JinnConfig;
+  } as JinnConfig;
 }
 
 /** A non-prediction joined SolverNet entry (SWE-rebench v2). */
@@ -46,9 +45,9 @@ const predictionJoined: JoinedSolverNetConfig = {
 };
 
 describe('buildPredictionOperatorStatus — joinedSolverNets awareness (jinn-mono-hjex.2)', () => {
-  it('emits prediction_solvernet_missing when both solverNets and joinedSolverNets are empty', async () => {
+  it('emits prediction_solvernet_missing when joinedSolverNets is empty', async () => {
     const status = await buildPredictionOperatorStatus({
-      config: minimalConfig({ solverNets: {}, joinedSolverNets: undefined }),
+      config: minimalConfig({ joinedSolverNets: undefined }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
       ...minimalDeps,
@@ -65,7 +64,6 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
     // diagnostics. Prediction is a deprecated SolverNet.
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        solverNets: {},
         joinedSolverNets: {
           [sweRebenchJoined.manifestCid]: sweRebenchJoined,
         },
@@ -88,7 +86,6 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
     // harness and run the prediction-harness-compat check against it.
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        solverNets: {},
         joinedSolverNets: {
           [sweRebenchJoined.manifestCid]: sweRebenchJoined,
         },
@@ -107,7 +104,6 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
   it('still produces real diagnostics for an operator genuinely on a prediction SolverNet', async () => {
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        solverNets: {},
         joinedSolverNets: {
           [predictionJoined.manifestCid]: predictionJoined,
         },
@@ -131,7 +127,6 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
   it('picks the prediction-contract entry when joinedSolverNets mixes prediction and non-prediction nets', async () => {
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        solverNets: {},
         joinedSolverNets: {
           // Non-prediction entry first — must NOT be the one synthesized.
           [sweRebenchJoined.manifestCid]: sweRebenchJoined,
