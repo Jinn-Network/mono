@@ -372,6 +372,64 @@ describe('GeneratorPanel', () => {
   });
 });
 
+describe('GeneratorPanel — pool re-publication notice', () => {
+  it('renders the notice when poolPublicationUpdatedAt is set', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            poolPublicationUpdatedAt: '2026-05-22T01:00:00.000Z',
+            poolPublicationPriorSize: 20,
+            poolPublicationCurrentSize: 112,
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    const notice = screen.getByTestId('launcher-launched-generator-pool-republished');
+    expect(notice).toBeTruthy();
+    expect(notice.textContent).toMatch(/Vetted pool re-published/);
+    expect(notice.textContent).toMatch(/Pool grew from 20 → 112 scorable tasks/);
+  });
+
+  it('does not render the notice when poolPublicationUpdatedAt is absent', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            poolPublicationPriorSize: 20,
+            poolPublicationCurrentSize: 112,
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByTestId('launcher-launched-generator-pool-republished'),
+    ).toBeNull();
+  });
+
+  it('falls back to "Pool re-published" when only updatedAt is present without sizes', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            poolPublicationUpdatedAt: '2026-05-22T01:00:00.000Z',
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    const notice = screen.getByTestId('launcher-launched-generator-pool-republished');
+    expect(notice).toBeTruthy();
+    expect(notice.textContent).toMatch(/Pool re-published/);
+    expect(notice.textContent).not.toMatch(/grew/);
+  });
+});
+
 describe('buildPatch', () => {
   const prior = {
     cadenceMs: '21600000',
