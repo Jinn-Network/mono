@@ -37,7 +37,7 @@ vi.mock('../api/client.js', () => ({
 }));
 
 // Import after the mock so the page picks up the mocked client.
-const { OverviewPage } = await import('./Overview.js');
+const { OverviewPage, selectVisibleEvictedService } = await import('./Overview.js');
 
 beforeEach(() => {
   getStatusMock.mockReset();
@@ -436,5 +436,55 @@ describe('OverviewPage Node Health wiring', () => {
     fireEvent.click(await screen.findByTestId('node-health-restart'));
     await waitFor(() => expect(restartDaemonMock).toHaveBeenCalledOnce());
     expect(restartDaemonMock).toHaveBeenCalledWith({ forceRespawn: true });
+  });
+});
+
+describe('selectVisibleEvictedService (#651)', () => {
+  const evictedAt = '2026-05-26T10:00:00.000Z';
+  const evictedAtMs = new Date(evictedAt).getTime();
+
+  it('hides banner within 2x window when auto-restake on', () => {
+    const out = selectVisibleEvictedService(
+      [{ index: 1, step: 'complete', evicted: true, evictedSince: evictedAt }],
+      { enabled: true, checkIntervalMs: 60_000 },
+      evictedAtMs + 60_000,
+    );
+    expect(out).toBeUndefined();
+  });
+
+  it('shows banner past 2x window when auto-restake on', () => {
+    const out = selectVisibleEvictedService(
+      [{ index: 1, step: 'complete', evicted: true, evictedSince: evictedAt }],
+      { enabled: true, checkIntervalMs: 60_000 },
+      evictedAtMs + 121_000,
+    );
+    expect(out).toBeDefined();
+  });
+
+  it('shows banner immediately when auto-restake off', () => {
+    const out = selectVisibleEvictedService(
+      [{ index: 1, step: 'complete', evicted: true, evictedSince: evictedAt }],
+      { enabled: false, checkIntervalMs: 0 },
+      evictedAtMs + 1_000,
+    );
+    expect(out).toBeDefined();
+  });
+
+  it('shows banner when evictedSince is missing (safer to surface)', () => {
+    const out = selectVisibleEvictedService(
+      [{ index: 1, step: 'complete', evicted: true }],
+      { enabled: true, checkIntervalMs: 60_000 },
+      evictedAtMs + 1_000,
+    );
+    expect(out).toBeDefined();
+  });
+
+  it('shows banner when evictedSince is malformed', () => {
+    const out = selectVisibleEvictedService(
+      [{ index: 1, step: 'complete', evicted: true, evictedSince: 'not-an-iso-string' }],
+      { enabled: true, checkIntervalMs: 60_000 },
+      evictedAtMs + 1_000,
+    );
+    expect(out).toBeDefined();
   });
 });

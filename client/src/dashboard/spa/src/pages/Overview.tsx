@@ -66,7 +66,14 @@ interface OverviewStatusV1 {
       agentId?: number | null;
       safeBoundToAgent?: boolean;
       evicted?: boolean;
+      /** ISO 8601 first-observed-evicted; null when not evicted (#651). */
+      evictedSince?: string | null;
     }>;
+  };
+  /** EvictionLoop gating exposed by /v1/status (#651). */
+  autoRestake?: {
+    enabled: boolean;
+    checkIntervalMs: number;
   };
   /**
    * Real Sepolia tJINN ERC-20 Safe balance (#406, daemon half PR #447).
@@ -189,6 +196,33 @@ function truncTx(hash?: string): string | null {
 }
 
 /**
+ * Banner-gating predicate (#651). Returns the first evicted service that
+ * should be surfaced — i.e. one whose suppression window has elapsed (or
+ * whose loop is disabled, or whose `evictedSince` is missing/malformed —
+ * bad data falls through to show). Lifted out of OverviewPage so it can
+ * be unit-tested without rendering the full page.
+ *
+ * Must mirror the predicate in `notifications/derive.ts`'s `service_evicted`
+ * branch so the inline banner and the notification rail never disagree.
+ */
+export function selectVisibleEvictedService(
+  services: NonNullable<OverviewStatusV1['fleet']>['services'],
+  autoRestake: OverviewStatusV1['autoRestake'],
+  nowMs: number,
+): NonNullable<NonNullable<OverviewStatusV1['fleet']>['services']>[number] | undefined {
+  if (!services) return undefined;
+  return services
+    .filter((s) => s.evicted === true)
+    .find((s) => {
+      if (autoRestake?.enabled !== true) return true; // immediate emit when loop disabled
+      if (typeof s.evictedSince !== 'string') return true; // missing timestamp → emit (safer)
+      const seenAt = Date.parse(s.evictedSince);
+      if (Number.isNaN(seenAt)) return true;
+      return nowMs - seenAt > 2 * (autoRestake.checkIntervalMs ?? 0); // past window → emit
+    });
+}
+
+/**
  * Inline blocking banner that surfaces when a service has been evicted from
  * staking. Lives in the main column above everything else so the operator
  * sees the Re-stake action without scrolling. The `service_evicted`
@@ -291,11 +325,18 @@ export function OverviewPage(): JSX.Element {
     return Array.from(collect(bootstrap?.joinedSolverNets)).sort();
   }, [bootstrap]);
 
-  // Eviction state — derived from the first evicted service in the fleet.
-  // Surfaces as an inline blocking banner above the main column rather than
-  // a hidden stat-tile child. The `service_evicted` notification handles the
-  // operator-came-from-elsewhere case.
-  const firstEvictedService = (status?.fleet?.services ?? []).find((s) => s.evicted === true);
+  // Eviction state — surfaces as an inline blocking banner above the main
+  // column. Gated by the same suppression-window predicate as the
+  // notifications deriver (#651) so the two surfaces never disagree: when
+  // auto-restake is enabled and the eviction is within 2 × checkIntervalMs of
+  // first observation, the banner stays hidden so the EvictionLoop can settle
+  // a restake before alarming the operator. Disabled loop, missing timestamp,
+  // or aged-past services all fall through to show.
+  const firstEvictedService = selectVisibleEvictedService(
+    status?.fleet?.services,
+    status?.autoRestake,
+    Date.now(),
+  );
   const isEvicted = firstEvictedService != null;
   const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
