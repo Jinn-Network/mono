@@ -58,7 +58,7 @@ Seven shapes plus one emergency sub-flow plus one meta-shape (`INTERACTIVE DESIG
 
 If an Issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a GitHub Issue under the engineering handbook umbrella when friction surfaces).
 
-### Eight ratified AI workflow rules
+### Ten ratified AI workflow rules
 
 1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`), not the primary checkout.
 2. **Issues frame problems, not solutions.** GitHub Issue body = context + impact + acceptance criteria. Solutions go in design sessions or implementation plans, not the Issue body.
@@ -69,6 +69,7 @@ If an Issue does not fit one of these shapes, it is mis-scoped — split or resh
 7. **TDD for new features, regression test for fixes.**
 8. **Auto-canary on push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy.
+10. **PRs target `next`, not `main`.** The only exception is `fix(incident)` hotfixes (target `main` directly, mandatory back-merge per `docs/runbooks/hotfix.md`). Branch protection on `main` enforces this (issue #589).
 
 ### Cadence
 

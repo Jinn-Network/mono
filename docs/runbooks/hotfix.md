@@ -4,6 +4,8 @@ A hotfix targets `main` directly when a critical bug in `@latest` cannot wait fo
 
 ## When this applies
 
+This is the only sanctioned exception to the handbook §Cadence "PRs target `next`" rule; all non-hotfix PRs target `next`. See [`docs/engineering/handbook.md`](../engineering/handbook.md) §Cadence (PR base policy) and §AI workflow rules (rule 10).
+
 - Critical operator-facing bug in the current `@latest` build (e.g. broken bootstrap, broken claim flow, security disclosure).
 - Captain has decided the regression cannot wait for Monday.
 - The `fix(incident)` shape from `docs/engineering/handbook.md` §The shapes of work applies.
