@@ -248,6 +248,54 @@ describe('useNotifications', () => {
   // docs/superpowers/specs/2026-05-26-issue-442-claim-failed-notification-design.md
   // §"Key trade-offs" → wall-clock window.
 
+  // Regression for the SSE reconnect-replay path. `useEventStream`
+  // accumulates events into a React state array; on reconnect the server
+  // replays the last 50 events from its ring buffer (events-endpoint.ts
+  // §/v1/events backfill) with their *original* ids. Without dedup, a single
+  // burst would inflate the visible failure count on every reconnect — which
+  // contradicts the issue's motivation (the dogfood operator who watched 26
+  // failures should still see "26", not "52").
+  it('deduplicates claim_failed events by id so reconnect-replay does not inflate the count', async () => {
+    const nowIso = new Date().toISOString();
+    eventsMock.useEventStream.mockReturnValue({
+      events: [
+        {
+          schemaVersion: 1,
+          id: 'evt-dup-1',
+          ts: nowIso,
+          kind: 'intent',
+          message: 'Task claim failed',
+          requestId: 'task-dup',
+          errorCode: 'claim_failed',
+        },
+        // Same id replayed by the server on reconnect — must not double-count.
+        {
+          schemaVersion: 1,
+          id: 'evt-dup-1',
+          ts: nowIso,
+          kind: 'intent',
+          message: 'Task claim failed',
+          requestId: 'task-dup',
+          errorCode: 'claim_failed',
+        },
+      ] satisfies StructuredEvent[],
+      connected: true,
+    });
+
+    const { result } = renderHook(() => useNotifications(), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() =>
+      expect(result.current.map(n => n.kind)).toContain('claim_failed'),
+    );
+    const claimFailed = result.current.filter(n => n.kind === 'claim_failed');
+    expect(claimFailed).toHaveLength(1);
+    // Critical assertion: n is 1, not 2.
+    expect(claimFailed[0].message).toMatch(/^1 claim attempt /);
+    expect(claimFailed[0].message).not.toMatch(/^2 claim attempts /);
+  });
+
   it('ignores intent events whose errorCode is not claim_failed', async () => {
     eventsMock.useEventStream.mockReturnValue({
       events: [

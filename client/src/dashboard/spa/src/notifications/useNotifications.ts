@@ -147,11 +147,25 @@ export function useNotifications(): OperatorNotification[] {
 
   const claimFailedNotice = useMemo<OperatorNotification | null>(() => {
     const cutoffMs = nowMs - CLAIM_FAILED_WINDOW_MS;
+    // Dedup by event `id`. `useEventStream` accumulates SSE messages into a
+    // React state array; on reconnect (network hiccup, daemon restart, tab
+    // resume) the server replays the last 50 events from its ring buffer
+    // (events-endpoint.ts §/v1/events backfill) with their original ids. The
+    // server ignores Last-Event-ID and the client does not deduplicate at the
+    // EventSource layer, so the same event can appear N times here after N
+    // reconnects. Without this set, the `n` in the notification message would
+    // inflate on every reconnect — exactly the failure mode issue #442's
+    // dogfood operator already encountered (26 failures must not read "52"
+    // after one reconnect).
+    const seen = new Set<string>();
     const recentFailures = events.filter((e) => {
       if (e.kind !== 'intent' || e.errorCode !== 'claim_failed') return false;
       const eventMs = Date.parse(e.ts);
       if (Number.isNaN(eventMs)) return false;
-      return eventMs >= cutoffMs;
+      if (eventMs < cutoffMs) return false;
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
     });
     if (recentFailures.length === 0) return null;
     const n = recentFailures.length;
