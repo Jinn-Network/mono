@@ -1,7 +1,7 @@
 {
   "name": "swe-rebench-v2-runtime",
   "version": "0.1.0",
-  "description": "Runtime plugin for the swe-rebench-v2.v1 SolverNet - provides orientation and planning skills for code-issue resolution tasks.",
+  "description": "Runtime plugin for the swe-rebench-v2.v1 SolverNet — provides domain reference for task shape, repo handling, FAIL_TO_PASS / PASS_TO_PASS semantics, and the solution payload schema.",
   "author": {
     "name": "Jinn Network",
     "url": "https://github.com/Jinn-Network/mono"
@@ -18,8 +18,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "SWE-rebench v2 Runtime",
-    "shortDescription": "SWE-rebench v2 orient and plan skills",
-    "longDescription": "Provides Solver-side orientation and planning skills for SWE-rebench v2 code-issue tasks.",
+    "shortDescription": "SWE-rebench v2 task domain reference",
+    "longDescription": "Provides Solver-side domain reference for SWE-rebench v2 code-issue tasks — task input shape, repo handling, FAIL_TO_PASS / PASS_TO_PASS semantics, and the swe-rebench-v2-solution.v1 payload schema.",
     "developerName": "Jinn Network",
     "category": "Coding",
     "capabilities": [
