@@ -10,86 +10,14 @@
  *   - No-op ensureStage1 when fleet_stage already 'stage1' or 'stage1_and_2'
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { describe, it, expect, vi } from 'vitest';
 import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
-
-/**
- * Test fixture state shared across helpers. The arrays are file-scope so the
- * `afterEach` cleanup can reset them; the helpers are exported so the
- * sibling solver-plugins test files (feedback / block / read) can reuse the
- * same temp-dir lifecycle and CLI context shape per the plan's "Test helper"
- * section.
- */
-export const tempDirs: string[] = [];
-
-export function withTempPlugin(name = 'test-plugin', version = '0.1.0'): string {
-  const dir = mkdtempSync(join(tmpdir(), 'jinn-plugin-'));
-  tempDirs.push(dir);
-  const root = join(dir, name);
-  mkdirSync(root, { recursive: true });
-  writeFileSync(
-    join(root, 'jinn.plugin.json'),
-    JSON.stringify({
-      name,
-      version,
-      jinn: { supports: ['swe-rebench-v2.v1'] },
-    }, null, 2),
-  );
-  return root;
-}
-
-export function withTempConfig(extra: Record<string, unknown> = {}): string {
-  const dir = mkdtempSync(join(tmpdir(), 'jinn-publish-config-'));
-  tempDirs.push(dir);
-  const configPath = join(dir, 'config.json');
-  writeFileSync(configPath, JSON.stringify({
-    rpcUrl: 'http://127.0.0.1:8545',
-    network: 'testnet',
-    earningDir: dir,
-    ipfsRegistryUrl: 'https://registry.autonolas.tech',
-    ...extra,
-  }), 'utf-8');
-  return configPath;
-}
-
-export function makeCtx(
-  argv: string[],
-  envOverride?: NodeJS.ProcessEnv,
-): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: false,
-    writer: { write: (s) => { writes.push(s); return true; } },
-    exit: (code) => { exits.push(code); },
-    env: envOverride ?? { JINN_PASSWORD: 'test' },
-  };
-  return { ctx, writes, exits };
-}
-
-export function parsedLine(writes: string[]): Record<string, unknown> {
-  const joined = writes.join('');
-  const line = joined.trim().split('\n').filter((s) => s.startsWith('{')).pop();
-  return JSON.parse(line!);
-}
-
-export function cleanupTempDirs(): void {
-  for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-}
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  cleanupTempDirs();
-});
+import {
+  withTempPlugin,
+  withTempConfig,
+  makeCtx,
+  parsedLine,
+} from './solver-plugins-test-helpers.js';
 
 describe('jinn solver-plugins publish', () => {
   it('runs the full pipeline and emits a tx hash envelope', async () => {

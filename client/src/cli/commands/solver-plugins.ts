@@ -37,6 +37,7 @@ import { FleetStateStore } from '../../earning/store.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
+import { endorseHandler } from './solver-plugins-feedback.js';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
 import { createDiscoveryAPI } from '../../discovery/factory.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
@@ -386,11 +387,55 @@ export function createSolverPluginsCommand(
           resolvedDeps,
         );
       }
+      if (subverb === 'endorse') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            score: { type: 'string' },
+            'score-decimals': { type: 'string' },
+            tag1: { type: 'string' },
+            tag2: { type: 'string' },
+            config: { type: 'string' },
+          },
+        });
+        const pluginCid = parsed.positionals[0];
+        if (!pluginCid) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins endorse requires <pluginCid>' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        const scoreRaw = parsed.values.score as string | undefined;
+        const score = scoreRaw === undefined ? 100 : Number.parseInt(scoreRaw, 10);
+        if (!Number.isFinite(score)) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins endorse --score must be an integer' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        const scoreDecimalsRaw = parsed.values['score-decimals'] as string | undefined;
+        const scoreDecimals = scoreDecimalsRaw === undefined ? 2 : Number.parseInt(scoreDecimalsRaw, 10);
+        return endorseHandler(
+          ctx,
+          {
+            pluginCid,
+            score,
+            scoreDecimals,
+            tag1: (parsed.values.tag1 as string | undefined) ?? 'endorsement',
+            tag2: parsed.values.tag2 as string | undefined,
+            configPath: parsed.values.config as string | undefined,
+          },
+          resolvedDeps,
+        );
+      }
       writeJson(ctx, {
         error: {
           code: 'invalid_invocation',
           message: `Unknown solver-plugins subverb: ${subverb}`,
-          expected: 'show|validate|pack|publish|revoke',
+          expected: 'show|validate|pack|publish|revoke|endorse|warn|block|review|respond|list-feedback|discover|status',
         },
       });
       ctx.exit(1);

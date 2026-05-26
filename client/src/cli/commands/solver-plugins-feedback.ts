@@ -1,0 +1,251 @@
+/**
+ * `jinn solver-plugins {endorse, warn, review, respond}` — write verbs that
+ * route ERC-8004 `ReputationRegistry` feedback writes against the agentId of
+ * the builder who published the plug-in. The builder's agentId is resolved
+ * from `DiscoveryAPI.listPluginPublications`; the on-chain body anchors the
+ * feedback to a specific plug-in via `manifestRef = "plugin:<cid>"` and
+ * `manifestHash = keccak256(manifestRef)`.
+ *
+ * The pipeline mirrors `publishHandler`'s shape:
+ *   1. resolveCliPassword (env > keystore-password file > prompt-fd)
+ *   2. loadConfig
+ *   3. discoveryApiFactory(config).listPluginPublications → builderAgentId
+ *   4. bootstrapper.ensureStage1(password) — lazy Stage 1 ensure
+ *   5. reputationClientFactory(...).giveFeedback(...) / .respondToFeedback(...)
+ *
+ * Outputs a single-line JSON envelope: `{ verb, txHash, pluginCid,
+ * targetAgentId, ... }`. Error codes match the publish surface convention:
+ * `keystore_missing`, `config_load_failed`, `ensure_stage1_failed`,
+ * `fleet_identity_missing`, `agentid_unresolvable`, `self_feedback_not_allowed`,
+ * `discovery_unavailable`, `publish_failed`.
+ */
+
+import { getAddress, keccak256, toBytes, type Address, type Hex } from 'viem';
+import type { CommandContext } from '../command.js';
+import { writeJson } from './solver-plugins.js';
+import type { SolverPluginsDeps } from './solver-plugins.js';
+import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
+import { DiscoveryUnavailableError } from '../../discovery/types.js';
+
+// ── Shared option shapes ────────────────────────────────────────────────────
+
+export interface EndorseOptions {
+  pluginCid: string;
+  score: number;
+  scoreDecimals: number;
+  tag1?: string;
+  tag2?: string;
+  configPath: string | undefined;
+}
+
+export interface WarnOptions {
+  pluginCid: string;
+  reason: string;
+  configPath: string | undefined;
+}
+
+export interface ReviewOptions {
+  pluginCid: string;
+  score: number;
+  scoreDecimals: number;
+  tag1?: string;
+  tag2?: string;
+  configPath: string | undefined;
+}
+
+export interface RespondOptions {
+  pluginCid: string;
+  feedbackIndex: bigint;
+  client: Address;
+  responseUri: string;
+  configPath: string | undefined;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+interface FeedbackPipelineCtx {
+  password: string;
+  config: ReturnType<SolverPluginsDeps['loadConfig']>;
+  builderAgentId: bigint;
+  safeAddress: Address;
+  reputationRegistryAddress: Address;
+  manifestRef: string;
+  manifestHash: Hex;
+}
+
+/**
+ * Shared prologue for every write verb: password → config → discovery row →
+ * Stage 1 ensure. Returns the materialised ids needed for the on-chain
+ * write, or null after writing an error envelope and calling ctx.exit.
+ */
+async function preparePipeline(
+  ctx: CommandContext,
+  pluginCid: string,
+  configPath: string | undefined,
+  deps: SolverPluginsDeps,
+): Promise<FeedbackPipelineCtx | null> {
+  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env);
+  if (!passwordResult.ok) {
+    writeJson(ctx, {
+      error: {
+        code: 'keystore_missing',
+        message:
+          'Could not resolve password. Set JINN_PASSWORD, write ~/.jinn-client/keystore-password, or pass --password-fd.',
+      },
+    });
+    ctx.exit(1);
+    return null;
+  }
+  const password = passwordResult.password;
+
+  let config: ReturnType<typeof deps.loadConfig>;
+  try {
+    config = deps.loadConfig(configPath);
+  } catch (err) {
+    writeJson(ctx, {
+      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
+    });
+    ctx.exit(1);
+    return null;
+  }
+
+  // Resolve builderAgentId via discovery first — cheaper to fail here than
+  // after Stage 1.
+  let builderAgentIdStr: string | undefined;
+  try {
+    const api = deps.discoveryApiFactory(config);
+    const rows = await api.listPluginPublications({});
+    const row = rows.find((r) => r.cid === pluginCid);
+    builderAgentIdStr = row?.builderAgentId;
+  } catch (err) {
+    if (err instanceof DiscoveryUnavailableError) {
+      writeJson(ctx, {
+        error: {
+          code: 'discovery_unavailable',
+          message: `Indexer unavailable (mode=${config.discovery?.mode ?? 'onchain'}${config.discovery?.url ? `, url=${config.discovery.url}` : ''}): ${err.message}`,
+        },
+      });
+      ctx.exit(1);
+      return null;
+    }
+    throw err;
+  }
+  if (!builderAgentIdStr) {
+    writeJson(ctx, {
+      error: {
+        code: 'agentid_unresolvable',
+        message: `No plug-in publication record found for cid ${pluginCid} (discovery mode=${config.discovery?.mode ?? 'onchain'}).`,
+        details: { mode: config.discovery?.mode ?? 'onchain' },
+      },
+    });
+    ctx.exit(1);
+    return null;
+  }
+
+  const bootstrapper = deps.bootstrapperFactory(config);
+  const stage1 = await bootstrapper.ensureStage1(password);
+  if (!stage1.ok) {
+    writeJson(ctx, { error: { code: 'ensure_stage1_failed', message: stage1.message } });
+    ctx.exit(1);
+    return null;
+  }
+  const fleet = stage1.fleet_state;
+  if (!fleet.fleet_agent_id || !fleet.fleet_safe_address || !fleet.fleet_identity_registry) {
+    writeJson(ctx, {
+      error: {
+        code: 'fleet_identity_missing',
+        message: 'Stage 1 completed but fleet identity is empty.',
+      },
+    });
+    ctx.exit(1);
+    return null;
+  }
+
+  const chainId = config.network === 'testnet' ? 84532 : 8453;
+  const reputationRegistryAddress = getReputationRegistryAddress(chainId);
+  if (!reputationRegistryAddress) {
+    writeJson(ctx, {
+      error: {
+        code: 'config_load_failed',
+        message: `No ReputationRegistry address known for chainId ${chainId}.`,
+      },
+    });
+    ctx.exit(1);
+    return null;
+  }
+
+  const safeAddress = getAddress(fleet.fleet_safe_address) as Address;
+  const manifestRef = `plugin:${pluginCid}`;
+  const manifestHash = keccak256(toBytes(manifestRef));
+
+  return {
+    password,
+    config,
+    builderAgentId: BigInt(builderAgentIdStr),
+    safeAddress,
+    reputationRegistryAddress,
+    manifestRef,
+    manifestHash,
+  };
+}
+
+function emitWriteError(ctx: CommandContext, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes('Self-feedback not allowed')) {
+    writeJson(ctx, {
+      error: {
+        code: 'self_feedback_not_allowed',
+        message:
+          'Reputation registry rejected feedback: caller is the agent owner. Use a different operator agent NFT, or skip endorsement for plug-ins you publish yourself.',
+      },
+    });
+    ctx.exit(1);
+    return;
+  }
+  writeJson(ctx, {
+    error: { code: 'publish_failed', message: msg },
+  });
+  ctx.exit(1);
+}
+
+// ── Verbs ────────────────────────────────────────────────────────────────────
+
+export async function endorseHandler(
+  ctx: CommandContext,
+  opts: EndorseOptions,
+  deps: SolverPluginsDeps,
+): Promise<void> {
+  const prep = await preparePipeline(ctx, opts.pluginCid, opts.configPath, deps);
+  if (!prep) return;
+  const client = deps.reputationClientFactory({
+    reputationRegistryAddress: prep.reputationRegistryAddress,
+    safeAddress: prep.safeAddress,
+    rpcUrl: prep.config.rpcUrl,
+    network: prep.config.network === 'testnet' ? 'base-sepolia' : 'base',
+    earningDir: prep.config.earningDir,
+    password: prep.password,
+  });
+  try {
+    const txHash = await client.giveFeedback({
+      harnessAgentId: prep.builderAgentId,
+      score: opts.score,
+      scoreDecimals: opts.scoreDecimals,
+      manifestRef: prep.manifestRef,
+      manifestHash: prep.manifestHash,
+      ...(opts.tag1 ? { tag1: opts.tag1 } : {}),
+      ...(opts.tag2 ? { tag2: opts.tag2 } : {}),
+    });
+    writeJson(ctx, {
+      verb: 'solver-plugins endorse',
+      txHash,
+      pluginCid: opts.pluginCid,
+      targetAgentId: prep.builderAgentId.toString(),
+      score: opts.score,
+      scoreDecimals: opts.scoreDecimals,
+      reputationRegistry: prep.reputationRegistryAddress,
+      safeAddress: prep.safeAddress,
+    });
+  } catch (err) {
+    emitWriteError(ctx, err);
+  }
+}
