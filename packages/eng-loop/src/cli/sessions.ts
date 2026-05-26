@@ -478,3 +478,93 @@ export async function killSession(
   deps.sendSignal(rec.pid, 'SIGTERM');
   deps.stderr.write(`killed pid ${rec.pid}\n`);
 }
+
+// ---------------------------------------------------------------------------
+// runSessionsCli — top-level argv parsing + routing
+// ---------------------------------------------------------------------------
+
+interface ParsedArgs {
+  mode: 'list' | 'tail' | 'kill';
+  json: boolean;
+  force: boolean;
+  issueNumber: number | null;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  let mode: ParsedArgs['mode'] = 'list';
+  let json = false;
+  let force = false;
+  let issueNumber: number | null = null;
+
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i]!;
+    if (tok === '--json') {
+      json = true;
+      continue;
+    }
+    if (tok === '--yes' || tok === '--force') {
+      force = true;
+      continue;
+    }
+    if (tok === '--tail') {
+      const next = argv[i + 1];
+      if (next == null || !/^\d+$/.test(next)) {
+        throw new Error('--tail requires an issue number');
+      }
+      mode = 'tail';
+      issueNumber = parseInt(next, 10);
+      i++;
+      continue;
+    }
+    if (tok === '--kill') {
+      const next = argv[i + 1];
+      if (next == null || !/^\d+$/.test(next)) {
+        throw new Error('--kill requires an issue number');
+      }
+      mode = 'kill';
+      issueNumber = parseInt(next, 10);
+      i++;
+      continue;
+    }
+    throw new Error(`unknown flag: ${tok}`);
+  }
+
+  return { mode, json, force, issueNumber };
+}
+
+/**
+ * Top-level `yarn eng:loop sessions` CLI shell. Parses `argv` (the slice
+ * after the subcommand name), routes to one of `tailSession` / `killSession`
+ * / default listing, and writes output via the injected `deps.stdout` /
+ * `deps.stderr`.
+ *
+ * Production callers omit `depsOverride` and get `defaultDeps()`. Tests
+ * inject a synthetic `SessionsDeps` to avoid touching the real filesystem
+ * or process table.
+ */
+export async function runSessionsCli(argv: string[], depsOverride?: SessionsDeps): Promise<void> {
+  const args = parseArgs(argv);
+  const deps = depsOverride ?? defaultDeps();
+
+  if (args.mode === 'tail') {
+    await tailSession(args.issueNumber!, { tailLines: 50 }, deps);
+    return;
+  }
+  if (args.mode === 'kill') {
+    await killSession(args.issueNumber!, { force: args.force }, deps);
+    return;
+  }
+
+  const records = await discoverSessions(deps);
+  deps.stdout.write(args.json ? renderJson(records) : renderTable(records));
+  deps.stdout.write('\n');
+}
+
+// ---------------------------------------------------------------------------
+// defaultDeps — production wiring (real fs / ps / lsof / claude)
+// Stub for Task 23; Task 24 replaces with real wiring.
+// ---------------------------------------------------------------------------
+
+export function defaultDeps(): SessionsDeps {
+  throw new Error('defaultDeps not yet wired — implement in Task 24');
+}

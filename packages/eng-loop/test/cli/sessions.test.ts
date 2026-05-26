@@ -12,6 +12,7 @@ import {
   prLinkRecord,
   renderJson,
   renderTable,
+  runSessionsCli,
   tailSession,
   truncate,
 } from '../../src/cli/sessions.js';
@@ -593,5 +594,132 @@ describe('killSession', () => {
   it('throws when the session is not alive', async () => {
     const deps = doneDeps();
     await expect(killSession(500, { force: true }, deps)).rejects.toThrow(/session for issue #500 is not alive/);
+  });
+});
+
+describe('runSessionsCli', () => {
+  const ALIVE_TS = Date.parse('2026-05-26T11:30:00.000Z');
+
+  function captureWritables(): {
+    stdout: Writable; stderr: Writable;
+    outChunks: string[]; errChunks: string[];
+  } {
+    const outChunks: string[] = [];
+    const errChunks: string[] = [];
+    const stdout = new Writable({
+      write(chunk, _enc, cb) {
+        outChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        cb();
+      },
+    });
+    const stderr = new Writable({
+      write(chunk, _enc, cb) {
+        errChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        cb();
+      },
+    });
+    return { stdout, stderr, outChunks, errChunks };
+  }
+
+  function aliveCliDeps(overrides: Partial<SessionsDeps> = {}): SessionsDeps {
+    return buildDeps({
+      listProjectDirs: async () => ['-wt-500'],
+      listJsonlFiles: async () => [{ name: 'sess.jsonl', mtimeMs: ALIVE_TS }],
+      readJsonl: async () => [
+        JSON.stringify({ type: 'assistant', timestamp: new Date(ALIVE_TS).toISOString(), message: { content: [{ type: 'text', text: 'hello' }] } }),
+        '',
+      ].join('\n'),
+      listClaudeProcesses: async () => [{ pid: 4242 }],
+      resolveProcessCwd: async () => '/wt/500',
+      ...overrides,
+    });
+  }
+
+  it('writes a human table to stdout with no flags', async () => {
+    const w = captureWritables();
+    const deps = aliveCliDeps({ stdout: w.stdout, stderr: w.stderr });
+    await runSessionsCli([], deps);
+    expect(w.outChunks.join('')).toContain('ISSUE');
+  });
+
+  it('writes JSON to stdout with --json', async () => {
+    const w = captureWritables();
+    const deps = aliveCliDeps({ stdout: w.stdout, stderr: w.stderr });
+    await runSessionsCli(['--json'], deps);
+    const parsed = JSON.parse(w.outChunks.join('').trim()) as SessionRecord[];
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.issueNumber).toBe(500);
+  });
+
+  it('routes --tail <N> to tailSession (spawnTail invoked)', async () => {
+    const w = captureWritables();
+    let spawnTailCalled = false;
+    const deps = aliveCliDeps({
+      stdout: w.stdout,
+      stderr: w.stderr,
+      spawnTail: () => {
+        spawnTailCalled = true;
+        return { stdout: Readable.from([]), kill: () => {} };
+      },
+    });
+    await runSessionsCli(['--tail', '500'], deps);
+    expect(spawnTailCalled).toBe(true);
+  });
+
+  it('routes --kill <N> to killSession with force=false (confirm invoked)', async () => {
+    const w = captureWritables();
+    let confirmCalled = false;
+    const deps = aliveCliDeps({
+      stdout: w.stdout,
+      stderr: w.stderr,
+      confirm: async () => { confirmCalled = true; return true; },
+      sendSignal: () => {},
+    });
+    await runSessionsCli(['--kill', '500'], deps);
+    expect(confirmCalled).toBe(true);
+  });
+
+  it('routes --kill <N> --yes to killSession with force=true (confirm skipped)', async () => {
+    const w = captureWritables();
+    let confirmCalled = false;
+    const deps = aliveCliDeps({
+      stdout: w.stdout,
+      stderr: w.stderr,
+      confirm: async () => { confirmCalled = true; return true; },
+      sendSignal: () => {},
+    });
+    await runSessionsCli(['--kill', '500', '--yes'], deps);
+    expect(confirmCalled).toBe(false);
+  });
+
+  it('routes --kill <N> --force the same as --yes', async () => {
+    const w = captureWritables();
+    let confirmCalled = false;
+    const deps = aliveCliDeps({
+      stdout: w.stdout,
+      stderr: w.stderr,
+      confirm: async () => { confirmCalled = true; return true; },
+      sendSignal: () => {},
+    });
+    await runSessionsCli(['--kill', '500', '--force'], deps);
+    expect(confirmCalled).toBe(false);
+  });
+
+  it('throws on unknown flag', async () => {
+    const w = captureWritables();
+    const deps = aliveCliDeps({ stdout: w.stdout, stderr: w.stderr });
+    await expect(runSessionsCli(['--bogus'], deps)).rejects.toThrow(/unknown flag/);
+  });
+
+  it('throws when --tail is not followed by a number', async () => {
+    const w = captureWritables();
+    const deps = aliveCliDeps({ stdout: w.stdout, stderr: w.stderr });
+    await expect(runSessionsCli(['--tail'], deps)).rejects.toThrow(/--tail requires an issue number/);
+  });
+
+  it('throws when --kill is not followed by a number', async () => {
+    const w = captureWritables();
+    const deps = aliveCliDeps({ stdout: w.stdout, stderr: w.stderr });
+    await expect(runSessionsCli(['--kill'], deps)).rejects.toThrow(/--kill requires an issue number/);
   });
 });
