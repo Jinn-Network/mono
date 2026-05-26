@@ -177,23 +177,32 @@ For each PR `P` that survives the prior Step 1 drops:
      listed in a CODEOWNERS rule that covers a file they touched).
 5. **Build `currentApprovers`.**
    ```
-   currentApprovers = { r.author.login
+   currentApprovers = { r
                         | r ∈ P.latestReviews,
                           r.state == "APPROVED",
                           r.commit.oid == P.headRefOid,
                           r.author.login != P.author.login }
    ```
-   The `commit.oid == headRefOid` clause is the stale-approval filter; a new
-   commit pushed after the approval invalidates the approval.
+   `currentApprovers` is the set of qualifying review **entries** (each one
+   carries `author.login` and `authorAssociation` alongside the other review
+   fields). Set-membership tests against owner-sets compare against
+   `r.author.login`; the no-coverage rule (Step 7) also inspects
+   `r.authorAssociation`. The `commit.oid == headRefOid` clause is the
+   stale-approval filter; a new commit pushed after the approval invalidates
+   the approval. The `r.author.login != P.author.login` clause is the
+   author-exclusion filter — an author can never satisfy their own review
+   requirement (see Edge cases below).
 6. **Coverage-case decision.** If `requiredOwnerSets` is non-empty: keep `P`
-   iff for every `S ∈ requiredOwnerSets`, `S ∩ currentApprovers ≠ ∅`.
-   Otherwise drop with `skipped: awaiting code-owner review`.
+   iff for every `S ∈ requiredOwnerSets`,
+   `S ∩ { r.author.login | r ∈ currentApprovers } ≠ ∅`. Otherwise drop with
+   `skipped: awaiting code-owner review`.
 7. **No-coverage-case decision.** If `requiredOwnerSets` is empty (every
    touched file was unmatched by CODEOWNERS): keep `P` iff there exists
-   `r ∈ P.latestReviews` with `r.state == "APPROVED"`,
-   `r.commit.oid == P.headRefOid`, `r.author.login != P.author.login`, **and**
-   `r.authorAssociation ∈ {"OWNER", "MEMBER"}`. Otherwise drop with
-   `skipped: awaiting maintainer review`.
+   `r ∈ currentApprovers` with `r.authorAssociation ∈ {"OWNER", "MEMBER"}`.
+   Otherwise drop with `skipped: awaiting maintainer review`. Note that
+   `currentApprovers` (computed at Step 5) has already filtered for
+   `state == "APPROVED"`, fresh `commit.oid`, and non-author — Step 7 composes
+   on top of those filters rather than re-deriving them.
 
 ### Edge cases
 

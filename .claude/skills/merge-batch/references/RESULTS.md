@@ -175,8 +175,14 @@ Code-owner review gate added to Step 1 of `SKILL.md` (the operational pseudocode
 lives in `references/merge-mechanics.md` Step 1.5). The synthetic batch covers
 the four AC3-named scenarios — external-author with green CI and only a
 non-member approval, properly code-owner-approved, no-coverage path with a real
-MEMBER/OWNER approval, and stale-approval invalidation — plus a re-statement
-that operator blanket-authorization to approve does not bypass the gate (AC2).
+MEMBER/OWNER approval, and stale-approval invalidation — plus a coverage-case
+drop (CODEOWNERS-covered path lacking a qualifying owner's approval) and a
+re-statement that operator blanket-authorization to approve does not bypass the
+gate (AC2). The two distinct skip-reasons surfaced by the gate
+(`awaiting maintainer review` for the no-coverage case,
+`awaiting code-owner review` for the coverage case) are both exercised by at
+least one worked example so AC1's human-visible output is covered on both
+sides.
 
 ### CODEOWNERS — relevant lines
 
@@ -205,7 +211,7 @@ Step 1.5 the gate normalizes CODEOWNERS owner tokens by stripping the leading
 
 ### Synthetic batch
 
-Four PRs against `next`, all CI-green, none `Blocked on: Human`. Each PR's
+Five PRs against `next`, all CI-green, none `Blocked on: Human`. Each PR's
 `headRefOid` is the SHA the gate compares against `latestReviews[*].commit.oid`.
 
 | PR | Title | Author (login / authorAssociation) | Files touched | latestReviews summary | headRefOid |
@@ -214,6 +220,7 @@ Four PRs against `next`, all CI-green, none `Blocked on: Human`. Each PR's
 | #902 | `docs: update PRINCIPLES` | `someone-else` / MEMBER | `/PRINCIPLES.md` | one entry: `oaksprout` / OWNER / APPROVED / commit.oid = `bbb2222` (matches head) | `bbb2222` |
 | #903 | `fix(daemon): correct foo race` | `external-contributor` / NONE | `client/src/daemon/foo.ts` | one entry: `oaksprout` / OWNER / APPROVED / commit.oid = `ccc3333` (matches head) | `ccc3333` |
 | #904 | `feat(client): add Y helper` | `someone` / CONTRIBUTOR | `client/src/bar.ts` | one entry: `ritsukai` / MEMBER / APPROVED / commit.oid = `ddd4444-OLD` (does **not** match head `ddd4444`) | `ddd4444` |
+| #905 | `docs: update PRINCIPLES` | `dvilelaf` / NONE | `/PRINCIPLES.md` | one entry: `ritsukai-bot` / CONTRIBUTOR / APPROVED / commit.oid = `eee5555` (matches head) | `eee5555` |
 
 Operator note recorded at the start of this batch: *"Approve any PR you would
 have approved yourself — blanket authorization for this batch."* This is the
@@ -226,10 +233,18 @@ Drop rules applied (in order):
 
 - CI red / pending: none dropped (all CI-green per scenario).
 - `Blocked on: Human`: none dropped (no PR carries that field value).
-- Code-owner review gate: drops #901 (`awaiting maintainer review`) and #904
-  (`awaiting maintainer review`).
+- Code-owner review gate: drops #901 (`awaiting maintainer review`), #904
+  (`awaiting maintainer review`), and #905 (`awaiting code-owner review`).
 
 **Candidate set:** #902, #903 (two PRs survive the gate).
+
+| PR | Disposition | Reason (drop only) |
+|----|-------------|--------------------|
+| #901 | dropped | `skipped: awaiting maintainer review` (no-coverage case, non-member approver) |
+| #902 | kept | — |
+| #903 | kept | — |
+| #904 | dropped | `skipped: awaiting maintainer review` (no-coverage case, stale approval) |
+| #905 | dropped | `skipped: awaiting code-owner review` (coverage case, owner-set intersection empty) |
 
 ### Reasoning trace — per-PR
 
@@ -278,6 +293,18 @@ filtering → decision case (coverage / no-coverage) → keep / drop verdict.
 - Required: at least one current approving review with `authorAssociation ∈ {OWNER, MEMBER}`. There is no current approving review at all.
 - **Verdict: drop with `skipped: awaiting maintainer review`.**
 
+**PR #905 — coverage-case drop (CODEOWNERS-covered path, non-owner approval)**
+
+- File touched: `/PRINCIPLES.md`. Last-match-wins lookup hits the `/PRINCIPLES.md @oaksprout @ritsukai` line → owner-set `{oaksprout, ritsukai}` (after `@`-stripping normalization).
+- `requiredOwnerSets` = `{ {oaksprout, ritsukai} }`. `requiredOwnersUnion` = `{oaksprout, ritsukai}`.
+- Author exclusion: PR author is `dvilelaf`, not in `{oaksprout, ritsukai}` — set unchanged.
+- `currentApprovers` after stale filter: one entry — `ritsukai-bot` / CONTRIBUTOR / APPROVED / `commit.oid = eee5555` matches `headRefOid`, not the author. The review qualifies for `currentApprovers`. The set of approver logins is `{ritsukai-bot}`.
+- Decision case: **coverage** (`requiredOwnerSets` is non-empty).
+- Required: every distinct owner-set in `requiredOwnerSets` intersects the set of approver logins from `currentApprovers`. The single set `{oaksprout, ritsukai}` ∩ `{ritsukai-bot}` = `∅` — the bot's login (`ritsukai-bot`) is **not** in the owner-set (`ritsukai` is a separate login). Intersection is empty.
+- **Verdict: drop with `skipped: awaiting code-owner review`.**
+
+Note that #905's reviewer carries `authorAssociation == CONTRIBUTOR`, but that field is **not** consulted in the coverage case — the coverage rule uses the literal owner-set from CODEOWNERS, not the OWNER/MEMBER whitelist used by the no-coverage rule. The drop here is purely because the approving login is not one of the named code-owners for `/PRINCIPLES.md`.
+
 ### Verdict per check
 
 **Check 1 — external-author PR with green CI and only a non-member approval is excluded.** PASS. #901's review came from `ritsukai-bot` whose `authorAssociation == CONTRIBUTOR`. The no-coverage rule requires `OWNER` or `MEMBER`, so the approval did not satisfy the gate. The PR was dropped with `skipped: awaiting maintainer review`. This is the literal incident shape from PR #423 (external author, green CI, non-code-owner approval) and the gate now correctly excludes it.
@@ -288,7 +315,9 @@ filtering → decision case (coverage / no-coverage) → keep / drop verdict.
 
 **Check 4 — stale approval (head-SHA mismatch) is invalidated.** PASS. #904's only approval was from `ritsukai` (MEMBER) but the review's `commit.oid` did not match `headRefOid` — i.e. a new commit was pushed after the approval. The stale-approval filter dropped the review from `currentApprovers`, leaving the set empty. The no-coverage rule's requirement of at least one current OWNER/MEMBER approval was not met, and the PR was dropped with `skipped: awaiting maintainer review`. This is the negative control required by the design note (`design.md` §Key trade-offs — stale-approval invalidation by `commit.oid`).
 
-**Check 5 — explicit refusal clause holds even under operator blanket authorization.** PASS by construction. The operator's batch-opening note ("Approve any PR you would have approved yourself — blanket authorization for this batch") is recorded but never consulted: the Code-owner review gate runs *before* operator authorization is checked. #901 and #904 were dropped at the gate; the skill did not submit a review of its own to satisfy the gate retroactively, and would have refused to do so even if instructed. AC2 is satisfied at the algorithm level — the gate's "drop iff not satisfied" decision is independent of any operator authorization variable, because the authorization variable is not an input to the algorithm.
+**Check 5 — PR touching a CODEOWNERS-covered path without a qualifying owner approval is dropped with `skipped: awaiting code-owner review`.** PASS. #905 touches `/PRINCIPLES.md` whose CODEOWNERS rule names `@oaksprout @ritsukai`. The single approving review came from `ritsukai-bot` (CONTRIBUTOR) — its `commit.oid` matched head and it passed the staleness and author-exclusion filters, so it entered `currentApprovers`. But `{oaksprout, ritsukai} ∩ {ritsukai-bot} = ∅` — the bot's login is not one of the named code-owners (despite the visual proximity to `ritsukai`). The coverage-case rule dropped the PR with the distinct `awaiting code-owner review` reason — different from #901/#904's `awaiting maintainer review` reason. This worked example exercises the second drop-reason that AC1's human-visible output names; together with Check 1 and Check 4 it confirms both reasons surface correctly.
+
+**Check 6 — explicit refusal clause holds even under operator blanket authorization.** PASS by construction. The operator's batch-opening note ("Approve any PR you would have approved yourself — blanket authorization for this batch") is recorded but never consulted: the Code-owner review gate runs *before* operator authorization is checked. #901, #904, and #905 were dropped at the gate; the skill did not submit a review of its own to satisfy the gate retroactively, and would have refused to do so even if instructed. AC2 is satisfied at the algorithm level — the gate's "drop iff not satisfied" decision is independent of any operator authorization variable, because the authorization variable is not an input to the algorithm.
 
 ### Weaknesses found
 
@@ -326,14 +355,19 @@ the gate for paths that *do* have coverage.
 ### Assessment
 
 The Code-owner review gate produces deterministic output on the synthetic batch
-and all four AC3-named scenarios behave as required. The external-author
+and all five worked-example scenarios behave as required. The external-author
 green-CI case (Check 1, the #423 incident shape) is now caught at Step 1 and
 never enters the merge sequence; properly code-owner-approved PRs (Check 2) and
 no-coverage PRs with a maintainer approval (Check 3) are retained without
 incident; stale approvals (Check 4) are invalidated by head-SHA mismatch, which
-matches the design's stated stale-approval discipline; and operator blanket
-authorization (Check 5) does not bypass the gate, by construction. The
-acceptance criteria from Issue #608 — AC1 (drop with a clear note), AC2
+matches the design's stated stale-approval discipline; the coverage-case drop
+reason (Check 5, the second of AC1's two distinct skip reasons) fires when a
+CODEOWNERS-covered path receives only a non-owner approval; and operator
+blanket authorization (Check 6) does not bypass the gate, by construction.
+Both drop reasons are now exercised by at least one worked example —
+`awaiting maintainer review` by #901 and #904, `awaiting code-owner review`
+by #905 — so AC1's human-visible output surface is covered on both sides.
+The acceptance criteria from Issue #608 — AC1 (drop with a clear note), AC2
 (refusal under blanket authorization), AC3 (worked-example regression
 artifact) — are all satisfied by the gate as documented in `SKILL.md` Step 1
 and `merge-mechanics.md` Step 1.5.
