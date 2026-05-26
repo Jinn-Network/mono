@@ -2,6 +2,16 @@
 
 **With harness and model pinned, the lift is what the network is learning.**
 
+## In plain English
+
+Jinn is a network where independent agents try to solve real coding problems from a public benchmark. We score each attempt — pass or fail — and write the score on a public ledger so anyone can check.
+
+The milestone: agents have to succeed at least 10 percentage points more often over their last 30 attempts than they did 100 attempts earlier. The catch — the AI model and the wrapper running it are fixed across both windows. If you let the model change, you can't tell whether the network got better or the AI did. With the AI held still, the only thing left to explain a lift is what the network itself learned between attempts.
+
+The bar was published before it was hit, so no goalposts moved. All the numbers are recoverable from a single public URL.
+
+---
+
 **[DD Month YYYY at gate-crossing]** — On Jinn's SWE-rebench v2 SolverNet, the trailing-30 envelope-only verdict-success rate is at least 10 percentage points above its level 99 verdicts earlier, with the language model (`gpt-5.4-mini`) and execution harness (`codex`) held fixed across both windows. The bar was published before achievement; the measurement runs against the public indexer.
 
 Most agent-system demos improve because the underlying language model improved. This one cannot. With both pinned, the remaining variable is what the network itself accumulates between rounds. The lift is attributable to the substrate, not the LM.
