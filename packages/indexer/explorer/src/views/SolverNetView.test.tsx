@@ -3,13 +3,73 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router, Switch, Route } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { SolverNetView } from './SolverNetView';
-import type { SolverNetResponse } from '../lib/api';
+import { useSlice, useSolverNet } from '../lib/api';
 
-// ── Fixture ───────────────────────────────────────────────────────────────────
+// ── Fixtures (dual-hook: SliceResponse + SolverNetResponse) ──────────────────
 
 const CID = 'bafkreiabc000000000000000000000001';
 
-const FIXTURE: SolverNetResponse = {
+const SLICE_DATA = {
+  params: {
+    manifestDigest: CID,
+    group: 'none' as const,
+    filter: {},
+    includeUnenriched: false,
+    bucket: 'auto' as const,
+  },
+  enrichmentCoverage: 1,
+  kpis: {
+    attempts: 900,
+    verdicts: 800,
+    verdictsPass: 760,
+    resolvedRate: 0.95,
+    jinnEarned: '0',
+  },
+  series: [
+    {
+      groupValue: null,
+      buckets: [
+        { bucketStartBlock: '1000000', total: 20, pass: 15, rate: 0.75 },
+        { bucketStartBlock: '1007200', total: 25, pass: 22, rate: 0.88 },
+      ],
+      rolling: [0.7, 0.75, 0.8, 0.85, 0.9, 0.95],
+      kpis: {
+        attempts: 900,
+        verdicts: 800,
+        verdictsPass: 760,
+        resolvedRate: 0.95,
+        jinnEarned: '0',
+      },
+    },
+  ],
+  leaderboard: {
+    train: [
+      {
+        operator: '0xaaaa000000000000000a',
+        attempts: 200,
+        verdictsTotal: 180,
+        verdictsPass: 171,
+        resolvedRate: 0.95,
+        jinnEarned: '1000000000000000000',
+      },
+    ],
+    frozen: [
+      {
+        operator: '0xffff000000000000ffff',
+        attempts: 10,
+        verdictsTotal: 8,
+        verdictsPass: 7,
+        resolvedRate: 0.875,
+        jinnEarned: '0',
+      },
+    ],
+  },
+  lastIndexedBlock: '14500000',
+  lastIndexedAt: new Date(Date.now() - 30_000).toISOString(),
+  behindHead: null,
+};
+
+const SOLVERNET_META = {
   cid: CID,
   name: 'SWE-rebench v2',
   description: 'Test fixture description.',
@@ -23,40 +83,10 @@ const FIXTURE: SolverNetResponse = {
   verdicts: 800,
   verdictsPass: 760,
   resolvedRate: 0.95,
-  learningCurveBuckets: [
-    { bucketStartBlock: '1000000', total: 20, pass: 15, rate: 0.75 },
-    { bucketStartBlock: '1007200', total: 25, pass: 22, rate: 0.88 },
-  ],
-  learningCurveRolling: [0.7, 0.75, 0.8, 0.85, 0.9, 0.95],
-  trainBoard: {
-    ranked: [
-      {
-        rank: 1,
-        operator: '0xaaaa000000000000000a',
-        attempts: 200,
-        settledContribution: 180,
-        verdictsTotal: 180,
-        verdictsPass: 171,
-        resolvedRate: 0.95,
-        jinnEarned: '1000000000000000000',
-      },
-    ],
-    lowVolume: [
-      {
-        operator: '0xbbbb000000000000000b',
-        attempts: 5,
-        settledContribution: 4,
-        verdictsTotal: 4,
-        verdictsPass: 3,
-        resolvedRate: 0.75,
-        jinnEarned: '10000000000000000',
-      },
-    ],
-  },
-  frozenBoard: {
-    ranked: [],
-    lowVolume: [],
-  },
+  learningCurveBuckets: [],
+  learningCurveRolling: [],
+  trainBoard: { ranked: [], lowVolume: [] },
+  frozenBoard: { ranked: [], lowVolume: [] },
   checkpointTimeline: {
     checkpoints: [
       {
@@ -87,6 +117,21 @@ const FIXTURE: SolverNetResponse = {
   behindHead: null,
 };
 
+vi.mock('../lib/api', () => ({
+  useSlice: vi.fn(() => ({
+    isLoading: false,
+    isError: false,
+    error: null,
+    data: SLICE_DATA,
+  })),
+  useSolverNet: vi.fn(() => ({
+    isLoading: false,
+    isError: false,
+    error: null,
+    data: SOLVERNET_META,
+  })),
+}));
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeWrapper(path = `/solvernet/${encodeURIComponent(CID)}`) {
@@ -111,32 +156,22 @@ function makeWrapper(path = `/solvernet/${encodeURIComponent(CID)}`) {
   return { WrappedView, qc };
 }
 
-function mockFetch(fixture: SolverNetResponse) {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(JSON.stringify(fixture), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-}
-
-function mockFetchError() {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(JSON.stringify({ error: 'unknown solvernet' }), {
-      status: 404,
-    }),
-  );
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('SolverNetView', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('renders loading skeleton initially', () => {
-    vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => {}));
+    vi.mocked(useSlice).mockReturnValueOnce({
+      isLoading: true,
+      isError: false,
+      error: null,
+      data: undefined,
+    } as any);
+    vi.mocked(useSolverNet).mockReturnValueOnce({
+      isLoading: true,
+      isError: false,
+      error: null,
+      data: undefined,
+    } as any);
     const { WrappedView } = makeWrapper();
     const { container } = render(<WrappedView />);
     // Skeleton blocks are rendered
@@ -147,7 +182,18 @@ describe('SolverNetView', () => {
   });
 
   it('renders unknown-cid error state and back link', async () => {
-    mockFetchError();
+    vi.mocked(useSlice).mockReturnValueOnce({
+      isLoading: false,
+      isError: true,
+      error: new Error('unknown'),
+      data: undefined,
+    } as any);
+    vi.mocked(useSolverNet).mockReturnValueOnce({
+      isLoading: false,
+      isError: true,
+      error: new Error('unknown'),
+      data: undefined,
+    } as any);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -159,7 +205,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders the gold headline resolved-rate', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -173,7 +218,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders "VERDICT-SUCCESS RATE" label', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -182,7 +226,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders the status chip', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -191,7 +234,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders supporting KPI values', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -203,7 +245,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders the learning curve card', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -212,7 +253,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders the LearningCurve component (plot container or empty state)', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -224,7 +264,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders checkpoint timeline card', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -234,7 +273,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders freeze integrity card', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -246,7 +284,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders the leaderboards card with board toggle', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -257,53 +294,24 @@ describe('SolverNetView', () => {
     expect(screen.getByText('Frozen')).toBeInTheDocument();
   });
 
-  it('renders train board ranked rows via the Leaderboard component', async () => {
-    mockFetch(FIXTURE);
+  it('renders train board rows via the Leaderboard component', async () => {
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
-      // The ranked operator is 0xaaaa000... → shortAddr → "0xaaaa…000a"
+      // The train operator is 0xaaaa000... → shortAddr → "0xaaaa…000a"
       expect(screen.getByText('0xaaaa…000a')).toBeInTheDocument();
     });
   });
 
-  it('renders low-volume section separator via the Leaderboard component', async () => {
-    mockFetch(FIXTURE);
-    const { WrappedView } = makeWrapper();
-    render(<WrappedView />);
-    await waitFor(() => {
-      // Leaderboard renders the low-volume label
-      expect(screen.getByText('New / Low-volume')).toBeInTheDocument();
-    });
-  });
-
   it('renders frozenBoard data when board=frozen is in the URL', async () => {
-    // Give the frozen board a row so we can assert it renders when board=frozen is pre-set
-    const fixtureWithFrozen = {
-      ...FIXTURE,
-      frozenBoard: {
-        ranked: [
-          {
-            rank: 1,
-            operator: '0xffff000000000000ffff',
-            attempts: 10,
-            settledContribution: 8,
-            verdictsTotal: 8,
-            verdictsPass: 7,
-            resolvedRate: 0.875,
-            jinnEarned: '0',
-          },
-        ],
-        lowVolume: [],
-      },
-    };
-    mockFetch(fixtureWithFrozen);
     // Load the page with board=frozen pre-set in the URL
-    const { WrappedView } = makeWrapper(`/solvernet/${encodeURIComponent(CID)}?board=frozen`);
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?board=frozen`,
+    );
     render(<WrappedView />);
 
     await waitFor(() => {
-      // The frozen operator should now be visible
+      // The frozen operator should now be visible (from SLICE_DATA.leaderboard.frozen)
       expect(screen.getByText('0xffff…ffff')).toBeInTheDocument();
     });
     // The train operator should NOT be visible
@@ -311,8 +319,18 @@ describe('SolverNetView', () => {
   });
 
   it('renders null resolvedRate as "—"', async () => {
-    const fixture = { ...FIXTURE, resolvedRate: null };
-    mockFetch(fixture);
+    vi.mocked(useSolverNet).mockReturnValueOnce({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: { ...SOLVERNET_META, resolvedRate: null },
+    } as any);
+    vi.mocked(useSlice).mockReturnValueOnce({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: { ...SLICE_DATA, kpis: { ...SLICE_DATA.kpis, resolvedRate: null } },
+    } as any);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
@@ -322,7 +340,6 @@ describe('SolverNetView', () => {
   });
 
   it('renders the breadcrumb link back to /solvernets', async () => {
-    mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {

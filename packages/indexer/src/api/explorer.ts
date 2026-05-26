@@ -37,6 +37,11 @@ import {
 } from './metrics.js';
 import { withFreshness, type FreshnessMeta } from './freshness.js';
 import { getChainHead } from './chain-head.js';
+import {
+  parseSliceParams,
+  computeSlice,
+  type SliceResponseLeaderboardRow,
+} from './slice.js';
 
 // ── Chain scope ───────────────────────────────────────────────────────────────
 
@@ -1362,6 +1367,202 @@ app.get('/operator/:addr', async (c) => {
     ...freshnessFields,
   });
 });
+
+// ── GET /explorer/slice ──────────────────────────────────────────────────────
+
+app.use('/slice', explorerFreshness());
+
+/**
+ * GET /explorer/slice — parameterized engine per spec §6 / #611.
+ *
+ * Operates within ONE SolverNet (manifestDigest is required). Returns a curve
+ * + leaderboard + KPIs for the slice defined by (group, filter,
+ * includeUnenriched, bucket).
+ *
+ * Strangler-fig: existing /explorer/solvernet/:cid stays live for back-compat;
+ * SolverNetView migrates to consume this endpoint with default params.
+ */
+app.get('/slice', async (c) => {
+  let params;
+  try {
+    params = parseSliceParams(new URL(c.req.url).searchParams);
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+
+  // Resolve manifestDigest (the IPFS CID) → cidKeccak (the keccak we index by).
+  const manifests = await db
+    .select({ cidKeccak: schema.solverNetManifest.cidKeccak })
+    .from(schema.solverNetManifest)
+    .where(
+      and(
+        eq(schema.solverNetManifest.id, params.manifestDigest),
+        eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
+  if (manifests.length === 0) {
+    return c.json({ error: 'unknown solvernet' }, 404);
+  }
+  const cidKeccak = manifests[0].cidKeccak;
+
+  // Get the task ids belonging to this SolverNet.
+  const taskIds = await db
+    .select({ id: schema.task.id })
+    .from(schema.task)
+    .where(
+      and(
+        eq(schema.task.manifestDigest, cidKeccak),
+        eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
+  const ids = taskIds.map((t) => t.id);
+
+  const meta = c.get('indexedHead');
+  const chainHead = c.get('chainHead');
+
+  if (ids.length === 0) {
+    const empty = computeSlice([], params, { rawVerdictCount: 0 });
+    return c.json({
+      ...empty,
+      ...freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined),
+    });
+  }
+
+  // Raw count (pre-filter) — for enrichmentCoverage.
+  const rawVerdictRows = await db
+    .select({ total: count() })
+    .from(schema.verdict)
+    .where(
+      and(
+        inArray(schema.verdict.taskId, ids),
+        eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
+  const rawVerdictCount = Number(rawVerdictRows[0]?.total ?? 0);
+
+  // Filtered join — what the engine consumes.
+  const joinedRows = await db
+    .select({
+      requestId: schema.verdict.requestId,
+      operator: schema.attempt.operator,
+      createdAtBlock: schema.verdict.createdAtBlock,
+      verdictCode: schema.verdict.verdictCode,
+      actualPassed: schema.verdictEnvelopeMeta.actualPassed,
+      enrichmentStatus: schema.verdictEnvelopeMeta.enrichmentStatus,
+      mode: schema.attemptEnvelopeMeta.mode,
+      harness: schema.attemptEnvelopeMeta.implName,
+      model: schema.attemptEnvelopeMeta.model,
+      pluginsJson: schema.attemptEnvelopeMeta.pluginsJson,
+    })
+    .from(schema.verdict)
+    .leftJoin(schema.verdictEnvelopeMeta, verdictEnvelopeJoinCondition())
+    // Canonical verdict ⇒ attempt join: (taskId, attemptIndex, chainId).
+    // The previous shape joined on requestId — but verdict.requestId is the
+    // evaluation mech request, attempt.requestId is the restoration mech
+    // request, so the two never matched and `operator` came back null for
+    // every row (collapsing group=operator to a single 0x000…0 series). See
+    // the canonical pattern in `getVerdictsForAttempts` below.
+    .leftJoin(
+      schema.attempt,
+      and(
+        eq(schema.attempt.taskId, schema.verdict.taskId),
+        eq(schema.attempt.attemptIndex, schema.verdict.attemptIndex),
+        eq(schema.attempt.chainId, schema.verdict.chainId),
+      ),
+    )
+    .leftJoin(
+      schema.attemptEnvelopeMeta,
+      and(
+        eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
+        eq(schema.attemptEnvelopeMeta.chainId, schema.attempt.chainId),
+      ),
+    )
+    .where(
+      and(
+        inArray(schema.verdict.taskId, ids),
+        eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+        enrichmentFilter(params.includeUnenriched),
+      ),
+    );
+
+  // Decode pluginsJson into a string[] of "name@version".
+  const sliceRows = joinedRows.map((r) => ({
+    requestId: r.requestId,
+    operator: r.operator ?? '0x0000000000000000000000000000000000000000',
+    createdAtBlock: r.createdAtBlock,
+    verdictCode: r.verdictCode,
+    actualPassed: r.actualPassed,
+    enrichmentStatus: r.enrichmentStatus,
+    mode: r.mode,
+    harness: r.harness,
+    model: r.model,
+    plugins: parsePluginsJson(r.pluginsJson),
+  }));
+
+  const out = computeSlice(sliceRows, params, { rawVerdictCount });
+
+  // Overlay leaderboards (re-use existing buildLeaderboardRows; ignores group/filter
+  // for now — Phase 3 / follow-up can wire filter[operator] into the leaderboard).
+  const trainRows = await buildLeaderboardRows({ manifestDigest: cidKeccak, mode: 'train' });
+  const frozenRows = await buildLeaderboardRows({ manifestDigest: cidKeccak, mode: 'frozen' });
+  out.leaderboard = {
+    train: trainRows.map(toSliceLeaderboardRow),
+    frozen: frozenRows.map(toSliceLeaderboardRow),
+  };
+
+  return c.json({
+    ...out,
+    ...freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined),
+  });
+});
+
+/**
+ * Adapter: maps a metrics-side {@link LeaderboardRow} (typed for the explorer's
+ * existing /operators + /solvernet/:cid leaderboards) into the slice response's
+ * {@link SliceResponseLeaderboardRow} shape.
+ *
+ * Differences the adapter resolves:
+ *   - `operator`: widens `` `0x${string}` `` to plain `string` (slice response is
+ *     consumer-facing and doesn't pin the hex-prefixed template-literal type).
+ *   - `jinnEarned`: converts the raw `bigint` from chain to a decimal string so
+ *     the JSON response remains serialisable.
+ *   - `settledContribution`: dropped (not part of the slice response shape).
+ *   - `dominantMode` / `dominantHarness`: passed through when present (optional
+ *     on both sides; `buildLeaderboardRows` does not currently emit these).
+ */
+function toSliceLeaderboardRow(
+  r: LeaderboardRow & { dominantMode?: string; dominantHarness?: string },
+): SliceResponseLeaderboardRow {
+  return {
+    operator: r.operator,
+    attempts: r.attempts,
+    verdictsTotal: r.verdictsTotal,
+    verdictsPass: r.verdictsPass,
+    resolvedRate: r.resolvedRate,
+    jinnEarned: r.jinnEarned.toString(),
+    dominantMode: r.dominantMode,
+    dominantHarness: r.dominantHarness,
+  };
+}
+
+/** Decode AttemptEnvelopeMeta.pluginsJson → ["name@version", ...]. */
+function parsePluginsJson(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as Array<{ name?: unknown; version?: unknown }>;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p) => {
+        const name = typeof p?.name === 'string' && p.name ? p.name : '';
+        if (!name) return '';
+        const version = typeof p?.version === 'string' && p.version ? p.version : '';
+        return version ? `${name}@${version}` : name;
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 // ── Internal query helpers ────────────────────────────────────────────────────
 

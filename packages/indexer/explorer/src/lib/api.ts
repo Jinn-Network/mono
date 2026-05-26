@@ -357,3 +357,17 @@ export function useOperator(addr: string) {
     enabled: Boolean(addr),
   });
 }
+
+// ── /explorer/slice (#611) ───────────────────────────────────────────────────
+
+export { useSlice } from './useSlice';
+export type {
+  SliceParams,
+  SliceResponse,
+  SliceSeries,
+  SliceSeriesKPIs,
+  SliceGroupBy,
+  SliceFilter,
+  SliceBucketSize,
+  SliceResponseLeaderboardRow,
+} from './slice-types';

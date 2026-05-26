@@ -7,7 +7,16 @@
  */
 
 import { Link, useParams } from 'wouter';
-import { useSolverNet } from '../lib/api';
+import {
+  useSlice,
+  useSolverNet,
+  type SliceParams,
+  type SliceResponseLeaderboardRow,
+} from '../lib/api';
+import type {
+  LeaderboardRankedRow,
+  LeaderboardLowVolumeRow,
+} from '../components/Leaderboard';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { Kpi, KpiRow } from '../components/Kpi';
@@ -80,6 +89,31 @@ function SegmentedControl<T extends string>({
   );
 }
 
+// ── Slice leaderboard → Leaderboard component row adapter ────────────────────
+
+// Phase 2 ships an unpartitioned list (no ranked/lowVolume split). We render
+// every row as "ranked" and synthesize the rank from position; `lowVolume` is
+// always empty. Phase 3 can reintroduce partitioning via a Leaderboard prop.
+// settledContribution isn't carried on SliceResponse; we surface attempts as a
+// best-effort proxy (the column is informational, no truth claim).
+function toRankedRow(
+  r: SliceResponseLeaderboardRow,
+  idx: number,
+): LeaderboardRankedRow {
+  return {
+    rank: idx + 1,
+    operator: r.operator,
+    attempts: r.attempts,
+    settledContribution: r.attempts,
+    verdictsTotal: r.verdictsTotal,
+    verdictsPass: r.verdictsPass,
+    resolvedRate: r.resolvedRate,
+    jinnEarned: r.jinnEarned,
+    dominantMode: r.dominantMode,
+    dominantHarness: r.dominantHarness,
+  };
+}
+
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
 function SkeletonBlock({
@@ -133,23 +167,44 @@ export function SolverNetView() {
   const cid = decodeURIComponent(params?.cid ?? '');
 
   const [k, setK] = useNumParam('k', 50);
-  const [bucket, setBucket] = useNumParam('bucket', 7200);
+  const [bucket] = useNumParam('bucket', 7200);
   const [curveMode, setCurveMode] = useEnumParam('curveMode', 'rolling', [
     'rolling',
     'buckets',
   ]);
   const [board, setBoard] = useEnumParam('board', 'train', ['train', 'frozen']);
 
-  const { data, isLoading, isError } = useSolverNet(cid, {
+  // Phase 2 strangler-fig: useSlice serves curve + leaderboard + KPIs.
+  // useSolverNet still serves metadata (name, status, launcherAgentId,
+  // checkpointTimeline, freezeIntegrity, manifestEnrichmentStatus). A later
+  // sprint can move those to engine endpoints too.
+  const sliceParams: SliceParams = {
+    manifestDigest: cid,
+    group: 'none',
+    filter: {},
+    includeUnenriched: false,
+    bucket: 'auto',
+  };
+  const {
+    data: slice,
+    isLoading: sliceLoading,
+    isError: sliceError,
+  } = useSlice(sliceParams);
+  const {
+    data: meta,
+    isLoading: metaLoading,
+    isError: metaError,
+  } = useSolverNet(cid, {
     k: k === K_ALL ? undefined : k,
     bucket,
   });
 
-  // Animate the gold headline resolved-rate; respects prefers-reduced-motion.
-  const animatedRate = useCountUp(data?.resolvedRate ?? 0, 400);
+  const isLoading = sliceLoading || metaLoading;
+  const isError = sliceError || metaError;
 
-  // Unused setter reference to silence lint — bucket setter is available
-  void setBucket;
+  // Animate the gold headline resolved-rate; respects prefers-reduced-motion.
+  // Sourced from the slice KPIs (engine-backed) rather than legacy meta.
+  const animatedRate = useCountUp(slice?.kpis.resolvedRate ?? 0, 400);
 
   // ── Unknown SolverNet ────────────────────────────────────────────────────────
 
@@ -246,8 +301,8 @@ export function SolverNetView() {
         </div>
       )}
 
-      {/* Data */}
-      {data && (
+      {/* Data — gated on slice (engine source). meta is best-effort metadata. */}
+      {slice && (
         <>
           {/* ── Header: cid + status + launcher ── */}
           <div
@@ -272,11 +327,11 @@ export function SolverNetView() {
                   fontWeight: 400,
                 }}
               >
-                {data.name || shortCid(data.cid)}
+                {meta?.name || shortCid(cid)}
               </h1>
               {/* Subtitle: cid (when name is present) + optional description.
                   Both empty until IPFS manifest enrichment lands. */}
-              {data.name && (
+              {meta?.name && (
                 <div
                   style={{
                     fontFamily: 'var(--font-mono)',
@@ -286,10 +341,10 @@ export function SolverNetView() {
                     letterSpacing: '0.04em',
                   }}
                 >
-                  {shortCid(data.cid)}
+                  {shortCid(cid)}
                 </div>
               )}
-              {data.description && (
+              {meta?.description && (
                 <div
                   style={{
                     fontFamily: 'var(--font-mono)',
@@ -300,7 +355,7 @@ export function SolverNetView() {
                     lineHeight: 1.5,
                   }}
                 >
-                  {data.description}
+                  {meta.description}
                 </div>
               )}
               <div
@@ -311,11 +366,13 @@ export function SolverNetView() {
                   flexWrap: 'wrap',
                 }}
               >
-                <StatusChip
-                  kind={data.status as 'launched' | 'paused' | 'retired'}
-                  label={data.status}
-                />
-                {data.launcherAgentId && (
+                {meta?.status && (
+                  <StatusChip
+                    kind={meta.status as 'launched' | 'paused' | 'retired'}
+                    label={meta.status}
+                  />
+                )}
+                {meta?.launcherAgentId && (
                   <span
                     style={{
                       fontFamily: 'var(--font-mono)',
@@ -323,7 +380,7 @@ export function SolverNetView() {
                       color: 'var(--fg-dim)',
                     }}
                   >
-                    Launcher: {shortAddr(data.launcherAgentId)}
+                    Launcher: {shortAddr(meta.launcherAgentId)}
                   </span>
                 )}
               </div>
@@ -341,9 +398,9 @@ export function SolverNetView() {
                   fontVariantNumeric: 'tabular-nums',
                   fontFeatureSettings: '"tnum" 1',
                 }}
-                aria-label={`Resolved rate: ${pct(data.resolvedRate)}`}
+                aria-label={`Resolved rate: ${pct(slice.kpis.resolvedRate)}`}
               >
-                {data.resolvedRate === null ? '—' : pct(animatedRate)}
+                {slice.kpis.resolvedRate === null ? '—' : pct(animatedRate)}
               </div>
               <div
                 style={{
@@ -360,13 +417,15 @@ export function SolverNetView() {
             </div>
           </div>
 
-          {/* ── Supporting KPIs ── */}
+          {/* ── Supporting KPIs ──
+              tasksPosted / tasksSettled stay on the legacy meta endpoint;
+              attempts / verdicts / verdictsPass come from the slice KPIs. */}
           <KpiRow>
-            <Kpi label="Tasks posted" value={int(data.tasksPosted)} />
-            <Kpi label="Settled" value={int(data.tasksSettled)} />
-            <Kpi label="Attempts" value={int(data.attempts)} />
-            <Kpi label="Verdicts" value={int(data.verdicts)} />
-            <Kpi label="Verdicts passed" value={int(data.verdictsPass)} />
+            <Kpi label="Tasks posted" value={int(meta?.tasksPosted ?? 0)} />
+            <Kpi label="Settled" value={int(meta?.tasksSettled ?? 0)} />
+            <Kpi label="Attempts" value={int(slice.kpis.attempts)} />
+            <Kpi label="Verdicts" value={int(slice.kpis.verdicts)} />
+            <Kpi label="Verdicts passed" value={int(slice.kpis.verdictsPass)} />
           </KpiRow>
 
           {/* ── Learning curve ── */}
@@ -437,8 +496,8 @@ export function SolverNetView() {
             </div>
 
             <LearningCurve
-              buckets={data.learningCurveBuckets}
-              rolling={data.learningCurveRolling}
+              buckets={slice.series[0]?.buckets ?? []}
+              rolling={slice.series[0]?.rolling ?? []}
               mode={curveMode as 'rolling' | 'buckets'}
             />
 
@@ -457,15 +516,19 @@ export function SolverNetView() {
             </div>
           </Card>
 
-          {/* ── Checkpoint timeline ── */}
-          <Card title="Checkpoint timeline">
-            <CheckpointTimeline data={data.checkpointTimeline} />
-          </Card>
+          {/* ── Checkpoint timeline ── (legacy meta only) */}
+          {meta?.checkpointTimeline && (
+            <Card title="Checkpoint timeline">
+              <CheckpointTimeline data={meta.checkpointTimeline} />
+            </Card>
+          )}
 
-          {/* ── Freeze integrity ── */}
-          <Card title="Freeze integrity">
-            <FreezeIntegrity data={data.freezeIntegrity} />
-          </Card>
+          {/* ── Freeze integrity ── (legacy meta only) */}
+          {meta?.freezeIntegrity && (
+            <Card title="Freeze integrity">
+              <FreezeIntegrity data={meta.freezeIntegrity} />
+            </Card>
+          )}
 
           {/* ── Leaderboards ── */}
           <Card title="Leaderboards">
@@ -482,11 +545,14 @@ export function SolverNetView() {
             </div>
 
             {(() => {
-              const boardData = board === 'train' ? data.trainBoard : data.frozenBoard;
+              const rows =
+                board === 'train' ? slice.leaderboard.train : slice.leaderboard.frozen;
+              const ranked: LeaderboardRankedRow[] = rows.map(toRankedRow);
+              const lowVolume: LeaderboardLowVolumeRow[] = [];
               return (
                 <Leaderboard
-                  ranked={boardData.ranked}
-                  lowVolume={boardData.lowVolume}
+                  ranked={ranked}
+                  lowVolume={lowVolume}
                   // JINN attribution can't be split by mode — show "—" until ebu7.9
                   meta={{ jinnAttribution: 'pending' }}
                   compact
@@ -498,9 +564,9 @@ export function SolverNetView() {
       )}
 
       <StatusBar
-        lastIndexedBlock={data?.lastIndexedBlock}
-        lastIndexedAt={data?.lastIndexedAt}
-        degraded={isError}
+        lastIndexedBlock={meta?.lastIndexedBlock}
+        lastIndexedAt={meta?.lastIndexedAt}
+        degraded={Boolean(isError)}
       />
     </div>
   );
