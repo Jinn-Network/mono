@@ -14,6 +14,7 @@
  */
 
 import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
+import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { runCycle } from '../src/dispatcher/loop.js';
@@ -25,6 +26,9 @@ import type { DispatcherConfig, ReadyIssue } from '../src/dispatcher/types.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { argv } from 'node:process';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -180,6 +184,78 @@ function printReport(report: CycleReport, label: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// runDryRun — one-shot dry-run cycle (fix #598)
+//
+// Extracted from `main()` so the failure-path is unit-testable in-process
+// with injected `runner` and `exit` spies. Dry-run is one-shot, so any
+// rejection exits non-zero — operators rely on the exit code as the
+// sanity-check signal.
+// ---------------------------------------------------------------------------
+
+export interface RunDryRunOpts {
+  runner?: CommandRunner;
+  exit?: (code: number) => void;
+  cfg: DispatcherConfig;
+  wallClock: WallClock;
+}
+
+export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
+  const { cfg, wallClock, runner = realRunner, exit = process.exit } = opts;
+
+  try {
+    console.log('[eng:loop] DRY RUN — polling live issue queue; will NOT dispatch, mutate board, or create worktrees.');
+
+    const source = new GhIssueSource(runner);
+
+    // Dry-run: use a stub dispatchIssue that records but does nothing
+    const wouldDispatch: number[] = [];
+    const dryDispatch = async (issue: ReadyIssue): Promise<import('../src/dispatcher/types.js').InFlightSession> => {
+      wouldDispatch.push(issue.number);
+      // Return a fake InFlightSession — nothing is created
+      return {
+        issueNumber: issue.number,
+        branch: `(dry-run)`,
+        worktreePath: `(dry-run)`,
+        pid: null,
+        startedAt: Date.now(),
+      };
+    };
+
+    // Dry-run stub for pauseSession — logs the intent but makes NO gh mutation,
+    // honouring the banner promise "will NOT dispatch, mutate board, or create worktrees".
+    const dryPauseSession = async (issueNumber: number): Promise<void> => {
+      console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
+    };
+
+    // Fetch the per-cycle Project snapshot once and share with deriveInFlight
+    // (and, after step 5 of the #585 plan, source.poll). Costs ≤2 GraphQL pts
+    // versus ~192 in the pre-#585 code.
+    const snapshot = await fetchProjectSnapshot(runner);
+    const report = await runCycle(snapshot, {
+      source,
+      cfg,
+      deriveInFlight: () => deriveInFlight(snapshot, runner),
+      dispatchIssue: dryDispatch,
+      countOpenReadyPrs,
+      wallClock,
+      pauseSession: dryPauseSession,
+    });
+
+    printReport(report, 'Cycle report (DRY RUN — no mutations)');
+
+    if (wouldDispatch.length > 0) {
+      console.log(`\n[dry-run] Would have dispatched: ${wouldDispatch.map((n) => `#${n}`).join(', ')}`);
+    } else {
+      console.log('\n[dry-run] No issues would be dispatched this cycle.');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[eng:loop] dry-run aborted: ${msg} — run \`gh api rate_limit\` to check budget`);
+    exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -226,50 +302,7 @@ async function main(): Promise<void> {
   // TODO: wire GhPrSink.collect once session-completion detection exists
 
   if (isDryRun) {
-    console.log('[eng:loop] DRY RUN — polling live issue queue; will NOT dispatch, mutate board, or create worktrees.');
-
-    // Dry-run: use a stub dispatchIssue that records but does nothing
-    const wouldDispatch: number[] = [];
-    const dryDispatch = async (issue: ReadyIssue): Promise<import('../src/dispatcher/types.js').InFlightSession> => {
-      wouldDispatch.push(issue.number);
-      // Return a fake InFlightSession — nothing is created
-      return {
-        issueNumber: issue.number,
-        branch: `(dry-run)`,
-        worktreePath: `(dry-run)`,
-        pid: null,
-        startedAt: Date.now(),
-      };
-    };
-
-    // Dry-run stub for pauseSession — logs the intent but makes NO gh mutation,
-    // honouring the banner promise "will NOT dispatch, mutate board, or create worktrees".
-    const dryPauseSession = async (issueNumber: number): Promise<void> => {
-      console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
-    };
-
-    // Fetch the per-cycle Project snapshot once and share with deriveInFlight
-    // (and, after step 5 of the #585 plan, source.poll). Costs ≤2 GraphQL pts
-    // versus ~192 in the pre-#585 code.
-    const snapshot = await fetchProjectSnapshot(realRunner);
-    const report = await runCycle(snapshot, {
-      source,
-      cfg,
-      deriveInFlight: () => deriveInFlight(snapshot, realRunner),
-      dispatchIssue: dryDispatch,
-      countOpenReadyPrs,
-      wallClock,
-      pauseSession: dryPauseSession,
-    });
-
-    printReport(report, 'Cycle report (DRY RUN — no mutations)');
-
-    if (wouldDispatch.length > 0) {
-      console.log(`\n[dry-run] Would have dispatched: ${wouldDispatch.map((n) => `#${n}`).join(', ')}`);
-    } else {
-      console.log('\n[dry-run] No issues would be dispatched this cycle.');
-    }
-
+    await runDryRun({ cfg, wallClock });
     return;
   }
 
@@ -357,7 +390,13 @@ async function main(): Promise<void> {
   scheduleNext(firstDelay);
 }
 
-main().catch((err) => {
-  console.error('[eng:loop] Fatal error:', err);
-  process.exit(1);
-});
+// Gate `main()` to direct invocation only — importing this module (e.g. from
+// the regression test) must not start the dispatcher loop. Resolve `argv[1]`
+// so a relative invocation (e.g. `tsx ./scripts/run-eng-loop.ts`) matches the
+// absolute path returned by `fileURLToPath`.
+if (argv[1] != null && resolve(argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('[eng:loop] Fatal error:', err);
+    process.exit(1);
+  });
+}
