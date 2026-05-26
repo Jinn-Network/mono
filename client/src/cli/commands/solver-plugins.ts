@@ -39,6 +39,7 @@ import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
 import { blockHandler } from './solver-plugins-block.js';
+import { listFeedbackHandler } from './solver-plugins-read.js';
 import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
 import { createDiscoveryAPI } from '../../discovery/factory.js';
@@ -385,6 +386,48 @@ export function createSolverPluginsCommand(
             builderAgentIdOverride: parsed.values['builder-agent-id']
               ? BigInt(parsed.values['builder-agent-id'] as string)
               : undefined,
+          },
+          resolvedDeps,
+        );
+      }
+      if (subverb === 'list-feedback') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            client: { type: 'string' },
+            'include-revoked': { type: 'boolean', default: false },
+            config: { type: 'string' },
+          },
+        });
+        const pluginCid = parsed.positionals[0];
+        if (!pluginCid) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins list-feedback requires <pluginCid>' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        const clientRaw = parsed.values.client as string | undefined;
+        let clientAddress: Address | undefined;
+        if (clientRaw) {
+          try {
+            clientAddress = getAddress(clientRaw);
+          } catch {
+            writeJson(ctx, {
+              error: { code: 'invalid_invocation', message: 'solver-plugins list-feedback --client must be a valid 0x address' },
+            });
+            ctx.exit(1);
+            return;
+          }
+        }
+        return listFeedbackHandler(
+          ctx,
+          {
+            pluginCid,
+            client: clientAddress,
+            includeRevoked: Boolean(parsed.values['include-revoked']),
+            configPath: parsed.values.config as string | undefined,
           },
           resolvedDeps,
         );
