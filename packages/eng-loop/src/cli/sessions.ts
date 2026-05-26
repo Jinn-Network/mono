@@ -279,14 +279,33 @@ export function renderJson(records: SessionRecord[]): string {
 }
 
 /**
- * Human-readable table for `yarn eng:loop sessions` (default mode). Columns:
- * `ISSUE`, `STATUS`, `PID`, `LAST ACTIVITY`, `SUMMARY`. The worktree and
- * transcript paths are intentionally omitted — they live in `--json` for
- * scripting, but the human-eyed table optimises for "what's running and what
- * did it last say". Summary column is clamped to fit terminal width.
+ * Compress an absolute `path` by replacing a leading `home` prefix with `~`.
+ * If `path` does not start with `home`, returns `path` unchanged. Used to
+ * keep worktree paths short in the human table; `--json` is the structured
+ * source and emits the full path.
  */
-export function renderTable(records: SessionRecord[]): string {
-  const headers = ['ISSUE', 'STATUS', 'PID', 'LAST ACTIVITY', 'SUMMARY'];
+export function tildeCompress(path: string, home: string): string {
+  if (home.length === 0) return path;
+  if (path === home) return '~';
+  const withSlash = home.endsWith('/') ? home : home + '/';
+  if (path.startsWith(withSlash)) {
+    return '~/' + path.slice(withSlash.length);
+  }
+  return path;
+}
+
+/**
+ * Human-readable table for `yarn eng:loop sessions` (default mode). Columns:
+ * `ISSUE`, `STATUS`, `PID`, `WORKTREE`, `LAST ACTIVITY`, `SUMMARY`,
+ * `TRANSCRIPT`. WORKTREE shows the path with `os.homedir()` collapsed to
+ * `~`; TRANSCRIPT shows only the JSONL basename (the sessionId) since the
+ * surrounding directory is deterministic from the issue number. `--json` is
+ * still the structured source for scripting and emits the full paths.
+ * Summary column is clamped to fit terminal width.
+ */
+export function renderTable(records: SessionRecord[], home: string = homedir()): string {
+  const headers = ['ISSUE', 'STATUS', 'PID', 'WORKTREE', 'LAST ACTIVITY', 'SUMMARY', 'TRANSCRIPT'];
+  const summaryIdx = headers.indexOf('SUMMARY');
 
   if (records.length === 0) {
     // Still render the header so downstream scripts grepping for column names
@@ -299,22 +318,25 @@ export function renderTable(records: SessionRecord[]): string {
     String(r.issueNumber),
     r.status,
     r.pid != null ? String(r.pid) : '-',
+    tildeCompress(r.worktreePath, home),
     r.lastActivity,
     r.lastSummary ?? '(no assistant text)',
+    basename(r.transcriptPath),
   ]);
 
-  // Column widths: max(header, max(data)) for the first four; summary is
-  // clamped below to fit the terminal.
+  // Column widths: max(header, max(data)) for the non-summary columns; the
+  // summary column is clamped below to fit the terminal.
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((row) => row[i]!.length)));
 
-  // Summary clamping: budget = min(80, terminalWidth - sum(otherCols+gaps)).
+  // Summary clamping: budget = min(60, terminalWidth - sum(otherCols+gaps)).
+  // 60 keeps the row navigable when both paths are present; 20 is the floor.
   const terminalWidth = (process.stdout as { columns?: number }).columns ?? 120;
-  const prefixWidth = widths.slice(0, 4).reduce((a, b) => a + b + 2, 0); // 2-space gutter per column
-  const summaryBudget = Math.max(20, Math.min(80, terminalWidth - prefixWidth));
-  widths[4] = Math.min(widths[4]!, summaryBudget);
+  const otherWidth = widths.reduce((a, b, i) => (i === summaryIdx ? a : a + b + 2), 0);
+  const summaryBudget = Math.max(20, Math.min(60, terminalWidth - otherWidth));
+  widths[summaryIdx] = Math.min(widths[summaryIdx]!, summaryBudget);
 
   // truncate-then-padEnd works for every column: truncate is a no-op for the
-  // first four (widths derived from data) and clamps the summary column.
+  // non-summary columns (widths derived from data) and clamps the summary.
   const renderRow = (cells: string[]): string =>
     cells.map((c, i) => truncate(c, widths[i]!).padEnd(widths[i]!)).join('  ');
 

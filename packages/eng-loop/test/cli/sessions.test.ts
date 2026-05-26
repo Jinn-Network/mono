@@ -14,6 +14,7 @@ import {
   renderTable,
   runSessionsCli,
   tailSession,
+  tildeCompress,
   truncate,
 } from '../../src/cli/sessions.js';
 import type { SessionRecord, SessionsDeps } from '../../src/cli/sessions.js';
@@ -334,13 +335,17 @@ describe('renderTable', () => {
     const idxIssue = header.indexOf('ISSUE');
     const idxStatus = header.indexOf('STATUS');
     const idxPid = header.indexOf('PID');
+    const idxWorktree = header.indexOf('WORKTREE');
     const idxLast = header.indexOf('LAST ACTIVITY');
     const idxSummary = header.indexOf('SUMMARY');
+    const idxTranscript = header.indexOf('TRANSCRIPT');
     expect(idxIssue).toBeGreaterThanOrEqual(0);
     expect(idxStatus).toBeGreaterThan(idxIssue);
     expect(idxPid).toBeGreaterThan(idxStatus);
-    expect(idxLast).toBeGreaterThan(idxPid);
+    expect(idxWorktree).toBeGreaterThan(idxPid);
+    expect(idxLast).toBeGreaterThan(idxWorktree);
     expect(idxSummary).toBeGreaterThan(idxLast);
+    expect(idxTranscript).toBeGreaterThan(idxSummary);
   });
 
   it('renders an alive session with the pid as a decimal integer', () => {
@@ -363,7 +368,48 @@ describe('renderTable', () => {
   it('renders empty input as header + "(no sessions in the last 24h)"', () => {
     const out = renderTable([]);
     expect(out).toContain('ISSUE');
+    expect(out).toContain('WORKTREE');
+    expect(out).toContain('TRANSCRIPT');
     expect(out).toContain('(no sessions in the last 24h)');
+  });
+
+  it('renders the WORKTREE column with the home prefix collapsed to ~', () => {
+    const rec: SessionRecord = {
+      ...alive,
+      worktreePath: '/home/test/work/100',
+    };
+    const out = renderTable([rec], '/home/test');
+    expect(out).toContain('~/work/100');
+    expect(out).not.toContain('/home/test/work/100');
+  });
+
+  it('renders the TRANSCRIPT column as only the JSONL basename (sessionId)', () => {
+    const rec: SessionRecord = {
+      ...alive,
+      transcriptPath: '/home/test/.claude/projects/-wt-100/abcd-1234.jsonl',
+    };
+    const out = renderTable([rec], '/home/test');
+    expect(out).toContain('abcd-1234.jsonl');
+    // The deterministic projects/<dir>/ prefix must be elided from the table.
+    expect(out).not.toContain('.claude/projects');
+  });
+});
+
+describe('tildeCompress', () => {
+  it('replaces a leading home prefix with ~', () => {
+    expect(tildeCompress('/home/test/foo/bar', '/home/test')).toBe('~/foo/bar');
+  });
+
+  it('returns the path unchanged when home does not prefix it', () => {
+    expect(tildeCompress('/other/path', '/home/test')).toBe('/other/path');
+  });
+
+  it('handles a trailing slash on home', () => {
+    expect(tildeCompress('/home/test/foo', '/home/test/')).toBe('~/foo');
+  });
+
+  it('returns ~ when path equals home exactly', () => {
+    expect(tildeCompress('/home/test', '/home/test')).toBe('~');
   });
 });
 
