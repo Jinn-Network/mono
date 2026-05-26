@@ -14,9 +14,16 @@ export interface DeriveInput {
     restartPending: boolean;
     daemonVersion: string;
     latestVersion?: string;
-    services: { evicted: boolean; safeBound: boolean }[];
+    services: { evicted: boolean; safeBound: boolean; evictedSince?: string | null }[];
     joinedSolverNets: Record<string, unknown>;
     passwordRotatedAt?: string; // ISO
+    /**
+     * EvictionLoop gating mirrored from the daemon (#651). When `enabled` is
+     * true, `service_evicted` is suppressed for each evicted service that has
+     * been observed evicted for less than `2 × checkIntervalMs`. When absent
+     * or `enabled === false`, eviction emits immediately (backwards compat).
+     */
+    autoRestake?: { enabled: boolean; checkIntervalMs: number };
   };
 }
 
@@ -74,13 +81,32 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
     });
   }
 
-  if (s.services.some(svc => svc.evicted)) {
-    out.push({
-      kind: 'service_evicted',
-      severity: 'blocking',
-      message: 'A service has been evicted from staking. Re-stake to resume.',
-      jumpTo: '/overview',
-    });
+  // Eviction suppression window (#651): when auto-restake is enabled, hide the
+  // notification for `2 × checkIntervalMs` after first observation so the
+  // EvictionLoop has time to settle a restake before alarming the operator.
+  // Suppress only when EVERY evicted service is still inside its window; any
+  // aged-past service tips the whole notification on (one stuck restake should
+  // not hide behind a healthy in-flight one). Bad data falls through to emit.
+  const evictedServices = s.services.filter(svc => svc.evicted);
+  if (evictedServices.length > 0) {
+    const auto = s.autoRestake;
+    const now = input.now ?? Date.now();
+    const allWithinWindow =
+      auto?.enabled === true &&
+      evictedServices.every(svc => {
+        if (typeof svc.evictedSince !== 'string') return false;
+        const seenAt = Date.parse(svc.evictedSince);
+        if (Number.isNaN(seenAt)) return false;
+        return now - seenAt <= 2 * (auto.checkIntervalMs ?? 0);
+      });
+    if (!allWithinWindow) {
+      out.push({
+        kind: 'service_evicted',
+        severity: 'blocking',
+        message: 'A service has been evicted from staking. Re-stake to resume.',
+        jumpTo: '/overview',
+      });
+    }
   }
 
   if (s.services.some(svc => !svc.safeBound)) {

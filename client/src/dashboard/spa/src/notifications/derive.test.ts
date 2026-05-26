@@ -185,3 +185,72 @@ describe('deriveNotifications', () => {
     expect(out.map(n => n.kind)).not.toContain('claim_available');
   });
 });
+
+describe('deriveNotifications — eviction suppression window (#651)', () => {
+  const evictedAt = '2026-05-26T10:00:00.000Z';
+  const evictedAtMs = new Date(evictedAt).getTime();
+
+  it('suppresses service_evicted when auto-restake enabled AND within 2x check interval', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      now: evictedAtMs + 60_000, // 1 min after — well inside the 2 × 60s window
+      status: {
+        ...baseState.status,
+        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
+        autoRestake: { enabled: true, checkIntervalMs: 60_000 },
+      },
+    });
+    expect(out.map(n => n.kind)).not.toContain('service_evicted');
+  });
+
+  it('emits service_evicted when auto-restake enabled AND beyond 2x check interval', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      now: evictedAtMs + 121_000, // 2 × 60s + 1s — past the window
+      status: {
+        ...baseState.status,
+        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
+        autoRestake: { enabled: true, checkIntervalMs: 60_000 },
+      },
+    });
+    expect(out.map(n => n.kind)).toContain('service_evicted');
+  });
+
+  it('emits service_evicted immediately when auto-restake disabled', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      now: evictedAtMs + 1_000, // 1s after — would be suppressed if loop were on
+      status: {
+        ...baseState.status,
+        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
+        autoRestake: { enabled: false, checkIntervalMs: 0 },
+      },
+    });
+    expect(out.map(n => n.kind)).toContain('service_evicted');
+  });
+
+  it('emits service_evicted when autoRestake field is absent (backwards compat)', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: {
+        ...baseState.status,
+        services: [{ evicted: true, safeBound: true }],
+      },
+    });
+    expect(out.map(n => n.kind)).toContain('service_evicted');
+  });
+
+  it('emits service_evicted when evictedSince is malformed', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      now: Date.now(),
+      status: {
+        ...baseState.status,
+        services: [{ evicted: true, safeBound: true, evictedSince: 'not-an-iso-string' }],
+        autoRestake: { enabled: true, checkIntervalMs: 60_000 },
+      },
+    });
+    // Bad data must fall through to emit — never silently suppress.
+    expect(out.map(n => n.kind)).toContain('service_evicted');
+  });
+});
