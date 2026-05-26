@@ -518,6 +518,72 @@ describe('dispatchIssue', () => {
     expect(secondEdit.args[fieldIdx + 1]).toBe('PVTSSF_STATUS_FIELD_ID_NEW');
   });
 
+  it('on `Field not found` stale-id error, resets cache, refetches once, and retries item-edit (#599)', async () => {
+    // Exercises the broadened isStaleFieldError matcher: when gh changes
+    // wording from "Could not resolve to a node" to "Field not found", the
+    // retry must still fire. Pre-#599-fix this test would have failed.
+    const FRESH_FIELD_LIST = JSON.stringify({
+      fields: [
+        {
+          id: 'PVTSSF_lADODh3-Ac4BXYaIzhTdqRo',
+          name: 'Blocked on',
+          options: [
+            { id: '122744bf', name: 'Nothing' },
+            { id: 'a20d20ac', name: 'Human' },
+            { id: 'e3e1b0c4', name: 'Another issue' },
+          ],
+        },
+        {
+          id: 'PVTSSF_STATUS_FIELD_ID_NEW',
+          name: 'Status',
+          options: [
+            { id: 'opt_todo_new', name: 'Todo' },
+            { id: 'opt_in_progress_NEW', name: 'In Progress' },
+            { id: 'opt_in_review_new', name: 'In Review' },
+            { id: 'opt_done_new', name: 'Done' },
+          ],
+        },
+      ],
+    });
+
+    const calls: RunnerCall[] = [];
+    let itemEditAttempts = 0;
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return WORKTREE_LIST_EMPTY;
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') return FRESH_FIELD_LIST;
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') {
+        itemEditAttempts += 1;
+        if (itemEditAttempts === 1) {
+          throw new Error('Field not found');
+        }
+        return '';
+      }
+      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+    };
+    const { spawn } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const fieldListCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'field-list',
+    );
+    expect(fieldListCalls).toHaveLength(1);
+
+    const itemEditCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'item-edit',
+    );
+    expect(itemEditCalls).toHaveLength(2);
+
+    // The retry uses the refetched ids.
+    const secondEdit = itemEditCalls[1];
+    const optIdx = secondEdit.args.indexOf('--single-select-option-id');
+    expect(secondEdit.args[optIdx + 1]).toBe('opt_in_progress_NEW');
+    const fieldIdx = secondEdit.args.indexOf('--field-id');
+    expect(secondEdit.args[fieldIdx + 1]).toBe('PVTSSF_STATUS_FIELD_ID_NEW');
+  });
+
   it('propagates the error when item-edit fails a second time after cache refetch (#599)', async () => {
     const calls: RunnerCall[] = [];
     let itemEditAttempts = 0;

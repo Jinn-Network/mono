@@ -165,6 +165,28 @@ export function resetFieldCache(): void {
   cached = null;
 }
 
+/**
+ * Returns `true` when `err` looks like a stale field/option id failure from
+ * `gh project item-edit` — the failure mode `dispatch.ts` retries by resetting
+ * the field cache and re-fetching exactly once.
+ *
+ * `gh` does not surface a typed error code for this case, so we match on the
+ * message. We accept several plausible phrasings to insulate the retry from
+ * upstream wording changes; a brittle exact-substring match was hiding stale
+ * id failures behind silent no-ops (the Stage 5 reviewer flagged this on
+ * jinn-mono#599).
+ *
+ * Sample observed: 'failed to run git: Could not resolve to a node with the
+ * global id of "…"' (from the project Graph endpoint when a field id is
+ * referenced after the field was rebuilt).
+ *
+ * TODO: extend when other shapes are observed in the wild.
+ */
+export function isStaleFieldError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return /could not resolve|field not found|404|no field with id/i.test(err.message);
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

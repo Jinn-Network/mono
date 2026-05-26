@@ -5,6 +5,7 @@ import type { ReadyIssue, DispatcherConfig, InFlightSession } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import {
   fetchFieldIds,
+  isStaleFieldError,
   resetFieldCache,
   type FieldCache,
 } from './field-cache.js';
@@ -193,8 +194,7 @@ export async function dispatchIssue(
       deps.fieldCache.status.options['In Progress'],
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes('Could not resolve to a node')) throw err;
+    if (!isStaleFieldError(err)) throw err;
     resetFieldCache();
     const fresh = await fetchFieldIds(runner);
     // Deliberate mutation: propagate the refreshed cache to the call site so

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   fetchFieldIds,
   getFieldCache,
+  isStaleFieldError,
   resetFieldCache,
 } from '../../src/dispatcher/field-cache.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
@@ -219,6 +220,50 @@ describe('field-cache', () => {
 
     resetFieldCache();
     expect(getFieldCache()).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // isStaleFieldError — predicate the dispatch retry switches on (#599)
+  // -------------------------------------------------------------------------
+
+  describe('isStaleFieldError', () => {
+    it('matches the observed gh "Could not resolve to a node" phrasing', () => {
+      const err = new Error(
+        'failed to run git: Could not resolve to a node with the global id of "..."',
+      );
+      expect(isStaleFieldError(err)).toBe(true);
+    });
+
+    it('matches a "Field not found" phrasing', () => {
+      expect(isStaleFieldError(new Error('Field not found'))).toBe(true);
+    });
+
+    it('matches an HTTP 404 phrasing', () => {
+      expect(isStaleFieldError(new Error('HTTP 404: not found'))).toBe(true);
+    });
+
+    it('matches "No field with id" phrasing', () => {
+      expect(isStaleFieldError(new Error('No field with id PVTSSF_… exists'))).toBe(true);
+    });
+
+    it('is case-insensitive on the match', () => {
+      expect(
+        isStaleFieldError(new Error('COULD NOT RESOLVE to a node')),
+      ).toBe(true);
+    });
+
+    it('returns false for unrelated errors', () => {
+      expect(isStaleFieldError(new Error('rate limit exceeded'))).toBe(false);
+      expect(isStaleFieldError(new Error('connection reset'))).toBe(false);
+    });
+
+    it('returns false for non-Error throwables', () => {
+      expect(isStaleFieldError('Could not resolve to a node')).toBe(false);
+      expect(isStaleFieldError(42)).toBe(false);
+      expect(isStaleFieldError(null)).toBe(false);
+      expect(isStaleFieldError(undefined)).toBe(false);
+      expect(isStaleFieldError({ message: 'Could not resolve to a node' })).toBe(false);
+    });
   });
 
   it('fetchFieldIds replaces the cached value on a second call', async () => {
