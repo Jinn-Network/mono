@@ -12,8 +12,8 @@
  * not by the dispatcher).
  *
  * This module owns the cache: `fetchFieldIds(runner)` runs the canonical
- * field-list call once and parses every Status + Blocked-on option (not just
- * the ones in use today — caching more is free, future callers benefit).
+ * field-list call once and parses every canonical Status + Blocked-on option
+ * (the full enums in `./types.ts`, not just the subset in use today).
  * `getFieldCache()` and `resetFieldCache()` are the read/clear primitives.
  *
  * The project id, owner, and number literals here duplicate the constants in
@@ -174,26 +174,22 @@ function buildOptionMap<K extends string>(
   required: readonly K[],
   fieldLabel: string,
 ): Record<K, string> {
+  // Fail loud per missing option — the named error message lets an operator
+  // diagnose a board rename from the boot log without grepping the payload.
   const byName = new Map<string, string>();
   for (const opt of field.options ?? []) {
     byName.set(opt.name, opt.id);
   }
 
-  // Cache every option present, then validate the required ones are there.
-  // Failing loud per missing option keeps the boot-time error message specific
-  // enough to act on without grepping the raw payload.
   const out = {} as Record<K, string>;
-  for (const opt of field.options ?? []) {
-    if (required.includes(opt.name as K)) {
-      out[opt.name as K] = opt.id;
-    }
-  }
   for (const need of required) {
-    if (!byName.has(need)) {
+    const id = byName.get(need);
+    if (id == null) {
       throw new ProjectFieldCacheError(
         `"${need}" option not found in ${fieldLabel} field`,
       );
     }
+    out[need] = id;
   }
   return out;
 }
