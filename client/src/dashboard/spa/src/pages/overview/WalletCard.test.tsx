@@ -5,9 +5,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { WalletCard, type WalletCardProps } from './WalletCard.js';
 
 vi.mock('../../api/client.js', () => ({
-  api: {
-    retryAgentBinding: vi.fn().mockResolvedValue({ attempts: [{ status: 'success' }] }),
-  },
+  api: {},
 }));
 
 function defaultProps(): WalletCardProps {
@@ -20,10 +18,6 @@ function defaultProps(): WalletCardProps {
     tjinnState: 'ready',
     tjinnError: null,
     lastClaimAt: null,
-    agentId: 5879,
-    masterAddress: '0x53e25264C86db85b6168F7824f5c39abd5281787',
-    safeAddress: '0x26e90000000000000000000000000000000000638',
-    services: [],
     lastPasswordRotationAt: null,
     onTopUp: vi.fn(),
   };
@@ -35,14 +29,14 @@ function wrap(ui: JSX.Element, initial = '/overview'): { hook: ReturnType<typeof
 }
 
 describe('WalletCard', () => {
-  it('renders Wallet eyebrow and the four sections', () => {
+  it('renders Wallet eyebrow and the three sections', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} />);
     render(ui);
     expect(screen.getByText(/^wallet$/i)).toBeTruthy();
     expect(screen.getByTestId('wallet-section-gas')).toBeTruthy();
     expect(screen.getByTestId('wallet-section-rewards')).toBeTruthy();
-    expect(screen.getByTestId('wallet-section-identity')).toBeTruthy();
     expect(screen.getByTestId('wallet-section-password')).toBeTruthy();
+    expect(screen.queryByTestId('wallet-section-identity')).toBeNull();
   });
 
   it('shows the big gas stat, runway, and Top up button labelled for the faucet', () => {
@@ -147,35 +141,6 @@ describe('WalletCard', () => {
     const region = screen.getByTestId('tjinn-earned-region');
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.getAttribute('aria-atomic')).toBe('true');
-  });
-
-  it('shows Identity labels (Agent / Master / Safe) with truncated addresses', () => {
-    const { ui } = wrap(<WalletCard {...defaultProps()} />);
-    render(ui);
-    const id = screen.getByTestId('wallet-section-identity');
-    expect(id.textContent).toMatch(/agent/i);
-    expect(id.textContent).toContain('#5879');
-    expect(id.textContent).toMatch(/master/i);
-    expect(id.textContent).toContain('0x53e2');
-    expect(id.textContent).toContain('1787');
-    expect(id.textContent).toMatch(/safe/i);
-    expect(id.textContent).toContain('0x26e9');
-    expect(id.textContent).toContain('0638');
-    // Chain is no longer in Wallet — it lives in the header pill.
-    expect(id.textContent).not.toMatch(/base sepolia/i);
-  });
-
-  it('surfaces a binding-pending chip when a service is unbound', () => {
-    const { ui } = wrap(
-      <WalletCard
-        {...defaultProps()}
-        services={[
-          { index: 0, serviceId: 50, safeAddress: '0xSafe', agentId: 5879, safeBoundToAgent: false },
-        ]}
-      />,
-    );
-    render(ui);
-    expect(screen.getByRole('button', { name: /binding pending/i })).toBeTruthy();
   });
 
   it('shows Last rotated and a Change Password button that navigates to /operator/security', () => {
