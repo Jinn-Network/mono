@@ -38,6 +38,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
+import { blockHandler } from './solver-plugins-block.js';
 import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
 import { createDiscoveryAPI } from '../../discovery/factory.js';
@@ -385,6 +386,37 @@ export function createSolverPluginsCommand(
               ? BigInt(parsed.values['builder-agent-id'] as string)
               : undefined,
           },
+          resolvedDeps,
+        );
+      }
+      if (subverb === 'block') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            reason: { type: 'string' },
+            config: { type: 'string' },
+          },
+        });
+        const pluginCid = parsed.positionals[0];
+        const reason = parsed.values.reason as string | undefined;
+        if (!pluginCid) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins block requires <pluginCid>' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        if (!reason) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins block requires --reason <text>' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        return blockHandler(
+          ctx,
+          { pluginCid, reason, configPath: parsed.values.config as string | undefined },
           resolvedDeps,
         );
       }
