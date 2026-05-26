@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
@@ -24,6 +25,8 @@ export interface HarnessStatusPanelProps {
 const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
 const sectionLabel = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
 
+type RowStatus = 'ready' | 'not-ready' | 'error';
+
 function HarnessStatusRow({ name }: { name: string }): JSX.Element {
   const queryClient = useQueryClient();
   const { data, isError, error } = useQuery<HarnessReadinessEntry>({
@@ -31,6 +34,15 @@ function HarnessStatusRow({ name }: { name: string }): JSX.Element {
     queryFn: () => api.harnessReadiness(name),
     refetchInterval: 30_000,
   });
+
+  function statusOf(): RowStatus | null {
+    if (isError) return 'error';
+    if (data?.ready === true) return 'ready';
+    if (data?.ready === false) return 'not-ready';
+    return null;
+  }
+  const status = statusOf();
+  const showActions = status === 'not-ready';
 
   const recheck = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['harness-readiness', name] });
@@ -56,36 +68,30 @@ function HarnessStatusRow({ name }: { name: string }): JSX.Element {
     }
   };
 
-  const ready = data?.ready === true;
-  const notReady = data?.ready === false;
-
   return (
-    <div
-      data-testid={`harness-row-${name}`}
-      className="flex flex-col gap-2"
-    >
+    <div data-testid={`harness-row-${name}`} className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-3">
         <span className={sectionLabel}>{name}</span>
-        {ready && (
+        {status === 'ready' && (
           <Badge variant="success" data-testid={`harness-pill-ready-${name}`}>
             ready
           </Badge>
         )}
-        {notReady && (
+        {status === 'not-ready' && (
           <Badge variant="destructive" data-testid={`harness-pill-not-ready-${name}`}>
             not ready
           </Badge>
         )}
-        {isError && (
+        {status === 'error' && (
           <Badge variant="outline" data-testid={`harness-pill-error-${name}`}>
             unavailable
           </Badge>
         )}
       </div>
-      {notReady && data?.reason && (
+      {status === 'not-ready' && data?.reason && (
         <span className="font-mono text-[12px] text-[var(--break-red)]">{data.reason}</span>
       )}
-      {notReady && data?.nextStep && (
+      {status === 'not-ready' && data?.nextStep && (
         <span
           data-testid={`harness-next-step-${name}`}
           className="font-mono text-[12px] text-[var(--fg-muted)]"
@@ -94,12 +100,12 @@ function HarnessStatusRow({ name }: { name: string }): JSX.Element {
           {data.nextStep.cli ? ` (${data.nextStep.cli})` : ''}
         </span>
       )}
-      {isError && (
+      {status === 'error' && (
         <span className="font-mono text-[12px] text-[var(--fg-muted)]">
           {error instanceof Error ? error.message : 'Readiness check failed.'}
         </span>
       )}
-      {notReady && (
+      {showActions && (
         <div className="flex gap-2">
           <Button
             variant="default"
@@ -159,10 +165,10 @@ export function HarnessStatusPanel({
       ) : (
         <div className="flex flex-col gap-4">
           {harnessNames.map((name, idx) => (
-            <div key={name} className="flex flex-col gap-4">
+            <Fragment key={name}>
               {idx > 0 && <Separator />}
               <HarnessStatusRow name={name} />
-            </div>
+            </Fragment>
           ))}
         </div>
       )}

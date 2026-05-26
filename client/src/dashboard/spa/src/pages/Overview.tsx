@@ -291,20 +291,16 @@ export function OverviewPage(): JSX.Element {
   // scope per design note 2026-05-26 — keeps the panel focused on harnesses
   // the operator actually runs. Deduped + sorted for stable rendering.
   const harnessNames = useMemo<string[]>(() => {
-    const set = new Set<string>();
-    const j = bootstrap?.joinedSolverNets;
-    if (j) {
-      for (const entry of Object.values(j)) {
+    const collect = (entries: Record<string, { harness?: string } | undefined> | undefined): Set<string> => {
+      const set = new Set<string>();
+      for (const entry of Object.values(entries ?? {})) {
         if (entry?.harness) set.add(entry.harness);
       }
-    }
-    const legacy = bootstrap?.solverNets;
-    if (legacy && set.size === 0) {
-      for (const entry of Object.values(legacy)) {
-        if (entry?.harness) set.add(entry.harness);
-      }
-    }
-    return Array.from(set).sort();
+      return set;
+    };
+    const joined = collect(bootstrap?.joinedSolverNets);
+    const out = joined.size > 0 ? joined : collect(bootstrap?.solverNets);
+    return Array.from(out).sort();
   }, [bootstrap]);
 
   // Eviction state — derived from the first evicted service in the fleet.

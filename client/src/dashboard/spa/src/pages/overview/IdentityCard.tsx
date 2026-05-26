@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { api } from '../../api/client.js';
 import { Card } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
@@ -17,10 +17,6 @@ import type { ServiceIdentity } from './WalletCard.js';
  * Five labelled monospace stats (Service / Agent / Master / Safe — agent
  * EOA reserved for a future daemon field) plus the binding-pending retry
  * flow and three §2.2 state-message rows.
- *
- * Extracted from WalletCard's `wallet-section-identity` block as part of
- * the #427 promotion — same data, promoted in the hierarchy. See
- * docs/superpowers/specs/2026-05-26-issue-427-identity-harness-promotion.md.
  */
 export interface IdentityCardProps {
   masterAddress: string | null;
@@ -34,17 +30,47 @@ export interface IdentityCardProps {
 
 const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
 const sectionLabel = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
+const statValue = 'font-mono text-[14px] text-foreground';
+const emptyValue = 'font-mono text-[14px] text-[var(--fg-muted)]';
 
-function trunc(addr: string | null | undefined): string {
-  if (!addr || addr.length < 10) return addr ?? '—';
+function trunc(addr: string): string {
+  if (addr.length < 10) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 function EmptyDash(): JSX.Element {
+  return <span data-testid="identity-stat-empty" className={emptyValue}>—</span>;
+}
+
+function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
-    <span data-testid="identity-stat-empty" className="font-mono text-[14px] text-[var(--fg-muted)]">
-      —
-    </span>
+    <div className="flex flex-col gap-1">
+      <span className={sectionLabel}>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function AddressStat({ label, address, testId }: {
+  label: string;
+  address: string | null;
+  testId: string;
+}): JSX.Element {
+  return (
+    <Stat label={label}>
+      {address ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span data-testid={testId} tabIndex={0} className={`cursor-help ${statValue}`}>
+              {trunc(address)}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{address}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <EmptyDash />
+      )}
+    </Stat>
   );
 }
 
@@ -96,19 +122,15 @@ export function IdentityCard({
         <span className={eyebrow}>Identity</span>
 
         <div className="flex flex-wrap gap-8">
-          <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Service</span>
+          <Stat label="Service">
             {serviceId !== null ? (
-              <span data-testid="identity-service-id" className="font-mono text-[14px] text-foreground">
-                #{serviceId}
-              </span>
+              <span data-testid="identity-service-id" className={statValue}>#{serviceId}</span>
             ) : (
               <EmptyDash />
             )}
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Agent</span>
-            <span className="flex items-center gap-2 font-mono text-[14px] text-foreground">
+          </Stat>
+          <Stat label="Agent">
+            <span className={`flex items-center gap-2 ${statValue}`}>
               {agentId !== null ? `#${agentId}` : <EmptyDash />}
               {pendingBinding && (
                 <button
@@ -125,48 +147,11 @@ export function IdentityCard({
                 </Badge>
               )}
             </span>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Master</span>
-            {masterAddress ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    data-testid="identity-master-address"
-                    tabIndex={0}
-                    className="cursor-help font-mono text-[14px] text-foreground"
-                  >
-                    {trunc(masterAddress)}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{masterAddress}</TooltipContent>
-              </Tooltip>
-            ) : (
-              <EmptyDash />
-            )}
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className={sectionLabel}>Safe</span>
-            {safeAddress ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    data-testid="identity-safe-address"
-                    tabIndex={0}
-                    className="cursor-help font-mono text-[14px] text-foreground"
-                  >
-                    {trunc(safeAddress)}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{safeAddress}</TooltipContent>
-              </Tooltip>
-            ) : (
-              <EmptyDash />
-            )}
-          </div>
+          </Stat>
+          <AddressStat label="Master" address={masterAddress} testId="identity-master-address" />
+          <AddressStat label="Safe" address={safeAddress} testId="identity-safe-address" />
         </div>
 
-        {/* State messages — §2.2 */}
         {pendingBinding && (
           <Alert
             variant="warning"
