@@ -792,3 +792,205 @@ describe('gatherStatusForApi', () => {
     });
   });
 });
+
+describe('gather-status eviction first-seen tracker (#651)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock('viem');
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  /**
+   * Mock viem with a controllable `evictedFn` for `getStakingState`. Each call
+   * to the mock returns whatever `evictedFn()` returns at the time the read
+   * happens — so the same fleet can be observed evicted on one read and not
+   * on the next.
+   */
+  function mockEvictionViem(evictedFn: () => boolean): void {
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          multicall: async (req: {
+            contracts: ReadonlyArray<{ functionName: string }>;
+          }) => req.contracts.map(() => ({ status: 'success' as const, result: 0n })),
+          readContract: async (req: { functionName: string }) => {
+            if (req.functionName === 'getStakingState') return evictedFn() ? 2 : 0;
+            if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
+            if (req.functionName === 'calculateStakingReward') return 0n;
+            if (req.functionName === 'getNextRewardCheckpointTimestamp') return 0n;
+            return 0n;
+          },
+          getLogs: async () => [],
+        }),
+        http: () => ({}),
+      };
+    });
+  }
+
+  async function setupFleet(): Promise<string> {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-evict-test-'));
+    const fleetStore = new FleetStateStore(earningDir);
+    const state = await fleetStore.load('base-sepolia');
+    await fleetStore.save({
+      ...state,
+      master_address: '0x1111111111111111111111111111111111111111',
+      services: [
+        {
+          index: 1,
+          agent_address: '0x2222222222222222222222222222222222222222',
+          safe_address: '0x3333333333333333333333333333333333333333',
+          service_id: 41,
+          mech_address: null,
+          staking_address: '0x5555555555555555555555555555555555555555',
+          step: 'complete',
+          error: null,
+        },
+      ],
+    });
+    return earningDir;
+  }
+
+  it('sets evictedSince on first observation and preserves it across reads', async () => {
+    let evicted = true;
+    mockEvictionViem(() => evicted);
+    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+      '../../src/api/gather-status.js'
+    );
+    __resetEvictionFirstSeenForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupFleet();
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
+
+      const first = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(first.fleet.services[0].evicted).toBe(true);
+      expect(first.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
+
+      vi.setSystemTime(new Date('2026-05-26T10:00:30.000Z'));
+      const second = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      // Same ISO — the first-seen timestamp is sticky.
+      expect(second.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
+    });
+  });
+
+  it('clears the tracker entry when service is no longer evicted', async () => {
+    let evicted = true;
+    mockEvictionViem(() => evicted);
+    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+      '../../src/api/gather-status.js'
+    );
+    __resetEvictionFirstSeenForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupFleet();
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
+
+      await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      vi.setSystemTime(new Date('2026-05-26T10:01:00.000Z'));
+      evicted = false;
+      const recovered = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(recovered.fleet.services[0].evicted).toBe(false);
+      expect(recovered.fleet.services[0].evictedSince).toBeNull();
+
+      // Re-eviction gets a fresh timestamp, not the old one.
+      vi.setSystemTime(new Date('2026-05-26T10:02:00.000Z'));
+      evicted = true;
+      const reEvicted = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(reEvicted.fleet.services[0].evictedSince).toBe('2026-05-26T10:02:00.000Z');
+    });
+  });
+
+  it('emits autoRestake.enabled=true only when all three predicate clauses are met', async () => {
+    mockEvictionViem(() => false);
+    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+      '../../src/api/gather-status.js'
+    );
+    __resetEvictionFirstSeenForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupFleet();
+
+      const enabled = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        config: { evictionCheckIntervalMs: 60_000, stakingMode: 'standard' } as unknown as JinnConfig,
+      });
+      expect(enabled.autoRestake).toEqual({ enabled: true, checkIntervalMs: 60_000 });
+
+      const noInterval = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        config: { evictionCheckIntervalMs: 0, stakingMode: 'standard' } as unknown as JinnConfig,
+      });
+      expect(noInterval.autoRestake.enabled).toBe(false);
+
+      const nonStandard = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        config: { evictionCheckIntervalMs: 60_000, stakingMode: 'self-bond' } as unknown as JinnConfig,
+      });
+      expect(nonStandard.autoRestake.enabled).toBe(false);
+
+      const noDistributor = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        config: { evictionCheckIntervalMs: 60_000, stakingMode: 'standard' } as unknown as JinnConfig,
+      });
+      expect(noDistributor.autoRestake.enabled).toBe(false);
+    });
+  });
+});

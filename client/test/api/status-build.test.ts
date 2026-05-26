@@ -513,3 +513,87 @@ describe('assembleStatusV1 → status.harness', () => {
     expect(j.harness).toEqual({ ready: true, name: null, reason: null });
   });
 });
+
+describe('assembleStatusV1 — eviction suppression fields (#651)', () => {
+  it('emits evictedSince=null when service not evicted', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.fleet.services[0].evicted).toBe(false);
+    expect(j.fleet.services[0].evictedSince).toBeNull();
+  });
+
+  it('emits evictedSince ISO when service is evicted and tracker set', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+      evictedByServiceIndex: { 0: true },
+      evictedSinceByServiceIndex: { 0: '2026-05-26T10:00:00.000Z' },
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.fleet.services[0].evicted).toBe(true);
+    expect(j.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
+  });
+
+  it('emits autoRestake.enabled=false + checkIntervalMs=0 by default', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.autoRestake).toEqual({ enabled: false, checkIntervalMs: 0 });
+  });
+
+  it('emits autoRestake.enabled=true + checkIntervalMs when raw flags it on', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+      autoRestakeEnabled: true,
+      evictionCheckIntervalMs: 60_000,
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.autoRestake).toEqual({ enabled: true, checkIntervalMs: 60_000 });
+  });
+});

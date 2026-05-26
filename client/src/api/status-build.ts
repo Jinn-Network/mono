@@ -176,6 +176,24 @@ export interface GatheredStatusRaw {
    * on the wire. See `status-harness-rollup.ts`.
    */
   harnessRollup?: HarnessRollup;
+  /**
+   * Per-service first-observed-evicted timestamps (ISO 8601) keyed by display
+   * index. Populated by gather-status's module-scoped first-seen tracker.
+   * Absent when the service is not currently evicted. Used together with
+   * `autoRestakeEnabled` + `evictionCheckIntervalMs` to suppress the
+   * `service_evicted` notification during the EvictionLoop's settlement
+   * budget (issue #651).
+   */
+  evictedSinceByServiceIndex?: Record<number, string>;
+  /**
+   * Mirror of the `main.ts` predicate that gates the EvictionLoop:
+   * `evictionCheckIntervalMs > 0 && stakingMode === 'standard' && !!distributorAddress`.
+   * When true, the notifications deriver + Overview banner suppress eviction
+   * surfaces for `2 × evictionCheckIntervalMs` after first observation.
+   */
+  autoRestakeEnabled?: boolean;
+  /** Configured EvictionLoop poll interval in milliseconds (0 when the loop is disabled). */
+  evictionCheckIntervalMs?: number;
 }
 
 export interface StatusV1Response {
@@ -205,9 +223,24 @@ export interface StatusV1Response {
       identityBindingStatus: 'bound' | 'pending' | 'not_applicable';
       /** True when the staking proxy reports this service as evicted (getStakingState === 2). */
       evicted: boolean;
+      /**
+       * ISO 8601 first-observed-evicted timestamp. `null` when the service is
+       * not currently evicted. Drives the suppression-window logic on the
+       * deriver + Overview banner (issue #651).
+       */
+      evictedSince: string | null;
     }>;
     stakedLikeCount: number;
     completeCount: number;
+  };
+  /**
+   * Auto-restake (EvictionLoop) feature gating. Mirrors `main.ts`'s
+   * `evictionCheck` predicate so the SPA can suppress eviction notifications
+   * for `2 × checkIntervalMs` after first observation (issue #651).
+   */
+  autoRestake: {
+    enabled: boolean;
+    checkIntervalMs: number;
   };
   activity: {
     counts: Record<string, number>;
@@ -280,6 +313,7 @@ export function resolveMasterDailyEstimateWei(
 function fleetSummary(
   fleet: FleetState | null,
   evictedByServiceIndex?: Record<number, boolean>,
+  evictedSinceByServiceIndex?: Record<number, string>,
 ): StatusV1Response['fleet'] {
   if (!fleet) {
     return {
@@ -309,6 +343,7 @@ function fleetSummary(
           : 'not_applicable'
     ) as 'bound' | 'pending' | 'not_applicable',
     evicted: evictedByServiceIndex?.[di] ?? false,
+    evictedSince: evictedSinceByServiceIndex?.[di] ?? null,
     };
   });
   const stakedLikeCount = fleet.services.filter(s => isStakedLikeServiceStep(s.step)).length;
@@ -512,7 +547,7 @@ function buildEthBalances(raw: GatheredStatusRaw): StatusV1Response['balances'][
 }
 
 export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
-  const fleetSum = fleetSummary(raw.fleet, raw.evictedByServiceIndex);
+  const fleetSum = fleetSummary(raw.fleet, raw.evictedByServiceIndex, raw.evictedSinceByServiceIndex);
   const mode: 'full' | 'sqlite_only' = raw.hintsScope === 'sqlite_only' ? 'sqlite_only' : 'full';
   const claimedRewardsWei = sumClaimedRewardsWei(raw);
   let pendingRewardsWei: bigint | undefined;
@@ -542,6 +577,10 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     },
     rpc: raw.rpc,
     fleet: fleetSum,
+    autoRestake: {
+      enabled: raw.autoRestakeEnabled === true,
+      checkIntervalMs: raw.evictionCheckIntervalMs ?? 0,
+    },
     activity: {
       counts: raw.activityCounts,
       recent: raw.recentActivity,

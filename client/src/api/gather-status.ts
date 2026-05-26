@@ -202,6 +202,25 @@ function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['d
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
 /**
+ * Module-scoped first-seen-evicted tracker for the suppression window (issue #651).
+ *
+ * Key: `${chain}:${serviceId}`. Value: epoch ms when this gatherer first
+ * observed `getStakingState === 2` for the service. Cleared as soon as the
+ * service is no longer reported evicted, so a successful auto-restake (or a
+ * manual one) immediately resets the window.
+ *
+ * Lives at module scope intentionally: gather-status is invoked on every
+ * status read and we need state to persist across reads. The daemon is
+ * single-process; no cross-instance coordination required.
+ */
+const evictionFirstSeenMs = new Map<string, number>();
+
+/** Test-only: clear the first-seen-evicted tracker. Do not call from production code. */
+export function __resetEvictionFirstSeenForTests(): void {
+  evictionFirstSeenMs.clear();
+}
+
+/**
  * Drop any cached prediction operator status for `config`.
  *
  * The cache key is the live `JinnConfig` object reference. When the SPA
@@ -1163,6 +1182,16 @@ export async function gatherGatheredStatusRaw(
     rewardClaimIntervalMs: status.rewardClaimIntervalMs,
   };
 
+  // Auto-restake gating (issue #651). Must mirror main.ts:~2520-2523 — when
+  // that predicate changes (evictionCheckIntervalMs > 0 && stakingMode ===
+  // 'standard' && !!distributorAddress), this one must change too.
+  const evictionIntervalMs = status.config?.evictionCheckIntervalMs ?? 0;
+  raw.evictionCheckIntervalMs = evictionIntervalMs;
+  raw.autoRestakeEnabled =
+    evictionIntervalMs > 0 &&
+    status.config?.stakingMode === 'standard' &&
+    !!status.tjinnDistributorAddress;
+
   const viemChain = status.network === 'testnet' ? baseSepolia : base;
   const client = createPublicClient({
     chain: viemChain,
@@ -1254,6 +1283,29 @@ export async function gatherGatheredStatusRaw(
       );
       raw.evictedByServiceIndex = evictedByServiceIndex;
       raw.inactivityByServiceIndex = inactivityByServiceIndex;
+
+      // First-seen tracker for the suppression window (issue #651).
+      // Key by `${chain}:${serviceId}` to survive multi-chain fleet layouts.
+      const nowMs = Date.now();
+      const chainKey = fleet?.chain ?? status.network;
+      const evictedSinceByServiceIndex: Record<number, string> = {};
+      for (const svc of fleet.services) {
+        const di = displayFleetServiceIndex(svc);
+        const sid = svc.service_id;
+        if (sid == null) continue;
+        const key = `${chainKey}:${sid}`;
+        if (evictedByServiceIndex[di] === true) {
+          let firstSeen = evictionFirstSeenMs.get(key);
+          if (firstSeen === undefined) {
+            firstSeen = nowMs;
+            evictionFirstSeenMs.set(key, firstSeen);
+          }
+          evictedSinceByServiceIndex[di] = new Date(firstSeen).toISOString();
+        } else {
+          evictionFirstSeenMs.delete(key);
+        }
+      }
+      raw.evictedSinceByServiceIndex = evictedSinceByServiceIndex;
     } catch {
       // Non-fatal: staking state reads should not prevent status from returning
     }
