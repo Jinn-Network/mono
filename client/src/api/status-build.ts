@@ -209,6 +209,14 @@ export interface StatusV1Response {
     pendingRewardsError?: string;
   };
   tJinn: TjinnStatus;
+  /** Per-role ETH balance (master / agent / Safe). Wei strings, base-10. */
+  balances: {
+    eth: {
+      master: { address: string | null; balanceWei: string | null; error?: string };
+      agent:  { address: string | null; balanceWei: string | null; error?: string };
+      safe:   { address: string | null; balanceWei: string | null; error?: string };
+    };
+  };
   masterGas: {
     address: string | null;
     balanceWei?: string;
