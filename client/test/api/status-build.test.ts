@@ -470,3 +470,46 @@ describe('assembleStatusV1', () => {
     expect(j.taskRuns?.inFlight[0]?.solverType).toBe('swe-rebench-v2.v1');
   });
 });
+
+describe('assembleStatusV1 → status.harness', () => {
+  // Minimal raw shared across the three cases below — the rollup is independent
+  // of fleet/RPC state, so we keep the fixture small.
+  function rawForHarness(harnessRollup?: GatheredStatusRaw['harnessRollup']): GatheredStatusRaw {
+    return {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+      ...(harnessRollup ? { harnessRollup } : {}),
+    };
+  }
+
+  it('defaults to ready when raw.harnessRollup is omitted (backward-compat)', () => {
+    const j = assembleStatusV1(rawForHarness());
+    expect(j.harness).toEqual({ ready: true, name: null, reason: null });
+  });
+
+  it('propagates an unready rollup verbatim', () => {
+    const j = assembleStatusV1(
+      rawForHarness({ ready: false, name: 'claude-code', reason: 'subscription_expired' }),
+    );
+    expect(j.harness).toEqual({
+      ready: false,
+      name: 'claude-code',
+      reason: 'subscription_expired',
+    });
+  });
+
+  it('propagates an explicit ready rollup verbatim', () => {
+    const j = assembleStatusV1(rawForHarness({ ready: true, name: null, reason: null }));
+    expect(j.harness).toEqual({ ready: true, name: null, reason: null });
+  });
+});

@@ -12,6 +12,7 @@ import type { EarningMigrationArchive } from '../earning/store.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
+import type { HarnessRollup } from './status-harness-rollup.js';
 
 // Mirror of DEFAULT_MASTER_ETH_DAILY_WEI in client/src/earning/bootstrap.ts —
 // see that constant for the full #288 rationale. A follow-up will collapse
@@ -166,6 +167,15 @@ export interface GatheredStatusRaw {
    * Value is the `inactivity` field from the ServiceInfo struct (seconds).
    */
   inactivityByServiceIndex?: Record<number, number>;
+  /**
+   * Harness readiness rollup — single boolean + name + reason summary across
+   * all joined harnesses. Populated by gather-status from the daemon's
+   * HarnessReadinessRegistry when threaded through `StatusGatherConfig`.
+   * Absent → assembleStatusV1 emits a default-ready rollup so callers that
+   * don't thread it (sqlite-only contexts, older tests) still see the field
+   * on the wire. See `status-harness-rollup.ts`.
+   */
+  harnessRollup?: HarnessRollup;
 }
 
 export interface StatusV1Response {
@@ -241,6 +251,13 @@ export interface StatusV1Response {
   taskRuns?: TaskRunsStatus;
   /** Per-credential daily spend block — present when caps are configured. */
   spend?: SpendStatus;
+  /**
+   * Harness readiness rollup — always present (default-ready when no rollup
+   * input was threaded through gather-status). Consumed by the SPA's
+   * `useNotifications` adapter to fire `harness_not_ready` when any joined
+   * SolverNet's harness is unready. See `status-harness-rollup.ts`.
+   */
+  harness: HarnessRollup;
 }
 
 /**
@@ -555,6 +572,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       hint: buildEarningsHint(raw, fleetSum),
     },
     nextActions: buildNextActions(raw, fleetSum),
+    harness: raw.harnessRollup ?? { ready: true, name: null, reason: null },
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
