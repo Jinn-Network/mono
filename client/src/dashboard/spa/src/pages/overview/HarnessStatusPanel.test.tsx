@@ -90,9 +90,9 @@ describe('HarnessStatusPanel', () => {
   it('renders a Re-check button per row and refetches readiness when clicked', async () => {
     harnessReadinessMock.mockResolvedValue(NOT_READY_CLI);
     render(withProviders(<HarnessStatusPanel harnessNames={['codex']} />));
-    await waitFor(() => screen.getByTestId('harness-row-codex'));
+    const recheck = await screen.findByTestId('harness-recheck-codex');
     const callsBefore = harnessReadinessMock.mock.calls.length;
-    fireEvent.click(screen.getByTestId('harness-recheck-codex'));
+    fireEvent.click(recheck);
     await waitFor(() =>
       expect(harnessReadinessMock.mock.calls.length).toBeGreaterThan(callsBefore),
     );
