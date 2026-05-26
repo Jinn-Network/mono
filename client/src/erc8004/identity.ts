@@ -115,6 +115,18 @@ export interface PublishContentV2Args {
   payload: ExecutionPayloadV2;
 }
 
+/**
+ * Return value from `publishContent` / `publishContentV2`.
+ *
+ * `txHash` is the on-chain transaction hash for the `setMetadata` call.
+ * `blockNumber` is the block the receipt landed in, or `null` if the
+ * receipt could not be fetched (the tx is still on chain — backfill later).
+ */
+export interface PublishContentResult {
+  txHash: Hex;
+  blockNumber: number | null;
+}
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 /** Thrown when an `ExecutionPayload` violates §5 strict-mode validity rules. */
@@ -440,13 +452,21 @@ export class IdentityPublisher {
     return this.identityRegistryAddress;
   }
 
+  /** Chain ID of the wallet client this publisher writes to. */
+  get chainId(): number {
+    return this.walletClient.chain?.id ?? 0;
+  }
+
   /**
    * Publish a per-execution commitment under the operator's agent NFT.
    *
    * Calls `IdentityRegistry.setMetadata(agentId, "<kind>:<cid>", encode(payload))`.
-   * Returns the on-chain tx hash. Throws on encode/validation/network failure.
+   * Returns the on-chain tx hash and block number from the confirmation
+   * receipt. If the receipt fetch fails for any reason (RPC hiccup), the tx
+   * hash is still returned with `blockNumber: null` so callers can record
+   * the anchor and backfill later. Throws on encode/validation/write failure.
    */
-  async publishContent(args: PublishContentArgs): Promise<Hex> {
+  async publishContent(args: PublishContentArgs): Promise<PublishContentResult> {
     const metadataKey = buildMetadataKey(args.kind, args.cid);
     const metadataValue = encodeExecutionPayload(args.payload);
     return this._writeMetadata(metadataKey, metadataValue);
@@ -464,13 +484,16 @@ export class IdentityPublisher {
    * (v1) — the subgraph decoder handles both versions and treats v1 as
    * `mode='train'` with empty `codeDigest`/`implName`.
    */
-  async publishContentV2(args: PublishContentV2Args): Promise<Hex> {
+  async publishContentV2(args: PublishContentV2Args): Promise<PublishContentResult> {
     const metadataKey = buildMetadataKey(args.kind, args.cid);
     const metadataValue = encodeExecutionPayloadV2(args.payload);
     return this._writeMetadata(metadataKey, metadataValue);
   }
 
-  private async _writeMetadata(metadataKey: string, metadataValue: Hex): Promise<Hex> {
+  private async _writeMetadata(
+    metadataKey: string,
+    metadataValue: Hex,
+  ): Promise<PublishContentResult> {
     const account = this.walletClient.account;
     if (!account) {
       throw new Error('IdentityPublisher: walletClient has no account configured');
@@ -489,12 +512,21 @@ export class IdentityPublisher {
       chain,
     });
 
-    // Best-effort confirmation; callers that want async fire-and-forget can
-    // ignore the await — but waiting here gives us a clear pass/fail signal
-    // and surfaces revert reasons promptly. The engine treats failures as
+    // Best-effort confirmation. We surface the blockNumber so callers can
+    // record a verifiable on-chain reference; if the receipt query fails
+    // (RPC hiccup), we still return the tx hash with a null block so the
+    // anchor row gets written. The engine treats publish failures as
     // non-fatal regardless.
-    await this.publicClient.waitForTransactionReceipt({ hash: txHash });
-    return txHash;
+    let blockNumber: number | null = null;
+    try {
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+      blockNumber = Number(receipt.blockNumber);
+    } catch (err) {
+      console.warn(
+        `[erc8004] receipt fetch failed for ${txHash} (anchor will be recorded with null block): ${err instanceof Error ? err.message : err}`,
+      );
+    }
+    return { txHash, blockNumber };
   }
 }
 

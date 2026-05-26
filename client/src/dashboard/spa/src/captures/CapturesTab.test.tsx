@@ -143,6 +143,7 @@ describe('CapturesTab', () => {
               lastAccessAt: null,
               lastPaidAt: null,
             },
+            anchors: [],
           }]
         : [],
     }));
@@ -205,5 +206,125 @@ describe('CapturesTab', () => {
       /Permission required to view execution data/i,
     );
     expect(screen.getByText('No execution data yet.')).toBeTruthy();
+  });
+
+  it('renders projection and anchor sections with an explorer link when both are present', async () => {
+    listPendingMock.mockResolvedValue({ captures: [] });
+    listArtifactsMock.mockImplementation((opts: { source?: string }) => Promise.resolve({
+      schemaVersion: 2,
+      generatedAt: '2026-05-25T15:00:00.000Z',
+      source: opts.source ?? 'served',
+      pricing: { publicEndpoint: '', defaultPriceUsdc: '0', perArtifactTypePrice: {}, donation: { enabled: false } },
+      summary: {
+        served: { totalCount: opts.source === 'served' ? 1 : 0, totalBytes: 100, freeCount: 1, gatedCount: 0, latestCreatedAt: null, artifactTypes: [] },
+        network: { totalCount: 0, totalBytes: 0, latestFetchedAt: null, artifactTypes: [] },
+        access: { accessCount: 0, paidServeCount: 0, freeServeCount: 0, failedPaymentCount: 0, paymentRequiredCount: 0, revenueUsdc: '0', lastAccessAt: null, lastPaidAt: null },
+      },
+      recentAccesses: [],
+      artifacts: opts.source === 'served'
+        ? [{
+            source: 'served',
+            sha256: 'd'.repeat(64),
+            artifactType: 'swe-rebench-v2_v1_solution',
+            requestId: 'req-projection',
+            envelopeCid: 'bafy-with-projection',
+            contentSize: 100,
+            priceUsdc: '0',
+            createdAt: '2026-05-25T15:00:00.000Z',
+            endpoint: null,
+            access: {
+              accessCount: 0, paidServeCount: 0, freeServeCount: 0, failedPaymentCount: 0,
+              paymentRequiredCount: 0, revenueUsdc: '0', lastAccessAt: null, lastPaidAt: null,
+            },
+            projection: {
+              envelopeId: 'env-d',
+              signatureHash: '0xsigd',
+              solverType: 'swe-rebench-v2',
+              role: 'solution',
+              taskCid: 'bafy-task',
+              taskId: 'task-1',
+              requestId: 'req-projection',
+              generatedAt: 1748178573,
+              evidenceTier: 'self-signed',
+              participantSafeAddress: '0xsafe',
+              participantAgentEoa: '0xeoa',
+              executor: {
+                implName: 'swe-rebench-v2-baseline',
+                implVersion: '0.1.0',
+                runtimeBundleDigest: 'sha256:beef',
+                plugins: ['shell'],
+              },
+              metadata: null,
+            },
+            anchors: [{
+              contentKind: 'envelope',
+              metadataKey: 'envelope:bafy-with-projection',
+              agentId: '42',
+              chainId: 84532,
+              identityRegistryAddress: '0xreg',
+              txHash: '0xanchortx',
+              blockNumber: 12345,
+              payloadHex: '0xabcdef',
+              anchoredAt: 1748178533,
+            }],
+          }]
+        : [],
+    }));
+
+    renderTab();
+
+    const row = await screen.findByText('swe-rebench-v2_v1_solution');
+    fireEvent.click(row);
+
+    expect(await screen.findByText('Envelope')).toBeTruthy();
+    expect(screen.getByText('Participant')).toBeTruthy();
+    expect(screen.getByText('Task')).toBeTruthy();
+    expect(screen.getByText('On-chain anchors')).toBeTruthy();
+    // solverType in Envelope section
+    expect(screen.getByText('swe-rebench-v2')).toBeTruthy();
+    // executor impl in Participant section
+    expect(screen.getByText('swe-rebench-v2-baseline')).toBeTruthy();
+    // anchor agent ID + chain
+    expect(screen.getByText('42')).toBeTruthy();
+    expect(screen.getByText('84532')).toBeTruthy();
+    // Explorer link for Base Sepolia (chainId 84532)
+    const link = screen.getByRole('link', { name: /0xanchortx/i });
+    expect(link.getAttribute('href')).toBe('https://sepolia.basescan.org/tx/0xanchortx');
+  });
+
+  it('shows "no on-chain anchor" placeholder when anchors is empty', async () => {
+    listPendingMock.mockResolvedValue({ captures: [] });
+    listArtifactsMock.mockImplementation((opts: { source?: string }) => Promise.resolve({
+      schemaVersion: 2,
+      generatedAt: '2026-05-25T15:00:00.000Z',
+      source: opts.source ?? 'served',
+      pricing: { publicEndpoint: '', defaultPriceUsdc: '0', perArtifactTypePrice: {}, donation: { enabled: false } },
+      summary: {
+        served: { totalCount: opts.source === 'served' ? 1 : 0, totalBytes: 10, freeCount: 1, gatedCount: 0, latestCreatedAt: null, artifactTypes: [] },
+        network: { totalCount: 0, totalBytes: 0, latestFetchedAt: null, artifactTypes: [] },
+        access: { accessCount: 0, paidServeCount: 0, freeServeCount: 0, failedPaymentCount: 0, paymentRequiredCount: 0, revenueUsdc: '0', lastAccessAt: null, lastPaidAt: null },
+      },
+      recentAccesses: [],
+      artifacts: opts.source === 'served'
+        ? [{
+            source: 'served',
+            sha256: 'e'.repeat(64),
+            artifactType: 'plain_artifact',
+            requestId: null,
+            envelopeCid: null,
+            contentSize: 10,
+            priceUsdc: '0',
+            createdAt: '2026-05-25T15:00:00.000Z',
+            endpoint: null,
+            access: { accessCount: 0, paidServeCount: 0, freeServeCount: 0, failedPaymentCount: 0, paymentRequiredCount: 0, revenueUsdc: '0', lastAccessAt: null, lastPaidAt: null },
+            anchors: [],
+          }]
+        : [],
+    }));
+
+    renderTab();
+    const row = await screen.findByText('plain_artifact');
+    fireEvent.click(row);
+    expect(await screen.findByText(/no on-chain anchor/i)).toBeTruthy();
   });
 });

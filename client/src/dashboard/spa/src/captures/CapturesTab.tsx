@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { CaptureDrillIn } from './CaptureDrillIn.js';
@@ -56,6 +57,57 @@ function formatTime(ts: string | null | undefined): string {
 
 function shortSha(sha: string): string {
   return sha.length > 14 ? `${sha.slice(0, 10)}…${sha.slice(-6)}` : sha;
+}
+
+function explorerTxUrl(chainId: number, txHash: string): string | null {
+  switch (chainId) {
+    case 8453:
+      return `https://basescan.org/tx/${txHash}`;
+    case 84532:
+      return `https://sepolia.basescan.org/tx/${txHash}`;
+    case 11155111:
+      return `https://sepolia.etherscan.io/tx/${txHash}`;
+    default:
+      return null;
+  }
+}
+
+function formatUnixSeconds(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '—';
+  return formatTime(new Date(seconds * 1000).toISOString());
+}
+
+function DetailSection({
+  title,
+  children,
+}: { title: string; children: ReactNode }): JSX.Element {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 pt-0">{children}</CardContent>
+    </Card>
+  );
+}
+
+function DetailList({
+  rows,
+}: {
+  rows: Array<{ label: string; value: ReactNode }>;
+}): JSX.Element {
+  return (
+    <dl className="m-0 grid gap-x-3.5 gap-y-2.5 [grid-template-columns:140px_minmax(0,1fr)]">
+      {rows.map(({ label, value }) => (
+        <Fragment key={label}>
+          <dt className="font-mono text-[12px] text-muted-foreground">{label}</dt>
+          <dd className="m-0 break-all font-mono text-[12px] text-foreground">{value ?? '—'}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
 }
 
 function artifactTime(artifact: OperatorArtifact): string {
@@ -133,62 +185,165 @@ function artifactRow(artifact: OperatorArtifact): ExecutionDataRow {
 
 function ExecutionArtifactDetail({ artifact }: { artifact: OperatorArtifact }): JSX.Element {
   const when = artifactTime(artifact);
+  const projection = artifact.projection;
+  const anchors = artifact.anchors ?? [];
+
+  const identityRows: Array<{ label: string; value: ReactNode }> = [
+    { label: 'state', value: artifactState(artifact) },
+    { label: 'sha256', value: artifact.sha256 },
+    { label: 'recorded', value: formatTime(when) },
+  ];
+
+  const envelopeRows: Array<{ label: string; value: ReactNode }> = [
+    { label: 'envelope', value: artifact.envelopeCid ?? '—' },
+  ];
+  if (projection) {
+    envelopeRows.push(
+      { label: 'signature', value: projection.signatureHash },
+      { label: 'generated', value: formatUnixSeconds(projection.generatedAt) },
+      { label: 'role', value: projection.role },
+      { label: 'solver', value: projection.solverType },
+      { label: 'evidence tier', value: projection.evidenceTier },
+    );
+  }
+
+  const participantRows = projection
+    ? [
+        { label: 'safe', value: projection.participantSafeAddress ?? '—' },
+        { label: 'agent EOA', value: projection.participantAgentEoa ?? '—' },
+        { label: 'impl', value: projection.executor.implName ?? '—' },
+        { label: 'impl version', value: projection.executor.implVersion ?? '—' },
+        { label: 'runtime digest', value: projection.executor.runtimeBundleDigest ?? '—' },
+        {
+          label: 'plugins',
+          value: projection.executor.plugins && projection.executor.plugins.length > 0
+            ? (
+                <div className="flex flex-wrap gap-1">
+                  {projection.executor.plugins.map((p) => (
+                    <Badge key={p} variant="outline">{p}</Badge>
+                  ))}
+                </div>
+              )
+            : '—',
+        },
+      ]
+    : null;
+
+  const taskRows = projection
+    ? [
+        { label: 'task CID', value: projection.taskCid ?? '—' },
+        { label: 'task ID', value: projection.taskId ?? '—' },
+        { label: 'request', value: projection.requestId ?? '—' },
+        {
+          label: 'solution ref',
+          value: projection.solutionRef
+            ? `${projection.solutionRef.envelopeCid}${projection.solutionRef.ref ? ` (${projection.solutionRef.ref})` : ''}`
+            : '—',
+        },
+      ]
+    : null;
+
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="m-0 break-all font-serif text-[22px] font-normal leading-tight text-foreground">
-            {artifact.artifactType}
-          </h1>
-          <div className="mt-1.5 font-mono text-[12px] text-muted-foreground">
-            {artifactState(artifact)} · {formatBytes(artifact.contentSize)} · {formatTime(when)}
-          </div>
-        </div>
-      </header>
+      <DetailSection title="Identity">
+        <DetailList rows={identityRows} />
+      </DetailSection>
 
-      <Card>
-        <CardContent className="p-4">
-          <dl className="m-0 grid gap-x-3.5 gap-y-2.5 [grid-template-columns:140px_minmax(0,1fr)]">
-            <dt className="font-mono text-[12px] text-muted-foreground">type</dt>
-            <dd className="m-0 font-mono text-[12px] text-foreground">{artifact.artifactType}</dd>
-            <dt className="font-mono text-[12px] text-muted-foreground">state</dt>
-            <dd className="m-0 font-mono text-[12px] text-foreground">{artifactState(artifact)}</dd>
-            <dt className="font-mono text-[12px] text-muted-foreground">sha256</dt>
-            <dd className="m-0 break-all font-mono text-[12px] text-foreground">
-              {artifact.sha256}
-            </dd>
-            <dt className="font-mono text-[12px] text-muted-foreground">envelope</dt>
-            <dd className="m-0 break-all font-mono text-[12px] text-foreground">
-              {artifact.envelopeCid ?? '—'}
-            </dd>
-            <dt className="font-mono text-[12px] text-muted-foreground">recorded</dt>
-            <dd className="m-0 font-mono text-[12px] text-foreground">{formatTime(when)}</dd>
-            {artifact.source === 'served' ? (
-              <>
-                <dt className="font-mono text-[12px] text-muted-foreground">request</dt>
-                <dd className="m-0 break-all font-mono text-[12px] text-foreground">
-                  {artifact.requestId ?? '—'}
-                </dd>
-                <dt className="font-mono text-[12px] text-muted-foreground">accesses</dt>
-                <dd className="m-0 font-mono text-[12px] text-foreground">
-                  {artifact.access.accessCount} total · {artifact.access.failedPaymentCount} failed
-                </dd>
-              </>
-            ) : (
-              <>
-                <dt className="font-mono text-[12px] text-muted-foreground">operator</dt>
-                <dd className="m-0 break-all font-mono text-[12px] text-foreground">
-                  {artifact.sourceOperator ?? '—'}
-                </dd>
-                <dt className="font-mono text-[12px] text-muted-foreground">source</dt>
-                <dd className="m-0 break-all font-mono text-[12px] text-foreground">
-                  {artifact.sourceEndpoint ?? '—'}
-                </dd>
-              </>
-            )}
-          </dl>
-        </CardContent>
-      </Card>
+      <DetailSection title="Envelope">
+        <DetailList rows={envelopeRows} />
+      </DetailSection>
+
+      {participantRows ? (
+        <DetailSection title="Participant">
+          <DetailList rows={participantRows} />
+        </DetailSection>
+      ) : null}
+
+      {taskRows ? (
+        <DetailSection title="Task">
+          <DetailList rows={taskRows} />
+        </DetailSection>
+      ) : null}
+
+      <DetailSection title="On-chain anchors">
+        {anchors.length === 0 ? (
+          <div className="font-mono text-[12px] text-muted-foreground">
+            no on-chain anchor recorded yet
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {anchors.map((anchor) => {
+              const explorerHref = explorerTxUrl(anchor.chainId, anchor.txHash);
+              const rows: Array<{ label: string; value: ReactNode }> = [
+                { label: 'content kind', value: anchor.contentKind },
+                { label: 'agent ID', value: anchor.agentId },
+                { label: 'chain ID', value: String(anchor.chainId) },
+                {
+                  label: 'tx',
+                  value: explorerHref ? (
+                    <a
+                      href={explorerHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all underline underline-offset-2 hover:text-foreground"
+                    >
+                      {anchor.txHash}
+                    </a>
+                  ) : (
+                    anchor.txHash
+                  ),
+                },
+                { label: 'block', value: anchor.blockNumber !== null ? String(anchor.blockNumber) : 'pending' },
+                { label: 'anchored', value: formatUnixSeconds(anchor.anchoredAt) },
+                { label: 'registry', value: anchor.identityRegistryAddress },
+                { label: 'metadata key', value: anchor.metadataKey },
+              ];
+              return (
+                <div key={`${anchor.contentKind}:${anchor.txHash}`} className="rounded-md border border-border bg-card p-3">
+                  <DetailList rows={rows} />
+                  <details className="mt-2">
+                    <summary className="cursor-pointer font-mono text-[11px] text-muted-foreground">
+                      payload (ABI-encoded)
+                    </summary>
+                    <div className="mt-1 break-all font-mono text-[11px] text-foreground">
+                      {anchor.payloadHex}
+                    </div>
+                  </details>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </DetailSection>
+
+      {artifact.source === 'served' ? (
+        <DetailSection title="Access">
+          <DetailList
+            rows={[
+              { label: 'request', value: artifact.requestId ?? '—' },
+              {
+                label: 'accesses',
+                value: `${artifact.access.accessCount} total · ${artifact.access.failedPaymentCount} failed`,
+              },
+              { label: 'paid serves', value: String(artifact.access.paidServeCount) },
+              { label: 'free serves', value: String(artifact.access.freeServeCount) },
+              { label: 'revenue', value: `${artifact.access.revenueUsdc} USDC` },
+            ]}
+          />
+        </DetailSection>
+      ) : (
+        <DetailSection title="Source">
+          <DetailList
+            rows={[
+              { label: 'operator', value: artifact.sourceOperator ?? '—' },
+              { label: 'endpoint', value: artifact.sourceEndpoint ?? '—' },
+              { label: 'origin', value: artifact.origin },
+              { label: 'paid', value: `${artifact.paidAmountUsdc} USDC` },
+              { label: 'peer catalog', value: artifact.peerCatalogId ?? '—' },
+            ]}
+          />
+        </DetailSection>
+      )}
     </div>
   );
 }
@@ -291,7 +446,7 @@ export function CapturesTab(): JSX.Element {
           detailQuery.data.spans.length
         } spans`
       : selected?.kind === 'artifact' && selectedArtifact
-        ? `${artifactState(selectedArtifact)} · ${formatBytes(selectedArtifact.contentSize)}`
+        ? `${artifactState(selectedArtifact)} · ${formatBytes(selectedArtifact.contentSize)} · ${formatTime(artifactTime(selectedArtifact))}`
         : 'Execution data detail.';
 
   return (

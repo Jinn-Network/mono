@@ -365,6 +365,48 @@ export interface OperatorArtifactAccessEvent {
   createdAt: string;
 }
 
+export interface OperatorArtifactProjectionExecutor {
+  implName: string | null;
+  implVersion: string | null;
+  runtimeBundleDigest: string | null;
+  plugins: string[] | null;
+}
+
+export interface OperatorArtifactProjectionSolutionRef {
+  envelopeCid: string;
+  envelopeSha256: string | null;
+  ref: string | null;
+}
+
+export interface OperatorArtifactProjection {
+  envelopeId: string;
+  signatureHash: string;
+  solverType: string;
+  role: string;
+  taskCid: string | null;
+  taskId: string | null;
+  requestId: string | null;
+  generatedAt: number;
+  evidenceTier: 'self-signed' | 'committed' | 'attested';
+  participantSafeAddress: string | null;
+  participantAgentEoa: string | null;
+  executor: OperatorArtifactProjectionExecutor;
+  solutionRef?: OperatorArtifactProjectionSolutionRef;
+  metadata: Record<string, string | number | boolean> | null;
+}
+
+export interface OperatorArtifactAnchor {
+  contentKind: string;
+  metadataKey: string;
+  agentId: string;
+  chainId: number;
+  identityRegistryAddress: string;
+  txHash: string;
+  blockNumber: number | null;
+  payloadHex: string;
+  anchoredAt: number;
+}
+
 export interface OperatorServedArtifact {
   source: 'served';
   sha256: string;
@@ -376,6 +418,8 @@ export interface OperatorServedArtifact {
   createdAt: string;
   endpoint: string | null;
   access: OperatorArtifactAccessStats;
+  projection?: OperatorArtifactProjection;
+  anchors: OperatorArtifactAnchor[];
 }
 
 export interface OperatorNetworkArtifact {
@@ -391,12 +435,14 @@ export interface OperatorNetworkArtifact {
   fetchedAt: string;
   lastUsedAt: string;
   peerCatalogId: string | null;
+  projection?: OperatorArtifactProjection;
+  anchors: OperatorArtifactAnchor[];
 }
 
 export type OperatorArtifact = OperatorServedArtifact | OperatorNetworkArtifact;
 
 export interface OperatorArtifactsResponse {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   generatedAt: string;
   source: OperatorArtifactSource;
   pricing: OperatorPricingConfig;

@@ -273,7 +273,7 @@ describe('IdentityPublisher.publishContent', () => {
     });
 
     const cid = 'bafyreienvelope001';
-    const txHash = await publisher.publishContent({
+    const { txHash } = await publisher.publishContent({
       kind: 'envelope',
       cid,
       payload: VECTOR_B_INPUT,
@@ -387,7 +387,7 @@ describe('IdentityPublisher.publishContentV2', () => {
     });
 
     const cid = 'bafyverdict003';
-    const txHash = await publisher.publishContentV2({
+    const { txHash } = await publisher.publishContentV2({
       kind: 'evaluation',
       cid,
       payload: V2_VECTOR_INPUT,

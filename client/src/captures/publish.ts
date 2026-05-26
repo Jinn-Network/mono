@@ -64,7 +64,7 @@ export interface CaptureEnvelopeAnchorInput {
 
 export interface CaptureEnvelopeAnchorResult {
   txHash?: `0x${string}`;
-  blockNumber?: number;
+  blockNumber?: number | null;
 }
 
 export interface PublishCaptureResult {

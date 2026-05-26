@@ -185,6 +185,24 @@ export interface NetworkArtifactMetadataRow {
   peerCatalogId: string | null;
 }
 
+export interface Erc8004AnchorInput {
+  envelopeId: string;
+  envelopeCid: string;
+  contentKind: string;
+  metadataKey: string;
+  agentId: string;
+  chainId: number;
+  identityRegistryAddress: string;
+  txHash: string;
+  blockNumber: number | null;
+  payloadHex: string;
+  anchoredAt: number;
+}
+
+export interface Erc8004AnchorRow extends Erc8004AnchorInput {
+  id: number;
+}
+
 export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
 type LauncherTaskProjectionState = 'open' | 'claims-in-flight' | 'fully-claimed' | 'settled' | 'failed';
 
@@ -439,6 +457,23 @@ CREATE TABLE IF NOT EXISTS envelope_projection_metadata (
 );
 CREATE INDEX IF NOT EXISTS idx_envelope_projection_metadata_key_value
   ON envelope_projection_metadata (key, value_text);
+
+CREATE TABLE IF NOT EXISTS erc8004_anchors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  envelope_id TEXT NOT NULL,
+  envelope_cid TEXT NOT NULL,
+  content_kind TEXT NOT NULL,
+  metadata_key TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  chain_id INTEGER NOT NULL,
+  identity_registry_address TEXT NOT NULL,
+  tx_hash TEXT NOT NULL,
+  block_number INTEGER,
+  payload_hex TEXT NOT NULL,
+  anchored_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_cid ON erc8004_anchors(envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_id ON erc8004_anchors(envelope_id);
 
 CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
@@ -2343,6 +2378,73 @@ export class Store {
     ).all(params) as EnvelopeProjectionRow[];
 
     return rows.map(rowToEnvelopeProjection);
+  }
+
+  saveErc8004Anchor(input: Erc8004AnchorInput): void {
+    this.db.prepare(
+      `INSERT INTO erc8004_anchors
+         (envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
+          chain_id, identity_registry_address, tx_hash, block_number,
+          payload_hex, anchored_at)
+       VALUES
+         (@envelopeId, @envelopeCid, @contentKind, @metadataKey, @agentId,
+          @chainId, @identityRegistryAddress, @txHash, @blockNumber,
+          @payloadHex, @anchoredAt)`,
+    ).run({
+      envelopeId: input.envelopeId,
+      envelopeCid: input.envelopeCid,
+      contentKind: input.contentKind,
+      metadataKey: input.metadataKey,
+      agentId: input.agentId,
+      chainId: input.chainId,
+      identityRegistryAddress: input.identityRegistryAddress,
+      txHash: input.txHash,
+      blockNumber: input.blockNumber,
+      payloadHex: input.payloadHex,
+      anchoredAt: input.anchoredAt,
+    });
+  }
+
+  listErc8004AnchorsByEnvelopeCids(envelopeCids: readonly string[]): Erc8004AnchorRow[] {
+    if (envelopeCids.length === 0) return [];
+    const placeholders = envelopeCids.map((_, i) => `@cid${i}`).join(', ');
+    const params: Record<string, string> = {};
+    envelopeCids.forEach((cid, i) => { params[`cid${i}`] = cid; });
+    const rows = this.db.prepare(
+      `SELECT id, envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
+              chain_id, identity_registry_address, tx_hash, block_number,
+              payload_hex, anchored_at
+         FROM erc8004_anchors
+         WHERE envelope_cid IN (${placeholders})
+         ORDER BY anchored_at ASC, id ASC`,
+    ).all(params) as Array<{
+      id: number;
+      envelope_id: string;
+      envelope_cid: string;
+      content_kind: string;
+      metadata_key: string;
+      agent_id: string;
+      chain_id: number;
+      identity_registry_address: string;
+      tx_hash: string;
+      block_number: number | null;
+      payload_hex: string;
+      anchored_at: number;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      envelopeId: r.envelope_id,
+      envelopeCid: r.envelope_cid,
+      contentKind: r.content_kind,
+      metadataKey: r.metadata_key,
+      agentId: r.agent_id,
+      chainId: r.chain_id,
+      identityRegistryAddress: r.identity_registry_address,
+      txHash: r.tx_hash,
+      blockNumber: r.block_number,
+      payloadHex: r.payload_hex,
+      anchoredAt: r.anchored_at,
+    }));
   }
 
   close(): void {

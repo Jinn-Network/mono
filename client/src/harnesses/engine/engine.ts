@@ -51,6 +51,8 @@ import type {
 import {
   submitEvaluatorFeedback,
   codeDigestSha256ToBytes32,
+  encodeExecutionPayload,
+  encodeExecutionPayloadV2,
   modeStringToFlag,
 } from '../../erc8004/index.js';
 import type { ArtifactSource, Role } from '../../types/envelope.js';
@@ -1804,6 +1806,8 @@ export class TaskEngine {
         !!harnessImplName;
       try {
         let pubTxHash: `0x${string}`;
+        let pubBlockNumber: number | null;
+        let payloadHex: `0x${string}`;
         if (canEmitV2) {
           const v2Payload: ExecutionPayloadV2 = {
             version: 2,
@@ -1816,11 +1820,14 @@ export class TaskEngine {
             implName: harnessImplName as string,
             modeFlag: modeStringToFlag(task.executorMode as 'train' | 'frozen'),
           };
-          pubTxHash = await this.identityPublisher.publishContentV2({
+          payloadHex = encodeExecutionPayloadV2(v2Payload);
+          const result = await this.identityPublisher.publishContentV2({
             kind: metadataKind,
             cid: manifestCid,
             payload: v2Payload,
           });
+          pubTxHash = result.txHash;
+          pubBlockNumber = result.blockNumber;
           console.log(
             `[harness-engine] ${requestId}: setMetadata ${metadataKind}:${manifestCid} tx=${pubTxHash} (payload v2 mode=${task.executorMode} impl=${harnessImplName})`,
           );
@@ -1833,13 +1840,35 @@ export class TaskEngine {
             sourceMeasurement:
               '0x0000000000000000000000000000000000000000000000000000000000000000',
           };
-          pubTxHash = await this.identityPublisher.publishContent({
+          payloadHex = encodeExecutionPayload(v1Payload);
+          const result = await this.identityPublisher.publishContent({
             kind: metadataKind,
             cid: manifestCid,
             payload: v1Payload,
           });
+          pubTxHash = result.txHash;
+          pubBlockNumber = result.blockNumber;
           console.log(
             `[harness-engine] ${requestId}: setMetadata ${metadataKind}:${manifestCid} tx=${pubTxHash} (payload v1)`,
+          );
+        }
+        try {
+          this.store.saveErc8004Anchor({
+            envelopeId: manifestHashHex,
+            envelopeCid: manifestCid,
+            contentKind: metadataKind,
+            metadataKey: `${metadataKind}:${manifestCid}`,
+            agentId: this.identityPublisher.agent.toString(),
+            chainId: this.identityPublisher.chainId,
+            identityRegistryAddress: this.identityPublisher.registry,
+            txHash: pubTxHash,
+            blockNumber: pubBlockNumber,
+            payloadHex,
+            anchoredAt: Math.floor(Date.now() / 1000),
+          });
+        } catch (anchorErr) {
+          console.warn(
+            `[harness-engine] ${requestId}: failed to record erc8004 anchor (non-fatal): ${anchorErr instanceof Error ? anchorErr.message : anchorErr}`,
           );
         }
       } catch (err) {

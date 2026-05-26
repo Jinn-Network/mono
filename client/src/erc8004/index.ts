@@ -42,6 +42,7 @@ export {
   type ExecutionTier,
   type IdentityPublisherConfig,
   type PublishContentArgs,
+  type PublishContentResult,
   type PublishContentV2Args,
   type ResolveAgentIdArgs,
   type ResolvedAgent,

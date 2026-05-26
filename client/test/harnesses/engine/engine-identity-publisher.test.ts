@@ -214,7 +214,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
   // ── pack() must NOT call publishContent ──────────────────────────────────────
 
   it('pack() does NOT call publishContent', async () => {
-    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
+    const publishContentMock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhash' as Hex, blockNumber: 1 });
     const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
 
     const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
@@ -243,7 +243,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
   // ── deliver() calls publishContent AFTER claimDelivery succeeds ─────────────
 
   it('deliver() calls publishContent after claimDelivery succeeds, using evidenceHash from pack', async () => {
-    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
+    const publishContentMock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhash' as Hex, blockNumber: 1 });
     const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
 
     const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
@@ -301,8 +301,8 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
   });
 
   it('deliver() emits a v2 setMetadata payload when executorMode + executorCodeDigest + implName are populated', async () => {
-    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
-    const publishContentV2Mock = vi.fn().mockResolvedValue('0xpubtxhashv2' as Hex);
+    const publishContentMock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhash' as Hex, blockNumber: 1 });
+    const publishContentV2Mock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhashv2' as Hex, blockNumber: 1 });
     const mockPublisher = {
       publishContent: publishContentMock,
       publishContentV2: publishContentV2Mock,
@@ -375,8 +375,8 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
   });
 
   it('deliver() falls back to v1 setMetadata when executorMode/codeDigest/implName are absent (back-compat)', async () => {
-    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
-    const publishContentV2Mock = vi.fn().mockResolvedValue('0xpubtxhashv2' as Hex);
+    const publishContentMock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhash' as Hex, blockNumber: 1 });
+    const publishContentV2Mock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhashv2' as Hex, blockNumber: 1 });
     const mockPublisher = {
       publishContent: publishContentMock,
       publishContentV2: publishContentV2Mock,
@@ -397,8 +397,8 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
   // ── jinn-mono-n93o: evaluation role publishes `evaluation:<cid>` ────────────
 
   it('deliver() publishes evaluation:<cid> when taskRole=evaluation (jinn-mono-n93o)', async () => {
-    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
-    const publishContentV2Mock = vi.fn().mockResolvedValue('0xpubtxhashv2' as Hex);
+    const publishContentMock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhash' as Hex, blockNumber: 1 });
+    const publishContentV2Mock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhashv2' as Hex, blockNumber: 1 });
     const mockPublisher = {
       publishContent: publishContentMock,
       publishContentV2: publishContentV2Mock,
@@ -464,7 +464,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     // calling it a second time with the same payload is safe. This test seeds two
     // separate DELIVERING intents with the same evidenceHash (simulating retry
     // from a separate engine instance) to verify both calls use the persisted hash.
-    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
+    const publishContentMock = vi.fn().mockResolvedValue({ txHash: '0xpubtxhash' as Hex, blockNumber: 1 });
     const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
 
     const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));

@@ -7,6 +7,7 @@ import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import type { IdentityPublisher, ExecutionPayloadV2 } from '../erc8004/index.js';
 import {
   codeDigestSha256ToBytes32,
+  encodeExecutionPayloadV2,
   modeStringToFlag,
 } from '../erc8004/index.js';
 import {
@@ -113,7 +114,7 @@ export function createLiveCapturePublisher(options: LiveCapturePublisherOptions)
             priceUsdc: '0',
           };
         },
-        anchorEnvelope: async ({ envelopeCid, envelopeHash, envelope }) => {
+        anchorEnvelope: async ({ metadataKey, envelopeCid, envelopeHash, envelope }) => {
           const payload: ExecutionPayloadV2 = {
             version: 2,
             tier: 0,
@@ -124,12 +125,33 @@ export function createLiveCapturePublisher(options: LiveCapturePublisherOptions)
             implName: envelope.executor.implName,
             modeFlag: modeStringToFlag(envelope.executor.mode ?? 'train'),
           };
-          const txHash = await options.identityPublisher!.publishContentV2({
+          const payloadHex = encodeExecutionPayloadV2(payload);
+          const publisher = options.identityPublisher!;
+          const { txHash, blockNumber } = await publisher.publishContentV2({
             kind: 'capture',
             cid: envelopeCid,
             payload,
           });
-          return { txHash };
+          try {
+            options.store.saveErc8004Anchor({
+              envelopeId: envelopeHash,
+              envelopeCid,
+              contentKind: 'capture',
+              metadataKey,
+              agentId: publisher.agent.toString(),
+              chainId: publisher.chainId,
+              identityRegistryAddress: publisher.registry,
+              txHash,
+              blockNumber,
+              payloadHex,
+              anchoredAt: Math.floor(Date.now() / 1000),
+            });
+          } catch (err) {
+            console.warn(
+              `[captures] failed to record erc8004 anchor for ${envelopeCid} (non-fatal): ${err instanceof Error ? err.message : err}`,
+            );
+          }
+          return { txHash, blockNumber };
         },
       };
 

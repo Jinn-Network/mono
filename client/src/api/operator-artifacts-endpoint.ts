@@ -7,10 +7,12 @@ import {
 } from '../config.js';
 import type {
   ArtifactAccessStats,
+  Erc8004AnchorRow,
   NetworkArtifactMetadataRow,
   ServedArtifactMetadataRow,
   Store,
 } from '../store/store.js';
+import type { EnvelopeProjection } from '../corpus/types.js';
 
 export interface OperatorPricingConfig {
   publicEndpoint: string;
@@ -161,10 +163,56 @@ function endpointFor(pricing: OperatorPricingConfig, sha256: string): string | n
   return `${pricing.publicEndpoint.replace(/\/$/, '')}/v1/artifacts/${sha256}/content`;
 }
 
+function projectionToResponse(projection: EnvelopeProjection): Record<string, unknown> {
+  return {
+    envelopeId: projection.envelopeId,
+    signatureHash: projection.signatureHash,
+    solverType: projection.solverType,
+    role: projection.role,
+    taskCid: projection.taskCid,
+    taskId: projection.taskId,
+    requestId: projection.requestId,
+    generatedAt: projection.generatedAt,
+    evidenceTier: projection.evidenceTier,
+    participantSafeAddress: projection.participantSafeAddress,
+    participantAgentEoa: projection.participantAgentEoa,
+    executor: {
+      implName: projection.executorImplName,
+      implVersion: projection.executorImplVersion,
+      runtimeBundleDigest: projection.executorRuntimeBundleDigest,
+      plugins: projection.executorPlugins.length > 0 ? projection.executorPlugins : null,
+    },
+    solutionRef: projection.solutionEnvelopeCid
+      ? {
+          envelopeCid: projection.solutionEnvelopeCid,
+          envelopeSha256: projection.solutionEnvelopeSha256,
+          ref: projection.solutionEnvelopeRef,
+        }
+      : undefined,
+    metadata: Object.keys(projection.metadata).length > 0 ? projection.metadata : null,
+  };
+}
+
+function anchorToResponse(anchor: Erc8004AnchorRow): Record<string, unknown> {
+  return {
+    contentKind: anchor.contentKind,
+    metadataKey: anchor.metadataKey,
+    agentId: anchor.agentId,
+    chainId: anchor.chainId,
+    identityRegistryAddress: anchor.identityRegistryAddress,
+    txHash: anchor.txHash,
+    blockNumber: anchor.blockNumber,
+    payloadHex: anchor.payloadHex,
+    anchoredAt: anchor.anchoredAt,
+  };
+}
+
 function servedArtifact(
   row: ServedArtifactMetadataRow,
   pricing: OperatorPricingConfig,
   access: ArtifactAccessStats,
+  projection: EnvelopeProjection | undefined,
+  anchors: Erc8004AnchorRow[],
 ): Record<string, unknown> {
   return {
     source: 'served',
@@ -177,10 +225,16 @@ function servedArtifact(
     createdAt: row.createdAt,
     endpoint: endpointFor(pricing, row.sha256),
     access,
+    projection: projection ? projectionToResponse(projection) : undefined,
+    anchors: anchors.map(anchorToResponse),
   };
 }
 
-function networkArtifact(row: NetworkArtifactMetadataRow): Record<string, unknown> {
+function networkArtifact(
+  row: NetworkArtifactMetadataRow,
+  projection: EnvelopeProjection | undefined,
+  anchors: Erc8004AnchorRow[],
+): Record<string, unknown> {
   return {
     source: 'network',
     sha256: row.sha256,
@@ -194,6 +248,8 @@ function networkArtifact(row: NetworkArtifactMetadataRow): Record<string, unknow
     fetchedAt: row.fetchedAt,
     lastUsedAt: row.lastUsedAt,
     peerCatalogId: row.peerCatalogId,
+    projection: projection ? projectionToResponse(projection) : undefined,
+    anchors: anchors.map(anchorToResponse),
   };
 }
 
@@ -304,16 +360,57 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
       }, 500);
     }
 
+    const baseRows: Array<{ sha256: string; envelopeCid: string | null }> =
+      source === 'served'
+        ? config.store.listServedArtifactMetadata({ artifactType, limit })
+        : config.store.listNetworkArtifactMetadata({ artifactType, limit });
+
+    const envelopeCids = Array.from(
+      new Set(
+        baseRows
+          .map((r) => r.envelopeCid)
+          .filter((cid): cid is string => typeof cid === 'string' && cid.length > 0),
+      ),
+    );
+    const projections = envelopeCids.length > 0
+      ? config.store.queryEnvelopeProjections({ envelopeRefs: envelopeCids, limit: envelopeCids.length })
+      : [];
+    const projectionByCid = new Map<string, EnvelopeProjection>();
+    for (const p of projections) {
+      if (p.envelopeCid) projectionByCid.set(p.envelopeCid, p);
+    }
+    const anchorRows = config.store.listErc8004AnchorsByEnvelopeCids(envelopeCids);
+    const anchorsByCid = new Map<string, Erc8004AnchorRow[]>();
+    for (const a of anchorRows) {
+      const list = anchorsByCid.get(a.envelopeCid) ?? [];
+      list.push(a);
+      anchorsByCid.set(a.envelopeCid, list);
+    }
+
     const rows = source === 'served'
       ? (() => {
-          const servedRows = config.store.listServedArtifactMetadata({ artifactType, limit });
+          const servedRows = baseRows as ServedArtifactMetadataRow[];
           const accessBySha = config.store.getArtifactAccessStatsBySha(servedRows.map((row) => row.sha256));
-          return servedRows.map((row) => servedArtifact(row, pricing, accessBySha[row.sha256] ?? EMPTY_ACCESS_STATS));
+          return servedRows.map((row) =>
+            servedArtifact(
+              row,
+              pricing,
+              accessBySha[row.sha256] ?? EMPTY_ACCESS_STATS,
+              row.envelopeCid ? projectionByCid.get(row.envelopeCid) : undefined,
+              row.envelopeCid ? anchorsByCid.get(row.envelopeCid) ?? [] : [],
+            ),
+          );
         })()
-      : config.store.listNetworkArtifactMetadata({ artifactType, limit }).map(networkArtifact);
+      : (baseRows as NetworkArtifactMetadataRow[]).map((row) =>
+          networkArtifact(
+            row,
+            row.envelopeCid ? projectionByCid.get(row.envelopeCid) : undefined,
+            row.envelopeCid ? anchorsByCid.get(row.envelopeCid) ?? [] : [],
+          ),
+        );
 
     return c.json({
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAt: new Date().toISOString(),
       source,
       pricing,
