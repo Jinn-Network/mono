@@ -113,17 +113,18 @@ If your PR touches Prediction-only surfaces (Polymarket task generator, `predict
 
 ## AI workflow rules (summary)
 
-Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-workflow-rules). The eight ratified rules (rule 5 deferred):
+Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-workflow-rules). The ten ratified rules (rule 5 deferred):
 
-1. Worktree-for-multi-agent — multi-agent or speculative subagent work uses `git worktree add cargo/.tasks/<id>`.
-2. Beads frame problems, not solutions — bd bodies = context + impact + acceptance criteria; solutions go in design sessions.
-3. bd-as-SoR, not `MEMORY.md` — use `bd remember` for persistent knowledge.
-4. Agent PR review parity — agent PRs reviewed like human PRs.
+1. Worktree-for-multi-agent — multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`).
+2. Issues frame problems, not solutions — GitHub Issue body = context + impact + acceptance criteria; solutions live in design sessions or implementation plans.
+3. GitHub Issues are the single SoR for engineering work — per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`.
+4. Agent PR review parity — Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exception: `fix(incident)` with documented reviewer justification.
 5. _(Deferred — see [`jinn-mono-8qbc`](https://github.com/Jinn-Network/mono/issues?q=jinn-mono-8qbc))_
 6. Integration tests > mocks for migration / contract surfaces.
 7. TDD for new features, regression test for fixes.
-8. Auto-canary on main merge; Monday-only named stable cut.
+8. Auto-canary on every push to `next`; Monday-only named stable cut promotes `main`.
 9. `canary` for rolling patches, `latest` for Monday named.
+10. PRs target `next`, not `main` — only exception is `fix(incident)` hotfixes (target `main` directly, mandatory back-merge per [`docs/runbooks/hotfix.md`](docs/runbooks/hotfix.md)); branch protection on `main` enforces this (issue #589).
 
 ## Issue tracker
 
