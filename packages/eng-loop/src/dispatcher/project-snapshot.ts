@@ -23,6 +23,12 @@ import type {
   Priority,
   ProjectStatus,
 } from './types.js';
+// Type-only back-import: `IssueBoardState` lives in the seam module
+// (`./issue-source.js`), and `toIssueBoardState` below adapts our
+// GitHub-specific snapshot into that abstract view (#600). The import is
+// `import type` so it never lands in the emitted JS, sidestepping the
+// runtime cycle that would otherwise exist between these two modules.
+import type { IssueBoardEntry, IssueBoardState } from './issue-source.js';
 
 // ---------------------------------------------------------------------------
 // Helper types
@@ -560,5 +566,49 @@ export async function fetchProjectSnapshot(
     items,
     rateLimit: rateLimit ?? { remaining: 0, used: 0, resetAt: '' },
     currentSprintIterationId: resolveCurrentSprintIterationId(sprintIterations, nowMs),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// IssueBoardState adapter (#600)
+//
+// The GitHub-Project snapshot is the concrete board substrate; `IssueSource`
+// implementations consume the abstract {@link IssueBoardState} (#600). This
+// adapter projects a snapshot down to that view: it filters out non-Issue
+// content (PRs, DraftIssues are not dispatchable) and indexes the surviving
+// items by issue number for O(1) lookup.
+//
+// Non-Issue filtering used to live in `GhIssueSource.poll`; folding it in
+// here keeps the seam clean — every entry returned via `getIssue` is
+// guaranteed to be Issue-typed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Adapt a {@link ProjectSnapshot} to the abstract {@link IssueBoardState}
+ * that `IssueSource.poll` consumes (#600).
+ *
+ * The snapshot's full power (rate-limit budget, non-Issue items) stays with
+ * `runCycle` for the rate-limit gate and `deriveInFlight`; the seam itself
+ * only sees the projected view.
+ */
+export function toIssueBoardState(snapshot: ProjectSnapshot): IssueBoardState {
+  const byNumber = new Map<number, IssueBoardEntry>();
+  for (const item of snapshot.items) {
+    if (item.contentType !== 'Issue') continue;
+    byNumber.set(item.number, {
+      id: item.id,
+      status: item.status,
+      priority: item.priority,
+      effort: item.effort,
+      blockedOn: item.blockedOn,
+      issueType: item.issueType,
+      sprintIterationId: item.sprintIterationId,
+    });
+  }
+  return {
+    getIssue(issueNumber: number): IssueBoardEntry | null {
+      return byNumber.get(issueNumber) ?? null;
+    },
+    currentSprintIterationId: snapshot.currentSprintIterationId,
   };
 }

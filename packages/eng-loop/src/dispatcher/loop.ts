@@ -1,5 +1,6 @@
 import type { IssueSource } from './issue-source.js';
 import type { ProjectSnapshot } from './project-snapshot.js';
+import { toIssueBoardState } from './project-snapshot.js';
 import type { DispatcherConfig, InFlightSession, ReadyIssue } from './types.js';
 import type { WallClock } from './wall-clock.js';
 import { selectReady, type SkippedForAuthor } from './ready-filter.js';
@@ -96,9 +97,12 @@ export async function runCycle(
 ): Promise<CycleReport> {
   const { source, cfg, deriveInFlight, dispatchIssue, countOpenReadyPrs, wallClock, pauseSession } = deps;
 
-  // 1. Poll + derive in-flight in parallel for efficiency
+  // 1. Poll + derive in-flight in parallel for efficiency.
+  //    The IssueSource sees only the abstract IssueBoardState (#600) — the
+  //    full ProjectSnapshot stays here for the rate-limit gate and
+  //    `deriveInFlight`, which still need `rateLimit` and the raw `items`.
   const [polled, { inFlight, drift }, openPrCount] = await Promise.all([
-    source.poll(snapshot),
+    source.poll(toIssueBoardState(snapshot)),
     deriveInFlight(),
     countOpenReadyPrs(),
   ]);

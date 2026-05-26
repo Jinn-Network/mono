@@ -1,18 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { GhIssueSource } from '../../src/dispatcher/issue-source.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
+import {
+  toIssueBoardState,
+} from '../../src/dispatcher/project-snapshot.js';
 import type {
   ProjectSnapshot,
   SnapshotItem,
 } from '../../src/dispatcher/project-snapshot.js';
 
 /**
- * Post-#585 fixtures.
+ * Post-#585 / post-#600 fixtures.
  *
- * GhIssueSource.poll(snapshot) now reads board state (status / priority /
- * effort / blocked on / issueType) from a {@link ProjectSnapshot} the
- * orchestrator fetches once per cycle. Only `gh issue list` (REST) remains
- * as a runner call.
+ * GhIssueSource.poll(board) now consumes the abstract IssueBoardState (#600);
+ * the GitHub-specific projection lives in `toIssueBoardState(snapshot)`. These
+ * tests still build a {@link ProjectSnapshot}-shaped fixture so they exercise
+ * the production path (snapshot → adapter → source) end-to-end — every
+ * `source.poll(SNAPSHOT)` call site below wraps the snapshot in
+ * `toIssueBoardState(...)`.
+ *
+ * Only `gh issue list` (REST) remains as a runner call inside the source.
  *
  * gh issue list --repo Jinn-Network/mono --state open --json number,title,labels
  *   → [{"labels":[],"number":403,"title":"fix(client): something"}, ...]
@@ -104,7 +111,7 @@ function makeFakeRunner(): CommandRunner {
 describe('GhIssueSource', () => {
   it('maps an issue on the board with Issue Type to a fully-populated PolledIssue', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll(SNAPSHOT);
+    const issues = await source.poll(toIssueBoardState(SNAPSHOT));
 
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_WITH_TYPE);
     expect(issue).toBeDefined();
@@ -120,7 +127,7 @@ describe('GhIssueSource', () => {
 
   it('maps an issue on the board with no Issue Type to shape: null', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll(SNAPSHOT);
+    const issues = await source.poll(toIssueBoardState(SNAPSHOT));
 
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_NO_TYPE);
     expect(issue).toBeDefined();
@@ -133,7 +140,7 @@ describe('GhIssueSource', () => {
 
   it('maps an issue not on the board to onBoard: false with null routing fields', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll(SNAPSHOT);
+    const issues = await source.poll(toIssueBoardState(SNAPSHOT));
 
     const issue = issues.find((i) => i.number === ISSUE_NOT_ON_BOARD);
     expect(issue).toBeDefined();
@@ -149,13 +156,13 @@ describe('GhIssueSource', () => {
 
   it('returns all polled issues (including off-board ones)', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll(SNAPSHOT);
+    const issues = await source.poll(toIssueBoardState(SNAPSHOT));
     expect(issues.length).toBe(3);
   });
 
   it('preserves issue title from the issue list', async () => {
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll(SNAPSHOT);
+    const issues = await source.poll(toIssueBoardState(SNAPSHOT));
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_WITH_TYPE);
     expect(issue!.title).toBe('fix(client): test-gated TaskClaimEmitter redeploy');
   });
@@ -178,7 +185,7 @@ describe('GhIssueSource', () => {
       currentSprintIterationId: null,
     };
     const source = new GhIssueSource(makeFakeRunner());
-    const issues = await source.poll(snapshotWithPr);
+    const issues = await source.poll(toIssueBoardState(snapshotWithPr));
 
     const issue = issues.find((i) => i.number === ISSUE_ON_BOARD_WITH_TYPE);
     expect(issue!.onBoard).toBe(false);
