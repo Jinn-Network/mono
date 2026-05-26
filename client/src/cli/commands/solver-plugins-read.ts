@@ -22,6 +22,14 @@ import type { SolverPluginsDeps } from './solver-plugins.js';
 import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
 import { DiscoveryUnavailableError } from '../../discovery/types.js';
 
+export interface DiscoverOptions {
+  solverType: string | undefined;
+  builderAgentId: string | undefined;
+  includeRevoked: boolean | undefined;
+  limit: number | undefined;
+  configPath: string | undefined;
+}
+
 export interface ListFeedbackOptions {
   pluginCid: string;
   client: Address | undefined;
@@ -45,6 +53,63 @@ function emitDiscoveryUnavailable(
     },
   });
   ctx.exit(1);
+}
+
+/**
+ * `discover` lists published plug-in rows directly from the indexer. The
+ * `PluginPublication` row already carries name/version/supports/builderAgentId,
+ * so no IPFS payload dereference is required — `ipfsFetch` is held on
+ * SolverPluginsDeps for symmetry / future use but this handler does not
+ * consume it (a plan refinement vs. the design note's "missing IPFS config"
+ * failure mode; that mode does not apply because the discovery row is
+ * self-describing).
+ */
+export async function discoverHandler(
+  ctx: CommandContext,
+  opts: DiscoverOptions,
+  deps: SolverPluginsDeps,
+): Promise<void> {
+  let config: ReturnType<typeof deps.loadConfig>;
+  try {
+    config = deps.loadConfig(opts.configPath);
+  } catch (err) {
+    writeJson(ctx, {
+      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
+    });
+    ctx.exit(1);
+    return;
+  }
+
+  try {
+    const api = deps.discoveryApiFactory(config);
+    const plugins = await api.listPluginPublications({
+      ...(opts.solverType ? { solverType: opts.solverType } : {}),
+      ...(opts.builderAgentId ? { builderAgentId: opts.builderAgentId } : {}),
+      ...(opts.includeRevoked !== undefined ? { includeRevoked: opts.includeRevoked } : {}),
+      ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+    });
+
+    writeJson(ctx, {
+      verb: 'solver-plugins discover',
+      plugins: plugins.map((p) => ({
+        cid: p.cid,
+        builderAgentId: p.builderAgentId,
+        name: p.name,
+        version: p.version,
+        supports: p.supports,
+        publishedAt: p.publishedAt,
+        revoked: p.revoked,
+        ...(p.revokedReason ? { revokedReason: p.revokedReason } : {}),
+        pluginSha256: p.pluginSha256,
+      })),
+    });
+  } catch (err) {
+    if (err instanceof DiscoveryUnavailableError) {
+      emitDiscoveryUnavailable(ctx, config, err);
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function listFeedbackHandler(

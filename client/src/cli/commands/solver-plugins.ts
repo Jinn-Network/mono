@@ -39,7 +39,7 @@ import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
 import { blockHandler } from './solver-plugins-block.js';
-import { listFeedbackHandler } from './solver-plugins-read.js';
+import { listFeedbackHandler, discoverHandler } from './solver-plugins-read.js';
 import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
 import { createDiscoveryAPI } from '../../discovery/factory.js';
@@ -386,6 +386,42 @@ export function createSolverPluginsCommand(
             builderAgentIdOverride: parsed.values['builder-agent-id']
               ? BigInt(parsed.values['builder-agent-id'] as string)
               : undefined,
+          },
+          resolvedDeps,
+        );
+      }
+      if (subverb === 'discover') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            'solver-type': { type: 'string' },
+            builder: { type: 'string' },
+            'include-revoked': { type: 'boolean' },
+            limit: { type: 'string' },
+            config: { type: 'string' },
+          },
+        });
+        const limitRaw = parsed.values.limit as string | undefined;
+        let limit: number | undefined;
+        if (limitRaw !== undefined) {
+          limit = Number.parseInt(limitRaw, 10);
+          if (!Number.isFinite(limit) || limit <= 0) {
+            writeJson(ctx, {
+              error: { code: 'invalid_invocation', message: 'solver-plugins discover --limit must be a positive integer' },
+            });
+            ctx.exit(1);
+            return;
+          }
+        }
+        return discoverHandler(
+          ctx,
+          {
+            solverType: parsed.values['solver-type'] as string | undefined,
+            builderAgentId: parsed.values.builder as string | undefined,
+            includeRevoked: parsed.values['include-revoked'] as boolean | undefined,
+            limit,
+            configPath: parsed.values.config as string | undefined,
           },
           resolvedDeps,
         );

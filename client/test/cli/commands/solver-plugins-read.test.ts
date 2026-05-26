@@ -39,6 +39,70 @@ function discoveryThatThrows(err: Error): DiscoveryAPI {
   } as unknown as DiscoveryAPI;
 }
 
+describe('jinn solver-plugins discover', () => {
+  it('lists published plug-in rows from discovery', async () => {
+    const configPath = withTempConfig();
+    const rows = [
+      fakePluginRow('bafyA', '777'),
+      fakePluginRow('bafyB', '778'),
+    ];
+    const listPluginPublications = vi.fn(async () => rows);
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () =>
+        ({ listPluginPublications } as unknown as DiscoveryAPI),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+    });
+
+    const { ctx, writes, exits } = makeCtx(
+      ['discover', '--solver-type', 'swe-rebench-v2.v1', '--config', configPath],
+      {}, // No JINN_PASSWORD.
+    );
+    await command.run(ctx);
+
+    expect(listPluginPublications).toHaveBeenCalledOnce();
+    const callArg = listPluginPublications.mock.calls[0]![0];
+    expect(callArg?.solverType).toBe('swe-rebench-v2.v1');
+
+    const out = parsedLine(writes);
+    expect(out.verb).toBe('solver-plugins discover');
+    const plugins = out.plugins as Array<Record<string, unknown>>;
+    expect(plugins).toHaveLength(2);
+    expect(plugins[0]!.cid).toBe('bafyA');
+    expect(plugins[1]!.cid).toBe('bafyB');
+    expect(exits).toEqual([]);
+  });
+
+  it('emits discovery_unavailable when the factory throws', async () => {
+    const configPath = withTempConfig();
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () =>
+        discoveryThatThrows(new DiscoveryUnavailableError('unreachable')),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+    });
+    const { ctx, writes, exits } = makeCtx(['discover', '--config', configPath], {});
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('discovery_unavailable');
+    expect(exits).toEqual([1]);
+  });
+});
+
 describe('jinn solver-plugins list-feedback', () => {
   it('reads all feedback for the cid via the read-only client', async () => {
     const configPath = withTempConfig();
