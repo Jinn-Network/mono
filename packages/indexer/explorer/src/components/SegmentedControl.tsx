@@ -1,9 +1,9 @@
 /**
  * SegmentedControl — a row of buttons where exactly one is active.
  *
- * Lifted out of SolverNetView (commit 1992ac3f) so ExploreView and
- * ExploreControls can reuse it. No visual change from the previous in-file
- * definition.
+ * Lifted out of SolverNetView (commit 1992ac3f) so ExploreControls and other
+ * views can reuse the chip-row pattern. No visual change from the previous
+ * in-file definition.
  *
  * Design:
  *   - 1px var(--border) hairline outline, var(--radius-1) corners, overflow:hidden

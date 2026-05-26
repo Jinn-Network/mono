@@ -149,11 +149,12 @@ function setupMockFetch() {
 
 // ── Wrapper ───────────────────────────────────────────────────────────────────
 
-function makeWrapper(path: string) {
+function makeWrapper(path: string, opts: { static?: boolean } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
   });
-  const { hook } = memoryLocation({ path, static: true });
+  const isStatic = opts.static ?? true;
+  const { hook } = memoryLocation({ path, static: isStatic });
 
   function Wrapper({ children }: { children: React.ReactNode }) {
     return (
@@ -225,12 +226,28 @@ describe('App routing', () => {
     });
   });
 
-  it('/explore/abc → ExploreView mounts with the cid', async () => {
-    const Wrapper = makeWrapper('/explore/abc');
+  it('/explore/abc → redirects to /solvernet/abc (SolverNetView mounts)', async () => {
+    const Wrapper = makeWrapper('/explore/abc', { static: false });
     render(<App />, { wrapper: Wrapper });
     await waitFor(() => {
-      // Header reads "Explore <name>" — name from SolverNet meta fixture is "Test"
-      expect(screen.getByText(/explore test/i)).toBeInTheDocument();
+      // After the redirect SolverNetView mounts. Its breadcrumb shows the
+      // (very short) decoded CID "abc"; the chrome's nav also has "SolverNets".
+      // The legacy "Explore Test" header should be gone.
+      expect(screen.getAllByText('SolverNets').length).toBeGreaterThanOrEqual(2);
+    });
+    expect(screen.queryByText(/explore test/i)).not.toBeInTheDocument();
+  });
+
+  it('/explore/abc?filter[harness]=codex&window=30 redirects preserving the query string', async () => {
+    const Wrapper = makeWrapper(
+      '/explore/abc?filter[harness]=codex&window=30',
+      { static: false },
+    );
+    render(<App />, { wrapper: Wrapper });
+    await waitFor(() => {
+      // The redirected SolverNetView reads the URL filter into the active-slice strip
+      const chips = screen.getByTestId('active-slice-chips');
+      expect(chips).toHaveTextContent(/harness:codex/i);
     });
   });
 

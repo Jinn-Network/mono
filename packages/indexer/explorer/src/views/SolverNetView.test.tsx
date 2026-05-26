@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router, Switch, Route } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -134,11 +134,15 @@ vi.mock('../lib/api', () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeWrapper(path = `/solvernet/${encodeURIComponent(CID)}`) {
+function makeWrapper(
+  path = `/solvernet/${encodeURIComponent(CID)}`,
+  opts: { static?: boolean } = {},
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
   });
-  const { hook } = memoryLocation({ path, static: true });
+  const isStatic = opts.static ?? true;
+  const { hook } = memoryLocation({ path, static: isStatic });
 
   // Render SolverNetView inside a Switch+Route so useParams gets the :cid param.
   function WrappedView() {
@@ -347,13 +351,198 @@ describe('SolverNetView', () => {
     });
   });
 
-  it('renders an "Explore this slice" link to /explore/<cid>', async () => {
-    const { WrappedView } = makeWrapper(`/solvernet/${encodeURIComponent(CID)}?k=50`);
+  it('does not render an "Explore this slice" link', async () => {
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?k=50`,
+    );
     render(<WrappedView />);
     await waitFor(() => {
-      const link = screen.getByRole('link', { name: /explore this slice/i });
-      expect(link).toBeInTheDocument();
-      expect(link.getAttribute('href')).toContain(`/explore/${encodeURIComponent(CID)}`);
+      expect(screen.getByText('Learning curve')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('link', { name: /explore this slice/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// ─── ExploreControls inline on SolverNetView ─────────────────────────────────
+
+describe('SolverNetView — ExploreControls inline', () => {
+  it('renders the GROUP BY chip row above the chart', async () => {
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      expect(screen.getByText(/^group by$/i)).toBeInTheDocument();
+    });
+    // The "none" group chip is rendered as a button with aria-pressed
+    expect(
+      screen.getByRole('button', { name: 'none', pressed: true }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the WINDOW SegmentedControl with 20 / 30 / 50 / 100 / ALL options', async () => {
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      expect(screen.getByText(/^window$/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: '20' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '30' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '50' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '100' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ALL' })).toBeInTheDocument();
+  });
+
+  it('renders the Raw toggle button', async () => {
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      // The Raw toggle is a button labelled "Raw"
+      expect(screen.getByRole('button', { name: /^raw$/i })).toBeInTheDocument();
+    });
+  });
+
+  it('calls useSlice with group=harness when URL has ?group=harness', async () => {
+    vi.mocked(useSlice).mockClear();
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?group=harness`,
+    );
+    render(<WrappedView />);
+    await waitFor(() => {
+      expect(useSlice).toHaveBeenCalled();
+    });
+    const calls = vi.mocked(useSlice).mock.calls;
+    const lastCall = calls[calls.length - 1]?.[0];
+    expect(lastCall?.group).toBe('harness');
+  });
+
+  it('renders the active-slice chip strip with filter[harness]=codex from the URL', async () => {
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?filter[harness]=codex`,
+    );
+    render(<WrappedView />);
+    await waitFor(() => {
+      const chips = screen.getByTestId('active-slice-chips');
+      expect(chips).toHaveTextContent(/harness:codex/i);
+    });
+  });
+
+  it('migrates legacy ?k=30 to ?window=30 on mount (back-compat)', async () => {
+    vi.mocked(useSlice).mockClear();
+    // Use k=30 (not the default 50) and static:false so setSearchParams
+    // actually mutates URL state — otherwise the migration is a no-op and
+    // the assertion would pass coincidentally.
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?k=30`,
+      { static: false },
+    );
+    render(<WrappedView />);
+    await waitFor(() => {
+      // The WINDOW SegmentedControl should select 30 (matching the legacy k)
+      expect(screen.getByRole('button', { name: '30' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+  });
+});
+
+// ─── Chart legend → filter ───────────────────────────────────────────────────
+
+describe('SolverNetView — chart legend click adds filter', () => {
+  it('clicking a legend value (group=harness) appends filter[harness]=<value>', async () => {
+    // group=harness multi-series fixture
+    const multiSeriesSlice = {
+      ...SLICE_DATA,
+      params: { ...SLICE_DATA.params, group: 'harness' as const },
+      series: [
+        {
+          groupValue: 'codex',
+          buckets: [],
+          rolling: SLICE_DATA.series[0]!.rolling,
+          kpis: SLICE_DATA.series[0]!.kpis,
+        },
+        {
+          groupValue: 'claude',
+          buckets: [],
+          rolling: SLICE_DATA.series[0]!.rolling,
+          kpis: SLICE_DATA.series[0]!.kpis,
+        },
+      ],
+    };
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: multiSeriesSlice,
+    } as any);
+
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?group=harness`,
+      { static: false },
+    );
+    render(<WrappedView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('learning-curve-legend')).toBeInTheDocument();
+    });
+    // Find the legend button for 'codex'
+    const legend = screen.getByTestId('learning-curve-legend');
+    const codexBtn = Array.from(legend.querySelectorAll('button')).find(
+      (b) => b.textContent === 'codex',
+    );
+    expect(codexBtn).toBeDefined();
+    fireEvent.click(codexBtn!);
+
+    // After the click the active-slice chip strip should show harness:codex
+    await waitFor(() => {
+      const chips = screen.getByTestId('active-slice-chips');
+      expect(chips).toHaveTextContent(/harness:codex/i);
+    });
+  });
+});
+
+// ─── Leaderboard row click → filter ──────────────────────────────────────────
+
+describe('SolverNetView — leaderboard row click adds filter[operator]', () => {
+  it('clicking the operator body appends filter[operator]=<addr> to chip strip', async () => {
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: SLICE_DATA,
+    } as any);
+    const { WrappedView } = makeWrapper(undefined, { static: false });
+    render(<WrappedView />);
+    await waitFor(() => {
+      // Train operator address rendered short
+      expect(screen.getByText('0xaaaa…000a')).toBeInTheDocument();
+    });
+    const opBtn = screen.getByRole('button', { name: /0xaaaa…000a/i });
+    fireEvent.click(opBtn);
+    await waitFor(() => {
+      const chips = screen.getByTestId('active-slice-chips');
+      expect(chips).toHaveTextContent(/operator:0xaaaa/i);
+    });
+  });
+
+  it('renders a trailing arrow link with href=/operator/<addr>', async () => {
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: SLICE_DATA,
+    } as any);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      const arrowLink = screen.getByRole('link', {
+        name: /open operator detail/i,
+      });
+      expect(arrowLink).toHaveAttribute(
+        'href',
+        `/operator/${encodeURIComponent('0xaaaa000000000000000a')}`,
+      );
     });
   });
 });

@@ -1,5 +1,7 @@
 /**
- * ExploreControls — the control card mounted above the chart on /explore/<cid>.
+ * ExploreControls — the control card mounted above the learning curve on
+ * `/solvernet/<cid>`. (Originally hosted under `/explore/<cid>`; the two
+ * views were merged in refactor #676.)
  *
  * Composes:
  *   - GROUP BY chip row (none / operator / harness / plugin / mode / model)
@@ -7,7 +9,7 @@
  *   - Raw toggle (wane-bordered when active, with INCLUDES RAW DATA chip)
  *   - Window selector (SegmentedControl: 20 / 30 / 50 / 100 / ALL)
  *
- * Pure presentation — the parent (ExploreView) owns URL state and passes
+ * Pure presentation — the parent (`SolverNetView`) owns URL state and passes
  * value/setter pairs in. No wouter dependency here.
  *
  * Design tokens per docs/design/jinn-design-system + DESIGN.md:

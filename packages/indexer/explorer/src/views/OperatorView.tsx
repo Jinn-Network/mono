@@ -430,11 +430,13 @@ export function OperatorView() {
                       <ModeBreakdownText entries={row.modeBreakdown} />
                     </td>
 
-                    {/* Explore this slice ↗ — deep-links to /explore/<cid>
-                        filtered to this operator. */}
+                    {/* Explore this slice ↗ — deep-links to /solvernet/<cid>
+                        filtered to this operator. After the /explore merge
+                        (refactor #676) the destination is SolverNetView, which
+                        now hosts the full slice control surface. */}
                     <td style={cellStyle}>
                       <Link
-                        href={`/explore/${encodeURIComponent(row.cid)}?filter[operator]=${encodeURIComponent(data.operator)}`}
+                        href={`/solvernet/${encodeURIComponent(row.cid)}?filter[operator]=${encodeURIComponent(data.operator)}`}
                         style={{
                           fontFamily: 'var(--font-mono)',
                           fontSize: 10,

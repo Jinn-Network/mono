@@ -41,6 +41,14 @@ export interface LeaderboardProps {
   meta?: { jinnAttribution: 'pending' | 'ok' };
   /** compact — smaller padding, fewer optional columns (for SolverNet embedding) */
   compact?: boolean;
+  /**
+   * Optional click handler for operator cells. When present, the operator
+   * cell body becomes a `<button>` that fires this handler with the operator
+   * address; a trailing arrow cell renders a `<Link>` to /operator/<addr> as
+   * the secondary navigation affordance. When absent (default), the operator
+   * cell stays a single `<Link>` to /operator/<addr>.
+   */
+  onOperatorClick?: (operator: string) => void;
 }
 
 // ── Sort helpers ──────────────────────────────────────────────────────────────
@@ -123,6 +131,7 @@ export function Leaderboard({
   minVerdicts,
   meta,
   compact = false,
+  onOperatorClick,
 }: LeaderboardProps) {
   // Sort lives in URL-state so it's a permalink
   const [sortKey, setSortKey] = useEnumParam('sort', 'resolvedRate', SORT_KEYS);
@@ -161,12 +170,19 @@ export function Leaderboard({
     { key: 'jinnEarned', label: 'JINN', numeric: true },
     ...(hasMode && !compact ? [{ key: 'mode', label: 'Mode', sortable: false }] : []),
     ...(hasHarness && !compact ? [{ key: 'harness', label: 'Harness', sortable: false }] : []),
+    ...(onOperatorClick ? [{ key: 'opLink', label: '', sortable: false, width: 24 }] : []),
   ];
 
   // Low-volume label includes the threshold when available
   const lvLabel = minVerdicts !== undefined
     ? `New / Low-volume (< ${minVerdicts} verdicts)`
     : 'New / Low-volume';
+
+  const operatorTextStyle = {
+    color: 'var(--accent)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: compact ? 11 : 12,
+  } as const;
 
   // Row renderer factory — handles both ranked and low-volume rows
   function renderRow(row: LeaderboardRankedRow | LeaderboardLowVolumeRow) {
@@ -196,17 +212,28 @@ export function Leaderboard({
 
         {/* Operator */}
         <td style={{ ...cellStyle, padding: compact ? '8px 12px' : undefined }}>
-          <Link
-            href={`/operator/${encodeURIComponent(row.operator)}`}
-            style={{
-              color: 'var(--accent)',
-              textDecoration: 'none',
-              fontFamily: 'var(--font-mono)',
-              fontSize: compact ? 11 : 12,
-            }}
-          >
-            {shortAddr(row.operator)}
-          </Link>
+          {onOperatorClick ? (
+            <button
+              type="button"
+              onClick={() => onOperatorClick(row.operator)}
+              style={{
+                ...operatorTextStyle,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+              }}
+            >
+              {shortAddr(row.operator)}
+            </button>
+          ) : (
+            <Link
+              href={`/operator/${encodeURIComponent(row.operator)}`}
+              style={{ ...operatorTextStyle, textDecoration: 'none' }}
+            >
+              {shortAddr(row.operator)}
+            </Link>
+          )}
         </td>
 
         {/* Resolved rate — bold, quality headline */}
@@ -274,6 +301,31 @@ export function Leaderboard({
             }}
           >
             {row.dominantHarness ?? '—'}
+          </td>
+        )}
+
+        {/* Trailing arrow link → operator detail.
+            Rendered only when onOperatorClick re-purposes the body cell. */}
+        {onOperatorClick && (
+          <td
+            style={{
+              ...cellStyle,
+              padding: compact ? '8px 8px' : undefined,
+              textAlign: 'right',
+            }}
+          >
+            <Link
+              href={`/operator/${encodeURIComponent(row.operator)}`}
+              aria-label="Open operator detail"
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+                color: 'var(--fg-muted)',
+                textDecoration: 'none',
+              }}
+            >
+              ↗
+            </Link>
           </td>
         )}
       </>

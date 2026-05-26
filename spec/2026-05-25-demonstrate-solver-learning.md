@@ -81,31 +81,33 @@ Drops the "solve-rate hero" framing (PR #251 lead). Replaces it with:
 
 The top-line `resolvedRate` field stays in `NetworkResponse` (back-compat) but is no longer rendered on the surface. A future deprecation can drop it from the API.
 
-### 5.2 `SolverNetView` — preset engine consumer
+### 5.2 `SolverNetView` — engine consumer with the full control surface
 
-Becomes the engine's default-params view. Default params: `{groupBy: 'none', filter: {}, includeUnenriched: false, bucketSize: 'auto'}`. The existing train/frozen leaderboards remain — they map to the engine's mode-filtered slices. The checkpoint timeline, freeze integrity, and KPI panels stay unchanged. The visible difference is purely the cleaned curve (envelope-only by default).
+The engine's reference consumer. The full slice control surface (group-by chips, filter pills, window selector, raw toggle, active-slice chip strip) sits directly above the learning curve, so the URL `/solvernet/<cid>?group=<dim>&filter[<dim>]=<value>&window=<n>&include=raw&bucket=<size>` is the canonical shape.
 
-Adds an `Explore this slice ↗` affordance (sentence-case button per [`Design.md`](../Design.md) §3 "Labels-in-Caps, Actions-in-Sentence Rule") that opens `/explore` with the current params baked in.
-
-### 5.3 `/explore` — engine with user-controlled params
-
-New route, scoped to one SolverNet at a time. URL shape: `/explore/<manifestDigest>?group=<dim>&filter=<encoded>&include=raw&bucket=<size>`.
+**Default params** when the URL omits them: `{group: 'none', filter: {}, includeUnenriched: false, bucket: 'auto', window: 50}`. The visible difference from a raw `/solvernet/<cid>` load is purely the cleaned curve (envelope-only by default). Train/frozen leaderboards, checkpoint timeline, freeze integrity, and KPI panels stay as-is.
 
 **Control surface** (rendered above the chart):
 
 - **Background:** `bg-elevated` card (#142340) with 1px `border` hairline, `panel` radius (10px) per [`Design.md`](../Design.md) §5 Cards.
 - **Group-by selector:** a chip row labelled `GROUP BY` (ALL CAPS MONO 11px eyebrow). Options rendered as chips: `none / operator / harness / plugin / mode / model`. Selected chip: `chip-accent` (transparent + sky border + sky text). Unselected: default chip (hairline border + `fg-muted`). Per §3 The Two-Voices Rule — eyebrow labels in mono caps, never serif.
-- **Active filter pills:** added by clicking a dimension's value in the chart legend or leaderboard. Render as `chip-accent` with a small `×` close affordance (Lucide `x` at `stroke-width="1.5"` per [`Design.md`](../Design.md) §5 Sigil-before-Lucide). ALL CAPS MONO label.
+- **Active filter pills:** added by clicking a dimension's value in the chart legend, or by clicking an operator row in the leaderboard. Render as `chip-accent` with a small `×` close affordance (Lucide `x` at `stroke-width="1.5"` per [`Design.md`](../Design.md) §5 Sigil-before-Lucide). ALL CAPS MONO label.
 - **Raw toggle:** single switch chip, hidden by default. When active, renders with `wane` border + `wane` text + the literal string `INCLUDES RAW DATA`. Displaces gold emphasis on this surface per the One-Voice Rule.
-- **Bucket size:** small dropdown input (`bg` fill, 1px hairline border, 6px `default` radius). Options: `auto / per-block / per-day / per-week`. ALL CAPS MONO option labels.
+- **Window selector:** `SegmentedControl` with options `20 / 30 / 50 / 100 / ALL`. Default 50; the post-merge milestone URL pins `window=30` explicitly.
 
-**Chart panel** (below the controls): existing `LearningCurve` component. When `groupBy !== 'none'`, renders up to 5 series. Series colors: sky (`#7aa7dc`) for the dominant series, then sky-muted variants. **Series colors never use gold** — gold remains reserved as single-point emphasis per the Gold-as-Hint Rule.
+**Chart panel** (below the controls): existing `LearningCurve` component. When `group !== 'none'`, renders up to 5 series with the dimension-value legend as clickable buttons — clicking a legend value appends a filter for that dimension. Series colors: sky (`#7aa7dc`) for the dominant series, then sky-muted variants. **Series colors never use gold** — gold remains reserved as single-point emphasis per the Gold-as-Hint Rule.
 
-**Leaderboard panel** (right column): existing `Leaderboard` component, filtered to the slice's params.
+**Active-slice chip strip:** rendered between the control card and the chart whenever the URL carries an explicit slice (group ≠ none, any filter, or an explicit window). Reads `group:<dim>`, `<dim>:<value>` per active filter, `window:<n>`. The strip is hidden at defaults so the cold landing is uncluttered.
 
-**Header:** page title `Explore <SolverNet name>` in Instrument Serif (Headline, 48px). Subtitle in JetBrains Mono showing the active slice as a chip strip.
+**Leaderboard panel** (below the chart, train/frozen toggle preserved): existing `Leaderboard` component. Operator cells render as `<button>` bodies (clicking adds `filter[operator]=<addr>`) plus a trailing `↗` arrow link to `/operator/<addr>`.
+
+**Legacy URL params:** the pre-merge `?k=<n>` form is migrated once-per-mount to `?window=<n>` (back-compat shim). The post-merge spec uses `window` only.
 
 No gradients, no glass, no shadows beyond the `Card` hairline. Linear motion only on control-surface transitions per [`Design.md`](../Design.md) §1.
+
+### 5.3 `/explore/<cid>` — deprecated back-compat redirect
+
+`/explore/<cid>` redirects to `/solvernet/<cid>` preserving the query string. The control surface previously hosted under this route lives at §5.2.
 
 ### 5.4 `OperatorsView` — roster, not leaderboard
 
@@ -113,7 +115,7 @@ Drops the cross-SolverNet rank ordering. Becomes a roster: one row per operator,
 
 ### 5.5 `OperatorView` — already correct
 
-Already renders `perSolverNet: OperatorPerSolverNet[]` with each SolverNet's `resolvedRate` kept separate. No reframe needed. Future addition (not in this milestone): per-row "Explore this slice" link to `/explore/<cid>?filter[operator]=<addr>`.
+Already renders `perSolverNet: OperatorPerSolverNet[]` with each SolverNet's `resolvedRate` kept separate. No reframe needed. Per-row "Explore this slice ↗" link points to `/solvernet/<cid>?filter[operator]=<addr>` (retargeted from `/explore/<cid>` in refactor #676).
 
 ## 6. Engine API sketch
 
@@ -197,13 +199,15 @@ Phase 1 is the minimum surface for the press-release-shaped artifact. Co-require
 - (P2b) Frontend: refactor `SolverNetView` to consume `/explorer/slice` with default params. Components stay; only the data source changes.
 
 **Phase 3 — `/explore` route (post-Sprint 3).** `feat` shape; depends on Phase 2.
-- (P3a) Frontend: `/explore/<manifestDigest>` route with the control surface specified in §5.3.
+- (P3a) ~~Frontend: `/explore/<manifestDigest>` route with the control surface specified in §5.3.~~ **Superseded by #676 (refactor) — control surface lives inline on `/solvernet/<cid>` (§5.2); `/explore/<cid>` is a query-preserving redirect.**
 - (P3b) Frontend: URL-state encoding for sharable slice links (extend `url-state.ts`).
-- (P3c) Frontend: `Explore this slice ↗` affordance on `SolverNetView` and `OperatorView`.
+- (P3c) ~~Frontend: `Explore this slice ↗` affordance on `SolverNetView` and `OperatorView`.~~ **Superseded by #676 (refactor) — `SolverNetView` hosts the control surface inline so the affordance is gone; `OperatorView`'s per-row deep-link now targets `/solvernet/<cid>?filter[operator]=<addr>`.**
 - (P3d) Engine: add `window` URL param to `/explorer/slice` so the trailing-N
   rolling line is computed server-side from the chronologically-sorted samples
   rather than reconstructed client-side from buckets. Default 50, clamped to
   [1, 1000]. Single-call-site change in `computeOneSeries`.
+
+**Phase 3 follow-up — merge `/explore` into `/solvernet/<cid>` (#676).** `refactor` shape. After P3a/P3c shipped (#656), the parallel `/explore/<cid>` view duplicated the engine consumer on `/solvernet/<cid>`. Per the locked Milestone #2 URL needing to live on a stable canonical surface, the two views are merged: the control surface (ExploreControls), the active-slice chip strip, the t-99 hairline / below-floor empty state, the multi-series legend with click-to-filter, and the operator-row click-to-filter all live on `SolverNetView`. `/explore/<cid>` is a one-line `<Redirect>` shim that preserves the query string. `?k=N` is migrated once per mount to `?window=N` (legacy SolverNetView form ↔ engine form — same semantics). The post-merge locked URL is `/solvernet/<cid>?filter[harness]=codex&filter[model]=gpt-5.4-mini&window=30`.
 
 ## 11. Out-of-scope refactors not undertaken here
 

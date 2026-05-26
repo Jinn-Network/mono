@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { LearningCurve } from './LearningCurve';
 import type { LearningCurveBucket } from '../lib/api';
 
@@ -107,5 +107,43 @@ describe('LearningCurve', () => {
       />,
     );
     expect(screen.queryByTestId('learning-curve-legend')).toBeNull();
+  });
+
+  it('renders legend items as <span> when `onLegendClick` is absent', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        series={[
+          { rolling: ROLLING, label: 'codex', color: '#7aa7dc' },
+          { rolling: ROLLING, label: 'hermes', color: '#6b9fc5' },
+        ]}
+      />,
+    );
+    const legend = screen.getByTestId('learning-curve-legend');
+    expect(legend.querySelector('button')).toBeNull();
+    expect(legend.querySelectorAll('span').length).toBeGreaterThan(0);
+  });
+
+  it('renders legend items as <button> and fires onLegendClick when supplied', () => {
+    const onLegendClick = vi.fn();
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        onLegendClick={onLegendClick}
+        series={[
+          { rolling: ROLLING, label: 'codex', color: '#7aa7dc' },
+          { rolling: ROLLING, label: 'hermes', color: '#6b9fc5' },
+        ]}
+      />,
+    );
+    const legend = screen.getByTestId('learning-curve-legend');
+    const btn = legend.querySelector('button');
+    expect(btn).not.toBeNull();
+    fireEvent.click(legend.querySelectorAll('button')[1]!);
+    expect(onLegendClick).toHaveBeenCalledWith('hermes');
   });
 });

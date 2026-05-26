@@ -9,21 +9,36 @@
  *     Route /solvernet/:cid    → SolverNetView
  *     Route /operators         → OperatorsView
  *     Route /operator/:addr    → OperatorView
- *     Route /explore/:cid      → ExploreView
+ *     Route /explore/:cid      → Redirect to /solvernet/:cid (preserves query)
  *     fallback                 → 404 inline
  *
  * Each view renders its own <StatusBar> (fixed footer) from its own query data.
  * The StatusBar sits inside the view so it has access to the per-view freshness.
  */
 
-import { Route, Switch } from 'wouter';
+import { Redirect, Route, Switch, useParams, useSearch } from 'wouter';
 import { Chrome } from './components/Chrome';
 import { NetworkView } from './views/NetworkView';
 import { SolverNetsListView } from './views/SolverNetsListView';
 import { SolverNetView } from './views/SolverNetView';
 import { OperatorsView } from './views/OperatorsView';
 import { OperatorView } from './views/OperatorView';
-import { ExploreView } from './views/ExploreView';
+
+/**
+ * /explore/<cid> back-compat redirect.
+ *
+ * After the merge of /explore into /solvernet/<cid> (refactor #676), the
+ * /explore route is a one-line redirect that preserves the query string.
+ * Historical deep-links (e.g. the locked Milestone #2 URL) and OperatorView's
+ * old deep-link target both resolve transparently.
+ */
+function ExploreRedirect() {
+  const params = useParams<{ cid: string }>();
+  const search = useSearch();
+  const cid = params?.cid ?? '';
+  const target = `/solvernet/${cid}${search ? `?${search}` : ''}`;
+  return <Redirect to={target} replace />;
+}
 
 function NotFound() {
   return (
@@ -79,7 +94,7 @@ export function App() {
           <Route path="/solvernet/:cid" component={SolverNetView} />
           <Route path="/operators" component={OperatorsView} />
           <Route path="/operator/:addr" component={OperatorView} />
-          <Route path="/explore/:cid" component={ExploreView} />
+          <Route path="/explore/:cid" component={ExploreRedirect} />
           <Route component={NotFound} />
         </Switch>
       </main>

@@ -43,6 +43,14 @@ export interface LearningCurveProps {
    * No protocol-emphasis gold per BRAND.md One-Voice Rule.
    */
   series?: LearningCurveSeries[];
+  /**
+   * Optional click handler on legend items. When present (and the chart is
+   * rendering a multi-series legend), each legend item becomes a `<button>`
+   * that fires this handler with the series label. When absent, legend items
+   * stay as inert `<span>`s. Lets the view tie chart clicks to URL-state
+   * filters without the chart owning URL state.
+   */
+  onLegendClick?: (label: string) => void;
 }
 
 const SKY = '#7aa7dc';
@@ -117,6 +125,7 @@ export function LearningCurve({
   mode,
   height = 220,
   series,
+  onLegendClick,
 }: LearningCurveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<unknown>(null);
@@ -302,23 +311,56 @@ export function LearningCurve({
             color: 'var(--fg-muted)',
           }}
         >
-          {effectiveSeries.map((s, i) => (
-            <span
-              key={`${i}:${s.label}`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
+          {effectiveSeries.map((s, i) => {
+            const content = (
+              <>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-block',
+                    width: 10,
+                    height: 2,
+                    background: s.color,
+                  }}
+                />
+                {s.label}
+              </>
+            );
+            const key = `${i}:${s.label}`;
+            if (onLegendClick) {
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onLegendClick(s.label)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    letterSpacing: 'inherit',
+                    textTransform: 'inherit',
+                    color: 'inherit',
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {content}
+                </button>
+              );
+            }
+            return (
               <span
-                aria-hidden="true"
-                style={{
-                  display: 'inline-block',
-                  width: 10,
-                  height: 2,
-                  background: s.color,
-                }}
-              />
-              {s.label}
-            </span>
-          ))}
+                key={key}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                {content}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>

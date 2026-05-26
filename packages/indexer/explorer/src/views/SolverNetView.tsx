@@ -1,12 +1,18 @@
 /**
  * SolverNetView — per-SolverNet detail with the Learning panel.
  *
+ * After the /explore merge (refactor #676), this view owns the full engine
+ * control surface — group-by chips, filter pills, window selector, raw toggle,
+ * and the active-slice chip strip — directly above the learning curve. The
+ * legacy /explore/<cid> route redirects here preserving its query string.
+ *
  * Gold element: the big headline resolved-rate (ONE gold per surface rule).
- * K and mode toggles write to URL-state.
- * Board toggle writes to URL-state.
+ * URL state owned here: window, group, filters, include, bucket, curveMode, board.
+ * Legacy `?k=N` query is migrated once-per-mount to `?window=N`.
  */
 
-import { Link, useParams } from 'wouter';
+import { useEffect, useRef } from 'react';
+import { Link, useParams, useSearchParams } from 'wouter';
 import {
   useSlice,
   useSolverNet,
@@ -21,32 +27,41 @@ import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { Kpi, KpiRow } from '../components/Kpi';
 import { StatusChip } from '../components/StatusChip';
-import { LearningCurve } from '../components/LearningCurve';
+import {
+  LearningCurve,
+  LEARNING_CURVE_SERIES_COLORS,
+} from '../components/LearningCurve';
 import { CheckpointTimeline } from '../components/CheckpointTimeline';
 import { FreezeIntegrity } from '../components/FreezeIntegrity';
 import { Leaderboard } from '../components/Leaderboard';
 import { SegmentedControl } from '../components/SegmentedControl';
-import { useNumParam, useEnumParam } from '../lib/url-state';
+import { ExploreControls } from '../components/ExploreControls';
+import {
+  ChartWithMilestoneMark,
+  ActiveSliceChips,
+} from '../components/SliceChrome';
+import {
+  useNumParam,
+  useEnumParam,
+  useGroupParam,
+  useFilterParams,
+  type FilterMap,
+} from '../lib/url-state';
 import { useCountUp } from '../hooks/useCountUp';
 import { pct, int, shortAddr, shortCid } from '../lib/format';
 
-// ── K sentinel (show all) ─────────────────────────────────────────────────────
+// ── Sentinel & constants ─────────────────────────────────────────────────────
 
-const K_ALL = 999999;
-const K_OPTIONS = [
-  { label: '20', value: 20 },
-  { label: '50', value: 50 },
-  { label: '100', value: 100 },
-  { label: 'all', value: K_ALL },
-];
+const WINDOW_ALL = 999999;
+const DEFAULT_WINDOW = 50;
+const MAX_SERIES = 5;
 
 // ── Slice leaderboard → Leaderboard component row adapter ────────────────────
 
 // Phase 2 ships an unpartitioned list (no ranked/lowVolume split). We render
 // every row as "ranked" and synthesize the rank from position; `lowVolume` is
-// always empty. Phase 3 can reintroduce partitioning via a Leaderboard prop.
-// settledContribution isn't carried on SliceResponse; we surface attempts as a
-// best-effort proxy (the column is informational, no truth claim).
+// always empty. settledContribution isn't carried on SliceResponse; we surface
+// attempts as a best-effort proxy (the column is informational).
 function toRankedRow(
   r: SliceResponseLeaderboardRow,
   idx: number,
@@ -116,51 +131,86 @@ function SkeletonBlock({
 export function SolverNetView() {
   const params = useParams<{ cid: string }>();
   const cid = decodeURIComponent(params?.cid ?? '');
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [k, setK] = useNumParam('k', 50);
-  const [bucket] = useNumParam('bucket', 7200);
+  // URL state — the explore control surface owns these.
+  const [window, setWindow] = useNumParam('window', DEFAULT_WINDOW);
+  const [group, setGroup] = useGroupParam();
+  const [filters, setFilters] = useFilterParams();
+  const [include, setInclude] = useEnumParam('include', 'enriched', [
+    'enriched',
+    'raw',
+  ]);
+  const [bucket] = useEnumParam('bucket', 'auto', [
+    'auto',
+    'per-block',
+    'per-day',
+    'per-week',
+  ]);
   const [curveMode, setCurveMode] = useEnumParam('curveMode', 'rolling', [
     'rolling',
     'buckets',
   ]);
   const [board, setBoard] = useEnumParam('board', 'train', ['train', 'frozen']);
 
-  // Phase 2 strangler-fig: useSlice serves curve + leaderboard + KPIs.
-  // useSolverNet still serves metadata (name, status, launcherAgentId,
-  // checkpointTimeline, freezeIntegrity, manifestEnrichmentStatus). A later
-  // sprint can move those to engine endpoints too.
+  // Legacy ?k=N → ?window=N migration. Fires once per mount (URL stays at the
+  // current location for the rest of the session unless the user navigates).
+  const migratedRef = useRef(false);
+  useEffect(() => {
+    if (migratedRef.current) return;
+    migratedRef.current = true;
+    const kRaw = searchParams.get('k');
+    if (kRaw === null) return;
+    const shouldSetWindow = !searchParams.has('window');
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('k');
+        if (shouldSetWindow) next.set('window', kRaw);
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const includeUnenriched = include === 'raw';
+  const hasExplicitSlice =
+    group !== 'none' ||
+    Object.keys(filters).length > 0 ||
+    searchParams.has('window');
+
+  // Engine consumer. SolverNetView is now the engine's reference consumer
+  // for the full surface — no more parallel /explore view.
   const sliceParams: SliceParams = {
     manifestDigest: cid,
-    group: 'none',
-    filter: {},
-    includeUnenriched: false,
-    bucket: 'auto',
+    group,
+    filter: filters,
+    includeUnenriched,
+    bucket: bucket as SliceParams['bucket'],
+    window: window >= WINDOW_ALL ? undefined : window,
   };
   const {
     data: slice,
     isLoading: sliceLoading,
     isError: sliceError,
   } = useSlice(sliceParams);
+
+  // useSolverNet still serves the legacy metadata fields (name, status,
+  // launcherAgentId, checkpointTimeline, freezeIntegrity, lastIndexed*). The
+  // meta endpoint's result is independent of window / bucket — no need to
+  // wire those args anymore.
   const {
     data: meta,
     isLoading: metaLoading,
     isError: metaError,
-  } = useSolverNet(cid, {
-    k: k === K_ALL ? undefined : k,
-    bucket,
-  });
+  } = useSolverNet(cid);
 
   const isLoading = sliceLoading || metaLoading;
   const isError = sliceError || metaError;
 
   // Animate the gold headline resolved-rate; respects prefers-reduced-motion.
-  // Sourced from the slice KPIs (engine-backed) rather than legacy meta.
   const animatedRate = useCountUp(slice?.kpis.resolvedRate ?? 0, 400);
-
-  // ── Unknown SolverNet ────────────────────────────────────────────────────────
-
-  // The API returns { error: 'unknown solvernet' } with 404 → isError will be true
-  // (fetchJson throws on non-ok). We detect it via isError.
 
   return (
     <div
@@ -368,25 +418,6 @@ export function SolverNetView() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Link
-              href={`/explore/${encodeURIComponent(cid)}`}
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                letterSpacing: '0.06em',
-                padding: '6px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-1)',
-                color: 'var(--fg-muted)',
-                textDecoration: 'none',
-                background: 'transparent',
-              }}
-            >
-              Explore this slice ↗
-            </Link>
-          </div>
-
           {/* ── Supporting KPIs ──
               tasksPosted / tasksSettled stay on the legacy meta endpoint;
               attempts / verdicts / verdictsPass come from the slice KPIs. */}
@@ -398,49 +429,38 @@ export function SolverNetView() {
             <Kpi label="Verdicts passed" value={int(slice.kpis.verdictsPass)} />
           </KpiRow>
 
+          {/* ── Explore controls (group / filters / window / raw) ── */}
+          <ExploreControls
+            group={group}
+            onGroupChange={setGroup}
+            filters={filters}
+            onFiltersChange={setFilters}
+            includeRaw={includeUnenriched}
+            onIncludeRawChange={(v) => setInclude(v ? 'raw' : null)}
+            window={window}
+            onWindowChange={(v) => setWindow(v)}
+          />
+
+          {/* ── Active-slice chip strip ── */}
+          {hasExplicitSlice && (
+            <ActiveSliceChips
+              group={group}
+              filters={filters}
+              window={window}
+            />
+          )}
+
           {/* ── Learning curve ── */}
           <Card title="Learning curve">
-            <div
-              style={{
-                display: 'flex',
-                gap: 12,
-                flexWrap: 'wrap',
-                marginBottom: 16,
-                alignItems: 'center',
-              }}
-            >
-              {/* Rolling window K toggle */}
+            {/* curveMode (Rolling / Buckets) selector lives inline above the
+                chart; group=none uses it, grouped views are rolling-only. */}
+            {group === 'none' && (
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 10,
-                    letterSpacing: '0.10em',
-                    textTransform: 'uppercase',
-                    color: 'var(--fg-dim)',
-                  }}
-                >
-                  Window
-                </span>
-                <SegmentedControl
-                  options={K_OPTIONS.map((o) => ({ label: o.label, value: String(o.value) }))}
-                  value={String(k >= K_ALL ? K_ALL : k)}
-                  onChange={(v) => setK(Number(v))}
-                />
-              </div>
-
-              {/* Mode toggle */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
+                  marginBottom: 16,
                 }}
               >
                 <span
@@ -463,27 +483,83 @@ export function SolverNetView() {
                   onChange={(v) => setCurveMode(v)}
                 />
               </div>
-            </div>
+            )}
 
-            <LearningCurve
-              buckets={slice.series[0]?.buckets ?? []}
-              rolling={slice.series[0]?.rolling ?? []}
-              mode={curveMode as 'rolling' | 'buckets'}
-            />
+            {group === 'none' ? (
+              curveMode === 'rolling' ? (
+                <ChartWithMilestoneMark
+                  rolling={slice.series[0]?.rolling ?? []}
+                  window={
+                    window >= WINDOW_ALL
+                      ? slice.series[0]?.rolling.length ?? 0
+                      : window
+                  }
+                  showMilestoneChrome={hasExplicitSlice}
+                />
+              ) : (
+                <LearningCurve
+                  buckets={slice.series[0]?.buckets ?? []}
+                  rolling={slice.series[0]?.rolling ?? []}
+                  mode="buckets"
+                />
+              )
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                }}
+              >
+                <LearningCurve
+                  buckets={[]}
+                  rolling={[]}
+                  mode="rolling"
+                  series={slice.series.slice(0, MAX_SERIES).map((s, i) => ({
+                    rolling: s.rolling,
+                    label: s.groupValue ?? `series ${i + 1}`,
+                    color: LEARNING_CURVE_SERIES_COLORS[i] ?? '#7aa7dc',
+                  }))}
+                  onLegendClick={(label) => {
+                    // Filter dim mirrors the current group.
+                    const dim = group as keyof FilterMap;
+                    const current = filters[dim] ?? [];
+                    if (current.includes(label)) return;
+                    setFilters({ ...filters, [dim]: [...current, label] });
+                  }}
+                />
+                <div
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    color: 'var(--fg-dim)',
+                    letterSpacing: '0.10em',
+                  }}
+                >
+                  {slice.series.length} series · grouped by {group}
+                  {slice.series.length > MAX_SERIES &&
+                    ` · showing first ${MAX_SERIES}`}
+                </div>
+              </div>
+            )}
 
-            <div
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 10,
-                color: 'var(--fg-dim)',
-                marginTop: 10,
-                letterSpacing: '0.06em',
-              }}
-            >
-              {curveMode === 'rolling'
-                ? `Rolling resolved-rate over the last ${k >= K_ALL ? 'all' : k} tasks`
-                : `Resolved-rate per ~${bucket}-block bucket`}
-            </div>
+            {group === 'none' && (
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10,
+                  color: 'var(--fg-dim)',
+                  marginTop: 10,
+                  letterSpacing: '0.06em',
+                }}
+              >
+                {curveMode === 'rolling'
+                  ? `Rolling resolved-rate over the last ${
+                      window >= WINDOW_ALL ? 'all' : window
+                    } tasks`
+                  : 'Resolved-rate per bucket'}
+              </div>
+            )}
           </Card>
 
           {/* ── Checkpoint timeline ── (legacy meta only) */}
@@ -516,7 +592,9 @@ export function SolverNetView() {
 
             {(() => {
               const rows =
-                board === 'train' ? slice.leaderboard.train : slice.leaderboard.frozen;
+                board === 'train'
+                  ? slice.leaderboard.train
+                  : slice.leaderboard.frozen;
               const ranked: LeaderboardRankedRow[] = rows.map(toRankedRow);
               const lowVolume: LeaderboardLowVolumeRow[] = [];
               return (
@@ -526,6 +604,11 @@ export function SolverNetView() {
                   // JINN attribution can't be split by mode — show "—" until ebu7.9
                   meta={{ jinnAttribution: 'pending' }}
                   compact
+                  onOperatorClick={(op) => {
+                    const current = filters.operator ?? [];
+                    if (current.includes(op)) return;
+                    setFilters({ ...filters, operator: [...current, op] });
+                  }}
                 />
               );
             })()}

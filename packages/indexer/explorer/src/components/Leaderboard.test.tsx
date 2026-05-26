@@ -217,4 +217,43 @@ describe('Leaderboard', () => {
     expect(screen.queryByText('Mode')).not.toBeInTheDocument();
     expect(screen.queryByText('Harness')).not.toBeInTheDocument();
   });
+
+  it('renders the operator cell as a Link when `onOperatorClick` is absent', () => {
+    const { Wrapper } = wrap();
+    render(
+      <Leaderboard ranked={RANKED.slice(0, 1)} lowVolume={[]} />,
+      { wrapper: Wrapper },
+    );
+    const link = screen.getByRole('link', { name: '0xaaaa…aaaa' });
+    expect(link).toHaveAttribute(
+      'href',
+      `/operator/${encodeURIComponent(RANKED[0].operator)}`,
+    );
+  });
+
+  it('renders the operator cell as a <button> + trailing arrow link when `onOperatorClick` is supplied', () => {
+    const onOperatorClick = vi.fn();
+    const { Wrapper } = wrap();
+    render(
+      <Leaderboard
+        ranked={RANKED.slice(0, 1)}
+        lowVolume={[]}
+        onOperatorClick={onOperatorClick}
+      />,
+      { wrapper: Wrapper },
+    );
+    // The body of the operator cell becomes a button
+    const btn = screen.getByRole('button', { name: /0xaaaa…aaaa/i });
+    fireEvent.click(btn);
+    expect(onOperatorClick).toHaveBeenCalledWith(RANKED[0].operator);
+
+    // The trailing-arrow link still goes to /operator/<addr>
+    const arrowLink = screen.getByRole('link', {
+      name: /open operator detail/i,
+    });
+    expect(arrowLink).toHaveAttribute(
+      'href',
+      `/operator/${encodeURIComponent(RANKED[0].operator)}`,
+    );
+  });
 });
