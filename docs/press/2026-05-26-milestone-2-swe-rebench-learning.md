@@ -14,7 +14,7 @@ Each clause is load-bearing.
 
 - **Envelope-enriched only.** The on-chain `verdictCode` defaulted to `Pass(1)` for some failed evaluations in the early-period daemon — a known contamination corrected by the envelope-truth indexer fix (commit `b56b9a34`, 2026-05-14). The gate reads only verdicts where the evaluator's full envelope is pinned to IPFS and `actualPassed` is the truth source. Unenriched verdicts are dropped.
 - **One harness, one model.** The variable controlled for is "we switched to a smarter LM". With both pinned, any sustained lift is the network's, not the model's.
-- **Trailing-30 vs t-99.** Two non-overlapping windows, separated by at least 39 verdicts. Wide enough to flush short-run noise.
+- **Trailing-30 vs t-99.** Two non-overlapping windows, with 69 verdicts of separation between them. Wide enough to flush short-run noise.
 - **≥130 verdicts on the net.** The two windows together require 60 enriched verdicts. The 130-floor adds enough sample to make the comparison meaningful at all.
 
 ## The receipts
