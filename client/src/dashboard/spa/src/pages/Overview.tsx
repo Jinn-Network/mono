@@ -4,6 +4,8 @@ import { AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client.js';
 import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
+import { IdentityCard } from './overview/IdentityCard.js';
+import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
@@ -280,6 +282,31 @@ export function OverviewPage(): JSX.Element {
     safeBoundToAgent: s.safeBoundToAgent ?? false,
   }));
 
+  // Primary service's on-chain ID (Service #50 etc.) — surfaced under Identity
+  // so operators can quote it when triaging with the team without digging
+  // through `jinn status`.
+  const primaryServiceId = services.find((s) => s.serviceId !== null)?.serviceId ?? null;
+
+  // Harness names this operator has joined SolverNets against. Joined-only
+  // scope per design note 2026-05-26 — keeps the panel focused on harnesses
+  // the operator actually runs. Deduped + sorted for stable rendering.
+  const harnessNames = useMemo<string[]>(() => {
+    const set = new Set<string>();
+    const j = bootstrap?.joinedSolverNets;
+    if (j) {
+      for (const entry of Object.values(j)) {
+        if (entry?.harness) set.add(entry.harness);
+      }
+    }
+    const legacy = bootstrap?.solverNets;
+    if (legacy && set.size === 0) {
+      for (const entry of Object.values(legacy)) {
+        if (entry?.harness) set.add(entry.harness);
+      }
+    }
+    return Array.from(set).sort();
+  }, [bootstrap]);
+
   // Eviction state — derived from the first evicted service in the fleet.
   // Surfaces as an inline blocking banner above the main column rather than
   // a hidden stat-tile child. The `service_evicted` notification handles the
@@ -473,6 +500,29 @@ export function OverviewPage(): JSX.Element {
         )}
 
         {/*
+         * Identity — §2.2 surface promoted out of WalletCard in #427. Stable
+         * address-of-record stats (master / agent / Safe / serviceId / agentId)
+         * plus the binding-pending retry flow. Renders first so the eye lands
+         * on the constant identity before the variable harness state below.
+         */}
+        <IdentityCard
+          masterAddress={bootstrap?.master_address ?? null}
+          agentAddress={null}
+          safeAddress={services[0]?.safeAddress ?? null}
+          serviceId={primaryServiceId}
+          agentId={services[0]?.agentId ?? null}
+          services={services}
+        />
+
+        {/*
+         * Harness Readiness — §2.9 surface. One row per harness this operator
+         * has joined SolverNets against; per-row queries hit
+         * api.harnessReadiness on a 30s refetch. Empty state links to
+         * /operator/registry when the operator hasn't joined a net yet.
+         */}
+        <HarnessStatusPanel harnessNames={harnessNames} />
+
+        {/*
          * Activity — the operator's view of their node's work. One surface
          * replaces the prior Network · counters / Solving on / In-flight /
          * Recent / Harness Status quintet. The aggregate counters are gone
@@ -525,10 +575,6 @@ export function OverviewPage(): JSX.Element {
           tjinnEarnedLast24h={tjinnEarnedLast24h}
           tjinnState={tjinnState}
           tjinnError={tjinnError}
-          agentId={services[0]?.agentId ?? null}
-          masterAddress={bootstrap?.master_address ?? null}
-          safeAddress={services[0]?.safeAddress ?? null}
-          services={services}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
           onTopUp={() =>
             runAction(

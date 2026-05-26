@@ -21,6 +21,7 @@ const restartDaemonMock = vi.fn();
 const stopDaemonMock = vi.fn();
 const restakeMock = vi.fn();
 const retryAgentBindingMock = vi.fn();
+const harnessReadinessMock = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
@@ -31,6 +32,7 @@ vi.mock('../api/client.js', () => ({
     stopDaemon: () => stopDaemonMock(),
     restake: (serviceId: number) => restakeMock(serviceId),
     retryAgentBinding: (opts: { serviceIndex: number }) => retryAgentBindingMock(opts),
+    harnessReadiness: (name: string) => harnessReadinessMock(name),
   },
 }));
 
@@ -45,10 +47,16 @@ beforeEach(() => {
   stopDaemonMock.mockReset();
   restakeMock.mockReset();
   retryAgentBindingMock.mockReset();
+  harnessReadinessMock.mockReset();
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
   stopDaemonMock.mockResolvedValue({ ok: true });
   restakeMock.mockResolvedValue({ ok: true });
+  // Default harness-readiness response keeps existing tests green when they
+  // don't bother to set a specific response. Empty harnessNames means
+  // HarnessStatusPanel renders the empty state and the readiness mock is
+  // never invoked.
+  harnessReadinessMock.mockResolvedValue({ harnessName: '', manifestCids: [], ready: true });
 });
 
 function withProviders(node: JSX.Element, path = '/overview'): JSX.Element {
@@ -65,7 +73,7 @@ function withProviders(node: JSX.Element, path = '/overview'): JSX.Element {
 }
 
 describe('OverviewPage layout', () => {
-  it('renders the two-column page shell with Activity card + Node Health + Wallet', async () => {
+  it('renders the two-column page shell with Identity, Harness, Activity + Node Health + Wallet', async () => {
     getStatusMock.mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       taskRuns: { totals: {}, inFlight: [], recentTasks: [] },
@@ -79,9 +87,76 @@ describe('OverviewPage layout', () => {
     render(withProviders(<OverviewPage />));
 
     expect(await screen.findByTestId('overview-page-grid')).toBeTruthy();
+    expect(screen.getByTestId('identity-card')).toBeTruthy();
+    expect(screen.getByTestId('harness-status-panel')).toBeTruthy();
     expect(screen.getByTestId('activity-card')).toBeTruthy();
     expect(screen.getByTestId('node-health-card')).toBeTruthy();
     expect(screen.getByTestId('wallet-card')).toBeTruthy();
+  });
+
+  it('renders IdentityCard and HarnessStatusPanel as direct children of the main column, above ActivityCard', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: {
+        services: [
+          {
+            index: 0,
+            step: 'complete',
+            serviceId: 50,
+            agentId: 5879,
+            safeAddress: '0xSafeAddr0000000000000000000000000000beef',
+            safeBoundToAgent: true,
+          },
+        ],
+      },
+      taskRuns: { totals: {}, inFlight: [], recentTasks: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({
+      master_address: '0x53e25264C86db85b6168F7824f5c39abd5281787',
+      joinedSolverNets: {
+        bafkreiswe: {
+          manifestCid: 'bafkreiswe',
+          name: 'SWE-rebench v2',
+          roles: ['solver'],
+          harness: 'hermes-agent',
+        },
+      },
+    });
+    // The Harness panel queries api.harnessReadiness — stub a ready response.
+    harnessReadinessMock.mockResolvedValue({
+      harnessName: 'hermes-agent',
+      manifestCids: ['bafkreiswe'],
+      ready: true,
+    });
+    render(withProviders(<OverviewPage />));
+
+    // Both cards mount as direct children of the main-column container.
+    const grid = await screen.findByTestId('overview-page-grid');
+    const mainColumn = grid.firstElementChild;
+    expect(mainColumn).not.toBeNull();
+    const identityCard = await screen.findByTestId('identity-card');
+    const harnessPanel = await screen.findByTestId('harness-status-panel');
+    const activityCard = await screen.findByTestId('activity-card');
+    expect(identityCard.parentElement).toBe(mainColumn);
+    expect(harnessPanel.parentElement).toBe(mainColumn);
+    expect(activityCard.parentElement).toBe(mainColumn);
+
+    // Document order: identity → harness → activity (no `<details>` wrapper).
+    const children = Array.from(mainColumn!.children) as HTMLElement[];
+    const identityIdx = children.findIndex((c) => c === identityCard);
+    const harnessIdx = children.findIndex((c) => c === harnessPanel);
+    const activityIdx = children.findIndex((c) => c === activityCard);
+    expect(identityIdx).toBeGreaterThanOrEqual(0);
+    expect(harnessIdx).toBeGreaterThan(identityIdx);
+    expect(activityIdx).toBeGreaterThan(harnessIdx);
+
+    // Neither card is wrapped in a <details> disclosure.
+    expect(identityCard.closest('details')).toBeNull();
+    expect(harnessPanel.closest('details')).toBeNull();
   });
 
   it('passes joined SolverNets and task rows into the ActivityCard', async () => {
