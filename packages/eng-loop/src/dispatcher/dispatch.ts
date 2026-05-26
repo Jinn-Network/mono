@@ -3,6 +3,11 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 import type { ReadyIssue, DispatcherConfig, InFlightSession } from './types.js';
 import type { CommandRunner } from './issue-source.js';
+import {
+  fetchFieldIds,
+  resetFieldCache,
+  type FieldCache,
+} from './field-cache.js';
 import { buildHeadlessPrompt } from '../headless.js';
 
 // ---------------------------------------------------------------------------
@@ -34,10 +39,13 @@ export const WORKTREES_BASE = computeWorktreesBase(REPO_ROOT);
 
 // ---------------------------------------------------------------------------
 // GitHub Project constants (from file-issue/references/gh-taxonomy.md)
+//
+// Owner + number are no longer referenced here — `gh project field-list` moved
+// to `./field-cache.ts` (jinn-mono#599) which holds its own copies. PROJECT_ID
+// is still used directly by the item-edit call below. Consolidation across
+// dispatch.ts / field-cache.ts / project-snapshot.ts is a separate `chore`.
 // ---------------------------------------------------------------------------
 
-const PROJECT_OWNER = 'Jinn-Network';
-const PROJECT_NUMBER = '1';
 const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
 
 // ---------------------------------------------------------------------------
@@ -87,49 +95,11 @@ function titleSlug(title: string): string {
     .replace(/-+$/, '');
 }
 
-// ---------------------------------------------------------------------------
-// gh project field helpers
-// ---------------------------------------------------------------------------
-
-interface GhFieldOption {
-  id: string;
-  name: string;
-}
-
-interface GhField {
-  id: string;
-  name: string;
-  options?: GhFieldOption[];
-}
-
-interface GhFieldListResponse {
-  fields: GhField[];
-}
-
-/**
- * Look up the "In Progress" option id from the Status field in the project
- * field-list response. Returns both the field id and option id.
- */
-function parseStatusField(
-  data: GhFieldListResponse,
-): { fieldId: string; inProgressOptionId: string } {
-  const statusField = data.fields.find((f) => f.name === 'Status');
-  if (statusField == null) {
-    throw new Error('Status field not found in gh project field-list response');
-  }
-  const inProgressOpt = (statusField.options ?? []).find(
-    (o) => o.name === 'In Progress',
-  );
-  if (inProgressOpt == null) {
-    throw new Error('"In Progress" option not found in Status field');
-  }
-  return { fieldId: statusField.id, inProgressOptionId: inProgressOpt.id };
-}
-
-// Note: pre-#585 a `getProjectItemId(runner, issueNumber)` helper called
-// `gh project item-list --limit 500` here (~96 GraphQL points per dispatch).
-// `ReadyIssue.projectItemId` is now populated from the per-cycle snapshot
-// (jinn-mono#585) so the dispatcher can read the item id directly.
+// Field-id parsing + caching live in `./field-cache.ts` (jinn-mono#599).
+// Pre-#585 a `getProjectItemId` helper called `gh project item-list --limit 500`
+// here (~96 GraphQL points/dispatch); pre-#599 a per-dispatch `gh project
+// field-list` call resolved the Status field id and "In Progress" option id.
+// Both have been replaced by snapshot + cache reads.
 
 // ---------------------------------------------------------------------------
 // Canon loading
@@ -179,7 +149,7 @@ function loadCanon(): string {
 export async function dispatchIssue(
   issue: ReadyIssue,
   cfg: DispatcherConfig,
-  deps: { runner: CommandRunner; spawn: SpawnFn },
+  deps: { runner: CommandRunner; spawn: SpawnFn; fieldCache: FieldCache },
 ): Promise<InFlightSession> {
   const { runner, spawn } = deps;
   const { number, title, shape } = issue;
@@ -194,27 +164,48 @@ export async function dispatchIssue(
   //    This must happen before the worktree is created. If anything fails
   //    after this point, the issue stays In Progress (not Todo), so
   //    selectReady skips it — no infinite retry loop.
-  //    a) discover field id + option id
-  const fieldListRaw = await runner('gh', [
-    'project', 'field-list', PROJECT_NUMBER,
-    '--owner', PROJECT_OWNER,
-    '--format', 'json',
-  ]);
-  const fieldListData = JSON.parse(fieldListRaw) as GhFieldListResponse;
-  const { fieldId, inProgressOptionId } = parseStatusField(fieldListData);
-
-  //    b) read the project item id from the snapshot-populated field on
-  //       ReadyIssue (jinn-mono#585) — no extra `gh project item-list` call.
+  //    Field id + "In Progress" option id come from the boot-time cache
+  //    (jinn-mono#599 — see `./field-cache.ts`); item id arrives on
+  //    ReadyIssue.projectItemId from the per-cycle snapshot (jinn-mono#585).
   const itemId = issue.projectItemId;
 
-  //    c) set the field
-  await runner('gh', [
-    'project', 'item-edit',
-    '--id', itemId,
-    '--project-id', PROJECT_ID,
-    '--field-id', fieldId,
-    '--single-select-option-id', inProgressOptionId,
-  ]);
+  // Wrap item-edit in a narrow stale-id retry: if the cached field id is
+  // stale (rare — happens when the Project field is rebuilt mid-run), `gh`
+  // returns "Could not resolve to a node". We reset + refetch the cache once
+  // and retry exactly once before propagating. The cache module's singleton
+  // is updated by `fetchFieldIds`, so subsequent callers (a later dispatch
+  // in this cycle, or pause-session via `getFieldCache()`) see the fresh
+  // value too; mutating `deps.fieldCache` propagates the refresh to any
+  // call site that captured the old reference.
+  const itemEditOnce = async (fId: string, optId: string): Promise<void> => {
+    await runner('gh', [
+      'project', 'item-edit',
+      '--id', itemId,
+      '--project-id', PROJECT_ID,
+      '--field-id', fId,
+      '--single-select-option-id', optId,
+    ]);
+  };
+
+  try {
+    await itemEditOnce(
+      deps.fieldCache.status.fieldId,
+      deps.fieldCache.status.options['In Progress'],
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('Could not resolve to a node')) throw err;
+    resetFieldCache();
+    const fresh = await fetchFieldIds(runner);
+    // Deliberate mutation: propagate the refreshed cache to the call site so
+    // any other consumer holding the same `deps.fieldCache` reference picks
+    // up the new ids on its next read.
+    deps.fieldCache = fresh;
+    await itemEditOnce(
+      fresh.status.fieldId,
+      fresh.status.options['In Progress'],
+    );
+  }
 
   // 3. Create the worktree — idempotent.
   //    If the path already exists (e.g. a pre-created worktree from the

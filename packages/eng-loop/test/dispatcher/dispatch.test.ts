@@ -1,10 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
+import {
+  fetchFieldIds,
+  resetFieldCache,
+  type FieldCache,
+} from '../../src/dispatcher/field-cache.js';
 
 // ---------------------------------------------------------------------------
 // Derive the expected REPO_ROOT / worktree path.
@@ -119,8 +124,38 @@ const WORKTREE_LIST_WITH_418 = [
 type RunnerCall = { cmd: string; args: string[] };
 
 /**
+ * Pre-built FieldCache mirroring FIELD_LIST_JSON — injected via `deps` so
+ * dispatchIssue does NOT need to call `gh project field-list` per dispatch
+ * (post-#599).
+ */
+const FIELD_CACHE: FieldCache = {
+  projectId: 'PVT_kwDODh3-Ac4BXYaI',
+  status: {
+    fieldId: 'PVTSSF_STATUS_FIELD_ID',
+    options: {
+      Todo: 'opt_todo',
+      'In Progress': 'opt_in_progress',
+      'In Review': 'opt_in_review',
+      Done: 'opt_done',
+    },
+  },
+  blockedOn: {
+    fieldId: 'PVTSSF_lADODh3-Ac4BXYaIzhTdqRo',
+    options: {
+      Nothing: '122744bf',
+      Human: 'a20d20ac',
+      'Another issue': 'e3e1b0c4',
+    },
+  },
+};
+
+/**
  * Create a fake runner that responds with empty worktree list (no pre-existing
  * jinn-mono_worktrees/418), so git worktree add will be called.
+ *
+ * Post-#599: `gh project field-list` is NOT served here — dispatchIssue must
+ * read from the injected FieldCache. If this branch fires, dispatch.ts has
+ * regressed to its pre-#599 behaviour.
  */
 function makeRunner(
   worktreeListOutput: string = WORKTREE_LIST_EMPTY,
@@ -132,13 +167,13 @@ function makeRunner(
     if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return worktreeListOutput;
     // git worktree add → void (empty stdout)
     if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
-    // gh project field-list → field JSON
-    if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') return FIELD_LIST_JSON;
     // gh project item-edit → void (empty stdout)
     if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') return '';
     // Post-#585: gh project item-list is NOT called by dispatchIssue —
-    // the project item id arrives on ReadyIssue.projectItemId. If this
-    // branch is reached, dispatch.ts has regressed.
+    // the project item id arrives on ReadyIssue.projectItemId.
+    // Post-#599: gh project field-list is NOT called either — the cache is
+    // injected via deps.fieldCache. If either branch is hit, dispatch.ts has
+    // regressed.
     throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
   };
   return { runner, calls };
@@ -163,11 +198,17 @@ function makeSpawn(
 // ---------------------------------------------------------------------------
 
 describe('dispatchIssue', () => {
+  beforeEach(() => {
+    // Stale-id retry tests mutate the module-level cache; keep state predictable
+    // across cases regardless of execution order.
+    resetFieldCache();
+  });
+
   it('creates a jinn-mono_worktrees/<N> worktree off origin/next on a <shape>/<N>-<slug> branch (absolute path)', async () => {
     const { runner, calls } = makeRunner();
     const { spawn } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const worktreeCall = calls.find(
       (c) => c.cmd === 'git' && c.args[0] === 'worktree' && c.args[1] === 'add',
@@ -199,7 +240,7 @@ describe('dispatchIssue', () => {
     const { runner, calls } = makeRunner(WORKTREE_LIST_WITH_418);
     const { spawn } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     // git worktree list must have been called (to detect existing worktree)
     const listCall = calls.find(
@@ -221,7 +262,7 @@ describe('dispatchIssue', () => {
     const { runner, calls } = makeRunner();
     const { spawn } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     // Find the indices of the Status item-edit call and the git worktree list call
     const itemEditIdx = calls.findIndex(
@@ -249,7 +290,7 @@ describe('dispatchIssue', () => {
     const { runner, calls } = makeRunner();
     const { spawn } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     // Must have called gh project item-edit with --single-select-option-id opt_in_progress
     const editCall = calls.find(
@@ -265,7 +306,7 @@ describe('dispatchIssue', () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     expect(calls).toHaveLength(1);
     const [spawnCall] = calls;
@@ -283,7 +324,7 @@ describe('dispatchIssue', () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
     const pFlagIdx = spawnCall.args.indexOf('-p');
@@ -297,7 +338,7 @@ describe('dispatchIssue', () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
     const pFlagIdx = spawnCall.args.indexOf('-p');
@@ -311,7 +352,7 @@ describe('dispatchIssue', () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
     const pFlagIdx = spawnCall.args.indexOf('-p');
@@ -326,7 +367,7 @@ describe('dispatchIssue', () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
     const pFlagIdx = spawnCall.args.indexOf('-p');
@@ -345,7 +386,7 @@ describe('dispatchIssue', () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
 
-    await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
     const { args } = spawnCall;
@@ -368,7 +409,7 @@ describe('dispatchIssue', () => {
     const { spawn } = makeSpawn(77777);
 
     const before = Date.now();
-    const session = await dispatchIssue(ISSUE, CFG, { runner, spawn });
+    const session = await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
     const after = Date.now();
 
     expect(session.issueNumber).toBe(418);
@@ -387,5 +428,154 @@ describe('dispatchIssue', () => {
     );
     const bFlagIdx = worktreeCall!.args.indexOf('-b');
     expect(session.branch).toBe(worktreeCall!.args[bFlagIdx + 1]);
+  });
+
+  // -------------------------------------------------------------------------
+  // #599 — field-cache injection + stale-id retry
+  // -------------------------------------------------------------------------
+
+  it('does NOT call gh project field-list — reads from the injected cache (#599)', async () => {
+    const { runner, calls } = makeRunner();
+    const { spawn } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const fieldListCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'field-list',
+    );
+    expect(fieldListCalls).toHaveLength(0);
+  });
+
+  it('on stale-id error, resets cache, refetches once, and retries item-edit (#599)', async () => {
+    // Build a runner that:
+    //   - returns a *fresh* FIELD_LIST_JSON on `field-list` (with the option
+    //     id changed to opt_in_progress_NEW so we can prove the retry uses it)
+    //   - throws "Could not resolve to a node" on the FIRST item-edit
+    //   - returns '' on the SECOND item-edit (the retry)
+    const FRESH_FIELD_LIST = JSON.stringify({
+      fields: [
+        {
+          id: 'PVTSSF_lADODh3-Ac4BXYaIzhTdqRo',
+          name: 'Blocked on',
+          options: [
+            { id: '122744bf', name: 'Nothing' },
+            { id: 'a20d20ac', name: 'Human' },
+            { id: 'e3e1b0c4', name: 'Another issue' },
+          ],
+        },
+        {
+          id: 'PVTSSF_STATUS_FIELD_ID_NEW',
+          name: 'Status',
+          options: [
+            { id: 'opt_todo_new', name: 'Todo' },
+            { id: 'opt_in_progress_NEW', name: 'In Progress' },
+            { id: 'opt_in_review_new', name: 'In Review' },
+            { id: 'opt_done_new', name: 'Done' },
+          ],
+        },
+      ],
+    });
+
+    const calls: RunnerCall[] = [];
+    let itemEditAttempts = 0;
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return WORKTREE_LIST_EMPTY;
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') return FRESH_FIELD_LIST;
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') {
+        itemEditAttempts += 1;
+        if (itemEditAttempts === 1) {
+          throw new Error('failed to run git: Could not resolve to a node with the global id of "..."');
+        }
+        return '';
+      }
+      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+    };
+    const { spawn } = makeSpawn();
+
+    // Seed deps with the OLD cache (opt_in_progress); the retry should
+    // refetch and use opt_in_progress_NEW.
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    // Exactly one field-list call (from the retry's refetch).
+    const fieldListCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'field-list',
+    );
+    expect(fieldListCalls).toHaveLength(1);
+
+    // Exactly two item-edit attempts.
+    const itemEditCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'item-edit',
+    );
+    expect(itemEditCalls).toHaveLength(2);
+
+    // The second item-edit uses the refetched option id.
+    const secondEdit = itemEditCalls[1];
+    const optIdx = secondEdit.args.indexOf('--single-select-option-id');
+    expect(secondEdit.args[optIdx + 1]).toBe('opt_in_progress_NEW');
+    const fieldIdx = secondEdit.args.indexOf('--field-id');
+    expect(secondEdit.args[fieldIdx + 1]).toBe('PVTSSF_STATUS_FIELD_ID_NEW');
+  });
+
+  it('propagates the error when item-edit fails a second time after cache refetch (#599)', async () => {
+    const calls: RunnerCall[] = [];
+    let itemEditAttempts = 0;
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return WORKTREE_LIST_EMPTY;
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') return FIELD_LIST_JSON;
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') {
+        itemEditAttempts += 1;
+        throw new Error('failed: Could not resolve to a node with the global id of "..."');
+      }
+      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+    };
+    const { spawn } = makeSpawn();
+
+    await expect(
+      dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } }),
+    ).rejects.toThrow(/Could not resolve to a node/);
+
+    const itemEditCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'item-edit',
+    );
+    expect(itemEditCalls).toHaveLength(2);
+  });
+
+  it('propagates non-stale-id errors without retrying (#599)', async () => {
+    // Sanity: an unrelated item-edit failure should NOT trigger the cache
+    // refetch — the retry is narrowly scoped to stale-id errors.
+    const calls: RunnerCall[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return WORKTREE_LIST_EMPTY;
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') {
+        throw new Error('rate limit exceeded');
+      }
+      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+    };
+    const { spawn } = makeSpawn();
+
+    await expect(
+      dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } }),
+    ).rejects.toThrow(/rate limit exceeded/);
+
+    // No field-list refetch should have happened.
+    const fieldListCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'field-list',
+    );
+    expect(fieldListCalls).toHaveLength(0);
+    // Exactly one item-edit attempt — no retry.
+    const itemEditCalls = calls.filter(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'item-edit',
+    );
+    expect(itemEditCalls).toHaveLength(1);
+
+    // Reference fetchFieldIds so the import is exercised even when no retry
+    // path runs in this case (it's used by the other #599 tests already).
+    void fetchFieldIds;
   });
 });
