@@ -342,11 +342,11 @@ interface SnapshotResponse {
 // ---------------------------------------------------------------------------
 // Parsers
 //
-// Mirrors the validation logic in `issue-source.ts` so an unknown field value
-// (a new option added on the Project board that the dispatcher doesn't
-// recognise yet) coerces to `null` rather than corrupting the typed snapshot.
-// After Step 5 of the #585 plan, `issue-source.ts` will consume the snapshot
-// directly and these become the canonical parsers.
+// Parsers live here, not in `issue-source.ts`. The `toIssueBoardState` adapter
+// (below) projects parsed `SnapshotItem` values into `IssueBoardEntry` objects
+// that the seam consumes (#600). An unknown field value (a new option added on
+// the Project board that the dispatcher doesn't recognise yet) coerces to
+// `null` rather than corrupting the typed snapshot.
 // ---------------------------------------------------------------------------
 
 const VALID_SHAPES = new Set<string>([
