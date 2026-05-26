@@ -300,6 +300,94 @@ describe('assembleStatusV1', () => {
     expect(j.predictionV1?.latest.solutionAt).toBe(100);
   });
 
+  it('exposes per-role ETH balances from serviceBalances + master', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: {
+        address: '0x1111111111111111111111111111111111111111',
+        balanceWei: '7000000000000000',
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+      // minimalFleet has services[0].index === 1, so displayFleetServiceIndex === 0.
+      serviceBalances: {
+        0: {
+          agentNativeWei: '2500000000000000',
+          safeNativeWei: '4000000000000000',
+          safeBondWei: '0',
+        },
+      },
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.balances.eth.master).toEqual({
+      address: '0x1111111111111111111111111111111111111111',
+      balanceWei: '7000000000000000',
+    });
+    expect(j.balances.eth.agent).toEqual({
+      address: '0x2222222222222222222222222222222222222222',
+      balanceWei: '2500000000000000',
+    });
+    expect(j.balances.eth.safe).toEqual({
+      address: '0x3333333333333333333333333333333333333333',
+      balanceWei: '4000000000000000',
+    });
+  });
+
+  it('returns null balances for roles whose address or row is missing', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.balances.eth.master).toEqual({ address: null, balanceWei: null });
+    expect(j.balances.eth.agent).toEqual({ address: null, balanceWei: null });
+    expect(j.balances.eth.safe).toEqual({ address: null, balanceWei: null });
+  });
+
+  it('propagates the master read error onto balances.eth.master', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: {
+        address: '0x1111111111111111111111111111111111111111',
+        error: 'rpc timeout',
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+      serviceBalanceErrors: { 0: { agent: 'agent rpc fail' } },
+      serviceBalances: { 0: { agentNativeWei: '0', safeNativeWei: '0', safeBondWei: '0' } },
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.balances.eth.master.error).toBe('rpc timeout');
+    expect(j.balances.eth.master.balanceWei).toBeNull();
+    expect(j.balances.eth.agent.error).toBe('agent rpc fail');
+  });
+
   it('passes generic task-run status through when present', () => {
     const raw: GatheredStatusRaw = {
       ...tjinnIdentityFields,
