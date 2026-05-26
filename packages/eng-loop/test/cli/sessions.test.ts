@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  PrettyPrintTransform,
   discoverSessions,
   encodeWorktreePathToProjectDir,
   lastAssistantText,
@@ -359,5 +360,67 @@ describe('renderTable', () => {
     const out = renderTable([]);
     expect(out).toContain('ISSUE');
     expect(out).toContain('(no sessions in the last 24h)');
+  });
+});
+
+describe('PrettyPrintTransform', () => {
+  // Drive the transform with a buffer and collect output text.
+  function pump(input: string | string[]): Promise<string> {
+    const chunks = Array.isArray(input) ? input : [input];
+    return new Promise((resolve, reject) => {
+      const t = new PrettyPrintTransform();
+      const out: Buffer[] = [];
+      t.on('data', (chunk: Buffer) => out.push(chunk));
+      t.on('end', () => resolve(Buffer.concat(out).toString('utf8')));
+      t.on('error', reject);
+      for (const c of chunks) t.write(Buffer.from(c));
+      t.end();
+    });
+  }
+
+  it('emits one line per assistant text block', async () => {
+    const out = await pump(FIX_WITH_TEXT);
+    expect(out).toContain('[00:01:00 assistant] first summary');
+    expect(out).toContain('[00:02:00 assistant] latest summary');
+  });
+
+  it('emits user text blocks', async () => {
+    const out = await pump(FIX_WITH_TEXT);
+    expect(out).toContain('[00:00:01 user] hi');
+  });
+
+  it('emits pr-link records with #N and URL', async () => {
+    const out = await pump(FIX_WITH_PR_LINK);
+    expect(out).toContain('[00:02:00 pr-link] #612 https://github.com/Jinn-Network/mono/pull/612');
+  });
+
+  it('drops queue-operation, attachment, tool_use-only assistant records, and thinking-only blocks', async () => {
+    const fix = [
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: '2026-05-26T00:00:00.000Z' }),
+      JSON.stringify({ type: 'attachment', timestamp: '2026-05-26T00:00:00.000Z' }),
+      JSON.stringify({ type: 'last-prompt', timestamp: '2026-05-26T00:00:00.000Z' }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:00.000Z', message: { content: [{ type: 'thinking', thinking: '...' }] } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:00.000Z', message: { content: [{ type: 'tool_use', name: 'Bash' }] } }),
+      '',
+    ].join('\n');
+    const out = await pump(fix);
+    expect(out).toBe('');
+  });
+
+  it('handles partial chunks across line boundaries', async () => {
+    const split = Math.floor(FIX_WITH_TEXT.length / 2);
+    const out = await pump([FIX_WITH_TEXT.slice(0, split), FIX_WITH_TEXT.slice(split)]);
+    expect(out).toContain('[00:01:00 assistant] first summary');
+    expect(out).toContain('[00:02:00 assistant] latest summary');
+  });
+
+  it('silently drops malformed JSON lines', async () => {
+    const fix = [
+      'not json',
+      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:00.000Z', message: { content: [{ type: 'text', text: 'ok' }] } }),
+      '',
+    ].join('\n');
+    const out = await pump(fix);
+    expect(out).toContain('[00:00:00 assistant] ok');
   });
 });

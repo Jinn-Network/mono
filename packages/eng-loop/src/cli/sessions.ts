@@ -59,6 +59,7 @@ export function encodeWorktreePathToProjectDir(path: string): string {
 }
 
 import { basename, dirname, join as pathJoin, resolve as pathResolve } from 'node:path';
+import { Transform } from 'node:stream';
 
 /**
  * Return the numeric issue id if `worktreePath` is a direct child of `base`
@@ -318,4 +319,87 @@ export function renderTable(records: SessionRecord[]): string {
   out.push(renderRow(headers));
   for (const row of rows) out.push(renderRow(row));
   return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// PrettyPrintTransform — JSONL → human lines (for --tail)
+// ---------------------------------------------------------------------------
+
+interface JsonlMessageRecord { type?: unknown; timestamp?: unknown; message?: { content?: unknown } }
+interface JsonlPrLinkRecord { type?: unknown; timestamp?: unknown; prNumber?: unknown; prUrl?: unknown }
+
+function timeFragment(ts: unknown): string {
+  if (typeof ts !== 'string') return '??:??:??';
+  const ms = Date.parse(ts);
+  if (!Number.isFinite(ms)) return '??:??:??';
+  return new Date(ms).toISOString().slice(11, 19);
+}
+
+/**
+ * Line-buffered JSONL → human-readable text stream. Emits one line per:
+ *   - `assistant` / `user` text content block → `[hh:mm:ss <type>] <text>`
+ *   - `pr-link` record → `[hh:mm:ss pr-link] #<N> <url>`
+ *
+ * All other record types (`queue-operation`, `attachment`, `last-prompt`,
+ * tool-use payloads, thinking-only assistant turns) are dropped at default
+ * verbosity. Malformed JSON lines are dropped silently.
+ */
+export class PrettyPrintTransform extends Transform {
+  private buffer = '';
+
+  constructor() {
+    super();
+  }
+
+  override _transform(chunk: Buffer | string, _enc: BufferEncoding, cb: (err?: Error | null) => void): void {
+    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    this.buffer += text;
+    const lines = this.buffer.split('\n');
+    this.buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      this.emitLine(line);
+    }
+    cb();
+  }
+
+  override _flush(cb: (err?: Error | null) => void): void {
+    if (this.buffer.length > 0) {
+      this.emitLine(this.buffer);
+      this.buffer = '';
+    }
+    cb();
+  }
+
+  private emitLine(line: string): void {
+    if (line.length === 0) return;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const r = record as JsonlMessageRecord | JsonlPrLinkRecord;
+    const t = r.type;
+    if (t === 'assistant' || t === 'user') {
+      const m = r as JsonlMessageRecord;
+      const content = m.message?.content;
+      if (!Array.isArray(content)) return;
+      const time = timeFragment(m.timestamp);
+      for (const block of content as Array<{ type?: unknown; text?: unknown }>) {
+        if (block?.type === 'text' && typeof block.text === 'string') {
+          this.push(`[${time} ${t}] ${block.text}\n`);
+        }
+      }
+      return;
+    }
+    if (t === 'pr-link') {
+      const m = r as JsonlPrLinkRecord;
+      if (typeof m.prNumber === 'number' && typeof m.prUrl === 'string') {
+        const time = timeFragment(m.timestamp);
+        this.push(`[${time} pr-link] #${m.prNumber} ${m.prUrl}\n`);
+      }
+      return;
+    }
+    // Drop everything else.
+  }
 }
