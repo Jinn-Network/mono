@@ -2444,6 +2444,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
       tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
       tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
+      // stOLAS L2 distributor — mirrors `CHAIN_CONFIG.distributorAddress`
+      // used to gate the EvictionLoop (issue #651). Threaded through so the
+      // SPA's autoRestake predicate keys off the same on-chain artifact as
+      // the daemon's `evictionCheck` predicate (~line 2520 below).
+      stOlasDistributorAddress: CHAIN_CONFIG.distributorAddress,
       network: config.network,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,

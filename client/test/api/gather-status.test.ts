@@ -955,7 +955,7 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        stOlasDistributorAddress: '0xdead000000000000000000000000000000000000',
         config: { evictionCheckIntervalMs: 60_000, stakingMode: 'standard' } as unknown as JinnConfig,
       });
       expect(enabled.autoRestake).toEqual({ enabled: true, checkIntervalMs: 60_000 });
@@ -966,7 +966,7 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        stOlasDistributorAddress: '0xdead000000000000000000000000000000000000',
         config: { evictionCheckIntervalMs: 0, stakingMode: 'standard' } as unknown as JinnConfig,
       });
       expect(noInterval.autoRestake.enabled).toBe(false);
@@ -977,7 +977,7 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        stOlasDistributorAddress: '0xdead000000000000000000000000000000000000',
         config: { evictionCheckIntervalMs: 60_000, stakingMode: 'self-bond' } as unknown as JinnConfig,
       });
       expect(nonStandard.autoRestake.enabled).toBe(false);
@@ -991,6 +991,147 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
         config: { evictionCheckIntervalMs: 60_000, stakingMode: 'standard' } as unknown as JinnConfig,
       });
       expect(noDistributor.autoRestake.enabled).toBe(false);
+    });
+  });
+
+  // Finding A (review): the autoRestake gate must mirror `main.ts`'s
+  // `evictionCheck` predicate, which keys off `CHAIN_CONFIG.distributorAddress`
+  // (the stOLAS L2 distributor) — NOT `tjinnDistributorAddress` (the JINN MVI
+  // L1 distributor). The two contracts happen to bundle together in our
+  // current testnet deployment but they are semantically distinct.
+  it('gates autoRestake on stOLAS distributor presence, not tJINN distributor presence', async () => {
+    mockEvictionViem(() => false);
+    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+      '../../src/api/gather-status.js'
+    );
+    __resetEvictionFirstSeenForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupFleet();
+
+      // tJINN distributor set, stOLAS distributor missing → must NOT enable.
+      // Mirrors `main.ts:2520-2523`: when `CHAIN_CONFIG.distributorAddress`
+      // is absent the EvictionLoop is not constructed, so the SPA must NOT
+      // open the suppression window.
+      const tjinnOnly = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
+        config: {
+          evictionCheckIntervalMs: 60_000,
+          stakingMode: 'standard',
+        } as unknown as JinnConfig,
+      });
+      expect(tjinnOnly.autoRestake.enabled).toBe(false);
+
+      // stOLAS distributor set, tJINN distributor missing → must enable.
+      // The tJINN distributor has no bearing on the EvictionLoop gate.
+      const stOlasOnly = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        stOlasDistributorAddress: '0xbeef000000000000000000000000000000000000',
+        config: {
+          evictionCheckIntervalMs: 60_000,
+          stakingMode: 'standard',
+        } as unknown as JinnConfig,
+      });
+      expect(stOlasOnly.autoRestake).toEqual({
+        enabled: true,
+        checkIntervalMs: 60_000,
+      });
+    });
+  });
+
+  // Finding B (review): transient RPC errors must not reset the
+  // suppression window. The deletion branch should run ONLY on a confirmed
+  // `false` read; a read failure must leave the prior `evictedSince`
+  // untouched. Otherwise a single flap during transient RPC trouble
+  // re-arms the 2 × checkIntervalMs silence window — exactly the
+  // silent-failure shape the issue warned about.
+  it('preserves evictedSince across a transient RPC failure', async () => {
+    // Reads are sequenced: succeed (evicted), throw, succeed (evicted).
+    let readNo = 0;
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          multicall: async (req: {
+            contracts: ReadonlyArray<{ functionName: string }>;
+          }) => req.contracts.map(() => ({ status: 'success' as const, result: 0n })),
+          readContract: async (req: { functionName: string }) => {
+            if (req.functionName === 'getStakingState') {
+              readNo += 1;
+              if (readNo === 2) throw new Error('transient RPC error');
+              return 2; // Evicted
+            }
+            if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
+            if (req.functionName === 'calculateStakingReward') return 0n;
+            if (req.functionName === 'getNextRewardCheckpointTimestamp') return 0n;
+            return 0n;
+          },
+          getLogs: async () => [],
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+      '../../src/api/gather-status.js'
+    );
+    __resetEvictionFirstSeenForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupFleet();
+      vi.useFakeTimers();
+
+      // T=0 — service observed evicted. evictedSince is set.
+      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
+      const first = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(first.fleet.services[0].evicted).toBe(true);
+      expect(first.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
+
+      // T=30s — RPC read fails. The tracker entry must be preserved so the
+      // suppression window does not restart on the next successful read.
+      vi.setSystemTime(new Date('2026-05-26T10:00:30.000Z'));
+      const middle = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      // Read failed → evicted reverts to false (no info), but evictedSince
+      // is preserved server-side. The wire shape may surface it or may not,
+      // but the next successful read MUST NOT bump the timestamp.
+      expect(middle.fleet.services[0].evicted).toBe(false);
+
+      // T=60s — RPC recovers, service still evicted. evictedSince must
+      // remain T=0, NOT be reset to T=60s.
+      vi.setSystemTime(new Date('2026-05-26T10:01:00.000Z'));
+      const third = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(third.fleet.services[0].evicted).toBe(true);
+      expect(third.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
     });
   });
 });

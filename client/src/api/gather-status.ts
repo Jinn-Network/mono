@@ -249,6 +249,14 @@ export interface StatusGatherConfig {
   tjinnChainId?: number;
   /** JinnDistributor address used for real operator lifetime claimed totals. */
   tjinnDistributorAddress?: string;
+  /**
+   * stOLAS L2 distributor address (`CHAIN_CONFIG.distributorAddress`). Used
+   * solely to mirror `main.ts`'s `evictionCheck` predicate (issue #651). The
+   * tJINN distributor on L1 is a different contract — do not substitute one
+   * for the other even though they happen to bundle together in our current
+   * testnet deployment.
+   */
+  stOlasDistributorAddress?: string;
   network: 'mainnet' | 'testnet';
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
@@ -1184,13 +1192,16 @@ export async function gatherGatheredStatusRaw(
 
   // Auto-restake gating (issue #651). Must mirror main.ts:~2520-2523 — when
   // that predicate changes (evictionCheckIntervalMs > 0 && stakingMode ===
-  // 'standard' && !!distributorAddress), this one must change too.
+  // 'standard' && !!CHAIN_CONFIG.distributorAddress), this one must change
+  // too. `stOlasDistributorAddress` is the same on-chain artifact threaded
+  // through `StatusGatherConfig`; do NOT substitute `tjinnDistributorAddress`
+  // (different contract on a different chain).
   const evictionIntervalMs = status.config?.evictionCheckIntervalMs ?? 0;
   raw.evictionCheckIntervalMs = evictionIntervalMs;
   raw.autoRestakeEnabled =
     evictionIntervalMs > 0 &&
     status.config?.stakingMode === 'standard' &&
-    !!status.tjinnDistributorAddress;
+    !!status.stOlasDistributorAddress;
 
   const viemChain = status.network === 'testnet' ? baseSepolia : base;
   const client = createPublicClient({
@@ -1287,13 +1298,17 @@ export async function gatherGatheredStatusRaw(
       // First-seen tracker for the suppression window (issue #651).
       // Key by `${chain}:${serviceId}` to survive multi-chain fleet layouts.
       const nowMs = Date.now();
-      const chainKey = fleet?.chain ?? status.network;
+      const chainKey = fleet.chain;
       const evictedSinceByServiceIndex: Record<number, string> = {};
       for (const svc of fleet.services) {
         const di = displayFleetServiceIndex(svc);
         const sid = svc.service_id;
         if (sid == null) continue;
         const key = `${chainKey}:${sid}`;
+        // Three-way: `true` → start/preserve window; `false` → clear it;
+        // `undefined` (read failed) → leave prior state untouched so a
+        // transient RPC flap does not reset the suppression window
+        // (issue #651 review Finding B).
         if (evictedByServiceIndex[di] === true) {
           let firstSeen = evictionFirstSeenMs.get(key);
           if (firstSeen === undefined) {
@@ -1301,8 +1316,15 @@ export async function gatherGatheredStatusRaw(
             evictionFirstSeenMs.set(key, firstSeen);
           }
           evictedSinceByServiceIndex[di] = new Date(firstSeen).toISOString();
-        } else {
+        } else if (evictedByServiceIndex[di] === false) {
           evictionFirstSeenMs.delete(key);
+        } else {
+          // Read failed — preserve any prior `evictedSince` so the next
+          // successful read does not bump the timestamp.
+          const firstSeen = evictionFirstSeenMs.get(key);
+          if (firstSeen !== undefined) {
+            evictedSinceByServiceIndex[di] = new Date(firstSeen).toISOString();
+          }
         }
       }
       raw.evictedSinceByServiceIndex = evictedSinceByServiceIndex;
