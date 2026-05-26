@@ -284,6 +284,16 @@ const HELP = `Usage:
   jinn solver-plugins publish <source-or-path> [--builder-agent-id <id>]
   jinn solver-plugins revoke <pluginCid> --reason <text> [--builder-agent-id <id>]
 
+  jinn solver-plugins endorse <pluginCid> [--score N --score-decimals N --tag1 <s>]
+  jinn solver-plugins warn <pluginCid> --reason <text>
+  jinn solver-plugins block <pluginCid> --reason <text>
+  jinn solver-plugins review <pluginCid> --score N [--score-decimals N --tag1 <s>]
+  jinn solver-plugins respond <pluginCid> --feedback-index N --client <addr> --response-uri <uri>
+
+  jinn solver-plugins list-feedback <pluginCid> [--client <addr>] [--include-revoked]
+  jinn solver-plugins discover [--solver-type <id>] [--builder <agentId>] [--include-revoked] [--limit N]
+  jinn solver-plugins status <pluginCid>
+
 SolverPlugin show/validate/pack are author/curator tooling — zero chain writes.
 
 publish + revoke are BUILDER actions:
@@ -291,6 +301,22 @@ publish + revoke are BUILDER actions:
   • Route through the fleet's Stage 1 identity Safe (\`fleet_safe_address\`).
   • Lazily complete Stage 1 (ETH funding + Safe deploy + agent NFT mint) if needed.
   • Never touch Stage 2 (OLAS service / staking) state.
+
+endorse / warn / block / review / respond are OPERATOR-trust write verbs:
+  • Submit ERC-8004 ReputationRegistry feedback against the builder's agentId.
+  • Anchor the feedback to a specific plug-in (\`manifestRef = "plugin:<cid>"\`).
+  • Require JINN_PASSWORD (or --password-fd / keystore-password file) and Stage 1.
+  • \`block\` additionally appends <pluginCid> to local \`solverPlugins.blockedCids\`;
+    the local effect lands even when the network publish fails. The daemon
+    reads the block list at startup — restart for it to take effect.
+
+list-feedback / discover / status are READ verbs (no password required):
+  • Use the configured DiscoveryAPI (defaults to the on-chain RPC floor on
+    mainnet; the privately-operated Ponder indexer on testnet).
+  • \`list-feedback\` reads ReputationRegistry rows for the cid's builder.
+  • \`discover\` lists published plug-ins, optionally filtered by SolverType.
+  • \`status\` summarises publication state + reputation summary +
+    local-block flag.
 
 Attach a plug-in to a SolverNet at runtime with:
   jinn solver-nets add-plugin <solver-net> <source>

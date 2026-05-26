@@ -39,6 +39,32 @@ function discoveryThatThrows(err: Error): DiscoveryAPI {
   } as unknown as DiscoveryAPI;
 }
 
+describe('jinn solver-plugins (dispatcher)', () => {
+  it('lists the new verbs in the help text', async () => {
+    const command = createSolverPluginsCommand({});
+    const { ctx, writes, exits } = makeCtx(['--help'], {});
+    await command.run(ctx);
+    const help = writes.join('');
+    for (const verb of ['endorse', 'warn', 'block', 'review', 'respond', 'list-feedback', 'discover', 'status']) {
+      expect(help).toContain(`jinn solver-plugins ${verb}`);
+    }
+    expect(exits).toEqual([]);
+  });
+
+  it('lists the new verbs in the invalid_invocation envelope expected field', async () => {
+    const command = createSolverPluginsCommand({});
+    const { ctx, writes, exits } = makeCtx(['unknown-subverb'], {});
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('invalid_invocation');
+    const expected = (out as any).error?.expected as string;
+    for (const verb of ['endorse', 'warn', 'block', 'review', 'respond', 'list-feedback', 'discover', 'status']) {
+      expect(expected).toContain(verb);
+    }
+    expect(exits).toEqual([1]);
+  });
+});
+
 describe('jinn solver-plugins status', () => {
   it('returns status="published" with publication + summary when discovery has a row', async () => {
     const configPath = withTempConfig();
