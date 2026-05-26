@@ -278,6 +278,13 @@ async function main(): Promise<void> {
   // dispatcher modes that may re-enter main(). Do not delete as dead code.
   // (jinn-mono#599)
   if (process.env.ENG_LOOP_RESET_FIELD_CACHE === '1') {
+    // Make the symbolism honest in the boot log (Stage 5 Finding 3 on
+    // jinn-mono#599) — on first boot the singleton is null, so this is a
+    // no-op; the call is preserved as the documented invariant for future
+    // long-running modes that re-enter main() without a fresh process.
+    console.log(
+      '[eng:loop] ENG_LOOP_RESET_FIELD_CACHE=1 — cache cleared (symbolic at boot; primary use is re-entry from a long-running mode).',
+    );
     resetFieldCache();
   }
   const fieldCache = await fetchFieldIds(realRunner);
