@@ -8,6 +8,14 @@
  * Issue: jinn-mono#587
  */
 
+import { basename, dirname, join as pathJoin, resolve as pathResolve } from 'node:path';
+import { Transform } from 'node:stream';
+import { promises as fsp } from 'node:fs';
+import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline/promises';
+import { WORKTREES_BASE } from '../dispatcher/dispatch.js';
+
 export interface SessionRecord {
   issueNumber: number;
   status: 'alive' | 'done' | 'stale';
@@ -57,14 +65,6 @@ export function encodeWorktreePathToProjectDir(path: string): string {
     .replace(/-+/g, '-')
     .replace(/-+$/, '');
 }
-
-import { basename, dirname, join as pathJoin, resolve as pathResolve } from 'node:path';
-import { Transform } from 'node:stream';
-import { promises as fsp } from 'node:fs';
-import { homedir } from 'node:os';
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
-import { WORKTREES_BASE } from '../dispatcher/dispatch.js';
 
 /**
  * Return the numeric issue id if `worktreePath` is a direct child of `base`
@@ -148,17 +148,6 @@ export function lastAssistantText(records: unknown[]): string | null {
 /**
  * Return the most-recent `pr-link` record's `{ prNumber, prUrl }`, or `null`.
  */
-/**
- * Truncate `s` to at most `n` characters. When truncation happens the suffix
- * is `...` and total length is exactly `n`. If `n` is smaller than the
- * ellipsis (`...` = 3 chars), the result is just the leading slice of `s`
- * up to `n` characters of ellipsis (so `truncate('abcd', 3)` → `'...'`).
- */
-export function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, Math.max(0, n - 3)) + '...';
-}
-
 export function prLinkRecord(records: unknown[]): { prNumber: number; prUrl: string } | null {
   let last: { prNumber: number; prUrl: string } | null = null;
   for (const r of records) {
@@ -169,6 +158,17 @@ export function prLinkRecord(records: unknown[]): { prNumber: number; prUrl: str
     }
   }
   return last;
+}
+
+/**
+ * Truncate `s` to at most `n` characters. When truncation happens the suffix
+ * is `...` and total length is exactly `n`. If `n` is smaller than the
+ * ellipsis (`...` = 3 chars), the result is just the leading slice of `s`
+ * up to `n` characters of ellipsis (so `truncate('abcd', 3)` → `'...'`).
+ */
+export function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, Math.max(0, n - 3)) + '...';
 }
 
 // ---------------------------------------------------------------------------
@@ -232,10 +232,7 @@ export async function discoverSessions(deps: SessionsDeps): Promise<SessionRecor
   for (const c of candidates) {
     const files = await deps.listJsonlFiles(pathJoin(deps.claudeProjectsDir, c.dir));
     if (files.length === 0) continue;
-    let newest = files[0]!;
-    for (const f of files) {
-      if (f.mtimeMs > newest.mtimeMs) newest = f;
-    }
+    const newest = files.reduce((a, b) => (b.mtimeMs > a.mtimeMs ? b : a));
     const transcriptPath = pathJoin(deps.claudeProjectsDir, c.dir, newest.name);
     const text = await deps.readJsonl(transcriptPath);
     const recordsParsed = parseJsonlLines(text);
@@ -257,14 +254,15 @@ export async function discoverSessions(deps: SessionsDeps): Promise<SessionRecor
       transcriptPath,
       sessionId: newest.name.replace(/\.jsonl$/, ''),
       lastActivity: new Date(lastActivityMs).toISOString(),
-      lastSummary: truncated == null || truncated.length === 0 ? null : truncated,
+      lastSummary: truncated != null && truncated.length > 0 ? truncated : null,
       prUrl: pr?.prUrl ?? null,
     });
   }
 
+  // ISO-8601 sorts correctly as a string; reverse comparator → newest first.
   return records
     .filter((r) => r.status !== 'stale')
-    .sort((a, b) => (a.lastActivity < b.lastActivity ? 1 : a.lastActivity > b.lastActivity ? -1 : 0));
+    .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
 }
 
 // ---------------------------------------------------------------------------
@@ -315,23 +313,25 @@ export function renderTable(records: SessionRecord[]): string {
   const summaryBudget = Math.max(20, Math.min(80, terminalWidth - prefixWidth));
   widths[4] = Math.min(widths[4]!, summaryBudget);
 
-  const pad = (s: string, w: number): string => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
-
+  // truncate-then-padEnd works for every column: truncate is a no-op for the
+  // first four (widths derived from data) and clamps the summary column.
   const renderRow = (cells: string[]): string =>
-    cells.map((c, i) => (i === 4 ? pad(truncate(c, widths[i]!), widths[i]!) : pad(c, widths[i]!))).join('  ');
+    cells.map((c, i) => truncate(c, widths[i]!).padEnd(widths[i]!)).join('  ');
 
-  const out: string[] = [];
-  out.push(renderRow(headers));
-  for (const row of rows) out.push(renderRow(row));
-  return out.join('\n');
+  return [headers, ...rows].map(renderRow).join('\n');
 }
 
 // ---------------------------------------------------------------------------
 // PrettyPrintTransform — JSONL → human lines (for --tail)
 // ---------------------------------------------------------------------------
 
-interface JsonlMessageRecord { type?: unknown; timestamp?: unknown; message?: { content?: unknown } }
-interface JsonlPrLinkRecord { type?: unknown; timestamp?: unknown; prNumber?: unknown; prUrl?: unknown }
+interface JsonlRecord {
+  type?: unknown;
+  timestamp?: unknown;
+  message?: { content?: unknown };
+  prNumber?: unknown;
+  prUrl?: unknown;
+}
 
 function timeFragment(ts: unknown): string {
   if (typeof ts !== 'string') return '??:??:??';
@@ -351,10 +351,6 @@ function timeFragment(ts: unknown): string {
  */
 export class PrettyPrintTransform extends Transform {
   private buffer = '';
-
-  constructor() {
-    super();
-  }
 
   override _transform(chunk: Buffer | string, _enc: BufferEncoding, cb: (err?: Error | null) => void): void {
     const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -377,19 +373,17 @@ export class PrettyPrintTransform extends Transform {
 
   private emitLine(line: string): void {
     if (line.length === 0) return;
-    let record: unknown;
+    let record: JsonlRecord;
     try {
-      record = JSON.parse(line);
+      record = JSON.parse(line) as JsonlRecord;
     } catch {
       return;
     }
-    const r = record as JsonlMessageRecord | JsonlPrLinkRecord;
-    const t = r.type;
+    const time = timeFragment(record.timestamp);
+    const t = record.type;
     if (t === 'assistant' || t === 'user') {
-      const m = r as JsonlMessageRecord;
-      const content = m.message?.content;
+      const content = record.message?.content;
       if (!Array.isArray(content)) return;
-      const time = timeFragment(m.timestamp);
       for (const block of content as Array<{ type?: unknown; text?: unknown }>) {
         if (block?.type === 'text' && typeof block.text === 'string') {
           this.push(`[${time} ${t}] ${block.text}\n`);
@@ -397,21 +391,33 @@ export class PrettyPrintTransform extends Transform {
       }
       return;
     }
-    if (t === 'pr-link') {
-      const m = r as JsonlPrLinkRecord;
-      if (typeof m.prNumber === 'number' && typeof m.prUrl === 'string') {
-        const time = timeFragment(m.timestamp);
-        this.push(`[${time} pr-link] #${m.prNumber} ${m.prUrl}\n`);
-      }
-      return;
+    if (t === 'pr-link' && typeof record.prNumber === 'number' && typeof record.prUrl === 'string') {
+      this.push(`[${time} pr-link] #${record.prNumber} ${record.prUrl}\n`);
     }
-    // Drop everything else.
+    // Everything else is dropped.
   }
 }
 
 // ---------------------------------------------------------------------------
 // tailSession — live-follow a session transcript with prettyprint
 // ---------------------------------------------------------------------------
+
+/**
+ * Find the discovered session for `issueNumber` or throw a clear error.
+ * `noun` customises the message (`transcript` for tail, `session` for kill).
+ */
+async function findSessionForIssue(
+  issueNumber: number,
+  noun: string,
+  deps: SessionsDeps,
+): Promise<SessionRecord> {
+  const records = await discoverSessions(deps);
+  const record = records.find((r) => r.issueNumber === issueNumber);
+  if (record == null) {
+    throw new Error(`no ${noun} found for issue #${issueNumber}`);
+  }
+  return record;
+}
 
 /**
  * Resolve the transcript for `issueNumber`, spawn `tail -F` against it, pipe
@@ -425,11 +431,7 @@ export async function tailSession(
   _opts: TailOptions,
   deps: SessionsDeps,
 ): Promise<void> {
-  const records = await discoverSessions(deps);
-  const record = records.find((r) => r.issueNumber === issueNumber);
-  if (record == null) {
-    throw new Error(`no transcript found for issue #${issueNumber}`);
-  }
+  const record = await findSessionForIssue(issueNumber, 'transcript', deps);
 
   const tail = deps.spawnTail(record.transcriptPath);
   const pretty = new PrettyPrintTransform();
@@ -462,11 +464,7 @@ export async function killSession(
   opts: KillOptions,
   deps: SessionsDeps,
 ): Promise<void> {
-  const records = await discoverSessions(deps);
-  const rec = records.find((r) => r.issueNumber === issueNumber);
-  if (rec == null) {
-    throw new Error(`no session found for issue #${issueNumber}`);
-  }
+  const rec = await findSessionForIssue(issueNumber, 'session', deps);
   if (rec.status !== 'alive' || rec.pid == null) {
     throw new Error(`session for issue #${issueNumber} is not alive (status: ${rec.status})`);
   }
@@ -495,6 +493,11 @@ interface ParsedArgs {
   issueNumber: number | null;
 }
 
+const ISSUE_FLAGS: Record<string, ParsedArgs['mode']> = {
+  '--tail': 'tail',
+  '--kill': 'kill',
+};
+
 function parseArgs(argv: string[]): ParsedArgs {
   let mode: ParsedArgs['mode'] = 'list';
   let json = false;
@@ -511,22 +514,13 @@ function parseArgs(argv: string[]): ParsedArgs {
       force = true;
       continue;
     }
-    if (tok === '--tail') {
+    const flagMode = ISSUE_FLAGS[tok];
+    if (flagMode != null) {
       const next = argv[i + 1];
       if (next == null || !/^\d+$/.test(next)) {
-        throw new Error('--tail requires an issue number');
+        throw new Error(`${tok} requires an issue number`);
       }
-      mode = 'tail';
-      issueNumber = parseInt(next, 10);
-      i++;
-      continue;
-    }
-    if (tok === '--kill') {
-      const next = argv[i + 1];
-      if (next == null || !/^\d+$/.test(next)) {
-        throw new Error('--kill requires an issue number');
-      }
-      mode = 'kill';
+      mode = flagMode;
       issueNumber = parseInt(next, 10);
       i++;
       continue;
@@ -567,7 +561,6 @@ export async function runSessionsCli(argv: string[], depsOverride?: SessionsDeps
 
 // ---------------------------------------------------------------------------
 // defaultDeps — production wiring (real fs / ps / lsof / claude)
-// Stub for Task 23; Task 24 replaces with real wiring.
 // ---------------------------------------------------------------------------
 
 /**
@@ -665,28 +658,22 @@ async function runCommand(cmd: string, args: string[]): Promise<string> {
 }
 
 async function resolveProcessCwdForPlatform(platform: NodeJS.Platform, pid: number): Promise<string | null> {
-  if (platform === 'darwin') {
-    try {
-      // `lsof -a -p <pid> -d cwd -Fn` emits records of the form:
-      //   p<pid>
-      //   fcwd
-      //   n<path>
-      const out = await runCommand('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn']);
-      for (const line of out.split('\n')) {
-        if (line.startsWith('n')) {
-          return line.slice(1).trim() || null;
-        }
+  // Linux (`readlink /proc/<pid>/cwd`) is a TODO(#587-followup) — the spec
+  // (§A portability) gates v1 on macOS since every operator runs darwin.
+  if (platform !== 'darwin') return null;
+  try {
+    // `lsof -a -p <pid> -d cwd -Fn` emits records of the form:
+    //   p<pid>
+    //   fcwd
+    //   n<path>
+    const out = await runCommand('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn']);
+    for (const line of out.split('\n')) {
+      if (line.startsWith('n')) {
+        return line.slice(1).trim() || null;
       }
-      return null;
-    } catch {
-      return null;
     }
-  }
-  if (platform === 'linux') {
-    // TODO(#587-followup): wire `readlink /proc/<pid>/cwd`. See
-    // docs/superpowers/specs/2026-05-26-eng-loop-sessions-subcommand.md §A
-    // (portability) — v1 ships macOS-only because every operator runs darwin.
+    return null;
+  } catch {
     return null;
   }
-  return null;
 }
