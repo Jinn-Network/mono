@@ -16,6 +16,7 @@ import {
   detectFreezeViolations,
   type LeaderboardRow,
 } from '../src/api/metrics.js';
+import { parseBoolParam, verdictTruth } from '../src/api/explorer.js';
 
 // ── verdictResolvedRate ───────────────────────────────────────────────────────
 
@@ -554,5 +555,106 @@ describe('detectFreezeViolations', () => {
     expect(result[0].violatingCount).toBe(2);
     expect(result[1].operator).toBe('0xAAA');
     expect(result[1].violatingCount).toBe(1);
+  });
+});
+
+// ── parseBoolParam ────────────────────────────────────────────────────────────
+
+describe('parseBoolParam', () => {
+  it('returns the default when raw is undefined', () => {
+    expect(parseBoolParam(undefined, true)).toBe(true);
+    expect(parseBoolParam(undefined, false)).toBe(false);
+  });
+
+  it('parses truthy strings (true/1/yes) case-insensitively', () => {
+    expect(parseBoolParam('true', false)).toBe(true);
+    expect(parseBoolParam('TRUE', false)).toBe(true);
+    expect(parseBoolParam('1', false)).toBe(true);
+    expect(parseBoolParam('yes', false)).toBe(true);
+    expect(parseBoolParam('YES', false)).toBe(true);
+  });
+
+  it('parses falsy strings (false/0/no) case-insensitively', () => {
+    expect(parseBoolParam('false', true)).toBe(false);
+    expect(parseBoolParam('FALSE', true)).toBe(false);
+    expect(parseBoolParam('0', true)).toBe(false);
+    expect(parseBoolParam('no', true)).toBe(false);
+    expect(parseBoolParam('NO', true)).toBe(false);
+  });
+
+  it('returns the default when raw is unparseable', () => {
+    expect(parseBoolParam('maybe', true)).toBe(true);
+    expect(parseBoolParam('maybe', false)).toBe(false);
+    expect(parseBoolParam('', true)).toBe(true);
+    expect(parseBoolParam('2', false)).toBe(false);
+  });
+});
+
+// ── verdictTruth strict mode ──────────────────────────────────────────────────
+
+describe('verdictTruth strict mode', () => {
+  it('strict=true returns null when enrichmentStatus is not "ok" (pending)', () => {
+    expect(
+      verdictTruth(
+        { verdictCode: 1, actualPassed: null, enrichmentStatus: 'pending' },
+        true,
+      ),
+    ).toBeNull();
+  });
+
+  it('strict=true returns null when enrichmentStatus is "failed" regardless of verdictCode', () => {
+    expect(
+      verdictTruth(
+        { verdictCode: 1, actualPassed: null, enrichmentStatus: 'failed' },
+        true,
+      ),
+    ).toBeNull();
+  });
+
+  it('strict=true returns actualPassed for enriched rows', () => {
+    expect(
+      verdictTruth(
+        { verdictCode: 0, actualPassed: true, enrichmentStatus: 'ok' },
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      verdictTruth(
+        { verdictCode: 1, actualPassed: false, enrichmentStatus: 'ok' },
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it('strict=false (default) falls back to verdictCode===1 for unenriched rows', () => {
+    expect(
+      verdictTruth({
+        verdictCode: 1,
+        actualPassed: null,
+        enrichmentStatus: 'pending',
+      }),
+    ).toBe(true);
+    expect(
+      verdictTruth(
+        { verdictCode: 0, actualPassed: null, enrichmentStatus: 'failed' },
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  it('strict=false returns actualPassed for enriched rows (back-compat)', () => {
+    expect(
+      verdictTruth(
+        { verdictCode: 1, actualPassed: false, enrichmentStatus: 'ok' },
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      verdictTruth({
+        verdictCode: 0,
+        actualPassed: true,
+        enrichmentStatus: 'ok',
+      }),
+    ).toBe(true);
   });
 });

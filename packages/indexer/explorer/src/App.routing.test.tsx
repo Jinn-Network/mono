@@ -152,13 +152,16 @@ describe('App routing', () => {
     vi.restoreAllMocks();
   });
 
-  it('/ → NetworkView mounts (Solve rate hero)', async () => {
+  it('/ → NetworkView mounts (Activity strip + Network composition)', async () => {
     const Wrapper = makeWrapper('/');
     render(<App />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('Solve rate')).toBeInTheDocument();
+      // The "Solve rate" hero was removed in #610; assert the surviving anchors
+      // (Activity strip + Network composition eyebrow).
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
-    expect(screen.queryByText('The ether')).not.toBeInTheDocument();
+    expect(screen.getByText(/network composition/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^solve rate$/i)).not.toBeInTheDocument();
   });
 
   it('/solvernets → SolverNetsListView mounts', async () => {

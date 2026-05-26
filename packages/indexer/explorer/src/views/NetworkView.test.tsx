@@ -8,15 +8,15 @@ import type { NetworkResponse } from '../lib/api';
 // ── Fixture ───────────────────────────────────────────────────────────────────
 
 const NETWORK_FIXTURE: NetworkResponse = {
-  tasksPosted: 1234,
-  tasksSettled: 1100,
-  tasksRefunded: 50,
-  attempts: 2500,
-  distinctOperators: 17,
-  solverNetsRunning: 3,
-  verdicts: 2000,
-  verdictsPass: 1800,
-  resolvedRate: 0.9,
+  tasksPosted: 12,
+  tasksSettled: 10,
+  tasksRefunded: 1,
+  attempts: 30,
+  distinctOperators: 7,
+  solverNetsRunning: 2,
+  verdicts: 18,
+  verdictsPass: 14,
+  resolvedRate: 14 / 18,
   onChainVerdictsPass: 0,
   onChainResolvedRate: null,
   verdictConsistency: { matched: 0, disagreed: 0, total: 0, agreementShare: null },
@@ -26,20 +26,20 @@ const NETWORK_FIXTURE: NetworkResponse = {
   mostRecentSettlementBlock: '14500000',
   composition: {
     byMode: [
-      { value: 'train', count: 1500, share: 0.6 },
-      { value: 'frozen', count: 1000, share: 0.4 },
+      { value: 'train', count: 20, share: 2 / 3 },
+      { value: 'frozen', count: 10, share: 1 / 3 },
     ],
     byHarness: [
-      { value: 'swe-bench', count: 2000, share: 0.8 },
-      { value: 'other', count: 500, share: 0.2 },
+      { value: 'swe-bench', count: 25, share: 25 / 30 },
+      { value: 'other', count: 5, share: 5 / 30 },
     ],
     byModel: [],
     byPlugin: [],
   },
   enrichmentCoverage: {
-    enrichedAttempts: 2000,
-    totalAttempts: 2500,
-    share: 0.8,
+    enrichedAttempts: 25,
+    totalAttempts: 30,
+    share: 25 / 30,
   },
   lastIndexedBlock: '14500001',
   lastIndexedAt: new Date(Date.now() - 30_000).toISOString(),
@@ -92,11 +92,9 @@ describe('NetworkView', () => {
     vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => {}));
     const { Wrapper } = makeWrapper();
     const { container } = render(<NetworkView />, { wrapper: Wrapper });
-    // Hero skeleton renders bg-sunken divs
-    const skeletonTiles = container.querySelectorAll(
-      '[style*="var(--bg-sunken)"]',
-    );
-    expect(skeletonTiles.length).toBeGreaterThan(0);
+    // Some skeleton elements should be present
+    const elevated = container.querySelectorAll('[style*="var(--bg-elevated)"]');
+    expect(elevated.length).toBeGreaterThan(0);
   });
 
   it('renders error state and retry button on fetch failure', async () => {
@@ -109,57 +107,38 @@ describe('NetworkView', () => {
     expect(screen.getByText('Retry')).toBeInTheDocument();
   });
 
-  it('leads with the solve-rate hero', async () => {
+  it('does NOT render a top-line "Solve rate" hero (#610)', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      // resolvedRate = 0.9 → "90.0%" rendered as the hero number
-      expect(screen.getByText('90.0%')).toBeInTheDocument();
+      // Wait for data — any of the activity strip labels signals data has landed.
+      expect(screen.getByText('Active operators')).toBeInTheDocument();
     });
-    // Pill label + section eyebrow
-    expect(screen.getByText('Solve rate')).toBeInTheDocument();
-    expect(screen.getByText('Task pipeline')).toBeInTheDocument();
+    // The cross-SolverNet "Solve rate" KPI was a regime-mixing roll-up per
+    // spec §2/§5.1 and is removed in #610.
+    expect(screen.queryByText(/^solve rate$/i)).toBeNull();
+    // No top-line percentage rendering — the old SolveHero showed pct(resolvedRate).
+    // (We can't easily assert "no percentage anywhere" — composition HBars may
+    // render shares as percentages. The text-match above is the load-bearing assertion.)
   });
 
-  it('renders the pipeline (Posted → Attempted → Evaluated) with avg attempts/task', async () => {
+  it('renders the Activity strip with operators/SolverNets/settlement', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('Posted')).toBeInTheDocument();
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
-    expect(screen.getByText('Attempted')).toBeInTheDocument();
-    expect(screen.getByText('Evaluated')).toBeInTheDocument();
-    // tasksPosted 1234 surfaces in the pipeline; "Out of 1,234 tasks posted"
-    // is the hero caption — the same number can legitimately repeat.
-    expect(screen.getAllByText('1,234').length).toBeGreaterThanOrEqual(1);
-    // attempts 2500 / tasksPosted 1234 → "2.0× per task"
-    expect(screen.getByText(/×\s*per task/)).toBeInTheDocument();
-    expect(screen.getAllByText('2,500').length).toBeGreaterThanOrEqual(1);
-    // verdicts 2000 in the evaluated step (also in enrichment line)
-    expect(screen.getAllByText('2,000').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/solvernets running/i)).toBeInTheDocument();
+    expect(screen.getByText(/last settlement/i)).toBeInTheDocument();
+    // distinctOperators = 7
+    expect(screen.getByText('7')).toBeInTheDocument();
+    // solverNetsRunning = 2
+    expect(screen.getByText('2')).toBeInTheDocument();
   });
 
-  it('renders the Activity strip', async () => {
-    mockFetchNetwork(NETWORK_FIXTURE);
-    const { Wrapper } = makeWrapper();
-    render(<NetworkView />, { wrapper: Wrapper });
-    await waitFor(() => {
-      expect(screen.getByText('Activity')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Active operators')).toBeInTheDocument();
-    expect(screen.getByText('SolverNets running')).toBeInTheDocument();
-    expect(screen.getByText('Last settlement')).toBeInTheDocument();
-    // distinctOperators = 17
-    expect(screen.getByText('17')).toBeInTheDocument();
-    // solverNetsRunning = 3
-    expect(screen.getByText('3')).toBeInTheDocument();
-    // block("14500000") → "14,500,000"
-    expect(screen.getByText('14,500,000')).toBeInTheDocument();
-  });
-
-  it('renders the Economy panel with operator/DAO split', async () => {
+  it('renders the Economy row with JINN distributed split', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
@@ -167,11 +146,19 @@ describe('NetworkView', () => {
       expect(screen.getByText('Economy')).toBeInTheDocument();
     });
     expect(screen.getByText('JINN distributed')).toBeInTheDocument();
-    // total = 100.50 + 50.00 = 150.50 JINN
-    expect(screen.getByText('150.50 JINN')).toBeInTheDocument();
     expect(screen.getByText(/100\.50 JINN to operators/)).toBeInTheDocument();
     expect(screen.getByText(/50\.00 JINN to DAO/)).toBeInTheDocument();
-    expect(screen.getByText('How JINN flows')).toBeInTheDocument();
+  });
+
+  it('renders the NETWORK COMPOSITION eyebrow on the composition card (#610)', async () => {
+    mockFetchNetwork(NETWORK_FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<NetworkView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      // Card title is rendered uppercased by the design system's mono eyebrow
+      // styling; the underlying text-content is "Network composition".
+      expect(screen.getByText(/network composition/i)).toBeInTheDocument();
+    });
   });
 
   it('renders composition HBars with mode labels', async () => {
@@ -190,21 +177,20 @@ describe('NetworkView', () => {
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      // "2,000 / 2,500 attempts enriched (80.0%)"
-      // 80.0% also appears in HBars "By mode" frozen share
-      const matches = screen.getAllByText('80.0%');
-      expect(matches.length).toBeGreaterThanOrEqual(1);
+      // "25 / 30 attempts enriched (...)" — both numbers may render elsewhere
+      // (HBars shares), so use getAllByText for resilience.
+      expect(screen.getAllByText('25').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('30').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText(/attempts enriched/)).toBeInTheDocument();
     });
   });
 
-  it('has no page-level headline — the Solve rate hero leads', async () => {
-    // The May 15 redesign drops the italic "The ether" headline; the chrome's
-    // Network tab is the wayfinder and the gold hero card is the lead.
+  it('has no page-level headline', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('Solve rate')).toBeInTheDocument();
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
     expect(screen.queryByText('The ether')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
@@ -220,33 +206,24 @@ describe('NetworkView', () => {
     });
   });
 
-  it('renders the "What\'s running" card', async () => {
-    mockFetchNetwork(NETWORK_FIXTURE);
-    const { Wrapper } = makeWrapper();
-    render(<NetworkView />, { wrapper: Wrapper });
-    await waitFor(() => {
-      expect(screen.getByText("What's running")).toBeInTheDocument();
-    });
-  });
-
   it('does not render the on-chain vs envelope block on this view', async () => {
     // The block now lives on the SolverNet detail view (jinn-mono-ujlu).
     const fixtureWithDisagreement: NetworkResponse = {
       ...NETWORK_FIXTURE,
-      onChainVerdictsPass: 1500,
-      onChainResolvedRate: 0.75,
+      onChainVerdictsPass: 12,
+      onChainResolvedRate: 0.6,
       verdictConsistency: {
-        matched: 1800,
-        disagreed: 200,
-        total: 2000,
-        agreementShare: 0.9,
+        matched: 14,
+        disagreed: 4,
+        total: 18,
+        agreementShare: 14 / 18,
       },
     };
     mockFetchNetwork(fixtureWithDisagreement);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('Solve rate')).toBeInTheDocument();
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
     expect(screen.queryByText('On-chain vs envelope')).not.toBeInTheDocument();
     expect(screen.queryByText('Envelope-truth resolved')).not.toBeInTheDocument();

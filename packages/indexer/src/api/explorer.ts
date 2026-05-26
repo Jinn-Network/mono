@@ -125,6 +125,23 @@ function parseBigIntParam(raw: string | undefined, def: bigint, max: bigint): bi
   return n > max ? max : n;
 }
 
+/**
+ * Parse a boolean query param. Recognises `true`/`1`/`yes` (case-insensitive)
+ * as true and `false`/`0`/`no` as false; unparseable or missing values fall
+ * back to `def`.
+ *
+ * Used by `?include=raw` and similar opt-in flags on the explorer routes.
+ * Exported because tests cover it (parseBoolParam describe in metrics.test.ts)
+ * and the helper is otherwise an internal utility.
+ */
+export function parseBoolParam(raw: string | undefined, def: boolean): boolean {
+  if (raw === undefined) return def;
+  const v = raw.toLowerCase();
+  if (v === 'true' || v === '1' || v === 'yes') return true;
+  if (v === 'false' || v === '0' || v === 'no') return false;
+  return def;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -204,10 +221,32 @@ function verdictEnvelopeJoinCondition() {
   );
 }
 
-function verdictTruth(v: VerdictTruthRow): boolean {
-  return v.enrichmentStatus === 'ok' && v.actualPassed !== null
-    ? v.actualPassed
-    : v.verdictCode === 1;
+/**
+ * Computes the "truth" of a verdict row.
+ *
+ * Default mode (`strict=false` / omitted):
+ *   - Enriched (`enrichmentStatus === 'ok'` AND `actualPassed != null`):
+ *     returns `actualPassed`.
+ *   - Otherwise: falls back to `verdictCode === 1` (the legacy on-chain truth).
+ *
+ * Strict mode (`strict=true`) — used by `?include=raw` absent (spec §4):
+ *   - Enriched: returns `actualPassed` (or `null` if `actualPassed == null`,
+ *     so the row drops out of pass/total counts).
+ *   - Unenriched (`enrichmentStatus !== 'ok'`): returns `null` regardless of
+ *     `verdictCode`. Callers should treat `null` as "exclude this row from
+ *     both numerator AND denominator" — see Task 2 + Task 4 in #610.
+ *
+ * Exported so the metrics-test suite can lock both modes by example.
+ */
+export function verdictTruth(
+  v: VerdictTruthRow,
+  strict = false,
+): boolean | null {
+  if (v.enrichmentStatus === 'ok' && v.actualPassed !== null) {
+    return v.actualPassed;
+  }
+  if (strict) return null;
+  return v.verdictCode === 1;
 }
 
 function verdictTruthPassCountSql() {
@@ -224,6 +263,20 @@ function verdictTruthDisagreementCountSql() {
       AND ((${schema.verdict.verdictCode} = 1) <> ${schema.verdictEnvelopeMeta.actualPassed})
     THEN 1
   END`;
+}
+
+/**
+ * SQL WHERE fragment that drops unenriched verdict rows when `includeUnenriched`
+ * is false (the new default per spec §4: envelope-only). Returns `undefined`
+ * when `includeUnenriched` is true so Drizzle's `and(...)` short-circuits it.
+ *
+ * Composes with the standard verdict-side WHERE clauses
+ * (e.g. `and(eq(...chainId), enrichmentFilter(false))`).
+ */
+function enrichmentFilter(includeUnenriched: boolean) {
+  return includeUnenriched
+    ? undefined
+    : eq(schema.verdictEnvelopeMeta.enrichmentStatus, 'ok');
 }
 
 /**
@@ -284,6 +337,8 @@ app.use('/network', explorerFreshness());
  *                             vs total attempts; lets the SPA warn when coverage is low.
  */
 app.get('/network', async (c) => {
+  const includeUnenriched = c.req.query('include') === 'raw';
+
   const [taskStats, attemptStats, verdictRows, rewardStats, snStats, enrichmentRows, totalAttemptCount] =
     await Promise.all([
       // Task counts — scoped to EXPLORER_CHAIN_ID
@@ -338,7 +393,12 @@ app.get('/network', async (c) => {
           schema.verdictEnvelopeMeta,
           verdictEnvelopeJoinCondition(),
         )
-        .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID)),
+        .where(
+          and(
+            eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+            enrichmentFilter(includeUnenriched),
+          ),
+        ),
 
       // Reward distributions — intentionally unfiltered by chainId:
       // JinnDistributor lives on Sepolia L1 (11155111) and JINN distributed
@@ -501,6 +561,8 @@ app.use('/solvernets', explorerFreshness());
  *   returned per net, ascending (oldest first). Empty when a net has no verdicts.
  */
 app.get('/solvernets', async (c) => {
+  const includeUnenriched = c.req.query('include') === 'raw';
+
   const manifests = await db
     .select()
     .from(schema.solverNetManifest)
@@ -509,11 +571,13 @@ app.get('/solvernets', async (c) => {
   // Batch-load all stats in O(1) round trips instead of O(N).
   const statsByDigest = await getSolverNetStatsBatch(
     manifests.map((m) => m.cidKeccak),
+    includeUnenriched,
   );
 
   // Batch-load sparkline series in one extra query — all manifests at once.
   const sparklinesByDigest = await getSolverNetSparklinesBatch(
     manifests.map((m) => m.cidKeccak),
+    includeUnenriched,
   );
 
   const rows = manifests.map((m) => ({
@@ -600,10 +664,14 @@ app.get('/solvernet/:cid', async (c) => {
     DEFAULT_MIN_VERDICTS,
     1000,
   );
+  const includeUnenriched = c.req.query('include') === 'raw';
+  // `strict` is the verdictTruth-side polarity of `includeUnenriched`: when
+  // includeUnenriched is false (the default), unenriched rows must be dropped.
+  const strict = !includeUnenriched;
 
   // Reuse the batch helper with a one-element array so the stats shape is
   // identical to what /solvernets uses.
-  const statsByDigest = await getSolverNetStatsBatch([m.cidKeccak]);
+  const statsByDigest = await getSolverNetStatsBatch([m.cidKeccak], includeUnenriched);
   const stats = statsByDigest.get(m.cidKeccak);
 
   // Fetch verdicts for this SolverNet's tasks (ordered by block for curves)
@@ -643,16 +711,17 @@ app.get('/solvernet/:cid', async (c) => {
               and(
                 inArray(schema.verdict.taskId, ids),
                 eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+                enrichmentFilter(includeUnenriched),
               ),
             )
             .orderBy(schema.verdict.createdAtBlock)
         : Promise.resolve([]),
 
       // Train board — mode-filtered leaderboard for this SolverNet
-      buildLeaderboardRows({ manifestDigest: m.cidKeccak, mode: 'train' }),
+      buildLeaderboardRows({ manifestDigest: m.cidKeccak, mode: 'train', includeUnenriched }),
 
       // Frozen board — mode-filtered leaderboard for this SolverNet
-      buildLeaderboardRows({ manifestDigest: m.cidKeccak, mode: 'frozen' }),
+      buildLeaderboardRows({ manifestDigest: m.cidKeccak, mode: 'frozen', includeUnenriched }),
 
       // HarnessCheckpoint rows (all on-chain anchors — not scoped to a SolverNet
       // since the harnessCheckpoint schema has no SolverNet link; we return all
@@ -706,12 +775,12 @@ app.get('/solvernet/:cid', async (c) => {
 
   const samples = verdictRows.map((v) => ({
     block: v.createdAtBlock,
-    pass: verdictTruth(v),
+    pass: verdictTruth(v) === true,
   }));
 
   const learningCurveBuckets = bucketResolvedRate(samples, bucketBlocks);
   const learningCurveRolling = rollingResolvedRate(
-    verdictRows.map(verdictTruth),
+    verdictRows.map((v) => verdictTruth(v) === true),
     rollingK,
   );
 
@@ -809,9 +878,13 @@ app.get('/solvernet/:cid', async (c) => {
         taskId: a.taskId,
         attemptIndex: a.attemptIndex,
       }));
-      const frozenVerdicts = await getVerdictsForAttempts(pairs);
-      const total = frozenVerdicts.length;
-      const pass = frozenVerdicts.filter(verdictTruth).length;
+      const frozenVerdicts = await getVerdictsForAttempts(pairs, { includeUnenriched });
+      const total = frozenVerdicts.filter(
+        (v) => verdictTruth(v, strict) !== null,
+      ).length;
+      const pass = frozenVerdicts.filter(
+        (v) => verdictTruth(v, strict) === true,
+      ).length;
       frozenRateByDigest.set(digest, resolvedRateFromCounts(pass, total));
     }
   }
@@ -872,6 +945,18 @@ app.get('/solvernet/:cid', async (c) => {
   const chainHead = c.get('chainHead');
   const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
+  // Override the cached batch-helper rates with route-filtered counts derived
+  // from the SQL-filtered verdictRows, so the headline resolvedRate matches
+  // the learning curve exactly. (Belt-and-braces: getSolverNetStatsBatch was
+  // also called with includeUnenriched and already filters, but recomputing
+  // from verdictRows guarantees consistency with learningCurveBuckets.)
+  const filteredVerdictsTotal = verdictRows.length;
+  const filteredVerdictsPass = verdictRows.filter(
+    (v) => verdictTruth(v, strict) === true,
+  ).length;
+  const filteredResolvedRate =
+    filteredVerdictsTotal === 0 ? null : filteredVerdictsPass / filteredVerdictsTotal;
+
   return c.json({
     cid: m.id,
     name: m.name,
@@ -882,6 +967,9 @@ app.get('/solvernet/:cid', async (c) => {
     launcherAgentId: m.launcherAgentId,
     statusUpdatedAt: m.statusUpdatedAt,
     ...stats,
+    verdicts: filteredVerdictsTotal,
+    verdictsPass: filteredVerdictsPass,
+    resolvedRate: filteredResolvedRate,
     learningCurveBuckets,
     learningCurveRolling,
     trainBoard: {
@@ -948,6 +1036,7 @@ app.get('/operators', async (c) => {
 
   const modeParam = c.req.query('mode');
   const harnessParam = c.req.query('harness');
+  const includeUnenriched = c.req.query('include') === 'raw';
 
   // Determine if any filter is active. Both mode and harness can stack.
   // If harness filter is set, we use a dedicated query rather than the leaderboard
@@ -960,11 +1049,15 @@ app.get('/operators', async (c) => {
     // Harness filter (optionally + mode): load attempts via an inner join on
     // attemptEnvelopeMeta filtered by implName (and optionally mode), then build
     // leaderboard rows in-process.
-    rows = await buildLeaderboardRowsWithHarnessFilter(modeParam, harnessParam);
+    rows = await buildLeaderboardRowsWithHarnessFilter(
+      modeParam,
+      harnessParam,
+      includeUnenriched,
+    );
   } else if (modeParam !== undefined) {
-    rows = await buildLeaderboardRows({ mode: modeParam });
+    rows = await buildLeaderboardRows({ mode: modeParam, includeUnenriched });
   } else {
-    rows = await buildLeaderboardRows();
+    rows = await buildLeaderboardRows({ includeUnenriched });
   }
 
   // Dominant mode/harness per operator — load enriched attempts for all operators
@@ -1061,6 +1154,7 @@ app.use('/operator/:addr', explorerFreshness());
  */
 app.get('/operator/:addr', async (c) => {
   const addr = c.req.param('addr').toLowerCase() as `0x${string}`;
+  const includeUnenriched = c.req.query('include') === 'raw';
 
   // All attempts by this operator — scoped to EXPLORER_CHAIN_ID
   const operatorAttempts = await db
@@ -1119,7 +1213,7 @@ app.get('/operator/:addr', async (c) => {
     taskId: a.taskId,
     attemptIndex: a.attemptIndex,
   }));
-  const verdictRows = await getVerdictsForAttempts(attemptPairs);
+  const verdictRows = await getVerdictsForAttempts(attemptPairs, { includeUnenriched });
 
   // Envelope enrichment for this operator's attempts — for dominant dims + modeBreakdown.
   // Join via requestId (attempt.requestId = attemptEnvelopeMeta.requestId).
@@ -1234,7 +1328,7 @@ app.get('/operator/:addr', async (c) => {
     (a) => taskMap.get(a.taskId)?.finalized,
   ).length;
   const totalVerdictsTotal = verdictRows.length;
-  const totalVerdictsPass = verdictRows.filter(verdictTruth).length;
+  const totalVerdictsPass = verdictRows.filter((v) => verdictTruth(v) === true).length;
   const totalResolvedRate = resolvedRateFromCounts(totalVerdictsPass, totalVerdictsTotal);
 
   // Dominant dims across all enriched attempts for this operator
@@ -1288,6 +1382,7 @@ app.get('/operator/:addr', async (c) => {
  */
 async function getSolverNetSparklinesBatch(
   cidKeccaks: `0x${string}`[],
+  includeUnenriched = false,
 ): Promise<Map<`0x${string}`, number[]>> {
   const result = new Map<`0x${string}`, number[]>(
     cidKeccaks.map((k) => [k, []]),
@@ -1323,6 +1418,7 @@ async function getSolverNetSparklinesBatch(
         inArray(schema.task.manifestDigest, cidKeccaks),
         eq(schema.task.chainId, EXPLORER_CHAIN_ID),
         eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+        enrichmentFilter(includeUnenriched),
       ),
     )
     .groupBy(schema.task.manifestDigest, sql`${sparklineBucketExpr}`);
@@ -1369,6 +1465,7 @@ async function getSolverNetSparklinesBatch(
  */
 async function getSolverNetStatsBatch(
   cidKeccaks: `0x${string}`[],
+  includeUnenriched = false,
 ): Promise<
   Map<
     `0x${string}`,
@@ -1472,6 +1569,7 @@ async function getSolverNetStatsBatch(
         inArray(schema.task.manifestDigest, cidKeccaks),
         eq(schema.task.chainId, EXPLORER_CHAIN_ID),
         eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+        enrichmentFilter(includeUnenriched),
       ),
     )
     .groupBy(schema.task.manifestDigest);
@@ -1513,12 +1611,17 @@ async function getSolverNetStatsBatch(
  * Fetches all verdicts for a set of (taskId, attemptIndex) pairs.
  * Returns the subset of verdict rows matching any of the pairs.
  * Scoped to EXPLORER_CHAIN_ID.
+ *
+ * `opts.includeUnenriched` (default `false` — strict per spec §4) restricts
+ * the result to verdict rows whose verdictEnvelopeMeta.enrichmentStatus = 'ok'.
  */
 async function getVerdictsForAttempts(
   pairs: { taskId: string; attemptIndex: number }[],
+  opts?: { includeUnenriched?: boolean },
 ): Promise<(VerdictTruthRow & { taskId: string; attemptIndex: number })[]> {
   if (pairs.length === 0) return [];
 
+  const includeUnenriched = opts?.includeUnenriched ?? false;
   const taskIds = [...new Set(pairs.map((p) => p.taskId))];
   const rows = await db
     .select({
@@ -1534,6 +1637,7 @@ async function getVerdictsForAttempts(
       and(
         inArray(schema.verdict.taskId, taskIds),
         eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+        enrichmentFilter(includeUnenriched),
       ),
     );
 
@@ -1560,6 +1664,12 @@ interface BuildLeaderboardOptions {
    * excluded when this filter is set.
    */
   mode?: string;
+  /**
+   * Spec §4 — when `false` (the new default), verdict-side reads drop
+   * unenriched rows from both numerator and denominator. When `true`, the
+   * legacy permissive behaviour is restored (used by `?include=raw`).
+   */
+  includeUnenriched?: boolean;
 }
 
 /**
@@ -1580,7 +1690,7 @@ interface BuildLeaderboardOptions {
 async function buildLeaderboardRows(
   opts: BuildLeaderboardOptions = {},
 ): Promise<LeaderboardRow[]> {
-  const { manifestDigest, mode } = opts;
+  const { manifestDigest, mode, includeUnenriched = false } = opts;
 
   // All attempts — scoped to EXPLORER_CHAIN_ID, with optional manifestDigest filter.
   // If mode filter is active we join attemptEnvelopeMeta to restrict.
@@ -1663,6 +1773,7 @@ async function buildLeaderboardRows(
       taskId: a.taskId,
       attemptIndex: a.attemptIndex,
     })),
+    { includeUnenriched },
   );
 
   // Reward distributions — intentionally unfiltered by chainId.
@@ -1699,7 +1810,7 @@ async function buildLeaderboardRows(
       attemptPairSet.has(`${v.taskId}:${v.attemptIndex}`),
     );
     const verdictsTotal = opVerdicts.length;
-    const verdictsPass = opVerdicts.filter(verdictTruth).length;
+    const verdictsPass = opVerdicts.filter((v) => verdictTruth(v) === true).length;
 
     rows.push({
       operator: op as `0x${string}`,
@@ -1808,6 +1919,7 @@ function modalString(arr: string[]): string | null {
 async function buildLeaderboardRowsWithHarnessFilter(
   modeFilter: string | undefined,
   harnessFilter: string,
+  includeUnenriched = false,
 ): Promise<LeaderboardRow[]> {
   // Build the envelope filter conditions
   const envelopeConditions = [
@@ -1851,6 +1963,7 @@ async function buildLeaderboardRowsWithHarnessFilter(
       taskId: a.taskId,
       attemptIndex: a.attemptIndex,
     })),
+    { includeUnenriched },
   );
 
   const rows: LeaderboardRow[] = [];
@@ -1864,7 +1977,7 @@ async function buildLeaderboardRowsWithHarnessFilter(
       attemptPairSet.has(`${v.taskId}:${v.attemptIndex}`),
     );
     const verdictsTotal = opVerdicts.length;
-    const verdictsPass = opVerdicts.filter(verdictTruth).length;
+    const verdictsPass = opVerdicts.filter((v) => verdictTruth(v) === true).length;
 
     rows.push({
       operator: op as `0x${string}`,

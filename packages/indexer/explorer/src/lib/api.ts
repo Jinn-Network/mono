@@ -272,10 +272,24 @@ function qs(params: Record<string, string | number | undefined>): string {
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
-export function useNetwork() {
+export interface NetworkParams {
+  /**
+   * When true, append `?include=raw` so the backend skips the envelope-only
+   * filter (spec §4). The SPA defaults to strict (envelope-only); this
+   * param exists for future ad-hoc URL state.
+   */
+  includeUnenriched?: boolean;
+}
+
+export function useNetwork(params?: NetworkParams) {
   return useQuery({
-    queryKey: ['network'],
-    queryFn: () => fetchJson<NetworkResponse>('/explorer/network'),
+    queryKey: ['network', params],
+    queryFn: () =>
+      fetchJson<NetworkResponse>(
+        `/explorer/network${qs({
+          include: params?.includeUnenriched ? 'raw' : undefined,
+        })}`,
+      ),
   });
 }
 
@@ -290,6 +304,8 @@ export interface SolverNetParams {
   bucket?: number;
   k?: number;
   minVerdicts?: number;
+  /** Append `?include=raw` to opt out of the spec-§4 envelope-only filter. */
+  includeUnenriched?: boolean;
 }
 
 export function useSolverNet(cid: string, params?: SolverNetParams) {
@@ -301,6 +317,7 @@ export function useSolverNet(cid: string, params?: SolverNetParams) {
           bucket: params?.bucket,
           k: params?.k,
           minVerdicts: params?.minVerdicts,
+          include: params?.includeUnenriched ? 'raw' : undefined,
         })}`,
       ),
     enabled: Boolean(cid),
@@ -311,6 +328,8 @@ export interface OperatorsParams {
   minVerdicts?: number;
   mode?: string;
   harness?: string;
+  /** Append `?include=raw` to opt out of the spec-§4 envelope-only filter. */
+  includeUnenriched?: boolean;
 }
 
 export function useOperators(params?: OperatorsParams) {
@@ -322,6 +341,7 @@ export function useOperators(params?: OperatorsParams) {
           minVerdicts: params?.minVerdicts,
           mode: params?.mode,
           harness: params?.harness,
+          include: params?.includeUnenriched ? 'raw' : undefined,
         })}`,
       ),
   });
