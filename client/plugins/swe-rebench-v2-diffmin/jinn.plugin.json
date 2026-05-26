@@ -7,6 +7,6 @@
       "skills/diffmin/SKILL.md",
       "skills/test-map/SKILL.md"
     ],
-    "description": "Minimal-diff discipline + PASS_TO_PASS test-mapping skills for swe-rebench-v2.v1. Complementary to swe-rebench-v2-runtime's orient/plan skills; the two stack."
+    "description": "Minimal-diff discipline + PASS_TO_PASS test-mapping skills for swe-rebench-v2.v1. Stacks with swe-rebench-v2-runtime, which describes the swe-rebench-v2.v1 task contract."
   }
 }

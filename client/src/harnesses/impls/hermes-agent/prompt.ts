@@ -7,12 +7,12 @@ import type { TaskSessionInputs } from '../learner/types.js';
  * The harness deliberately does NOT bake SolverNet-specific guidance into
  * this prompt. Per-SolverNet task patterns (repo setup, schema shape,
  * submission expectations) live in the SolverPlugin's SKILL.md files
- * (e.g. `swe-rebench-v2-runtime/skills/orient/SKILL.md` +
- * `plan/SKILL.md`). The harness loads those skills via
- * `solverPluginRoots` and the agent picks them up at runtime. Adding
- * SolverNet branching here would re-create the leak that retired the
- * earlier `sweRebenchV2Guidance()` helper — every new SolverNet would
- * require a code change in every harness's prompt builder.
+ * (e.g. `swe-rebench-v2-runtime/skills/task/SKILL.md`). The harness loads
+ * those skills via `solverPluginRoots` and the agent picks them up at
+ * runtime. Adding SolverNet branching here would re-create the leak that
+ * retired the earlier `sweRebenchV2Guidance()` helper — every new
+ * SolverNet would require a code change in every harness's prompt
+ * builder.
  */
 export function buildInitialPrompt(inputs: TaskSessionInputs): string {
   return [

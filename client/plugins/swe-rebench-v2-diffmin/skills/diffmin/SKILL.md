@@ -7,8 +7,10 @@ description: Bias the patch toward the smallest change that flips FAIL_TO_PASS w
 
 This skill keeps your patch as small as possible. Smaller diffs are easier to
 verify, less likely to introduce regressions, and align with how maintainers
-actually ship fixes. Apply it after the Orient phase has identified the root
-cause and before writing the patch in the Execute phase.
+actually ship fixes. The `swe-rebench-v2-task` skill (in
+`swe-rebench-v2-runtime`) describes the swe-rebench-v2.v1 task contract —
+read it first if you're not already familiar with the input shape and output
+schema.
 
 ## Core heuristics
 
@@ -102,15 +104,18 @@ in intent but violates every heuristic.
 All checks pass. The `FAIL_TO_PASS` test now sees a proper empty string
 instead of garbage; `PASS_TO_PASS` tests are untouched.
 
-## Integration with the Plan skill
+## Relationship to the task contract
 
-The `swe-rebench-v2-plan` skill from `swe-rebench-v2-runtime` sketches the
-edit list. Run this diffmin skill after Plan and before submitting:
+The `swe-rebench-v2-task` skill (in `swe-rebench-v2-runtime`) describes the
+swe-rebench-v2.v1 task contract — input fields, FAIL_TO_PASS / PASS_TO_PASS
+semantics, and the `swe-rebench-v2-solution.v1` output schema. This diffmin
+skill describes a technique for shaping the patch you embed in that output:
 
-1. Plan produces: "change line 402 in `libsrc/var.c` from `!=` to `==`."
-2. Execute writes the patch.
-3. **This skill validates:** call `mcp__diff-stats__diff_stats` on the patch,
+1. Whatever edit list you've arrived at, e.g. "change line 402 in
+   `libsrc/var.c` from `!=` to `==`."
+2. Once the patch is written, call `mcp__diff-stats__diff_stats` on it and
    confirm `hunks: 1, filesTouched: 1, hasRenames: false`.
-4. Submit via `submit_typed_payload` only after validation passes.
+3. If validation fails, trim the patch and re-validate.
 
-If validation fails, trim the patch and re-validate before submitting.
+The diff_stats checks are about the shape of the patch, not about when in the
+solve loop you run them.

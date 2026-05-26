@@ -61,7 +61,7 @@ branch reachable from `test_fill_value`."
 
 ### Step 4: Pre-load the call graph for the affected function
 
-Read the function you intend to edit (identified by the Orient skill). Trace:
+Read the function you intend to edit. Trace:
 - Which sub-functions does it call?
 - Which of those sub-functions appear in the PASS_TO_PASS test map?
 
@@ -71,7 +71,7 @@ step 3's ratio.
 
 ### Step 5: Write the edit constraint list
 
-Output a structured list before starting Execute:
+Output a structured list summarising what the patch may and may not touch:
 
 ```
 Edit constraint list:
@@ -83,7 +83,7 @@ Edit constraint list:
 - Safe to change: local variable stat comparison on line 402
 ```
 
-Pass this list to the Plan/Execute phase.
+This list is the input to writing the patch itself.
 
 ## Worked example: org__repo-42 (fictional)
 
@@ -114,13 +114,11 @@ Pass this list to the Plan/Execute phase.
 This constraint list feeds directly into the diffmin skill's heuristics: one
 hunk, one file, no renames, no changes to `_validate_token`.
 
-## Integration with the diffmin skill
+## Relationship to the diffmin skill
 
-Run this test-map skill in parallel with the Orient skill. By the time Plan
-begins, you should have:
-1. The Orient summary (hypothesis + target function).
-2. The test-map constraint list (which sub-functions are covered by PASS_TO_PASS).
-
-Both feed into the Plan phase. After Execute produces the patch, run
-`mcp__diff-stats__diff_stats` via the diffmin skill to confirm the diff
-satisfies the hunk and file count constraints before submitting.
+The test-map constraint list (which sub-functions are covered by
+PASS_TO_PASS) is the natural input to the diffmin skill's heuristics: it
+tells you which functions are safe to touch and which would inflate
+regression risk. The `mcp__diff-stats__diff_stats` tool described in the
+diffmin skill can then confirm that the resulting patch satisfies the hunk
+and file count constraints.

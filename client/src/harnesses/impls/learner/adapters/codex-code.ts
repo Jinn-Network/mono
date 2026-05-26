@@ -97,12 +97,12 @@ function taskContextJson(inputs: TaskSessionInputs): string {
  * The harness deliberately does NOT bake SolverNet-specific guidance into
  * this prompt. Per-SolverNet task patterns (repo setup, schema shape,
  * submission expectations) live in the SolverPlugin's SKILL.md files
- * (e.g. `swe-rebench-v2-runtime/skills/orient/SKILL.md` +
- * `plan/SKILL.md`). The adapter loads those skills via the projected
- * plugin root and the agent picks them up at runtime. Adding SolverNet
- * branching here would re-create the leak that retired the earlier
- * `sweRebenchV2Guidance()` helper — every new SolverNet would require a
- * code change in every adapter's prompt builder.
+ * (e.g. `swe-rebench-v2-runtime/skills/task/SKILL.md`). The adapter loads
+ * those skills via the projected plugin root and the agent picks them up
+ * at runtime. Adding SolverNet branching here would re-create the leak
+ * that retired the earlier `sweRebenchV2Guidance()` helper — every new
+ * SolverNet would require a code change in every adapter's prompt
+ * builder.
  */
 function buildInitialPrompt(inputs: TaskSessionInputs): string {
   return [

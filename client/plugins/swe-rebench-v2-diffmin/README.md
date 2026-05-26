@@ -2,10 +2,10 @@
 
 Minimal-diff discipline and PASS\_TO\_PASS test-mapping skills for the
 `swe-rebench-v2.v1` SolverNet. This plugin competes on a different vertical
-than `swe-rebench-v2-runtime`: where the runtime plugin teaches the solver to
-orient and plan, this plugin constrains how the solver patches — keeping diffs
-small, renames absent, and PASS\_TO\_PASS coverage explicit before the first
-line of code is written.
+than `swe-rebench-v2-runtime`: where the runtime plugin describes the
+swe-rebench-v2.v1 task contract (input shape, test-set semantics, output
+schema), this plugin constrains how the solver patches — keeping diffs small,
+renames absent, and PASS\_TO\_PASS coverage explicit.
 
 ## What the skills do
 
@@ -18,8 +18,8 @@ line of code is written.
 
 - **`swe-rebench-v2-test-map`** — PASS\_TO\_PASS test mapping. Greps test names
   to source files, computes test-to-source coverage ratios, pre-loads the call
-  graph for the function under fix. Produces an edit-constraint list before
-  the Execute phase begins.
+  graph for the function under fix. Produces an edit-constraint list that
+  feeds the patch.
 
 Both skills reference real SWE-rebench v2 mechanics (`FAIL_TO_PASS`,
 `PASS_TO_PASS`, `base_commit`, `instance_id`, `goal.spec`). They read like a
@@ -38,12 +38,13 @@ gets the full set of skills:
 
 | Plugin | Skills |
 |--------|--------|
-| `swe-rebench-v2-runtime` | `supports: ["swe-rebench-v2.v1"]` — orient, plan |
+| `swe-rebench-v2-runtime` | `supports: ["swe-rebench-v2.v1"]` — task |
 | `swe-rebench-v2-diffmin` | `supports: ["swe-rebench-v2.v1"]` — diffmin, test-map |
 
 The harness loads skills from all plugins that declare `swe-rebench-v2.v1`
-support. Adding this plugin alongside the runtime plugin gives the solver four
-complementary skills for a single task: orient → plan → test-map → diffmin.
+support. The runtime plugin's `task` skill describes the swe-rebench-v2.v1
+task contract; the diffmin and test-map skills here describe complementary
+patching techniques.
 
 ## Bundled MCP tool: diff_stats
 
