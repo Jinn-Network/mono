@@ -48,6 +48,78 @@ gh project item-list 1 --owner Jinn-Network --format json \
 **Drop from the batch:**
 - Any PR whose CI rollup is red or has pending checks.
 - Any PR whose linked issue has `Blocked on: Human` (it is already a paused session; do not integrate it).
+- Any PR that fails the **Code-owner review gate** below.
+
+### Code-owner review gate
+
+After the CI and `Blocked on: Human` drops, apply this gate to every surviving
+PR. The operational mechanics (exact `gh` invocation, JSON-shape details,
+CODEOWNERS-parsing recipe, glob semantics, pseudocode) live in
+[`references/merge-mechanics.md`](references/merge-mechanics.md) §Step 1.5; this
+section states the rule the gate enforces.
+
+For each surviving PR, fetch:
+
+```bash
+gh pr view <N> --repo Jinn-Network/mono \
+  --json author,latestReviews,reviewDecision,files,headRefOid
+```
+
+Then:
+
+1. **Parse `.github/CODEOWNERS`** at the current `next` HEAD into ordered
+   path-pattern → owner-set entries. CODEOWNERS uses **last-match-wins**
+   precedence (this is GitHub's documented behaviour, *not* `.gitignore`'s
+   first-match-wins). State this explicitly so the executing agent does not
+   improvise glob precedence.
+
+2. **Compute `requiredOwners`** per PR: for each file the PR touches, find the
+   **last** matching CODEOWNERS pattern; collect that entry's owner set. Take
+   the distinct owner-sets produced across all touched files as
+   `requiredOwnerSets`; the union as `requiredOwnersUnion`. Each distinct
+   owner-set must be satisfied by at least one matching approval.
+
+3. **Exclude the PR author.** Remove `author.login` from every set in
+   `requiredOwnerSets` and from `requiredOwnersUnion`. An author can never
+   satisfy their own code-owner requirement.
+
+4. **Filter `latestReviews` to current approvals.** From `latestReviews`, keep
+   entries where `state == "APPROVED"` AND `commit.oid == headRefOid` AND
+   `author.login != PR.author.login`. Call the resulting reviewer-set
+   `currentApprovers`. Approvals against earlier head SHAs are **stale** and do
+   not count — rebases during the merge loop change head SHAs, and the gate
+   must re-verify at survey time rather than trust branch protection.
+
+5. **Decide approval by cases:**
+
+   - **Coverage case** (`requiredOwnerSets` is non-empty): keep the PR iff
+     every distinct owner-set in `requiredOwnerSets` has at least one current
+     approver in it — i.e. for every `S ∈ requiredOwnerSets`,
+     `S ∩ currentApprovers ≠ ∅`. Otherwise drop with
+     `skipped: awaiting code-owner review`.
+
+   - **No-coverage case** (`requiredOwnerSets` is empty — the common case in
+     this repo, since CODEOWNERS only covers eight canonical docs): keep the
+     PR iff at least one entry in `currentApprovers` has
+     `authorAssociation ∈ {"OWNER", "MEMBER"}`. `authorAssociation` is
+     GitHub's own org-membership signal, returned inline in each
+     `latestReviews` entry, so no separate allow-list file is needed.
+     Otherwise drop with `skipped: awaiting maintainer review`.
+
+   The two distinct skip reasons (`awaiting code-owner review` vs
+   `awaiting maintainer review`) tell the human which rule the PR failed —
+   the canonical-doc CODEOWNERS rule or the no-coverage maintainer rule.
+
+#### Refusal clause — operator authorization does not bypass the gate
+
+Operator authorization to approve PRs is procedural only — it never
+substitutes for code-owner review. **The code-owner gate runs *before*
+operator authorization is consulted.** If the gate would drop a PR, the skill
+drops it; it does not submit an approving review on the operator's behalf,
+regardless of any blanket authorization given for this batch. This applies
+verbatim to the "approve any PR you would have approved yourself" pattern that
+preceded the PR #423 / PR #607 incident on 2026-05-25 — that authorization is
+exhausted before the gate runs, not after.
 
 The remaining PRs form the **candidate set** for ordering.
 
@@ -227,6 +299,22 @@ Final `next` HEAD: `<sha>`
 | PR | Title | Reason | Issue status |
 |----|-------|--------|--------------|
 | #50 | fix(api): correct artifact search pagination | Semantic conflict with #38 in `src/api/server.ts` — both modified `searchArtifacts`; resolution needs re-implementation | `Blocked on: Human` |
+| #61 | feat(client): add foo helper | Awaiting code-owner review — touched `/PRINCIPLES.md`, requires approval from `@oaksprout` or `@ritsukai` | unchanged (not routed to `Blocked on: Human`) |
+| #62 | fix(daemon): correct foo race | Awaiting maintainer review — no CODEOWNERS coverage on touched paths; needs an approving review from a reviewer with `authorAssociation ∈ {OWNER, MEMBER}` | unchanged (not routed to `Blocked on: Human`) |
+
+### Awaiting code-owner review
+
+The last two skipped-PR rows above are **reporting-only**: the skill does not
+write any Project field change for these. The PRs remain in their normal queue
+state and become mergeable once a qualified reviewer approves. They are not in
+`Blocked on: Human` — the gate is a queue signal at survey time, not an
+escalation. Surface each such PR with:
+
+- The PR number and author login.
+- The missing owner-set, when the PR touched a CODEOWNERS-covered path
+  (e.g. `requires approval from @oaksprout or @ritsukai`).
+- The no-coverage flag, when no touched path matched CODEOWNERS
+  (`no CODEOWNERS coverage — needed maintainer (OWNER/MEMBER) approval`).
 
 ### Human's next step
 
@@ -249,6 +337,7 @@ jinn run
 | CI stays pending on a rebased branch beyond a reasonable wait | Run local gates (typecheck + tests + build); if local is green, flag CI as the problem, surface to human, and pause. |
 | Semantic conflict cannot be cleanly described in one paragraph | Route to `Blocked on: Human` with whatever partial context you have; do not let classification difficulty block the batch. |
 | All PRs in the batch route to `Blocked on: Human` | Report this outcome — the batch is empty-merged. The human needs to jump into the paused sessions. |
+| PR drops to "awaiting code-owner review" (or "awaiting maintainer review") | Report the PR in the Step 5 skipped-PRs surface with the missing owner-set or `no CODEOWNERS coverage` note. Do **not** approve the PR on the operator's behalf and do **not** route the linked issue to `Blocked on: Human` — the gate is a queue signal, not an escalation. |
 
 ---
 

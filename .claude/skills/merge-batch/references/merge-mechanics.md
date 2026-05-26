@@ -60,6 +60,178 @@ That item is already in a paused session — do not integrate it.
 
 ---
 
+## Step 1.5 — Code-owner review gate mechanics
+
+This section is the operational source-of-truth for the Code-owner review gate
+introduced in `SKILL.md` §Step 1. `SKILL.md` states the rule; this section
+states the algorithm.
+
+### Fetch the review state
+
+For each PR that survives the CI and `Blocked on: Human` drops:
+
+```bash
+gh pr view <N> --repo Jinn-Network/mono \
+  --json author,latestReviews,reviewDecision,files,headRefOid
+```
+
+`reviewDecision` alone is insufficient. The 2026-05-25 PR #423 / PR #607
+incident proved that `reviewDecision` returns `APPROVED` for any approving
+review, with no signal about *who* approved or against *which* head SHA. The
+gate ignores `reviewDecision` and reasons from `latestReviews` directly.
+
+### `latestReviews` shape
+
+`latestReviews` returns the **most recent review per reviewer** — not the full
+review history. For each entry, the gate consumes these fields:
+
+```json
+{
+  "author":             { "login": "oaksprout" },
+  "authorAssociation":  "OWNER",
+  "state":              "APPROVED",
+  "commit":             { "oid": "ccc3333..." },
+  "submittedAt":        "2026-05-26T09:00:00Z"
+}
+```
+
+- `author.login` — the reviewer's GitHub handle, without the `@` prefix.
+- `authorAssociation` — the reviewer's relationship to the repo, set by
+  GitHub. Documented values: `OWNER`, `MEMBER`, `COLLABORATOR`,
+  `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, `FIRST_TIMER`, `MANNEQUIN`, `NONE`.
+  The no-coverage rule whitelists `OWNER` and `MEMBER` **only**.
+- `state` — one of `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`,
+  `PENDING`. The gate counts only `APPROVED`.
+- `commit.oid` — the head SHA the review was submitted against. The gate
+  compares this against the PR's current `headRefOid` to detect stale
+  approvals.
+
+Because `latestReviews` returns the most recent review per reviewer, a later
+`CHANGES_REQUESTED` or `DISMISSED` review from the same reviewer **supersedes**
+an earlier `APPROVED` review from that reviewer. State this explicitly so the
+agent does not double-count an obsolete approval — there is no "approved once,
+counts forever" path.
+
+### CODEOWNERS parsing recipe
+
+Read `.github/CODEOWNERS` from disk (the worktree at the current `next` HEAD).
+Each non-blank, non-comment line is a CODEOWNERS rule:
+
+```
+<glob>   <owner1>   <owner2>   ...
+```
+
+- Skip blank lines and lines beginning with `#` (comments).
+- Each remaining line yields an ordered entry `(pattern, owners[])`.
+- Owner tokens in CODEOWNERS begin with `@` (e.g. `@oaksprout`); the
+  `latestReviews[*].author.login` field is the bare handle (e.g.
+  `oaksprout`). The gate compares owners against approver logins **without
+  the leading `@`** — normalize the CODEOWNERS owner tokens by stripping the
+  `@` prefix before set-membership tests. Team owners (`@org/team-name`) are
+  not used in the current CODEOWNERS file; if added later, the matcher must
+  expand them to their member set.
+- An empty owner set on a matching pattern explicitly clears coverage (rare
+  but possible).
+
+**Precedence: last-match-wins.** This is GitHub's documented behaviour and
+differs from `.gitignore`'s first-match-wins. For a given file path, iterate
+the entries from top to bottom; the **last** entry whose pattern matches the
+path is the entry that applies. Earlier matches are overridden.
+
+#### Glob semantics
+
+- `/PATH` is repo-rooted (relative to repo root, like `/PRINCIPLES.md`).
+- `*` matches anything **except** `/` (does not cross directory boundaries).
+- `**` matches anything including `/` (crosses directory boundaries).
+
+For the current `Jinn-Network/mono` CODEOWNERS, the only patterns are
+exact-file rules (`/PRINCIPLES.md`, `/SPEC.md`, …) so the matcher does not
+need full gitignore-style pattern support. State this as the **current-state**
+observation, not a permanent simplification — if CODEOWNERS later grows
+overlapping glob patterns, the matcher must implement the rules above
+faithfully.
+
+Reference: GitHub's CODEOWNERS documentation describes the syntax and the
+last-match-wins precedence.
+
+### The gate algorithm
+
+For each PR `P` that survives the prior Step 1 drops:
+
+1. Parse `.github/CODEOWNERS` into an ordered list of `(pattern, owners[])`
+   entries.
+2. Fetch the JSON payload with the `gh pr view` invocation above.
+3. **Per-file owner-set lookup.** For each `file` in `P.files`, walk the
+   ordered CODEOWNERS entries; record the owner set of the **last** entry
+   whose `pattern` matches `file.path`. A file matched by no entry contributes
+   an empty owner set.
+4. **Build `requiredOwnerSets` and `requiredOwnersUnion`.**
+   - `requiredOwnerSets` = the distinct non-empty owner sets produced across
+     the touched files. (Empty owner sets from unmatched files are discarded
+     here — they signal no coverage for that file, not a satisfied
+     requirement.)
+   - `requiredOwnersUnion` = the union of all sets in `requiredOwnerSets`.
+   - Remove `P.author.login` from every set in `requiredOwnerSets` and from
+     `requiredOwnersUnion`. An author can never satisfy their own code-owner
+     requirement (state this so it is not overlooked when the author is
+     listed in a CODEOWNERS rule that covers a file they touched).
+5. **Build `currentApprovers`.**
+   ```
+   currentApprovers = { r.author.login
+                        | r ∈ P.latestReviews,
+                          r.state == "APPROVED",
+                          r.commit.oid == P.headRefOid,
+                          r.author.login != P.author.login }
+   ```
+   The `commit.oid == headRefOid` clause is the stale-approval filter; a new
+   commit pushed after the approval invalidates the approval.
+6. **Coverage-case decision.** If `requiredOwnerSets` is non-empty: keep `P`
+   iff for every `S ∈ requiredOwnerSets`, `S ∩ currentApprovers ≠ ∅`.
+   Otherwise drop with `skipped: awaiting code-owner review`.
+7. **No-coverage-case decision.** If `requiredOwnerSets` is empty (every
+   touched file was unmatched by CODEOWNERS): keep `P` iff there exists
+   `r ∈ P.latestReviews` with `r.state == "APPROVED"`,
+   `r.commit.oid == P.headRefOid`, `r.author.login != P.author.login`, **and**
+   `r.authorAssociation ∈ {"OWNER", "MEMBER"}`. Otherwise drop with
+   `skipped: awaiting maintainer review`.
+
+### Edge cases
+
+- **Author's own approval.** If the only `latestReviews` entry on a PR is an
+  approval the author submitted on themselves (e.g. via the API), it must not
+  satisfy either rule. This is enforced by the author-exclusion step in
+  `currentApprovers` (the `r.author.login != P.author.login` clause) but state
+  it explicitly so the agent does not regress this filter.
+- **Superseded approvals.** Because `latestReviews` returns the most recent
+  review per reviewer, a `DISMISSED` or `CHANGES_REQUESTED` review submitted
+  after an earlier `APPROVED` review from the same reviewer fully supersedes
+  the approval — the entry in `latestReviews` for that reviewer carries the
+  later state, not the earlier one. The agent never needs to walk back through
+  earlier reviews from the same reviewer.
+- **Stale approvals after rebase.** When the merge loop rebases a PR in
+  Step 2 and force-pushes (`--force-with-lease`), the head SHA changes. Any
+  approval submitted before the rebase has `commit.oid != new headRefOid` and
+  is filtered out by the stale-approval clause. Re-running the gate after the
+  rebase is the correct discipline; do not assume an approval persists across
+  a rebase.
+
+### Drop-report wording
+
+PRs that fail the gate are dropped with one of two reasons:
+
+- `skipped: awaiting code-owner review` — the coverage case
+  (`requiredOwnerSets` was non-empty but at least one owner-set was not
+  satisfied by `currentApprovers`).
+- `skipped: awaiting maintainer review` — the no-coverage case
+  (`requiredOwnerSets` was empty and `currentApprovers` did not contain a
+  reviewer with `authorAssociation ∈ {OWNER, MEMBER}`).
+
+Surface each dropped PR in the Step 5 wrap-up report under the
+"Awaiting code-owner review" subsection — name the missing owner-set (when
+coverage was required) or the no-coverage flag.
+
+---
+
 ## Step 2 — Rebase a PR onto `next`
 
 ### Fetch latest remote state
