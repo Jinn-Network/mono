@@ -58,7 +58,7 @@ export function encodeWorktreePathToProjectDir(path: string): string {
     .replace(/-+$/, '');
 }
 
-import { basename, dirname, resolve as pathResolve } from 'node:path';
+import { basename, dirname, join as pathJoin, resolve as pathResolve } from 'node:path';
 
 /**
  * Return the numeric issue id if `worktreePath` is a direct child of `base`
@@ -163,4 +163,100 @@ export function prLinkRecord(records: unknown[]): { prNumber: number; prUrl: str
     }
   }
   return last;
+}
+
+// ---------------------------------------------------------------------------
+// discoverSessions — joins JSONL transcripts to live claude pids
+// ---------------------------------------------------------------------------
+
+const TWENTY_FOUR_HOURS_MS = 24 * 3600_000;
+
+/**
+ * Reconstruct the set of dispatcher-spawned Claude Code sessions from on-disk
+ * transcripts under `~/.claude/projects/<dir>/<sessionId>.jsonl` plus the live
+ * `claude` process list. A session is **alive** if a running `claude` pid's
+ * cwd exactly matches the worktree path we inferred from `<dir>`; otherwise
+ * it's **done** if its most-recent activity is within 24h, or **stale**
+ * (excluded from output) beyond that.
+ *
+ * The encoder `encodeWorktreePathToProjectDir` is lossy (apostrophes,
+ * underscores, and slashes all collapse to `-`), so we cannot decode `<dir>`
+ * directly. Instead we exploit the dispatcher's convention — exactly one
+ * worktree per issue at `<WORKTREES_BASE>/<N>` — to enumerate by candidate
+ * issue number: peel the encoded base prefix off `<dir>`, treat the remainder
+ * as a candidate `<N>`, and verify by round-tripping through the encoder
+ * (`encodeWorktreePathToProjectDir(join(base, N)) === dir`). This rejects
+ * collisions (e.g. unrelated dirs whose stem decodes to a numeric leaf under
+ * a different real path) without ever materialising the inverse encoder.
+ */
+export async function discoverSessions(deps: SessionsDeps): Promise<SessionRecord[]> {
+  const dirs = await deps.listProjectDirs(deps.claudeProjectsDir);
+  const encodedBase = encodeWorktreePathToProjectDir(deps.worktreesBase);
+  const basePrefix = encodedBase + '-';
+
+  // First pass: discover { dir, issueNumber, worktreePath } for matching dirs.
+  interface Candidate { dir: string; issueNumber: number; worktreePath: string; }
+  const candidates: Candidate[] = [];
+  for (const dir of dirs) {
+    if (!dir.startsWith(basePrefix)) continue;
+    const remainder = dir.slice(basePrefix.length);
+    if (!/^\d+$/.test(remainder)) continue;
+    const candidateWorktree = pathJoin(deps.worktreesBase, remainder);
+    // Round-trip guard: only accept if re-encoding the candidate worktree
+    // path produces the same project dir name. Rejects collisions where the
+    // dispatcher convention does not hold.
+    if (encodeWorktreePathToProjectDir(candidateWorktree) !== dir) continue;
+    candidates.push({ dir, issueNumber: parseInt(remainder, 10), worktreePath: candidateWorktree });
+  }
+
+  if (candidates.length === 0) return [];
+
+  // Resolve the live claude process list and their cwds once per call.
+  const procs = await deps.listClaudeProcesses();
+  const cwdEntries = await Promise.all(
+    procs.map(async (p) => ({ pid: p.pid, cwd: await deps.resolveProcessCwd(p.pid) })),
+  );
+  const cwdToPid = new Map<string, number>();
+  for (const { pid, cwd } of cwdEntries) {
+    if (cwd != null) cwdToPid.set(cwd, pid);
+  }
+
+  const now = deps.now();
+  const records: SessionRecord[] = [];
+  for (const c of candidates) {
+    const files = await deps.listJsonlFiles(pathJoin(deps.claudeProjectsDir, c.dir));
+    if (files.length === 0) continue;
+    let newest = files[0]!;
+    for (const f of files) {
+      if (f.mtimeMs > newest.mtimeMs) newest = f;
+    }
+    const transcriptPath = pathJoin(deps.claudeProjectsDir, c.dir, newest.name);
+    const text = await deps.readJsonl(transcriptPath);
+    const recordsParsed = parseJsonlLines(text);
+    const lastActivityMs = lastTimestamp(recordsParsed) ?? newest.mtimeMs;
+    const alivePid = cwdToPid.get(c.worktreePath) ?? null;
+    let status: SessionRecord['status'];
+    if (alivePid != null) status = 'alive';
+    else if (now - lastActivityMs <= TWENTY_FOUR_HOURS_MS) status = 'done';
+    else status = 'stale';
+
+    const summary = lastAssistantText(recordsParsed);
+    const truncated = summary != null ? truncate(summary, 200) : null;
+    const pr = prLinkRecord(recordsParsed);
+    records.push({
+      issueNumber: c.issueNumber,
+      status,
+      pid: alivePid,
+      worktreePath: c.worktreePath,
+      transcriptPath,
+      sessionId: newest.name.replace(/\.jsonl$/, ''),
+      lastActivity: new Date(lastActivityMs).toISOString(),
+      lastSummary: truncated == null || truncated.length === 0 ? null : truncated,
+      prUrl: pr?.prUrl ?? null,
+    });
+  }
+
+  return records
+    .filter((r) => r.status !== 'stale')
+    .sort((a, b) => (a.lastActivity < b.lastActivity ? 1 : a.lastActivity > b.lastActivity ? -1 : 0));
 }

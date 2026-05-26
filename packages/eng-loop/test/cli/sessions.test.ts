@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  discoverSessions,
   encodeWorktreePathToProjectDir,
   lastAssistantText,
   lastTimestamp,
@@ -8,6 +9,7 @@ import {
   prLinkRecord,
   truncate,
 } from '../../src/cli/sessions.js';
+import type { SessionsDeps } from '../../src/cli/sessions.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -38,6 +40,30 @@ const FIX_BLANK_AND_GARBAGE = [
   JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:00.000Z', message: { content: [{ type: 'text', text: 'ok' }] } }),
   '',
 ].join('\n');
+
+// ---------------------------------------------------------------------------
+// Test helper: build an in-memory SessionsDeps
+// ---------------------------------------------------------------------------
+
+function buildDeps(overrides: Partial<SessionsDeps> = {}): SessionsDeps {
+  return {
+    worktreesBase: '/wt',
+    claudeProjectsDir: '/p',
+    now: () => Date.parse('2026-05-26T12:00:00.000Z'),
+    listProjectDirs: async () => [],
+    listJsonlFiles: async () => [],
+    readJsonl: async () => '',
+    listClaudeProcesses: async () => [],
+    resolveProcessCwd: async () => null,
+    spawnTail: () => { throw new Error('spawnTail not stubbed'); },
+    sendSignal: () => { throw new Error('sendSignal not stubbed'); },
+    confirm: async () => false,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    onSigint: () => {},
+    ...overrides,
+  };
+}
 
 describe('encodeWorktreePathToProjectDir', () => {
   it('encodes the live worktree path from this machine', () => {
@@ -148,5 +174,87 @@ describe('truncate', () => {
 
   it('returns only the ellipsis when the cap is shorter than the input + ellipsis', () => {
     expect(truncate('abcd', 3)).toBe('...');
+  });
+});
+
+describe('discoverSessions', () => {
+  const NOW = Date.parse('2026-05-26T12:00:00.000Z');
+  const MS_PER_HOUR = 3600_000;
+
+  // Build a one-record JSONL anchored at a specific timestamp so each fixture
+  // controls its own `lastActivity`. Includes one assistant text block so the
+  // record has a deterministic `lastSummary`.
+  function jsonlAt(timestampMs: number, summary: string): string {
+    return [
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: new Date(timestampMs).toISOString(),
+        message: { content: [{ type: 'text', text: summary }] },
+      }),
+      '',
+    ].join('\n');
+  }
+
+  it('classifies alive/done and excludes stale; sorts by lastActivity desc', async () => {
+    const aliveTs = NOW - 30 * 60_000;        // T - 30m
+    const doneTs = NOW - 1 * MS_PER_HOUR;      // T - 1h
+    const staleTs = NOW - 26 * MS_PER_HOUR;    // T - 26h
+
+    const transcripts: Record<string, string> = {
+      '/p/-wt-100/sess-100.jsonl': jsonlAt(aliveTs, 'latest summary'),
+      '/p/-wt-200/sess-200.jsonl': jsonlAt(doneTs, 'done summary'),
+      '/p/-wt-300/sess-300.jsonl': jsonlAt(staleTs, 'stale summary'),
+    };
+
+    const deps = buildDeps({
+      listProjectDirs: async () => ['-wt-100', '-wt-200', '-wt-300'],
+      listJsonlFiles: async (dir) => {
+        if (dir === '/p/-wt-100') return [{ name: 'sess-100.jsonl', mtimeMs: aliveTs }];
+        if (dir === '/p/-wt-200') return [{ name: 'sess-200.jsonl', mtimeMs: doneTs }];
+        if (dir === '/p/-wt-300') return [{ name: 'sess-300.jsonl', mtimeMs: staleTs }];
+        return [];
+      },
+      readJsonl: async (path) => transcripts[path] ?? '',
+      listClaudeProcesses: async () => [{ pid: 1000 }],
+      resolveProcessCwd: async (pid) => (pid === 1000 ? '/wt/100' : null),
+    });
+
+    const records = await discoverSessions(deps);
+    expect(records).toHaveLength(2);
+    expect(records[0]?.issueNumber).toBe(100);
+    expect(records[0]?.status).toBe('alive');
+    expect(records[0]?.pid).toBe(1000);
+    expect(records[0]?.lastSummary).toBe('latest summary');
+    expect(records[1]?.issueNumber).toBe(200);
+    expect(records[1]?.status).toBe('done');
+    expect(records[1]?.pid).toBeNull();
+  });
+
+  it('ignores project dirs whose decoded path is not under worktreesBase', async () => {
+    const ts = NOW - 30 * 60_000;
+    const deps = buildDeps({
+      listProjectDirs: async () => ['-wt-100', '-Users-elsewhere'],
+      listJsonlFiles: async (dir) => {
+        if (dir === '/p/-wt-100') return [{ name: 'sess.jsonl', mtimeMs: ts }];
+        return [];
+      },
+      readJsonl: async () => jsonlAt(ts, 'ok'),
+    });
+
+    const records = await discoverSessions(deps);
+    expect(records).toHaveLength(1);
+    expect(records[0]?.issueNumber).toBe(100);
+  });
+
+  it('ignores project dirs whose leaf is non-numeric', async () => {
+    const ts = NOW - 30 * 60_000;
+    const deps = buildDeps({
+      listProjectDirs: async () => ['-wt-feature-branch'],
+      listJsonlFiles: async () => [{ name: 'sess.jsonl', mtimeMs: ts }],
+      readJsonl: async () => jsonlAt(ts, 'ok'),
+    });
+
+    const records = await discoverSessions(deps);
+    expect(records).toHaveLength(0);
   });
 });
