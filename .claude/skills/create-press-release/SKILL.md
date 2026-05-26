@@ -85,6 +85,12 @@ Apply this structure unless the milestone clearly demands otherwise:
 
 **<Subheadline — one sentence expanding significance>**
 
+## In plain English
+
+<2-3 short paragraphs. Grade-11 vocabulary: a 16-year-old who's seen percentages, controlled experiments, and the rough idea of a benchmark can follow without help. State the milestone, the control variable, and the verification path in language a non-technical reader actually parses. No protocol jargon — no "verdicts" / "envelopes" / "on-chain" / "indexer" / "harness" / "manifest CID" / "tx hash" without immediate plain-English gloss. If a technical term must appear, gloss it on first use ("the wrapper that runs the AI", "a public ledger anyone can check"). End with the verification path in one sentence: anyone can check this, here's how.>
+
+---
+
 **DD Month YYYY** — <Opening paragraph: state the announcement directly, name Jinn Network, name the milestone, name the core significance.>
 
 <Second paragraph: explain the problem the milestone addresses. Make it concrete. Show what existing approaches miss.>
@@ -194,6 +200,7 @@ Commit the file to `docs/press/YYYY-MM-DD-<slug>.md` with a `docs(press):` commi
 - Read `PRINCIPLES.md` and `BRAND.md` before drafting. Always.
 - Run `distil-writing` before claiming the draft is ready. Always.
 - Run Step 8 (Legibility) as a substantive claim-by-claim pass — never report it complete on the basis of Step 7's grep. Always.
+- Include an `In plain English` section between the subhead and the dateline opening. Grade-11 vocabulary; protocol jargon glossed on first use; ends with the verification path. Always.
 - Include a `What this does not yet prove` section. Always.
 - No dateline city. Ever.
 - No named attribution by default. Ever — until the contributor signs off explicitly.
