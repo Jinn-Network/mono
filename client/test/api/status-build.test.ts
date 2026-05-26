@@ -49,6 +49,16 @@ describe('resolveMasterDailyEstimateWei', () => {
     const v = resolveMasterDailyEstimateWei(undefined, 5000);
     expect(v).toBeGreaterThan(0n);
   });
+
+  it('returns the 0.0005 ETH/day floor at default pollIntervalMs (#288)', () => {
+    // Pre-#288 the poll-based blend short-circuited the floor at default
+    // pollIntervalMs=5000 (returning 3.6e15 wei ≈ 0.0036 ETH/day), which made
+    // "(balance - min) / daily" floor to 0 days at modest 0.008 ETH balances
+    // and surfaced as a misleading "1 days runway" red flag in the dashboard.
+    // The fix drops the blend and lets the floor (0.0005 ETH/day = 5e14 wei)
+    // govern when no explicit config is supplied.
+    expect(resolveMasterDailyEstimateWei(undefined, 5000)).toBe(500_000_000_000_000n);
+  });
 });
 
 describe('assembleStatusV1', () => {
@@ -107,6 +117,36 @@ describe('assembleStatusV1', () => {
     };
     const j = assembleStatusV1(raw);
     expect(j.masterGas.runwayDaysExcess).toBe('0');
+  });
+
+  it("reports >=5 days runway at the issue's 0.008 ETH boundary post-fix (#288)", () => {
+    // Boundary test from the user-reported scenario in #288: with a master
+    // balance of ~0.008 ETH (the exact wei amount observed post-bootstrap),
+    // a 0.005 ETH min-floor, and the post-fix 0.0005 ETH/day estimate, the
+    // dashboard should show ~5 days runway, not "1 days" / "0 days".
+    //   (7991886719184102 - 5000000000000000) / 500000000000000
+    //   = 2991886719184102 / 500000000000000
+    //   = 5.98... → BigInt floor → '5'
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: {
+        address: '0x1111111111111111111111111111111111111111',
+        balanceWei: '7991886719184102',
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '500000000000000',
+      minMasterEthWei: '5000000000000000',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.masterGas.runwayDaysExcess).toBe('5');
   });
 
   it('flags low master balance vs minimum', () => {

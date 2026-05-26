@@ -57,6 +57,28 @@ describe('Fleet bootstrap', () => {
     expect(state.services).toEqual([]);
   });
 
+  it('uses the 0.0005 ETH/day default master daily when pollIntervalMs is the daemon default (#288)', async () => {
+    // Regression for #288: the per-poll heuristic baked into
+    // `estimateMasterDailyGasWei` short-circuited the conservative floor at
+    // pollIntervalMs=5000 (the daemon default), returning 3.6e15 wei
+    // (≈ 0.0036 ETH/day) and producing the misleading "1 days runway"
+    // dashboard reading after fresh bootstrap. The fix drops the blend and
+    // returns the floor (0.0005 ETH/day = 5e14 wei) directly when no
+    // explicit override is supplied.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      pollIntervalMs: 5000,
+    });
+
+    expect((bootstrapper as any).masterEthDailyEstimateWei).toBe(500_000_000_000_000n);
+  });
+
   it('hydrates master_address when keystore exists without fleet master (post-init)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
