@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Readable, Writable } from 'node:stream';
 import {
   PrettyPrintTransform,
   discoverSessions,
@@ -10,6 +11,7 @@ import {
   prLinkRecord,
   renderJson,
   renderTable,
+  tailSession,
   truncate,
 } from '../../src/cli/sessions.js';
 import type { SessionRecord, SessionsDeps } from '../../src/cli/sessions.js';
@@ -422,5 +424,78 @@ describe('PrettyPrintTransform', () => {
     ].join('\n');
     const out = await pump(fix);
     expect(out).toContain('[00:00:00 assistant] ok');
+  });
+});
+
+describe('tailSession', () => {
+  function captureWritable(): { write: Writable; collected: string[] } {
+    const collected: string[] = [];
+    const write = new Writable({
+      write(chunk, _enc, cb) {
+        collected.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        cb();
+      },
+    });
+    return { write, collected };
+  }
+
+  // Configure a deps fixture where issue #500 has one transcript file.
+  function setupDeps(overrides: Partial<SessionsDeps> = {}): SessionsDeps {
+    return buildDeps({
+      listProjectDirs: async () => ['-wt-500'],
+      listJsonlFiles: async () => [{ name: 'sess-500.jsonl', mtimeMs: Date.parse('2026-05-26T11:30:00.000Z') }],
+      readJsonl: async () => FIX_WITH_TEXT,
+      ...overrides,
+    });
+  }
+
+  it('passes the resolved transcript path to spawnTail', async () => {
+    let receivedPath: string | undefined;
+    const { write } = captureWritable();
+    const deps = setupDeps({
+      stdout: write,
+      spawnTail: (path) => {
+        receivedPath = path;
+        return { stdout: Readable.from([]), kill: () => {} };
+      },
+    });
+    await tailSession(500, { tailLines: 50 }, deps);
+    expect(receivedPath).toBe('/p/-wt-500/sess-500.jsonl');
+  });
+
+  it('pipes spawnTail stdout through PrettyPrintTransform into deps.stdout', async () => {
+    const { write, collected } = captureWritable();
+    const deps = setupDeps({
+      stdout: write,
+      spawnTail: () => ({ stdout: Readable.from([Buffer.from(FIX_WITH_TEXT)]), kill: () => {} }),
+    });
+    await tailSession(500, { tailLines: 50 }, deps);
+    const out = collected.join('');
+    expect(out).toContain('[00:01:00 assistant] first summary');
+    expect(out).toContain('[00:02:00 assistant] latest summary');
+  });
+
+  it('rejects with a clear error when no transcript matches the issue', async () => {
+    const { write } = captureWritable();
+    const deps = setupDeps({
+      stdout: write,
+      spawnTail: () => ({ stdout: Readable.from([]), kill: () => {} }),
+    });
+    await expect(tailSession(999, { tailLines: 50 }, deps)).rejects.toThrow(/no transcript found for issue #999/);
+  });
+
+  it('forwards SIGINT to the tail subprocess via onSigint seam', async () => {
+    let killed = false;
+    let installedHandler: (() => void) | null = null;
+    const { write } = captureWritable();
+    const deps = setupDeps({
+      stdout: write,
+      spawnTail: () => ({ stdout: Readable.from([]), kill: () => { killed = true; } }),
+      onSigint: (handler) => { installedHandler = handler; },
+    });
+    await tailSession(500, { tailLines: 50 }, deps);
+    expect(installedHandler).not.toBeNull();
+    installedHandler!();
+    expect(killed).toBe(true);
   });
 });

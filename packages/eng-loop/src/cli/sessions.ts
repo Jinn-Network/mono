@@ -403,3 +403,41 @@ export class PrettyPrintTransform extends Transform {
     // Drop everything else.
   }
 }
+
+// ---------------------------------------------------------------------------
+// tailSession — live-follow a session transcript with prettyprint
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the transcript for `issueNumber`, spawn `tail -F` against it, pipe
+ * through `PrettyPrintTransform`, and write to `deps.stdout`. Forwards
+ * `SIGINT` to the tail subprocess via the `onSigint` seam so Ctrl-C exits
+ * cleanly. Resolves when the tail stdout closes (normally never — operator
+ * Ctrl-Cs to exit).
+ */
+export async function tailSession(
+  issueNumber: number,
+  _opts: TailOptions,
+  deps: SessionsDeps,
+): Promise<void> {
+  const records = await discoverSessions(deps);
+  const record = records.find((r) => r.issueNumber === issueNumber);
+  if (record == null) {
+    throw new Error(`no transcript found for issue #${issueNumber}`);
+  }
+
+  const tail = deps.spawnTail(record.transcriptPath);
+  const pretty = new PrettyPrintTransform();
+  tail.stdout.pipe(pretty).pipe(deps.stdout, { end: false });
+
+  if (deps.onSigint != null) {
+    deps.onSigint(() => {
+      tail.kill('SIGTERM');
+    });
+  }
+
+  await new Promise<void>((resolve) => {
+    tail.stdout.on('end', resolve);
+    tail.stdout.on('close', resolve);
+  });
+}
