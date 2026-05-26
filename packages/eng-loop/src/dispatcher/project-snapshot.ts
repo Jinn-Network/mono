@@ -161,11 +161,45 @@ export class PaginationLimitError extends Error {
 }
 
 /**
- * Thrown by `fetchProjectSnapshot` when N ≥ {@link SCHEMA_DRIFT_MIN_ISSUE_COUNT}
- * Issue items all have *every* single-select Project field (`Status`,
- * `Priority`, `Effort`, `Blocked on`) resolved to `null`. The most likely
- * cause is that one or more field labels were renamed in the Project, so
- * `fieldValueByName(name: "…")` returns `null` for every item.
+ * Which Project field tripped the schema-drift check.
+ *
+ * - `'all'` — the catastrophic all-four-fields-null backstop fired (every
+ *   single-select field returned `null` for every Issue). Most likely one
+ *   or more of the four field labels were renamed.
+ * - `'Status'` — the per-field check fired: `Status` returned `null` for
+ *   every Issue. Per spec/2026-05-26-597, the per-field check is
+ *   `Status`-only by design because `Status` is the only field GitHub
+ *   auto-sets on issue creation; per-field checks on `Priority` / `Effort` /
+ *   `Blocked on` would false-positive on freshly-triaged boards.
+ * - `'Priority'` / `'Effort'` / `'Blocked on'` — currently never emitted by
+ *   `fetchProjectSnapshot` (no per-field check for these — see above), but
+ *   the discriminant is open for future use should the trade-off change.
+ */
+export type SchemaDriftField = 'Status' | 'Priority' | 'Effort' | 'Blocked on' | 'all';
+
+/**
+ * Thrown by `fetchProjectSnapshot` when schema drift is detected on the
+ * Project board. Two cases fire:
+ *
+ * 1. **All-four-fields-null backstop** (`field === 'all'`): every
+ *    single-select Project field (`Status`, `Priority`, `Effort`,
+ *    `Blocked on`) resolved to `null` on ≥ {@link SCHEMA_DRIFT_MIN_ISSUE_COUNT}
+ *    Issues — the catastrophic case where multiple field labels were
+ *    renamed at once.
+ * 2. **Single-field `Status` rename** (`field === 'Status'`): the `Status`
+ *    field alone resolved to `null` on every Issue while the other three
+ *    fields populated normally. Added in #597 to catch single-label renames
+ *    that the all-four-null backstop would miss.
+ *
+ * Per spec/2026-05-26-597, the per-field check is **`Status`-only** by
+ * design: `Status` is auto-set to `Todo` on issue creation by GitHub
+ * (`gh project item-add` + the project's auto-add workflow), giving it
+ * zero false-positive surface. The other three single-select fields
+ * legitimately stay `null` on freshly-triaged Issues, so a per-field check
+ * on them would fire constantly during normal operation. Renames of
+ * `Priority` / `Effort` / `Blocked on` remain caught by the `'all'`
+ * backstop only — that's a known residual gap, documented here so a future
+ * contributor doesn't reopen the issue.
  *
  * This catches the silent-failure mode where the dispatcher would otherwise
  * continue running with a snapshot in which every issue fails the
@@ -173,26 +207,33 @@ export class PaginationLimitError extends Error {
  * silently halting all dispatch. Throwing here surfaces the schema drift
  * loudly enough for an operator to notice on the next cycle.
  *
- * The N ≥ 3 threshold avoids false positives on small boards where one or
- * two brand-new untriaged issues legitimately have no fields set. Catches
- * the catastrophic case (all 4 fields renamed); single-field renames are
- * not detected — that's a future enhancement.
+ * The N ≥ {@link SCHEMA_DRIFT_MIN_ISSUE_COUNT} threshold avoids false
+ * positives on small boards where one or two brand-new untriaged issues
+ * legitimately have no fields set.
  *
  * Recovery: re-discover the field names via `gh project field-list 1
  * --owner Jinn-Network --format json` and update the snapshot query (or
  * rename the Project fields back).
  */
 export class ProjectFieldSchemaError extends Error {
-  constructor(itemCount: number) {
-    super(
-      `ProjectFieldSchemaError: all ${itemCount} project items resolved every ` +
-        `single-select field to null (threshold: ${SCHEMA_DRIFT_MIN_ISSUE_COUNT}+). ` +
-        `The most likely cause is that one of the ` +
-        `Status / Priority / Effort / Blocked on field labels was renamed. ` +
-        `Re-run \`gh project field-list 1 --owner Jinn-Network --format json\` ` +
-        `to discover the current field labels and update the snapshot query.`,
-    );
+  readonly field: SchemaDriftField;
+
+  constructor(itemCount: number, field: SchemaDriftField = 'all') {
+    const message =
+      field === 'all'
+        ? `ProjectFieldSchemaError: all ${itemCount} project items resolved every ` +
+            `single-select field to null (threshold: ${SCHEMA_DRIFT_MIN_ISSUE_COUNT}+). ` +
+            `The most likely cause is that one of the ` +
+            `Status / Priority / Effort / Blocked on field labels was renamed. ` +
+            `Re-run \`gh project field-list 1 --owner Jinn-Network --format json\` ` +
+            `to discover the current field labels and update the snapshot query.`
+        : `ProjectFieldSchemaError: field '${field}' returned null for all ${itemCount} Issues ` +
+            `(threshold: ${SCHEMA_DRIFT_MIN_ISSUE_COUNT}+). Likely renamed in the Project — ` +
+            `re-run \`gh project field-list 1 --owner Jinn-Network --format json\` ` +
+            `to discover the current label and update the snapshot query.`;
+    super(message);
     this.name = 'ProjectFieldSchemaError';
+    this.field = field;
   }
 }
 
@@ -444,6 +485,7 @@ export async function fetchProjectSnapshot(
   let cursor: string | null = null;
   let issueCount = 0;
   let issuesWithAllFieldsNull = 0;
+  let issuesWithNullStatus = 0;
   let pageNum = 0;
 
   for (;;) {
@@ -479,6 +521,9 @@ export async function fetchProjectSnapshot(
       items.push(item);
       if (item.contentType === 'Issue') {
         issueCount += 1;
+        if (item.status == null) {
+          issuesWithNullStatus += 1;
+        }
         if (
           item.status == null &&
           item.priority == null &&
@@ -505,11 +550,24 @@ export async function fetchProjectSnapshot(
     cursor = pageItems.pageInfo.endCursor;
   }
 
+  // The catastrophic all-four-null backstop is evaluated FIRST so its more
+  // informative `'all'` message wins when both branches would fire (e.g.
+  // every field, including Status, is null on every Issue).
   if (
     issueCount >= SCHEMA_DRIFT_MIN_ISSUE_COUNT &&
     issueCount === issuesWithAllFieldsNull
   ) {
-    throw new ProjectFieldSchemaError(issueCount);
+    throw new ProjectFieldSchemaError(issueCount, 'all');
+  }
+
+  // Per-field Status-only check (#597). Restricted to Status because that's
+  // the only single-select field GitHub auto-sets on issue creation, giving
+  // it zero false-positive surface. See spec/2026-05-26-597.
+  if (
+    issueCount >= SCHEMA_DRIFT_MIN_ISSUE_COUNT &&
+    issueCount === issuesWithNullStatus
+  ) {
+    throw new ProjectFieldSchemaError(issueCount, 'Status');
   }
 
   // Defensive: if no pages returned (shouldn't happen — empty boards still

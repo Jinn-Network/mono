@@ -419,8 +419,139 @@ describe('fetchProjectSnapshot — schema-drift detection', () => {
       }),
     ]);
 
-    await expect(fetchProjectSnapshot(runner)).rejects.toBeInstanceOf(ProjectFieldSchemaError);
+    // Capture the error so we can assert both the type, the `field`
+    // discriminant, and that the original "all 3 project items" message
+    // shape is preserved verbatim (back-compat with log scrapers — see
+    // spec/2026-05-26-597 §`ProjectFieldSchemaError` extension).
+    let caught: unknown;
+    try {
+      await fetchProjectSnapshot(runner);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ProjectFieldSchemaError);
+    expect((caught as ProjectFieldSchemaError).field).toBe('all');
+    expect((caught as Error).message).toContain('all 3 project items');
   });
+
+  it('throws ProjectFieldSchemaError when Status is null for every Issue (N≥3) and other fields are populated', async () => {
+    // Single-field rename of `Status` — the catastrophic all-four-null
+    // backstop would not fire here because Priority/Effort/Blocked on are
+    // all populated. Per-field Status check catches it. See #597.
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        nodes: [
+          issueNode({ id: 'PVTI_a', number: 1, priority: 'P1', effort: 'Low', blockedOn: 'Nothing' }),
+          issueNode({ id: 'PVTI_b', number: 2, priority: 'P2', effort: 'Medium', blockedOn: 'Nothing' }),
+          issueNode({ id: 'PVTI_c', number: 3, priority: 'P3', effort: 'High', blockedOn: 'Nothing' }),
+        ],
+      }),
+    ]);
+
+    let caught: unknown;
+    try {
+      await fetchProjectSnapshot(runner);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ProjectFieldSchemaError);
+    expect((caught as ProjectFieldSchemaError).field).toBe('Status');
+    expect((caught as Error).message).toContain("field 'Status'");
+    expect((caught as Error).message).toContain('3');
+  });
+
+  it('does NOT throw when Status is null for only 2 Issues (below SCHEMA_DRIFT_MIN_ISSUE_COUNT)', async () => {
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        nodes: [
+          issueNode({ id: 'PVTI_a', number: 1, priority: 'P1', effort: 'Low', blockedOn: 'Nothing' }),
+          issueNode({ id: 'PVTI_b', number: 2, priority: 'P2', effort: 'Medium', blockedOn: 'Nothing' }),
+        ],
+      }),
+    ]);
+
+    await expect(fetchProjectSnapshot(runner)).resolves.toBeDefined();
+  });
+
+  it('does NOT throw on an untriaged board where Status is set but Priority/Effort/Blocked on are all null', async () => {
+    // This is the central justification for restricting the per-field check
+    // to Status: a freshly-bulk-imported board legitimately has Status
+    // auto-set to Todo but the other three null until a human triages them.
+    // See spec/2026-05-26-597 §False-positive avoidance.
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        nodes: [
+          issueNode({ id: 'PVTI_a', number: 1, status: 'Todo' }),
+          issueNode({ id: 'PVTI_b', number: 2, status: 'Todo' }),
+          issueNode({ id: 'PVTI_c', number: 3, status: 'Todo' }),
+          issueNode({ id: 'PVTI_d', number: 4, status: 'Todo' }),
+          issueNode({ id: 'PVTI_e', number: 5, status: 'Todo' }),
+        ],
+      }),
+    ]);
+
+    await expect(fetchProjectSnapshot(runner)).resolves.toBeDefined();
+  });
+
+  it('does NOT throw when some Issues have Status set and others do not (per-field check requires every Issue null)', async () => {
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        nodes: [
+          issueNode({ id: 'PVTI_a', number: 1, status: 'Todo', priority: 'P1', effort: 'Low', blockedOn: 'Nothing' }),
+          issueNode({ id: 'PVTI_b', number: 2, status: 'Todo', priority: 'P2', effort: 'Medium', blockedOn: 'Nothing' }),
+          issueNode({ id: 'PVTI_c', number: 3, priority: 'P3', effort: 'High', blockedOn: 'Nothing' }), // status null
+        ],
+      }),
+    ]);
+
+    await expect(fetchProjectSnapshot(runner)).resolves.toBeDefined();
+  });
+
+  it('ignores PRs/DraftIssues when computing the per-field Status check', async () => {
+    // 2 Issues both with Status set + 3 PRs/Drafts whose Status is
+    // structurally null. The per-field Status check must only count Issues —
+    // otherwise a board with mostly PRs would false-positive constantly.
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        nodes: [
+          issueNode({ id: 'PVTI_iss1', number: 1, status: 'Todo' }),
+          issueNode({ id: 'PVTI_iss2', number: 2, status: 'In Progress' }),
+          prNode({ id: 'PVTI_pr1', number: 100 }),
+          prNode({ id: 'PVTI_pr2', number: 101 }),
+          draftIssueNode({ id: 'PVTI_draft' }),
+        ],
+      }),
+    ]);
+
+    await expect(fetchProjectSnapshot(runner)).resolves.toBeDefined();
+  });
+
+  it.each([
+    { label: 'Priority', overrides: { status: 'Todo', effort: 'Low', blockedOn: 'Nothing' } },
+    { label: 'Effort', overrides: { status: 'Todo', priority: 'P2', blockedOn: 'Nothing' } },
+    { label: 'Blocked on', overrides: { status: 'Todo', priority: 'P2', effort: 'Low' } },
+  ])(
+    'does NOT throw when only $label is null across N=3 Issues (per-field check is Status-only by design — see spec 2026-05-26)',
+    async ({ overrides }) => {
+      const { runner } = makePagedRunner([
+        buildPageResponse({
+          rateLimitRemaining: 4999,
+          nodes: [
+            issueNode({ id: 'PVTI_a', number: 1, ...overrides }),
+            issueNode({ id: 'PVTI_b', number: 2, ...overrides }),
+            issueNode({ id: 'PVTI_c', number: 3, ...overrides }),
+          ],
+        }),
+      ]);
+
+      await expect(fetchProjectSnapshot(runner)).resolves.toBeDefined();
+    },
+  );
 
   it('does NOT throw when fewer than SCHEMA_DRIFT_MIN_ISSUE_COUNT issues are all-null (threshold avoids false positives on small boards)', async () => {
     // 2 brand-new untriaged issues with all fields null is a normal state,
