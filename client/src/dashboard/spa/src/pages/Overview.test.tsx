@@ -439,52 +439,49 @@ describe('OverviewPage Node Health wiring', () => {
   });
 });
 
+// Per-scenario gating (loop on/off, missing/malformed timestamps, in/past
+// window) is exhaustively tested in `notifications/auto-restake-window.test.ts`.
+// These tests just exercise the aggregator on top of that predicate: `.find`
+// across services + the non-evicted filter.
 describe('selectVisibleEvictedService (#651)', () => {
   const evictedAt = '2026-05-26T10:00:00.000Z';
   const evictedAtMs = new Date(evictedAt).getTime();
 
-  it('hides banner within 2x window when auto-restake on', () => {
+  it('returns undefined when ALL evicted services are within window', () => {
     const out = selectVisibleEvictedService(
-      [{ index: 1, step: 'complete', evicted: true, evictedSince: evictedAt }],
+      [
+        { index: 0, step: 'complete', evicted: true, evictedSince: evictedAt },
+        { index: 1, step: 'complete', evicted: true, evictedSince: evictedAt },
+      ],
       { enabled: true, checkIntervalMs: 60_000 },
       evictedAtMs + 60_000,
     );
     expect(out).toBeUndefined();
   });
 
-  it('shows banner past 2x window when auto-restake on', () => {
+  it('returns the first past-window service when one of several is stuck', () => {
     const out = selectVisibleEvictedService(
-      [{ index: 1, step: 'complete', evicted: true, evictedSince: evictedAt }],
+      [
+        // Within-window service first; should be skipped.
+        { index: 0, step: 'complete', evicted: true, evictedSince: new Date(evictedAtMs + 90_000).toISOString() },
+        // Past-window service; should be picked.
+        { index: 1, step: 'complete', evicted: true, evictedSince: evictedAt },
+      ],
       { enabled: true, checkIntervalMs: 60_000 },
       evictedAtMs + 121_000,
     );
-    expect(out).toBeDefined();
+    expect(out?.index).toBe(1);
   });
 
-  it('shows banner immediately when auto-restake off', () => {
+  it('skips non-evicted services', () => {
     const out = selectVisibleEvictedService(
-      [{ index: 1, step: 'complete', evicted: true, evictedSince: evictedAt }],
-      { enabled: false, checkIntervalMs: 0 },
+      [
+        { index: 0, step: 'complete', evicted: false },
+        { index: 1, step: 'complete', evicted: false },
+      ],
+      undefined,
       evictedAtMs + 1_000,
     );
-    expect(out).toBeDefined();
-  });
-
-  it('shows banner when evictedSince is missing (safer to surface)', () => {
-    const out = selectVisibleEvictedService(
-      [{ index: 1, step: 'complete', evicted: true }],
-      { enabled: true, checkIntervalMs: 60_000 },
-      evictedAtMs + 1_000,
-    );
-    expect(out).toBeDefined();
-  });
-
-  it('shows banner when evictedSince is malformed', () => {
-    const out = selectVisibleEvictedService(
-      [{ index: 1, step: 'complete', evicted: true, evictedSince: 'not-an-iso-string' }],
-      { enabled: true, checkIntervalMs: 60_000 },
-      evictedAtMs + 1_000,
-    );
-    expect(out).toBeDefined();
+    expect(out).toBeUndefined();
   });
 });
