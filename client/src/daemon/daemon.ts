@@ -618,6 +618,7 @@ export class Daemon {
         this.store.recordOwnActivity(request.requestId, 'claimed');
         runStartedAt = Date.now();
       } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(
           `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
           err instanceof Error ? err.message : err,
@@ -628,6 +629,23 @@ export class Daemon {
           { requestId: taskAnnouncement.taskId, solverType },
           'daemon',
         );
+        // Paired SSE signal for the operator-app `claim_failed` notification
+        // (OPERATOR-APP-SPEC §2.10). The activity-DB row above (durable
+        // record) is written by `emitTickErrorOrRaceLost`; this is the
+        // event-stream channel `useNotifications` listens on. See spec
+        // 2026-05-26-issue-442-claim-failed-notification-design.md.
+        emitStructured({
+          kind: 'intent',
+          message: 'Task claim failed',
+          requestId: taskAnnouncement.taskId,
+          errorCode: 'claim_failed',
+          details: {
+            taskId: taskAnnouncement.taskId,
+            solverType,
+            source: 'daemon.claimTask',
+            error: errorMessage,
+          },
+        });
         continue;
       }
 

@@ -49,6 +49,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
+import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
 import {
@@ -1176,6 +1177,21 @@ export class MechAdapter implements ExecutionAdapter {
         return 'already-claimed';
       }
       console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
+      // Paired SSE signal for the operator-app `claim_failed` notification
+      // (OPERATOR-APP-SPEC §2.10). The early-return branches above
+      // (`skipped` / `already-claimed`) are not failures and intentionally
+      // do not emit. See spec 2026-05-26-issue-442-claim-failed-notification-design.md.
+      emitStructured({
+        kind: 'intent',
+        message: 'Delivery claim failed',
+        requestId,
+        errorCode: 'claim_failed',
+        details: {
+          kind: claimOptions.kind,
+          source: 'mech.claimDelivery',
+          error: message,
+        },
+      });
       return 'retry';
     }
   }
