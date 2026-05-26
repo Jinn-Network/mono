@@ -30,21 +30,12 @@ import { gateOrRun, isSkipped } from '../src/dispatcher/rate-limit-guard.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { DispatcherConfig, ReadyIssue } from '../src/dispatcher/types.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
+import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { argv } from 'node:process';
-
-/**
- * Routing helper for the `sessions` subcommand (#587). Returns true when the
- * dispatcher entrypoint should hand off to `runSessionsCli` instead of
- * running its normal cycle loop. Exported so the routing branch can be
- * pinned by a unit test.
- */
-export function shouldRouteToSessions(argv: string[]): boolean {
-  return argv[2] === 'sessions';
-}
 
 // ---------------------------------------------------------------------------
 // Constants

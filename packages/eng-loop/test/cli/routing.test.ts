@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldRouteToSessions } from '../../scripts/run-eng-loop.js';
+import { shouldRouteToSessions } from '../../src/cli/routing.js';
 
 describe('shouldRouteToSessions', () => {
   it('routes when argv[2] is "sessions"', () => {
@@ -12,5 +12,9 @@ describe('shouldRouteToSessions', () => {
 
   it('does not route when argv has no third element', () => {
     expect(shouldRouteToSessions(['node', 'run-eng-loop.ts'])).toBe(false);
+  });
+
+  it('does not route on length-1 argv (defensive against odd invocations)', () => {
+    expect(shouldRouteToSessions(['node'])).toBe(false);
   });
 });
