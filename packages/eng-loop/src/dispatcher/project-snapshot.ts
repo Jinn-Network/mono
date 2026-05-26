@@ -23,11 +23,9 @@ import type {
   Priority,
   ProjectStatus,
 } from './types.js';
-// Type-only back-import: `IssueBoardState` lives in the seam module
-// (`./issue-source.js`), and `toIssueBoardState` below adapts our
-// GitHub-specific snapshot into that abstract view (#600). The import is
-// `import type` so it never lands in the emitted JS, sidestepping the
-// runtime cycle that would otherwise exist between these two modules.
+// Type-only back-import (#600): `toIssueBoardState` adapts a snapshot into
+// the seam's abstract view. `import type` keeps this out of the emitted JS,
+// avoiding a runtime cycle between the two modules.
 import type { IssueBoardEntry, IssueBoardState } from './issue-source.js';
 
 // ---------------------------------------------------------------------------
@@ -571,25 +569,12 @@ export async function fetchProjectSnapshot(
 
 // ---------------------------------------------------------------------------
 // IssueBoardState adapter (#600)
-//
-// The GitHub-Project snapshot is the concrete board substrate; `IssueSource`
-// implementations consume the abstract {@link IssueBoardState} (#600). This
-// adapter projects a snapshot down to that view: it filters out non-Issue
-// content (PRs, DraftIssues are not dispatchable) and indexes the surviving
-// items by issue number for O(1) lookup.
-//
-// Non-Issue filtering used to live in `GhIssueSource.poll`; folding it in
-// here keeps the seam clean — every entry returned via `getIssue` is
-// guaranteed to be Issue-typed.
 // ---------------------------------------------------------------------------
 
 /**
- * Adapt a {@link ProjectSnapshot} to the abstract {@link IssueBoardState}
- * that `IssueSource.poll` consumes (#600).
- *
- * The snapshot's full power (rate-limit budget, non-Issue items) stays with
- * `runCycle` for the rate-limit gate and `deriveInFlight`; the seam itself
- * only sees the projected view.
+ * Project a {@link ProjectSnapshot} down to the abstract {@link IssueBoardState}
+ * the seam consumes (#600). Non-Issue items (PRs, DraftIssues) are dropped so
+ * every entry surfaced via `getIssue` is guaranteed Issue-typed.
  */
 export function toIssueBoardState(snapshot: ProjectSnapshot): IssueBoardState {
   const byNumber = new Map<number, IssueBoardEntry>();

@@ -12,19 +12,11 @@ import type {
 } from '../../src/dispatcher/project-snapshot.js';
 
 /**
- * Type-level decoupling of the IssueSource seam (#600).
- *
- * `IssueSource.poll` accepts the abstract {@link IssueBoardState} interface,
- * not the GitHub-Project-specific `ProjectSnapshot`. A future SolverNet
- * implementation would talk to on-chain task contracts and supply its own
- * `IssueBoardState`; nothing about the seam should mention `ProjectSnapshot`.
- *
- * These tests exercise:
- *  1. Structural satisfaction — a hand-rolled `IssueBoardState` literal (not
- *     derived from `ProjectSnapshot`) is accepted by `GhIssueSource.poll`.
- *  2. The `toIssueBoardState(snapshot)` adapter projects `ProjectSnapshot`
- *     down to the abstract view: Issue items only, all routing fields
- *     plumbed through, current-sprint id surfaced, unknown numbers → null.
+ * IssueSource seam decoupling (#600). Exercises:
+ *  1. Structural satisfaction — a hand-rolled `IssueBoardState` (no
+ *     `ProjectSnapshot`) is accepted by `GhIssueSource.poll`.
+ *  2. `toIssueBoardState(snapshot)` projects correctly — Issue items only,
+ *     all routing fields plumbed, current-sprint surfaced, unknown → null.
  */
 
 // Fixture issue numbers used in tests

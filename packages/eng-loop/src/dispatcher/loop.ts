@@ -97,10 +97,9 @@ export async function runCycle(
 ): Promise<CycleReport> {
   const { source, cfg, deriveInFlight, dispatchIssue, countOpenReadyPrs, wallClock, pauseSession } = deps;
 
-  // 1. Poll + derive in-flight in parallel for efficiency.
-  //    The IssueSource sees only the abstract IssueBoardState (#600) — the
-  //    full ProjectSnapshot stays here for the rate-limit gate and
-  //    `deriveInFlight`, which still need `rateLimit` and the raw `items`.
+  // 1. Poll + derive in-flight in parallel. The IssueSource sees only the
+  //    abstract IssueBoardState (#600); the full snapshot stays here for
+  //    the rate-limit gate and `deriveInFlight`.
   const [polled, { inFlight, drift }, openPrCount] = await Promise.all([
     source.poll(toIssueBoardState(snapshot)),
     deriveInFlight(),
