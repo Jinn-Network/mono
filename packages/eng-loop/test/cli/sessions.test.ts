@@ -7,9 +7,10 @@ import {
   parseIssueNumberFromWorktree,
   parseJsonlLines,
   prLinkRecord,
+  renderJson,
   truncate,
 } from '../../src/cli/sessions.js';
-import type { SessionsDeps } from '../../src/cli/sessions.js';
+import type { SessionRecord, SessionsDeps } from '../../src/cli/sessions.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -256,5 +257,43 @@ describe('discoverSessions', () => {
 
     const records = await discoverSessions(deps);
     expect(records).toHaveLength(0);
+  });
+});
+
+describe('renderJson', () => {
+  const sample: SessionRecord = {
+    issueNumber: 100,
+    status: 'alive',
+    pid: 1234,
+    worktreePath: '/wt/100',
+    transcriptPath: '/p/-wt-100/sess.jsonl',
+    sessionId: 'sess',
+    lastActivity: '2026-05-26T11:30:00.000Z',
+    lastSummary: 'hello',
+    prUrl: null,
+  };
+
+  it('round-trips through JSON.parse', () => {
+    const out = renderJson([sample]);
+    expect(JSON.parse(out)).toEqual([sample]);
+  });
+
+  it('renders an empty array as "[]"', () => {
+    expect(renderJson([])).toBe('[]');
+  });
+
+  it('emits exactly the nine documented fields', () => {
+    const parsed = JSON.parse(renderJson([sample])) as SessionRecord[];
+    expect(Object.keys(parsed[0]!).sort()).toEqual([
+      'issueNumber',
+      'lastActivity',
+      'lastSummary',
+      'pid',
+      'prUrl',
+      'sessionId',
+      'status',
+      'transcriptPath',
+      'worktreePath',
+    ]);
   });
 });

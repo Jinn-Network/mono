@@ -260,3 +260,16 @@ export async function discoverSessions(deps: SessionsDeps): Promise<SessionRecor
     .filter((r) => r.status !== 'stale')
     .sort((a, b) => (a.lastActivity < b.lastActivity ? 1 : a.lastActivity > b.lastActivity ? -1 : 0));
 }
+
+// ---------------------------------------------------------------------------
+// Renderers
+// ---------------------------------------------------------------------------
+
+/**
+ * `--json` output. The `SessionRecord` interface is the contract — do not add
+ * or rename fields here without updating downstream scripts.
+ */
+export function renderJson(records: SessionRecord[]): string {
+  if (records.length === 0) return '[]';
+  return JSON.stringify(records, null, 2);
+}
