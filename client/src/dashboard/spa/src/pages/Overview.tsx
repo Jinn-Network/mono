@@ -307,11 +307,12 @@ export function OverviewPage(): JSX.Element {
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
 
-  // Per-role ETH balances (#430). formatEth() already returns '—' for missing/null input,
-  // so each role degrades cleanly when the daemon predates this field or a row is unresolved.
-  const perRoleMasterEth = formatEth(status?.balances?.eth?.master?.balanceWei ?? undefined);
-  const perRoleAgentEth  = formatEth(status?.balances?.eth?.agent?.balanceWei ?? undefined);
-  const perRoleSafeEth   = formatEth(status?.balances?.eth?.safe?.balanceWei ?? undefined);
+  // Per-role ETH balances (#430). `?? undefined` coerces the nullable wire shape
+  // to formatEth's `string | undefined`; formatEth then renders '—' for missing input.
+  const perRoleEth = status?.balances?.eth;
+  const perRoleMasterEth = formatEth(perRoleEth?.master?.balanceWei ?? undefined);
+  const perRoleAgentEth = formatEth(perRoleEth?.agent?.balanceWei ?? undefined);
+  const perRoleSafeEth = formatEth(perRoleEth?.safe?.balanceWei ?? undefined);
 
   // ── Activity card inputs ────────────────────────────────────────────
   //

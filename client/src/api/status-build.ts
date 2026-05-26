@@ -469,35 +469,27 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
 
 function buildEthBalances(raw: GatheredStatusRaw): StatusV1Response['balances']['eth'] {
   const primaryService = raw.fleet?.services?.[0];
-  const primaryDisplayIndex =
-    primaryService !== undefined
-      ? Math.max(0, primaryService.index - 1) // mirrors displayFleetServiceIndex
-      : null;
-  const row =
-    primaryDisplayIndex !== null
-      ? raw.serviceBalances?.[primaryDisplayIndex]
-      : undefined;
-  const rowErr =
-    primaryDisplayIndex !== null
-      ? raw.serviceBalanceErrors?.[primaryDisplayIndex]
-      : undefined;
+  const di = primaryService !== undefined ? displayFleetServiceIndex(primaryService) : undefined;
+  const row = di !== undefined ? raw.serviceBalances?.[di] : undefined;
+  const rowErr = di !== undefined ? raw.serviceBalanceErrors?.[di] : undefined;
 
-  const master: StatusV1Response['balances']['eth']['master'] = {
-    address: raw.master.address,
-    balanceWei: raw.master.balanceWei ?? null,
-    ...(raw.master.error !== undefined ? { error: raw.master.error } : {}),
+  return {
+    master: {
+      address: raw.master.address,
+      balanceWei: raw.master.balanceWei ?? null,
+      ...(raw.master.error !== undefined ? { error: raw.master.error } : {}),
+    },
+    agent: {
+      address: primaryService?.agent_address ?? null,
+      balanceWei: row?.agentNativeWei ?? null,
+      ...(rowErr?.agent !== undefined ? { error: rowErr.agent } : {}),
+    },
+    safe: {
+      address: primaryService?.safe_address ?? null,
+      balanceWei: row?.safeNativeWei ?? null,
+      ...(rowErr?.multisig !== undefined ? { error: rowErr.multisig } : {}),
+    },
   };
-  const agent: StatusV1Response['balances']['eth']['agent'] = {
-    address: primaryService?.agent_address ?? null,
-    balanceWei: row?.agentNativeWei ?? null,
-    ...(rowErr?.agent !== undefined ? { error: rowErr.agent } : {}),
-  };
-  const safe: StatusV1Response['balances']['eth']['safe'] = {
-    address: primaryService?.safe_address ?? null,
-    balanceWei: row?.safeNativeWei ?? null,
-    ...(rowErr?.multisig !== undefined ? { error: rowErr.multisig } : {}),
-  };
-  return { master, agent, safe };
 }
 
 export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
