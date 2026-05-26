@@ -9,7 +9,6 @@ import type { BootstrapState } from './api/types.js';
 import { OverviewPage } from './pages/Overview.js';
 import { EventsPage } from './pages/Events.js';
 import { EventDetailPage } from './pages/EventDetail.js';
-import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
@@ -132,7 +131,6 @@ describe('App routes', () => {
       withProviders(
         <Switch>
           <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
         '/overview',
       ),
@@ -143,54 +141,6 @@ describe('App routes', () => {
     expect(screen.getByText(/^node health$/i)).toBeTruthy();
     expect(screen.getByText(/^wallet$/i)).toBeTruthy();
     expect(screen.getByText(/^rewards$/i)).toBeTruthy();
-  });
-
-  it('renders OperatorPage on /operator', async () => {
-    render(
-      withProviders(
-        <Switch>
-          <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/operator"><OperatorPage /></Route>
-        </Switch>,
-        '/operator',
-      ),
-    );
-    expect(screen.getByTestId('operator-page')).toBeTruthy();
-    // The launcher-tools panel migrated from a styled <section> to shadcn
-    // <Card>; assert by testid + link href instead of element name.
-    expect(screen.getByText(/launcher tools/i)).toBeTruthy();
-    expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
-  });
-
-  // Issue #219: the live activity surface belongs on /overview (the
-  // Dashboard), not on /operator (Settings). After the IA reshuffle the
-  // surface is the Activity card.
-  it('renders the activity surface on /overview, not on /operator', async () => {
-    const { unmount } = render(
-      withProviders(
-        <Switch>
-          <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/operator"><OperatorPage /></Route>
-        </Switch>,
-        '/overview',
-      ),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId('activity-card')).toBeTruthy();
-    });
-    unmount();
-
-    render(
-      withProviders(
-        <Switch>
-          <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/operator"><OperatorPage /></Route>
-        </Switch>,
-        '/operator',
-      ),
-    );
-    await waitFor(() => expect(screen.getByTestId('operator-page')).toBeTruthy());
-    expect(screen.queryByTestId('activity-card')).toBeNull();
   });
 
   it('renders the durable Events page on /events', async () => {
