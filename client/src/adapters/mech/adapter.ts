@@ -1179,8 +1179,7 @@ export class MechAdapter implements ExecutionAdapter {
       console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
       // Paired SSE signal for the operator-app `claim_failed` notification
       // (OPERATOR-APP-SPEC §2.10). The early-return branches above
-      // (`skipped` / `already-claimed`) are not failures and intentionally
-      // do not emit. See spec 2026-05-26-issue-442-claim-failed-notification-design.md.
+      // (`skipped` / `already-claimed`) are not failures and intentionally do not emit.
       emitStructured({
         kind: 'intent',
         message: 'Delivery claim failed',

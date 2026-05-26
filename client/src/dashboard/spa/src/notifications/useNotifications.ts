@@ -183,8 +183,8 @@ export function useNotifications(): OperatorNotification[] {
       bootstrap: bootstrap.data as DeriveInput['bootstrap'],
       status: mapStatusToDeriveInput(status.data, bootstrap.data, restartPending),
     });
-    const combined = claimFailedNotice ? [...derived, claimFailedNotice] : derived;
-    return [...combined].sort(
+    const combined = claimFailedNotice ? [...derived, claimFailedNotice] : [...derived];
+    return combined.sort(
       (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
     );
   }, [connection.status, restartPending, status.data, bootstrap.data, claimFailedNotice]);
