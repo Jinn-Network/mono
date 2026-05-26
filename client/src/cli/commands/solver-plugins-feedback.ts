@@ -63,7 +63,7 @@ export interface RespondOptions {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-interface FeedbackPipelineCtx {
+export interface FeedbackPipelineCtx {
   password: string;
   config: ReturnType<SolverPluginsDeps['loadConfig']>;
   builderAgentId: bigint;
@@ -74,11 +74,12 @@ interface FeedbackPipelineCtx {
 }
 
 /**
- * Shared prologue for every write verb: password → config → discovery row →
- * Stage 1 ensure. Returns the materialised ids needed for the on-chain
- * write, or null after writing an error envelope and calling ctx.exit.
+ * Shared prologue for every write verb (endorse / warn / review / respond /
+ * block): password → config → discovery row → Stage 1 ensure. Returns the
+ * materialised ids needed for the on-chain write, or null after writing an
+ * error envelope and calling ctx.exit.
  */
-async function preparePipeline(
+export async function preparePipeline(
   ctx: CommandContext,
   pluginCid: string,
   configPath: string | undefined,

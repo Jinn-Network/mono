@@ -20,7 +20,7 @@ import type { CommandContext } from '../command.js';
 import { writeJson } from './solver-plugins.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
 import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
-import { DiscoveryUnavailableError } from '../../discovery/types.js';
+import { DiscoveryUnavailableError, type PluginPublication } from '../../discovery/types.js';
 
 export interface StatusOptions {
   pluginCid: string;
@@ -42,9 +42,31 @@ export interface ListFeedbackOptions {
   configPath: string | undefined;
 }
 
+type LoadedConfig = ReturnType<SolverPluginsDeps['loadConfig']>;
+
+/**
+ * Load the operator config, emitting a `config_load_failed` envelope and
+ * exiting on failure. Returns `null` only after `ctx.exit` has been called.
+ */
+function loadConfigOrEmit(
+  ctx: CommandContext,
+  configPath: string | undefined,
+  deps: SolverPluginsDeps,
+): LoadedConfig | null {
+  try {
+    return deps.loadConfig(configPath);
+  } catch (err) {
+    writeJson(ctx, {
+      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
+    });
+    ctx.exit(1);
+    return null;
+  }
+}
+
 function emitDiscoveryUnavailable(
   ctx: CommandContext,
-  config: ReturnType<SolverPluginsDeps['loadConfig']>,
+  config: LoadedConfig,
   err: DiscoveryUnavailableError,
 ): void {
   writeJson(ctx, {
@@ -74,16 +96,8 @@ export async function discoverHandler(
   opts: DiscoverOptions,
   deps: SolverPluginsDeps,
 ): Promise<void> {
-  let config: ReturnType<typeof deps.loadConfig>;
-  try {
-    config = deps.loadConfig(opts.configPath);
-  } catch (err) {
-    writeJson(ctx, {
-      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
-    });
-    ctx.exit(1);
-    return;
-  }
+  const config = loadConfigOrEmit(ctx, opts.configPath, deps);
+  if (!config) return;
 
   try {
     const api = deps.discoveryApiFactory(config);
@@ -128,20 +142,12 @@ export async function statusHandler(
   opts: StatusOptions,
   deps: SolverPluginsDeps,
 ): Promise<void> {
-  let config: ReturnType<typeof deps.loadConfig>;
-  try {
-    config = deps.loadConfig(opts.configPath);
-  } catch (err) {
-    writeJson(ctx, {
-      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
-    });
-    ctx.exit(1);
-    return;
-  }
+  const config = loadConfigOrEmit(ctx, opts.configPath, deps);
+  if (!config) return;
 
   const locallyBlocked = config.solverPlugins?.blockedCids?.includes(opts.pluginCid) ?? false;
 
-  let row: import('../../discovery/types.js').PluginPublication | undefined;
+  let row: PluginPublication | undefined;
   try {
     const api = deps.discoveryApiFactory(config);
     const rows = await api.listPluginPublications({});
@@ -233,24 +239,14 @@ export async function listFeedbackHandler(
   opts: ListFeedbackOptions,
   deps: SolverPluginsDeps,
 ): Promise<void> {
-  let config: ReturnType<typeof deps.loadConfig>;
-  try {
-    config = deps.loadConfig(opts.configPath);
-  } catch (err) {
-    writeJson(ctx, {
-      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
-    });
-    ctx.exit(1);
-    return;
-  }
+  const config = loadConfigOrEmit(ctx, opts.configPath, deps);
+  if (!config) return;
 
-  // Resolve agentId via discovery.
   let builderAgentIdStr: string | undefined;
   try {
     const api = deps.discoveryApiFactory(config);
     const rows = await api.listPluginPublications({});
-    const row = rows.find((r) => r.cid === opts.pluginCid);
-    builderAgentIdStr = row?.builderAgentId;
+    builderAgentIdStr = rows.find((r) => r.cid === opts.pluginCid)?.builderAgentId;
   } catch (err) {
     if (err instanceof DiscoveryUnavailableError) {
       emitDiscoveryUnavailable(ctx, config, err);

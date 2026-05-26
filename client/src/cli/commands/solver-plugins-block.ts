@@ -19,20 +19,17 @@
  *     exit 1. This overrides any earlier network outcome (the operator's
  *     intent did not land on disk).
  *
- * Password resolution and Stage 1 ensure happen first so a daemon without
- * keystore credentials surfaces `keystore_missing` before touching either
- * the network or the config file.
+ * The password / config / discovery / Stage 1 prologue is the same one the
+ * other write verbs use — see `preparePipeline` in
+ * `solver-plugins-feedback.ts`.
  */
 
-import { keccak256, toBytes, getAddress, type Address, type Hex } from 'viem';
+import type { Hex } from 'viem';
 import type { CommandContext } from '../command.js';
 import { writeJson } from './solver-plugins.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
-import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
-import { DiscoveryUnavailableError } from '../../discovery/types.js';
-import {
-  DEFAULT_CONFIG_PATH,
-} from '../../config.js';
+import { preparePipeline } from './solver-plugins-feedback.js';
+import { DEFAULT_CONFIG_PATH } from '../../config.js';
 
 export interface BlockOptions {
   pluginCid: string;
@@ -45,98 +42,8 @@ export async function blockHandler(
   opts: BlockOptions,
   deps: SolverPluginsDeps,
 ): Promise<void> {
-  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env);
-  if (!passwordResult.ok) {
-    writeJson(ctx, {
-      error: {
-        code: 'keystore_missing',
-        message:
-          'Could not resolve password. Set JINN_PASSWORD, write ~/.jinn-client/keystore-password, or pass --password-fd.',
-      },
-    });
-    ctx.exit(1);
-    return;
-  }
-  const password = passwordResult.password;
-
-  let config: ReturnType<typeof deps.loadConfig>;
-  try {
-    config = deps.loadConfig(opts.configPath);
-  } catch (err) {
-    writeJson(ctx, {
-      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
-    });
-    ctx.exit(1);
-    return;
-  }
-
-  // Resolve builder agentId via discovery.
-  let builderAgentIdStr: string | undefined;
-  try {
-    const api = deps.discoveryApiFactory(config);
-    const rows = await api.listPluginPublications({});
-    const row = rows.find((r) => r.cid === opts.pluginCid);
-    builderAgentIdStr = row?.builderAgentId;
-  } catch (err) {
-    if (err instanceof DiscoveryUnavailableError) {
-      writeJson(ctx, {
-        error: {
-          code: 'discovery_unavailable',
-          message: `Indexer unavailable (mode=${config.discovery?.mode ?? 'onchain'}${config.discovery?.url ? `, url=${config.discovery.url}` : ''}): ${err.message}`,
-        },
-      });
-      ctx.exit(1);
-      return;
-    }
-    throw err;
-  }
-  if (!builderAgentIdStr) {
-    writeJson(ctx, {
-      error: {
-        code: 'agentid_unresolvable',
-        message: `No plug-in publication record found for cid ${opts.pluginCid} (discovery mode=${config.discovery?.mode ?? 'onchain'}).`,
-        details: { mode: config.discovery?.mode ?? 'onchain' },
-      },
-    });
-    ctx.exit(1);
-    return;
-  }
-
-  const bootstrapper = deps.bootstrapperFactory(config);
-  const stage1 = await bootstrapper.ensureStage1(password);
-  if (!stage1.ok) {
-    writeJson(ctx, { error: { code: 'ensure_stage1_failed', message: stage1.message } });
-    ctx.exit(1);
-    return;
-  }
-  const fleet = stage1.fleet_state;
-  if (!fleet.fleet_agent_id || !fleet.fleet_safe_address || !fleet.fleet_identity_registry) {
-    writeJson(ctx, {
-      error: {
-        code: 'fleet_identity_missing',
-        message: 'Stage 1 completed but fleet identity is empty.',
-      },
-    });
-    ctx.exit(1);
-    return;
-  }
-
-  const chainId = config.network === 'testnet' ? 84532 : 8453;
-  const reputationRegistryAddress = getReputationRegistryAddress(chainId);
-  if (!reputationRegistryAddress) {
-    writeJson(ctx, {
-      error: {
-        code: 'config_load_failed',
-        message: `No ReputationRegistry address known for chainId ${chainId}.`,
-      },
-    });
-    ctx.exit(1);
-    return;
-  }
-
-  const safeAddress = getAddress(fleet.fleet_safe_address) as Address;
-  const manifestRef = `plugin:${opts.pluginCid}`;
-  const manifestHash: Hex = keccak256(toBytes(manifestRef));
+  const prep = await preparePipeline(ctx, opts.pluginCid, opts.configPath, deps);
+  if (!prep) return;
 
   // Step (a): attempt the network publish. Capture either the txHash or the
   // error; never throw out of this block — the local write must run
@@ -144,20 +51,20 @@ export async function blockHandler(
   let networkTxHash: Hex | undefined;
   let networkError: Error | undefined;
   const client = deps.reputationClientFactory({
-    reputationRegistryAddress,
-    safeAddress,
-    rpcUrl: config.rpcUrl,
-    network: config.network === 'testnet' ? 'base-sepolia' : 'base',
-    earningDir: config.earningDir,
-    password,
+    reputationRegistryAddress: prep.reputationRegistryAddress,
+    safeAddress: prep.safeAddress,
+    rpcUrl: prep.config.rpcUrl,
+    network: prep.config.network === 'testnet' ? 'base-sepolia' : 'base',
+    earningDir: prep.config.earningDir,
+    password: prep.password,
   });
   try {
     networkTxHash = await client.giveFeedback({
-      harnessAgentId: BigInt(builderAgentIdStr),
+      harnessAgentId: prep.builderAgentId,
       score: 0,
       scoreDecimals: 2,
-      manifestRef,
-      manifestHash,
+      manifestRef: prep.manifestRef,
+      manifestHash: prep.manifestHash,
       tag1: 'block',
       tag2: opts.reason,
     });
@@ -204,7 +111,7 @@ export async function blockHandler(
       verb: 'solver-plugins block',
       blockedLocal: true,
       pluginCid: opts.pluginCid,
-      targetAgentId: builderAgentIdStr,
+      targetAgentId: prep.builderAgentId.toString(),
       reason: opts.reason,
       networkPublishError: {
         code: 'blocked_locally_only',
@@ -219,9 +126,9 @@ export async function blockHandler(
     blockedLocal: true,
     txHash: networkTxHash,
     pluginCid: opts.pluginCid,
-    targetAgentId: builderAgentIdStr,
+    targetAgentId: prep.builderAgentId.toString(),
     reason: opts.reason,
-    reputationRegistry: reputationRegistryAddress,
-    safeAddress,
+    reputationRegistry: prep.reputationRegistryAddress,
+    safeAddress: prep.safeAddress,
   });
 }
