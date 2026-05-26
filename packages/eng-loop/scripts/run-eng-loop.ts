@@ -36,6 +36,16 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { argv } from 'node:process';
 
+/**
+ * Routing helper for the `sessions` subcommand (#587). Returns true when the
+ * dispatcher entrypoint should hand off to `runSessionsCli` instead of
+ * running its normal cycle loop. Exported so the routing branch can be
+ * pinned by a unit test.
+ */
+export function shouldRouteToSessions(argv: string[]): boolean {
+  return argv[2] === 'sessions';
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -220,6 +230,12 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  if (shouldRouteToSessions(process.argv)) {
+    const { runSessionsCli } = await import('../src/cli/sessions.js');
+    await runSessionsCli(process.argv.slice(3));
+    return;
+  }
+
   const isDryRun = process.argv.includes('--dry-run');
   const isOnce = process.argv.includes('--once');
   const capIdx = process.argv.indexOf('--cap');
