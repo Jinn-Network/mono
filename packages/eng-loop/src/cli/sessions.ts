@@ -60,6 +60,11 @@ export function encodeWorktreePathToProjectDir(path: string): string {
 
 import { basename, dirname, join as pathJoin, resolve as pathResolve } from 'node:path';
 import { Transform } from 'node:stream';
+import { promises as fsp } from 'node:fs';
+import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline/promises';
+import { WORKTREES_BASE } from '../dispatcher/dispatch.js';
 
 /**
  * Return the numeric issue id if `worktreePath` is a direct child of `base`
@@ -565,6 +570,123 @@ export async function runSessionsCli(argv: string[], depsOverride?: SessionsDeps
 // Stub for Task 23; Task 24 replaces with real wiring.
 // ---------------------------------------------------------------------------
 
+/**
+ * Production wiring of `SessionsDeps`. Resolves real fs paths, shells out
+ * to `ps` and `lsof` (macOS), spawns `tail -F`, and uses `readline/promises`
+ * for the `[y/N]` prompt. Linux's `/proc/<pid>/cwd` resolver is left as a
+ * follow-up — the spec (§A portability) gates the v1 ship on macOS, which
+ * is what every operator runs today.
+ */
 export function defaultDeps(): SessionsDeps {
-  throw new Error('defaultDeps not yet wired — implement in Task 24');
+  const claudeProjectsDir = pathJoin(homedir(), '.claude', 'projects');
+
+  return {
+    worktreesBase: WORKTREES_BASE,
+    claudeProjectsDir,
+    now: () => Date.now(),
+    listProjectDirs: async (dir) => {
+      const entries = await fsp.readdir(dir, { withFileTypes: true });
+      return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    },
+    listJsonlFiles: async (dir) => {
+      const entries = await fsp.readdir(dir, { withFileTypes: true });
+      const jsonl = entries.filter((e) => e.isFile() && e.name.endsWith('.jsonl'));
+      const stats = await Promise.all(
+        jsonl.map(async (e) => {
+          const st = await fsp.stat(pathJoin(dir, e.name));
+          return { name: e.name, mtimeMs: st.mtimeMs };
+        }),
+      );
+      return stats;
+    },
+    readJsonl: (path) => fsp.readFile(path, 'utf8'),
+    listClaudeProcesses: async () => {
+      // `ps -axo pid=,comm=` — pid + the basename of the executable.
+      // The dispatcher spawns the absolute path to `claude`, so we match
+      // either `claude` (just the basename) or any path ending in `/claude`.
+      const out = await runCommand('ps', ['-axo', 'pid=,comm=']);
+      const pids: Array<{ pid: number }> = [];
+      for (const line of out.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed.length === 0) continue;
+        // First whitespace-delimited token is pid; the rest is the comm.
+        const m = trimmed.match(/^(\d+)\s+(.+)$/);
+        if (m == null) continue;
+        const pid = parseInt(m[1]!, 10);
+        const comm = m[2]!.trim();
+        if (comm === 'claude' || comm.endsWith('/claude')) {
+          pids.push({ pid });
+        }
+      }
+      return pids;
+    },
+    resolveProcessCwd: (pid) => resolveProcessCwdForPlatform(process.platform, pid),
+    spawnTail: (path) => {
+      const child = spawn('tail', ['-n', '50', '-F', path], { stdio: ['ignore', 'pipe', 'inherit'] });
+      return {
+        stdout: child.stdout!,
+        kill: (sig) => { child.kill(sig); },
+      };
+    },
+    sendSignal: (pid, sig) => { process.kill(pid, sig); },
+    confirm: async (prompt) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        const ans = await rl.question(prompt);
+        return /^y(es)?$/i.test(ans.trim());
+      } finally {
+        rl.close();
+      }
+    },
+    onSigint: (handler) => { process.on('SIGINT', handler); },
+    stdout: process.stdout,
+    stderr: process.stderr,
+  };
+}
+
+/** Run a shell command and return its stdout. Throws on non-zero exit. */
+async function runCommand(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+    child.stdout?.on('data', (c: Buffer) => chunks.push(c));
+    child.stderr?.on('data', (c: Buffer) => errChunks.push(c));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        const err = Buffer.concat(errChunks).toString('utf8').trim();
+        reject(new Error(`${cmd} exited with code ${code}: ${err}`));
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    });
+  });
+}
+
+async function resolveProcessCwdForPlatform(platform: NodeJS.Platform, pid: number): Promise<string | null> {
+  if (platform === 'darwin') {
+    try {
+      // `lsof -a -p <pid> -d cwd -Fn` emits records of the form:
+      //   p<pid>
+      //   fcwd
+      //   n<path>
+      const out = await runCommand('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn']);
+      for (const line of out.split('\n')) {
+        if (line.startsWith('n')) {
+          return line.slice(1).trim() || null;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  if (platform === 'linux') {
+    // TODO(#587-followup): wire `readlink /proc/<pid>/cwd`. See
+    // docs/superpowers/specs/2026-05-26-eng-loop-sessions-subcommand.md §A
+    // (portability) — v1 ships macOS-only because every operator runs darwin.
+    return null;
+  }
+  return null;
 }
