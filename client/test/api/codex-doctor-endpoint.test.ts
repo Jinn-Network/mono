@@ -36,11 +36,14 @@ const { addCodexDoctorRoutes, probeCodexDoctor } = await import(
 );
 
 type CodexAuthStatus = 'ok' | 'expired' | 'not_configured';
+type CodexVersionStatus = 'ok' | 'unknown' | 'untested';
 
 interface CodexDoctorBody {
   installed: boolean;
   authenticated: boolean;
   authStatus: CodexAuthStatus;
+  cliVersion: string | null;
+  versionStatus: CodexVersionStatus;
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -97,6 +100,9 @@ beforeEach(() => {
   readFileSyncMock.mockImplementation(() => {
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   });
+  // Silence the #675 untested-version warning so it does not pollute test
+  // output. Tests that assert on warn behaviour install their own spy.
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
 describe('GET /api/codex/doctor — install detection', () => {
@@ -550,5 +556,102 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
 
     const result = probeCodexDoctor({ env: {}, now: NOW_MS });
     expect(result.authStatus).toBe('expired');
+  });
+});
+
+// #675 — codex CLI version surfacing. The harness was developed against the
+// 0.50.0–0.133.0 window; an out-of-range CLI may break in ways the daemon
+// cannot recover from. The doctor parses `codex --version` stdout, classifies
+// it against the tested range, and emits a single console.warn on out-of-range.
+describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
+  function spawnVersion(stdout: string) {
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      signal: null,
+      error: undefined,
+      stdout,
+      stderr: '',
+    });
+  }
+
+  it('parses cliVersion from `codex --version` stdout', () => {
+    spawnVersion('codex-cli 0.120.5\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.cliVersion).toBe('0.120.5');
+  });
+
+  it('reports cliVersion=null and versionStatus=unknown when stdout has no semver triple', () => {
+    spawnVersion('codex CLI (build deadbeef)\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.cliVersion).toBeNull();
+    expect(result.versionStatus).toBe('unknown');
+  });
+
+  it('reports versionStatus=ok for a version inside the tested range', () => {
+    spawnVersion('codex-cli 0.120.0\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('ok');
+  });
+
+  it('reports versionStatus=untested for a version below MIN_TESTED', () => {
+    spawnVersion('codex-cli 0.10.0\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('untested');
+    expect(result.cliVersion).toBe('0.10.0');
+  });
+
+  it('reports versionStatus=untested for a version above MAX_TESTED', () => {
+    spawnVersion('codex-cli 0.200.0\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('untested');
+    expect(result.cliVersion).toBe('0.200.0');
+  });
+
+  // Patch releases within the same minor as MAX_TESTED_CODEX_VERSION stay
+  // 'ok' — codex patch bumps almost never break the CLI contract, and warning
+  // on every patch would produce alarm fatigue. Bump MAX on minor/major
+  // upgrades only.
+  it('reports versionStatus=ok for a patch release within the tested minor (0.133.5)', () => {
+    spawnVersion('codex-cli 0.133.5\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('ok');
+    expect(result.cliVersion).toBe('0.133.5');
+  });
+
+  it('reports versionStatus=untested for a minor bump above MAX_TESTED (0.134.0)', () => {
+    spawnVersion('codex-cli 0.134.0\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('untested');
+    expect(result.cliVersion).toBe('0.134.0');
+  });
+
+  it('readiness is not affected by versionStatus (an untested version still authenticates)', () => {
+    spawnVersion('codex-cli 0.200.0\n');
+    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.installed).toBe(true);
+    expect(result.authenticated).toBe(true);
+    expect(result.authStatus).toBe('ok');
+    expect(result.versionStatus).toBe('untested');
+  });
+
+  it('emits a single console.warn the first time an untested version is observed (once-per-process)', async () => {
+    // Re-import the module in isolation so the module-scoped warning flag
+    // is fresh for this test.
+    vi.resetModules();
+    const { probeCodexDoctor: probe } = await import(
+      '../../src/api/codex-doctor-endpoint.js'
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    spawnVersion('codex-cli 0.200.0\n');
+    probe({ env: { OPENAI_API_KEY: 'sk-x' } });
+    probe({ env: { OPENAI_API_KEY: 'sk-x' } });
+    probe({ env: { OPENAI_API_KEY: 'sk-x' } });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]![0]).toContain('0.200.0');
+    expect(warnSpy.mock.calls[0]![0]).toContain('#675');
+
+    warnSpy.mockRestore();
   });
 });

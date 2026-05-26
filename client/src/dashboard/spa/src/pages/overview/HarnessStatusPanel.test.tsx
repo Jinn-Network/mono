@@ -8,10 +8,12 @@ import { HarnessStatusPanel } from './HarnessStatusPanel.js';
 import type { HarnessReadinessEntry } from '../../api/types.js';
 
 const harnessReadinessMock = vi.fn();
+const codexDoctorMock = vi.fn();
 
 vi.mock('../../api/client.js', () => ({
   api: {
     harnessReadiness: (name: string) => harnessReadinessMock(name),
+    codexDoctor: () => codexDoctorMock(),
   },
 }));
 
@@ -49,6 +51,19 @@ function withProviders(node: JSX.Element): JSX.Element {
 describe('HarnessStatusPanel', () => {
   beforeEach(() => {
     harnessReadinessMock.mockReset();
+    codexDoctorMock.mockReset();
+    // Default: codex CLI is within the tested range so the version hint
+    // never renders unless a test opts in.
+    codexDoctorMock.mockResolvedValue({
+      installed: true,
+      authenticated: true,
+      authStatus: 'ok',
+      cliVersion: '0.120.0',
+      versionStatus: 'ok',
+      exitCode: 0,
+      stdout: 'codex 0.120.0',
+      stderr: '',
+    });
   });
 
   it('exposes data-testid="harness-status-panel" on the root region', async () => {
@@ -130,5 +145,43 @@ describe('HarnessStatusPanel', () => {
     await waitFor(() => screen.getByTestId('harness-row-claude-code'));
     expect(screen.queryByTestId('harness-reauth-claude-code')).toBeNull();
     expect(screen.queryByTestId('harness-recheck-claude-code')).toBeNull();
+  });
+
+  // #675 — yellow hint when the operator's installed codex CLI falls outside
+  // the harness's tested range. Scoped to the codex row only.
+  it('renders untested-version hint for codex harness row when versionStatus is "untested"', async () => {
+    harnessReadinessMock.mockResolvedValue({
+      harnessName: 'codex',
+      manifestCids: ['bafkreiswe'],
+      ready: true,
+    });
+    codexDoctorMock.mockResolvedValue({
+      installed: true,
+      authenticated: true,
+      authStatus: 'ok',
+      cliVersion: '0.200.0',
+      versionStatus: 'untested',
+      exitCode: 0,
+      stdout: 'codex 0.200.0',
+      stderr: '',
+    });
+    render(withProviders(<HarnessStatusPanel harnessNames={['codex']} />));
+    const hint = await screen.findByTestId('codex-version-hint-untested');
+    expect(hint.textContent).toContain('0.200.0');
+    expect(hint.textContent).toMatch(/outside the tested range/i);
+  });
+
+  it('does not render the untested-version hint when codex versionStatus is "ok"', async () => {
+    harnessReadinessMock.mockResolvedValue({
+      harnessName: 'codex',
+      manifestCids: ['bafkreiswe'],
+      ready: true,
+    });
+    // beforeEach already mocks codexDoctor with versionStatus='ok'.
+    render(withProviders(<HarnessStatusPanel harnessNames={['codex']} />));
+    await waitFor(() => screen.getByTestId('harness-row-codex'));
+    // Give the codexDoctor query a tick to resolve.
+    await waitFor(() => expect(codexDoctorMock).toHaveBeenCalled());
+    expect(screen.queryByTestId('codex-version-hint-untested')).toBeNull();
   });
 });

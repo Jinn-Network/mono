@@ -921,3 +921,22 @@ export interface HarnessReadinessEntry {
   reason?: string;
   nextStep?: HarnessReadinessNextStep;
 }
+
+// ── Codex CLI doctor (`/api/codex/doctor`) ───────────────────────────────────
+// Mirrors the daemon's `CodexDoctorResponse` so the SPA can render a yellow
+// untested-version hint without re-running the version comparison client-side
+// (#675).
+
+export type CodexAuthStatus = 'ok' | 'expired' | 'not_configured';
+export type CodexVersionStatus = 'ok' | 'unknown' | 'untested';
+
+export interface CodexDoctorResponse {
+  installed: boolean;
+  authenticated: boolean;
+  authStatus: CodexAuthStatus;
+  cliVersion: string | null;
+  versionStatus: CodexVersionStatus;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}

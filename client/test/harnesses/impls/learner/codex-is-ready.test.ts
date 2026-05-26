@@ -40,6 +40,8 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
+      cliVersion: '1.2.3',
+      versionStatus: 'untested',
     });
     const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
     const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
@@ -55,6 +57,8 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       exitCode: null,
       stdout: '',
       stderr: '',
+      cliVersion: null,
+      versionStatus: 'unknown',
     });
     const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
     const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
@@ -72,6 +76,8 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
+      cliVersion: '1.2.3',
+      versionStatus: 'untested',
     });
     const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
     const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
@@ -91,6 +97,8 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
+      cliVersion: '1.2.3',
+      versionStatus: 'untested',
     });
     const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
     const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });

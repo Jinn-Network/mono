@@ -31,6 +31,7 @@ import type {
   DiscoveryPluginScoresResponse,
   DiscoverySolverNetOperatorCountResponse,
   HarnessReadinessEntry,
+  CodexDoctorResponse,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -241,6 +242,13 @@ export const api = {
     jfetch<{ installed: boolean; exitCode: number | null; stdout: string; stderr: string }>(
       '/api/hermes/doctor',
     ),
+
+  /**
+   * Codex CLI install + auth + version snapshot. Used by HarnessStatusPanel
+   * to show a yellow untested-version hint when the operator's installed
+   * codex CLI falls outside the harness's tested range (#675).
+   */
+  codexDoctor: () => jfetch<CodexDoctorResponse>('/api/codex/doctor'),
 
   /**
    * Per-harness readiness snapshot (vh74.2 Stage A — #248 / #332).

@@ -46,12 +46,36 @@ import { join } from 'node:path';
 /** Classification of Codex credentials. */
 export type CodexAuthStatus = 'ok' | 'expired' | 'not_configured';
 
+/**
+ * Tested @openai/codex CLI version window (#675). Below MIN or above MAX, the
+ * harness may break — codex 0.133.0 introduced a stdin contract change that
+ * silently broke the previous positional-prompt invocation. Bumping these
+ * bounds is a deliberate compatibility statement, made with a green run of
+ * `yarn test test/harnesses/impls/learner/codex-code-adapter.test.ts` against
+ * the new CLI version.
+ *
+ * The upper bound is compared on major+minor only: patch releases within the
+ * same minor as `MAX_TESTED_CODEX_VERSION` are treated as `'ok'`, since codex
+ * patch bumps almost never break the CLI contract and warning on every patch
+ * would produce alarm fatigue. Bump `MAX_TESTED_CODEX_VERSION` when codex
+ * bumps its minor or major; patch bumps stay `'ok'` automatically.
+ */
+const MIN_TESTED_CODEX_VERSION = '0.50.0';
+const MAX_TESTED_CODEX_VERSION = '0.133.0';
+
+/** Classification of the installed codex CLI version against the tested range. */
+export type CodexVersionStatus = 'ok' | 'unknown' | 'untested';
+
 export interface CodexDoctorResponse {
   installed: boolean;
   /** Convenience alias — true iff `authStatus === 'ok'`. */
   authenticated: boolean;
   /** Live/expired/absent classification of Codex credentials. */
   authStatus: CodexAuthStatus;
+  /** Parsed semver string from `codex --version`, or null when unparseable. */
+  cliVersion: string | null;
+  /** ok = within tested range; untested = outside it; unknown = unparseable (#675). */
+  versionStatus: CodexVersionStatus;
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -213,6 +237,70 @@ function hasApiKey(config: CodexDoctorConfig): boolean {
 }
 
 /**
+ * Extracts the first `MAJOR.MINOR.PATCH` semver-looking triple from `codex
+ * --version` output. Returns null when no such triple is present.
+ */
+function parseCodexVersion(stdout: string): string | null {
+  const match = stdout.match(/\d+\.\d+\.\d+/);
+  return match ? match[0] : null;
+}
+
+/**
+ * Compares two `MAJOR.MINOR.PATCH` strings segment-by-segment as integers.
+ * Returns -1 if `a < b`, 0 if equal, 1 if `a > b`. Non-numeric / missing
+ * segments fall back to 0 so a partial input never throws.
+ */
+function compareSemver(a: string, b: string): -1 | 0 | 1 {
+  const av = a.split('.').map((s) => Number.parseInt(s, 10) || 0);
+  const bv = b.split('.').map((s) => Number.parseInt(s, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const ai = av[i] ?? 0;
+    const bi = bv[i] ?? 0;
+    if (ai < bi) return -1;
+    if (ai > bi) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Returns true when `a`'s `MAJOR.MINOR` is strictly greater than `b`'s. Patch
+ * differences within the same minor are ignored, so 0.133.5 is NOT above
+ * 0.133.0, but 0.134.0 and 1.0.0 are. Used for the upper-bound check (#675)
+ * so codex patch releases don't trip the untested-version warning.
+ */
+function isAboveMinor(a: string, b: string): boolean {
+  const av = a.split('.').map((s) => Number.parseInt(s, 10) || 0);
+  const bv = b.split('.').map((s) => Number.parseInt(s, 10) || 0);
+  const [aMajor, aMinor] = [av[0] ?? 0, av[1] ?? 0];
+  const [bMajor, bMinor] = [bv[0] ?? 0, bv[1] ?? 0];
+  if (aMajor !== bMajor) return aMajor > bMajor;
+  return aMinor > bMinor;
+}
+
+/**
+ * Classifies a parsed semver against the tested range.
+ *   - null → 'unknown'
+ *   - below MIN (full semver compare) → 'untested'
+ *   - above MAX on major+minor → 'untested' (patch bumps within the tested
+ *     minor stay 'ok'; bump MAX_TESTED_CODEX_VERSION on minor/major bumps)
+ *   - otherwise → 'ok'
+ */
+function classifyVersion(cliVersion: string | null): CodexVersionStatus {
+  if (cliVersion === null) return 'unknown';
+  if (
+    compareSemver(cliVersion, MIN_TESTED_CODEX_VERSION) < 0
+    || isAboveMinor(cliVersion, MAX_TESTED_CODEX_VERSION)
+  ) {
+    return 'untested';
+  }
+  return 'ok';
+}
+
+// Module-scoped so the warning fires once per process even though
+// `probeCodexDoctor` is called every readiness tick.
+let untestedVersionWarningEmitted = false;
+
+/**
  * Synchronously runs `codex --version` and classifies install + auth state.
  * Pure (no Hono dependency) so the harness layer can call it without pulling
  * the API server in.
@@ -245,10 +333,29 @@ export function probeCodexDoctor(config: CodexDoctorConfig = {}): CodexDoctorRes
     ? detectCodexAuthStatus(config)
     : 'not_configured';
 
+  // Version surfacing (#675). Parse only when we have a runnable binary;
+  // otherwise the stdout is meaningless.
+  const cliVersion = runnable ? parseCodexVersion(result.stdout ?? '') : null;
+  const versionStatus: CodexVersionStatus = runnable
+    ? classifyVersion(cliVersion)
+    : 'unknown';
+
+  if (versionStatus === 'untested' && !untestedVersionWarningEmitted) {
+    untestedVersionWarningEmitted = true;
+    // eslint-disable-next-line no-console
+    console.warn(
+      `codex CLI version ${cliVersion} is outside the tested range `
+      + `${MIN_TESTED_CODEX_VERSION}–${MAX_TESTED_CODEX_VERSION}; the harness `
+      + `may break — see issue #675`,
+    );
+  }
+
   return {
     installed,
     authenticated: authStatus === 'ok',
     authStatus,
+    cliVersion,
+    versionStatus,
     exitCode: result.status,
     stdout: (result.stdout ?? '').slice(0, 4000),
     stderr: (result.stderr ?? '').slice(0, 4000),

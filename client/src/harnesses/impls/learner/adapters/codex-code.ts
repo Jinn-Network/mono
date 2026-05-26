@@ -158,6 +158,15 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     this.runSessionStartHook = config._runSessionStartHook ?? true;
   }
 
+  /**
+   * Spawn `codex exec` and stream the prompt to its stdin.
+   *
+   * Stdin contract (#675): codex >=0.133.0 detects a non-TTY-with-no-data
+   * stdin as a fatal config error ("Reading additional input from stdin") and
+   * exits with code 1 before reading the positional [PROMPT]. The daemon
+   * therefore pipes the prompt through `child.stdin` and closes the stream;
+   * the positional-arg invocation used pre-0.133 is no longer supported.
+   */
   async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
     const prompt = buildInitialPrompt(inputs);
     const baseEnv = {
@@ -224,10 +233,9 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     for (const configArg of prepared.configArgs) {
       args.push('-c', configArg);
     }
-    args.push(prompt);
 
     const spawnOpts: SpawnOptions = {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env,
       cwd: inputs.workingDir,
     };
@@ -247,6 +255,13 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
         if (stderrErr) throw stderrErr;
       };
       const child: ChildProcess = this.spawnFn(this.codexPath, args, spawnOpts);
+
+      if (child.stdin) {
+        // codex may close stdin early; let the exit-code branch report the
+        // real failure rather than crashing this promise on EPIPE.
+        child.stdin.on('error', () => {});
+        child.stdin.end(prompt);
+      }
 
       if (inputs.abort.aborted) {
         if (!child.killed) child.kill('SIGTERM');

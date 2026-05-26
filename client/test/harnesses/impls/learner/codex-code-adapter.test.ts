@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { SweRebenchV2SolutionPayloadSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import {
@@ -23,20 +24,36 @@ type SpawnCall = {
   options: { env?: NodeJS.ProcessEnv; cwd?: string };
 };
 
-function fakeCodexChild(onSpawn?: (options: { env?: NodeJS.ProcessEnv; cwd?: string }) => void): EventEmitter & {
+type FakeCodexChild = EventEmitter & {
   stdout: EventEmitter;
   stderr: EventEmitter;
+  stdin: PassThrough & { end: ReturnType<typeof vi.fn> };
+  /** Chunks captured from the stdin stream as utf8 strings. */
+  stdinChunks: string[];
   killed: boolean;
   kill: ReturnType<typeof vi.fn>;
-} {
-  const child = new EventEmitter() as EventEmitter & {
-    stdout: EventEmitter;
-    stderr: EventEmitter;
-    killed: boolean;
-    kill: ReturnType<typeof vi.fn>;
-  };
+};
+
+function fakeCodexChild(
+  onSpawn?: (options: { env?: NodeJS.ProcessEnv; cwd?: string }) => void,
+  opts: { emitErrorOnSpawn?: boolean } = {},
+): FakeCodexChild {
+  const child = new EventEmitter() as FakeCodexChild;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
+  const stdin = new PassThrough();
+  const stdinChunks: string[] = [];
+  stdin.on('data', (chunk: Buffer) => {
+    stdinChunks.push(chunk.toString('utf8'));
+  });
+  // Wrap stdin.end so the test can assert it was called exactly once.
+  const realEnd = stdin.end.bind(stdin);
+  const endMock = vi.fn((chunk?: unknown, encoding?: unknown, cb?: unknown) => {
+    return realEnd(chunk as never, encoding as never, cb as never);
+  });
+  (stdin as unknown as { end: typeof endMock }).end = endMock;
+  child.stdin = stdin as FakeCodexChild['stdin'];
+  child.stdinChunks = stdinChunks;
   child.killed = false;
   child.kill = vi.fn(() => {
     child.killed = true;
@@ -44,6 +61,10 @@ function fakeCodexChild(onSpawn?: (options: { env?: NodeJS.ProcessEnv; cwd?: str
   });
   setImmediate(() => {
     onSpawn?.({});
+    if (opts.emitErrorOnSpawn) {
+      child.emit('error', new Error('spawn codex ENOENT'));
+      return;
+    }
     child.stdout.emit('data', Buffer.from('{"type":"session_configured"}\n'));
     child.emit('exit', 0, null);
   });
@@ -158,9 +179,11 @@ describe('CodexCodeHarnessAdapter', () => {
 
   it('spawns codex exec with per-run plugin projection, MCP config, and cheap model', async () => {
     const calls: SpawnCall[] = [];
+    let captured: FakeCodexChild | undefined;
     const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {
       calls.push({ command, args, options });
-      return fakeCodexChild();
+      captured = fakeCodexChild();
+      return captured;
     });
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-adapter-work-'));
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-adapter-state-'));
@@ -218,7 +241,10 @@ describe('CodexCodeHarnessAdapter', () => {
         '-c',
         'mcp_servers.jinn-client.args=["mcp/jinn-client-server.mjs"]',
       ]));
-      const promptArg = calls[0]!.args.at(-1)!;
+      // Prompt is piped to codex stdin (#675), not passed as a positional
+      // argument. Read it back from the captured stdin chunks.
+      expect(captured).toBeDefined();
+      const promptArg = captured!.stdinChunks.join('');
       expect(promptArg).toContain('You are executing a Jinn task');
       expect(promptArg).toContain('Use the available skills, plugins, tools, and runtime context exposed by this harness');
       expect(promptArg).toContain('typed SolverNet payload');
@@ -271,6 +297,104 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(existsSync(join(workingDir, '.agents', 'skills', 'swe-rebench-v2-runtime__plan', 'SKILL.md'))).toBe(true);
       expect(existsSync(join(workingDir, '.agents', 'plugins', 'marketplace.json'))).toBe(true);
       expect(readFileSync(join(workingDir, '.codex-code', 'stdout.jsonl'), 'utf8')).toContain('session_configured');
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression for #675 — @openai/codex@0.133.0 detects a non-TTY-with-no-data
+  // stdin as a hard error and exits before reading the positional [PROMPT].
+  // The fix pipes the prompt to child.stdin and drops the positional arg.
+  it('pipes the prompt to codex stdin, not as a positional argument (#675)', async () => {
+    const calls: SpawnCall[] = [];
+    let captured: FakeCodexChild | undefined;
+    const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; stdio?: unknown }) => {
+      calls.push({ command, args, options });
+      captured = fakeCodexChild();
+      return captured;
+    });
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-stdin-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-stdin-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _runSessionStartHook: false,
+      });
+
+      await adapter.runTask({
+        taskId: 'swe-rebench-task-restoration',
+        requestId: '0x' + '7'.repeat(64),
+        solverType: 'swe-rebench-v2.v1',
+        taskBody: sweTask() as never,
+        implStateDir,
+        workingDir,
+        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+        windowStartTs: 1,
+        windowEndTs: 2,
+        msUntilEndTs: 1,
+        mode: 'train',
+        abort: new AbortController().signal,
+      }, learnerPluginRoot);
+
+      // stdio[0] must be 'pipe' so codex 0.133.0+ reads the prompt as input,
+      // not flag a non-TTY-with-no-data stdin as a fatal config error.
+      const opts = calls[0]!.options as { stdio?: unknown };
+      expect(Array.isArray(opts.stdio)).toBe(true);
+      expect((opts.stdio as unknown[])[0]).toBe('pipe');
+      // The prompt must travel through stdin, not on argv.
+      expect(captured).toBeDefined();
+      const stdinBody = captured!.stdinChunks.join('');
+      expect(stdinBody).toContain('You are executing a Jinn task');
+      expect(captured!.stdin.end).toHaveBeenCalledTimes(1);
+      // argv must not contain the prompt body.
+      expect(calls[0]!.args).not.toContain(stdinBody);
+      for (const arg of calls[0]!.args) {
+        expect(arg).not.toContain('You are executing a Jinn task');
+      }
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('closes stdin even when the child errors before reading the prompt (#675)', async () => {
+    let captured: FakeCodexChild | undefined;
+    const spawnFn = vi.fn(() => {
+      captured = fakeCodexChild(undefined, { emitErrorOnSpawn: true });
+      return captured;
+    });
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-stdin-err-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-stdin-err-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _runSessionStartHook: false,
+      });
+
+      await expect(
+        adapter.runTask({
+          taskId: 'swe-rebench-task-restoration',
+          requestId: '0x' + '7'.repeat(64),
+          solverType: 'swe-rebench-v2.v1',
+          taskBody: sweTask() as never,
+          implStateDir,
+          workingDir,
+          pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+          windowStartTs: 1,
+          windowEndTs: 2,
+          msUntilEndTs: 1,
+          mode: 'train',
+          abort: new AbortController().signal,
+        }, learnerPluginRoot),
+      ).rejects.toThrow();
+
+      expect(captured).toBeDefined();
+      expect(captured!.stdin.end).toHaveBeenCalledTimes(1);
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });

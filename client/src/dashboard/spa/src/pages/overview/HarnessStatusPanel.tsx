@@ -7,7 +7,8 @@ import { Card } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Separator } from '../../components/ui/separator.js';
-import type { HarnessReadinessEntry } from '../../api/types.js';
+import type { CodexDoctorResponse, HarnessReadinessEntry } from '../../api/types.js';
+import { CODEX_HARNESS, canonicalHarnessName } from '../configuration/harnessNames.js';
 
 /**
  * Harness Readiness — §2.9 surface promoted out of buried state into a
@@ -33,6 +34,16 @@ function HarnessStatusRow({ name }: { name: string }): JSX.Element {
     queryKey: ['harness-readiness', name],
     queryFn: () => api.harnessReadiness(name),
     refetchInterval: 30_000,
+  });
+
+  // #675 — yellow hint when the operator's codex CLI is outside the tested
+  // range. Scoped to the codex harness row; other harnesses skip the query.
+  const isCodex = canonicalHarnessName(name) === CODEX_HARNESS;
+  const codexDoctor = useQuery<CodexDoctorResponse>({
+    queryKey: ['codex-doctor'],
+    queryFn: () => api.codexDoctor(),
+    refetchInterval: 30_000,
+    enabled: isCodex,
   });
 
   function statusOf(): RowStatus | null {
@@ -103,6 +114,14 @@ function HarnessStatusRow({ name }: { name: string }): JSX.Element {
       {status === 'error' && (
         <span className="font-mono text-[12px] text-[var(--fg-muted)]">
           {error instanceof Error ? error.message : 'Readiness check failed.'}
+        </span>
+      )}
+      {isCodex && codexDoctor.data?.versionStatus === 'untested' && (
+        <span
+          data-testid="codex-version-hint-untested"
+          className="font-mono text-[12px] text-[var(--severity-warning-fg)]"
+        >
+          Codex CLI {codexDoctor.data.cliVersion} is outside the tested range — harness may break.
         </span>
       )}
       {showActions && (
