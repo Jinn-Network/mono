@@ -419,19 +419,14 @@ describe('fetchProjectSnapshot — schema-drift detection', () => {
       }),
     ]);
 
-    // Capture the error so we can assert both the type, the `field`
+    // Capture the rejection so we can assert the type, the `field`
     // discriminant, and that the original "all 3 project items" message
     // shape is preserved verbatim (back-compat with log scrapers — see
     // spec/2026-05-26-597 §`ProjectFieldSchemaError` extension).
-    let caught: unknown;
-    try {
-      await fetchProjectSnapshot(runner);
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(ProjectFieldSchemaError);
-    expect((caught as ProjectFieldSchemaError).field).toBe('all');
-    expect((caught as Error).message).toContain('all 3 project items');
+    const err = await fetchProjectSnapshot(runner).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProjectFieldSchemaError);
+    expect((err as ProjectFieldSchemaError).field).toBe('all');
+    expect((err as Error).message).toContain('all 3 project items');
   });
 
   it('throws ProjectFieldSchemaError when Status is null for every Issue (N≥3) and other fields are populated', async () => {
@@ -449,16 +444,11 @@ describe('fetchProjectSnapshot — schema-drift detection', () => {
       }),
     ]);
 
-    let caught: unknown;
-    try {
-      await fetchProjectSnapshot(runner);
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(ProjectFieldSchemaError);
-    expect((caught as ProjectFieldSchemaError).field).toBe('Status');
-    expect((caught as Error).message).toContain("field 'Status'");
-    expect((caught as Error).message).toContain('3');
+    const err = await fetchProjectSnapshot(runner).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProjectFieldSchemaError);
+    expect((err as ProjectFieldSchemaError).field).toBe('Status');
+    expect((err as Error).message).toContain("field 'Status'");
+    expect((err as Error).message).toContain('3');
   });
 
   it('does NOT throw when Status is null for only 2 Issues (below SCHEMA_DRIFT_MIN_ISSUE_COUNT)', async () => {
