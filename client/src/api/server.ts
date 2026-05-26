@@ -419,7 +419,29 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   app.get('/v1/status', async (c) => {
     try {
-      const body = await gatherStatusForApi(store, config.status);
+      // Thread the live HarnessReadinessRegistry through to gather-status so
+      // the response carries a `harness` rollup. main.ts uses the holder shape
+      // (registry is constructed post-bootstrap); dereferencing once per
+      // request keeps server.ts decoupled from that timing. When the holder
+      // is empty (pre-bootstrap) the getter returns null and the assembler
+      // defaults to ready.
+      const reg = config.harnessReadinessRegistry;
+      const getRegistry = (): HarnessReadinessRegistry | null =>
+        reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
+      const statusConfig: StatusGatherConfig | undefined = config.status
+        ? {
+            ...config.status,
+            harnessReadiness: () => {
+              const live = getRegistry();
+              if (!live) return null;
+              return {
+                snapshot: live.getSnapshot(),
+                joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
+              };
+            },
+          }
+        : undefined;
+      const body = await gatherStatusForApi(store, statusConfig);
       return c.json(body);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
