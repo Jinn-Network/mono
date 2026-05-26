@@ -8,7 +8,7 @@
  * Issue: jinn-mono#587
  */
 
-import { basename, dirname, join as pathJoin, resolve as pathResolve } from 'node:path';
+import { basename, join as pathJoin } from 'node:path';
 import { Transform } from 'node:stream';
 import { promises as fsp } from 'node:fs';
 import { homedir } from 'node:os';
@@ -64,21 +64,6 @@ export function encodeWorktreePathToProjectDir(path: string): string {
     .replace(/[^A-Za-z0-9]/g, '-')
     .replace(/-+/g, '-')
     .replace(/-+$/, '');
-}
-
-/**
- * Return the numeric issue id if `worktreePath` is a direct child of `base`
- * whose leaf is `^\d+$`. The dispatcher's convention is one worktree per
- * issue at `<WORKTREES_BASE>/<N>` — anything else (different base, non-numeric
- * leaf, nested subdirectory) returns null.
- */
-export function parseIssueNumberFromWorktree(worktreePath: string, base: string): number | null {
-  const resolvedBase = pathResolve(base);
-  const resolvedWt = pathResolve(worktreePath);
-  if (dirname(resolvedWt) !== resolvedBase) return null;
-  const leaf = basename(resolvedWt);
-  if (!/^\d+$/.test(leaf)) return null;
-  return parseInt(leaf, 10);
 }
 
 // ---------------------------------------------------------------------------
