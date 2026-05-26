@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
+import {
+  createSolverPluginsCommand,
+  PRODUCTION_DEPS,
+} from '../../../src/cli/commands/solver-plugins.js';
 import { DiscoveryUnavailableError } from '../../../src/discovery/types.js';
 import type { DiscoveryAPI, PluginPublication } from '../../../src/discovery/types.js';
 import { withTempConfig, makeCtx, parsedLine } from './solver-plugins-test-helpers.js';
@@ -377,5 +380,60 @@ describe('jinn solver-plugins list-feedback', () => {
     expect((out as any).error?.code).toBe('discovery_unavailable');
     expect((out as any).error?.message).toMatch(/indexer/);
     expect(exits).toEqual([1]);
+  });
+});
+
+/**
+ * Direct factory-level coverage of the read-only path: when the production
+ * `reputationClientFactory` is called with `password: undefined`, it must
+ * return a handle whose write methods throw the canonical
+ * `walletClient required` error. The factory uses `http()` transports so
+ * client construction does not hit the network.
+ */
+describe('PRODUCTION_DEPS.reputationClientFactory (read-only path)', () => {
+  it('returns a handle whose giveFeedback throws walletClient required when password is undefined', async () => {
+    const handle = PRODUCTION_DEPS.reputationClientFactory({
+      reputationRegistryAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+      safeAddress: '0xBBBB000000000000000000000000000000000001',
+      rpcUrl: 'http://127.0.0.1:8545',
+      network: 'base-sepolia',
+      earningDir: '/tmp/jinn-readonly-factory-test',
+      password: undefined,
+    });
+
+    await expect(
+      handle.giveFeedback({
+        harnessAgentId: 777n,
+        score: 100,
+        scoreDecimals: 2,
+        manifestRef: 'plugin:bafyCid',
+        manifestHash:
+          '0x0000000000000000000000000000000000000000000000000000000000000001',
+      }),
+    ).rejects.toThrow(/walletClient required/);
+  });
+
+  it('returns a handle whose respondToFeedback throws walletClient required when password is undefined', async () => {
+    const handle = PRODUCTION_DEPS.reputationClientFactory({
+      reputationRegistryAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+      safeAddress: undefined,
+      rpcUrl: 'http://127.0.0.1:8545',
+      network: 'base-sepolia',
+      earningDir: '/tmp/jinn-readonly-factory-test',
+      password: undefined,
+    });
+
+    await expect(
+      handle.respondToFeedback({
+        feedbackId: {
+          agentId: 777n,
+          client: '0xAAAA000000000000000000000000000000000001',
+          feedbackIndex: 1n,
+        },
+        responseURI: 'ipfs://bafyResp',
+        responseHash:
+          '0x0000000000000000000000000000000000000000000000000000000000000001',
+      }),
+    ).rejects.toThrow(/walletClient required/);
   });
 });

@@ -355,6 +355,86 @@ describe('jinn solver-plugins endorse', () => {
     expect(exits).toEqual([1]);
   });
 
+  it('emits ensure_stage1_failed when bootstrapper reports stage1 not ok', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyStage1FailCid';
+    const row = fakePluginRow(cid, '777');
+
+    const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
+    const ensureStage1 = vi.fn(async () => ({
+      ok: false,
+      message: 'needs funding',
+      fleet_state: {},
+    }));
+
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1 } as any),
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback,
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'endorse', cid,
+      '--score', '100',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    expect(ensureStage1).toHaveBeenCalledOnce();
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('ensure_stage1_failed');
+    expect((out as any).error?.message).toMatch(/needs funding/);
+    expect(giveFeedback).not.toHaveBeenCalled();
+    expect(exits).toEqual([1]);
+  });
+
+  it('emits self_feedback_not_allowed when giveFeedback throws the canonical revert', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafySelfFeedbackCid';
+    const row = fakePluginRow(cid, '777');
+
+    const giveFeedback = vi.fn(async () => {
+      throw new Error('Self-feedback not allowed');
+    });
+
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback,
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'endorse', cid,
+      '--score', '100',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    expect(giveFeedback).toHaveBeenCalledOnce();
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('self_feedback_not_allowed');
+    expect((out as any).error?.message).toMatch(/Self-feedback|caller is the agent owner/i);
+    expect(exits).toEqual([1]);
+  });
+
   it('emits agentid_unresolvable when discovery has no row for the cid', async () => {
     const configPath = withTempConfig();
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
