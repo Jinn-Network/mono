@@ -250,7 +250,7 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(promptArg).toContain('typed SolverNet payload');
       // Generic submission guidance lives in the prompt; SolverNet-specific
       // pattern (repo setup, schema shape, etc.) lives in the SolverPlugin's
-      // SKILL.md files — see swe-rebench-v2-runtime/skills/{orient,plan}/.
+      // SKILL.md files — see swe-rebench-v2-runtime/skills/task/.
       expect(promptArg).toContain('call submit_typed_payload');
       expect(promptArg).toContain('.execute/solution-payload.json');
       // Regression guard: ensure no SolverNet-specific guidance leaks back
@@ -294,7 +294,7 @@ describe('CodexCodeHarnessAdapter', () => {
         JINN_CORPUS_IPFS_GATEWAY_URL: 'https://ipfs.example',
       });
       expect(existsSync(join(workingDir, '.agents', 'skills', 'claude-code-learner__learn', 'SKILL.md'))).toBe(true);
-      expect(existsSync(join(workingDir, '.agents', 'skills', 'swe-rebench-v2-runtime__plan', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(workingDir, '.agents', 'skills', 'swe-rebench-v2-runtime__task', 'SKILL.md'))).toBe(true);
       expect(existsSync(join(workingDir, '.agents', 'plugins', 'marketplace.json'))).toBe(true);
       expect(readFileSync(join(workingDir, '.codex-code', 'stdout.jsonl'), 'utf8')).toContain('session_configured');
     } finally {

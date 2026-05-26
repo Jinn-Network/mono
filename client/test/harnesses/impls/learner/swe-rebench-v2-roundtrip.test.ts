@@ -150,7 +150,7 @@ describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
 
   it('documents the harness-neutral fallback payload file and schema shape', () => {
     const skill = readFileSync(
-      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'plan', 'SKILL.md'),
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'task', 'SKILL.md'),
       'utf8',
     );
     // SKILL.md describes the submission action by intent, not by hardcoded tool
@@ -178,16 +178,17 @@ describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
     }
   });
 
-  it('orient skill owns repo setup so the harness prompt can stay generic', () => {
+  it('task skill owns repo setup so the harness prompt can stay generic', () => {
     const skill = readFileSync(
-      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'task', 'SKILL.md'),
       'utf8',
     );
     // Repo-setup guidance used to live in each harness's prompt.ts (the
     // `sweRebenchV2Guidance` helper that was retired in favour of skill-driven
-    // dispatch). Orient now owns it. If this assertion breaks, check that
-    // nothing has reintroduced SolverNet branching in the harness prompts —
-    // the skill should be the single home for SWE-rebench-specific patterns.
+    // dispatch). The domain-reference task skill now owns it. If this
+    // assertion breaks, check that nothing has reintroduced SolverNet
+    // branching in the harness prompts — the skill should be the single
+    // home for SWE-rebench-specific patterns.
     // Backticks in the SKILL.md wrap inline code spans, so we search for the
     // load-bearing tokens without insisting on a literal "clone https://..."
     // run that the markdown formatting interrupts.
@@ -200,13 +201,13 @@ describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
 
   it('documents SWE execution data retrieval through Network Tools', () => {
     const skill = readFileSync(
-      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'task', 'SKILL.md'),
       'utf8',
     );
-    // Orient describes the three corpus-tool actions (find candidates → examine
-    // index card → download bytes) by intent. We assert the workflow vocabulary
-    // and the typed-restoration filter values, not the literal tool names —
-    // those vary by harness MCP namespace.
+    // The task skill describes the three corpus-tool actions (find candidates
+    // → examine index card → download bytes) by intent. We assert the workflow
+    // vocabulary and the typed-restoration filter values, not the literal
+    // tool names — those vary by harness MCP namespace.
     expect(skill).toContain('Jinn knowledge corpus');
     expect(skill).toContain('"swe-rebench-v2.v1"');
     expect(skill).toContain('"swe-rebench-v2_v1_solution"');

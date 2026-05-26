@@ -4,9 +4,8 @@
   "jinn": {
     "supports": ["swe-rebench-v2.v1"],
     "skills": [
-      "skills/orient/SKILL.md",
-      "skills/plan/SKILL.md"
+      "skills/task/SKILL.md"
     ],
-    "description": "Provides Solver-side orientation + planning skills for SWE-rebench v2 code-issue Tasks."
+    "description": "Provides domain reference for swe-rebench-v2.v1 code-issue tasks — task shape, repo handling, FAIL_TO_PASS / PASS_TO_PASS semantics, and solution payload schema."
   }
 }
