@@ -17,6 +17,10 @@ import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/is
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
+import {
+  fetchFieldIds,
+  resetFieldCache,
+} from '../src/dispatcher/field-cache.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
@@ -302,9 +306,26 @@ async function main(): Promise<void> {
   // TODO: wire GhPrSink.collect once session-completion detection exists
 
   if (isDryRun) {
+    // Dry-run intentionally skips the field-id cache + any other live-gh
+    // boot work: no mutations happen here, so no field ids are needed and
+    // the boot-time GraphQL spend is saved. (#599)
     await runDryRun({ cfg, wallClock });
     return;
   }
+
+  // Populate the Project field-id cache once, at boot, BEFORE any cycle
+  // runs. Eager-at-boot means a renamed Status/Blocked-on field surfaces as
+  // a fatal ProjectFieldCacheError before the first dispatch (consistent
+  // with ProjectFieldSchemaError in the snapshot path). The
+  // ENG_LOOP_RESET_FIELD_CACHE=1 env knob is symbolic on first boot — the
+  // cache starts null — but documents operator intent for future long-lived
+  // dispatcher modes that may re-enter main(). Do not delete as dead code.
+  // (jinn-mono#599)
+  if (process.env.ENG_LOOP_RESET_FIELD_CACHE === '1') {
+    resetFieldCache();
+  }
+  const fieldCache = await fetchFieldIds(realRunner);
+  console.log(`[eng:loop] field cache populated (projectId=${fieldCache.projectId})`);
 
   // Normal mode: run on an interval (or once + exit when --once)
   console.log(
@@ -351,6 +372,7 @@ async function main(): Promise<void> {
               }
               return { pid: child.pid };
             },
+            fieldCache,
           }),
         countOpenReadyPrs,
         wallClock,
