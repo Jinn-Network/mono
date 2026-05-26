@@ -1,4 +1,5 @@
 import type { OperatorNotification } from './taxonomy.js';
+import { isWithinAutoRestakeWindow, type AutoRestakeStatus } from './auto-restake-window.js';
 
 // Loose shape — refine to the concrete BootstrapState + StatusSnapshot types
 // when wiring this up in Task 1.4. Kept loose here so the deriver can be tested
@@ -23,7 +24,7 @@ export interface DeriveInput {
      * been observed evicted for less than `2 × checkIntervalMs`. When absent
      * or `enabled === false`, eviction emits immediately (backwards compat).
      */
-    autoRestake?: { enabled: boolean; checkIntervalMs: number };
+    autoRestake?: AutoRestakeStatus;
   };
 }
 
@@ -89,17 +90,11 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
   // not hide behind a healthy in-flight one). Bad data falls through to emit.
   const evictedServices = s.services.filter(svc => svc.evicted);
   if (evictedServices.length > 0) {
-    const auto = s.autoRestake;
     const now = input.now ?? Date.now();
-    const allWithinWindow =
-      auto?.enabled === true &&
-      evictedServices.every(svc => {
-        if (typeof svc.evictedSince !== 'string') return false;
-        const seenAt = Date.parse(svc.evictedSince);
-        if (Number.isNaN(seenAt)) return false;
-        return now - seenAt <= 2 * (auto.checkIntervalMs ?? 0);
-      });
-    if (!allWithinWindow) {
+    const anyPastWindow = evictedServices.some(
+      svc => !isWithinAutoRestakeWindow(svc, s.autoRestake, now),
+    );
+    if (anyPastWindow) {
       out.push({
         kind: 'service_evicted',
         severity: 'blocking',

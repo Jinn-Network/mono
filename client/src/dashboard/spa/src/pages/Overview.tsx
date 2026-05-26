@@ -12,6 +12,10 @@ import { computeEffectivePlugins } from './configuration/effective-plugins.js';
 import type { SolverNetsCatalogResponse, TjinnStatus } from '../api/types.js';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { Button } from '../components/ui/button.js';
+import {
+  isWithinAutoRestakeWindow,
+  type AutoRestakeStatus,
+} from '../notifications/auto-restake-window.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -71,10 +75,7 @@ interface OverviewStatusV1 {
     }>;
   };
   /** EvictionLoop gating exposed by /v1/status (#651). */
-  autoRestake?: {
-    enabled: boolean;
-    checkIntervalMs: number;
-  };
+  autoRestake?: AutoRestakeStatus;
   /**
    * Real Sepolia tJINN ERC-20 Safe balance (#406, daemon half PR #447).
    * Optional: older daemons predate this field.
@@ -213,13 +214,7 @@ export function selectVisibleEvictedService(
   if (!services) return undefined;
   return services
     .filter((s) => s.evicted === true)
-    .find((s) => {
-      if (autoRestake?.enabled !== true) return true; // immediate emit when loop disabled
-      if (typeof s.evictedSince !== 'string') return true; // missing timestamp → emit (safer)
-      const seenAt = Date.parse(s.evictedSince);
-      if (Number.isNaN(seenAt)) return true;
-      return nowMs - seenAt > 2 * (autoRestake.checkIntervalMs ?? 0); // past window → emit
-    });
+    .find((s) => !isWithinAutoRestakeWindow(s, autoRestake, nowMs));
 }
 
 /**

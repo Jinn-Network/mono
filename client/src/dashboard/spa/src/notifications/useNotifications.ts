@@ -5,6 +5,7 @@ import { useConnectionState } from '../api/connection-state.js';
 import { useEventStream } from '../api/events.js';
 import { useRestartPending } from '../shell/RestartPendingContext.js';
 import { deriveNotifications, type DeriveInput } from './derive.js';
+import type { AutoRestakeStatus } from './auto-restake-window.js';
 import type { OperatorNotification } from './taxonomy.js';
 
 const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
@@ -86,7 +87,7 @@ function mapStatusToDeriveInput(
   // Forward the `autoRestake` block when the daemon emits it (#651). Older
   // daemons predate the field, in which case it's undefined and the deriver
   // falls through to the immediate-emit branch (backwards compat).
-  const autoRestake =
+  const autoRestake: AutoRestakeStatus | undefined =
     s.autoRestake && typeof s.autoRestake === 'object'
       ? {
           enabled: Boolean(s.autoRestake.enabled),
