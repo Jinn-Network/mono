@@ -21,6 +21,7 @@ import {
   fetchFieldIds,
   resetFieldCache,
 } from '../src/dispatcher/field-cache.js';
+import { makePauseSession } from '../src/dispatcher/pause-session.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
@@ -93,56 +94,10 @@ async function countOpenReadyPrs(): Promise<number> {
   return prs.length;
 }
 
-// ---------------------------------------------------------------------------
-// pauseSession — wall-clock circuit-breaker (spec §4)
-//
-// Sets the issue's "Blocked on" Project field to "Human" so the merge-batch
-// and eng-day skills skip it. Field/option ids from gh-taxonomy.md (provisioned
-// 2026-05-21; re-discover via `gh project field-list 1 --owner Jinn-Network`
-// if a field is rebuilt).
-// ---------------------------------------------------------------------------
-
-const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
-const BLOCKED_ON_FIELD_ID = 'PVTSSF_lADODh3-Ac4BXYaIzhTdqRo';
-const BLOCKED_ON_HUMAN_OPTION_ID = 'a20d20ac';
-
-interface GhProjectItemsForPause {
-  items: Array<{
-    id: string;
-    content?: { number: number; type: string };
-  }>;
-}
-
-async function pauseSession(issueNumber: number): Promise<void> {
-  console.log(`[eng:loop] WALL-CLOCK EXPIRED — pausing session for issue #${issueNumber} (Blocked on: Human)`);
-
-  // Resolve the project item id for this issue
-  const itemListRaw = await realRunner('gh', [
-    'project', 'item-list', '1',
-    '--owner', 'Jinn-Network',
-    '--format', 'json',
-    '--limit', '500',
-  ]);
-  const itemsData = JSON.parse(itemListRaw) as GhProjectItemsForPause;
-  const item = itemsData.items.find(
-    (it) => it.content?.type === 'Issue' && it.content.number === issueNumber,
-  );
-  if (item == null) {
-    console.error(`[eng:loop] pauseSession: issue #${issueNumber} not found in project board — cannot set Blocked on: Human`);
-    return;
-  }
-
-  // Set Blocked on → Human
-  await realRunner('gh', [
-    'project', 'item-edit',
-    '--id', item.id,
-    '--project-id', PROJECT_ID,
-    '--field-id', BLOCKED_ON_FIELD_ID,
-    '--single-select-option-id', BLOCKED_ON_HUMAN_OPTION_ID,
-  ]);
-
-  console.log(`[eng:loop] issue #${issueNumber} set to Blocked on: Human (wall-clock ceiling exceeded).`);
-}
+// Wall-clock pauseSession is built per cycle via `makePauseSession(snapshot,
+// fieldCache, realRunner)` inside `runOneCycle`. Pre-#599 it was an inline
+// async function here that called `gh project item-list --limit 500` per
+// pause; that lookup now reads from the cycle's ProjectSnapshot in memory.
 
 // ---------------------------------------------------------------------------
 // Print cycle report
@@ -306,9 +261,9 @@ async function main(): Promise<void> {
   // TODO: wire GhPrSink.collect once session-completion detection exists
 
   if (isDryRun) {
-    // Dry-run intentionally skips the field-id cache + any other live-gh
-    // boot work: no mutations happen here, so no field ids are needed and
-    // the boot-time GraphQL spend is saved. (#599)
+    // Dry-run intentionally skips the field-id cache + makePauseSession + any
+    // other live-gh boot work: no mutations happen here, so no field ids are
+    // needed and the boot-time GraphQL spend is saved. (#599)
     await runDryRun({ cfg, wallClock });
     return;
   }
@@ -350,6 +305,11 @@ async function main(): Promise<void> {
   const runOneCycle = async (): Promise<number> => {
     try {
       const snapshot = await fetchProjectSnapshot(realRunner);
+      // Build a per-cycle pause closure that resolves the project item id
+      // from the snapshot already in scope (jinn-mono#599) — no extra
+      // `gh project item-list` call per pause.
+      const pauseSessionForCycle = makePauseSession(snapshot, fieldCache, realRunner);
+
       // Allow operators to override the rate-limit floor via env (mainly for
       // testing the gate). ENG_LOOP_RATELIMIT_FLOOR=4999 forces the gate to
       // trip on the next cycle for verification.
@@ -376,7 +336,7 @@ async function main(): Promise<void> {
           }),
         countOpenReadyPrs,
         wallClock,
-        pauseSession,
+        pauseSession: pauseSessionForCycle,
       }, floorOverride != null ? { floor: floorOverride } : undefined);
 
       if (isSkipped(result)) {
