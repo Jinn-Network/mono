@@ -386,6 +386,7 @@ describe('assembleStatusV1', () => {
     expect(j.balances.eth.master.error).toBe('rpc timeout');
     expect(j.balances.eth.master.balanceWei).toBeNull();
     expect(j.balances.eth.agent.error).toBe('agent rpc fail');
+    expect(j.balances.eth.agent.balanceWei).toBe('0');
   });
 
   it('passes generic task-run status through when present', () => {

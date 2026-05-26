@@ -39,8 +39,8 @@ export interface WalletCardProps {
   /** Estimated days of runway at current burn rate. Accept string to allow "—" when unknown. */
   runwayDays: number | string;
   // perRole stays in the props so re-enabling the drill-down later is a
-  // one-block restore. The daemon doesn't surface agent/safe balances yet
-  // (#430), so showing the disclosure today renders three "—" rows.
+  // one-block restore. Real values are wired via #430; the drill-down rows
+  // are commented out pending a follow-up Issue.
   /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
   perRole?: {
     master: string;
