@@ -5,7 +5,7 @@ const baseState = {
   bootstrap: { mode: 'running' as const },
   status: {
     funds: { eth: '1.0', runwayDays: 30 },
-    harness: { ready: true, name: 'claude-code' },
+    harness: { ready: true, name: 'claude-code', reason: null },
     rpc: { reachable: true },
     restartPending: false,
     daemonVersion: '0.1.5',

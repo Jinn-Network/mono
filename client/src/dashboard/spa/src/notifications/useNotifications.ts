@@ -40,9 +40,11 @@ const INTENT_KINDS: ['intent'] = ['intent'];
  *   `safeBoundToAgent` (NOT `safeBound`). See `client/src/api/status-build.ts`.
  * - `joinedSolverNets` comes from `/v1/bootstrap`, NOT `/v1/status`. See
  *   `client/src/api/bootstrap-endpoint.ts`.
- * - `harness` readiness and `password_rotation_due` have no `/v1/status` field
- *   today — both follow-up Issues are linked in the PR. Defaults below keep
- *   their notifications silent until the daemon surfaces the inputs.
+ * - `harness` readiness is now populated by the daemon on `/v1/status.harness`
+ *   (#440) — a single boolean + name + reason rollup over the joined SolverNets'
+ *   harnesses. Older daemons / partial responses default to ready.
+ * - `password_rotation_due` has no `/v1/status` field today; the default below
+ *   keeps it silent until the daemon surfaces the input.
  */
 function mapStatusToDeriveInput(
   rawStatus: unknown,
@@ -90,10 +92,15 @@ function mapStatusToDeriveInput(
     // notifications. That field is the OLAS/staking collector queue, not real
     // operator tJINN earning, and tJINN claims are automatic via the daemon
     // emit loop plus standing relayer.
-    // Harness readiness is its own endpoint (`/v1/harnesses/readiness`) — not on
-    // /v1/status today. Default to ready=true so harness_not_ready doesn't fire
-    // spuriously. Follow-up Issue: surface a rollup field on /v1/status.
-    harness: { ready: true, name: 'unknown' },
+    // Harness readiness rollup comes from `/v1/status.harness` (#440).
+    // `ready !== false` preserves default-ready when the field is absent
+    // (older daemons / partial responses); `name`/`reason` accept the
+    // daemon's `string | null` shape and reject anything else.
+    harness: {
+      ready: s.harness?.ready !== false,
+      name: typeof s.harness?.name === 'string' ? s.harness.name : null,
+      reason: typeof s.harness?.reason === 'string' ? s.harness.reason : null,
+    },
     // RPC reachability is handled by the connection-state early-return above;
     // this default keeps rpc_unreachable from double-firing through the deriver.
     rpc: { reachable: true },

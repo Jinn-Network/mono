@@ -9,7 +9,7 @@ export interface DeriveInput {
   bootstrap: { mode: string; blockingReason?: string };
   status: {
     funds: { eth: string; runwayDays: number };
-    harness: { ready: boolean; name: string; reason?: string };
+    harness: { ready: boolean; name: string | null; reason: string | null };
     rpc: { reachable: boolean };
     restartPending: boolean;
     daemonVersion: string;
@@ -46,10 +46,16 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
   }
 
   if (!s.harness.ready) {
+    const name = s.harness.name;
+    const reason = s.harness.reason;
+    const message =
+      name === null
+        ? `A harness is not ready${reason ? `: ${reason}` : ''}.`
+        : `Harness ${name} is not ready${reason ? `: ${reason}` : ''}.`;
     out.push({
       kind: 'harness_not_ready',
       severity: 'blocking',
-      message: `Harness ${s.harness.name} is not ready${s.harness.reason ? `: ${s.harness.reason}` : ''}.`,
+      message,
       jumpTo: '/operator/memberships',
     });
   }
