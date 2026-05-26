@@ -2,11 +2,12 @@
  * eng:loop entry point.
  *
  * Usage:
- *   yarn eng:loop                     # run the dispatcher on a 60s interval (normal mode)
+ *   yarn eng:loop                     # run the dispatcher on a 10min interval (normal mode)
  *   yarn eng:loop --dry-run           # one cycle, no mutations, prints the CycleReport
  *   yarn eng:loop --once              # one cycle live (dispatch up to cap), then exit
  *   yarn eng:loop --cap <N>           # override concurrencyCap
  *   yarn eng:loop --backpressure <N>  # override openPrBackpressure
+ *   yarn eng:loop --interval <ms>     # override poll interval (default 600000 = 10min)
  *
  * --once + --cap <N> compose: bound a first live run to at most N dispatches.
  * Defaults live in src/dispatcher/types.ts DEFAULT_CONFIG.
@@ -29,7 +30,20 @@ import type { SpawnOptions } from 'node:child_process';
 // Constants
 // ---------------------------------------------------------------------------
 
-const INTERVAL_MS = 60_000; // 1 minute between cycles
+/**
+ * Default poll interval between cycles. 10 minutes is well-matched to the
+ * 30min–multi-hour timescale of an implement-issue session — slot-fill
+ * latency is bounded by interval, not by session length, so the throughput
+ * cost of a slower poll is ~1–5% (one session-completion lingers up to
+ * interval before the next slot fills). Override with `--interval <ms>`.
+ *
+ * Trade-off vs. faster polling: at 60s the dispatcher alone consumed ~180
+ * GraphQL pts/hr; at 10min it consumes ~18 pts/hr, freeing the rest of the
+ * 5000/hr budget for the spawned children's `gh` calls and reducing the
+ * rate-limit guard's trip rate to near zero. (#585 budget visibility,
+ * #593 guard.)
+ */
+const DEFAULT_INTERVAL_MS = 10 * 60_000;
 const REPO = 'Jinn-Network/mono';
 
 /**
@@ -176,6 +190,12 @@ async function main(): Promise<void> {
   const capOverride = capIdx >= 0 ? parseInt(process.argv[capIdx + 1] ?? '', 10) : NaN;
   const bpIdx = process.argv.indexOf('--backpressure');
   const bpOverride = bpIdx >= 0 ? parseInt(process.argv[bpIdx + 1] ?? '', 10) : NaN;
+  const intervalIdx = process.argv.indexOf('--interval');
+  const intervalOverride = intervalIdx >= 0 ? parseInt(process.argv[intervalIdx + 1] ?? '', 10) : NaN;
+  const intervalMs =
+    Number.isInteger(intervalOverride) && intervalOverride > 0
+      ? intervalOverride
+      : DEFAULT_INTERVAL_MS;
 
   const authorAllowlist = parseAuthorAllowlist(process.env[AUTHOR_ALLOWLIST_ENV]);
   const capOk = Number.isInteger(capOverride) && capOverride > 0;
@@ -256,7 +276,7 @@ async function main(): Promise<void> {
   // Normal mode: run on an interval (or once + exit when --once)
   console.log(
     `[eng:loop] Starting dispatcher (cap=${cfg.concurrencyCap}, backpressure=${cfg.openPrBackpressure}, ` +
-      (isOnce ? 'mode=once' : `interval=${INTERVAL_MS}ms`) +
+      (isOnce ? 'mode=once' : `interval=${intervalMs}ms`) +
       ')',
   );
 
@@ -264,10 +284,10 @@ async function main(): Promise<void> {
    * Run one cycle, gated on GraphQL budget.
    *
    * Returns the next-attempt delay in ms:
-   *   - On normal cycle (gate passed): {@link INTERVAL_MS} (default 60s).
+   *   - On normal cycle (gate passed): `intervalMs` (default 10min; overridable via `--interval <ms>`).
    *   - On gate-skip (budget low): the gate's `sleepMs` (sleep until reset
    *     + 5s, clamped to [0, 1h]).
-   *   - On thrown error: {@link INTERVAL_MS} (retry next tick).
+   *   - On thrown error: `intervalMs` (retry next tick).
    *
    * Per jinn-mono#585, the snapshot is fetched once at the top of the cycle
    * and threaded through every consumer; the gate reads `snapshot.rateLimit`
@@ -312,10 +332,10 @@ async function main(): Promise<void> {
       }
 
       printReport(result, 'Cycle report');
-      return INTERVAL_MS;
+      return intervalMs;
     } catch (err) {
       console.error('[eng:loop] Cycle error:', err);
-      return INTERVAL_MS;
+      return intervalMs;
     }
   };
 
