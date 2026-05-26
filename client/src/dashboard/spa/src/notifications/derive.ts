@@ -46,16 +46,12 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
   }
 
   if (!s.harness.ready) {
-    const name = s.harness.name;
-    const reason = s.harness.reason;
-    const message =
-      name === null
-        ? `A harness is not ready${reason ? `: ${reason}` : ''}.`
-        : `Harness ${name} is not ready${reason ? `: ${reason}` : ''}.`;
+    const subject = s.harness.name === null ? 'A harness' : `Harness ${s.harness.name}`;
+    const suffix = s.harness.reason ? `: ${s.harness.reason}` : '';
     out.push({
       kind: 'harness_not_ready',
       severity: 'blocking',
-      message,
+      message: `${subject} is not ready${suffix}.`,
       jumpTo: '/operator/memberships',
     });
   }

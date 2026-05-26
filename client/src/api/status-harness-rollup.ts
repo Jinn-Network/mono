@@ -33,18 +33,21 @@ export interface HarnessRollup {
   reason: string | null;
 }
 
-const DEFAULT_READY: HarnessRollup = { ready: true, name: null, reason: null };
+/**
+ * Canonical default-ready rollup. Re-exported from here so `status-build.ts`
+ * and any other consumer share one source of truth for the shape.
+ */
+export const DEFAULT_HARNESS_ROLLUP: HarnessRollup = { ready: true, name: null, reason: null };
 
 export function buildHarnessRollup(
   snapshot: HarnessReadinessSnapshot,
   joinedHarnessesByCid: Record<string, JoinedHarnessSpec>,
 ): HarnessRollup {
-  const joinedNames = new Set<string>();
-  for (const joined of Object.values(joinedHarnessesByCid)) {
-    joinedNames.add(joined.harnessName);
-  }
+  const joinedNames = new Set(
+    Object.values(joinedHarnessesByCid).map((j) => j.harnessName),
+  );
   if (joinedNames.size === 0 || snapshot.harnesses.length === 0) {
-    return { ...DEFAULT_READY };
+    return { ...DEFAULT_HARNESS_ROLLUP };
   }
 
   for (const entry of snapshot.harnesses) {
@@ -57,5 +60,5 @@ export function buildHarnessRollup(
     }
   }
 
-  return { ...DEFAULT_READY };
+  return { ...DEFAULT_HARNESS_ROLLUP };
 }
