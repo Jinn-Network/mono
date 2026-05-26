@@ -273,3 +273,49 @@ export function renderJson(records: SessionRecord[]): string {
   if (records.length === 0) return '[]';
   return JSON.stringify(records, null, 2);
 }
+
+/**
+ * Human-readable table for `yarn eng:loop sessions` (default mode). Columns:
+ * `ISSUE`, `STATUS`, `PID`, `LAST ACTIVITY`, `SUMMARY`. The worktree and
+ * transcript paths are intentionally omitted — they live in `--json` for
+ * scripting, but the human-eyed table optimises for "what's running and what
+ * did it last say". Summary column is clamped to fit terminal width.
+ */
+export function renderTable(records: SessionRecord[]): string {
+  const headers = ['ISSUE', 'STATUS', 'PID', 'LAST ACTIVITY', 'SUMMARY'];
+
+  if (records.length === 0) {
+    // Still render the header so downstream scripts grepping for column names
+    // get something stable, and an explanatory body line.
+    return headers.join('  ') + '\n(no sessions in the last 24h)';
+  }
+
+  // Build row strings (data only; we'll pad column widths after measuring).
+  const rows = records.map((r) => [
+    String(r.issueNumber),
+    r.status,
+    r.pid != null ? String(r.pid) : '-',
+    r.lastActivity,
+    r.lastSummary ?? '(no assistant text)',
+  ]);
+
+  // Column widths: max(header, max(data)) for the first four; summary is
+  // clamped below to fit the terminal.
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((row) => row[i]!.length)));
+
+  // Summary clamping: budget = min(80, terminalWidth - sum(otherCols+gaps)).
+  const terminalWidth = (process.stdout as { columns?: number }).columns ?? 120;
+  const prefixWidth = widths.slice(0, 4).reduce((a, b) => a + b + 2, 0); // 2-space gutter per column
+  const summaryBudget = Math.max(20, Math.min(80, terminalWidth - prefixWidth));
+  widths[4] = Math.min(widths[4]!, summaryBudget);
+
+  const pad = (s: string, w: number): string => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
+
+  const renderRow = (cells: string[]): string =>
+    cells.map((c, i) => (i === 4 ? pad(truncate(c, widths[i]!), widths[i]!) : pad(c, widths[i]!))).join('  ');
+
+  const out: string[] = [];
+  out.push(renderRow(headers));
+  for (const row of rows) out.push(renderRow(row));
+  return out.join('\n');
+}

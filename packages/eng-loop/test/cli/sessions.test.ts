@@ -8,6 +8,7 @@ import {
   parseJsonlLines,
   prLinkRecord,
   renderJson,
+  renderTable,
   truncate,
 } from '../../src/cli/sessions.js';
 import type { SessionRecord, SessionsDeps } from '../../src/cli/sessions.js';
@@ -295,5 +296,68 @@ describe('renderJson', () => {
       'transcriptPath',
       'worktreePath',
     ]);
+  });
+});
+
+describe('renderTable', () => {
+  const alive: SessionRecord = {
+    issueNumber: 100,
+    status: 'alive',
+    pid: 1234,
+    worktreePath: '/wt/100',
+    transcriptPath: '/p/-wt-100/sess.jsonl',
+    sessionId: 'sess',
+    lastActivity: '2026-05-26T11:30:00.000Z',
+    lastSummary: 'hello',
+    prUrl: null,
+  };
+  const done: SessionRecord = {
+    issueNumber: 200,
+    status: 'done',
+    pid: null,
+    worktreePath: '/wt/200',
+    transcriptPath: '/p/-wt-200/sess.jsonl',
+    sessionId: 'sess',
+    lastActivity: '2026-05-26T11:00:00.000Z',
+    lastSummary: null,
+    prUrl: null,
+  };
+
+  it('renders the header columns in the documented order', () => {
+    const out = renderTable([alive]);
+    const header = out.split('\n')[0]!;
+    const idxIssue = header.indexOf('ISSUE');
+    const idxStatus = header.indexOf('STATUS');
+    const idxPid = header.indexOf('PID');
+    const idxLast = header.indexOf('LAST ACTIVITY');
+    const idxSummary = header.indexOf('SUMMARY');
+    expect(idxIssue).toBeGreaterThanOrEqual(0);
+    expect(idxStatus).toBeGreaterThan(idxIssue);
+    expect(idxPid).toBeGreaterThan(idxStatus);
+    expect(idxLast).toBeGreaterThan(idxPid);
+    expect(idxSummary).toBeGreaterThan(idxLast);
+  });
+
+  it('renders an alive session with the pid as a decimal integer', () => {
+    const out = renderTable([alive]);
+    expect(out).toContain('1234');
+  });
+
+  it('renders a done session with "-" in the PID column', () => {
+    const out = renderTable([done]);
+    const dataLine = out.split('\n').find((line) => line.includes('200'));
+    expect(dataLine).toBeDefined();
+    expect(dataLine).toMatch(/\b-\b/);
+  });
+
+  it('renders null lastSummary as "(no assistant text)"', () => {
+    const out = renderTable([done]);
+    expect(out).toContain('(no assistant text)');
+  });
+
+  it('renders empty input as header + "(no sessions in the last 24h)"', () => {
+    const out = renderTable([]);
+    expect(out).toContain('ISSUE');
+    expect(out).toContain('(no sessions in the last 24h)');
   });
 });
