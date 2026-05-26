@@ -33,7 +33,7 @@ import { CostEstimatePanel, useCostSurfaceDecision } from './CostEstimatePanel.j
  * plugins, model }`. Roles are immutable post-join (set by `JoinFlow` and
  * not editable here — operators leave + rejoin to change roles). Save
  * re-uses `api.operator.join(cid, body)` with full-overwrite semantics; the
- * daemon returns `{ restartRequired: true }` and the parent (`OperatorPage`)
+ * daemon returns `{ restartRequired: true }` and the parent (`MembershipsTab`)
  * surfaces the restart banner.
  *
  * Compatibility warning: when the chosen harness isn't in
