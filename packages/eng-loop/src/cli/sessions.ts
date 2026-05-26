@@ -441,3 +441,40 @@ export async function tailSession(
     tail.stdout.on('close', resolve);
   });
 }
+
+// ---------------------------------------------------------------------------
+// killSession — SIGTERM an alive session after [y/N] confirm
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the session for `issueNumber`, prompt the operator (unless
+ * `opts.force`), and send SIGTERM to the matched `claude` pid. The worktree
+ * and transcript are preserved — the operator can re-dispatch via the
+ * project board or restart the dispatcher.
+ */
+export async function killSession(
+  issueNumber: number,
+  opts: KillOptions,
+  deps: SessionsDeps,
+): Promise<void> {
+  const records = await discoverSessions(deps);
+  const rec = records.find((r) => r.issueNumber === issueNumber);
+  if (rec == null) {
+    throw new Error(`no session found for issue #${issueNumber}`);
+  }
+  if (rec.status !== 'alive' || rec.pid == null) {
+    throw new Error(`session for issue #${issueNumber} is not alive (status: ${rec.status})`);
+  }
+
+  if (!opts.force) {
+    const prompt = `Kill claude session for issue #${issueNumber} (pid ${rec.pid}, started ${rec.lastActivity})? [y/N] `;
+    const ok = await deps.confirm(prompt);
+    if (!ok) {
+      deps.stderr.write('aborted (no-op)\n');
+      return;
+    }
+  }
+
+  deps.sendSignal(rec.pid, 'SIGTERM');
+  deps.stderr.write(`killed pid ${rec.pid}\n`);
+}

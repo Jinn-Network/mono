@@ -4,6 +4,7 @@ import {
   PrettyPrintTransform,
   discoverSessions,
   encodeWorktreePathToProjectDir,
+  killSession,
   lastAssistantText,
   lastTimestamp,
   parseIssueNumberFromWorktree,
@@ -497,5 +498,100 @@ describe('tailSession', () => {
     expect(installedHandler).not.toBeNull();
     installedHandler!();
     expect(killed).toBe(true);
+  });
+});
+
+describe('killSession', () => {
+  const ALIVE_TS = Date.parse('2026-05-26T11:30:00.000Z');
+  const DONE_TS = Date.parse('2026-05-26T11:00:00.000Z');
+
+  function captureStderr(): { write: Writable; collected: string[] } {
+    const collected: string[] = [];
+    const write = new Writable({
+      write(chunk, _enc, cb) {
+        collected.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        cb();
+      },
+    });
+    return { write, collected };
+  }
+
+  function aliveDeps(overrides: Partial<SessionsDeps> = {}): SessionsDeps {
+    return buildDeps({
+      listProjectDirs: async () => ['-wt-500'],
+      listJsonlFiles: async () => [{ name: 'sess.jsonl', mtimeMs: ALIVE_TS }],
+      readJsonl: async () => [
+        JSON.stringify({ type: 'assistant', timestamp: new Date(ALIVE_TS).toISOString(), message: { content: [{ type: 'text', text: 'ok' }] } }),
+        '',
+      ].join('\n'),
+      listClaudeProcesses: async () => [{ pid: 4242 }],
+      resolveProcessCwd: async () => '/wt/500',
+      ...overrides,
+    });
+  }
+
+  function doneDeps(overrides: Partial<SessionsDeps> = {}): SessionsDeps {
+    return buildDeps({
+      listProjectDirs: async () => ['-wt-500'],
+      listJsonlFiles: async () => [{ name: 'sess.jsonl', mtimeMs: DONE_TS }],
+      readJsonl: async () => [
+        JSON.stringify({ type: 'assistant', timestamp: new Date(DONE_TS).toISOString(), message: { content: [{ type: 'text', text: 'done' }] } }),
+        '',
+      ].join('\n'),
+      listClaudeProcesses: async () => [],
+      resolveProcessCwd: async () => null,
+      ...overrides,
+    });
+  }
+
+  it('sends SIGTERM when the operator confirms with y', async () => {
+    let signal: { pid?: number; sig?: NodeJS.Signals } = {};
+    const { write, collected } = captureStderr();
+    const deps = aliveDeps({
+      confirm: async () => true,
+      sendSignal: (pid, sig) => { signal = { pid, sig }; },
+      stderr: write,
+    });
+    await killSession(500, { force: false }, deps);
+    expect(signal.pid).toBe(4242);
+    expect(signal.sig).toBe('SIGTERM');
+    expect(collected.join('')).toContain('killed pid 4242');
+  });
+
+  it('aborts (no signal) when the operator declines', async () => {
+    let called = false;
+    const { write, collected } = captureStderr();
+    const deps = aliveDeps({
+      confirm: async () => false,
+      sendSignal: () => { called = true; },
+      stderr: write,
+    });
+    await killSession(500, { force: false }, deps);
+    expect(called).toBe(false);
+    expect(collected.join('')).toContain('aborted (no-op)');
+  });
+
+  it('skips the confirmation prompt when force is true', async () => {
+    let confirmCalled = false;
+    let sent = false;
+    const { write } = captureStderr();
+    const deps = aliveDeps({
+      confirm: async () => { confirmCalled = true; return true; },
+      sendSignal: () => { sent = true; },
+      stderr: write,
+    });
+    await killSession(500, { force: true }, deps);
+    expect(confirmCalled).toBe(false);
+    expect(sent).toBe(true);
+  });
+
+  it('throws when the issue has no matching session', async () => {
+    const deps = aliveDeps();
+    await expect(killSession(999, { force: true }, deps)).rejects.toThrow(/no session found for issue #999/);
+  });
+
+  it('throws when the session is not alive', async () => {
+    const deps = doneDeps();
+    await expect(killSession(500, { force: true }, deps)).rejects.toThrow(/session for issue #500 is not alive/);
   });
 });
