@@ -1,8 +1,42 @@
 import { describe, it, expect } from 'vitest';
 import {
   encodeWorktreePathToProjectDir,
+  lastAssistantText,
+  lastTimestamp,
   parseIssueNumberFromWorktree,
+  parseJsonlLines,
+  prLinkRecord,
 } from '../../src/cli/sessions.js';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const FIX_WITH_TEXT = [
+  JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: '2026-05-26T00:00:00.000Z' }),
+  JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:01.000Z', message: { content: [{ type: 'text', text: 'hi' }] } }),
+  JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:01:00.000Z', message: { content: [{ type: 'thinking', thinking: '...' }, { type: 'text', text: 'first summary' }] } }),
+  JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:02:00.000Z', message: { content: [{ type: 'text', text: 'latest summary' }] } }),
+  '',
+].join('\n');
+
+const FIX_TOOL_USE_ONLY = [
+  JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:00.000Z', message: { content: [{ type: 'tool_use', name: 'Bash' }] } }),
+  '',
+].join('\n');
+
+const FIX_WITH_PR_LINK = [
+  JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:01:00.000Z', message: { content: [{ type: 'text', text: 'opened PR' }] } }),
+  JSON.stringify({ type: 'pr-link', timestamp: '2026-05-26T00:02:00.000Z', prNumber: 612, prUrl: 'https://github.com/Jinn-Network/mono/pull/612' }),
+  '',
+].join('\n');
+
+const FIX_BLANK_AND_GARBAGE = [
+  '',
+  'not json at all',
+  JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:00.000Z', message: { content: [{ type: 'text', text: 'ok' }] } }),
+  '',
+].join('\n');
 
 describe('encodeWorktreePathToProjectDir', () => {
   it('encodes the live worktree path from this machine', () => {
@@ -45,5 +79,53 @@ describe('parseIssueNumberFromWorktree', () => {
 
   it('handles a trailing slash on base', () => {
     expect(parseIssueNumberFromWorktree('/wt/587', '/wt/')).toBe(587);
+  });
+});
+
+describe('parseJsonlLines', () => {
+  it('skips blank lines and non-JSON lines', () => {
+    const records = parseJsonlLines(FIX_BLANK_AND_GARBAGE);
+    expect(records).toHaveLength(1);
+  });
+});
+
+describe('lastTimestamp', () => {
+  it('returns the max ISO-8601 timestamp across records', () => {
+    const records = parseJsonlLines(FIX_WITH_TEXT);
+    expect(lastTimestamp(records)).toBe(Date.parse('2026-05-26T00:02:00.000Z'));
+  });
+
+  it('returns a finite number even when some lines are garbage', () => {
+    const records = parseJsonlLines(FIX_BLANK_AND_GARBAGE);
+    const ts = lastTimestamp(records);
+    expect(ts).not.toBeNull();
+    expect(Number.isFinite(ts)).toBe(true);
+  });
+});
+
+describe('lastAssistantText', () => {
+  it('returns the most recent text block from assistant records', () => {
+    const records = parseJsonlLines(FIX_WITH_TEXT);
+    expect(lastAssistantText(records)).toBe('latest summary');
+  });
+
+  it('returns null when the only assistant blocks are tool_use', () => {
+    const records = parseJsonlLines(FIX_TOOL_USE_ONLY);
+    expect(lastAssistantText(records)).toBeNull();
+  });
+});
+
+describe('prLinkRecord', () => {
+  it('returns the pr-link payload when present', () => {
+    const records = parseJsonlLines(FIX_WITH_PR_LINK);
+    expect(prLinkRecord(records)).toEqual({
+      prNumber: 612,
+      prUrl: 'https://github.com/Jinn-Network/mono/pull/612',
+    });
+  });
+
+  it('returns null when no pr-link record is present', () => {
+    const records = parseJsonlLines(FIX_WITH_TEXT);
+    expect(prLinkRecord(records)).toBeNull();
   });
 });

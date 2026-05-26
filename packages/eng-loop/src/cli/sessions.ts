@@ -74,3 +74,82 @@ export function parseIssueNumberFromWorktree(worktreePath: string, base: string)
   if (!/^\d+$/.test(leaf)) return null;
   return parseInt(leaf, 10);
 }
+
+// ---------------------------------------------------------------------------
+// JSONL extractors
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a JSONL transcript body. Blank lines and lines that fail JSON.parse are
+ * dropped silently — Claude Code transcripts are append-only and occasionally
+ * contain a partial-write tail.
+ */
+export function parseJsonlLines(text: string): unknown[] {
+  const out: unknown[] = [];
+  for (const line of text.split('\n')) {
+    if (line.length === 0) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      // drop malformed line
+    }
+  }
+  return out;
+}
+
+interface MaybeTimestamped { timestamp?: unknown }
+interface MaybeMessage { type?: unknown; message?: { content?: unknown } }
+interface ContentBlock { type?: unknown; text?: unknown }
+interface PrLinkRecord { type?: unknown; prNumber?: unknown; prUrl?: unknown }
+
+/**
+ * Return the latest parseable ISO-8601 timestamp across `records`. Returns
+ * `null` if no record has a parseable timestamp.
+ */
+export function lastTimestamp(records: unknown[]): number | null {
+  let max: number | null = null;
+  for (const r of records) {
+    const ts = (r as MaybeTimestamped | null | undefined)?.timestamp;
+    if (typeof ts !== 'string') continue;
+    const ms = Date.parse(ts);
+    if (!Number.isFinite(ms)) continue;
+    if (max == null || ms > max) max = ms;
+  }
+  return max;
+}
+
+/**
+ * Walk `records` in order; for each `assistant` record scan its message
+ * content for `text` blocks; return the `.text` of the most recent such
+ * block (trimmed), or `null` if no assistant text exists.
+ */
+export function lastAssistantText(records: unknown[]): string | null {
+  let last: string | null = null;
+  for (const r of records) {
+    const rec = r as MaybeMessage | null | undefined;
+    if (rec?.type !== 'assistant') continue;
+    const content = rec.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content as ContentBlock[]) {
+      if (block?.type === 'text' && typeof block.text === 'string') {
+        last = block.text.trim();
+      }
+    }
+  }
+  return last;
+}
+
+/**
+ * Return the most-recent `pr-link` record's `{ prNumber, prUrl }`, or `null`.
+ */
+export function prLinkRecord(records: unknown[]): { prNumber: number; prUrl: string } | null {
+  let last: { prNumber: number; prUrl: string } | null = null;
+  for (const r of records) {
+    const rec = r as PrLinkRecord | null | undefined;
+    if (rec?.type !== 'pr-link') continue;
+    if (typeof rec.prNumber === 'number' && typeof rec.prUrl === 'string') {
+      last = { prNumber: rec.prNumber, prUrl: rec.prUrl };
+    }
+  }
+  return last;
+}
