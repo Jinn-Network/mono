@@ -168,7 +168,8 @@ describe('makePauseSession', () => {
     // No item-edit call — pause-session bails out cleanly.
     expect(calls).toHaveLength(0);
 
-    // Preserve the exact log substring eng-day greps for.
+    // Operator-visible log line — preserve wording for log-stability
+    // across releases.
     const substring =
       'pauseSession: issue #999 not found in project board — cannot set Blocked on: Human';
     const hit = logger.errors.find((m) => m.includes(substring));

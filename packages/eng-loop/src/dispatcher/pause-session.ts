@@ -41,9 +41,9 @@ export interface PauseSessionLogger {
  * PR doesn't shadow the Issue), then sets "Blocked on" to "Human" via
  * `gh project item-edit`.
  *
- * The error log when an issue is absent from the snapshot preserves the exact
- * substring `pauseSession: issue #<n> not found in project board — cannot set
- * Blocked on: Human` because the `eng-day` operator skill greps for it.
+ * The error log when an issue is absent from the snapshot is an
+ * operator-visible line — preserve wording for log-stability across releases,
+ * as downstream consumers (alerting, log scrapers) may key off the substring.
  */
 export function makePauseSession(
   snapshot: ProjectSnapshot,
@@ -67,7 +67,8 @@ export function makePauseSession(
 
     const itemId = itemIdByIssueNumber.get(issueNumber);
     if (itemId == null) {
-      // Preserve exact substring — eng-day greps for it.
+      // Operator-visible log line — preserve wording for log-stability
+      // across releases.
       logger.error(
         `[eng:loop] pauseSession: issue #${issueNumber} not found in project board — cannot set Blocked on: Human`,
       );

@@ -42,12 +42,14 @@ export const WORKTREES_BASE = computeWorktreesBase(REPO_ROOT);
 // GitHub Project constants (from file-issue/references/gh-taxonomy.md)
 //
 // Owner + number are no longer referenced here — `gh project field-list` moved
-// to `./field-cache.ts` (jinn-mono#599) which holds its own copies. PROJECT_ID
-// is still used directly by the item-edit call below. Consolidation across
-// dispatch.ts / field-cache.ts / project-snapshot.ts is a separate `chore`.
+// to `./field-cache.ts` (jinn-mono#599) which holds its own copies. The
+// project id used by the `item-edit` call below comes from
+// `deps.fieldCache.projectId`, the same source pause-session.ts reads from —
+// keeping both call sites symmetric so a future project-id migration only
+// has to touch field-cache.ts. (Stage 5 Finding 5 on jinn-mono#599.)
+// Cross-module constant consolidation (project-snapshot.ts also has copies)
+// is a separate `chore`.
 // ---------------------------------------------------------------------------
-
-const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
 
 // ---------------------------------------------------------------------------
 // SpawnFn — injectable spawn so tests create no real processes
@@ -187,21 +189,18 @@ export async function dispatchIssue(
   //     — this is intra-call only, scoping the refresh to any consumer that
   //     shares this `deps` reference for the rest of the current dispatch.
   //     It does NOT propagate across cycles; the singleton re-read does.
-  const itemEditOnce = async (fId: string, optId: string): Promise<void> => {
+  const itemEditOnce = async (cache: FieldCache): Promise<void> => {
     await runner('gh', [
       'project', 'item-edit',
       '--id', itemId,
-      '--project-id', PROJECT_ID,
-      '--field-id', fId,
-      '--single-select-option-id', optId,
+      '--project-id', cache.projectId,
+      '--field-id', cache.status.fieldId,
+      '--single-select-option-id', cache.status.options['In Progress'],
     ]);
   };
 
   try {
-    await itemEditOnce(
-      deps.fieldCache.status.fieldId,
-      deps.fieldCache.status.options['In Progress'],
-    );
+    await itemEditOnce(deps.fieldCache);
   } catch (err) {
     if (!isStaleFieldError(err)) throw err;
     resetFieldCache();
@@ -210,10 +209,7 @@ export async function dispatchIssue(
     // any other consumer holding the same `deps.fieldCache` reference picks
     // up the new ids on its next read.
     deps.fieldCache = fresh;
-    await itemEditOnce(
-      fresh.status.fieldId,
-      fresh.status.options['In Progress'],
-    );
+    await itemEditOnce(fresh);
   }
 
   // 3. Create the worktree — idempotent.

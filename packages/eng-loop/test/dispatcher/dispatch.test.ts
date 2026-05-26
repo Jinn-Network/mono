@@ -302,6 +302,25 @@ describe('dispatchIssue', () => {
     expect(editCall!.args[optIdx + 1]).toBe('opt_in_progress');
   });
 
+  it('passes --project-id from deps.fieldCache.projectId (not a local constant) — #599 Finding 5', async () => {
+    // Symmetry fix: pause-session.ts reads projectId from the live cache;
+    // dispatch.ts previously used a local PROJECT_ID literal. The literal
+    // is gone — dispatch must read from the same source so a project-id
+    // migration only touches field-cache.ts.
+    const { runner, calls } = makeRunner();
+    const { spawn } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const editCall = calls.find(
+      (c) => c.cmd === 'gh' && c.args[0] === 'project' && c.args[1] === 'item-edit',
+    );
+    expect(editCall).toBeDefined();
+    const pidIdx = editCall!.args.indexOf('--project-id');
+    expect(pidIdx).toBeGreaterThan(-1);
+    expect(editCall!.args[pidIdx + 1]).toBe(FIELD_CACHE.projectId);
+  });
+
   it('spawns with a prompt containing the headless-override block', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
