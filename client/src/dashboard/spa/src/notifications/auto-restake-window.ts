@@ -44,5 +44,5 @@ export function isWithinAutoRestakeWindow(
   if (typeof service.evictedSince !== 'string') return false;
   const seenAt = Date.parse(service.evictedSince);
   if (Number.isNaN(seenAt)) return false;
-  return nowMs - seenAt <= 2 * (autoRestake.checkIntervalMs ?? 0);
+  return nowMs - seenAt <= 2 * autoRestake.checkIntervalMs;
 }

@@ -212,6 +212,9 @@ export function selectVisibleEvictedService(
   nowMs: number,
 ): NonNullable<NonNullable<OverviewStatusV1['fleet']>['services']>[number] | undefined {
   if (!services) return undefined;
+  // Any-past-window emits: one stuck restake should not hide behind a healthy
+  // in-flight one — return the first evicted service that has aged past its
+  // suppression window. Mirrors `derive.ts:96` (`anyPastWindow`).
   return services
     .filter((s) => s.evicted === true)
     .find((s) => !isWithinAutoRestakeWindow(s, autoRestake, nowMs));
@@ -327,6 +330,8 @@ export function OverviewPage(): JSX.Element {
   // first observation, the banner stays hidden so the EvictionLoop can settle
   // a restake before alarming the operator. Disabled loop, missing timestamp,
   // or aged-past services all fall through to show.
+  // Banner freshness is bounded by the SPA's poll interval — `Date.now()`
+  // only re-evaluates when the status query refetches, not continuously.
   const firstEvictedService = selectVisibleEvictedService(
     status?.fleet?.services,
     status?.autoRestake,
