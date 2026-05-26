@@ -156,10 +156,17 @@ Any hit must be either removed or justified. Verb substitutions per `CLAUDE.md` 
 
 ### Step 8 — Legibility cross-check
 
-For every assertive claim in the body, ask: *can a reader independently verify this from the artifact?*
+**This is not Step 7.** Step 7 is hygiene — grep for prohibited surface vocabulary. Step 8 is substance — the inside of each sentence, the math, the citations, the conditionals. Grep cannot do Step 8 because grep cannot see meaning. Reporting Step 7's "clean" output as Step 8 done is the failure mode this step exists to prevent.
 
-- If yes → leave as-is.
-- If no → either (a) tighten to what is verifiable (`distinct` not `independent`), or (b) move to the `What this does not yet prove` section with the trust step named.
+Run as a deliberate pass with its own output. The protocol:
+
+1. **Enumerate every assertive sentence in the body.** Headline, subhead, dateline opening, How-it-works bullets, receipts, What's-different, framing around the Quote. Skip the Quote itself and the About-block boilerplate. Write the list out — a numbered list in your turn output, or as a temporary scratchpad. Do not work from memory.
+2. **For each claim, name the source-of-truth in one phrase.** Indexer URL, spec line, deployment JSON path, contract call, git SHA, screenshot caption, canonical-doc section. If you can't name one in five seconds, the claim is not yet Legible.
+3. **For every numeric claim, do the arithmetic by inspection.** If the body says "windows separated by N verdicts", compute N from the window definitions and confirm it matches. If it says "75/25 to the wei", check the rounding. Counts, percentages, block ranges, time gaps, window offsets — verify each one. A surface-clean bullet can hide a wrong number; only inspection finds it.
+4. **For every conditional claim ("X is attributable to Y", "this proves Z"), list the conditions that must hold.** Confirm each condition is either stated in the body or moved to `What this does not yet prove` with the trust step named.
+5. **Tighten or relocate.** Verifiable claims stay. Unverifiable claims either tighten to what is verifiable (`distinct` not `independent`) or move to `What this does not yet prove` with the trust step named.
+
+Do not report Step 8 complete on the basis of Step 7's grep output. Step 7 reports "no prohibited vocabulary appeared." Step 8 reports "every assertive sentence has been walked, the source-of-truth is named, the numerics check out, and the conditionals have their conditions." These are different sentences; only one of them is the Legibility check.
 
 The `What this does not yet prove` section is not optional. If a release has no Legibility caveats, the caveats have been hidden, not absent.
 
@@ -186,6 +193,7 @@ Commit the file to `docs/press/YYYY-MM-DD-<slug>.md` with a `docs(press):` commi
 
 - Read `PRINCIPLES.md` and `BRAND.md` before drafting. Always.
 - Run `distil-writing` before claiming the draft is ready. Always.
+- Run Step 8 (Legibility) as a substantive claim-by-claim pass — never report it complete on the basis of Step 7's grep. Always.
 - Include a `What this does not yet prove` section. Always.
 - No dateline city. Ever.
 - No named attribution by default. Ever — until the contributor signs off explicitly.
