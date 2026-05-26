@@ -20,10 +20,11 @@ import type { RequestId, TaskRequest } from '../../src/types/index.js';
  * `useNotifications` hook can surface a notification (the event-driven
  * 12th kind from OPERATOR-APP-SPEC §2.10).
  *
- * The mech-adapter's `claimDelivery` failure path is paired-emitted in the
- * same change; coverage of that path is left to the daemon-harness e2e
- * (`yarn e2e:daemon-harness`) because it requires the on-chain plumbing
- * the unit-level harness cannot stand up cheaply.
+ * The mech-adapter's `ensureDeliveryClaimed` failure path is paired-emitted
+ * in the same change; unit-level coverage of that path is deferred to a
+ * dedicated follow-up — see #639 — because it requires mocking the on-chain
+ * claim plumbing. The daemon-harness e2e (`yarn e2e:daemon-harness`) exercises
+ * it indirectly today.
  */
 
 class FailingClaimLocalAdapter extends LocalAdapter {
