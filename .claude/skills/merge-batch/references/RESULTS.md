@@ -161,3 +161,179 @@ Inter-group ordering by lowest member: 101 < 102 < 104.
 **Result: single unambiguous order — #101, #103, #102, #104, #105.**
 
 The alternative identified in Weakness 1 (inserting #102 between #101 and #103) is now explicitly prohibited by the consecutiveness rule. The ordering is deterministic. Both weaknesses are resolved.
+
+---
+
+## Task — Code-owner review gate verification (2026-05-26)
+
+Date: 2026-05-26
+Task: Issue #608 — `merge-batch` skill considers PRs without code-owner approval
+Scope: Step 1 — Survey (Code-owner review gate) only — no real merges, no writes to `next`, no `gh` mutations.
+
+This block is the AC3 regression artifact for Issue #608. It exercises the new
+Code-owner review gate added to Step 1 of `SKILL.md` (the operational pseudocode
+lives in `references/merge-mechanics.md` Step 1.5). The synthetic batch covers
+the four AC3-named scenarios — external-author with green CI and only a
+non-member approval, properly code-owner-approved, no-coverage path with a real
+MEMBER/OWNER approval, and stale-approval invalidation — plus a re-statement
+that operator blanket-authorization to approve does not bypass the gate (AC2).
+
+### CODEOWNERS — relevant lines
+
+The gate parses `.github/CODEOWNERS` at the current `next` HEAD. For this
+synthetic batch, the only patterns that match touched files are the
+canonical-doc rules:
+
+```
+/PRINCIPLES.md @oaksprout @ritsukai
+/SPEC.md       @oaksprout @ritsukai
+/THESIS.md     @oaksprout @ritsukai
+/BRAND.md      @oaksprout @ritsukai
+/GROWTH.md     @oaksprout @ritsukai
+/GLOSSARY.md   @oaksprout @ritsukai
+/CLAUDE.md     @oaksprout @ritsukai
+/README.md     @oaksprout @ritsukai
+```
+
+No pattern matches any path under `client/`, `contracts/`, or `.claude/`. Paths
+that do not match any pattern produce an empty owner-set (the **no-coverage
+case**); paths that match `/PRINCIPLES.md` produce the owner-set
+`{oaksprout, ritsukai}` (the **coverage case**). Per `merge-mechanics.md`
+Step 1.5 the gate normalizes CODEOWNERS owner tokens by stripping the leading
+`@` before set-membership tests, so the bare login `oaksprout` (as returned by
+`latestReviews[*].author.login`) is the canonical form throughout this trace.
+
+### Synthetic batch
+
+Four PRs against `next`, all CI-green, none `Blocked on: Human`. Each PR's
+`headRefOid` is the SHA the gate compares against `latestReviews[*].commit.oid`.
+
+| PR | Title | Author (login / authorAssociation) | Files touched | latestReviews summary | headRefOid |
+|----|-------|------------------------------------|---------------|------------------------|------------|
+| #901 | `feat(client): add a foo helper` | `dvilelaf` / NONE | `client/src/foo.ts` | one entry: `ritsukai-bot` / CONTRIBUTOR / APPROVED / commit.oid = `aaa1111` (matches head) | `aaa1111` |
+| #902 | `docs: update PRINCIPLES` | `someone-else` / MEMBER | `/PRINCIPLES.md` | one entry: `oaksprout` / OWNER / APPROVED / commit.oid = `bbb2222` (matches head) | `bbb2222` |
+| #903 | `fix(daemon): correct foo race` | `external-contributor` / NONE | `client/src/daemon/foo.ts` | one entry: `oaksprout` / OWNER / APPROVED / commit.oid = `ccc3333` (matches head) | `ccc3333` |
+| #904 | `feat(client): add Y helper` | `someone` / CONTRIBUTOR | `client/src/bar.ts` | one entry: `ritsukai` / MEMBER / APPROVED / commit.oid = `ddd4444-OLD` (does **not** match head `ddd4444`) | `ddd4444` |
+
+Operator note recorded at the start of this batch: *"Approve any PR you would
+have approved yourself — blanket authorization for this batch."* This is the
+operator authorization clause the gate must explicitly refuse to honour when
+the code-owner gate would drop a PR (AC2).
+
+### Step 1 output — candidate set after the Code-owner review gate
+
+Drop rules applied (in order):
+
+- CI red / pending: none dropped (all CI-green per scenario).
+- `Blocked on: Human`: none dropped (no PR carries that field value).
+- Code-owner review gate: drops #901 (`awaiting maintainer review`) and #904
+  (`awaiting maintainer review`).
+
+**Candidate set:** #902, #903 (two PRs survive the gate).
+
+### Reasoning trace — per-PR
+
+For each PR the trace shows: CODEOWNERS lookup → `requiredOwners`
+computation → author exclusion → `currentApprovers` after stale-approval
+filtering → decision case (coverage / no-coverage) → keep / drop verdict.
+
+**PR #901 — external-author, no-coverage path, non-member approval**
+
+- File touched: `client/src/foo.ts`. No CODEOWNERS pattern matches → owner-set for this file is empty.
+- `requiredOwnerSets` = `{}` (no covered paths). `requiredOwnersUnion` = `{}`.
+- Author exclusion: `dvilelaf` removed from owner-sets (no-op — sets already empty).
+- `currentApprovers` after stale filter: `{ritsukai-bot}` — the review's `commit.oid = aaa1111` matches `headRefOid`, the review is `APPROVED`, and the reviewer is not the author.
+- Decision case: **no-coverage** (`requiredOwnerSets` is empty).
+- Required: at least one approving review with `authorAssociation ∈ {OWNER, MEMBER}` from a non-author reviewer. `ritsukai-bot` has `authorAssociation == CONTRIBUTOR`, which is **not** in the whitelist.
+- **Verdict: drop with `skipped: awaiting maintainer review`.**
+
+**PR #902 — properly code-owner-approved canonical-doc PR**
+
+- File touched: `/PRINCIPLES.md`. Last-match-wins lookup hits the `/PRINCIPLES.md @oaksprout @ritsukai` line → owner-set `{oaksprout, ritsukai}` (after `@`-stripping normalization).
+- `requiredOwnerSets` = `{ {oaksprout, ritsukai} }`. `requiredOwnersUnion` = `{oaksprout, ritsukai}`.
+- Author exclusion: PR author is `someone-else`, not in the set — no change.
+- `currentApprovers` after stale filter: `{oaksprout}` — `commit.oid = bbb2222` matches `headRefOid`, `APPROVED`, not the author.
+- Decision case: **coverage** (`requiredOwnerSets` is non-empty).
+- Required: every distinct owner-set in `requiredOwnerSets` has at least one current approver in it. The single set `{oaksprout, ritsukai}` ∩ `{oaksprout}` = `{oaksprout}` — non-empty.
+- **Verdict: keep.**
+
+**PR #903 — no-coverage path with a real OWNER approval**
+
+- File touched: `client/src/daemon/foo.ts`. No CODEOWNERS pattern matches → owner-set empty.
+- `requiredOwnerSets` = `{}`. `requiredOwnersUnion` = `{}`.
+- Author exclusion: PR author is `external-contributor`, not in any set — no change.
+- `currentApprovers` after stale filter: `{oaksprout}` — `commit.oid = ccc3333` matches, `APPROVED`, not the author.
+- Decision case: **no-coverage**.
+- Required: at least one approving review with `authorAssociation ∈ {OWNER, MEMBER}` from a non-author reviewer. `oaksprout` has `authorAssociation == OWNER` — whitelisted.
+- **Verdict: keep.**
+
+**PR #904 — stale approval (head-SHA mismatch)**
+
+- File touched: `client/src/bar.ts`. No CODEOWNERS pattern matches → owner-set empty.
+- `requiredOwnerSets` = `{}`. `requiredOwnersUnion` = `{}`.
+- Author exclusion: PR author is `someone`, not in any set — no change.
+- Stale-approval filter: the single `latestReviews` entry has `commit.oid = ddd4444-OLD`, which does not match `headRefOid = ddd4444`. The review is invalidated.
+- `currentApprovers` after stale filter: `{}` (empty — the only approval was stale).
+- Decision case: **no-coverage**.
+- Required: at least one current approving review with `authorAssociation ∈ {OWNER, MEMBER}`. There is no current approving review at all.
+- **Verdict: drop with `skipped: awaiting maintainer review`.**
+
+### Verdict per check
+
+**Check 1 — external-author PR with green CI and only a non-member approval is excluded.** PASS. #901's review came from `ritsukai-bot` whose `authorAssociation == CONTRIBUTOR`. The no-coverage rule requires `OWNER` or `MEMBER`, so the approval did not satisfy the gate. The PR was dropped with `skipped: awaiting maintainer review`. This is the literal incident shape from PR #423 (external author, green CI, non-code-owner approval) and the gate now correctly excludes it.
+
+**Check 2 — properly code-owner-approved PR is kept.** PASS. #902 touches `/PRINCIPLES.md` whose CODEOWNERS rule names `@oaksprout @ritsukai`. The single owner-set `{@oaksprout, @ritsukai}` was intersected with `currentApprovers = {oaksprout}` and produced a non-empty intersection. The PR remains in the candidate set.
+
+**Check 3 — no-coverage PR with a real `MEMBER`/`OWNER` approval is kept.** PASS. #903 touches `client/src/daemon/foo.ts` which has no CODEOWNERS coverage, so the no-coverage rule applies. `oaksprout` (OWNER) approved on the current head SHA, satisfying the no-coverage maintainer rule. The PR remains in the candidate set.
+
+**Check 4 — stale approval (head-SHA mismatch) is invalidated.** PASS. #904's only approval was from `ritsukai` (MEMBER) but the review's `commit.oid` did not match `headRefOid` — i.e. a new commit was pushed after the approval. The stale-approval filter dropped the review from `currentApprovers`, leaving the set empty. The no-coverage rule's requirement of at least one current OWNER/MEMBER approval was not met, and the PR was dropped with `skipped: awaiting maintainer review`. This is the negative control required by the design note (`design.md` §Key trade-offs — stale-approval invalidation by `commit.oid`).
+
+**Check 5 — explicit refusal clause holds even under operator blanket authorization.** PASS by construction. The operator's batch-opening note ("Approve any PR you would have approved yourself — blanket authorization for this batch") is recorded but never consulted: the Code-owner review gate runs *before* operator authorization is checked. #901 and #904 were dropped at the gate; the skill did not submit a review of its own to satisfy the gate retroactively, and would have refused to do so even if instructed. AC2 is satisfied at the algorithm level — the gate's "drop iff not satisfied" decision is independent of any operator authorization variable, because the authorization variable is not an input to the algorithm.
+
+### Weaknesses found
+
+**Weakness 1 — `authorAssociation` can drift between review submission and batch run.**
+GitHub's `authorAssociation` field reflects the reviewer's relationship to the
+repo at the time the review payload is fetched, not at the time of review
+submission. In practice this means a reviewer promoted to `MEMBER` after
+approving (or demoted from `MEMBER` to `CONTRIBUTOR` after approving) is
+re-classified at survey time, not at review time. For this repo the maintainer
+set is small and stable, so the drift surface is narrow, but the gate's
+behaviour is dependent on a GitHub-side field whose semantics could change.
+Accepted trade-off: relying on `authorAssociation` keeps the rule in one place
+(the PR JSON) and avoids inventing a new config file the skill would have to
+teach itself to read.
+
+**Weakness 2 — the gate does not separately verify against the GitHub org member list.**
+The no-coverage rule trusts the `authorAssociation == MEMBER` signal as the
+definition of "qualified maintainer". An attacker who somehow gets
+`authorAssociation == MEMBER` set (e.g. via a misconfigured permission grant)
+could approve a PR and satisfy the gate. The mitigation is org-level: only
+trusted maintainers should hold the GitHub role that produces
+`authorAssociation == MEMBER`. The gate explicitly does not introduce a
+parallel allow-list file because that would create a second source of truth
+that drifts from the GitHub state.
+
+**Weakness 3 — last-match-wins parsing must be respected when CODEOWNERS grows.**
+The current `.github/CODEOWNERS` has only exact-file rules for canonical docs,
+so the matcher does not exercise glob precedence beyond trivial cases. If
+future entries add overlapping patterns (e.g. `/client/**` and `/client/src/dashboard/**`),
+the gate's correctness depends on the matcher honouring GitHub's last-match-wins
+rule, not `.gitignore`'s first-match-wins rule. The `merge-mechanics.md` Step 1.5
+algorithm states this explicitly; failure to honour it would silently weaken
+the gate for paths that *do* have coverage.
+
+### Assessment
+
+The Code-owner review gate produces deterministic output on the synthetic batch
+and all four AC3-named scenarios behave as required. The external-author
+green-CI case (Check 1, the #423 incident shape) is now caught at Step 1 and
+never enters the merge sequence; properly code-owner-approved PRs (Check 2) and
+no-coverage PRs with a maintainer approval (Check 3) are retained without
+incident; stale approvals (Check 4) are invalidated by head-SHA mismatch, which
+matches the design's stated stale-approval discipline; and operator blanket
+authorization (Check 5) does not bypass the gate, by construction. The
+acceptance criteria from Issue #608 — AC1 (drop with a clear note), AC2
+(refusal under blanket authorization), AC3 (worked-example regression
+artifact) — are all satisfied by the gate as documented in `SKILL.md` Step 1
+and `merge-mechanics.md` Step 1.5.
