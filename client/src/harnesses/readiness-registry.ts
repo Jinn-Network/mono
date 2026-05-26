@@ -75,6 +75,16 @@ export class HarnessReadinessRegistry {
     return this.snapshot;
   }
 
+  /**
+   * Frozen-at-construction `joinedHarnessesByCid` map. Exposed so callers
+   * that already have a registry reference (e.g. the `/v1/status` handler
+   * building a HarnessRollup) can pair it with `getSnapshot()` without
+   * reaching past the registry's encapsulation boundary.
+   */
+  getJoinedHarnessesByCid(): Record<string, JoinedHarnessSpec> {
+    return this.opts.joinedHarnessesByCid;
+  }
+
   isReadyForClaim(manifestCid: string): ReadyStatus {
     const joined = this.opts.joinedHarnessesByCid[manifestCid];
     if (!joined) {

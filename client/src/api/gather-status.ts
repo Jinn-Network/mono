@@ -58,6 +58,11 @@ import {
   rolesFromJoinedConfig,
   solverTypeFromJoinedContract,
 } from '../solver-nets/registry.js';
+import { buildHarnessRollup } from './status-harness-rollup.js';
+import type {
+  HarnessReadinessSnapshot,
+  JoinedHarnessSpec,
+} from '../harnesses/readiness-registry.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -240,6 +245,18 @@ export interface StatusGatherConfig {
   configPath?: string;
   /** Per-credential daily caps; when present, /v1/status carries a `spend` block. */
   spendCaps?: Record<CredentialId, number>;
+  /**
+   * Optional getter that returns the live HarnessReadinessRegistry snapshot
+   * + joinedHarnessesByCid map. Threaded by `server.ts` for the `/v1/status`
+   * handler so the response carries a `harness` rollup. Returning `null`
+   * means "registry not ready yet" — gather-status leaves `raw.harnessRollup`
+   * unset and the assembler defaults to ready. Mirrors the holder pattern
+   * already used for `harnessReadinessRegistry` in main.ts.
+   */
+  harnessReadiness?: () => {
+    snapshot: HarnessReadinessSnapshot;
+    joinedHarnessesByCid: Record<string, JoinedHarnessSpec>;
+  } | null;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -1016,6 +1033,17 @@ export async function gatherGatheredStatusRaw(
     taskRuns = undefined;
   }
 
+  let harnessRollup: ReturnType<typeof buildHarnessRollup> | undefined;
+  try {
+    const hr = status?.harnessReadiness?.();
+    if (hr) {
+      harnessRollup = buildHarnessRollup(hr.snapshot, hr.joinedHarnessesByCid);
+    }
+  } catch {
+    // Best-effort: leave harnessRollup unset so assembleStatusV1 falls
+    // through to the default-ready posture.
+  }
+
   let predictionOperator: PredictionOperatorStatusForApi | null = null;
   let predictionOperatorError: string | undefined;
   if (status?.config) {
@@ -1072,6 +1100,7 @@ export async function gatherGatheredStatusRaw(
     tjinnTokenAddress: tjinnIdentity.tokenAddress,
     tjinnChainId: tjinnIdentity.chainId,
     tjinnDistributorAddress: status?.tjinnDistributorAddress,
+    harnessRollup,
   };
 
   if (!status) {

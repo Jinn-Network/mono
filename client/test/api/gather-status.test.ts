@@ -707,6 +707,52 @@ describe('gatherStatusForApi', () => {
     expect((callArgs as [{ name?: string }])[0].name).toBeUndefined();
   });
 
+  it('defaults status.harness to ready when no harnessReadiness getter is supplied', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, undefined);
+      expect(status.harness).toEqual({ ready: true, name: null, reason: null });
+    });
+  });
+
+  it('threads status.harness from the harnessReadiness getter when supplied', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        harnessReadiness: () => ({
+          snapshot: {
+            lastRefreshedAt: '2026-05-26T00:00:00.000Z',
+            harnesses: [
+              {
+                harnessName: 'claude-code',
+                manifestCids: ['bafkre-a'],
+                ready: false,
+                reason: 'not authenticated',
+              },
+            ],
+          },
+          joinedHarnessesByCid: {
+            'bafkre-a': { harnessName: 'claude-code', roles: ['solver'] },
+          },
+        }),
+      });
+
+      expect(status.harness).toEqual({
+        ready: false,
+        name: 'claude-code',
+        reason: 'not authenticated',
+      });
+    });
+  });
+
   it("surfaces joined-entry roles on the unavailable path (joined-only after issue #421)", async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {
