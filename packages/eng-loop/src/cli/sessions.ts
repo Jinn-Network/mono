@@ -142,6 +142,17 @@ export function lastAssistantText(records: unknown[]): string | null {
 /**
  * Return the most-recent `pr-link` record's `{ prNumber, prUrl }`, or `null`.
  */
+/**
+ * Truncate `s` to at most `n` characters. When truncation happens the suffix
+ * is `...` and total length is exactly `n`. If `n` is smaller than the
+ * ellipsis (`...` = 3 chars), the result is just the leading slice of `s`
+ * up to `n` characters of ellipsis (so `truncate('abcd', 3)` → `'...'`).
+ */
+export function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, Math.max(0, n - 3)) + '...';
+}
+
 export function prLinkRecord(records: unknown[]): { prNumber: number; prUrl: string } | null {
   let last: { prNumber: number; prUrl: string } | null = null;
   for (const r of records) {

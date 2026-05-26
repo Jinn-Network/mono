@@ -6,6 +6,7 @@ import {
   parseIssueNumberFromWorktree,
   parseJsonlLines,
   prLinkRecord,
+  truncate,
 } from '../../src/cli/sessions.js';
 
 // ---------------------------------------------------------------------------
@@ -127,5 +128,25 @@ describe('prLinkRecord', () => {
   it('returns null when no pr-link record is present', () => {
     const records = parseJsonlLines(FIX_WITH_TEXT);
     expect(prLinkRecord(records)).toBeNull();
+  });
+});
+
+describe('truncate', () => {
+  it('returns the input unchanged when shorter than the cap', () => {
+    expect(truncate('hi', 10)).toBe('hi');
+  });
+
+  it('truncates and appends ellipsis when longer than the cap', () => {
+    const out = truncate('hello world', 5);
+    expect(out).toBe('he...');
+    expect(out).toHaveLength(5);
+  });
+
+  it('returns the input unchanged at exact cap', () => {
+    expect(truncate('abc', 3)).toBe('abc');
+  });
+
+  it('returns only the ellipsis when the cap is shorter than the input + ellipsis', () => {
+    expect(truncate('abcd', 3)).toBe('...');
   });
 });
