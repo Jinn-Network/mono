@@ -89,6 +89,17 @@ interface OverviewStatusV1 {
     balanceWei?: string;
     runwayDaysExcess?: string | number | null;
   };
+  /**
+   * Per-role ETH balances (master / agent / Safe) exposed on /v1/status (#430).
+   * Optional: older daemons predate this field.
+   */
+  balances?: {
+    eth?: {
+      master?: { balanceWei?: string | null };
+      agent?: { balanceWei?: string | null };
+      safe?: { balanceWei?: string | null };
+    };
+  };
   activity?: {
     recent?: Array<{
       id: number;
@@ -296,6 +307,12 @@ export function OverviewPage(): JSX.Element {
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
 
+  // Per-role ETH balances (#430). formatEth() already returns '—' for missing/null input,
+  // so each role degrades cleanly when the daemon predates this field or a row is unresolved.
+  const perRoleMasterEth = formatEth(status?.balances?.eth?.master?.balanceWei ?? undefined);
+  const perRoleAgentEth  = formatEth(status?.balances?.eth?.agent?.balanceWei ?? undefined);
+  const perRoleSafeEth   = formatEth(status?.balances?.eth?.safe?.balanceWei ?? undefined);
+
   // ── Activity card inputs ────────────────────────────────────────────
   //
   // Joined: project `bootstrap.joinedSolverNets` into the ActivityCard
@@ -499,12 +516,9 @@ export function OverviewPage(): JSX.Element {
           runwayDays={gasRunwayDays}
           actionsDisabled={activeAction !== null}
           perRole={{
-            // Only masterGas is currently exposed by /v1/status; per-role
-            // drill-down is commented out inside WalletCard. Keep the
-            // values flowing so re-enabling is a one-block restore.
-            master: gasBalanceEth,
-            agent: '—',
-            safe: '—',
+            master: perRoleMasterEth,
+            agent: perRoleAgentEth,
+            safe: perRoleSafeEth,
           }}
           tjinnEarned={tjinnEarned}
           tjinnEarnedLast24h={tjinnEarnedLast24h}
