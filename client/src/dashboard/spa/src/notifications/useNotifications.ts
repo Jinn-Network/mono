@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useConnectionState } from '../api/connection-state.js';
+import { useEventStream } from '../api/events.js';
 import { useRestartPending } from '../shell/RestartPendingContext.js';
 import { deriveNotifications, type DeriveInput } from './derive.js';
 import type { OperatorNotification } from './taxonomy.js';
@@ -11,6 +12,22 @@ const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
   warning: 1,
   info: 2,
 };
+
+/**
+ * Recent-window for the event-driven `claim_failed` notification (issue #442).
+ *
+ * 30 minutes is wall-clock measured against the event's own `ts`, not against
+ * SPA mount. An operator who refreshes the dashboard 25 minutes after a burst
+ * of claim failures should still see the warning; an operator who opens the
+ * dashboard a week later should not. The 60s re-render tick (see below) ages
+ * stale events out on an otherwise-idle dashboard.
+ */
+const CLAIM_FAILED_WINDOW_MS = 30 * 60 * 1000;
+const CLAIM_FAILED_TICK_MS = 60 * 1000;
+
+// `useEventStream` re-uses its EventSource per join-key (filterKinds.join(',')).
+// Hoisting the kinds array keeps the join-key identity stable across renders.
+const INTENT_KINDS: ['intent'] = ['intent'];
 
 /**
  * Translate the real `/v1/status` + `/v1/bootstrap` responses into the deriver's
@@ -112,6 +129,41 @@ export function useNotifications(): OperatorNotification[] {
     queryFn: () => api.getBootstrap(),
   });
 
+  // Event-driven source for the 12th notification kind (`claim_failed`, per
+  // OPERATOR-APP-SPEC §2.10 + issue #442). Subscribes to `kind: 'intent'` only
+  // so the hook does not re-render on every `log` event the daemon emits.
+  // SSE backfill replays the last 50 events on connect, so a page reload that
+  // happens within the recent window re-surfaces the burst for free.
+  const { events } = useEventStream(INTENT_KINDS);
+
+  // Wall-clock tick: re-evaluate the recent-window filter every 60s so a
+  // notification ages out even on an otherwise-idle dashboard with no new SSE
+  // traffic. The filter is honest against the event's own `ts`, not mount time.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), CLAIM_FAILED_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  const claimFailedNotice = useMemo<OperatorNotification | null>(() => {
+    const cutoffMs = nowMs - CLAIM_FAILED_WINDOW_MS;
+    const recentFailures = events.filter((e) => {
+      if (e.kind !== 'intent' || e.errorCode !== 'claim_failed') return false;
+      const eventMs = Date.parse(e.ts);
+      if (Number.isNaN(eventMs)) return false;
+      return eventMs >= cutoffMs;
+    });
+    if (recentFailures.length === 0) return null;
+    const n = recentFailures.length;
+    return {
+      kind: 'claim_failed',
+      severity: 'warning',
+      message: `${n} claim attempt${n === 1 ? '' : 's'} failed in the last 30 minutes. Check Tasks for details.`,
+      jumpTo: '/overview',
+      details: { count: n, sinceMs: cutoffMs },
+    };
+  }, [events, nowMs]);
+
   return useMemo(() => {
     // When the SPA can't reach the daemon, surface a blocking notification
     // immediately without waiting for (stale) status/bootstrap data.
@@ -131,8 +183,9 @@ export function useNotifications(): OperatorNotification[] {
       bootstrap: bootstrap.data as DeriveInput['bootstrap'],
       status: mapStatusToDeriveInput(status.data, bootstrap.data, restartPending),
     });
-    return [...derived].sort(
+    const combined = claimFailedNotice ? [...derived, claimFailedNotice] : derived;
+    return [...combined].sort(
       (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
     );
-  }, [connection.status, restartPending, status.data, bootstrap.data]);
+  }, [connection.status, restartPending, status.data, bootstrap.data, claimFailedNotice]);
 }
