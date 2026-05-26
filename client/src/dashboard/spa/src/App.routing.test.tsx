@@ -3,6 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { Router, Route, Switch, Redirect, useLocation } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import App from './App.js';
+import { api } from './api/client.js';
+import type { BootstrapState } from './api/types.js';
 import { OverviewPage } from './pages/Overview.js';
 import { EventsPage } from './pages/Events.js';
 import { EventDetailPage } from './pages/EventDetail.js';
@@ -26,7 +29,10 @@ vi.mock('./api/events.js', () => ({
 // mock so the routing tests don't depend on a live server.
 vi.mock('./api/client.js', () => ({
   api: {
-    getBootstrap: async () => ({}),
+    // Wrap as vi.fn so individual tests can call `vi.mocked(api.getBootstrap)
+    // .mockResolvedValue(...)` to drive App into operating mode. Per-test
+    // overrides are reset in the `afterEach` below.
+    getBootstrap: vi.fn(async () => ({})),
     getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
     getActivityEvents: async () => ({ events: [], nextCursor: null, counts: {} }),
     getActivityEvent: async () => ({
@@ -270,6 +276,11 @@ describe('App routes', () => {
 
   afterEach(() => {
     delete (window as { __JINN_FEATURES__?: unknown }).__JINN_FEATURES__;
+    // Reset the bootstrap mock so per-test overrides don't leak across cases.
+    // Restores the module-level stub from the `vi.mock('./api/client.js', …)`
+    // factory (`getBootstrap: async () => ({})`).
+    vi.mocked(api.getBootstrap).mockReset();
+    vi.mocked(api.getBootstrap).mockResolvedValue({} as BootstrapState);
   });
 
   function LocationProbe(): JSX.Element {
@@ -393,5 +404,39 @@ describe('App routes', () => {
     await waitFor(() =>
       expect(screen.getByTestId('location').textContent).toBe('/operator/memberships'),
     );
+  });
+
+  // Mounts the real `App` (default export) so this test exercises the
+  // production routing table from App.tsx — not the local OperatorSubSwitch
+  // fixture above, which rebuilds its own Switch.
+  //
+  // Contract being locked in: the four `/operator/{memberships,registry,
+  // network,security}` sub-routes must be listed BEFORE the bare-`/operator`
+  // redirect in App.tsx's Switch. If a future refactor reorders the Switch
+  // so the bare-`/operator` redirect catches first, /operator/network would
+  // wrongly redirect to /operator/memberships and this test would fail.
+  // That's intentional — don't "fix" it by deleting the test; fix the
+  // ordering in App.tsx.
+  it('routes /operator/network directly to NetworkTab without shadow from the bare-/operator redirect', async () => {
+    // App reads bootstrap on mount; in running mode it renders the operator
+    // Switch. Use mockResolvedValue (not Once) because App.tsx schedules a
+    // 1.5s refetch on the ['bootstrap'] query and we don't want the second
+    // resolution to fall back to the module-level `{}` stub (which would
+    // collapse App into Onboarding mid-test).
+    vi.mocked(api.getBootstrap).mockResolvedValue({
+      mode: 'running',
+      chain: 'base-sepolia',
+    } as BootstrapState);
+    const { hook } = memoryLocation({ path: '/operator/network' });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <Router hook={hook}>
+          <App />
+        </Router>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('network-tab')).toBeTruthy());
+    expect(screen.queryByTestId('memberships-tab')).toBeNull();
   });
 });
