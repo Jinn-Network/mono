@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,28 @@ import {
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
 const tempDirs: string[] = [];
+
+// #515 — the default disk floor is 20 GB (set in #476 for the real eval
+// runner). Tests that don't explicitly inject `diskFloorBytes` / `freeDiskBytes`
+// fall through to the real `statvfs`-based disk check on the CI runner,
+// which typically has ~19 GB free → `InsufficientDiskError` on unrelated PRs.
+// Lower the floor to 1 GB for this file so the real disk check still runs
+// but is effectively a no-op on any plausible runner; the dedicated
+// `disk-floor guard (#476)` describe-block below overrides this via the
+// constructor option (explicit option > env > default) so its assertions
+// remain intact.
+let savedDiskFloorEnv: string | undefined;
+beforeAll(() => {
+  savedDiskFloorEnv = process.env['JINN_EVAL_DISK_FLOOR_GB'];
+  process.env['JINN_EVAL_DISK_FLOOR_GB'] = '1';
+});
+afterAll(() => {
+  if (savedDiskFloorEnv === undefined) {
+    delete process.env['JINN_EVAL_DISK_FLOOR_GB'];
+  } else {
+    process.env['JINN_EVAL_DISK_FLOOR_GB'] = savedDiskFloorEnv;
+  }
+});
 
 /**
  * Build a fake upstream `scripts.eval` repo. The fake `eval.py` writes a report
