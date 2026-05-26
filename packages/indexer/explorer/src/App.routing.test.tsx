@@ -115,6 +115,31 @@ function setupMockFetch() {
 
     if (u.includes('/explorer/network')) return json(NETWORK_FIXTURE);
     if (u.match(/\/explorer\/solvernets$/)) return json(SOLVERNETS_FIXTURE);
+    if (u.includes('/explorer/slice')) {
+      return json({
+        params: {
+          manifestDigest: 'abc',
+          group: 'none',
+          filter: {},
+          includeUnenriched: false,
+          bucket: 'auto',
+        },
+        enrichmentCoverage: 1,
+        kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null, jinnEarned: '0' },
+        series: [
+          {
+            groupValue: null,
+            buckets: [],
+            rolling: [],
+            kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null, jinnEarned: '0' },
+          },
+        ],
+        leaderboard: { train: [], frozen: [] },
+        lastIndexedBlock: '100',
+        lastIndexedAt: new Date().toISOString(),
+        behindHead: null,
+      });
+    }
     if (u.match(/\/explorer\/solvernet\//)) return json(SOLVERNET_FIXTURE);
     if (u.match(/\/explorer\/operators$/)) return json(OPERATORS_FIXTURE);
     if (u.match(/\/explorer\/operator\//)) return json(OPERATOR_FIXTURE);
@@ -197,6 +222,15 @@ describe('App routing', () => {
     await waitFor(() => {
       // The OperatorView renders the full address in the header
       expect(screen.getByText('0x123')).toBeInTheDocument();
+    });
+  });
+
+  it('/explore/abc → ExploreView mounts with the cid', async () => {
+    const Wrapper = makeWrapper('/explore/abc');
+    render(<App />, { wrapper: Wrapper });
+    await waitFor(() => {
+      // Header reads "Explore <name>" — name from SolverNet meta fixture is "Test"
+      expect(screen.getByText(/explore test/i)).toBeInTheDocument();
     });
   });
 

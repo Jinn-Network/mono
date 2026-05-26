@@ -1483,7 +1483,13 @@ app.get('/slice', async (c) => {
         eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
         enrichmentFilter(params.includeUnenriched),
       ),
-    );
+    )
+    // Chronological order is required: computeOneSeries hands these rows
+    // straight to rollingResolvedRate, which is a time-series rolling window.
+    // PostgreSQL does not guarantee a deterministic order without ORDER BY,
+    // and the sibling /explorer/solvernet/:cid route applies the same sort
+    // for the same reason (see line ~722 above).
+    .orderBy(schema.verdict.createdAtBlock);
 
   // Decode pluginsJson into a string[] of "name@version".
   const sliceRows = joinedRows.map((r) => ({

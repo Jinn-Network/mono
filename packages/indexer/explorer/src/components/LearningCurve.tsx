@@ -23,37 +23,58 @@ import { block } from '../lib/format';
 // Import uPlot CSS once here
 import 'uplot/dist/uPlot.min.css';
 
+export interface LearningCurveSeries {
+  rolling: number[];
+  label: string;
+  color: string;
+}
+
 export interface LearningCurveProps {
   buckets: LearningCurveBucket[];
   rolling: number[];
   mode: 'rolling' | 'buckets';
   height?: number;
+  /**
+   * Optional multi-series payload. When provided with >= 2 entries, the chart
+   * renders up to 5 series with distinct stroke colors plus a legend below.
+   * When absent or with a single entry, falls back to the canonical single-line
+   * rendering driven by the `rolling`/`buckets` props.
+   *
+   * No protocol-emphasis gold per BRAND.md One-Voice Rule.
+   */
+  series?: LearningCurveSeries[];
 }
 
 const SKY = '#7aa7dc';
 const FONT_MONO = "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace";
+
+// Up-to-5 series palette: sky / sky-muted / sage / rose / lilac. Series
+// colors never use gold — gold remains reserved as single-point emphasis
+// per the Gold-as-Hint Rule (spec §5.3) and BRAND.md One-Voice Rule.
+const SERIES_COLORS = [SKY, '#6b9fc5', '#76c1a4', '#c47fa8', '#a89dd6'];
+const MAX_SERIES = 5;
 
 function buildOpts(
   width: number,
   height: number,
   mode: 'rolling' | 'buckets',
   buckets: LearningCurveBucket[],
+  seriesCount: number,
+  seriesColors: string[],
 ): object {
+  const lineSeries = Array.from({ length: seriesCount }, (_, i) => ({
+    stroke: seriesColors[i] ?? SKY,
+    width: 1.5,
+    points: { show: false },
+    fill: undefined,
+  }));
   return {
     width,
     height,
     padding: [12, 8, 0, 4],
     cursor: { show: false },
     legend: { show: false },
-    series: [
-      {},
-      {
-        stroke: SKY,
-        width: 1.5,
-        points: { show: false },
-        fill: undefined,
-      },
-    ],
+    series: [{}, ...lineSeries],
     axes: [
       {
         // x-axis
@@ -95,9 +116,15 @@ export function LearningCurve({
   rolling,
   mode,
   height = 220,
+  series,
 }: LearningCurveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<unknown>(null);
+
+  // Resolve effective multi-series payload. When `series` is provided with
+  // >= 2 entries, we override the single-line rendering. Otherwise we keep
+  // the canonical single-series rolling/buckets behaviour.
+  const effectiveSeries = series && series.length >= 2 ? series.slice(0, MAX_SERIES) : null;
 
   useEffect(() => {
     // Guard: jsdom / SSR has no proper canvas support
@@ -111,14 +138,29 @@ export function LearningCurve({
 
     // Build the data series
     let xs: number[];
-    let ys: (number | null)[];
+    let yseries: (number | null)[][];
+    let colors: string[];
 
-    if (mode === 'buckets') {
+    if (effectiveSeries) {
+      // Multi-series rolling — xs is the index range of the longest series;
+      // shorter series are padded with null so uPlot anchors to the same axis.
+      const longest = Math.max(...effectiveSeries.map((s) => s.rolling.length));
+      xs = Array.from({ length: longest }, (_, i) => i);
+      yseries = effectiveSeries.map((s) => {
+        const padded: (number | null)[] = Array.from({ length: longest }, (_, i) =>
+          i < s.rolling.length ? s.rolling[i] ?? null : null,
+        );
+        return padded;
+      });
+      colors = effectiveSeries.map((s) => s.color);
+    } else if (mode === 'buckets') {
       xs = buckets.map((_, i) => i);
-      ys = buckets.map((b) => b.rate);
+      yseries = [buckets.map((b) => b.rate)];
+      colors = [SKY];
     } else {
       xs = rolling.map((_, i) => i);
-      ys = rolling;
+      yseries = [rolling];
+      colors = [SKY];
     }
 
     if (xs.length === 0) {
@@ -149,11 +191,11 @@ export function LearningCurve({
         UPlot = (mod as unknown as { default?: typeof uPlotType }).default
           ?? (mod as unknown as typeof uPlotType);
 
-        const opts = buildOpts(w, height, mode, buckets);
+        const opts = buildOpts(w, height, mode, buckets, yseries.length, colors);
 
         instance = new UPlot(
           opts as uPlotType.Options,
-          [xs as number[], ys as number[]],
+          [xs, ...yseries] as unknown as uPlotType.AlignedData,
           containerRef.current,
         );
 
@@ -211,10 +253,13 @@ export function LearningCurve({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buckets, rolling, mode, height]);
+  }, [buckets, rolling, mode, height, effectiveSeries]);
 
-  const isEmpty =
-    mode === 'buckets' ? buckets.length === 0 : rolling.length === 0;
+  const isEmpty = effectiveSeries
+    ? effectiveSeries.every((s) => s.rolling.length === 0)
+    : mode === 'buckets'
+      ? buckets.length === 0
+      : rolling.length === 0;
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
@@ -242,6 +287,43 @@ export function LearningCurve({
           data-testid="learning-curve-plot"
         />
       )}
+      {effectiveSeries && (
+        <div
+          data-testid="learning-curve-legend"
+          style={{
+            marginTop: 8,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            letterSpacing: '0.10em',
+            textTransform: 'uppercase',
+            color: 'var(--fg-muted)',
+          }}
+        >
+          {effectiveSeries.map((s, i) => (
+            <span
+              key={`${i}:${s.label}`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  display: 'inline-block',
+                  width: 10,
+                  height: 2,
+                  background: s.color,
+                }}
+              />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
+/** Exported for callers that want to consume the canonical series palette. */
+export const LEARNING_CURVE_SERIES_COLORS = SERIES_COLORS;

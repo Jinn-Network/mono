@@ -70,4 +70,42 @@ describe('LearningCurve', () => {
       );
     }).not.toThrow();
   });
+
+  it('renders a legend with one entry per series when `series` has >= 2 entries', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        series={[
+          { rolling: ROLLING, label: 'codex', color: '#7aa7dc' },
+          { rolling: ROLLING, label: 'hermes', color: '#6b9fc5' },
+          { rolling: ROLLING, label: 'claude', color: '#76c1a4' },
+        ]}
+      />,
+    );
+    const legend = screen.getByTestId('learning-curve-legend');
+    expect(legend).toHaveTextContent('codex');
+    expect(legend).toHaveTextContent('hermes');
+    expect(legend).toHaveTextContent('claude');
+  });
+
+  it('does not render a legend when `series` is absent', () => {
+    render(
+      <LearningCurve buckets={BUCKETS} rolling={ROLLING} mode="rolling" />,
+    );
+    expect(screen.queryByTestId('learning-curve-legend')).toBeNull();
+  });
+
+  it('does not render a legend when `series` has only one entry', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        series={[{ rolling: ROLLING, label: 'codex', color: '#7aa7dc' }]}
+      />,
+    );
+    expect(screen.queryByTestId('learning-curve-legend')).toBeNull();
+  });
 });

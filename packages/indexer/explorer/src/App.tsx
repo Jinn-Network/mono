@@ -9,6 +9,7 @@
  *     Route /solvernet/:cid    → SolverNetView
  *     Route /operators         → OperatorsView
  *     Route /operator/:addr    → OperatorView
+ *     Route /explore/:cid      → ExploreView
  *     fallback                 → 404 inline
  *
  * Each view renders its own <StatusBar> (fixed footer) from its own query data.
@@ -22,6 +23,7 @@ import { SolverNetsListView } from './views/SolverNetsListView';
 import { SolverNetView } from './views/SolverNetView';
 import { OperatorsView } from './views/OperatorsView';
 import { OperatorView } from './views/OperatorView';
+import { ExploreView } from './views/ExploreView';
 
 function NotFound() {
   return (
@@ -77,6 +79,7 @@ export function App() {
           <Route path="/solvernet/:cid" component={SolverNetView} />
           <Route path="/operators" component={OperatorsView} />
           <Route path="/operator/:addr" component={OperatorView} />
+          <Route path="/explore/:cid" component={ExploreView} />
           <Route component={NotFound} />
         </Switch>
       </main>

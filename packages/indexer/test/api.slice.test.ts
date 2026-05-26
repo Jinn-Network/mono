@@ -93,6 +93,80 @@ describe('parseSliceParams', () => {
     const p = parseSliceParams(urlSearchParams('manifestDigest=bafy&bucket=fortnight'));
     expect(p.bucket).toBe('auto');
   });
+
+  it('parses window when provided', () => {
+    const p = parseSliceParams(urlSearchParams('manifestDigest=bafy&window=30'));
+    expect(p.window).toBe(30);
+  });
+
+  it('defaults window to undefined when missing (engine falls back to 50)', () => {
+    const p = parseSliceParams(urlSearchParams('manifestDigest=bafy'));
+    expect(p.window).toBeUndefined();
+  });
+
+  it('clamps window below 1 to 1', () => {
+    const p = parseSliceParams(urlSearchParams('manifestDigest=bafy&window=0'));
+    expect(p.window).toBe(1);
+  });
+
+  it('clamps window above 1000 to 1000', () => {
+    const p = parseSliceParams(urlSearchParams('manifestDigest=bafy&window=99999'));
+    expect(p.window).toBe(1000);
+  });
+
+  it('ignores non-numeric window', () => {
+    const p = parseSliceParams(urlSearchParams('manifestDigest=bafy&window=banana'));
+    expect(p.window).toBeUndefined();
+  });
+});
+
+describe('computeSlice — window param', () => {
+  it('honors params.window when computing the rolling series', () => {
+    // 6 verdicts: F F F P P P → trailing-3 rolling should converge faster
+    // than trailing-6.
+    const rows: SliceInputRow[] = [
+      row({ requestId: 'r1', actualPassed: false, createdAtBlock: 100n }),
+      row({ requestId: 'r2', actualPassed: false, createdAtBlock: 101n }),
+      row({ requestId: 'r3', actualPassed: false, createdAtBlock: 102n }),
+      row({ requestId: 'r4', actualPassed: true,  createdAtBlock: 103n }),
+      row({ requestId: 'r5', actualPassed: true,  createdAtBlock: 104n }),
+      row({ requestId: 'r6', actualPassed: true,  createdAtBlock: 105n }),
+    ];
+    const baseParams: SliceParams = {
+      manifestDigest: 'bafy',
+      group: 'none',
+      filter: {},
+      includeUnenriched: false,
+      bucket: 'auto',
+    };
+
+    const win3 = computeSlice(rows, { ...baseParams, window: 3 }, { rawVerdictCount: 6 });
+    const win6 = computeSlice(rows, { ...baseParams, window: 6 }, { rawVerdictCount: 6 });
+
+    // window=3: last entry is mean of [P,P,P] = 1.0
+    expect(win3.series[0].rolling.at(-1)).toBe(1);
+    // window=6: last entry is mean of [F,F,F,P,P,P] = 0.5
+    expect(win6.series[0].rolling.at(-1)).toBe(0.5);
+  });
+
+  it('defaults to window=50 when params.window is undefined', () => {
+    // 100 alternating verdicts — trailing-50 should be exactly 0.5.
+    const rows: SliceInputRow[] = Array.from({ length: 100 }, (_, i) => row({
+      requestId: `r${i}`,
+      actualPassed: i % 2 === 0,
+      createdAtBlock: BigInt(100 + i),
+    }));
+    const params: SliceParams = {
+      manifestDigest: 'bafy',
+      group: 'none',
+      filter: {},
+      includeUnenriched: false,
+      bucket: 'auto',
+      // window deliberately omitted
+    };
+    const out = computeSlice(rows, params, { rawVerdictCount: 100 });
+    expect(out.series[0].rolling.at(-1)).toBe(0.5);
+  });
 });
 
 describe('computeSlice — group=none', () => {

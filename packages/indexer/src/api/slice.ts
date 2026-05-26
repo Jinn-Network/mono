@@ -46,6 +46,11 @@ export interface SliceParams {
   includeUnenriched: boolean;
   /** Curve bucketing. */
   bucket: SliceBucketSize;
+  /**
+   * Trailing-window size for the rolling resolved-rate series. Clamped to
+   * [1, 1000]. Undefined → engine uses DEFAULT_ROLLING_K (50). Spec §6.
+   */
+  window?: number;
 }
 
 export interface SliceSeriesKPIs {
@@ -133,7 +138,16 @@ export function parseSliceParams(qs: URLSearchParams): SliceParams {
 
   const includeUnenriched = qs.get('include') === 'raw';
 
-  return { manifestDigest, group, filter, includeUnenriched, bucket };
+  let window: number | undefined;
+  const rawWindow = qs.get('window');
+  if (rawWindow !== null) {
+    const n = Number.parseInt(rawWindow, 10);
+    if (Number.isFinite(n)) {
+      window = Math.min(1000, Math.max(1, n));
+    }
+  }
+
+  return { manifestDigest, group, filter, includeUnenriched, bucket, window };
 }
 
 /**
@@ -193,6 +207,7 @@ function computeOneSeries(
   rows: SliceInputRow[],
   groupValue: string | null,
   bucket: SliceBucketSize,
+  window: number,
 ): SliceSeries {
   const samples = rows
     .map((r) => ({ block: r.createdAtBlock, pass: passFromRow(r) }))
@@ -200,7 +215,7 @@ function computeOneSeries(
   return {
     groupValue,
     buckets: bucketResolvedRate(samples, bucketBlocksFor(bucket)),
-    rolling: rollingResolvedRate(samples.map((s) => s.pass), DEFAULT_ROLLING_K),
+    rolling: rollingResolvedRate(samples.map((s) => s.pass), window),
     kpis: computeSeriesKPIs(rows),
   };
 }
@@ -220,6 +235,7 @@ function computeGroupedSeries(
   rows: SliceInputRow[],
   group: SingleKeyGroup,
   bucket: SliceBucketSize,
+  window: number,
 ): SliceSeries[] {
   const groups = new Map<string, SliceInputRow[]>();
   for (const r of rows) {
@@ -229,7 +245,7 @@ function computeGroupedSeries(
   }
   return Array.from(groups.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, groupRows]) => computeOneSeries(groupRows, key, bucket));
+    .map(([key, groupRows]) => computeOneSeries(groupRows, key, bucket, window));
 }
 
 /**
@@ -282,6 +298,7 @@ function applyFilters(rows: SliceInputRow[], filter: SliceFilter): SliceInputRow
 function computePluginSeries(
   rows: SliceInputRow[],
   bucket: SliceBucketSize,
+  window: number,
 ): SliceSeries[] {
   const groups = new Map<string, SliceInputRow[]>();
   for (const r of rows) {
@@ -293,7 +310,7 @@ function computePluginSeries(
   }
   return Array.from(groups.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, groupRows]) => computeOneSeries(groupRows, key, bucket));
+    .map(([key, groupRows]) => computeOneSeries(groupRows, key, bucket, window));
 }
 
 export interface ComputeSliceContext {
@@ -312,14 +329,15 @@ export function computeSlice(
     ctx.rawVerdictCount === 0 ? 0 : rows.length / ctx.rawVerdictCount;
 
   const filtered = applyFilters(rows, params.filter);
+  const window = params.window ?? DEFAULT_ROLLING_K;
 
   let series: SliceSeries[];
   if (params.group === 'none') {
-    series = [computeOneSeries(filtered, null, params.bucket)];
+    series = [computeOneSeries(filtered, null, params.bucket, window)];
   } else if (params.group === 'plugin') {
-    series = computePluginSeries(filtered, params.bucket);
+    series = computePluginSeries(filtered, params.bucket, window);
   } else {
-    series = computeGroupedSeries(filtered, params.group, params.bucket);
+    series = computeGroupedSeries(filtered, params.group, params.bucket, window);
   }
 
   return {

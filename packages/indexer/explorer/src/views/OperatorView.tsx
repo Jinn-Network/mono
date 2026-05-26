@@ -149,6 +149,7 @@ const SOLVERNET_COLUMNS = [
   { key: 'verdicts', label: 'Pass / Total', numeric: true },
   { key: 'resolvedRate', label: 'Resolved', numeric: true },
   { key: 'modeBreakdown', label: 'Modes', sortable: false },
+  { key: 'explore', label: '', sortable: false },
 ];
 
 // ── OperatorView ──────────────────────────────────────────────────────────────
@@ -427,6 +428,23 @@ export function OperatorView() {
                     {/* Mode breakdown */}
                     <td style={cellStyle}>
                       <ModeBreakdownText entries={row.modeBreakdown} />
+                    </td>
+
+                    {/* Explore this slice ↗ — deep-links to /explore/<cid>
+                        filtered to this operator. */}
+                    <td style={cellStyle}>
+                      <Link
+                        href={`/explore/${encodeURIComponent(row.cid)}?filter[operator]=${encodeURIComponent(data.operator)}`}
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 10,
+                          letterSpacing: '0.06em',
+                          color: 'var(--fg-muted)',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        Explore this slice ↗
+                      </Link>
                     </td>
                   </>
                 )}

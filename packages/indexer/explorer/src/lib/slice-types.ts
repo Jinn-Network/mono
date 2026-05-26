@@ -30,6 +30,8 @@ export interface SliceParams {
   filter: SliceFilter;
   includeUnenriched: boolean;
   bucket: SliceBucketSize;
+  /** Trailing rolling window size; clamped to [1, 1000] server-side, default 50. */
+  window?: number;
 }
 
 export interface SliceSeriesKPIs {

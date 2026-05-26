@@ -126,6 +126,7 @@ GET /explorer/slice
   &filter[<dim>]=<value>,<value> (repeatable per dim)
   &includeUnenriched=<bool>      (default: false)
   &bucket=<size>                 (default: auto)
+  &window=<n>                    (default: 50, range: 1..1000)
 ```
 
 Returns:
@@ -150,6 +151,9 @@ interface SliceResponse extends FreshnessMeta {
 interface SliceSeries {
   groupValue: string | null;       // the dimension value (e.g. operator address) or null when group=none
   buckets: LearningCurveBucket[];
+  // Trailing-window resolved-rate; entry[i] = mean of trailing min(window, i+1)
+  // verdicts. Length equals the number of envelope-filtered verdicts for the
+  // series. Window defaults to 50; clamped to [1, 1000].
   rolling: number[];
 }
 ```
@@ -196,6 +200,10 @@ Phase 1 is the minimum surface for the press-release-shaped artifact. Co-require
 - (P3a) Frontend: `/explore/<manifestDigest>` route with the control surface specified in §5.3.
 - (P3b) Frontend: URL-state encoding for sharable slice links (extend `url-state.ts`).
 - (P3c) Frontend: `Explore this slice ↗` affordance on `SolverNetView` and `OperatorView`.
+- (P3d) Engine: add `window` URL param to `/explorer/slice` so the trailing-N
+  rolling line is computed server-side from the chronologically-sorted samples
+  rather than reconstructed client-side from buckets. Default 50, clamped to
+  [1, 1000]. Single-call-site change in `computeOneSeries`.
 
 ## 11. Out-of-scope refactors not undertaken here
 

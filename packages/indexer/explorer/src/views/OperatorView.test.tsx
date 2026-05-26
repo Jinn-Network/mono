@@ -240,4 +240,17 @@ describe('OperatorView', () => {
 
     expect(screen.getByText('Operators')).toBeInTheDocument();
   });
+
+  it('renders "Explore this slice" links per SolverNet row, deep-linking with filter[operator]', async () => {
+    mockFetch(OPERATOR_FIXTURE);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      const link = screen.getAllByRole('link', { name: /explore this slice/i })[0];
+      expect(link).toBeDefined();
+      const href = link.getAttribute('href') ?? '';
+      expect(href).toMatch(/^\/explore\//);
+      expect(href).toContain(`filter[operator]=${encodeURIComponent(ADDR)}`);
+    });
+  });
 });

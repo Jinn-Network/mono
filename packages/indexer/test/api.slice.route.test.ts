@@ -95,6 +95,7 @@ const mockState = vi.hoisted(() => {
     joins: { kind: 'left' | 'inner'; tableName: string; condition: unknown }[];
     whereCondition: unknown;
     selectShape: Record<string, unknown> | null;
+    orderByArgs: unknown[];
   }
 
   interface Responder {
@@ -153,6 +154,11 @@ const mockState = vi.hoisted(() => {
       record.whereCondition = condition;
       return chain;
     };
+    chain.orderBy = (...args: unknown[]) => {
+      record.orderByArgs.push(...args);
+      return chain;
+    };
+    chain.limit = (_n: unknown) => chain;
     chain.then = (
       onFulfilled: (v: unknown[]) => unknown,
       onRejected?: (e: unknown) => unknown,
@@ -174,6 +180,7 @@ const mockState = vi.hoisted(() => {
         joins: [],
         whereCondition: undefined,
         selectShape: shape ?? null,
+        orderByArgs: [],
       };
       recordedQueries.push(record);
       return buildChain(record);
@@ -268,6 +275,7 @@ interface QueryRecord {
   joins: { kind: 'left' | 'inner'; tableName: string; condition: unknown }[];
   whereCondition: unknown;
   selectShape: Record<string, unknown> | null;
+  orderByArgs: unknown[];
 }
 
 function findVerdictAttemptJoin(record: QueryRecord) {
@@ -459,6 +467,35 @@ describe('GET /explorer/slice — route integration', () => {
       requestIdEq,
       'verdict⇒attempt join must NOT key on requestId',
     ).toBeUndefined();
+  });
+
+  // ── Regression: chronological ORDER BY on the slice verdict query ────────────
+  //
+  // computeOneSeries hands joined rows straight to rollingResolvedRate, which
+  // is a time-series rolling window. PostgreSQL does not guarantee a
+  // deterministic order without ORDER BY — so the rolling array must be
+  // computed from rows already sorted by createdAtBlock. The sibling
+  // /explorer/solvernet/:cid route applies the same sort for the same reason.
+  it('orders the slice verdict query by verdict.createdAtBlock', async () => {
+    const res = await explorerApp.request(
+      `/slice?manifestDigest=${MANIFEST_CID}&group=none`,
+    );
+    expect(res.status).toBe(200);
+
+    const sliceQuery = findSliceJoinQuery();
+    expect(
+      sliceQuery,
+      'expected the slice route to issue a verdict⇒attempt joined query',
+    ).toBeDefined();
+
+    // Exactly one column was passed to .orderBy, and it's verdict.createdAtBlock.
+    expect(sliceQuery!.orderByArgs.length).toBeGreaterThanOrEqual(1);
+    const orderCol = sliceQuery!.orderByArgs[0] as ColumnRef;
+    expect(orderCol).toMatchObject({
+      __col: true,
+      table: 'verdict',
+      col: 'createdAtBlock',
+    });
   });
 
   // ── Wire-shape: group=operator yields one series per distinct operator ───────

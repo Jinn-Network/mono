@@ -346,4 +346,14 @@ describe('SolverNetView', () => {
       expect(screen.getByText('SolverNets')).toBeInTheDocument();
     });
   });
+
+  it('renders an "Explore this slice" link to /explore/<cid>', async () => {
+    const { WrappedView } = makeWrapper(`/solvernet/${encodeURIComponent(CID)}?k=50`);
+    render(<WrappedView />);
+    await waitFor(() => {
+      const link = screen.getByRole('link', { name: /explore this slice/i });
+      expect(link).toBeInTheDocument();
+      expect(link.getAttribute('href')).toContain(`/explore/${encodeURIComponent(CID)}`);
+    });
+  });
 });

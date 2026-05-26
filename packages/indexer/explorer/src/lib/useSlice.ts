@@ -25,6 +25,7 @@ function encodeSliceParams(params: SliceParams): string {
     `bucket=${params.bucket}`,
   ];
   if (params.includeUnenriched) base.push('include=raw');
+  if (typeof params.window === 'number') base.push(`window=${params.window}`);
   const fenc = encodeFilter(params.filter);
   if (fenc) base.push(fenc);
   return base.join('&');

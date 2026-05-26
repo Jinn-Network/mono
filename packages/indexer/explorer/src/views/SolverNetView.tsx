@@ -25,6 +25,7 @@ import { LearningCurve } from '../components/LearningCurve';
 import { CheckpointTimeline } from '../components/CheckpointTimeline';
 import { FreezeIntegrity } from '../components/FreezeIntegrity';
 import { Leaderboard } from '../components/Leaderboard';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { useNumParam, useEnumParam } from '../lib/url-state';
 import { useCountUp } from '../hooks/useCountUp';
 import { pct, int, shortAddr, shortCid } from '../lib/format';
@@ -38,56 +39,6 @@ const K_OPTIONS = [
   { label: '100', value: 100 },
   { label: 'all', value: K_ALL },
 ];
-
-// ── Segmented control ─────────────────────────────────────────────────────────
-
-function SegmentedControl<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div
-      role="group"
-      style={{
-        display: 'inline-flex',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-1)',
-        overflow: 'hidden',
-      }}
-    >
-      {options.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            onClick={() => onChange(opt.value)}
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              letterSpacing: '0.10em',
-              textTransform: 'uppercase',
-              padding: '5px 12px',
-              border: 'none',
-              borderRight: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: active ? 'var(--bg-sunken)' : 'transparent',
-              color: active ? 'var(--fg)' : 'var(--fg-dim)',
-              transition: `background var(--dur-fast) var(--ease-linear), color var(--dur-fast) var(--ease-linear)`,
-            }}
-
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // ── Slice leaderboard → Leaderboard component row adapter ────────────────────
 
@@ -415,6 +366,25 @@ export function SolverNetView() {
                 Verdict-success rate
               </div>
             </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Link
+              href={`/explore/${encodeURIComponent(cid)}`}
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                letterSpacing: '0.06em',
+                padding: '6px 12px',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-1)',
+                color: 'var(--fg-muted)',
+                textDecoration: 'none',
+                background: 'transparent',
+              }}
+            >
+              Explore this slice ↗
+            </Link>
           </div>
 
           {/* ── Supporting KPIs ──
