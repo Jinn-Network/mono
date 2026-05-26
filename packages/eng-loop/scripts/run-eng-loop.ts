@@ -19,6 +19,7 @@ import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import {
   fetchFieldIds,
+  getFieldCache,
   resetFieldCache,
 } from '../src/dispatcher/field-cache.js';
 import { makePauseSession } from '../src/dispatcher/pause-session.js';
@@ -305,10 +306,28 @@ async function main(): Promise<void> {
   const runOneCycle = async (): Promise<number> => {
     try {
       const snapshot = await fetchProjectSnapshot(realRunner);
+
+      // Re-read the field-cache singleton at the top of each cycle so a
+      // refresh inside the previous cycle's dispatch retry propagates here.
+      // `main()`'s boot `fetchFieldIds` populated the singleton, and
+      // `dispatchIssue`'s stale-id retry calls `fetchFieldIds` again — which
+      // swaps the singleton in place. Closing over the outer
+      // `const fieldCache` would pin the original (stale) reference forever
+      // (Stage 5 Finding 1 on jinn-mono#599). If the singleton is somehow
+      // null here, it means main() never ran or an exotic re-entry path
+      // wiped it — fail loud rather than silently dispatch with a half-built
+      // cache.
+      const cycleFieldCache = getFieldCache();
+      if (cycleFieldCache == null) {
+        throw new Error(
+          '[eng:loop] field cache is null at cycle entry — main() must populate it via fetchFieldIds before any cycle runs',
+        );
+      }
+
       // Build a per-cycle pause closure that resolves the project item id
       // from the snapshot already in scope (jinn-mono#599) — no extra
       // `gh project item-list` call per pause.
-      const pauseSessionForCycle = makePauseSession(snapshot, fieldCache, realRunner);
+      const pauseSessionForCycle = makePauseSession(snapshot, cycleFieldCache, realRunner);
 
       // Allow operators to override the rate-limit floor via env (mainly for
       // testing the gate). ENG_LOOP_RATELIMIT_FLOOR=4999 forces the gate to
@@ -332,7 +351,7 @@ async function main(): Promise<void> {
               }
               return { pid: child.pid };
             },
-            fieldCache,
+            fieldCache: cycleFieldCache,
           }),
         countOpenReadyPrs,
         wallClock,

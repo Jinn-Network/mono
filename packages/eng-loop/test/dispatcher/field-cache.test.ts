@@ -266,6 +266,51 @@ describe('field-cache', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Singleton swap — run-eng-loop.ts's per-cycle `getFieldCache()` re-read
+  // depends on this so a stale-id refresh inside dispatchIssue propagates to
+  // the next cycle. (#599 — Stage 5 Finding 1)
+  // -------------------------------------------------------------------------
+
+  it('getFieldCache returns the *new* object after a re-fetch (proves cross-cycle singleton swap)', async () => {
+    const { runner: r1 } = makeRunner(FIELD_LIST_JSON);
+    const first = await fetchFieldIds(r1);
+    expect(getFieldCache()).toBe(first);
+
+    const altPayload = JSON.stringify({
+      fields: [
+        {
+          id: 'PVTSSF_lADODh3-Ac4BXYaIzhTdqRo',
+          name: 'Blocked on',
+          options: [
+            { id: '122744bf', name: 'Nothing' },
+            { id: 'a20d20ac', name: 'Human' },
+            { id: 'e3e1b0c4', name: 'Another issue' },
+          ],
+        },
+        {
+          id: 'PVTSSF_STATUS_FIELD_ID_NEW',
+          name: 'Status',
+          options: [
+            { id: 'opt_todo_new', name: 'Todo' },
+            { id: 'opt_in_progress_NEW', name: 'In Progress' },
+            { id: 'opt_in_review_new', name: 'In Review' },
+            { id: 'opt_done_new', name: 'Done' },
+          ],
+        },
+      ],
+    });
+    const { runner: r2 } = makeRunner(altPayload);
+    const second = await fetchFieldIds(r2);
+
+    // The singleton swap is the invariant: getFieldCache() must follow the
+    // new reference. A `const fieldCache` captured before the re-fetch would
+    // still see `first`; the next cycle's re-read sees `second`.
+    expect(second).not.toBe(first);
+    expect(getFieldCache()).toBe(second);
+    expect(getFieldCache()).not.toBe(first);
+  });
+
   it('fetchFieldIds replaces the cached value on a second call', async () => {
     const payloadFirst = FIELD_LIST_JSON;
     const payloadSecond = JSON.stringify({

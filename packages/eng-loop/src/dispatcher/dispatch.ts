@@ -172,12 +172,21 @@ export async function dispatchIssue(
 
   // Wrap item-edit in a narrow stale-id retry: if the cached field id is
   // stale (rare — happens when the Project field is rebuilt mid-run), `gh`
-  // returns "Could not resolve to a node". We reset + refetch the cache once
-  // and retry exactly once before propagating. The cache module's singleton
-  // is updated by `fetchFieldIds`, so subsequent callers (a later dispatch
-  // in this cycle, or pause-session via `getFieldCache()`) see the fresh
-  // value too; mutating `deps.fieldCache` propagates the refresh to any
-  // call site that captured the old reference.
+  // fails with a stale-id error (see `isStaleFieldError` for the matched
+  // phrasings). We reset + refetch the cache once and retry exactly once
+  // before propagating.
+  //
+  // Propagation model (Stage 5 Finding 1 on jinn-mono#599):
+  //   - The cache module in `./field-cache.ts` owns a singleton.
+  //     `fetchFieldIds` rebinds it; `getFieldCache()` returns the current
+  //     value.
+  //   - Cross-cycle propagation happens via that singleton: run-eng-loop.ts
+  //     re-reads `getFieldCache()` at the top of every cycle, so the next
+  //     cycle picks up the refreshed value automatically.
+  //   - Within the in-flight dispatch we also mutate `deps.fieldCache = fresh`
+  //     — this is intra-call only, scoping the refresh to any consumer that
+  //     shares this `deps` reference for the rest of the current dispatch.
+  //     It does NOT propagate across cycles; the singleton re-read does.
   const itemEditOnce = async (fId: string, optId: string): Promise<void> => {
     await runner('gh', [
       'project', 'item-edit',
