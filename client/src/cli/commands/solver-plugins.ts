@@ -37,7 +37,8 @@ import { FleetStateStore } from '../../earning/store.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
-import { endorseHandler, warnHandler } from './solver-plugins-feedback.js';
+import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
+import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
 import { createDiscoveryAPI } from '../../discovery/factory.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
@@ -415,6 +416,114 @@ export function createSolverPluginsCommand(
         return warnHandler(
           ctx,
           { pluginCid, reason, configPath: parsed.values.config as string | undefined },
+          resolvedDeps,
+        );
+      }
+      if (subverb === 'review') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            score: { type: 'string' },
+            'score-decimals': { type: 'string' },
+            tag1: { type: 'string' },
+            tag2: { type: 'string' },
+            config: { type: 'string' },
+          },
+        });
+        const pluginCid = parsed.positionals[0];
+        if (!pluginCid) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins review requires <pluginCid>' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        const scoreRaw = parsed.values.score as string | undefined;
+        if (scoreRaw === undefined) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins review requires --score N' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        const score = Number.parseInt(scoreRaw, 10);
+        if (!Number.isFinite(score)) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins review --score must be an integer' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        const scoreDecimalsRaw = parsed.values['score-decimals'] as string | undefined;
+        const scoreDecimals = scoreDecimalsRaw === undefined ? 2 : Number.parseInt(scoreDecimalsRaw, 10);
+        return reviewHandler(
+          ctx,
+          {
+            pluginCid,
+            score,
+            scoreDecimals,
+            tag1: parsed.values.tag1 as string | undefined,
+            tag2: parsed.values.tag2 as string | undefined,
+            configPath: parsed.values.config as string | undefined,
+          },
+          resolvedDeps,
+        );
+      }
+      if (subverb === 'respond') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            'feedback-index': { type: 'string' },
+            client: { type: 'string' },
+            'response-uri': { type: 'string' },
+            config: { type: 'string' },
+          },
+        });
+        const pluginCid = parsed.positionals[0];
+        const feedbackIndexRaw = parsed.values['feedback-index'] as string | undefined;
+        const clientRaw = parsed.values.client as string | undefined;
+        const responseUri = parsed.values['response-uri'] as string | undefined;
+        if (!pluginCid || !feedbackIndexRaw || !clientRaw || !responseUri) {
+          writeJson(ctx, {
+            error: {
+              code: 'invalid_invocation',
+              message: 'solver-plugins respond requires <pluginCid> --feedback-index N --client <addr> --response-uri <uri>',
+            },
+          });
+          ctx.exit(1);
+          return;
+        }
+        let clientAddress: Address;
+        try {
+          clientAddress = getAddress(clientRaw);
+        } catch {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins respond --client must be a valid 0x address' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        let feedbackIndex: bigint;
+        try {
+          feedbackIndex = BigInt(feedbackIndexRaw);
+        } catch {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins respond --feedback-index must be an integer' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        return respondHandler(
+          ctx,
+          {
+            pluginCid,
+            feedbackIndex,
+            client: clientAddress,
+            responseUri,
+            configPath: parsed.values.config as string | undefined,
+          },
           resolvedDeps,
         );
       }

@@ -209,6 +209,152 @@ describe('jinn solver-plugins endorse', () => {
     expect(exits).toEqual([1]);
   });
 
+  it('review submits a free-form score+tag1 feedback', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyReviewCid';
+    const row = fakePluginRow(cid, '777');
+
+    const giveFeedback = vi.fn(async () => '0xtxreview' as `0x${string}`);
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback,
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'review', cid,
+      '--score', '75',
+      '--score-decimals', '2',
+      '--tag1', 'restoration.v0',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    const callArg = giveFeedback.mock.calls[0]![0];
+    expect(callArg.harnessAgentId).toBe(777n);
+    expect(callArg.score).toBe(75);
+    expect(callArg.scoreDecimals).toBe(2);
+    expect(callArg.tag1).toBe('restoration.v0');
+    expect(callArg.manifestRef).toBe(`plugin:${cid}`);
+
+    const out = parsedLine(writes);
+    expect(out.verb).toBe('solver-plugins review');
+    expect(out.txHash).toBe('0xtxreview');
+    expect(exits).toEqual([]);
+  });
+
+  it('respond submits a respondToFeedback with the resolved agentId', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyRespondCid';
+    const row = fakePluginRow(cid, '777');
+
+    const respondToFeedback = vi.fn(async () => '0xtxrespond' as `0x${string}`);
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback,
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'respond', cid,
+      '--feedback-index', '3',
+      '--client', '0xAAAA000000000000000000000000000000000001',
+      '--response-uri', 'ipfs://bafyResp',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    expect(respondToFeedback).toHaveBeenCalledOnce();
+    const callArg = respondToFeedback.mock.calls[0]![0];
+    expect(callArg.feedbackId.agentId).toBe(777n);
+    // viem's getAddress checksums the input; assert against the checksummed form.
+    expect(callArg.feedbackId.client.toLowerCase()).toBe('0xaaaa000000000000000000000000000000000001');
+    expect(callArg.feedbackId.feedbackIndex).toBe(3n);
+    expect(callArg.responseURI).toBe('ipfs://bafyResp');
+    expect(callArg.responseHash).toBe(keccak256(toBytes('ipfs://bafyResp')));
+
+    const out = parsedLine(writes);
+    expect(out.verb).toBe('solver-plugins respond');
+    expect(out.txHash).toBe('0xtxrespond');
+    expect(exits).toEqual([]);
+  });
+
+  it('review emits keystore_missing when no password is available', async () => {
+    const configPath = withTempConfig();
+    const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback,
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: false, message: 'no password' } as any),
+    });
+    const { ctx, writes, exits } = makeCtx([
+      'review', 'bafyCid', '--score', '60', '--config', configPath,
+    ]);
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('keystore_missing');
+    expect(giveFeedback).not.toHaveBeenCalled();
+    expect(exits).toEqual([1]);
+  });
+
+  it('respond emits keystore_missing when no password is available', async () => {
+    const configPath = withTempConfig();
+    const respondToFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback,
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: false, message: 'no password' } as any),
+    });
+    const { ctx, writes, exits } = makeCtx([
+      'respond', 'bafyCid',
+      '--feedback-index', '1',
+      '--client', '0xAAAA000000000000000000000000000000000001',
+      '--response-uri', 'ipfs://b',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('keystore_missing');
+    expect(respondToFeedback).not.toHaveBeenCalled();
+    expect(exits).toEqual([1]);
+  });
+
   it('emits agentid_unresolvable when discovery has no row for the cid', async () => {
     const configPath = withTempConfig();
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);

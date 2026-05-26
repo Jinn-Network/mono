@@ -291,6 +291,48 @@ export async function endorseHandler(
 ): Promise<void> {
   const prep = await preparePipeline(ctx, opts.pluginCid, opts.configPath, deps);
   if (!prep) return;
+  await submitFeedbackAndEmit(
+    ctx,
+    prep,
+    deps,
+    'solver-plugins endorse',
+    {
+      score: opts.score,
+      scoreDecimals: opts.scoreDecimals,
+      ...(opts.tag1 ? { tag1: opts.tag1 } : {}),
+      ...(opts.tag2 ? { tag2: opts.tag2 } : {}),
+    },
+  );
+}
+
+export async function reviewHandler(
+  ctx: CommandContext,
+  opts: ReviewOptions,
+  deps: SolverPluginsDeps,
+): Promise<void> {
+  const prep = await preparePipeline(ctx, opts.pluginCid, opts.configPath, deps);
+  if (!prep) return;
+  await submitFeedbackAndEmit(
+    ctx,
+    prep,
+    deps,
+    'solver-plugins review',
+    {
+      score: opts.score,
+      scoreDecimals: opts.scoreDecimals,
+      ...(opts.tag1 ? { tag1: opts.tag1 } : {}),
+      ...(opts.tag2 ? { tag2: opts.tag2 } : {}),
+    },
+  );
+}
+
+export async function respondHandler(
+  ctx: CommandContext,
+  opts: RespondOptions,
+  deps: SolverPluginsDeps,
+): Promise<void> {
+  const prep = await preparePipeline(ctx, opts.pluginCid, opts.configPath, deps);
+  if (!prep) return;
   const client = deps.reputationClientFactory({
     reputationRegistryAddress: prep.reputationRegistryAddress,
     safeAddress: prep.safeAddress,
@@ -300,22 +342,24 @@ export async function endorseHandler(
     password: prep.password,
   });
   try {
-    const txHash = await client.giveFeedback({
-      harnessAgentId: prep.builderAgentId,
-      score: opts.score,
-      scoreDecimals: opts.scoreDecimals,
-      manifestRef: prep.manifestRef,
-      manifestHash: prep.manifestHash,
-      ...(opts.tag1 ? { tag1: opts.tag1 } : {}),
-      ...(opts.tag2 ? { tag2: opts.tag2 } : {}),
+    const responseHash = keccak256(toBytes(opts.responseUri));
+    const txHash = await client.respondToFeedback({
+      feedbackId: {
+        agentId: prep.builderAgentId,
+        client: opts.client,
+        feedbackIndex: opts.feedbackIndex,
+      },
+      responseURI: opts.responseUri,
+      responseHash,
     });
     writeJson(ctx, {
-      verb: 'solver-plugins endorse',
+      verb: 'solver-plugins respond',
       txHash,
       pluginCid: opts.pluginCid,
       targetAgentId: prep.builderAgentId.toString(),
-      score: opts.score,
-      scoreDecimals: opts.scoreDecimals,
+      feedbackIndex: opts.feedbackIndex.toString(),
+      client: opts.client,
+      responseURI: opts.responseUri,
       reputationRegistry: prep.reputationRegistryAddress,
       safeAddress: prep.safeAddress,
     });
