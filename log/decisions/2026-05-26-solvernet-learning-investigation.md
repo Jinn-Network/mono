@@ -1,12 +1,13 @@
 ---
 id: DR-2026-05-26
-title: SolverNet learning — agents are not demonstrably learning; corpus read-path is broken in Hermes and unenforced in claude-code/codex
+title: SolverNet learning — corpus consumption works, but swe-rebench-v2's plan skill terminates the agent's loop before Improve/Memory; SolverType plugins must not own orchestration
 date: 2026-05-26
 verb: Find
 status: ratified
 authors: opus (spike on spike/659-investigate-solvernet-learning)
 spike: issue #659
-relates-to: issue #601 (parent epic), PRs #349 / #350 / #351 / #162 (donation production/consumption)
+relates-to: issue #601 (parent epic), issue #666, #669, #670, #671, #672, #673 (sibling fixes filed during this spike), PRs #349 / #350 / #351 / #162 (donation production/consumption)
+amends: this is the second draft; the first draft (committed earlier on this branch) reached outcome (b) but with the wrong root cause and a sibling-issue list that turned out to be obsolete. Both drafts retained in git history.
 ---
 
 ## Context
@@ -26,204 +27,334 @@ The cross-operator learning path, as designed in PRs #349/#350/#351/#162, is:
 2. During a solve session, the harness's MCP subprocess exposes
    `search_records`, `inspect_record`, and `acquire_artifact` tools backed by
    the same indexer plus a local x402-payment-cached store
-   (`client/src/mcp/server.ts:82`, `client/src/mcp/search-records.ts:298`,
-   `client/src/mcp/acquire-artifact.ts`).
-3. The agent — the LLM running inside `claude`, `codex`, or `hermes` — is
-   *expected* to call those tools, find prior successful solutions for the
+   (`client/src/mcp/server.ts`).
+3. The agent inside the spawned model CLI (`claude`, `codex`, or `hermes`)
+   is *expected* to call those tools, find prior successful solutions for the
    current `instance_id`, acquire the bytes, and consult them while generating
    its own solution.
+4. The learner plugin's `learn` skill drives a 7-phase loop (Orient →
+   Strategize → Plan → Execute → Debrief → Improve → Memory consolidation),
+   with phases 6 and 7 mutating `implStateDir` so durable strategy notes
+   accumulate across runs (`mode = train` gate).
 
-There is no pre-fetch of donations into the prompt and no harness-level
-"donations" parameter; the read-path is entirely MCP-tool-mediated and
-LLM-driven. The harness implementations live in-tree under
-`client/src/harnesses/impls/` (the issue's reference to `packages/*/` is
-incorrect — there are no standalone `packages/codex/` or `packages/claude-code/`
-packages).
+The expected payoff: each operator's swe-rebench-v2 attempts get better over
+time because (a) the agent reads donated artifacts from the network into its
+solving context, and (b) phases 6–7 write durable improvement notes that the
+next run starts from.
 
-## Finding — outcome (b): agents are not demonstrably learning
+This DR replaces an earlier draft on the same branch that misdiagnosed the
+gap as a corpus-read failure. The corrected picture is below.
 
-Agents are NOT demonstrably learning across operators. The cross-operator
-read-path is **broken in `hermes-agent`** (concrete code defect) and **unenforced
-in `claude-code` / `codex`** (LLM-instruction only; no harness-side guarantee
-the donation is read before patch generation). The within-operator learning
-path (`implStateDir` git-backed memory written by the learner plugin's
-Improve/Memory phases) is wired but has not been verified to run in production.
-The learning-curve metric on the explorer cannot distinguish "agents are not
-consuming donations" from "agents are consuming and not improving" — it
-measures resolved rate only, with no trajectory-level tool-call signal.
+## Finding — outcome (b), refined: the read-path works, but the agent's loop terminates before Improve/Memory because of SolverType plugin orchestration leakage
 
-This means the observed 60–70% plateau is consistent with cross-operator
-learning being effectively off across the network. We did not examine LLM
-trajectories in production runs and cannot say what *fraction* of the gap is
-the broken read-path vs. an LLM capability ceiling vs. metric smoothing.
-Closing the read-path is the prerequisite to interpreting the metric.
+The corpus consumption path is operational. Agents DO call `search_records`,
+DO call `acquire_artifact`, DO receive past patch bytes, and DO produce
+patches that resemble the acquired prior work. What's broken is downstream:
 
-### B1 — Hermes corpus discovery is broken (code defect)
+1. The `swe-rebench-v2-runtime` plugin's `plan` skill explicitly tells the
+   agent its work is done after `submit_typed_payload`. The agent obeys and
+   never reaches phases 7–9 (Debrief / Improve / Memory).
+2. No cross-session strategy notes accumulate for swe-rebench-v2 on any
+   harness, on this operator, across 215 production runs.
+3. The cross-operator corpus is also extremely sparse — only two operators
+   are actively publishing donations today — so even if the read-path were
+   more aggressive, there is very little cross-operator material to read.
 
-`main.ts:1914` builds the daemon's `corpusEnv` with a `discoveryUrl` field
-(matching `RunnerContext.corpusEnv` at `client/src/runner/runner.ts:28`) and
-passes it through `buildHarnesses()` (`client/src/harnesses/impls/index.ts:278`)
-into `HermesHarnessAdapter`.
+The plateau is therefore consistent with: within-operator learning is
+mechanically possible (the agent uses past local patches as context) but
+nothing durable persists between runs, and cross-operator amplification has
+no substrate to amplify from yet. Both must be fixed before Milestone #2's
++10pp gate is achievable.
 
-`HermesHarnessAdapter` declares its `corpusEnv` as
-`ConfigBuilderEnv['corpusEnv']` (`client/src/harnesses/impls/hermes-agent/adapter.ts:72`),
-whose schema is `{ subgraphUrl?: string }`
-(`client/src/harnesses/impls/hermes-agent/config-builder.ts:30`).
+### Architectural principle (the load-bearing decision)
 
-`snippetToEnvFile()` (`client/src/harnesses/impls/hermes-agent/bootstrap.ts:244`)
-and `buildJinnRuntimeEnv()` (`client/src/harnesses/impls/hermes-agent/config-builder.ts:91`)
-both gate on `env.corpusEnv.subgraphUrl` and write
-`JINN_CORPUS_SUBGRAPH_URL` — but `subgraphUrl` is always undefined because
-the daemon supplies `discoveryUrl`. The MCP server reads
-`JINN_DISCOVERY_URL` (`client/src/mcp/server.ts:82`), not
-`JINN_CORPUS_SUBGRAPH_URL`.
+**SolverType plugins describe their domain; they do not override the
+harness's loop.** The `learn` skill is the orchestration playbook and lives
+in the `learner` plugin. Any SolverType-specific plugin
+(`swe-rebench-v2-runtime`, future plugins for new task types) contains only
+domain knowledge — the task input shape, the output contract, submission
+tools and their use, success criteria. No "this cycle is complete," no
+"after submission, the daemon will…", no instructions that imply the agent's
+work is finished.
 
-Therefore the Hermes MCP subprocess starts without `JINN_DISCOVERY_URL` set.
-`buildReadOnlyCorpus()` returns null (`client/src/mcp/server.ts:92`:
-`if (!ipfsGatewayUrl || (!hasDiscovery && !hasOnchainCorpus)) return null`),
-and `handleSearchRecords()` falls back to local-only results with a corpus
-warning. Hermes operators never see network donations.
+The same rule, applied to other layers:
 
-Note that Hermes also does not load the Jinn-side `learner` plugin by design
-(`client/src/harnesses/impls/hermes-agent/harness.ts:43-46`); it relies on its
-own internal skill-self-improvement and FTS5 session search. The cross-operator
-gap is the bug.
+- The `learner` plugin contains no SolverType references. Its prompts are
+  generic; nothing about "if the task is swe-rebench, do X."
+- The `network-tools` plugin is a pure MCP transport plugin with no
+  agent-facing prose.
+- The harness's TypeScript code (`client/src/harnesses/`) may need to know
+  about SolverType-specific details for output harvesting (e.g.
+  `maybeMaterializeSweRebenchPatchPayload` in `harvest.ts`), but that's a
+  separate layering question (see Follow-ups below).
 
-### B2 — claude-code / codex: corpus consumption is possible but unenforced
+This DR ratifies the principle. Sibling issue [#673](https://github.com/Jinn-Network/mono/issues/673)
+implements it for swe-rebench-v2-runtime; future SolverType plugins land
+under the same rule.
 
-`ClaudeCodeHarnessAdapter` (`client/src/harnesses/impls/learner/adapters/claude-code.ts:207`)
-and `CodexCodeHarnessAdapter` (`client/src/harnesses/impls/learner/adapters/codex-code.ts:179`)
-correctly forward `JINN_DISCOVERY_URL` from `corpusEnv.discoveryUrl` into the
-MCP subprocess. The same `LearnerHarness` class
-(`client/src/harnesses/impls/learner/harness.ts:26`) backs both.
+### Detailed findings
 
-The initial prompt (`buildInitialPrompt()` at
-`client/src/harnesses/impls/learner/adapters/claude-code.ts:108`) contains the
-task body only — no donation data, no prior runs, no corpus artifacts. The
-`swe-rebench-v2-runtime` orient skill
-(`client/plugins/swe-rebench-v2-runtime/skills/orient/SKILL.md:22-25`)
-instructs the agent in prose to "search for records with
-`solverType: 'swe-rebench-v2.v1'`, `role: 'restoration'`, and
-`artifactType: 'swe-rebench-v2_v1_solution'`" and to acquire promising
-artifacts. The learner plugin's `learn` skill (`client/plugins/learner/skills/learn/SKILL.md`
-§3) instructs the agent to dispatch an `others-history` explorer subagent.
+#### F1 — Corpus tools ARE being called
 
-These are LLM-readable instructions, not code. The harness does not enforce
-that `search_records` is called, does not pre-inject corpus results, and does
-not check that any `acquire_artifact` call occurred before the patch is
-emitted. Whether donations influence the solution is entirely LLM-behaviour-
-dependent. We did not examine production trajectories to measure how often
-the model follows the instruction.
+Inspected `~/.codex/sessions/2026/` JSONL transcripts on this operator,
+filtered to daemon-spawned sessions (cwd under `~/.jinn-client/engine/work/`),
+323 sessions total:
 
-### B3 — No harness-side mechanism injects donations into per-run state
+| Step | Calls | Sessions reaching this step |
+|---|---|---|
+| `search_records` | 562 | 233 / 323 = 72% |
+| `inspect_record` | 226 | 162 / 323 = 50% |
+| `acquire_artifact` | 177 | 134 / 323 = 41% |
+| Full search → inspect → acquire chain | — | 133 / 323 = 41% |
 
-The learner plugin's `implStateDir` (git-backed, `client/plugins/learner/hooks/session-start`)
-is the within-operator memory surface. Its Improve and Memory phases
-(SKILL.md §8–§9, gated on `mode === 'train'`) commit skill edits and strategy
-notes after a successful run. The session-start hook initialises the git repo
-but does *not* read corpus state or pre-populate any donated content.
-Cross-operator learning routes exclusively through B2's MCP path; if B2 does
-not fire, nothing else closes the gap.
+In a 50-session sample of acquire calls, 27 succeeded and 1 errored. The
+bytes returned are full swe-rebench-v2-solution.v1 JSONs with the `patch`
+field populated.
 
-### B4 — The donation-consumption gate confirms acquisition, not influence
+Patch-similarity verification: one sympy-27510 session on 2026-05-18 (full
+chain, 2 acquires) was inspected. The acquired past patch and the produced
+new patch both modify `sympy/printing/str.py`'s `_print_Mul` in essentially
+identical ways (remove the early `prec = precedence(expr)` line, move it
+after the early-return path). Not coincidence — the model used the acquired
+content.
 
-`scripts/donation-consumption-acceptance.ts:1227-1229` asserts
-`lastUsedAt >= acquisitionStartedAt` against the SQLite network-cache row. The
-`lastUsedAt` column is bumped whenever `acquire_artifact` returns bytes. The
-gate proves the cache was hit during the session. It does not prove the bytes
-were read by the model, included in its context, or influenced the patch. The
-gate is necessary but not sufficient evidence of learning.
+#### F2 — All 76 acquires hit this operator's own past work, not other operators'
 
-### B5 — The learning-curve metric cannot distinguish "not consuming" from "not benefiting"
+`ownerSafe` fields across all `search_records` outputs in 323 sessions:
 
-`packages/indexer/src/api/explorer.ts:781` returns `bucketResolvedRate`
-(`packages/indexer/src/api/metrics.ts:116`, default 7200-block buckets ≈ 1 day
-on Base at 12s/block) and `rollingResolvedRate`
-(`packages/indexer/src/api/metrics.ts:159`, k=50 trailing window over verdict
-booleans). Both summarise the *output* of solve attempts. Neither indexes the
-MCP tool-call log from each session, so a 60–70% plateau is consistent with
-any combination of: corpus calls never made (B1, B2), corpus calls made but
-content not used by the LLM, content used but capability ceiling reached, or
-metric smoothing hiding a real trend. Distinguishing these requires
-trajectory-level signal the indexer does not currently surface.
+- 610 refs to `0x0e767...` (this operator's own published donations)
+- 72 refs to `0x7828...` (Phase 0 fossil — manifest schema doesn't satisfy
+  current consumer validator)
+- 10 refs to `0x53d141...` (similar Phase 0 fossil)
+- 2 refs to `0x26e9...` (5879 — the only other active publisher on the
+  network today)
+
+`ownerSafe` on all 76 `acquire_artifact` call args: 100% this operator's own
+Safe. Zero cross-operator acquires. Plausibly because (a) instance_id
+matching is local-tighter — the agent's own past work is more likely to
+share the current instance_id than another operator's, and (b) the
+cross-operator donation pool is so thin that for most instances there are no
+matching donations available.
+
+#### F3 — Cross-operator corpus is sparse: 2 active publishers
+
+Indexer (`/explorer/network`) GraphQL across all envelopes:
+
+| agentId | envelope count | notes |
+|---|---|---|
+| 5474 | 430 | this operator |
+| 5879 | 235 | second active publisher; verified publishing with `jinn.artifact.donation.v1` encoding |
+| 5277 / 5737 / 5941 / 5838 / 5945 / 5956 / 5914 | 24 / 23 / 15 / 5 / 3 / 2 / 2 | Phase 0 fossils — `kind: prediction.v0`, no `solverType`, missing the access blocks the current consumer schema requires |
+
+Composition: codex 84% / hermes 13% / prediction baseline 2% / learner-prefix
+harnesses combined <1%. By model: gpt-5.4-mini 59%. The Milestone #2 target
+configuration (codex + gpt-5.4-mini on swe-rebench-v2.v1) is the dominant
+production traffic.
+
+#### F4 — swe-rebench-v2 plugin terminates the agent's loop
+
+[`client/plugins/swe-rebench-v2-runtime/skills/plan/SKILL.md`](../../client/plugins/swe-rebench-v2-runtime/skills/plan/SKILL.md)
+final paragraph, verbatim:
+
+> "After a successful submission, **this Plan/Execute cycle is complete** —
+> the daemon's harness picks up the persisted payload post-execution and
+> assembles the on-chain envelope."
+
+The agent picks this skill over the generic `learn` skill (description match
+on "swe-rebench v2 task" is tighter), follows it to `submit_typed_payload`,
+and exits. The `learn` skill's pre-execute / post-execute split design
+([`client/plugins/learner/skills/learn/SKILL.md`](../../client/plugins/learner/skills/learn/SKILL.md) §2)
+is documented but never invoked by the adapter — `LEARNER_PHASE_RANGE` is
+read only by harvest-side code (`harvest.ts:379`); no adapter ever sets it.
+
+#### F5 — Direct evidence: impl-state git histories
+
+Inspected every harness's `implStateDir` under
+`~/.jinn-client/engine/impl-state/`:
+
+| Harness/SolverType | Commits | Status |
+|---|---|---|
+| `claude-code-learner/prediction_v1` | **9 commits** | Real improve/consolidate cycles firing. Sample: `improve: enhance consensus baseline strategy`, `consolidate: archive run 9c1a953fe92c8357`. |
+| `codex-code-learner/swe-rebench-v2_v1` | 1 (init only) | No phase 6–7 writes. |
+| `claude-code-learner/swe-rebench-v2_v1` | 1 (init only) | No phase 6–7 writes. |
+| `hermes-agent/swe-rebench-v2_v1` | directory missing | Hermes runs its own internal memory loop, doesn't load the learner plugin (per its harness.ts comment). |
+| `swe-rebench-v2-evaluator/upstream` | 1 (init only) | No phase 6–7 writes (expected — evaluators don't self-modify). |
+
+Same operator, same harness for some rows (`claude-code-learner`),
+different SolverTypes. Prediction loops fire all 7 phases. swe-rebench loops
+stop after submit. The difference is the SolverType plugin, not the
+harness or the operator.
+
+#### F6 — Codex session post-submit doesn't reach Debrief/Improve/Memory
+
+Direct inspection of one daemon-spawned codex session for sympy-27510 (May
+18, full chain):
+
+- 41 total function calls; ordering: `exec_command (26) → search_records (4)
+  → inspect_record (2) → acquire_artifact (2) → submit_typed_payload (2) →
+  write_stdin (2)`.
+- After the second `submit_typed_payload`, session ended.
+- Zero writes to `.debrief/`, `.improve/`, `.memory-consolidation/`.
+
+#### F7 — Envelope-level evidence corroborates (per ritsuKai2000's #659 comment)
+
+The envelope's `executor.plugins` array is populated from
+`solverNet.runtimePlugins` ([`engine.ts:1153`](../../client/src/harnesses/engine/engine.ts#L1153)),
+not from what the adapter materially loads. The swe-rebench-v2 SolverNet
+manifest declares `network-tools` + `swe-rebench-v2-runtime` only — no
+learner plugin. So envelopes signed by this operator across 241 swe-rebench
+attempts list those two plugins and nothing else, even though the codex
+adapter does materialise the learner plugin into the workspace at runtime.
+
+Two interpretations:
+- The learner plugin is harness-internal (loaded by the adapter, not
+  attested in the SolverNet contract) — consistent with the architectural
+  principle in §"Architectural principle" above.
+- OR: the learner plugin should be in the SolverNet manifest so on-chain
+  attestation proves the operator ran with self-improvement.
+
+The current implementation chose the first; whether that should change is
+an open architectural question for #601 / mainnet. This DR notes the
+choice rather than ratifying it.
+
+#### F8 — Side findings: launcher saturation/abandonment caps violated
+
+While tracing why sympy-27510 had 22 verdicts (21 PASSED), discovered the
+local generator state shows `posted: 16, successful: 8` for that
+instance — both above the configured thresholds (`N_target_successes: 5`,
+`N_max_postings_per_task: 10`). Two root causes:
+
+- `recordSuccess` only counts verdicts this daemon's delivery-watcher
+  observes, not on-chain truth (local 8 vs on-chain 21). Operator launchers
+  see an undercount and over-post resolved instances.
+- `selectNextPostingCandidates` reads counters at tick start, not per-post;
+  a single tick with `post_batch_size: 25` can blow past `N_max_postings_per_task`
+  for a single instance before any update fires.
+
+Filed as [#669](https://github.com/Jinn-Network/mono/issues/669) and
+[#670](https://github.com/Jinn-Network/mono/issues/670). Independent of the
+main spike question but found while investigating it.
+
+#### F9 — Side finding: daemon-side telemetry capture exists but isn't wired
+
+`capture_spans` and `pending_captures` tables, the OTel OTLP receiver, the
+processor stack (CredentialScrub / IdentityScrub / PathScrub /
+TranscriptContentScrub / EnsurePendingCapture / SqliteExporter), and the
+Path B `transcript-watcher.ts` with per-tool parsers (codex, claude-code,
+gemini-cli, aider, continue) all exist as production code. But
+`startTranscriptWatcher` has zero callers in `main.ts`, so Path B never runs.
+And `CodexSessionParser` expects the flat pre-0.129.0 Codex format; current
+Codex CLI emits `{timestamp, type, payload}` wrapped records that the parser
+silently skips.
+
+Net effect: 1,179 codex session JSONLs on this operator's disk go to waste
+when they could be flowing into `capture_spans` for SQL-queryable
+observability. Filed as [#671](https://github.com/Jinn-Network/mono/issues/671)
+and [#672](https://github.com/Jinn-Network/mono/issues/672).
+
+#### F10 — Side finding: Hermes corpus discovery completely broken
+
+`HermesHarnessAdapter.corpusEnv` uses `ConfigBuilderEnv['corpusEnv']` which
+declares `subgraphUrl?: string`, while the daemon supplies `discoveryUrl`.
+`snippetToEnvFile()` and `buildJinnRuntimeEnv()` gate on
+`env.corpusEnv.subgraphUrl` — always undefined — and write the wrong env
+var name. The MCP server reads `JINN_DISCOVERY_URL`. Hermes operators get
+local-only corpus results and no network donations ever reach them.
+
+Filed as [#666](https://github.com/Jinn-Network/mono/issues/666). Smaller
+blast radius than the main finding (one harness affected) but a clean fix.
+
+## Decision
+
+1. **Ratify the architectural principle:** SolverType plugins describe their
+   domain only. They do not contain orchestration verbs ("this cycle is
+   complete," "after submission, the daemon will…", "your work is done") and
+   they do not override the harness's 7-phase loop. Phase orchestration is
+   exclusively the learner plugin's `learn` skill.
+
+2. **Implement the principle for swe-rebench-v2 in [#673](https://github.com/Jinn-Network/mono/issues/673):**
+   delete `client/plugins/swe-rebench-v2-runtime/skills/orient/SKILL.md` and
+   `.../plan/SKILL.md`. Replace with a single domain-only `contract` skill
+   describing task input shape, repo handling, `FAIL_TO_PASS` / `PASS_TO_PASS`
+   semantics, the `swe-rebench-v2-solution.v1` output schema, and use of
+   `submit_typed_payload` for delivery — with no orchestration verbs.
+   `network-tools` and the `learner` plugin remain untouched. Verify by
+   running one codex session against a sympy-27510-class task and confirming
+   `~/.jinn-client/engine/impl-state/codex-code-learner/swe-rebench-v2_v1/.git`
+   accumulates commits beyond `init implStateDir`.
+
+3. **`swe-rebench-v2-diffmin` cleanup is a follow-up sibling issue,** not a
+   blocker for #673. The same layering rule applies; the file is
+   `client/plugins/swe-rebench-v2-diffmin/skills/diffmin/SKILL.md:114` which
+   currently mixes diffmin-technique guidance with `submit_typed_payload`
+   prose.
+
+4. **Defer the "should learner be in the SolverNet manifest?" question.**
+   Today it isn't (harness-internal). This DR records the question (F7) but
+   does not decide it. Surface for #601 / mainnet design.
+
+## Consequences
+
+- Once #673 lands, swe-rebench-v2 sessions complete the full 7-phase loop,
+  Improve/Memory commits start appearing in
+  `codex-code-learner/swe-rebench-v2_v1/.git`, and we get observable
+  cross-session learning for the Milestone #2 dominant configuration. The
+  +10pp gate becomes attainable.
+- Cross-operator amplification remains thin until donation density grows.
+  The 2-active-publishers picture doesn't change with #673 alone — it needs
+  GTM / incentive work that's outside the engineering surface.
+- The launcher fixes (#669, #670) compound the win: with accurate counters
+  and respected caps, operators stop wasting budget on resolved instances
+  and the learning-curve denominator stops being inflated.
+- The TranscriptWatcher + parser fixes (#671, #672) unlock observability for
+  the next round of investigation — any future "did the agent learn?" or
+  "did this change help?" question becomes a SQL query, not a JSONL grep.
+- Hermes (#666) becomes a real cross-operator corpus consumer once fixed;
+  currently it's silently disabled.
 
 ## Caveats / things this spike did not check
 
-1. We did not examine LLM trajectories from production runs to confirm whether
-   the `claude-code` / `codex` model actually calls `search_records` in
-   practice.
-2. We did not verify, on a real operator's machine, that
-   `~/.jinn-client/engine/impl-state/claude-code-learner/.git` has commits
-   beyond `init implStateDir` — i.e. that the Improve/Memory phases run in
-   production and `mode` is ever `train` rather than `frozen`.
-3. The `network-tools` plugin is required to expose corpus MCP tools to the
-   session; we did not confirm it is loaded against production SolverNet
-   manifests.
-4. PRs #349/#350/#351/#162 were read from current code state; we did not
-   inspect their merge-time intent for divergence.
-5. Hermes' internal learning (skill self-improvement, FTS5 session search) is
-   external code and not analysed here. B1 is about the Jinn cross-operator
-   path, not Hermes' internal memory.
-6. We did not evaluate the gpt-5.4-mini / current model versions for
-   instruction-following quality on the orient skill.
-
-## Candidate sibling issues (under #601)
-
-These are the concrete repair tracks implied by B1–B5. File them separately
-under the #601 epic; this DR is the finding, not the implementation plan.
-
-1. **`fix(harnesses): Hermes MCP server missing JINN_DISCOVERY_URL — subgraphUrl/discoveryUrl field-name mismatch`**
-   Fix the field-name mismatch in `HermesHarnessAdapter.corpusEnv`. Add a
-   `discoveryUrl` field to `ConfigBuilderEnv.corpusEnv` and write
-   `JINN_DISCOVERY_URL` from both `snippetToEnvFile()`
-   (`client/src/harnesses/impls/hermes-agent/bootstrap.ts:244`) and
-   `buildJinnRuntimeEnv()`
-   (`client/src/harnesses/impls/hermes-agent/config-builder.ts:91`).
-   Acceptance: the Hermes MCP subprocess receives `JINN_DISCOVERY_URL`
-   matching the daemon's `discovery.url`; `handleSearchRecords` returns
-   network corpus results. Shape: `fix`.
-
-2. **`feat(harnesses): enforce corpus pre-scan before patch generation for swe-rebench-v2 in LearnerHarness`**
-   Replace the soft orient-skill instruction with a harness-side pre-run step
-   that executes `search_records` for the current `instance_id` and either
-   injects the structured result into the task prompt or writes
-   `workingDir/.orient/injected-corpus-context.json` for the orient skill to
-   read. Files: `client/src/harnesses/impls/learner/harness.ts`,
-   `client/plugins/swe-rebench-v2-runtime/`. Acceptance: when donations exist
-   for the `instance_id`, a corpus-context artifact appears under the working
-   directory before the model is invoked; transcripts show the model
-   references it. Shape: `feat`.
-
-3. **`feat(indexer): surface corpus tool-call evidence in per-attempt trajectory`**
-   Extract from the trajectory bundle attached to each envelope: whether
-   `search_records` was called, how many `acquire_artifact` calls succeeded,
-   and the `instance_id` those queries targeted. Index this and expose a
-   `corpusConsumptionRate` on the SolverNet detail endpoint. Files:
-   `packages/indexer/src/handlers.ts`,
-   `packages/indexer/src/api/explorer.ts`, `packages/indexer/ponder.schema.ts`.
-   Acceptance: `/explorer/solvernet/:cid` returns
-   `corpusConsumptionRate: number | null` alongside `resolvedRate`. Shape:
-   `feat`.
-
-4. **`spike: controlled A/B — does corpus consumption improve resolved rate on swe-rebench-v2?`**
-   For instances with at least one donated prior solution, run N attempts
-   with corpus consumption enabled and N with it disabled (e.g. via a
-   `JINN_CORPUS_SKIP_ORIENT` flag). Compare resolved rates. Output: a
-   finding with measured effect size and confidence interval. Sequence: do
-   issue 1 (B1 fix) and issue 3 (trajectory signal) first so the experiment
-   has a working baseline and a way to verify which arm actually consumed.
-   Shape: `spike`.
-
-5. **`spike: verify Improve/Memory consolidation runs in production — is implStateDir growing?`**
-   Inspect a production operator's
-   `~/.jinn-client/engine/impl-state/claude-code-learner/` git history. If
-   only `init implStateDir` appears, the Improve/Memory phases are not
-   executing (probable cause: `mode` is `frozen`, or earlier phases fail
-   first). Output: a written finding with a real `git log` excerpt or a code
-   reference explaining the absence. Shape: `spike`.
+1. **LLM trajectories on other operators' machines.** Only this operator's
+   sessions were inspected. Whether agentId 5879's codex follows the same
+   "stops after submit" pattern is presumed but not verified.
+2. **The exact reason the agent picks `swe-rebench-v2-orient` over `learn`.**
+   Skill-discovery / description-matching behaviour is LLM-specific.
+   Post-fix, the absence of orient/plan should force the agent onto the
+   `learn` skill, but if it doesn't, the test session will surface that.
+3. **Window-pressure feasibility.** Whether adding Debrief / Improve /
+   Memory to a swe-rebench session fits within the task window at scale is
+   unverified. If sessions hit window-end before phase 7, partial outcomes
+   (e.g. `.improve/` artifacts written before the cut) are still
+   informative, but reliable consolidation may need window-budget tuning.
+4. **`harvest.ts` SolverType-awareness** (`maybeMaterializeSweRebenchPatchPayload`)
+   is a latent layering violation on the TypeScript side. The agreed
+   principle says SolverType-specific logic should live in plugins, not in
+   the daemon's TypeScript code. Out of scope for this spike — flag as a
+   follow-up `refactor` issue.
+5. **Prediction.v1's working loop is the reference**, but its specific
+   prompts may not transfer directly to swe-rebench (e.g. "consensus
+   baseline" vocabulary is prediction-specific). The Improve subagent's
+   generic prompt may need SolverType-aware enrichment over time. Acceptable
+   for v1 of the fix; revisit if Improve notes for swe-rebench come out
+   low-quality.
 
 ## Status
 
-Ratified as the spike finding for issue #659. No code changes land under this
-DR; the five candidate sibling issues above are filed separately under #601 as
-follow-up work.
+Ratified as the spike finding for [#659](https://github.com/Jinn-Network/mono/issues/659).
+
+This DR replaces the earlier draft on this branch (same path, earlier
+commit) which incorrectly diagnosed the gap as "corpus read-path broken /
+unenforced" and proposed sibling issues that have since been retired or
+reshaped (see Decision §1 above for the architectural principle that
+emerged; see the sibling-issue list in the front-matter for the
+implementation tracking). The earlier draft remains in git history on this
+branch as a record of the investigation arc.
+
+Sibling implementation work tracked separately:
+
+- [#666](https://github.com/Jinn-Network/mono/issues/666) — `fix`, Hermes corpus discovery
+- [#669](https://github.com/Jinn-Network/mono/issues/669) — `fix`, launcher counter under-counts
+- [#670](https://github.com/Jinn-Network/mono/issues/670) — `fix`, launcher cap overshoot
+- [#671](https://github.com/Jinn-Network/mono/issues/671) — `feat`, TranscriptWatcher startup
+- [#672](https://github.com/Jinn-Network/mono/issues/672) — `fix`, CodexSessionParser format drift
+- [#673](https://github.com/Jinn-Network/mono/issues/673) — `spike` deliverable (this DR) plus the swe-rebench-v2-runtime refactor
