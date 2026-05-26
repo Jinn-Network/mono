@@ -12,7 +12,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { Address } from 'viem';
@@ -29,6 +29,7 @@ import {
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { PluginRegistryPublisher } from '../../erc8004/plugin-registry.js';
 import { pinFileToIpfs as defaultPinFileToIpfs } from '../../adapters/mech/ipfs-pinfile.js';
+import { fetchFromIpfs as defaultFetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from '../../earning/viem-clients.js';
 import { walletPrivateKeyAtIndex, decryptMnemonic } from '../../earning/wallet.js';
@@ -36,6 +37,9 @@ import { FleetStateStore } from '../../earning/store.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
+import { ReputationRegistryClient } from '../../erc8004/reputation.js';
+import { createDiscoveryAPI } from '../../discovery/factory.js';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 
 export function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -67,6 +71,44 @@ export interface PublisherFactoryArgs {
   password: string;
 }
 
+/**
+ * Args passed to `reputationClientFactory`.
+ *
+ * When `password === undefined`, the factory builds a read-only client: reads
+ * work, writes throw the canonical `walletClient required` error from
+ * `ReputationRegistryClient`. The read-only path is what `list-feedback`,
+ * `status`, and (indirectly) `discover` consume — none of them require a
+ * keystore password.
+ */
+export interface ReputationClientFactoryArgs {
+  reputationRegistryAddress: Address;
+  safeAddress: Address | undefined;
+  rpcUrl: string;
+  network: JinnOnchainNetwork;
+  earningDir: string;
+  password: string | undefined;
+}
+
+export type ReputationClientHandle = Pick<
+  ReputationRegistryClient,
+  | 'giveFeedback'
+  | 'respondToFeedback'
+  | 'revokeFeedback'
+  | 'readAllFeedback'
+  | 'getSummary'
+  | 'getClients'
+>;
+
+/**
+ * Filesystem shim consumed by `block`'s local-config write. Held on the deps
+ * bag so tests can inject read/write failure modes without monkey-patching
+ * `fs`. Production wires the real fs-backed implementations.
+ */
+export interface ConfigFileIo {
+  readConfigFile: (configPath: string) => Record<string, unknown>;
+  writeConfigFile: (configPath: string, value: Record<string, unknown>) => void;
+}
+
 export interface SolverPluginsDeps extends BaseCommandDeps {
   bootstrapperFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => Pick<FleetBootstrapper, 'ensureStage1'>;
   pinFileToIpfs: typeof defaultPinFileToIpfs;
@@ -76,6 +118,11 @@ export interface SolverPluginsDeps extends BaseCommandDeps {
     publish: PluginRegistryPublisher['publish'];
     revoke: PluginRegistryPublisher['revoke'];
   };
+  reputationClientFactory: (args: ReputationClientFactoryArgs) => ReputationClientHandle;
+  discoveryApiFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => DiscoveryAPI;
+  ipfsFetch: typeof defaultFetchFromIpfs;
+  readConfigFile: ConfigFileIo['readConfigFile'];
+  writeConfigFile: ConfigFileIo['writeConfigFile'];
   resolveCliPassword: typeof defaultResolveCliPassword;
   now: () => number;
 }
@@ -139,6 +186,88 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
       },
     };
     return publisher;
+  },
+  reputationClientFactory: (args) => {
+    // Lazy-mnemonic-decrypt pattern matching publisherFactory: synchronous
+    // return, single shared ReputationRegistryClient built on first write
+    // call. When password is undefined, build the read-only client up front
+    // (no decrypt path) so reads work without a keystore.
+    const pubClient = createJinnPublicClient(args.rpcUrl, args.network);
+    let readOnlyClient: ReputationRegistryClient | undefined;
+    let writeClientPromise: Promise<ReputationRegistryClient> | undefined;
+
+    const getReadOnly = () => {
+      if (!readOnlyClient) {
+        readOnlyClient = new ReputationRegistryClient({
+          reputationRegistryAddress: args.reputationRegistryAddress,
+          publicClient: pubClient,
+          ...(args.safeAddress ? { safeAddress: args.safeAddress } : {}),
+        });
+      }
+      return readOnlyClient;
+    };
+
+    const getWriteClient = async () => {
+      if (args.password === undefined) {
+        // The read-only client's write methods throw a clean
+        // 'walletClient required' error — the canonical signal for callers
+        // that omitted the password.
+        return getReadOnly();
+      }
+      if (!writeClientPromise) {
+        const password = args.password;
+        const store = new FleetStateStore(args.earningDir);
+        writeClientPromise = (async () => {
+          const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), password);
+          const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
+          const account = privateKeyToAccount(agentKey);
+          const walClient = createJinnWalletClient(args.rpcUrl, args.network, account);
+          return new ReputationRegistryClient({
+            reputationRegistryAddress: args.reputationRegistryAddress,
+            publicClient: pubClient,
+            walletClient: walClient,
+            ...(args.safeAddress ? { safeAddress: args.safeAddress } : {}),
+          });
+        })();
+      }
+      return writeClientPromise;
+    };
+
+    return {
+      async giveFeedback(gArgs) {
+        return (await getWriteClient()).giveFeedback(gArgs);
+      },
+      async respondToFeedback(rArgs) {
+        return (await getWriteClient()).respondToFeedback(rArgs);
+      },
+      async revokeFeedback(rArgs) {
+        return (await getWriteClient()).revokeFeedback(rArgs);
+      },
+      async readAllFeedback(agentId, opts) {
+        return getReadOnly().readAllFeedback(agentId, opts);
+      },
+      async getSummary(agentId, opts) {
+        return getReadOnly().getSummary(agentId, opts);
+      },
+      async getClients(agentId) {
+        return getReadOnly().getClients(agentId);
+      },
+    };
+  },
+  discoveryApiFactory: (cfg) => {
+    const chainId = cfg.network === 'testnet' ? 84532 : 8453;
+    return createDiscoveryAPI(cfg.discovery ?? { mode: 'onchain' }, {
+      rpcUrl: cfg.rpcUrl,
+      chainId,
+    });
+  },
+  ipfsFetch: defaultFetchFromIpfs,
+  readConfigFile: (configPath) => {
+    const raw = readFileSync(configPath, 'utf-8');
+    return JSON.parse(raw) as Record<string, unknown>;
+  },
+  writeConfigFile: (configPath, value) => {
+    writeFileSync(configPath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
   },
   resolveCliPassword: defaultResolveCliPassword,
   now: () => Date.now(),

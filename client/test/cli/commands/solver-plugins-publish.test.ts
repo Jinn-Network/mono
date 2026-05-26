@@ -17,9 +17,16 @@ import { join } from 'node:path';
 import type { CommandContext } from '../../../src/cli/command.js';
 import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
 
-const tempDirs: string[] = [];
+/**
+ * Test fixture state shared across helpers. The arrays are file-scope so the
+ * `afterEach` cleanup can reset them; the helpers are exported so the
+ * sibling solver-plugins test files (feedback / block / read) can reuse the
+ * same temp-dir lifecycle and CLI context shape per the plan's "Test helper"
+ * section.
+ */
+export const tempDirs: string[] = [];
 
-function withTempPlugin(name = 'test-plugin', version = '0.1.0'): string {
+export function withTempPlugin(name = 'test-plugin', version = '0.1.0'): string {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-plugin-'));
   tempDirs.push(dir);
   const root = join(dir, name);
@@ -35,7 +42,7 @@ function withTempPlugin(name = 'test-plugin', version = '0.1.0'): string {
   return root;
 }
 
-function withTempConfig(extra: Record<string, unknown> = {}): string {
+export function withTempConfig(extra: Record<string, unknown> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-publish-config-'));
   tempDirs.push(dir);
   const configPath = join(dir, 'config.json');
@@ -49,7 +56,10 @@ function withTempConfig(extra: Record<string, unknown> = {}): string {
   return configPath;
 }
 
-function makeCtx(argv: string[]): {
+export function makeCtx(
+  argv: string[],
+  envOverride?: NodeJS.ProcessEnv,
+): {
   ctx: CommandContext;
   writes: string[];
   exits: number[];
@@ -61,20 +71,24 @@ function makeCtx(argv: string[]): {
     stdoutIsTty: false,
     writer: { write: (s) => { writes.push(s); return true; } },
     exit: (code) => { exits.push(code); },
-    env: { JINN_PASSWORD: 'test' },
+    env: envOverride ?? { JINN_PASSWORD: 'test' },
   };
   return { ctx, writes, exits };
 }
 
-function parsedLine(writes: string[]): Record<string, unknown> {
+export function parsedLine(writes: string[]): Record<string, unknown> {
   const joined = writes.join('');
   const line = joined.trim().split('\n').filter((s) => s.startsWith('{')).pop();
   return JSON.parse(line!);
 }
 
+export function cleanupTempDirs(): void {
+  for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  cleanupTempDirs();
 });
 
 describe('jinn solver-plugins publish', () => {

@@ -597,6 +597,24 @@ export const JinnConfigSchema = z.object({
    * but is NOT a config-file field and has no entry in this schema.
    */
   spendCaps: z.record(z.string(), z.number().positive()).optional(),
+
+  /**
+   * Operator-local SolverPlugin trust state.
+   *
+   * `blockedCids` is the list of plug-in CIDs the operator has chosen to
+   * refuse to load — populated by `jinn solver-plugins block <cid>` and read
+   * at daemon startup. The block list complements the on-chain
+   * `giveFeedback(score=0)` write (which is the public-trust signal); the
+   * local list is the operator's own refusal to execute, applied even when
+   * the network write fails. File-managed only — no env override.
+   *
+   * See spec/2026-05-26-117-design.md "Failure modes" and "Local-only effects".
+   */
+  solverPlugins: z
+    .object({
+      blockedCids: z.array(z.string()).default([]),
+    })
+    .default({ blockedCids: [] }),
 }).refine(
   (cfg) =>
     cfg.jinnClaimSubmissionMode !== 'submit' ||
