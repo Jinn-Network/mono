@@ -372,20 +372,14 @@ describe('App routes', () => {
     // Switch. Use mockResolvedValue (not Once) because App.tsx schedules a
     // 1.5s refetch on the ['bootstrap'] query and we don't want the second
     // resolution to fall back to the module-level `{}` stub (which would
-    // collapse App into Onboarding mid-test).
+    // collapse App into Onboarding mid-test). wouter Routers are nestable —
+    // the outer `memoryLocation` hook from `withProviders` wins over the
+    // inner `<Router>` App mounts itself.
     vi.mocked(api.getBootstrap).mockResolvedValue({
       mode: 'running',
       chain: 'base-sepolia',
     } as BootstrapState);
-    const { hook } = memoryLocation({ path: '/operator/network' });
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <Router hook={hook}>
-          <App />
-        </Router>
-      </QueryClientProvider>,
-    );
+    render(withProviders(<App />, '/operator/network'));
     await waitFor(() => expect(screen.getByTestId('network-tab')).toBeTruthy());
     expect(screen.queryByTestId('memberships-tab')).toBeNull();
   });
