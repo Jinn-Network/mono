@@ -39,6 +39,141 @@ function discoveryThatThrows(err: Error): DiscoveryAPI {
   } as unknown as DiscoveryAPI;
 }
 
+describe('jinn solver-plugins status', () => {
+  it('returns status="published" with publication + summary when discovery has a row', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyStatCid';
+
+    const getClients = vi.fn(async () => ['0xCCCC000000000000000000000000000000000003' as `0x${string}`]);
+    const getSummary = vi.fn(async () => ({
+      count: 3n,
+      summaryValue: 250n,
+      summaryValueDecimals: 2,
+    }));
+
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary,
+          getClients,
+        }) as any,
+    });
+
+    const { ctx, writes, exits } = makeCtx(['status', cid, '--config', configPath], {});
+    await command.run(ctx);
+
+    const out = parsedLine(writes);
+    expect(out.verb).toBe('solver-plugins status');
+    expect(out.pluginCid).toBe(cid);
+    expect(out.status).toBe('published');
+    expect((out as any).summary?.count).toBe('3');
+    expect((out as any).summary?.summaryValue).toBe('250');
+    expect(out.locallyBlocked).toBe(false);
+    expect(exits).toEqual([]);
+  });
+
+  it('returns status="not_published" without erroring when discovery has no row', async () => {
+    const configPath = withTempConfig();
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () => discoveryWith([]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+    });
+    const { ctx, writes, exits } = makeCtx(
+      ['status', 'bafyMissing', '--config', configPath],
+      {},
+    );
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect(out.verb).toBe('solver-plugins status');
+    expect(out.status).toBe('not_published');
+    expect(out.locallyBlocked).toBe(false);
+    expect(exits).toEqual([]);
+  });
+
+  it('returns status="revoked" when discovery row is revoked', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyRev';
+    const row = { ...fakePluginRow(cid, '777'), revoked: true, revokedReason: 'CVE' };
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(async () => []),
+        }) as any,
+    });
+    const { ctx, writes, exits } = makeCtx(['status', cid, '--config', configPath], {});
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect(out.status).toBe('revoked');
+    expect((out as any).revokedReason).toBe('CVE');
+    expect(exits).toEqual([]);
+  });
+
+  it('marks locallyBlocked=true when the cid is in solverPlugins.blockedCids', async () => {
+    const cid = 'bafyLocallyBlocked';
+    const configPath = withTempConfig({
+      solverPlugins: { blockedCids: [cid] },
+    });
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(async () => []),
+        }) as any,
+    });
+    const { ctx, writes, exits } = makeCtx(['status', cid, '--config', configPath], {});
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect(out.locallyBlocked).toBe(true);
+    expect(exits).toEqual([]);
+  });
+
+  it('emits discovery_unavailable when factory throws', async () => {
+    const configPath = withTempConfig();
+    const command = createSolverPluginsCommand({
+      discoveryApiFactory: () =>
+        discoveryThatThrows(new DiscoveryUnavailableError('rpc timeout')),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback: vi.fn(),
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+    });
+    const { ctx, writes, exits } = makeCtx(['status', 'bafy', '--config', configPath], {});
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('discovery_unavailable');
+    expect(exits).toEqual([1]);
+  });
+});
+
 describe('jinn solver-plugins discover', () => {
   it('lists published plug-in rows from discovery', async () => {
     const configPath = withTempConfig();

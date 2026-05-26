@@ -22,6 +22,11 @@ import type { SolverPluginsDeps } from './solver-plugins.js';
 import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
 import { DiscoveryUnavailableError } from '../../discovery/types.js';
 
+export interface StatusOptions {
+  pluginCid: string;
+  configPath: string | undefined;
+}
+
 export interface DiscoverOptions {
   solverType: string | undefined;
   builderAgentId: string | undefined;
@@ -110,6 +115,117 @@ export async function discoverHandler(
     }
     throw err;
   }
+}
+
+/**
+ * `status` composes the publication row (or the absence of one) with the
+ * read-only `ReputationRegistry.getSummary` and the operator-local
+ * `solverPlugins.blockedCids` flag. A missing publication is a valid answer
+ * (`{ status: 'not_published' }`, exit 0), not an error.
+ */
+export async function statusHandler(
+  ctx: CommandContext,
+  opts: StatusOptions,
+  deps: SolverPluginsDeps,
+): Promise<void> {
+  let config: ReturnType<typeof deps.loadConfig>;
+  try {
+    config = deps.loadConfig(opts.configPath);
+  } catch (err) {
+    writeJson(ctx, {
+      error: { code: 'config_load_failed', message: err instanceof Error ? err.message : String(err) },
+    });
+    ctx.exit(1);
+    return;
+  }
+
+  const locallyBlocked = config.solverPlugins?.blockedCids?.includes(opts.pluginCid) ?? false;
+
+  let row: import('../../discovery/types.js').PluginPublication | undefined;
+  try {
+    const api = deps.discoveryApiFactory(config);
+    const rows = await api.listPluginPublications({});
+    row = rows.find((r) => r.cid === opts.pluginCid);
+  } catch (err) {
+    if (err instanceof DiscoveryUnavailableError) {
+      emitDiscoveryUnavailable(ctx, config, err);
+      return;
+    }
+    throw err;
+  }
+
+  if (!row) {
+    writeJson(ctx, {
+      verb: 'solver-plugins status',
+      pluginCid: opts.pluginCid,
+      status: 'not_published',
+      locallyBlocked,
+    });
+    return;
+  }
+
+  if (row.revoked) {
+    writeJson(ctx, {
+      verb: 'solver-plugins status',
+      pluginCid: opts.pluginCid,
+      status: 'revoked',
+      publication: {
+        cid: row.cid,
+        builderAgentId: row.builderAgentId,
+        name: row.name,
+        version: row.version,
+        supports: row.supports,
+        publishedAt: row.publishedAt,
+        pluginSha256: row.pluginSha256,
+      },
+      ...(row.revokedReason ? { revokedReason: row.revokedReason } : {}),
+      locallyBlocked,
+    });
+    return;
+  }
+
+  // Active publication: also try to summarise reputation. Empty client list →
+  // no summary (getSummary reverts on empty input by design).
+  const chainId = config.network === 'testnet' ? 84532 : 8453;
+  const reputationRegistryAddress = getReputationRegistryAddress(chainId);
+  let summarySerialised: { count: string; summaryValue: string; summaryValueDecimals: number } | null = null;
+  if (reputationRegistryAddress) {
+    const client = deps.reputationClientFactory({
+      reputationRegistryAddress,
+      safeAddress: undefined,
+      rpcUrl: config.rpcUrl,
+      network: config.network === 'testnet' ? 'base-sepolia' : 'base',
+      earningDir: config.earningDir,
+      password: undefined,
+    });
+    const builderAgentId = BigInt(row.builderAgentId);
+    const clients = await client.getClients(builderAgentId);
+    if (clients.length > 0) {
+      const summary = await client.getSummary(builderAgentId, { clientAddresses: clients });
+      summarySerialised = {
+        count: summary.count.toString(),
+        summaryValue: summary.summaryValue.toString(),
+        summaryValueDecimals: summary.summaryValueDecimals,
+      };
+    }
+  }
+
+  writeJson(ctx, {
+    verb: 'solver-plugins status',
+    pluginCid: opts.pluginCid,
+    status: 'published',
+    publication: {
+      cid: row.cid,
+      builderAgentId: row.builderAgentId,
+      name: row.name,
+      version: row.version,
+      supports: row.supports,
+      publishedAt: row.publishedAt,
+      pluginSha256: row.pluginSha256,
+    },
+    summary: summarySerialised,
+    locallyBlocked,
+  });
 }
 
 export async function listFeedbackHandler(

@@ -39,7 +39,7 @@ import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
 import { blockHandler } from './solver-plugins-block.js';
-import { listFeedbackHandler, discoverHandler } from './solver-plugins-read.js';
+import { listFeedbackHandler, discoverHandler, statusHandler } from './solver-plugins-read.js';
 import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
 import { createDiscoveryAPI } from '../../discovery/factory.js';
@@ -387,6 +387,28 @@ export function createSolverPluginsCommand(
               ? BigInt(parsed.values['builder-agent-id'] as string)
               : undefined,
           },
+          resolvedDeps,
+        );
+      }
+      if (subverb === 'status') {
+        const parsed = parseArgs({
+          args: rest,
+          allowPositionals: true,
+          options: {
+            config: { type: 'string' },
+          },
+        });
+        const pluginCid = parsed.positionals[0];
+        if (!pluginCid) {
+          writeJson(ctx, {
+            error: { code: 'invalid_invocation', message: 'solver-plugins status requires <pluginCid>' },
+          });
+          ctx.exit(1);
+          return;
+        }
+        return statusHandler(
+          ctx,
+          { pluginCid, configPath: parsed.values.config as string | undefined },
           resolvedDeps,
         );
       }
