@@ -288,9 +288,7 @@ export function OverviewPage(): JSX.Element {
       }
       return set;
     };
-    const joined = collect(bootstrap?.joinedSolverNets);
-    const out = joined.size > 0 ? joined : collect(bootstrap?.solverNets);
-    return Array.from(out).sort();
+    return Array.from(collect(bootstrap?.joinedSolverNets)).sort();
   }, [bootstrap]);
 
   // Eviction state — derived from the first evicted service in the fleet.
