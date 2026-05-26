@@ -40,4 +40,20 @@ export interface SessionsDeps {
 export interface KillOptions { force: boolean; }
 export interface TailOptions { tailLines: number; /* default 50 */ }
 
-export {};
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Encode an absolute worktree path the way Claude Code does when it persists a
+ * session transcript under `~/.claude/projects/<dir>/`: every non-alphanumeric
+ * character becomes a single `-`, runs of `-` collapse, and any trailing `-`
+ * (e.g. from a trailing slash) is trimmed. The leading `-` (from the leading
+ * `/` on an absolute path) is preserved — it is load-bearing for round-trips.
+ */
+export function encodeWorktreePathToProjectDir(path: string): string {
+  return path
+    .replace(/[^A-Za-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/-+$/, '');
+}
