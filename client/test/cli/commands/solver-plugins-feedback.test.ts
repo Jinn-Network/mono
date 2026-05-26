@@ -138,6 +138,77 @@ describe('jinn solver-plugins endorse', () => {
     expect(exits).toEqual([1]);
   });
 
+  it('warn submits a score=50 tag1=warning feedback with the reason as tag2', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyWarnCid';
+    const row = fakePluginRow(cid, '777');
+
+    const giveFeedback = vi.fn(async () => '0xtxwarn' as `0x${string}`);
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback,
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'warn', cid,
+      '--reason', 'flaky on swe-rebench-v2',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    expect(giveFeedback).toHaveBeenCalledOnce();
+    const callArg = giveFeedback.mock.calls[0]![0];
+    expect(callArg.harnessAgentId).toBe(777n);
+    expect(callArg.score).toBe(50);
+    expect(callArg.scoreDecimals).toBe(2);
+    expect(callArg.tag1).toBe('warning');
+    expect(callArg.tag2).toBe('flaky on swe-rebench-v2');
+    expect(callArg.manifestRef).toBe(`plugin:${cid}`);
+
+    const out = parsedLine(writes);
+    expect(out.verb).toBe('solver-plugins warn');
+    expect(out.txHash).toBe('0xtxwarn');
+    expect(out.pluginCid).toBe(cid);
+    expect(exits).toEqual([]);
+  });
+
+  it('warn emits keystore_missing when no password is available', async () => {
+    const configPath = withTempConfig();
+    const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      reputationClientFactory: () =>
+        ({
+          giveFeedback,
+          respondToFeedback: vi.fn(),
+          revokeFeedback: vi.fn(),
+          readAllFeedback: vi.fn(),
+          getSummary: vi.fn(),
+          getClients: vi.fn(),
+        }) as any,
+      resolveCliPassword: () => ({ ok: false, message: 'no password' } as any),
+    });
+    const { ctx, writes, exits } = makeCtx([
+      'warn', 'bafyCid', '--reason', 'because', '--config', configPath,
+    ]);
+    await command.run(ctx);
+    const out = parsedLine(writes);
+    expect((out as any).error?.code).toBe('keystore_missing');
+    expect(giveFeedback).not.toHaveBeenCalled();
+    expect(exits).toEqual([1]);
+  });
+
   it('emits agentid_unresolvable when discovery has no row for the cid', async () => {
     const configPath = withTempConfig();
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);

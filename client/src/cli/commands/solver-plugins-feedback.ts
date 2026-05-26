@@ -210,6 +210,80 @@ function emitWriteError(ctx: CommandContext, err: unknown): void {
 
 // ── Verbs ────────────────────────────────────────────────────────────────────
 
+/**
+ * Shared body for any verb that submits a single `giveFeedback` after the
+ * preparePipeline prologue. The caller supplies the verb name (for the
+ * envelope) plus the on-chain args; this function emits the success envelope
+ * or maps the thrown error to a typed envelope.
+ */
+async function submitFeedbackAndEmit(
+  ctx: CommandContext,
+  prep: FeedbackPipelineCtx,
+  deps: SolverPluginsDeps,
+  verb: string,
+  args: {
+    score: number;
+    scoreDecimals: number;
+    tag1?: string;
+    tag2?: string;
+  },
+  extraEnvelopeFields: Record<string, unknown> = {},
+): Promise<void> {
+  const client = deps.reputationClientFactory({
+    reputationRegistryAddress: prep.reputationRegistryAddress,
+    safeAddress: prep.safeAddress,
+    rpcUrl: prep.config.rpcUrl,
+    network: prep.config.network === 'testnet' ? 'base-sepolia' : 'base',
+    earningDir: prep.config.earningDir,
+    password: prep.password,
+  });
+  try {
+    const txHash = await client.giveFeedback({
+      harnessAgentId: prep.builderAgentId,
+      score: args.score,
+      scoreDecimals: args.scoreDecimals,
+      manifestRef: prep.manifestRef,
+      manifestHash: prep.manifestHash,
+      ...(args.tag1 ? { tag1: args.tag1 } : {}),
+      ...(args.tag2 ? { tag2: args.tag2 } : {}),
+    });
+    writeJson(ctx, {
+      verb,
+      txHash,
+      pluginCid: prep.manifestRef.slice('plugin:'.length),
+      targetAgentId: prep.builderAgentId.toString(),
+      score: args.score,
+      scoreDecimals: args.scoreDecimals,
+      reputationRegistry: prep.reputationRegistryAddress,
+      safeAddress: prep.safeAddress,
+      ...extraEnvelopeFields,
+    });
+  } catch (err) {
+    emitWriteError(ctx, err);
+  }
+}
+
+export async function warnHandler(
+  ctx: CommandContext,
+  opts: WarnOptions,
+  deps: SolverPluginsDeps,
+): Promise<void> {
+  const prep = await preparePipeline(ctx, opts.pluginCid, opts.configPath, deps);
+  if (!prep) return;
+  // The on-chain feedback layout exposes `tag1` (indexed; we use it as the
+  // verb's category — 'warning') and `tag2` (free-text). The design note
+  // referenced a "feedback URI" for the reason, but tag2 is the available
+  // free-text slot on giveFeedback — wire the reason there.
+  await submitFeedbackAndEmit(
+    ctx,
+    prep,
+    deps,
+    'solver-plugins warn',
+    { score: 50, scoreDecimals: 2, tag1: 'warning', tag2: opts.reason },
+    { reason: opts.reason },
+  );
+}
+
 export async function endorseHandler(
   ctx: CommandContext,
   opts: EndorseOptions,
