@@ -13,7 +13,9 @@ import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
 
-const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
+// Kept deliberately in sync with client/src/earning/bootstrap.ts (#288); a
+// follow-up refactor will collapse the two copies.
+const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 export type TjinnStatusState = 'pending' | 'ready' | 'error';
@@ -241,21 +243,22 @@ export interface StatusV1Response {
 }
 
 /**
- * Match bootstrap heuristic for master daily gas when config omits JINN_MASTER_ETH_DAILY_WEI.
+ * Resolve the master daily gas estimate used by the operator dashboard's
+ * "Nd runway" display. Honours `JINN_MASTER_ETH_DAILY_WEI` (threaded via the
+ * `explicit` arg) when set; otherwise returns the conservative default. The
+ * previous poll-based blend was removed in #288 — it short-circuited the
+ * floor at the daemon's default pollIntervalMs and produced a misleading
+ * "1 days runway" reading post-bootstrap. The `pollIntervalMs` parameter is
+ * retained for call-site stability.
  */
 export function resolveMasterDailyEstimateWei(
   explicit: string | undefined,
-  pollIntervalMs: number,
+  _pollIntervalMs: number,
 ): bigint {
   if (explicit !== undefined && /^\d+$/.test(explicit.trim())) {
     return BigInt(explicit.trim());
   }
-  const interval = Math.max(pollIntervalMs, 1000);
-  const pollsPerDay = 86400000 / interval;
-  const txsPerDay = Math.min(Math.ceil(pollsPerDay / 600), 12);
-  const txCostWei = 150_000n * 2_000_000_000n;
-  const fromPoll = BigInt(txsPerDay) * txCostWei;
-  return fromPoll > DEFAULT_MASTER_ETH_DAILY_WEI ? fromPoll : DEFAULT_MASTER_ETH_DAILY_WEI;
+  return DEFAULT_MASTER_ETH_DAILY_WEI;
 }
 
 function fleetSummary(

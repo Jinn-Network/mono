@@ -251,8 +251,18 @@ export function stage1MinMasterEth(
   );
 }
 
-/** Conservative default: ~0.001 ETH/day master gas if not configured. */
-const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
+/**
+ * Conservative default: ~0.0005 ETH/day master gas if not configured.
+ *
+ * Post-bootstrap master burn is dominated by rare BalanceTopupLoop top-ups,
+ * not every-poll activity — the previous 0.001 ETH/day floor (compounded
+ * with the now-removed poll-based blend) over-estimated steady-state burn
+ * and surfaced a misleading "1 days runway" dashboard reading at ~0.008
+ * ETH balances (#288). Kept deliberately in sync with the second copy at
+ * client/src/api/status-build.ts (a follow-up refactor will collapse the
+ * two — out of scope here per the #288 design note).
+ */
+const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
 /** Warn when ETH above the minimum would last fewer than this many days at the daily estimate. */
 const MASTER_ETH_RUNWAY_WARN_DAYS = 7n;
 
@@ -460,16 +470,15 @@ export class FleetBootstrapper {
   }
 
   /**
-   * Conservative daily master gas (wei): max(DEFAULT, rough tx count from poll interval × cost).
+   * Conservative daily master gas (wei). Returns DEFAULT_MASTER_ETH_DAILY_WEI;
+   * the `pollIntervalMs` parameter is retained for call-site stability after
+   * the poll-based blend was removed (#288 — the blend short-circuited the
+   * floor at default poll intervals and produced a misleading "1 days runway"
+   * dashboard reading at modest ~0.008 ETH balances). Operators who want a
+   * more aggressive estimate can still set `JINN_MASTER_ETH_DAILY_WEI`.
    */
-  private estimateMasterDailyGasWei(pollIntervalMs?: number): bigint {
-    const interval = Math.max(pollIntervalMs ?? 5000, 1000);
-    const pollsPerDay = 86400000 / interval;
-    // Assume at most one funding-sized tx per ~600 polls (~50 min at 5s), capped at 12/day
-    const txsPerDay = Math.min(Math.ceil(pollsPerDay / 600), 12);
-    const txCostWei = 150_000n * 2_000_000_000n; // ~150k gas @ 2 gwei
-    const fromPoll = BigInt(txsPerDay) * txCostWei;
-    return fromPoll > DEFAULT_MASTER_ETH_DAILY_WEI ? fromPoll : DEFAULT_MASTER_ETH_DAILY_WEI;
+  private estimateMasterDailyGasWei(_pollIntervalMs?: number): bigint {
+    return DEFAULT_MASTER_ETH_DAILY_WEI;
   }
 
   /**
