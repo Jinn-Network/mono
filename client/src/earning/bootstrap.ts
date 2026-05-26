@@ -255,12 +255,11 @@ export function stage1MinMasterEth(
  * Conservative default: ~0.0005 ETH/day master gas if not configured.
  *
  * Post-bootstrap master burn is dominated by rare BalanceTopupLoop top-ups,
- * not every-poll activity — the previous 0.001 ETH/day floor (compounded
- * with the now-removed poll-based blend) over-estimated steady-state burn
- * and surfaced a misleading "1 days runway" dashboard reading at ~0.008
- * ETH balances (#288). Kept deliberately in sync with the second copy at
- * client/src/api/status-build.ts (a follow-up refactor will collapse the
- * two — out of scope here per the #288 design note).
+ * not every-poll activity — the previous 0.001 ETH/day floor (alongside a
+ * poll-based blend, since removed) over-estimated steady-state burn and
+ * surfaced a misleading "1 days runway" dashboard reading at ~0.008 ETH
+ * balances (#288). Mirrored at client/src/api/status-build.ts; collapsing
+ * the two copies is a deferred follow-up per the #288 design note.
  */
 const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
 /** Warn when ETH above the minimum would last fewer than this many days at the daily estimate. */
@@ -309,8 +308,9 @@ export interface FleetBootstrapperOptions {
   /** Optional Safe ETH target override (wei). */
   minSafeEthWei?: string;
   /**
-   * When `masterEthDailyEstimateWei` is unset, blends a conservative daily estimate
-   * from poll frequency (config.pollIntervalMs).
+   * Daemon poll interval. Currently unused by the master-daily-estimate path
+   * (the poll-based blend was removed in #288); kept on the options bag so
+   * existing callers compile unchanged.
    */
   pollIntervalMs?: number;
   /**
@@ -470,12 +470,11 @@ export class FleetBootstrapper {
   }
 
   /**
-   * Conservative daily master gas (wei). Returns DEFAULT_MASTER_ETH_DAILY_WEI;
-   * the `pollIntervalMs` parameter is retained for call-site stability after
-   * the poll-based blend was removed (#288 — the blend short-circuited the
-   * floor at default poll intervals and produced a misleading "1 days runway"
-   * dashboard reading at modest ~0.008 ETH balances). Operators who want a
-   * more aggressive estimate can still set `JINN_MASTER_ETH_DAILY_WEI`.
+   * Conservative daily master gas (wei). Returns the floor; operators who
+   * want a more aggressive estimate can still set `JINN_MASTER_ETH_DAILY_WEI`.
+   * See DEFAULT_MASTER_ETH_DAILY_WEI for rationale (#288). The
+   * `pollIntervalMs` parameter is vestigial since the poll-based blend was
+   * removed; kept so the constructor call site stays unchanged.
    */
   private estimateMasterDailyGasWei(_pollIntervalMs?: number): bigint {
     return DEFAULT_MASTER_ETH_DAILY_WEI;

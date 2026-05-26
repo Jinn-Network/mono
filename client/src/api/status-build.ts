@@ -13,8 +13,9 @@ import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
 
-// Kept deliberately in sync with client/src/earning/bootstrap.ts (#288); a
-// follow-up refactor will collapse the two copies.
+// Mirror of DEFAULT_MASTER_ETH_DAILY_WEI in client/src/earning/bootstrap.ts —
+// see that constant for the full #288 rationale. A follow-up will collapse
+// the two copies.
 const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
@@ -245,11 +246,9 @@ export interface StatusV1Response {
 /**
  * Resolve the master daily gas estimate used by the operator dashboard's
  * "Nd runway" display. Honours `JINN_MASTER_ETH_DAILY_WEI` (threaded via the
- * `explicit` arg) when set; otherwise returns the conservative default. The
- * previous poll-based blend was removed in #288 — it short-circuited the
- * floor at the daemon's default pollIntervalMs and produced a misleading
- * "1 days runway" reading post-bootstrap. The `pollIntervalMs` parameter is
- * retained for call-site stability.
+ * `explicit` arg) when set; otherwise returns the conservative default.
+ * The `_pollIntervalMs` parameter is vestigial since the poll-based blend
+ * was removed in #288; kept so the gather-status call site stays unchanged.
  */
 export function resolveMasterDailyEstimateWei(
   explicit: string | undefined,
