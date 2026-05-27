@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   selectNextPostingCandidate,
   selectNextPostingCandidates,
@@ -7,6 +10,7 @@ import {
 } from '../../src/solver-types/swe-rebench-v2-auto.js';
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
+import type { DiscoveryAPI } from '../../src/discovery/types.js';
 
 const config: GeneratorConfig = {
   N_target_successes: 5,
@@ -183,6 +187,111 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord', () => {
       totalPosted: 0,
       config: expect.objectContaining(configRef.current),
     });
+    fetchSpy.mockRestore();
+  });
+});
+
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success reconciliation (#669)', () => {
+  it('classifies an instance as saturated when network successes ≥ N_target_successes, even if local successful=0', async () => {
+    // Arrange — local state file says successful=0 for sympy__sympy-27510;
+    // network truth (the stub DiscoveryAPI) reports passCount=21 for the same
+    // instance, which is ≥ N_target_successes=5. The expected behaviour is
+    // that the launcher does NOT post sympy__sympy-27510 — it is saturated
+    // from network truth, even though the local counter is zero.
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-669-'));
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, 'generator-state.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-generator-state.v1',
+        tasks: {
+          'sympy__sympy-27510': { posted: 8, successful: 0, last_posted_at: 0 },
+        },
+      }),
+    );
+
+    // Inject a single-instance pool so the only candidate is the network-saturated one.
+    // Pool cache file shape per `_swe-rebench-v2-pool-cache.ts`: { schemaVersion,
+    // savedAt, tasks }. With a non-empty cache and HF unreachable in the test
+    // sandbox, `loadPoolWithCacheFallback` serves from disk.
+    await writeFile(
+      join(stateDir, 'pool-cache.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-pool-cache.v1',
+        savedAt: new Date().toISOString(),
+        tasks: [{
+          instance_id: 'sympy__sympy-27510',
+          language: 'python',
+          hf_dataset: 'nebius/SWE-rebench-leaderboard',
+          hf_split: '2024_12',
+          base_commit: '0000000000000000000000000000000000000000',
+        }],
+      }),
+    );
+
+    // Force the HF datasets-server load to fail so loadPoolWithCacheFallback
+    // serves the single-instance pool we wrote to disk above. Without this the
+    // generator pulls the live HF dataset and the test environment becomes
+    // dependent on network state.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => {
+        throw new Error('HF unreachable in test sandbox');
+      });
+
+    // Stub DiscoveryAPI: only the new method is exercised by this test. Other
+    // methods can throw — they are not called on this code path.
+    const successCounts = new Map<string, number>([
+      ['sympy__sympy-27510', 21],
+    ]);
+    const discoveryApi = {
+      getInstanceSuccessCounts: vi.fn(async () => successCounts),
+      // Stub out the rest with throws so any accidental call surfaces.
+      findClaimableTasks: vi.fn(async () => { throw new Error('not used'); }),
+      listLaunchedSolverNets: vi.fn(async () => { throw new Error('not used'); }),
+      getLifecycleStatus: vi.fn(async () => { throw new Error('not used'); }),
+      getSolverNetOperatorCount: vi.fn(async () => { throw new Error('not used'); }),
+      queryEnvelopes: vi.fn(async () => { throw new Error('not used'); }),
+      listPluginPublications: vi.fn(async () => { throw new Error('not used'); }),
+      getPluginScores: vi.fn(async () => { throw new Error('not used'); }),
+      listBuilderArtifacts: vi.fn(async () => { throw new Error('not used'); }),
+    } satisfies DiscoveryAPI;
+
+    const recordRef = {
+      current: launchedRecord({
+        status: 'launched',
+        manifestCid: 'bafymanifest669test',
+      }),
+    };
+    const configRef = {
+      current: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 10,
+        posting_window_ms: 300_000,
+        // Use 'python-floor' so the test doesn't have to publish a vetted pool.
+        admissionMode: 'python-floor' as const,
+      },
+    };
+
+    const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
+      recordRef,
+      configRef,
+      staticConfig: { stateDir, discoveryApi },
+    });
+
+    // Act — call the generator tick.
+    const result = await gen();
+
+    // Assert — no task posted, saturated == 1.
+    expect(result).toBeNull();
+    expect(discoveryApi.getInstanceSuccessCounts).toHaveBeenCalledWith({
+      manifestCid: 'bafymanifest669test',
+    });
+    expect(gen.getState().lastPollSummary).toMatchObject({
+      saturated: 1,
+      posted: 0,
+    });
+
     fetchSpy.mockRestore();
   });
 });
