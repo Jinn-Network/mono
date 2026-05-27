@@ -2590,7 +2590,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // is side-effect-free; we handle the unlink here so the failure mode matches
   // the surrounding try/catch idiom (see operator-server.ts:209-213).
   const pidPath = join(config.earningDir, 'daemon.pid');
-  const { writeFileSync, unlinkSync } = await import('node:fs');
 
   const liveness = checkPidfileLiveness({ pidPath });
   if (liveness.decision === 'refuse') {
@@ -2617,7 +2616,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   }
 
-  writeFileSync(pidPath, String(process.pid) + '\n', 'utf-8');
+  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
   const removePidfile = () => {
     try {
       unlinkSync(pidPath);
