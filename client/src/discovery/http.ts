@@ -221,16 +221,10 @@ query OperatorCountAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, 
 /**
  * Paginated read of verdictEnvelopeMeta rows for swe-rebench-v2 successes.
  *
- * Ponder's auto-GraphQL does not expose GROUP BY / count aggregations, so the
- * aggregator (below in getInstanceSuccessCounts) pages this query with the
- * `after` cursor and groups client-side. Capped at 1000 per page (Ponder's
- * upper bound on plural-query `limit`).
- *
- * The `solverType_starts_with` filter is GraphQL-syntactic — verify it
- * matches the Ponder generated filter shape; if Ponder requires the explicit
- * suffix (`solverType: { startsWith: "..." }`) shape, adjust accordingly when
- * the test fails. As of jinn-mono today the Ponder GraphQL layer accepts
- * `solverType_starts_with: "swe-rebench-v2"` directly.
+ * Ponder's auto-GraphQL does not expose GROUP BY / count aggregations, so
+ * getInstanceSuccessCounts pages this query with the `after` cursor and
+ * groups client-side. Capped at 1000 per page (Ponder's upper bound on
+ * plural-query `limit`).
  */
 const INSTANCE_SUCCESS_COUNTS_QUERY = `
 query InstanceSuccessCounts($limit: Int!, $after: String) {
@@ -1008,18 +1002,16 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   }
 
   // ── getInstanceSuccessCounts (#669) ────────────────────────────────────────
-  // manifestCid is ignored in the GraphQL filter — see types.ts JSDoc for why.
-  // It is preserved on the call-signature so a future refinement (per-manifest
-  // scoping) is a non-breaking change.
+  // `manifestCid` is ignored in the GraphQL filter (see types.ts JSDoc); kept
+  // on the signature so per-manifest scoping is a non-breaking change later.
 
   async function getInstanceSuccessCounts(_args: {
     manifestCid: string;
   }): Promise<Map<string, number>> {
     await ensureReady();
 
-    // Cap on total rows scanned, defensive: 10 pages × 1000 = 10k rows. A
-    // healthy SolverNet has ~25 candidates × N_target_successes = 125 expected
-    // successes; 10k is two orders of magnitude headroom.
+    // Defensive cap: 10 × 1000 rows. Expected ~125 successes per SolverNet
+    // (25 candidates × N_target_successes), so two orders of magnitude head.
     const MAX_PAGES = 10;
     const PAGE_LIMIT = 1000;
     const counts = new Map<string, number>();
@@ -1042,7 +1034,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         if (!id) continue;
         counts.set(id, (counts.get(id) ?? 0) + 1);
       }
-      const pageInfo: InstanceSuccessCountsPage['verdictEnvelopeMetas']['pageInfo'] = data.verdictEnvelopeMetas?.pageInfo;
+      const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;
     }

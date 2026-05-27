@@ -583,11 +583,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       counters.set(task.instance_id, await stateStore.getCounters(task.instance_id));
     }
 
-    // Reconcile against network truth (#669). For each eligible instance, take
-    // max(local.successful, network[instance_id] ?? 0). On DiscoveryUnavailableError
-    // (indexer outage), the tick aborts: we MUST NOT silently fall through to
-    // local-only counters — that is exactly the bug this fix is addressing.
-    // No discoveryApi configured (test paths) → skip the merge silently.
+    // Reconcile each instance's `successful` against network truth (#669):
+    // take max(local, network). On indexer outage the tick aborts — silently
+    // falling through to local-only counters is exactly the bug being fixed.
+    // The discoveryApi/manifestCid pair is optional so test paths can skip.
     if (config.discoveryApi && config.solverNetManifestCid) {
       try {
         const networkSuccesses = await config.discoveryApi.getInstanceSuccessCounts({
@@ -598,10 +597,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
           if (!local) continue;
           const networkSuccess = networkSuccesses.get(task.instance_id) ?? 0;
           if (networkSuccess > local.successful) {
-            counters.set(task.instance_id, {
-              ...local,
-              successful: networkSuccess,
-            });
+            counters.set(task.instance_id, { ...local, successful: networkSuccess });
           }
         }
       } catch (err) {

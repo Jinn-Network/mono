@@ -239,22 +239,22 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
         throw new Error('HF unreachable in test sandbox');
       });
 
-    // Stub DiscoveryAPI: only the new method is exercised by this test. Other
-    // methods can throw — they are not called on this code path.
+    // Stub DiscoveryAPI: only getInstanceSuccessCounts is exercised on this
+    // code path; the rest throw so any accidental call surfaces.
     const successCounts = new Map<string, number>([
       ['sympy__sympy-27510', 21],
     ]);
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
     const discoveryApi = {
       getInstanceSuccessCounts: vi.fn(async () => successCounts),
-      // Stub out the rest with throws so any accidental call surfaces.
-      findClaimableTasks: vi.fn(async () => { throw new Error('not used'); }),
-      listLaunchedSolverNets: vi.fn(async () => { throw new Error('not used'); }),
-      getLifecycleStatus: vi.fn(async () => { throw new Error('not used'); }),
-      getSolverNetOperatorCount: vi.fn(async () => { throw new Error('not used'); }),
-      queryEnvelopes: vi.fn(async () => { throw new Error('not used'); }),
-      listPluginPublications: vi.fn(async () => { throw new Error('not used'); }),
-      getPluginScores: vi.fn(async () => { throw new Error('not used'); }),
-      listBuilderArtifacts: vi.fn(async () => { throw new Error('not used'); }),
+      findClaimableTasks: notUsed,
+      listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed,
+      getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed,
+      listPluginPublications: notUsed,
+      getPluginScores: notUsed,
+      listBuilderArtifacts: notUsed,
     } satisfies DiscoveryAPI;
 
     const recordRef = {
