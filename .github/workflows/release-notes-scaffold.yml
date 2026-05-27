@@ -36,7 +36,7 @@ jobs:
     name: Build release-notes draft
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # need full history to walk tags + commits since last stable client release
 

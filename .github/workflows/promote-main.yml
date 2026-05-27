@@ -28,7 +28,7 @@ jobs:
     # The Monday scaffold creates v<semver> tags from `next` HEAD; this job advances main to that SHA.
     if: ${{ !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v') }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: main
