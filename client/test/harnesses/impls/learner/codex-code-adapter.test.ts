@@ -361,6 +361,8 @@ describe('CodexCodeHarnessAdapter', () => {
   });
 
   it('passes local Codex provider config for Ollama-compatible endpoints', async () => {
+    const previousOpenAiKey = process.env['OPENAI_API_KEY'];
+    delete process.env['OPENAI_API_KEY'];
     const calls: SpawnCall[] = [];
     const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {
       calls.push({ command, args, options });
@@ -407,7 +409,10 @@ describe('CodexCodeHarnessAdapter', () => {
         '-c',
         'model_providers.jinn-local.wire_api="responses"',
       ]));
+      expect(calls[0]!.options.env?.OPENAI_API_KEY).toBe('jinn-local');
     } finally {
+      if (previousOpenAiKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousOpenAiKey;
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });
     }

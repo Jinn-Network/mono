@@ -217,6 +217,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
    */
   async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
     const prompt = buildInitialPrompt(inputs);
+    const usingLocalProvider = this.codexBaseUrl !== undefined && isLocalCodexBaseUrl(this.codexBaseUrl);
     const baseEnv = {
       IMPL_STATE_DIR: inputs.implStateDir,
       WORKING_DIR: inputs.workingDir,
@@ -240,6 +241,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',
       JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: this.corpusEnv?.identityRegistryAddress ?? '',
       JINN_CORPUS_FROM_BLOCK: this.corpusEnv?.fromBlock != null ? String(this.corpusEnv.fromBlock) : '',
+      ...(usingLocalProvider && !process.env['OPENAI_API_KEY'] ? { OPENAI_API_KEY: 'jinn-local' } : {}),
       ...(inputs.adapterEnv ?? {}),
     };
     const env = buildAgentEnv(baseEnv);
