@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Hex } from 'viem';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
 import { VerdictCode } from '../../../src/adapters/mech/verdict-code.js';
+import { SafeInnerRevertError } from '../../../src/adapters/mech/safe-revert.js';
 import type { SignedTaskV1 } from '../../../src/types/task-document.js';
 import type { DiscoveryAPI, ClaimableTaskCandidate } from '../../../src/discovery/types.js';
 import { DiscoveryUnavailableError } from '../../../src/discovery/types.js';
@@ -1153,6 +1155,60 @@ describe('MechAdapter TaskCoordinator flow', () => {
     // The claimability gate runs FIRST; the restoration lookup is never attempted.
     expect(getTaskCidDigest).not.toHaveBeenCalled();
     expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('prunes evaluation opportunity maps when claimEvaluation loses a TOCTOU race (issue #512)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(claimEvaluation).mockRejectedValueOnce(
+      new SafeInnerRevertError(
+        'Safe execTransaction inner revert (estimate): TCMaxVerdictsReached(1, 0)',
+        '0x39d0ed4c' as Hex,
+        null,
+        'TCMaxVerdictsReached',
+        [1n, 0],
+        null,
+      ),
+    );
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const opportunityId = `evaluation:1:0:${REQUEST_ID}`;
+    const evaluationTask = signedTask({
+      id: 'watched-task:evaluation:0',
+      role: 'evaluation',
+      restorationRequestId: REQUEST_ID,
+      attemptId: REQUEST_ID,
+      attemptNumber: 0,
+    });
+    (adapter as any).evaluationOpportunities.set(opportunityId, {
+      taskId: '1',
+      attemptIndex: 0,
+      task: evaluationTask,
+    });
+    (adapter as any).observedTasks.set(opportunityId, {
+      taskId: opportunityId,
+      task: evaluationTask,
+      taskCid: TASK_CID,
+    });
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    });
+
+    await expect(adapter.claimTask(opportunityId)).rejects.toBeInstanceOf(SafeInnerRevertError);
+    expect(uploadToIpfs).toHaveBeenCalled();
+    expect((adapter as any).evaluationOpportunities.has(opportunityId)).toBe(false);
+    expect((adapter as any).observedTasks.has(opportunityId)).toBe(false);
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
 
     await adapter.stop();
   });

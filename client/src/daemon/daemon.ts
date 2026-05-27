@@ -53,7 +53,7 @@ function emitTickErrorOrRaceLost(
   err: unknown,
   ctx: { requestId: string; solverType: string | undefined },
   component: string,
-): void {
+): 'race_lost' | 'tick_error' {
   if (err instanceof SafeInnerRevertError && isNonRecoverableInnerRevert(err.decodedName)) {
     emitEvent(store, {
       kind: 'race_lost',
@@ -63,7 +63,7 @@ function emitTickErrorOrRaceLost(
       // decodedName is non-null by virtue of isNonRecoverableInnerRevert returning true.
       detail: formatDecodedRevert(err.decodedName!, err.decodedArgs),
     }, component);
-    return;
+    return 'race_lost';
   }
   emitEvent(store, {
     kind: 'tick_error',
@@ -72,6 +72,7 @@ function emitTickErrorOrRaceLost(
     outcome: 'failed',
     detail: err instanceof Error ? err.message : String(err),
   }, component);
+  return 'tick_error';
 }
 
 export interface DaemonConfig {
@@ -633,29 +634,29 @@ export class Daemon {
           `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
           err instanceof Error ? err.message : err,
         );
-        emitTickErrorOrRaceLost(
+        const claimOutcome = emitTickErrorOrRaceLost(
           this.store,
           err,
           { requestId: taskAnnouncement.taskId, solverType },
           'daemon',
         );
         // Paired SSE signal for the operator-app `claim_failed` notification
-        // (OPERATOR-APP-SPEC §2.10). The activity-DB row above (durable
-        // record) is written by `emitTickErrorOrRaceLost`; this is the
-        // event-stream channel `useNotifications` listens on. See spec
-        // 2026-05-26-issue-442-claim-failed-notification-design.md.
-        emitStructured({
-          kind: 'intent',
-          message: 'Task claim failed',
-          requestId: taskAnnouncement.taskId,
-          errorCode: 'claim_failed',
-          details: {
-            taskId: taskAnnouncement.taskId,
-            solverType,
-            source: 'daemon.claimTask',
-            error: errorMessage,
-          },
-        });
+        // (OPERATOR-APP-SPEC §2.10). Terminal evaluation race losses are normal
+        // multi-operator no-ops — do not surface as claim_failed (#512).
+        if (claimOutcome !== 'race_lost') {
+          emitStructured({
+            kind: 'intent',
+            message: 'Task claim failed',
+            requestId: taskAnnouncement.taskId,
+            errorCode: 'claim_failed',
+            details: {
+              taskId: taskAnnouncement.taskId,
+              solverType,
+              source: 'daemon.claimTask',
+              error: errorMessage,
+            },
+          });
+        }
         continue;
       }
 

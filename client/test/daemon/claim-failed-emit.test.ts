@@ -2,12 +2,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { Hex } from 'viem';
 import Database from 'better-sqlite3';
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
 import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { getEventBuffer } from '../../src/events/emitter.js';
+import { SafeInnerRevertError } from '../../src/adapters/mech/safe-revert.js';
+import { Store } from '../../src/store/store.js';
 import type { RequestId, TaskRequest } from '../../src/types/index.js';
 
 /**
@@ -126,6 +129,55 @@ describe('Daemon claim-failed emission', () => {
       if (daemon.getShutdownState() !== 'clean') {
         await daemon.stop();
       }
+    }
+  });
+
+  it('does not emit claim_failed when claimTask throws a terminal evaluation race loss (issue #512)', async () => {
+    const adapter = new FailingClaimLocalAdapter();
+    adapter.claimTask = async (taskId: string): Promise<never> => {
+      throw new SafeInnerRevertError(
+        'Safe execTransaction inner revert (estimate): TCMaxVerdictsReached(1, 0)',
+        '0x39d0ed4c' as Hex,
+        null,
+        'TCMaxVerdictsReached',
+        [1n, 0],
+        null,
+      );
+    };
+
+    const store = new Store(':memory:');
+    const daemon = new Daemon({
+      adapter,
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      taskSources: [],
+      dbPath: ':memory:',
+      store,
+      apiPort: 0,
+      restorationEngine: minimalEngineConfig(),
+    });
+
+    await daemon.start();
+
+    try {
+      await adapter.postTask({
+        id: 'race-lost-eval-1',
+        description: 'evaluation slot already taken',
+      });
+
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline) {
+        const raceLost = store.getRecentActivityEvents(50).find((r) => r.kind === 'race_lost');
+        if (raceLost) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      expect(store.getRecentActivityEvents(50).find((r) => r.kind === 'race_lost')).toBeDefined();
+      expect(
+        getEventBuffer().snapshot({ kinds: ['intent'] }).some((e) => e.errorCode === 'claim_failed'),
+      ).toBe(false);
+      expect(store.getRecentActivityEvents(50).find((r) => r.kind === 'tick_error')).toBeUndefined();
+    } finally {
+      await daemon.stop();
     }
   });
 });

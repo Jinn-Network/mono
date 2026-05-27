@@ -54,7 +54,11 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
-import { isNonRecoverableInnerRevert } from './safe-revert.js';
+import {
+  SafeInnerRevertError,
+  formatDecodedRevert,
+  isNonRecoverableInnerRevert,
+} from './safe-revert.js';
 import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
@@ -435,6 +439,31 @@ export class MechAdapter implements ExecutionAdapter {
     }
     this.persistPendingEvaluationSolutions();
     return false;
+  }
+
+  /**
+   * Drop a terminal evaluation opportunity from every in-memory working set so
+   * the poll loop never re-pays announcement or claim cost. Used when
+   * `canClaimEvaluation` says the slot is gone and when `claimEvaluation` loses
+   * a TOCTOU race after the gate passed (#512).
+   */
+  private pruneTerminalEvaluationOpportunity(params: {
+    opportunityId?: string;
+    solutionRequestId?: string;
+    reason: string;
+  }): void {
+    const { opportunityId, solutionRequestId, reason } = params;
+    const target = opportunityId ?? solutionRequestId ?? 'unknown';
+    console.log(
+      `[mech] pruning evaluation opportunity ${target}: ${reason} (terminal — pruned)`,
+    );
+    if (opportunityId) {
+      this.evaluationOpportunities.delete(opportunityId);
+      this.observedTasks.delete(opportunityId);
+    }
+    if (solutionRequestId) {
+      this.forgetPendingEvaluationSolution(solutionRequestId);
+    }
   }
 
   private clearPendingDeliveryRecoveryState(requestId: string): void {
@@ -881,7 +910,10 @@ export class MechAdapter implements ExecutionAdapter {
           (terminal ? ' (terminal — pruned)' : ' (transient — will retry)'),
       );
       if (terminal) {
-        this.forgetPendingEvaluationSolution(solution.requestId);
+        this.pruneTerminalEvaluationOpportunity({
+          solutionRequestId: solution.requestId,
+          reason: claimable.reason,
+        });
       } else {
         // #645 backstop: bound retries on transient/unclassified claimability
         // failures so a wedged opportunity can't log-spam forever.
@@ -897,11 +929,11 @@ export class MechAdapter implements ExecutionAdapter {
       // retry with the same toBlock cannot reach an older event, so this is
       // terminal — prune so the loop never re-pays the canClaimEvaluation +
       // restoration lookup cost on a deterministically-failing opportunity.
-      console.log(
-        `[mech] pruning evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ` +
-          `no Deliver event found within configured lookback (terminal — pruned)`,
-      );
-      this.forgetPendingEvaluationSolution(solution.requestId);
+      this.pruneTerminalEvaluationOpportunity({
+        solutionRequestId: solution.requestId,
+        reason:
+          `no Deliver event found within configured lookback for task ${solution.taskId}/${solution.attemptIndex}`,
+      });
       return undefined;
     }
     const resultPayload = await fetchFromIpfs(
@@ -1046,11 +1078,23 @@ export class MechAdapter implements ExecutionAdapter {
       const signedEvaluationTask = await this.signTaskDocument(evaluationOpportunity.task);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, signedEvaluationTask);
       const evaluationTaskCidDigest = cidToDigestHex(evaluationCid);
-      const claimed = await this.claimEvaluation(
-        evaluationOpportunity.taskId,
-        evaluationOpportunity.attemptIndex,
-        evaluationTaskCidDigest,
-      );
+      let claimed;
+      try {
+        claimed = await this.claimEvaluation(
+          evaluationOpportunity.taskId,
+          evaluationOpportunity.attemptIndex,
+          evaluationTaskCidDigest,
+        );
+      } catch (err) {
+        if (err instanceof SafeInnerRevertError && isNonRecoverableInnerRevert(err.decodedName)) {
+          this.pruneTerminalEvaluationOpportunity({
+            opportunityId: taskId,
+            solutionRequestId: evaluationOpportunity.task.restorationRequestId,
+            reason: formatDecodedRevert(err.decodedName!, err.decodedArgs),
+          });
+        }
+        throw err;
+      }
 
       this.pendingEvaluations.set(claimed.requestId, evaluationOpportunity.task);
       this.originalStates.set(claimed.requestId, evaluationOpportunity.task);
