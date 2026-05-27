@@ -49,7 +49,7 @@ import {
 import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
-import { checkPidfileLiveness } from './preflight/pidfile-liveness.js';
+import { applyPidfileLivenessGate } from './preflight/pidfile-liveness.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
@@ -2586,47 +2586,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   });
 
   // Write pidfile so `jinn stop` can find us. First, refuse the run if another
-  // daemon already owns this earning directory — see issue #649. The classifier
-  // is side-effect-free; we handle the unlink here so the failure mode matches
-  // the surrounding try/catch idiom (see operator-server.ts:209-213).
+  // daemon already owns this earning directory — see issue #649. The gate
+  // handles all three branches (refuse-and-exit, unlink-stale-and-continue,
+  // proceed); the writeFileSync below MUST stay outside the helper so the
+  // "// DO NOT add store mutations above this line — see #649" invariant is
+  // visible right here at the call site.
   const pidPath = join(config.earningDir, 'daemon.pid');
-
-  const liveness = checkPidfileLiveness({ pidPath });
-  if (liveness.decision === 'refuse') {
-    emitEnvelope({
-      code: 'invalid_invocation',
-      message: `Another jinn daemon is already running (PID ${liveness.pid}).`,
-      hint: 'Run `jinn stop` to terminate it, or set JINN_EARNING_DIR to a different earning directory.',
-      exampleCli: 'jinn stop',
-      details: {
-        field: 'daemon_pidfile',
-        pid: liveness.pid,
-        pidfilePath: pidPath,
-        reason: liveness.reason,
-      },
-    });
-    // emitEnvelope calls process.exit; this return is for type-narrowing only.
-    return;
-  }
-  if (liveness.decision === 'unlink-stale') {
-    // Surface stale-pidfile cleanup so operators can diagnose unexpected
-    // startups (e.g. a previous daemon crashed without removing its pidfile).
-    emitStructured({
-      kind: 'system',
-      message: `cleaning up stale pidfile (${liveness.reason})`,
-      details: {
-        phase: 'preflight',
-        pidfilePath: pidPath,
-        reason: liveness.reason,
-        pid: liveness.pid,
-      },
-    });
-    try {
-      unlinkSync(pidPath);
-    } catch {
-      /* best-effort — the writeFileSync below will surface any real problem */
-    }
-  }
+  applyPidfileLivenessGate(pidPath);
 
   writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
   const removePidfile = () => {

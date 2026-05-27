@@ -15,7 +15,10 @@
  * trailing `\n` (see `client/src/main.ts` writeFileSync near the pidfile site).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+
+import { emitEnvelope, type EnvelopeSinks } from '../errors/envelope.js';
+import { emitStructured } from '../events/emitter.js';
 
 export type PidfileLivenessDecision =
   | { decision: 'proceed' }
@@ -72,5 +75,59 @@ export function checkPidfileLiveness(
     // Any other errno: conservative refuse rather than risk trampling a daemon
     // we can't classify.
     return { decision: 'refuse', pid: parsed, pidfilePath: pidPath, reason: 'unknown' };
+  }
+}
+
+/**
+ * Apply the pidfile-liveness gate at `jinn run` startup (#649). On `refuse`
+ * emits the `invalid_invocation` envelope and exits (does not return); on
+ * `unlink-stale` logs the cleanup, removes the stale pidfile, and returns;
+ * on `proceed` returns immediately. Callers MUST write the pidfile themselves
+ * after this returns — the helper deliberately stops short of the write so the
+ * "// DO NOT add store mutations above this line — see #649" invariant in
+ * main.ts stays visible at the call site.
+ */
+export function applyPidfileLivenessGate(
+  pidPath: string,
+  sinks: EnvelopeSinks = {},
+): void {
+  const liveness = checkPidfileLiveness({ pidPath });
+  if (liveness.decision === 'refuse') {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: `Another jinn daemon is already running (PID ${liveness.pid}).`,
+        hint: 'Run `jinn stop` to terminate it, or set JINN_EARNING_DIR to a different earning directory.',
+        exampleCli: 'jinn stop',
+        details: {
+          field: 'daemon_pidfile',
+          pid: liveness.pid,
+          pidfilePath: pidPath,
+          reason: liveness.reason,
+        },
+      },
+      sinks,
+    );
+    // emitEnvelope calls process.exit in production; the test sink may throw
+    // or no-op. Either way control does not fall through to the writeFileSync
+    // in the caller.
+    return;
+  }
+  if (liveness.decision === 'unlink-stale') {
+    emitStructured({
+      kind: 'system',
+      message: `cleaning up stale pidfile (${liveness.reason})`,
+      details: {
+        phase: 'preflight',
+        pidfilePath: pidPath,
+        reason: liveness.reason,
+        pid: liveness.pid,
+      },
+    });
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      /* best-effort — the writeFileSync that follows surfaces any real problem */
+    }
   }
 }
