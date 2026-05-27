@@ -31,11 +31,14 @@ function encodeSliceParams(params: SliceParams): string {
   return base.join('&');
 }
 
-export function useSlice(params: SliceParams) {
+export function useSlice(
+  params: SliceParams,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ['slice', params],
     queryFn: () =>
       fetchJson<SliceResponse>(`/explorer/slice?${encodeSliceParams(params)}`),
-    enabled: Boolean(params.manifestDigest),
+    enabled: (options?.enabled ?? true) && Boolean(params.manifestDigest),
   });
 }

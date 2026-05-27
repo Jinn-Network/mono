@@ -2,14 +2,14 @@
  * SliceChrome — slice-aware chrome that wraps the learning curve.
  *
  * Extracted from SolverNetView (refactor #676) once that file crossed the
- * ~600-line extraction threshold. Both helpers are pure presentation and
- * have no consumers outside SolverNetView; they live here only to keep the
- * view file readable.
+ * ~600-line extraction threshold. The helper is pure presentation and has
+ * no consumers outside SolverNetView; it lives here only to keep the
+ * view file readable. (The legacy ActiveSliceChips helper was deleted in
+ * #687 — its surface is owned by FilterChipStrip now.)
  */
 
 import { LearningCurve } from './LearningCurve';
 import { int } from '../lib/format';
-import type { FilterMap } from '../lib/url-state';
 
 const ROLLING_FLOOR = 130;
 const MILESTONE_OFFSET = 100;
@@ -81,47 +81,3 @@ export function ChartWithMilestoneMark({
   );
 }
 
-export function ActiveSliceChips({
-  group,
-  filters,
-  window,
-}: {
-  group: string;
-  filters: FilterMap;
-  window: number;
-}) {
-  const chips: string[] = [];
-  if (group !== 'none') chips.push(`group:${group}`);
-  for (const [dim, vals] of Object.entries(filters)) {
-    if (vals) for (const v of vals) chips.push(`${dim}:${v}`);
-  }
-  chips.push(`window:${window}`);
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 8,
-        fontFamily: 'var(--font-mono)',
-        fontSize: 11,
-        color: 'var(--fg-muted)',
-        letterSpacing: '0.10em',
-        textTransform: 'uppercase',
-      }}
-      data-testid="active-slice-chips"
-    >
-      {chips.map((c) => (
-        <span
-          key={c}
-          style={{
-            padding: '2px 8px',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-pill)',
-          }}
-        >
-          {c}
-        </span>
-      ))}
-    </div>
-  );
-}

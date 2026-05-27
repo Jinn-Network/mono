@@ -2,23 +2,48 @@
  * AddFilterPopover — two-step add-filter UI.
  *
  * Step 1: dimension picker (operator / harness / plugin / mode / model).
- * Step 2: value picker, listing the values that exist in availableValues[dim].
- * Selecting a value calls onSelect(dim, value) and parent dismisses.
+ * Step 2: value picker, listing the values for the picked dimension.
+ *
+ * Controlled component: the parent owns `pickedDim` so it can fire a lookup
+ * slice fetch when the user picks a dim that isn't the current group (#687
+ * bug 2 — cold-landing `+ filter` no longer dead-ends). The popover renders
+ * the dim list at step 1 and either a loading state, an empty state, or the
+ * value list at step 2, gated by the `values` and `loading` props.
  *
  * Escape and outside-click both dismiss via onDismiss.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { FILTER_DIMS, type FilterDim } from '../lib/url-state';
+import { useDismissOnOutsideClick } from '../hooks/useDismissOnOutsideClick';
 
 interface Props {
-  availableValues: Partial<Record<FilterDim, string[]>>;
+  /** Currently-picked dimension, or null for step 1 (dim picker). */
+  pickedDim: FilterDim | null;
+  /** Called when the user picks a dim in step 1. */
+  onPickDim: (dim: FilterDim) => void;
+  /** Called when the user clicks Back from step 2 → step 1. */
+  onBack: () => void;
+  /** Values to render in step 2 for the picked dim. */
+  values: string[];
+  /** True while values are being fetched. */
+  loading: boolean;
+  /** Called when the user picks a value in step 2. */
   onSelect: (dim: FilterDim, value: string) => void;
+  /** Called on Escape key or outside-click. */
   onDismiss: () => void;
 }
 
-export function AddFilterPopover({ availableValues, onSelect, onDismiss }: Props) {
-  const [step, setStep] = useState<'dim' | 'value'>('dim');
-  const [pickedDim, setPickedDim] = useState<FilterDim | null>(null);
+export function AddFilterPopover({
+  pickedDim,
+  onPickDim,
+  onBack,
+  values,
+  loading,
+  onSelect,
+  onDismiss,
+}: Props) {
+  const step: 'dim' | 'value' = pickedDim === null ? 'dim' : 'value';
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -28,22 +53,15 @@ export function AddFilterPopover({ availableValues, onSelect, onDismiss }: Props
     return () => document.removeEventListener('keydown', handleKey);
   }, [onDismiss]);
 
-  function pickDim(dim: FilterDim) {
-    setPickedDim(dim);
-    setStep('value');
-  }
+  useDismissOnOutsideClick(rootRef, onDismiss);
 
   function pickValue(value: string) {
     if (pickedDim) onSelect(pickedDim, value);
   }
 
-  function goBack() {
-    setStep('dim');
-    setPickedDim(null);
-  }
-
   return (
     <div
+      ref={rootRef}
       role="dialog"
       aria-label="Add filter"
       style={{
@@ -70,12 +88,13 @@ export function AddFilterPopover({ availableValues, onSelect, onDismiss }: Props
         Add filter{step === 'value' && pickedDim ? ` · ${pickedDim}` : ''}
       </div>
       {step === 'dim' ? (
-        <DimensionList onPick={pickDim} />
+        <DimensionList onPick={onPickDim} />
       ) : (
         <ValueList
-          values={(pickedDim && availableValues[pickedDim]) || []}
+          values={values}
+          loading={loading}
           onPick={pickValue}
-          onBack={goBack}
+          onBack={onBack}
         />
       )}
     </div>
@@ -102,10 +121,12 @@ function DimensionList({ onPick }: { onPick: (d: FilterDim) => void }) {
 
 function ValueList({
   values,
+  loading,
   onPick,
   onBack,
 }: {
   values: string[];
+  loading: boolean;
   onPick: (v: string) => void;
   onBack: () => void;
 }) {
@@ -119,7 +140,20 @@ function ValueList({
       >
         ← Back
       </button>
-      {values.length === 0 ? (
+      {loading ? (
+        <div
+          role="status"
+          aria-label="Loading values"
+          style={{
+            padding: '8px 10px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            color: 'var(--fg-dim)',
+          }}
+        >
+          Loading…
+        </div>
+      ) : values.length === 0 ? (
         <div
           style={{
             padding: '8px 10px',

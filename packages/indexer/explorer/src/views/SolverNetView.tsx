@@ -44,10 +44,7 @@ import { GroupByDropdown } from '../components/GroupByDropdown';
 import { PersistentControlsRow } from '../components/PersistentControlsRow';
 import { AddFilterPopover } from '../components/AddFilterPopover';
 import { SliceSettingsPopover } from '../components/SliceSettingsPopover';
-import {
-  ChartWithMilestoneMark,
-  ActiveSliceChips,
-} from '../components/SliceChrome';
+import { ChartWithMilestoneMark } from '../components/SliceChrome';
 import {
   useNumParam,
   useEnumParam,
@@ -178,6 +175,11 @@ export function SolverNetView() {
   // Progressive-disclosure filter chrome (spec §3) — popover open state.
   const [addFilterOpen, setAddFilterOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // #687 bug 2: lift the add-filter popover's picked-dim state up so we can
+  // fire a lookup slice for the picked dim when it differs from the current
+  // group. Without this, the popover dead-ends on cold landing because the
+  // primary slice has no per-dim values to surface.
+  const [pickedDim, setPickedDim] = useState<FilterDim | null>(null);
 
   // Bug fix 6.1 (spec §6.1): when filter[<dim>] is set AND group === <dim>,
   // the group is degenerate (one series, equals what group=none would show).
@@ -231,6 +233,28 @@ export function SolverNetView() {
     isLoading: sliceLoading,
     isError: sliceError,
   } = useSlice(sliceParams);
+
+  // #687 bug 2 — Lookup slice for the add-filter popover. Fires only when the
+  // user opens the popover and picks a dim that differs from the current
+  // group; otherwise we already have the values in `slice.series`.
+  const needsDimLookup = pickedDim !== null && pickedDim !== group;
+  const lookupSliceParams: SliceParams = needsDimLookup
+    ? { ...sliceParams, group: pickedDim as FilterDim }
+    : sliceParams;
+  const dimLookup = useSlice(lookupSliceParams, { enabled: needsDimLookup });
+  const dimValues: string[] = (() => {
+    if (pickedDim === null) return [];
+    if (pickedDim === group) {
+      // Primary slice already groups on this dim — read values directly.
+      return (slice?.series ?? [])
+        .map((s) => s.groupValue)
+        .filter((v): v is string => v !== null && v !== '');
+    }
+    return (dimLookup.data?.series ?? [])
+      .map((s) => s.groupValue)
+      .filter((v): v is string => v !== null && v !== '');
+  })();
+  const dimLoading = needsDimLookup && dimLookup.isLoading;
 
   // useSolverNet still serves the legacy metadata fields (name, status,
   // launcherAgentId, checkpointTimeline, freezeIntegrity, lastIndexed*). The
@@ -474,91 +498,71 @@ export function SolverNetView() {
               - Active filters: FilterChipStrip on the left, GroupByDropdown
                 right-aligned, both inside a hairline-bordered band.
               The ⚙ settings popover lives in the chart-caption row below. */}
-          {(() => {
-            // Available values for the add-filter popover come from the slice
-            // engine's series array when the user has grouped by a dimension.
-            // The engine emits one series per distinct value of the group dim.
-            // For dimensions the user hasn't grouped on, the popover falls back
-            // to "No values to filter by".
-            const availableValues: Partial<Record<FilterDim, string[]>> = {};
-            if (group !== 'none') {
-              const dim = group as FilterDim;
-              const values = slice.series
-                .map((s) => s.groupValue)
-                .filter((v): v is string => v !== null && v !== '');
-              if (values.length > 0) availableValues[dim] = values;
-            }
-            return (
-              <div style={{ position: 'relative' }}>
-                {hasFilters ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 12,
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 0',
-                      borderTop: '1px solid var(--border)',
-                      borderBottom: '1px solid var(--border)',
-                      background: 'rgba(122,167,220,0.04)',
-                    }}
-                  >
-                    <FilterChipStrip
-                      filters={filters}
-                      onRemove={(dim, value) => {
-                        const next: FilterMap = { ...filters };
-                        const arr = (next[dim] ?? []).filter(
-                          (v) => v !== value,
-                        );
-                        if (arr.length === 0) delete next[dim];
-                        else next[dim] = arr;
-                        setFilters(next);
-                      }}
-                      onAddFilter={() => setAddFilterOpen(true)}
-                    />
-                    <GroupByDropdown value={group} onChange={setGroup} />
-                  </div>
-                ) : (
-                  <PersistentControlsRow
-                    group={group}
-                    onGroupChange={setGroup}
-                    onAddFilter={() => setAddFilterOpen(true)}
-                  />
-                )}
-                {addFilterOpen ? (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      zIndex: 10,
-                      marginTop: 4,
-                    }}
-                  >
-                    <AddFilterPopover
-                      availableValues={availableValues}
-                      onSelect={(dim, value) => {
-                        const next: FilterMap = { ...filters };
-                        next[dim] = [...(next[dim] ?? []), value];
-                        setFilters(next);
-                        setAddFilterOpen(false);
-                      }}
-                      onDismiss={() => setAddFilterOpen(false)}
-                    />
-                  </div>
-                ) : null}
+          <div style={{ position: 'relative' }}>
+            {hasFilters ? (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 0',
+                  borderTop: '1px solid var(--border)',
+                  borderBottom: '1px solid var(--border)',
+                  background: 'rgba(122,167,220,0.04)',
+                }}
+              >
+                <FilterChipStrip
+                  filters={filters}
+                  onRemove={(dim, value) => {
+                    const next: FilterMap = { ...filters };
+                    const arr = (next[dim] ?? []).filter((v) => v !== value);
+                    if (arr.length === 0) delete next[dim];
+                    else next[dim] = arr;
+                    setFilters(next);
+                  }}
+                  onAddFilter={() => setAddFilterOpen(true)}
+                />
+                <GroupByDropdown value={group} onChange={setGroup} />
               </div>
-            );
-          })()}
-
-          {/* ── Active-slice chip strip ── */}
-          {hasExplicitSlice && (
-            <ActiveSliceChips
-              group={group}
-              filters={filters}
-              window={window}
-            />
-          )}
+            ) : (
+              <PersistentControlsRow
+                group={group}
+                onGroupChange={setGroup}
+                onAddFilter={() => setAddFilterOpen(true)}
+              />
+            )}
+            {addFilterOpen ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  zIndex: 10,
+                  marginTop: 4,
+                }}
+              >
+                <AddFilterPopover
+                  pickedDim={pickedDim}
+                  onPickDim={setPickedDim}
+                  onBack={() => setPickedDim(null)}
+                  values={dimValues}
+                  loading={dimLoading}
+                  onSelect={(dim, value) => {
+                    const next: FilterMap = { ...filters };
+                    next[dim] = [...(next[dim] ?? []), value];
+                    setFilters(next);
+                    setAddFilterOpen(false);
+                    setPickedDim(null);
+                  }}
+                  onDismiss={() => {
+                    setAddFilterOpen(false);
+                    setPickedDim(null);
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
 
           {/* ── Learning curve ── */}
           <Card title="Learning curve">
@@ -652,6 +656,7 @@ export function SolverNetView() {
                   >
                     <SliceSettingsPopover
                       includeRaw={includeUnenriched}
+                      onDismiss={() => setSettingsOpen(false)}
                       onIncludeRawChange={(v) => {
                         setInclude(v ? 'raw' : null);
                         setSettingsOpen(false);

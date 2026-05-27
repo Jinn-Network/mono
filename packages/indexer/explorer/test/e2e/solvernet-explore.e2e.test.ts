@@ -46,7 +46,7 @@ test.describe('Milestone #2 — locked-config URL renders on /solvernet', () => 
 
   test('renders the active-slice chips for codex + gpt-5.4-mini', async ({ page }) => {
     await page.goto(LOCKED_URL);
-    const chips = page.getByTestId('active-slice-chips');
+    const chips = page.getByRole('region', { name: 'Active filters' });
     await expect(chips).toContainText(/harness:codex/i);
     await expect(chips).toContainText(/model:gpt-5\.4-mini/i);
   });
@@ -75,7 +75,7 @@ test.describe('Milestone #2 — locked-config URL renders on /solvernet', () => 
     // the first one and assert the chips reflect a harness:* filter.
     const firstBtn = legend.locator('button').first();
     await firstBtn.click();
-    const chips = page.getByTestId('active-slice-chips');
+    const chips = page.getByRole('region', { name: 'Active filters' });
     await expect(chips).toContainText(/harness:/i);
   });
 
@@ -87,7 +87,7 @@ test.describe('Milestone #2 — locked-config URL renders on /solvernet', () => 
     const opBtn = page.getByRole('button', { name: /^0x[a-f0-9…]+$/i }).first();
     await expect(opBtn).toBeVisible({ timeout: 20_000 });
     await opBtn.click();
-    const chips = page.getByTestId('active-slice-chips');
+    const chips = page.getByRole('region', { name: 'Active filters' });
     await expect(chips).toContainText(/operator:0x/i);
   });
 
@@ -96,7 +96,7 @@ test.describe('Milestone #2 — locked-config URL renders on /solvernet', () => 
       `/explore/${CID}?filter[harness]=codex&filter[model]=gpt-5.4-mini&window=30`,
     );
     await expect(page).toHaveURL(new RegExp(`/solvernet/${CID}\\?.*window=30`));
-    const chips = page.getByTestId('active-slice-chips');
+    const chips = page.getByRole('region', { name: 'Active filters' });
     await expect(chips).toContainText(/harness:codex/i);
   });
 });
@@ -147,6 +147,24 @@ test.describe('SolverNetView — cold landing → add filter → remove (spec §
     ).toHaveCount(0);
   });
 
+  test('cold-landing + filter → picking a dim surfaces values via lookup slice (#687 bug 2)', async ({ page }) => {
+    // Regression for #687 bug 2 — before the fix, opening + filter from the
+    // empty state and picking any dim showed "No values to filter by". The fix
+    // fires an on-demand slice with group=<pickedDim> to enumerate values.
+    await page.goto(`/solvernet/${CID}`);
+    await page.getByRole('button', { name: /^Add filter$/i }).click();
+    const dialog = page.getByRole('dialog', { name: /Add filter/i });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'harness' }).click();
+    // Either a loading state appears briefly, or values land directly if
+    // react-query had a warm cache from a prior session navigation.
+    const valueButtons = dialog.locator('button').filter({ hasNotText: /Back/ });
+    // Wait for at least one value button (not "Back", not the loading status).
+    await expect(valueButtons.first()).toBeVisible({ timeout: 10_000 });
+    // The empty-state must NOT appear once values arrive.
+    await expect(dialog.getByText(/No values to filter by/i)).toHaveCount(0);
+  });
+
   test('clicking + filter opens the dimension picker; picking a value adds a chip', async ({ page }) => {
     // Start at ?group=harness so the AddFilterPopover has values to offer for
     // the harness dimension (availableValues is derived from slice.series for
@@ -180,6 +198,44 @@ test.describe('SolverNetView — cold landing → add filter → remove (spec §
     // URL reflects the new filter — assert the key landed, not the value
     // (URL-encoding of e.g. `(unknown)` makes value-anchored regex brittle).
     await expect(page).toHaveURL(/filter(\[|%5B)harness/);
+  });
+
+  test('+ filter popover dismisses on outside-click (#687 bug 3)', async ({ page }) => {
+    await page.goto(`/solvernet/${CID}`);
+    await page.getByRole('button', { name: /^Add filter$/i }).click();
+    const dialog = page.getByRole('dialog', { name: /Add filter/i });
+    await expect(dialog).toBeVisible();
+    // Click somewhere outside the popover — the breadcrumb area at the top is
+    // always present and a safe target.
+    await page.getByText('SolverNets').first().click();
+    await expect(
+      page.getByRole('dialog', { name: /Add filter/i }),
+    ).toHaveCount(0);
+  });
+
+  test('⚙ Slice settings popover dismisses on outside-click (#687 bug 3)', async ({ page }) => {
+    await page.goto(`/solvernet/${CID}?filter[harness]=codex`);
+    await page
+      .getByRole('button', { name: /^Slice settings$/i })
+      .click();
+    const dialog = page.getByRole('dialog', { name: /Slice settings/i });
+    await expect(dialog).toBeVisible();
+    await page.getByText('SolverNets').first().click();
+    await expect(
+      page.getByRole('dialog', { name: /Slice settings/i }),
+    ).toHaveCount(0);
+  });
+
+  test('does NOT render the legacy ActiveSliceChips strip alongside the new chip strip (#687 bug 1)', async ({ page }) => {
+    await page.goto(
+      `/solvernet/${CID}?filter[harness]=codex&filter[model]=gpt-5.4-mini&window=30`,
+    );
+    await expect(
+      page.getByRole('region', { name: /Active filters/i }),
+    ).toBeVisible({ timeout: 20_000 });
+    // The legacy strip used data-testid="active-slice-chips" — deleted in
+    // #687 bug 1. Must not be in the DOM.
+    await expect(page.locator('[data-testid="active-slice-chips"]')).toHaveCount(0);
   });
 
   test('clicking × on a chip removes the filter; strip collapses to cold landing', async ({ page }) => {

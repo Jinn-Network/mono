@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router, Switch, Route } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -426,15 +426,32 @@ describe('SolverNetView — slice control surface', () => {
     expect(lastCall?.group).toBe('harness');
   });
 
-  it('renders the active-slice chip strip with filter[harness]=codex from the URL', async () => {
+  it('renders the FilterChipStrip with filter[harness]=codex from the URL', async () => {
     const { WrappedView } = makeWrapper(
       `/solvernet/${encodeURIComponent(CID)}?filter[harness]=codex`,
     );
     render(<WrappedView />);
     await waitFor(() => {
-      const chips = screen.getByTestId('active-slice-chips');
+      // The new chip strip is a labeled region (no longer a testid-anchored
+      // div). Issue #687 deleted the legacy ActiveSliceChips duplicate.
+      const chips = screen.getByRole('region', { name: 'Active filters' });
       expect(chips).toHaveTextContent(/harness:codex/i);
     });
+  });
+
+  it('does NOT render the legacy ActiveSliceChips strip below the new FilterChipStrip (#687)', async () => {
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?filter[harness]=codex&window=30`,
+    );
+    render(<WrappedView />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: 'Active filters' }),
+      ).toBeInTheDocument();
+    });
+    // Regression guard for #687 bug 1: the static legacy strip from PR #676
+    // must not coexist with the new dismissible chip strip.
+    expect(screen.queryByTestId('active-slice-chips')).toBeNull();
   });
 
   it('migrates legacy ?k=30 to ?window=30 on mount (back-compat)', async () => {
@@ -588,9 +605,9 @@ describe('SolverNetView — chart legend click adds filter', () => {
     expect(codexBtn).toBeDefined();
     fireEvent.click(codexBtn!);
 
-    // After the click the active-slice chip strip should show harness:codex
+    // After the click the FilterChipStrip should show harness:codex.
     await waitFor(() => {
-      const chips = screen.getByTestId('active-slice-chips');
+      const chips = screen.getByRole('region', { name: 'Active filters' });
       expect(chips).toHaveTextContent(/harness:codex/i);
     });
   });
@@ -737,7 +754,7 @@ describe('SolverNetView — leaderboard row click adds filter[operator]', () => 
     const opBtn = screen.getByRole('button', { name: /0xaaaa…000a/i });
     fireEvent.click(opBtn);
     await waitFor(() => {
-      const chips = screen.getByTestId('active-slice-chips');
+      const chips = screen.getByRole('region', { name: 'Active filters' });
       expect(chips).toHaveTextContent(/operator:0xaaaa/i);
     });
   });
@@ -760,5 +777,109 @@ describe('SolverNetView — leaderboard row click adds filter[operator]', () => 
         `/operator/${encodeURIComponent('0xaaaa000000000000000a')}`,
       );
     });
+  });
+});
+
+// ─── Cold-landing `+ filter` lookup (bug 2, #687) ─────────────────────────────
+
+describe('SolverNetView — + filter surfaces values on cold landing (#687 bug 2)', () => {
+  it('fires a lookup slice and renders values when a dim is picked at cold landing', async () => {
+    vi.mocked(useSlice).mockClear();
+    // Mock: primary slice (group=none) returns the default SLICE_DATA. Lookup
+    // slice (group=harness) returns multi-series data with distinct harness
+    // values. Without the fix, AddFilterPopover would render "No values to
+    // filter by" because availableValues was empty for ungrouped dims.
+    const harnessLookup = {
+      ...SLICE_DATA,
+      params: { ...SLICE_DATA.params, group: 'harness' as const },
+      series: [
+        { ...SLICE_DATA.series[0], groupValue: 'codex' },
+        { ...SLICE_DATA.series[0], groupValue: 'hermes-agent' },
+      ],
+    };
+    vi.mocked(useSlice).mockImplementation((params: any) => {
+      if (params.group === 'harness') {
+        return {
+          isLoading: false,
+          isError: false,
+          error: null,
+          data: harnessLookup,
+        } as any;
+      }
+      return {
+        isLoading: false,
+        isError: false,
+        error: null,
+        data: SLICE_DATA,
+      } as any;
+    });
+
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+
+    // Cold landing: only the persistent `+ filter` chip + group dropdown.
+    const addFilterBtn = await screen.findByRole('button', {
+      name: /^Add filter$/i,
+    });
+    fireEvent.click(addFilterBtn);
+    // Popover opens — pick harness.
+    const dialog = screen.getByRole('dialog', { name: /Add filter/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'harness' }));
+
+    // Lookup slice fires (mock returns immediately), values render.
+    await waitFor(() => {
+      expect(
+        within(dialog).getByRole('button', { name: 'codex' }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole('button', { name: 'hermes-agent' }),
+      ).toBeInTheDocument();
+    });
+    // No "No values to filter by" empty state.
+    expect(
+      within(dialog).queryByText(/No values to filter by/i),
+    ).toBeNull();
+
+    // Lookup useSlice call: confirm the second invocation used group: 'harness'.
+    const calls = vi.mocked(useSlice).mock.calls;
+    const lookupCall = calls.find((c: any[]) => c[0]?.group === 'harness');
+    expect(lookupCall).toBeDefined();
+    expect((lookupCall![1] as any)?.enabled).toBe(true);
+  });
+
+  it('renders a loading state while the lookup slice is pending', async () => {
+    vi.mocked(useSlice).mockClear();
+    vi.mocked(useSlice).mockImplementation((params: any) => {
+      if (params.group === 'harness') {
+        return {
+          isLoading: true,
+          isError: false,
+          error: null,
+          data: undefined,
+        } as any;
+      }
+      return {
+        isLoading: false,
+        isError: false,
+        error: null,
+        data: SLICE_DATA,
+      } as any;
+    });
+
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^Add filter$/i }),
+    );
+    const dialog = screen.getByRole('dialog', { name: /Add filter/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'harness' }));
+
+    expect(
+      within(dialog).getByRole('status', { name: /Loading values/i }),
+    ).toBeInTheDocument();
+    // The "no values" empty state does NOT show while loading.
+    expect(
+      within(dialog).queryByText(/No values to filter by/i),
+    ).toBeNull();
   });
 });

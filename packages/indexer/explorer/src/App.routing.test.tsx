@@ -245,8 +245,10 @@ describe('App routing', () => {
     );
     render(<App />, { wrapper: Wrapper });
     await waitFor(() => {
-      // The redirected SolverNetView reads the URL filter into the active-slice strip
-      const chips = screen.getByTestId('active-slice-chips');
+      // The redirected SolverNetView reads the URL filter into the
+      // FilterChipStrip (labeled region after #687 removed the legacy
+      // active-slice-chips testid-anchored strip).
+      const chips = screen.getByRole('region', { name: 'Active filters' });
       expect(chips).toHaveTextContent(/harness:codex/i);
     });
   });

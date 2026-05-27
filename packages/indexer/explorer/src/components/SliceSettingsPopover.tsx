@@ -5,22 +5,37 @@
  *   - Include raw data — toggle. When on, ?include=raw and surface marked.
  *   - Reset to default — action. Clears all slice URL state.
  *
- * Anchor/positioning handled by the parent.
+ * Anchor/positioning handled by the parent. Dismissal: Escape key + click
+ * outside the panel (#687 bug 3).
  */
+import { useEffect, useRef } from 'react';
+import { useDismissOnOutsideClick } from '../hooks/useDismissOnOutsideClick';
 
 interface Props {
   includeRaw: boolean;
   onIncludeRawChange: (v: boolean) => void;
   onReset: () => void;
+  onDismiss: () => void;
 }
 
 export function SliceSettingsPopover({
   includeRaw,
   onIncludeRawChange,
   onReset,
+  onDismiss,
 }: Props) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onDismiss();
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onDismiss]);
+  useDismissOnOutsideClick(rootRef, onDismiss);
   return (
     <div
+      ref={rootRef}
       role="dialog"
       aria-label="Slice settings"
       style={{
