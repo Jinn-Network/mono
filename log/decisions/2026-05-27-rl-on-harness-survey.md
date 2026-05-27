@@ -123,7 +123,119 @@ not as a current Jinn surface.
   across runs so the operator has a durable history. This is one path by
   which the marketplace of agent ↔ operator preferences can compose.
 
-### §1.3 Empirical occupancy
+### §1.3 Data join is already live (verdict ↔ codeDigest)
+
+This is one of the load-bearing facts the first draft of this DR
+under-specified. The chain from harness state to verdict reward is
+wired end-to-end and queryable through the indexer today:
+
+1. **`codeDigest` = content hash of `implStateDir`.** The freeze-fence
+   ([`client/src/daemon/freeze-fence.ts:55`](../../client/src/daemon/freeze-fence.ts:55))
+   computes `hashImplStateDir(ctx.implStateDir)` on every run via the
+   deterministic, sorted, content-only hasher at
+   [`client/src/harnesses/freeze.ts:51`](../../client/src/harnesses/freeze.ts:51).
+2. **`codeDigest` is written to the Solution envelope.** The engine
+   stores the freeze-fence digest per request
+   ([`engine.ts:1268`](../../client/src/harnesses/engine/engine.ts:1268))
+   and writes it into the envelope's `executor.codeDigest` field
+   ([`engine.ts:1624`](../../client/src/harnesses/engine/engine.ts:1624)).
+3. **`codeDigest` is published on-chain via the v2 payload.** When the
+   harness identity is available the engine emits a v2
+   `ExecutionPayload` carrying the 32-byte codeDigest, mode flag, and
+   implName
+   ([`engine.ts:1802`](../../client/src/harnesses/engine/engine.ts:1802),
+   [`identity.ts:268`](../../client/src/erc8004/identity.ts:268)).
+4. **The indexer materialises codeDigest into a queryable table.** The
+   Ponder enrichment pass fetches the IPFS envelope body and projects
+   the executor block into
+   [`attemptEnvelopeMeta`](../../packages/indexer/ponder.schema.ts) —
+   columns `codeDigest`, `implName`, `mode`, `pluginsJson`
+   ([`handlers.ts:586`](../../packages/indexer/src/handlers.ts)).
+5. **The verdict's real outcome is also indexed.** A sibling enrichment
+   writes `verdictEnvelopeMeta` carrying `actualPassed` and
+   `actualScore`
+   ([`handlers.ts:709`](../../packages/indexer/src/handlers.ts)) —
+   the source of truth that bypasses the on-chain default-to-Pass bug.
+
+Conceptually, per-codeDigest selection-on-reward is one query against
+the indexer:
+
+```sql
+SELECT
+  aem.implName,
+  aem.codeDigest,
+  aem.mode,
+  COUNT(*)                                                AS attempts,
+  AVG(CASE WHEN vem.actualPassed THEN 1.0 ELSE 0.0 END)   AS pass_rate,
+  AVG(CAST(NULLIF(vem.actualScore,'') AS DECIMAL))        AS avg_score
+FROM attempt_envelope_meta aem
+JOIN attempt              a   ON aem.requestId = a.requestId AND aem.chainId = a.chainId
+JOIN verdict              v   ON v.taskId = a.taskId AND v.attemptIndex = a.attemptIndex
+JOIN verdict_envelope_meta vem ON vem.requestId = v.requestId
+WHERE a.operator = $operatorSafe
+GROUP BY aem.implName, aem.codeDigest, aem.mode;
+```
+
+The explorer SPA already runs essentially this query for frozen-mode
+SolverNet views ([`explorer/src/lib/api.ts:154`](../../packages/indexer/explorer/src/lib/api.ts)
+documents the frozen-pass-rate-by-codeDigest aggregation). Adapting it
+to train mode is removing one WHERE clause.
+
+The first draft of this DR mis-stated that this join required
+[#671](https://github.com/Jinn-Network/mono/issues/671) +
+[#672](https://github.com/Jinn-Network/mono/issues/672) (the
+TranscriptWatcher + CodexSessionParser unblock). Those are gates for
+**trajectory-level credit assignment** (Level 3b in §4); aggregate
+per-codeDigest selection-on-reward operates on data the indexer already
+exposes. The actual structural ask on Level 1 is (a) add a Ponder index
+on `attemptEnvelopeMeta.codeDigest` for fast lookup, (b) extend the
+learner plugin's Memory-consolidation phase to query the join and
+decide reverts on statistical confidence.
+[#669](https://github.com/Jinn-Network/mono/issues/669)'s launcher
+counter under-count degrades denominator reliability but does not
+block the work.
+
+### §1.4 Trajectory capture: structure exists, solver-side density is sparse
+
+The same correction applies to trajectory data. Jinn already publishes
+structured, hash-chained, content-addressable trajectories with every
+Solution envelope:
+
+- The `TrajectoryCollector`
+  ([`client/src/trajectory/collector.ts:53`](../../client/src/trajectory/collector.ts:53))
+  produces spans with `traceId`, `spanId`, `parentSpanId`, `name`,
+  `kind`, hash-chained via `jinn.prevSpanHash`, secret-scrubbed,
+  conformance-checked.
+- The envelope's `trajectory` field is a content-addressed reference
+  ([`client/src/types/envelope.ts:172`](../../client/src/types/envelope.ts:172))
+  carrying `{ sha256, access: { endpoint, priceUsdc } }` — fetchable
+  via the operator's HTTP endpoint.
+- Three `jinn.span.kind` values are emitted in practice:
+  `jinn.state_transition` (lifecycle), `jinn.venue_io` (external venue
+  interactions), `jinn.artifact.emit` (artifact creation).
+
+The **nuance** is who emits which kinds:
+
+| Path | Trajectory richness |
+|---|---|
+| Evaluator harnesses (prediction-v0, prediction-apy-v0, portfolio-v0) | **Rich** — venue_io + state_transition + artifact.emit |
+| Solver session orchestrators (claude-mcp-shared, hyperliquid) | **Sparse** — state_transition markers only |
+| MCP server tool calls (`search_records`, `inspect_record`, `acquire_artifact`) | **Not instrumented** — fired without addSpan |
+| Codex / claude-code session contents | **Rich locally** in `~/.codex/sessions/`; **not yet joined** to envelope trajectory |
+
+So an evaluator's envelope today is genuinely "trajectory + verdict";
+a solver's envelope is "sparse trajectory + verdict." For Levels 1–3a
+in §4 below this is sufficient (the relevant signals are codeDigest and
+the envelope's `artifacts` acquired-list). For Level 3b (per-tool-call
+GRPO / GEPA) the gap is bridgeable two ways: instrument the MCP
+server's tool handlers to call `addSpan` on each invocation (lives
+entirely inside Jinn's controlled path) **OR** unblock
+[#671](https://github.com/Jinn-Network/mono/issues/671) +
+[#672](https://github.com/Jinn-Network/mono/issues/672) so local
+session JSONLs flow into `capture_spans` and content-address into the
+envelope.
+
+### §1.5 Empirical occupancy
 
 Per DR-2026-05-26 §F5: the only working learning case today is
 `claude-code-learner/prediction_v1` with **nine commits across runs**, all
@@ -398,185 +510,268 @@ The column **Status** uses:
 
 ### §3.1 Where the gap is, in one paragraph
 
-The pieces Jinn already has are **the substrate** (git-backed
-`implStateDir`, revert-by-sha, mode-gated freezing, allowed write paths,
-operator-access requests) and **the verbal-RL inner loop** (Reflexion-shaped
-Debrief → Memory). The pieces Jinn does not yet have are **(a) any
-attribution from a downstream reward signal back to a specific Improve
-commit** (selection-on-reward); **(b) any retrieval policy more
-sophisticated than name-similarity** over the corpus; and **(c) any
+Jinn already has: **the substrate** (git-backed `implStateDir`,
+revert-by-sha, mode-gated freezing, allowed write paths,
+operator-access requests), **the verbal-RL inner loop** (Reflexion-shaped
+Debrief → Memory), **the verdict-to-harness-state join** (§1.3 —
+`attemptEnvelopeMeta.codeDigest` ↔ `verdictEnvelopeMeta.actualPassed`,
+queryable today), and **structured trajectory publication** (§1.4 —
+`TrajectoryCollector` + envelope `trajectory` ref). What Jinn does not
+yet have are **(a) a closed feedback loop that uses the live join** —
+nothing yet reads per-codeDigest aggregate reward to decide reverts;
+**(b) richer solver-side trajectory spans** — today only state_transition
+markers, no per-tool-call detail; **(c) any retrieval policy more
+sophisticated than name-similarity** over the corpus; and **(d) any
 mechanism that biases the promoter toward higher-tier action surface
-(skills / tools) rather than markdown-in-notes**. Most of the
-high-leverage interventions in §4 close exactly these three gaps with
-small, composable additions to existing prompts and indexer code.
+(skills / tools) rather than markdown-in-notes**. (a) and (d) are
+plugin-level edits — the §4 ladder starts there. (b) is bridgeable via
+MCP-server instrumentation or by the capture_spans unblock. (c) becomes
+a real lever once (a) supplies reward attribution for retrieval ranking.
 
-## §4 — Candidate intervention sequences (ranked by leverage)
+## §4 — The ladder, level by level
 
-Each intervention names:
+The first draft of this DR proposed three candidate sequences (A / B / C)
+under a leverage-and-effort schema. The corrections in §1.3 and §1.4 made
+that framing misleading: a substantial portion of the "wiring" the
+original Sequence A and B treated as new work is already in place. The
+clean reframing is a six-level ladder of increasing RL sophistication,
+with explicit per-level cost-to-operator and required work.
 
-- **What** — concrete change.
-- **Effort** — rough scale (`S` = ≤1 sprint, `M` = 1–2 sprints,
-  `L` = 2+ sprints).
-- **Leverage** — qualitative (`High` shifts the central
-  empirical-occupancy gap; `Medium` improves an existing surface;
-  `Low` is exploratory).
-- **Gated on** — which filed prerequisites block it (see §6).
-- **Prior art** — which techniques in §2 inform it.
+Each level names: what it adds, what it costs the operator, what work it
+needs in Jinn beyond what already exists today.
 
-### §4.1 Sequence A — promoter-prompt nudge + selection-on-reward (highest leverage / lowest effort)
+### §4.1 Level 0 — "RL-shaped" memory (today)
 
-**Step A1 — promoter-prompt nudge** (Effort: S; Leverage: High; Gated on:
-nothing). Add a single paragraph to
-[`promoter-prompt.md`](../../client/plugins/learner/skills/learn/promoter-prompt.md)
-biasing the Improve agent toward higher-tier mutations (skill edits, new
-tools) over note-writing, with a worked example of a skill-edit promotion.
-A/B against the current prompt for one operator over N runs. **Why High
-leverage:** the empirical-occupancy gap (9 of 9 commits in the lowest tier)
-is the load-bearing diagnostic for the whole substrate-vs-usage
-mismatch — a one-paragraph nudge that shifts the distribution upward
-turns ~all of the un-exercised surface into a measurable experiment.
-Prior art: Voyager (§2.1), Darwin Gödel Machine (§2.16).
+What runs today. The Memory-consolidation phase reverts `implStateDir`
+mutations on the Debrief Analyst's qualitative trend signal. Verbal-RL /
+Reflexion-shaped. Not statistical RL.
 
-**Step A2 — selection-on-reward in Memory consolidation** (Effort: M;
-Leverage: High; Gated on: [#671](https://github.com/Jinn-Network/mono/issues/671),
-[#672](https://github.com/Jinn-Network/mono/issues/672) for reward
-attribution). Wire the Consolidator to read a recent-N-run reward signal
-(per-`implStateDirShaAfter`) and `git revert` Improve commits whose
-presence did not lift pass rate. Today Consolidator only reverts on
-Debrief's "regressed" trend signal — that's coarse; tie it to the actual
-JINN-earned / verdict-passed counter. **Why High leverage:** the
-revert-by-sha plumbing already exists; this turns the existing substrate
-from "wide but un-pressured" into the closed loop the design wager
-requires. Prior art: ReST-EM (§2.7, verifier-filter step), Voyager (§2.1,
-skill validation), GEPA (§2.15, Pareto-front discipline).
+**Cost:** nothing extra. **Status:** in production.
 
-**Sequence A combined effort:** S + M = roughly one sprint of focused
-work once #671/#672 land. **Combined leverage:** closes both the
-"agent under-uses the surface" gap and the "no reward attribution" gap in
-one ordered pair.
+### §4.2 Level 1 — Per-codeDigest aggregate selection-on-reward
 
-### §4.2 Sequence B — reward-shaped retrieval (medium leverage / medium effort)
+What it adds: the first **quantitative** reward signal into the
+learning loop. The Memory-consolidation phase (Consolidator or a sibling
+subagent dispatched from it) tracks per-codeDigest sample windows,
+queries the indexer join from §1.3 for aggregate pass rate, and reverts
+Improve commits whose presence is statistically associated with worse
+outcomes.
 
-**Step B1 — reward-attribution indexer schema** (Effort: M; Leverage:
-Medium; Gated on:
-[#671](https://github.com/Jinn-Network/mono/issues/671),
-[#672](https://github.com/Jinn-Network/mono/issues/672)). Indexer-side
-back-join from `verdict.score` to every span in the trajectory that
-produced it, so each `acquire_artifact` call inherits a downstream PASS /
-FAIL marker. Required by everything in §4.1 step A2 and §4.2 step B2.
-Prerequisite, not a deliverable.
+**Cost to the operator:** nothing extra. Operates observationally over
+attempts the operator submits anyway.
 
-**Step B2 — reward-shaped retrieval ranking** (Effort: M; Leverage:
-Medium; Gated on: B1). Replace name-similarity ranking in
-`handleSearchRecords` ([`client/src/mcp/server.ts`](../../client/src/mcp/server.ts))
-with empirical-reward ranking — corpus entries weighted by their
-downstream PASS correlation across the operator's history (and, where
-cross-operator data exists, across the network). **Why Medium leverage:**
-the cross-operator corpus is sparse today (DR-2026-05-26 §F3: two active
-publishers), so the immediate gain is largely intra-operator. Becomes
-High leverage if / when donation density grows. Prior art: contextual
-bandits, ExpeL (§2.10, insight-conditioned retrieval), Generative Agents
-(§2.9, recency × importance × relevance scoring).
+**Required work in Jinn:**
 
-**Sequence B combined effort:** M + M = roughly two sprints once #671/#672
-land. **Combined leverage:** improves the retrieval half of the two-layer
-taxonomy; downstream-bound on donation density.
+1. Ponder index on `attemptEnvelopeMeta.codeDigest`. Small migration.
+2. Learner-plugin extension — per-codeDigest sample-window tracker,
+   indexer query, statistical revert-decision logic. Lives inside the
+   Consolidator's prompt or in a new sibling subagent dispatched from
+   phase 7. Reusable substrate for higher levels (every level needs
+   "sample window before update").
+3. Promoter-prompt nudge toward higher action-surface tiers (the
+   originally-A1 move). Independent; can ship in parallel.
 
-### §4.3 Sequence C — Pareto-per-SolverNet promoter evolution (medium leverage / high effort)
+**Prior art:** ReST-EM (§2.7, verifier-filter step), Voyager (§2.1,
+skill validation), GEPA (§2.15, Pareto-front discipline). The
+selection-on-reward step generalises: every higher level uses the same
+sample-window pattern.
 
-**Step C1 — promoter-prompt population** (Effort: M; Leverage: Low alone,
-High in combination with C2; Gated on: A1 having shown the agent is
-willing to use higher-tier surface at all). Maintain k=4 promoter prompts
-per SolverNet, sampled per run; track per-prompt downstream reward; evolve
-via reflective mutation each N runs. Prior art: Promptbreeder (§2.3),
-GEPA (§2.15).
+### §4.3 Level 2 — Controlled per-commit ablation
 
-**Step C2 — Pareto-front-per-SolverNet bookkeeping** (Effort: M; Leverage:
-Medium; Gated on: C1, B1). Per the GEPA result, maintain a Pareto front
-per SolverNet rather than a single best promoter — defeats local optima
-when the SolverNet's task distribution is multi-modal. **Why this is
-ranked below A and B:** higher effort, and the headline (35× sample
-efficiency vs RL) is from a 2025 paper on synthetic benchmarks; production
-behaviour at Jinn's scale is uncertain. Right thing if A + B have already
-demonstrated the central wager and we need to push further.
+What it adds: isolation of a single Improve commit's contribution by
+deliberately running K samples from sha_n vs sha_{n−1} rather than
+relying on observational comparison alone.
 
-**Sequence C combined effort:** M + M = roughly two sprints. **Combined
-leverage:** the largest single 2025+ prior-art finding; right next step
-*after* the simpler sequences have de-risked the design wager.
+**Cost to the operator:** **K× more inference per ablation.** Acceptable
+for periodic / operator-initiated ablations of specific commits; not a
+continuous loop.
 
-### §4.4 Honorable mentions (below the top three)
+**Required work:** Level 1 + a daemon-side scheduling capability
+("re-run N samples from this implStateDir sha"), invokable from a CLI
+(`jinn ablate <commit-sha> --samples K`).
 
-These are surveyed and parked, not ranked, because they don't fit the
-≥3-sequence cutoff but should be visible to the design pass.
+### §4.4 Level 3a — Retrieval-pattern GRPO
 
-- **Voyager-style skill validation gate** (Effort: M; Leverage: Medium).
-  New skills emitted by the promoter must pass a held-out validation
-  before promotion. Prerequisite for any aggressive new-skill cadence.
-  Cite: Voyager (§2.1).
-- **Constitutional self-critique pass** (Effort: S; Leverage: Low–Medium).
-  Add a self-critique step in the Improve phase grounded in `PRINCIPLES.md`
-  — analogous to the SL half of Constitutional AI. Cheapest path to
-  Legibility / Neutral / Permissionless adherence inside the loop. Cite:
-  Constitutional AI (§2.8).
+What it adds: group-relative policy attribution at the
+**retrieval-pattern** level. For K trajectories from the same starting
+codeDigest, compute advantage = score − group_mean and attribute the
+delta to differences in which donated artifacts each run acquired. The
+envelope's `artifacts` list already contains the acquired CIDs.
+
+**Cost:** K× inference per task you optimize on (same shape as Level 2
+and 3b).
+
+**Required work:** Level 1 substrate + a trajectory-diff routine over
+envelope `artifacts` lists. No new instrumentation.
+
+**Prior art:** contextual bandits, ExpeL (§2.10, cross-task insight
+extraction), Generative Agents (§2.9, recency × importance × relevance
+scoring).
+
+### §4.5 Level 3b — Per-tool-call GRPO / GEPA
+
+What it adds: group-relative attribution at the **per-tool-call**
+level — which `search_records` queries fired, which decisions the LLM
+made between tool calls. Choice of advantage-arithmetic (GRPO-style) or
+reflective natural-language critique (GEPA-style).
+
+**Cost:** K× inference + ongoing trajectory-storage / query overhead.
+
+**Required work:** richer solver-side trajectory spans (per §1.4 the
+sparse-on-solver picture today). Two complementary paths:
+
+- **Instrument the MCP server's tool handlers** (`search_records`,
+  `inspect_record`, `acquire_artifact`) to emit `addSpan` calls. Lives
+  entirely inside Jinn's controlled path. Wins for agents that use the
+  Jinn MCP server.
+- **Unblock [#671](https://github.com/Jinn-Network/mono/issues/671) +
+  [#672](https://github.com/Jinn-Network/mono/issues/672)** so local
+  codex / claude-code session JSONLs flow into `capture_spans` and then
+  fold into the envelope trajectory. Wins for agents that drive the
+  model CLI as a subprocess.
+
+The two paths complement: MCP-server instrumentation gives the
+Jinn-controlled half; capture_spans gives the LLM-reasoning half.
+
+The GRPO-vs-GEPA prompt-shape choice is a days-long A/B once the
+substrate is in place, not a big design fork.
+
+**Prior art:** GEPA (§2.15, 35× fewer rollouts than GRPO with reflective
+critique), Promptbreeder (§2.3), classical GRPO.
+
+### §4.6 Level 4 — Process reward model
+
+What it adds: per-step credit assignment within a single trajectory.
+Train a small scorer (LLM-as-judge or learned PRM) that predicts step
+quality from local context, then use it as a within-trajectory reward.
+
+**Cost:** sustained inference for the PRM, plus substantial trajectory
+volume to calibrate.
+
+**Required work:** Level 3b + PRM training pipeline. Research direction;
+not a near-term sprint.
+
+**Prior art:** process reward models (Lightman et al., 2023,
+arXiv:2305.20050 — surveyed in §7 caveat 1).
+
+### §4.7 Level 5 — Weight updates (horizon)
+
+Out of scope while Jinn uses API providers. Recorded as the horizon for
+the day Jinn self-hosts open-weight models. Prior art for that day:
+SWE-RL (§2.6), ReST-EM (§2.7), Constitutional AI (§2.8).
+
+### §4.8 Two economic constraints specific to Jinn
+
+1. **Per-attempt cost is real JINN spend.** Levels 0/1 are
+   observational over attempts the operator already pays for; Levels
+   2+ multiply per-task cost by K. The continuous loop should stay at
+   Level 1; higher levels are deliberate / periodic / per-SolverNet
+   economic decisions.
+2. **The marketplace is a cross-operator reward aggregator we don't
+   yet use.** The indexer join from §1.3 works across *all* operators,
+   not just the local one. A federated Level 1 — "which codeDigests
+   across the network perform best on this SolverNet?" — is queryable
+   today. Operators could converge on dominant codeDigests by
+   observation alone. This is one path to Phase 5 / federation in
+   [#689](https://github.com/Jinn-Network/mono/issues/689)'s roadmap
+   that requires no new infrastructure.
+
+### §4.9 Honorable mentions (orthogonal to the ladder)
+
+These are surveyed and parked because they don't sit cleanly on the
+levels above but should be visible to [#689](https://github.com/Jinn-Network/mono/issues/689)'s
+design pass.
+
+- **Voyager-style skill validation gate** (effort: M). New skills
+  emitted by the promoter must pass a held-out validation before
+  promotion. Prerequisite for any aggressive new-skill cadence —
+  becomes load-bearing once Level 1 has shifted occupancy off the
+  notes-only baseline. Cite: Voyager (§2.1).
+- **Constitutional self-critique pass** (effort: S). Add a self-critique
+  step in the Improve phase grounded in `PRINCIPLES.md` — analogous to
+  the SL half of Constitutional AI. Cheapest path to PRINCIPLES.md
+  adherence inside the loop. Cite: Constitutional AI (§2.8).
 - **Cross-operator donations carry skill edits, not just past solutions**
-  (Effort: L; Leverage: High *if* density grows). The substrate already
-  has the envelope plumbing; what's missing is the promoter-side semantics
-  for consuming a donated skill (vs. a donated past patch). Phase 5 in
-  [#689](https://github.com/Jinn-Network/mono/issues/689)'s roadmap. Cite:
-  Voyager (§2.1), Darwin Gödel Machine (§2.16) for the
+  (effort: L). Envelope plumbing exists; what's missing is the
+  promoter-side semantics for consuming a donated skill (vs. a donated
+  past patch). Phase 5 in
+  [#689](https://github.com/Jinn-Network/mono/issues/689)'s roadmap.
+  Cite: Voyager (§2.1), Darwin Gödel Machine (§2.16) for the
   archive-not-overwrite discipline.
 
 ## §5 — Recommendation for the next concrete step
 
-**File Sequence A (A1 + A2) as one or two `design` issues under
-[#689](https://github.com/Jinn-Network/mono/issues/689).** Specifically:
+**File Level 1 as three small issues; defer Level 2+ to the design pass
+in [#689](https://github.com/Jinn-Network/mono/issues/689).**
 
-1. **One `feat` issue:** "promoter-prompt nudge toward higher action-surface
-   tiers + A/B measurement protocol." Acceptance: a single-paragraph edit
-   to `promoter-prompt.md` plus a measurement plan (using
-   [#683](https://github.com/Jinn-Network/mono/issues/683)'s tracker if it
-   lands first; degraded measurement otherwise) lands; runs are observable
-   for ≥4 weeks. Effort: S. Independent of #671 / #672 / #669.
-2. **One `design` issue:** "selection-on-reward in Memory consolidation."
-   Acceptance: the design pass produces a spec for how the Consolidator
-   reads per-sha downstream reward signal and reverts non-improving Improve
-   commits. Effort: M. Implementation gated on #671 / #672. Filing the
-   design issue *now* (not after #671 / #672 land) parallelises the work.
+1. **`chore(indexer)`** — add `codeDigest` index on
+   `attemptEnvelopeMeta`. ≤1 hour. Independent.
+2. **`feat(learner)`** — extend the Memory-consolidation phase (Consolidator
+   or sibling subagent inside the learner plugin) with: per-codeDigest
+   sample-window tracking, indexer query for aggregate `actualPassed` /
+   `actualScore`, statistical revert-decision logic. ~1 sprint.
+   Independent of [#671](https://github.com/Jinn-Network/mono/issues/671)
+   / [#672](https://github.com/Jinn-Network/mono/issues/672).
+3. **`feat(learner)`** — promoter-prompt nudge toward higher
+   action-surface tiers. ~1 day. Independent.
 
-Sequence B (reward-shaped retrieval) and Sequence C (Pareto-per-SolverNet)
-follow once A has demonstrated the central wager. Each of B and C can be
-filed as a separate `design` issue with a single recommended near-term
-issue inside it; they are sequential to A, not parallel, because the
-empirical signal from A determines whether to push further on retrieval
-ranking (Sequence B) or on promoter-population evolution (Sequence C)
-first.
+Why three issues rather than one bundled PR: each is small enough that
+the AI-PR-review-parity rule (handbook §AI workflow rules, rule 4) is
+cheap to honour. The promoter nudge can ship and start collecting
+empirical data while the selection-on-reward extension is in review.
+
+**Level 2** (controlled per-commit ablation) lands as a follow-up CLI
+(`jinn ablate <sha> --samples K`) once Level 1's observational signal is
+demonstrably useful.
+
+**Level 3a** (retrieval-pattern GRPO) follows once Level 2's K-sample
+regime has been shown economically acceptable for at least one
+SolverNet — the K× per-task cost is a real operator decision and needs
+empirical grounding.
+
+**Level 3b** (per-tool-call GRPO / GEPA) lands behind either the
+MCP-server span-instrumentation issue or
+[#671](https://github.com/Jinn-Network/mono/issues/671) /
+[#672](https://github.com/Jinn-Network/mono/issues/672), whichever
+substrate appears first.
 
 The deliberate choice is **not** to file the entire ladder at once.
-Sequence A is the experimental input the design needs in order to choose
-between B and C; without A's signal, the choice of B-then-C vs C-then-B is
-intuition.
+Level 1 is the experimental input the design pass needs in order to
+decide whether the higher-level work is worth its K× cost; without that
+signal, the order of Level 2 vs Level 3a is intuition.
 
-## §6 — Gating on filed prerequisites
+## §6 — Gating on filed prerequisites (corrected)
 
-| Step | Gated on | Why |
+| Level / step | Gated on | Why |
 |---|---|---|
-| A1 — promoter-prompt nudge | nothing | Pure prompt edit; A/B can run on existing infrastructure |
-| A2 — selection-on-reward | [#671](https://github.com/Jinn-Network/mono/issues/671), [#672](https://github.com/Jinn-Network/mono/issues/672) | Needs trajectory-to-reward attribution from TranscriptWatcher + CodexSessionParser |
-| B1 — reward-attribution schema | [#671](https://github.com/Jinn-Network/mono/issues/671), [#672](https://github.com/Jinn-Network/mono/issues/672) | Same as A2; this is the indexer-side half |
-| B2 — reward-shaped retrieval | B1 | Needs the attribution from B1 to rank by |
-| C1 — promoter population | A1 having shifted occupancy | Need empirical evidence the agent will use higher-tier surface before evolving a population over it |
-| C2 — Pareto-per-SolverNet | C1, B1 | Same |
-| HM — Voyager skill validation | A1 having shown new-skill promotions occur | Validation only matters once new-skill cadence exists |
+| L1 — Ponder index | nothing | Schema-additive migration on `attemptEnvelopeMeta.codeDigest` |
+| L1 — Consolidator extension | nothing structural; [#669](https://github.com/Jinn-Network/mono/issues/669) degrades denominator reliability but doesn't block | Indexer join is live (§1.3); plugin already has indexer access via MCP |
+| L1 — Promoter-prompt nudge | nothing | Pure prompt edit |
+| L2 — Controlled ablation CLI | L1 having shown observational signal works | No reason to pay K× cost ablating if observational signal at L1 is sufficient |
+| L3a — Retrieval-pattern GRPO | L1 substrate (sample-window tracking) | Envelope `artifacts` list already exists; trajectory-diff is a small extension |
+| L3b — Per-tool-call GRPO / GEPA | richer solver-side spans, via either MCP-server instrumentation **or** [#671](https://github.com/Jinn-Network/mono/issues/671) + [#672](https://github.com/Jinn-Network/mono/issues/672) | Solver spans today are state_transition-only (§1.4) |
+| L4 — Process reward model | L3b + sustained trajectory volume | Step-level signal needs step-level data |
+| L5 — Weight updates | open-weight self-host | Foundation-model training infra |
+| HM — Voyager skill validation | L1 having shown new-skill promotions occur | Validation only matters once new-skill cadence exists |
 | HM — Constitutional critique | nothing | Pure prompt edit |
 | HM — donation of skill edits | [#666](https://github.com/Jinn-Network/mono/issues/666) | Hermes operators are currently silently disabled from cross-operator donation consumption |
 
 **[#669](https://github.com/Jinn-Network/mono/issues/669) and
 [#670](https://github.com/Jinn-Network/mono/issues/670)** (launcher
-counter under-count, launcher cap overshoot) are not direct prerequisites
-for any §4 sequence, but they degrade the denominator of every learning
-measurement. Filed-but-not-blocking: a survey result expressed as
-"pass rate improved by +X%" is unreliable until those land, regardless of
-which intervention sequence runs.
+counter under-count, launcher cap overshoot) are filed-but-not-blocking
+across the whole ladder: they degrade denominator reliability for any
+pass-rate measurement, but every level can ship with degraded signal
+and tighten as those fixes land.
+
+**The original DR's gating table was substantially wrong on
+[#671](https://github.com/Jinn-Network/mono/issues/671) and
+[#672](https://github.com/Jinn-Network/mono/issues/672).** Those issues
+gate Level 3b's per-tool-call path; the original table claimed they
+gate Level 1's aggregate selection-on-reward, which would have
+mis-prioritised the design pass in
+[#689](https://github.com/Jinn-Network/mono/issues/689) toward "wait
+for trajectory capture" rather than "ship Level 1 now." Corrected here
+per the substrate findings in §1.3 / §1.4.
 
 ## §7 — What this survey did not check
 
@@ -591,13 +786,14 @@ Per BRAND.md, naming the gap is more Legible than papering over it.
    Refresh recommended every ~6 months as the field is moving fast.
 2. **Quantitative head-to-head on Jinn substrate.** None of the §2
    techniques have been benchmarked against each other on Jinn's actual
-   task stream. The leverage rankings in §4 are reasoned, not measured.
-   Sequence A's A/B is the first datapoint that will sharpen them.
-3. **Cost analysis.** Each technique's per-step inference cost differs by
-   1–3 orders of magnitude (Self-Refine: 3 LLM calls per instance; GEPA:
-   k × population × N trajectories; Promptbreeder: similar). The rankings
-   in §4 don't price this in; an honest cost-leverage Pareto would shift
-   §4.3 (Sequence C) lower.
+   task stream. The ladder ordering in §4 is reasoned, not measured.
+   Level 1's deployment is the first datapoint that will sharpen it.
+3. **Cost analysis.** Each technique's per-step inference cost differs
+   by 1–3 orders of magnitude (Self-Refine: 3 LLM calls per instance;
+   GEPA: k × population × N trajectories; Promptbreeder: similar). The
+   ladder names the K× per-task multiplier at Levels 2+ but doesn't
+   produce a cost-leverage Pareto; an honest one would shape the
+   per-SolverNet decision on which level to operate at.
 4. **Multi-operator dynamics.** Every cited technique studies single-agent
    learning. Jinn's marketplace introduces unsolved questions (when does
    an operator publish vs. hoard a skill discovery? how does
@@ -607,13 +803,31 @@ Per BRAND.md, naming the gap is more Legible than papering over it.
    Phase 5 (cross-operator federation), not in this survey.
 5. **Window-pressure feasibility of higher-tier mutations.** Per
    DR-2026-05-26 caveat 3: whether adding aggressive Improve-tier
-   mutations fits within the task window is unverified. Sequence A's
+   mutations fits within the task window is unverified. Level 1's
    instrumentation should surface this if it appears.
+6. **Substantial in-place revision.** The first publication of this DR
+   (committed earlier on this branch) under-specified what was already
+   built and over-stated the gating on
+   [#671](https://github.com/Jinn-Network/mono/issues/671) /
+   [#672](https://github.com/Jinn-Network/mono/issues/672). The
+   corrections in §1.3, §1.4, §3.1, §4, §5, and §6 were prompted by a
+   dialogue with the Captain after the first publish; key facts
+   discovered: `codeDigest` is the `implStateDir` content-hash and is
+   indexer-queryable today (§1.3); `TrajectoryCollector` already
+   publishes structured spans (§1.4); selection-on-reward at the
+   per-codeDigest aggregate level is not gated on `capture_spans`
+   (§4.2). The earlier version remains in git history on this branch
+   as a record of the investigation arc. Future reviewers: trust the
+   corrected version; treat the gating-on-#671/#672 framing in the
+   earlier draft as archaeology.
 
 ## Status
 
 Ratified as the spike finding for
-[#692](https://github.com/Jinn-Network/mono/issues/692).
+[#692](https://github.com/Jinn-Network/mono/issues/692). Revision 2 —
+restructured around the six-level ladder (§4) after substrate
+clarifications (§1.3, §1.4) discovered post-first-publish; see §7
+caveat 6 for the investigation arc.
 
 Companion artifact: the Discussion-post draft at
 [`docs/research/2026-05-27-rl-on-harness-survey-discussion-draft.md`](../../docs/research/2026-05-27-rl-on-harness-survey-discussion-draft.md)
