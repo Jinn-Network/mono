@@ -420,6 +420,58 @@ export class ValidatedPoolStore {
   }
 }
 
+/**
+ * Collapse a stored `reason` string into a histogram bucket. Diagnostic
+ * detail (`(f2p X, p2p_broke Y)`, the verbatim HF 429 message) is kept on
+ * the entry for debugging, but the bucket name is what matters for the
+ * #493 reason-histogram CLI. Unknown reasons pass through unchanged.
+ */
+export function normalizeReason(reason: string): string {
+  if (reason.startsWith('gold-patch-not-resolved')) return 'gold-patch-not-resolved';
+  if (reason.startsWith('transient:HF-429:')) return 'transient:HF-429';
+  // Pre-#578 legacy: 429s recorded as `error:HF datasets-server returned 429 for ...`.
+  if (/^error:HF datasets-server returned 429\b/.test(reason)) return 'error:HF-429';
+  return reason;
+}
+
+export interface ValidatedPoolHistogramBucket {
+  reason: string;
+  count: number;
+}
+
+export interface ValidatedPoolSummary {
+  totalEntries: number;
+  scorable: number;
+  unscorable: number;
+  byReason: ValidatedPoolHistogramBucket[];
+}
+
+/**
+ * Read-only summary of a `validated-pool.json` file. Counts entries by
+ * normalised reason (see {@link normalizeReason}) and returns the buckets
+ * sorted descending by count, with ties broken alphabetically by reason.
+ */
+export function summarizeValidatedPool(file: unknown): ValidatedPoolSummary {
+  if (!isObject(file) || !isObject((file as Record<string, unknown>)['entries'])) {
+    throw new Error('summarizeValidatedPool: file must include an `entries` object');
+  }
+  const entries = (file as { entries: Record<string, unknown> }).entries;
+  let scorable = 0;
+  let unscorable = 0;
+  const counts = new Map<string, number>();
+  for (const entry of Object.values(entries)) {
+    if (!isObject(entry)) continue;
+    const raw = typeof entry['reason'] === 'string' ? (entry['reason'] as string) : 'unknown';
+    const reason = normalizeReason(raw);
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    if (entry['scorable'] === true) scorable += 1; else unscorable += 1;
+  }
+  const byReason = [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => (b.count - a.count) || a.reason.localeCompare(b.reason));
+  return { totalEntries: scorable + unscorable, scorable, unscorable, byReason };
+}
+
 export async function exportScorableVettedPoolArtifact(
   store: ValidatedPoolStore,
   evalSemanticsVersion: string,
