@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
+import { buildHarnesses } from '../../src/harnesses/impls/index.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
+import type { Harness } from '../../src/harnesses/types.js';
 
 export type LearnerHarnessName = typeof CLAUDE_CODE_HARNESS | typeof CODEX_HARNESS;
 
@@ -33,6 +35,43 @@ export function readLearnerHarnessE2EConfig(env: NodeJS.ProcessEnv = process.env
     cliPath,
     model,
   };
+}
+
+export type LearnerFullCycleBootstrap =
+  | { kind: 'skip'; reason: string }
+  | { kind: 'fail'; reason: string }
+  | { kind: 'ready'; config: LearnerHarnessE2EConfig; harness: Harness; cliVersion: string };
+
+export function bootstrapLearnerFullCycleE2e(): LearnerFullCycleBootstrap {
+  const config = readLearnerHarnessE2EConfig();
+  const cliCheck = checkLearnerCli(config);
+  if (!cliCheck.ok) {
+    return { kind: 'skip', reason: cliCheck.reason };
+  }
+
+  const harness = buildHarnesses({
+    stub: true,
+    rpcUrl: 'http://stub',
+    claudePath: config.harnessName === CLAUDE_CODE_HARNESS ? config.cliPath : 'claude',
+    claudeModel: config.model,
+    codexPath: config.harnessName === CODEX_HARNESS ? config.cliPath : 'codex',
+    codexModel: config.model,
+  }).find((impl) => impl.name === config.harnessName);
+
+  if (!harness) {
+    return {
+      kind: 'fail',
+      reason: `configured learner harness not registered: ${config.harnessName}`,
+    };
+  }
+
+  return { kind: 'ready', config, harness, cliVersion: cliCheck.version };
+}
+
+export function logLearnerHarnessBanner(config: LearnerHarnessE2EConfig, cliVersion: string): void {
+  console.log(`learner harness: ${config.harnessName}`);
+  console.log(`learner CLI:     ${config.cliPath} (${cliVersion})`);
+  console.log(`learner model:   ${config.model}`);
 }
 
 export function checkLearnerCli(config: LearnerHarnessE2EConfig): { ok: true; version: string } | { ok: false; reason: string } {

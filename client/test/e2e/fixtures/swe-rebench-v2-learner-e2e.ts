@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSolverNets, type JoinedSolverNetConfig } from '../../../src/solver-nets/registry.js';
 
-export const E2E_SWE_JOINED: Record<string, JoinedSolverNetConfig> = {
+const E2E_SWE_JOINED: Record<string, JoinedSolverNetConfig> = {
   'bafy-e2e-swe-learner-full-cycle': {
     manifestCid: 'bafy-e2e-swe-learner-full-cycle',
     name: 'SWE-rebench v2',
@@ -23,6 +23,11 @@ export async function resolveSweLearnerPluginRoots(): Promise<{
   }
   const names = net.runtimePlugins.map((p) => p.name);
   const roots = net.runtimePlugins.map((p) => p.root);
+  for (const required of ['@jinn-network/network-tools', 'swe-rebench-v2-runtime'] as const) {
+    if (!names.includes(required)) {
+      throw new Error(`E2E plugin fixture missing ${required}; got: ${names.join(', ')}`);
+    }
+  }
   return { roots, names };
 }
 

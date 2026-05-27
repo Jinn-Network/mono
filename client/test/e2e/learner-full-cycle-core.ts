@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Harness, HarnessContext } from '../../src/harnesses/types.js';
 import type { Task } from '../../src/types/task.js';
 import type { LearnerHarnessE2EConfig } from './learner-harness-config.js';
 
-export const PHASES = [
+const PHASES = [
   'orient',
   'strategize',
   'plan',
@@ -15,12 +15,16 @@ export const PHASES = [
   'memory-consolidation',
 ] as const;
 
+export const LEARNER_SEVEN_PHASE_LINES = [
+  'Run the FULL seven-phase learner pipeline:',
+  'Orient -> Strategize -> Plan -> Execute -> Debrief -> Improve -> Memory consolidation.',
+].join('\n');
+
 export interface CycleParams {
   cycleLabel: string;
   goalId: string;
   goalDescription: string;
   fieldValue?: string;
-  goalSpec?: Record<string, unknown>;
   workingDir: string;
   implStateDir: string;
   harness: Harness;
@@ -40,7 +44,7 @@ export interface CycleParams {
   ) => Task;
 }
 
-export interface CycleResult {
+interface CycleResult {
   exitCode: number;
   durationMs: number;
   phasesPresent: string[];
@@ -50,17 +54,36 @@ export interface CycleResult {
   errorMessage?: string;
 }
 
-export interface BootJson {
+interface BootJson {
   implStateDirShaAtStart: string;
   skillBundleCid?: string;
   goalId: string;
   deadline: number;
 }
 
-export interface AssertOptions {
+interface AssertOptions {
   label: string;
   requireBootJson: boolean;
   requireOutputJson?: Record<string, string>;
+}
+
+export interface FullCycleWorkDirs {
+  implStateDir: string;
+  cycle1WorkingDir: string;
+  cycle2WorkingDir: string;
+}
+
+export function cleanupFullCycleWorkDirs(dirs: FullCycleWorkDirs, exitCode: number): void {
+  if (exitCode === 0) {
+    rmSync(dirs.implStateDir, { recursive: true, force: true });
+    rmSync(dirs.cycle1WorkingDir, { recursive: true, force: true });
+    rmSync(dirs.cycle2WorkingDir, { recursive: true, force: true });
+  } else {
+    console.log(`\nFailure artifacts preserved at:`);
+    console.log(`  implStateDir: ${dirs.implStateDir}`);
+    console.log(`  cycle 1 work: ${dirs.cycle1WorkingDir}`);
+    console.log(`  cycle 2 work: ${dirs.cycle2WorkingDir}`);
+  }
 }
 
 export async function runCycle(params: CycleParams): Promise<CycleResult> {
@@ -85,7 +108,6 @@ export async function runCycle(params: CycleParams): Promise<CycleResult> {
       ...(params.fieldValue !== undefined
         ? { fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue }
         : {}),
-      ...params.goalSpec,
       ...beforeRunSpec,
     },
   };

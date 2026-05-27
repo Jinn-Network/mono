@@ -25,23 +25,20 @@
  *
  * Plan 4 T3 / bd jinn-mono-iee.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildHarnesses } from '../../src/harnesses/impls/index.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
 import type { Task } from '../../src/types/task.js';
 import {
   assertCycle,
   assertCycle2BootReadsCycle1Head,
   assertImplStateDirHeadAdvanced,
+  cleanupFullCycleWorkDirs,
+  LEARNER_SEVEN_PHASE_LINES,
   runCycle,
   type CycleParams,
 } from './learner-full-cycle-core.js';
-import {
-  checkLearnerCli,
-  readLearnerHarnessE2EConfig,
-} from './learner-harness-config.js';
+import { bootstrapLearnerFullCycleE2e, logLearnerHarnessBanner } from './learner-harness-config.js';
 
 function buildPortfolioTaskForCycle(
   params: CycleParams,
@@ -55,8 +52,7 @@ function buildPortfolioTaskForCycle(
     description: [
       params.goalDescription,
       '',
-      'Run the FULL seven-phase learner pipeline:',
-      'Orient -> Strategize -> Plan -> Execute -> Debrief -> Improve -> Memory consolidation.',
+      LEARNER_SEVEN_PHASE_LINES,
       'For Improve: even if Debrief found no major issues, write at least one trivial improvement',
       'such as a note in implStateDir/notes/ so the cross-cycle test can verify learning state mutation.',
       'Exit cleanly when all phases are done.',
@@ -70,29 +66,17 @@ function buildPortfolioTaskForCycle(
 }
 
 async function main(): Promise<void> {
-  const config = readLearnerHarnessE2EConfig();
-
-  const cliCheck = checkLearnerCli(config);
-  if (!cliCheck.ok) {
-    console.log(`SKIP: ${cliCheck.reason}`);
+  const boot = bootstrapLearnerFullCycleE2e();
+  if (boot.kind === 'skip') {
+    console.log(`SKIP: ${boot.reason}`);
     process.exit(0);
   }
-  console.log(`learner harness: ${config.harnessName}`);
-  console.log(`learner CLI:     ${config.cliPath} (${cliCheck.version})`);
-  console.log(`learner model:   ${config.model}`);
-
-  const harness = buildHarnesses({
-    stub: true,
-    rpcUrl: 'http://stub',
-    claudePath: config.harnessName === CLAUDE_CODE_HARNESS ? config.cliPath : 'claude',
-    claudeModel: config.model,
-    codexPath: config.harnessName === CODEX_HARNESS ? config.cliPath : 'codex',
-    codexModel: config.model,
-  }).find((impl) => impl.name === config.harnessName);
-  if (!harness) {
-    console.error(`FAIL: configured learner harness not registered: ${config.harnessName}`);
+  if (boot.kind === 'fail') {
+    console.error(`FAIL: ${boot.reason}`);
     process.exit(1);
   }
+  const { config, harness, cliVersion } = boot;
+  logLearnerHarnessBanner(config, cliVersion);
 
   console.log('=== learner full-cycle e2e ===\n');
 
@@ -161,16 +145,7 @@ async function main(): Promise<void> {
     console.error(`\ne2e FAILED: ${err instanceof Error ? err.message : err}`);
     exitCode = 1;
   } finally {
-    if (exitCode === 0) {
-      rmSync(implStateDir, { recursive: true, force: true });
-      rmSync(cycle1WorkingDir, { recursive: true, force: true });
-      rmSync(cycle2WorkingDir, { recursive: true, force: true });
-    } else {
-      console.log(`\nFailure artifacts preserved at:`);
-      console.log(`  implStateDir: ${implStateDir}`);
-      console.log(`  cycle 1 work: ${cycle1WorkingDir}`);
-      console.log(`  cycle 2 work: ${cycle2WorkingDir}`);
-    }
+    cleanupFullCycleWorkDirs({ implStateDir, cycle1WorkingDir, cycle2WorkingDir }, exitCode);
   }
   process.exit(exitCode);
 }

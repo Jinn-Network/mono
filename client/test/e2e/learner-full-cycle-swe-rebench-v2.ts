@@ -20,11 +20,9 @@
  *
  * Issue #682.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildHarnesses } from '../../src/harnesses/impls/index.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
 import type { Task } from '../../src/types/task.js';
 import { seedWorkingRepo, resolveSweLearnerPluginRoots } from './fixtures/swe-rebench-v2-learner-e2e.js';
 import {
@@ -32,15 +30,15 @@ import {
   assertCycle2BootReadsCycle1Head,
   assertImplStateDirHeadAdvanced,
   assertImplStateDirLearnerCommitSubjects,
+  cleanupFullCycleWorkDirs,
+  LEARNER_SEVEN_PHASE_LINES,
   runCycle,
   type CycleParams,
 } from './learner-full-cycle-core.js';
-import {
-  checkLearnerCli,
-  readLearnerHarnessE2EConfig,
-} from './learner-harness-config.js';
+import { bootstrapLearnerFullCycleE2e, logLearnerHarnessBanner } from './learner-harness-config.js';
 
 const SOLVER_NET_NAME = 'learner-full-cycle-swe-rebench-v2-e2e';
+const beforeSweHarnessRun = ({ workingDir }: Pick<CycleParams, 'workingDir'>) => seedWorkingRepo(workingDir);
 
 function buildSweTaskForCycle(
   params: CycleParams,
@@ -60,8 +58,7 @@ function buildSweTaskForCycle(
       'Do NOT clone from GitHub or Hugging Face. Do NOT use Docker or the eval runner.',
       'All SWE edits belong under workingDir/repo only.',
       '',
-      'Run the FULL seven-phase learner pipeline:',
-      'Orient -> Strategize -> Plan -> Execute -> Debrief -> Improve -> Memory consolidation.',
+      LEARNER_SEVEN_PHASE_LINES,
       'For Improve: write at least one trivial change under implStateDir/notes/ so learning state mutates.',
       'Exit cleanly when all phases are done.',
     ].join('\n'),
@@ -85,35 +82,20 @@ function buildSweTaskForCycle(
 }
 
 async function main(): Promise<void> {
-  const config = readLearnerHarnessE2EConfig();
-
-  const cliCheck = checkLearnerCli(config);
-  if (!cliCheck.ok) {
-    console.log(`SKIP: ${cliCheck.reason}`);
+  const boot = bootstrapLearnerFullCycleE2e();
+  if (boot.kind === 'skip') {
+    console.log(`SKIP: ${boot.reason}`);
     process.exit(0);
   }
-  console.log(`learner harness: ${config.harnessName}`);
-  console.log(`learner CLI:     ${config.cliPath} (${cliCheck.version})`);
-  console.log(`learner model:   ${config.model}`);
-
-  const { roots, names } = await resolveSweLearnerPluginRoots();
-  if (!names.includes('@jinn-network/network-tools') || !names.includes('swe-rebench-v2-runtime')) {
-    throw new Error(`E2E plugin fixture missing expected runtime plugins: ${names.join(', ')}`);
-  }
-  console.log(`runtime plugins: ${names.join(', ')}`);
-
-  const harness = buildHarnesses({
-    stub: true,
-    rpcUrl: 'http://stub',
-    claudePath: config.harnessName === CLAUDE_CODE_HARNESS ? config.cliPath : 'claude',
-    claudeModel: config.model,
-    codexPath: config.harnessName === CODEX_HARNESS ? config.cliPath : 'codex',
-    codexModel: config.model,
-  }).find((impl) => impl.name === config.harnessName);
-  if (!harness) {
-    console.error(`FAIL: configured learner harness not registered: ${config.harnessName}`);
+  if (boot.kind === 'fail') {
+    console.error(`FAIL: ${boot.reason}`);
     process.exit(1);
   }
+  const { config, harness, cliVersion } = boot;
+  logLearnerHarnessBanner(config, cliVersion);
+
+  const { roots, names } = await resolveSweLearnerPluginRoots();
+  console.log(`runtime plugins: ${names.join(', ')}`);
 
   console.log('=== learner full-cycle swe-rebench-v2 e2e ===\n');
 
@@ -139,7 +121,7 @@ async function main(): Promise<void> {
       config,
       solverNetName: SOLVER_NET_NAME,
       solverPluginRoots: roots,
-      beforeHarnessRun: ({ workingDir }) => seedWorkingRepo(workingDir),
+      beforeHarnessRun: beforeSweHarnessRun,
       buildTask: buildSweTaskForCycle,
     });
 
@@ -160,7 +142,7 @@ async function main(): Promise<void> {
       config,
       solverNetName: SOLVER_NET_NAME,
       solverPluginRoots: roots,
-      beforeHarnessRun: ({ workingDir }) => seedWorkingRepo(workingDir),
+      beforeHarnessRun: beforeSweHarnessRun,
       buildTask: buildSweTaskForCycle,
     });
 
@@ -179,16 +161,7 @@ async function main(): Promise<void> {
     console.error(`\ne2e FAILED: ${err instanceof Error ? err.message : err}`);
     exitCode = 1;
   } finally {
-    if (exitCode === 0) {
-      rmSync(implStateDir, { recursive: true, force: true });
-      rmSync(cycle1WorkingDir, { recursive: true, force: true });
-      rmSync(cycle2WorkingDir, { recursive: true, force: true });
-    } else {
-      console.log(`\nFailure artifacts preserved at:`);
-      console.log(`  implStateDir: ${implStateDir}`);
-      console.log(`  cycle 1 work: ${cycle1WorkingDir}`);
-      console.log(`  cycle 2 work: ${cycle2WorkingDir}`);
-    }
+    cleanupFullCycleWorkDirs({ implStateDir, cycle1WorkingDir, cycle2WorkingDir }, exitCode);
   }
   process.exit(exitCode);
 }
