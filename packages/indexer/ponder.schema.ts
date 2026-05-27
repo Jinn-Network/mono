@@ -561,6 +561,8 @@ export const attemptEnvelopeMeta = onchainTable(
     manifestCidIdx: index().on(table.manifestCid),
     implNameIdx: index().on(table.implName),
     modeIdx: index().on(table.mode),
+    /** Per-(operator, codeDigest) reward aggregates (DR-2026-05-27 §4.2 Level 1). */
+    codeDigestIdx: index().on(table.codeDigest),
   }),
 );
 
