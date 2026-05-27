@@ -129,6 +129,19 @@ The early ladder (Levels 0 → 1 → 2 → 3a) is achievable without
 are real but only for **3b and above**, where per-tool-call spans
 matter.
 
+**The ladder's deeper structure:** Level 1 is **hill climbing on the
+harness** — Promoter proposes a neighbour (one Improve commit),
+Consolidator evaluates and reverts if pass rate didn't improve. Each
+subsequent level addresses a known weakness of hill climbing: Level 2
+turns observational hill climbing into controlled per-step experiments;
+Levels 3a/3b introduce group baselines to escape local optima; Level 4
+supplies step-level credit; Level 5 moves from harness parameters to
+weight gradients. GEPA names its own contribution as defeating "the
+local-optima problem that plagues greedy prompt search" — greedy prompt
+search is hill climbing on prompts. Reading the ladder as
+"hill-climbing-plus-successive-fixes-to-its-known-weaknesses" makes the
+sequence canonical rather than ad-hoc.
+
 ## Why Level 1 first
 
 Three reasons.
@@ -148,6 +161,13 @@ Three reasons.
    decision lives in the learner plugin; every level above reuses it.
    Filing Level 1 is also filing the foundation Levels 2 / 3a / 3b
    build on.
+
+We expect Level 1 to plateau on some SolverNets — that's the known
+characteristic of hill climbing, not a bug. Plateau is the signal to
+either run a Level 2 ablation (disambiguate genuine local optimum from
+noisy denominator) or jump to Level 3 (escape via group baselines). The
+ladder's "L1 first, L2+ as warranted by evidence" pattern is exactly
+how you operate an algorithm with known plateau behaviour.
 
 We'd file Level 1 as three small issues: (1) `chore(indexer)` for the
 codeDigest index (~1 hour); (2) `feat(learner)` for the

@@ -540,6 +540,18 @@ with explicit per-level cost-to-operator and required work.
 Each level names: what it adds, what it costs the operator, what work it
 needs in Jinn beyond what already exists today.
 
+**The ladder's deeper structure: Level 1 is hill climbing on the
+harness; each subsequent level addresses one of hill climbing's known
+weaknesses.** Level 2 turns observational hill climbing into controlled
+per-step experiments. Levels 3a/3b introduce group baselines to escape
+local optima. Level 4 supplies step-level credit (finer gradient
+signal). Level 5 moves from harness parameters to weight gradients. All
+canonical successors to greedy local search; the ladder is an
+algorithm-family progression, not an ad-hoc list. GEPA (§2.15) frames
+its own contribution explicitly as defeating "the local-optima problem
+that plagues greedy prompt search" — and greedy prompt search is hill
+climbing on prompts.
+
 ### §4.1 Level 0 — "RL-shaped" memory (today)
 
 What runs today. The Memory-consolidation phase reverts `implStateDir`
@@ -576,6 +588,15 @@ skill validation), GEPA (§2.15, Pareto-front discipline). The
 selection-on-reward step generalises: every higher level uses the same
 sample-window pattern.
 
+**Algorithm.** Level 1 is **hill climbing on the harness.** Promoter
+proposes a neighbour (one Improve commit); Consolidator evaluates and
+reverts if pass rate did not improve. Greedy, single-trajectory, local.
+Plateau on some SolverNets is *expected*, not a bug — it is the known
+characteristic of greedy local search. Plateau under L1 is the trigger
+to either run a Level 2 ablation (to disambiguate genuine local optimum
+from noisy denominator) or jump to Level 3 (escape via group-relative
+methods).
+
 ### §4.3 Level 2 — Controlled per-commit ablation
 
 What it adds: isolation of a single Improve commit's contribution by
@@ -607,6 +628,13 @@ envelope `artifacts` lists. No new instrumentation.
 **Prior art:** contextual bandits, ExpeL (§2.10, cross-task insight
 extraction), Generative Agents (§2.9, recency × importance × relevance
 scoring).
+
+**Why this level.** Hill climbing (Level 1) has known plateau
+characteristics. Group-relative advantage (`score − group_mean`)
+introduces an exploration mechanism: a trajectory that diverged from
+the mean is visible as "this run did X and earned more," even when X
+looks unappealing in isolation. First escape from L1's local-optima
+trap.
 
 ### §4.5 Level 3b — Per-tool-call GRPO / GEPA
 
