@@ -67,6 +67,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
