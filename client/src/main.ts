@@ -2343,6 +2343,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         agentEoa: agentEoaAddress,
         safeAddress,
         agentPrivateKey,
+        ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
       },
       logger: {
         info: (message) => console.log(message),
