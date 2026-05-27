@@ -3,14 +3,10 @@
  * against an already-running daemon must refuse cleanly: no pidfile clobber,
  * no spurious `startup` activity row, no `daemon_started_at` rewrite.
  *
- * Mirrors the in-process pattern from `restart-daemon-cleanup-frees-ports.test.ts`.
- * We don't fork a second node process; we exercise the liveness helper + a real
- * Daemon (port 0) inside one vitest worker, asserting the side-effect surface
- * the operator dashboard cares about.
- *
- * Run-mode: `fix` (issue #649). Skill chain: systematic-debugging →
- * writing-plans → test-driven-development → executing-plans →
- * verification-before-completion.
+ * In-process pattern (mirrors `restart-daemon-cleanup-frees-ports.test.ts`): we
+ * don't fork a second node process; we exercise the liveness helper against a
+ * real Daemon on port 0 inside one vitest worker, asserting the side-effect
+ * surface the operator dashboard cares about.
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

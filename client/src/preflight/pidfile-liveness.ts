@@ -1,17 +1,9 @@
 /**
- * Pidfile liveness preflight (issue #649).
+ * Pidfile liveness preflight (issue #649). Classifies the recorded PID and
+ * returns a discriminated decision; side-effect-free so the caller owns the
+ * unlink (mirrors the idiom at `client/src/mcp/operator-server.ts:209-213`).
  *
- * Reads <earningDir>/daemon.pid (if present), classifies the recorded PID,
- * and returns a discriminated decision the caller acts on. The function does
- * NOT mutate the filesystem — on `unlink-stale` the caller is responsible for
- * the `unlinkSync(pidPath)` call. Keeping the classifier side-effect-free
- * makes it trivially testable and lets the caller wrap the unlink in its own
- * try/catch consistent with the existing idiom in
- * `client/src/mcp/operator-server.ts:209-213`.
- *
- * Behavioral contract (mirrors the issue body's acceptance criteria + the
- * proven pattern at `client/src/mcp/operator-server.ts:203-215`):
- *
+ * Branches (load-bearing — see #649 acceptance criteria):
  *   - File missing               → { decision: 'proceed' }
  *   - File malformed (NaN/empty) → { decision: 'unlink-stale', reason: 'malformed' }
  *   - process.kill(pid, 0) ESRCH → { decision: 'unlink-stale', reason: 'esrch' }
@@ -19,9 +11,8 @@
  *   - process.kill(pid, 0) EPERM → { decision: 'refuse', reason: 'eperm' }
  *   - any other errno            → { decision: 'refuse', reason: 'unknown' }
  *
- * The newline handling matches `client/src/cli/commands/stop.ts:124`: read
- * the file, `.trim()`, `parseInt(_, 10)`. `main.ts` writes the pidfile with a
- * trailing `\n` (see `client/src/main.ts:2578`), so trim is required.
+ * `.trim()` before `parseInt` is required: `main.ts` writes the PID with a
+ * trailing `\n` (see `client/src/main.ts` writeFileSync near the pidfile site).
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -57,9 +48,8 @@ export function checkPidfileLiveness(
   try {
     raw = readFileSync(pidPath, 'utf-8');
   } catch {
-    // Unreadable pidfile: treat as malformed/stale. The caller will unlink
-    // and proceed; if the next write also fails, that failure surfaces
-    // upstream via main.ts's `writeFileSync` call.
+    // Unreadable pidfile: treat as stale. If the caller's subsequent write also
+    // fails, that surfaces via main.ts's `writeFileSync`.
     return { decision: 'unlink-stale', pid: null, pidfilePath: pidPath, reason: 'malformed' };
   }
 
@@ -79,8 +69,8 @@ export function checkPidfileLiveness(
     if (errno === 'EPERM') {
       return { decision: 'refuse', pid: parsed, pidfilePath: pidPath, reason: 'eperm' };
     }
-    // Any other errno: conservative refuse. Better to surface a clear error
-    // to the operator than risk trampling a daemon we can't classify.
+    // Any other errno: conservative refuse rather than risk trampling a daemon
+    // we can't classify.
     return { decision: 'refuse', pid: parsed, pidfilePath: pidPath, reason: 'unknown' };
   }
 }
