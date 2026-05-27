@@ -27,7 +27,7 @@ export interface ConfigBuilderEnv {
   daemonApiUrl: string;
   daemonApiToken: string;
   corpusEnv: {
-    subgraphUrl?: string;
+    discoveryUrl?: string;
     ipfsGatewayUrl?: string;
     rpcUrl?: string;
     chainId?: number;
@@ -88,7 +88,10 @@ function buildJinnRuntimeEnv(env: ConfigBuilderEnv): Record<string, string> {
     JINN_NETWORK_TOOLS_CLIENT_ROOT: resolveClientRoot(),
   };
   if (env.storePath) out.STORE_PATH = env.storePath;
-  if (env.corpusEnv.subgraphUrl) out.JINN_CORPUS_SUBGRAPH_URL = env.corpusEnv.subgraphUrl;
+  if (env.corpusEnv.discoveryUrl) {
+    out.JINN_DISCOVERY_URL = env.corpusEnv.discoveryUrl;
+    out.JINN_DISCOVERY_MODE = 'http';
+  }
   if (env.corpusEnv.ipfsGatewayUrl) out.JINN_CORPUS_IPFS_GATEWAY_URL = env.corpusEnv.ipfsGatewayUrl;
   if (env.corpusEnv.rpcUrl) out.JINN_CORPUS_RPC_URL = env.corpusEnv.rpcUrl;
   if (env.corpusEnv.chainId != null) out.JINN_CORPUS_CHAIN_ID = String(env.corpusEnv.chainId);

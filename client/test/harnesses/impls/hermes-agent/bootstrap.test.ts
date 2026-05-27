@@ -74,13 +74,14 @@ describe('writePerTaskHermesConfig', () => {
         env: {
           daemonApiUrl: 'http://127.0.0.1:7331',
           daemonApiToken: 'tok-xyz',
-          corpusEnv: { subgraphUrl: 'https://subgraph.example/' },
+          corpusEnv: { discoveryUrl: 'https://discovery.example/' },
         },
       });
       const envFile = readFileSync(join(home, '.env'), 'utf8');
       expect(envFile).toContain('DAEMON_API_TOKEN=tok-xyz');
       expect(envFile).toContain('DAEMON_API_URL=http://127.0.0.1:7331');
-      expect(envFile).toContain('JINN_CORPUS_SUBGRAPH_URL=https://subgraph.example/');
+      expect(envFile).toContain('JINN_DISCOVERY_URL=https://discovery.example/');
+      expect(envFile).toContain('JINN_DISCOVERY_MODE=http');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

@@ -241,7 +241,10 @@ function snippetToEnvFile(env: ConfigBuilderEnv): string {
   lines.push(`DAEMON_API_URL=${env.daemonApiUrl}`);
   lines.push(`DAEMON_API_TOKEN=${env.daemonApiToken}`);
   if (env.storePath) lines.push(`STORE_PATH=${env.storePath}`);
-  if (env.corpusEnv.subgraphUrl) lines.push(`JINN_CORPUS_SUBGRAPH_URL=${env.corpusEnv.subgraphUrl}`);
+  if (env.corpusEnv.discoveryUrl) {
+    lines.push(`JINN_DISCOVERY_URL=${env.corpusEnv.discoveryUrl}`);
+    lines.push('JINN_DISCOVERY_MODE=http');
+  }
   if (env.corpusEnv.ipfsGatewayUrl) lines.push(`JINN_CORPUS_IPFS_GATEWAY_URL=${env.corpusEnv.ipfsGatewayUrl}`);
   if (env.corpusEnv.rpcUrl) lines.push(`JINN_CORPUS_RPC_URL=${env.corpusEnv.rpcUrl}`);
   if (env.corpusEnv.chainId != null) lines.push(`JINN_CORPUS_CHAIN_ID=${env.corpusEnv.chainId}`);

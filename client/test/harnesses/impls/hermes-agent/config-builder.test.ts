@@ -15,7 +15,7 @@ function fakeEnv() {
     daemonApiUrl: 'http://127.0.0.1:7331',
     daemonApiToken: 'tok-test',
     corpusEnv: {
-      subgraphUrl: 'https://subgraph.example/',
+      discoveryUrl: 'https://discovery.example/',
       ipfsGatewayUrl: 'https://ipfs.example/',
       rpcUrl: 'https://rpc.example/',
       chainId: 8453,
@@ -41,7 +41,8 @@ describe('hermesConfigFromSolverPlugins', () => {
     expect(jinnClient.env?.STORE_PATH).toBe('/tmp/jinn.db');
     expect(jinnClient.env?.DAEMON_API_URL).toBe('http://127.0.0.1:7331');
     expect(jinnClient.env?.DAEMON_API_TOKEN).toBe('tok-test');
-    expect(jinnClient.env?.JINN_CORPUS_SUBGRAPH_URL).toBe('https://subgraph.example/');
+    expect(jinnClient.env?.JINN_DISCOVERY_URL).toBe('https://discovery.example/');
+    expect(jinnClient.env?.JINN_DISCOVERY_MODE).toBe('http');
     expect(jinnClient.env?.JINN_CORPUS_IPFS_GATEWAY_URL).toBe('https://ipfs.example/');
     expect(jinnClient.env?.JINN_CORPUS_RPC_URL).toBe('https://rpc.example/');
     expect(jinnClient.env?.JINN_CORPUS_CHAIN_ID).toBe('8453');
