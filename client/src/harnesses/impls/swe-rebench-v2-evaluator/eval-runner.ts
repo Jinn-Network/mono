@@ -275,12 +275,9 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
   if (args.log_parser === 'parse_log_pytest') {
     const nodeIds = [...args.fail_to_pass, ...args.pass_to_pass];
     if (nodeIds.length > 0) {
-      // #493 — when the dataset's install does not already mention pytest,
-      // many SWE-rebench rows ship a base image that lacks the binary and
-      // the eval aborts as `ungradeable:pytest_missing`. Prepend a
-      // best-effort install. `ensurepip` keeps stripped-down images alive;
-      // the fallback is plain pip. Only fires when no install line matches
-      // a word-boundary `pytest` (so `pytest-cov` alone does not skip it).
+      // Why: many SWE-rebench rows ship a base image lacking pytest, which
+      // aborts the eval as `ungradeable:pytest_missing` (#493). Prepend a
+      // best-effort install unless the dataset's install already does it.
       const guarded = installsPytest(install)
         ? install
         : [PYTEST_INSTALL_GUARD, ...install];
@@ -294,10 +291,8 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
   return [...install, ...normalizeCommands(args.test_cmd)];
 }
 
-// Word-boundary match: `pytest` matches `pip install pytest` and
-// `pip install pytest==7.4` but not `pip install pytest-cov` (the trailing
-// hyphen is not a word char so `\b` matches there, but the negative class
-// excludes hyphen).
+// Why: hyphen is excluded from the boundary class so `pytest-cov` alone
+// does not satisfy the check (only an explicit `pytest` install counts).
 function installsPytest(install: string[]): boolean {
   return install.some((line) => /(?:^|[^A-Za-z0-9_-])pytest(?:$|[^A-Za-z0-9_-])/.test(line));
 }
