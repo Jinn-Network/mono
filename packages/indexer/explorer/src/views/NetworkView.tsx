@@ -287,9 +287,9 @@ function EconomyRow({ data }: { data: NetworkResponse }) {
             lineHeight: 1.6,
           }}
         >
-          Every settled task pays out from the launcher's bond. Operators earn
-          for passing solutions; the DAO collects a protocol cut to fund the
-          next epoch.
+          Every settled task distributes from the launcher's bond. Operators
+          earn for passing solutions; the DAO collects a protocol cut to fund
+          the next epoch.
         </p>
       </Card>
     </div>
