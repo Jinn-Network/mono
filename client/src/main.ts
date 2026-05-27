@@ -2609,6 +2609,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     return;
   }
   if (liveness.decision === 'unlink-stale') {
+    // Surface stale-pidfile cleanup so operators can diagnose unexpected
+    // startups (e.g. a previous daemon crashed without removing its pidfile).
+    emitStructured({
+      kind: 'system',
+      message: `cleaning up stale pidfile (${liveness.reason})`,
+      details: {
+        phase: 'preflight',
+        pidfilePath: pidPath,
+        reason: liveness.reason,
+        pid: liveness.pid,
+      },
+    });
     try {
       unlinkSync(pidPath);
     } catch {
