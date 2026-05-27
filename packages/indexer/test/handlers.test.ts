@@ -1441,4 +1441,84 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       actualScore: '1',
     });
   });
+
+  it('populates instanceId from the task IPFS body for swe-rebench-v2 verdicts', async () => {
+    const TASK_CID = 'bafytaskbody-sympy';
+    const verdictBody = {
+      ...SWE_REBENCH_FAIL_BODY,
+      task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1, cid: TASK_CID },
+      payload: { passed_match: true, score: 1 },
+    };
+    const taskBody = {
+      schemaVersion: 'task.v1',
+      id: 'task-uuid',
+      solverType: 'swe-rebench-v2.v1',
+      spec: { instance_id: 'sympy__sympy-27510' },
+    };
+    const stubFetch: FetchLike = async (url) => {
+      const u = String(url);
+      // Routed via the task body's CID for the task fetch; anything else is
+      // treated as the verdict body fetch.
+      if (u.includes(TASK_CID)) {
+        return { ok: true, status: 200, json: async () => taskBody };
+      }
+      return { ok: true, status: 200, json: async () => verdictBody };
+    };
+    await handleMetadataSet({
+      event: metadataSetEvent({
+        agentId: 5n,
+        metadataKey: evalKey,
+        metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }),
+      }, { block: 41_500_001n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+    expect(row).toMatchObject({
+      instanceId: 'sympy__sympy-27510',
+      actualPassed: true,
+      solverType: 'swe-rebench-v2.v1',
+    });
+  });
+
+  it('leaves instanceId="" when the task body fetch fails (degraded but resilient)', async () => {
+    const TASK_CID = 'bafytaskbody-broken';
+    const verdictBody = {
+      ...SWE_REBENCH_FAIL_BODY,
+      task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1, cid: TASK_CID },
+    };
+    let calls = 0;
+    const stubFetch: FetchLike = async (url) => {
+      calls += 1;
+      if (String(url).includes(TASK_CID)) throw new Error('task body IPFS offline');
+      return { ok: true, status: 200, json: async () => verdictBody };
+    };
+    await handleMetadataSet({
+      event: metadataSetEvent({
+        agentId: 5n,
+        metadataKey: evalKey,
+        metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }),
+      }, { block: 41_500_002n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+    expect(row?.instanceId).toBe('');
+    expect(row?.actualPassed).toBe(false);  // verdict row still written
+    expect(calls).toBeGreaterThanOrEqual(2); // verdict + task body attempt
+  });
 });

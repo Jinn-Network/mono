@@ -607,6 +607,9 @@ export interface VerdictEnvelopeLite {
   verdictIndex: number;
   attemptIndex: number;
   taskId: string;
+  /** IPFS CID of the task body (envelope.task.cid). Used by the swe-rebench-v2
+   *  enrichment branch to fetch spec.instance_id (#669). Empty when absent. */
+  taskCid: string;
   evaluator: string;
   solverType: string;
   evidenceTier: string;
@@ -650,6 +653,10 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
 
   const attemptIndex = safeInt(taskObj['attemptIndex'], 0);
   const taskId = safeStr(taskObj['taskId']) || String(taskObj['taskId'] ?? '');
+  // Capture the task body CID so the swe-rebench-v2 enrichment branch can
+  // resolve spec.instance_id via a follow-up IPFS fetch (#669). Optional;
+  // empty when the envelope omits it.
+  const taskCid = safeStr(taskObj['cid']);
   // verdictIndex may be at the top level or under task. It is diagnostic only
   // for older envelopes that omit it; requestId is the stable verdict join key.
   const verdictIndex = safeInt(b['verdictIndex'] ?? taskObj['verdictIndex'], 0);
@@ -703,6 +710,7 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
     verdictIndex,
     attemptIndex,
     taskId,
+    taskCid,
     evaluator,
     solverType,
     evidenceTier,
@@ -1097,6 +1105,35 @@ export async function handleMetadataSet({
         });
         const meta = parseVerdictEnvelopeLite(body);
         if (meta) {
+          // For swe-rebench-v2 verdicts, fetch the task IPFS body so we can store
+          // spec.instance_id alongside the verdict. The verdict envelope's
+          // payload does NOT carry instance_id (see SweRebenchV2VerdictPayloadSchema
+          // in packages/sdk/src/payloads/swe-rebench-v2.ts), so the only honest
+          // source is the task body itself. One extra IPFS fetch per verdict,
+          // gated by solverType so it does not penalise other types.
+          // Failures degrade gracefully — instanceId stays '' and the launcher
+          // falls back to local counters for that instance (#669).
+          let instanceId = '';
+          if (meta.solverType.startsWith('swe-rebench-v2') && meta.taskCid) {
+            try {
+              const taskBody = await fetchIpfsJson(ipfsGateway, meta.taskCid, {
+                timeoutMs: 5000,
+                fetchImpl,
+              });
+              const spec = (taskBody && typeof taskBody === 'object'
+                ? (taskBody as Record<string, unknown>)['spec']
+                : undefined);
+              if (spec && typeof spec === 'object') {
+                const raw = (spec as Record<string, unknown>)['instance_id'];
+                if (typeof raw === 'string' && raw.length > 0) instanceId = raw;
+              }
+            } catch (err) {
+              console.warn(
+                `[indexer] task body fetch failed for verdict ${meta.requestId.slice(0, 10)}... cid=${meta.taskCid}: ${String(err)}`,
+              );
+            }
+          }
+
           await context.db
             .insert(verdictEnvelopeMeta)
             .values({
@@ -1110,6 +1147,7 @@ export async function handleMetadataSet({
               evidenceTier: meta.evidenceTier,
               actualPassed: meta.actualPassed,
               actualScore: meta.actualScore,
+              instanceId,
               evaluatorVerdict: meta.evaluatorVerdict,
               enrichmentStatus: 'ok',
               enrichedAtBlock: blockNumber,
@@ -1128,6 +1166,7 @@ export async function handleMetadataSet({
                   evidenceTier: meta.evidenceTier,
                   actualPassed: meta.actualPassed,
                   actualScore: meta.actualScore,
+                  instanceId,
                   evaluatorVerdict: meta.evaluatorVerdict,
                   enrichmentStatus: 'ok',
                   enrichedAtBlock: blockNumber,
@@ -1145,6 +1184,7 @@ export async function handleMetadataSet({
                 evidenceTier: row.evidenceTier,
                 actualPassed: row.actualPassed,
                 actualScore: row.actualScore,
+                instanceId: row.instanceId,
                 evaluatorVerdict: row.evaluatorVerdict,
                 enrichmentStatus: row.enrichmentStatus,
                 enrichedAtBlock: row.enrichedAtBlock,
