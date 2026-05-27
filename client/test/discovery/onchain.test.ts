@@ -433,6 +433,96 @@ describe('OnchainDiscoveryAPI — listLaunchedSolverNets', () => {
   });
 });
 
+describe('OnchainDiscoveryAPI — MetadataSet scan retry (#546)', () => {
+  it('retries getBlockNumber on transient failure before succeeding', async () => {
+    vi.useFakeTimers();
+    const log = buildSolvernetMetadataLog(42n, MANIFEST_CID, 'launched', 5_000n);
+    let blockCalls = 0;
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => {
+        blockCalls++;
+        if (blockCalls === 1) throw new Error('429 Too Many Requests');
+        return CURRENT_BLOCK;
+      }),
+      getLogs: vi.fn(async () => [log]),
+      simulateContract: vi.fn(async () => ({ result: undefined })),
+    };
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    const resultPromise = api.listLaunchedSolverNets();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toHaveLength(1);
+    expect(mockClient.getBlockNumber).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('retries MetadataSet getLogs on transient failure before succeeding', async () => {
+    vi.useFakeTimers();
+    const log = buildSolvernetMetadataLog(42n, MANIFEST_CID, 'launched', 5_000n);
+    let logsCalls = 0;
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => CURRENT_BLOCK),
+      getLogs: vi.fn(async () => {
+        logsCalls++;
+        if (logsCalls === 1) throw new Error('fetch failed: connection reset');
+        return [log];
+      }),
+      simulateContract: vi.fn(async () => ({ result: undefined })),
+    };
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      // Single getLogs chunk so retry count is observable.
+      taskDiscoveryFromBlock: CURRENT_BLOCK - 1n,
+      publicClient: mockClient as never,
+    });
+
+    const resultPromise = api.listLaunchedSolverNets();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toHaveLength(1);
+    expect(mockClient.getLogs).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('does not retry findClaimableTasks getLogs on transient failure', async () => {
+    const mockClient = {
+      getBlockNumber: vi.fn(async () => CURRENT_BLOCK),
+      getLogs: vi.fn(async () => {
+        throw new Error('429 Too Many Requests');
+      }),
+      simulateContract: vi.fn(async () => ({ result: undefined })),
+    };
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      routerAddress: ROUTER,
+      safeAddress: SAFE_ADDRESS,
+      mechAddress: MECH_ADDRESS,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    await expect(
+      api.findClaimableTasks({
+        solverNetManifestCids: [MANIFEST_CID],
+        operatorAddress: OPERATOR_ADDRESS,
+      }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+    expect(mockClient.getLogs).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('OnchainDiscoveryAPI — getLifecycleStatus', () => {
   it('returns undefined for an unknown manifestCid', async () => {
     const mockClient = buildMockClient([[]]); // no logs
@@ -815,6 +905,7 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
   });
 
   it('preserves `rpc_rate_limited` through a getLogs failure on listLaunchedSolverNets', async () => {
+    vi.useFakeTimers();
     const mockClient = {
       getBlockNumber: vi.fn(async () => CURRENT_BLOCK),
       getLogs: vi.fn(async () => { throw new Error('the RPC endpoint says: rate limit exceeded'); }),
@@ -824,18 +915,20 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
     const api = createOnchainDiscoveryAPI({
       chainId: CHAIN_ID,
       identityRegistryAddress: IDENTITY_REGISTRY,
-      taskDiscoveryFromBlock: 0,
+      taskDiscoveryFromBlock: CURRENT_BLOCK - 1n,
       publicClient: mockClient as never,
     });
 
     let caught: unknown;
-    try {
-      await api.listLaunchedSolverNets();
-    } catch (err) {
+    const resultPromise = api.listLaunchedSolverNets().catch((err) => {
       caught = err;
-    }
+    });
+    await vi.runAllTimersAsync();
+    await resultPromise;
     expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
     expect((caught as DiscoveryUnavailableError).code).toBe('rpc_rate_limited');
+    expect(mockClient.getLogs).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
   });
 });
 

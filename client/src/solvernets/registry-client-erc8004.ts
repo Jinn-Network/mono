@@ -38,6 +38,7 @@ import type {
   SignerWithAgentEoa,
 } from './registry-client.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
+import { DiscoveryUnavailableError } from '../discovery/types.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -406,6 +407,13 @@ export class IdentityRegistryBackedSolverNetRegistryClient
             advertisedHash = lifecycleStatus.manifestHash;
           }
         } catch (err) {
+          if (err instanceof DiscoveryUnavailableError) {
+            const codeSuffix = err.code ? ` (${err.code})` : '';
+            console.warn(
+              `[solvernet] manifest ${args.manifestCid}: discoveryApi hash check unavailable${codeSuffix}: ${err.message}`,
+            );
+            throw err;
+          }
           console.error(
             `[solvernet] manifest ${args.manifestCid}: discoveryApi hash check unavailable; ` +
             `using IPFS CID-bound manifest (${err instanceof Error ? err.message : String(err)})`,
@@ -499,6 +507,13 @@ export class IdentityRegistryBackedSolverNetRegistryClient
           hash = lifecycleStatus.manifestHash;
         }
       } catch (err) {
+        if (err instanceof DiscoveryUnavailableError) {
+          const codeSuffix = err.code ? ` (${err.code})` : '';
+          console.warn(
+            `[solvernet] manifest ${manifestCid}: discoveryApi hash check unavailable${codeSuffix}: ${err.message}`,
+          );
+          throw err;
+        }
         console.error(
           `[solvernet] manifest ${manifestCid}: discoveryApi hash check unavailable; ` +
           `using IPFS CID-bound manifest (${err instanceof Error ? err.message : String(err)})`,

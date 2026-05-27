@@ -3,7 +3,12 @@
  * treat flaky RPC as "service missing on-chain".
  */
 
-import { flattenErrorMessage } from './tx-retry.js';
+import { flattenErrorMessage, sleep } from './tx-retry.js';
+
+/** Backoff delays between transient eth_read retries (issue #546). */
+export const TRANSIENT_ETH_READ_RETRY_DELAYS_MS = [250, 500, 1000] as const;
+
+export const TRANSIENT_ETH_READ_MAX_ATTEMPTS = 3;
 
 /**
  * True when a static call / eth_call likely failed due to transport/RPC, not an
@@ -68,4 +73,39 @@ export function isRateLimitedEthReadError(error: unknown): boolean {
     msg.includes('rate limit') ||
     msg.includes('too many requests')
   );
+}
+
+/**
+ * Retry a single eth_read RPC (getBlockNumber, getLogs, eth_call) on transient
+ * transport failures. Used by the on-chain discovery floor for MetadataSet
+ * scans so a single rate-limit does not degrade manifest hash verification.
+ * See jinn-mono #546.
+ */
+export async function withTransientEthReadRetry<T>(
+  fn: () => Promise<T>,
+  options?: {
+    onRetry?: (info: { attempt: number; error: unknown }) => void;
+    sleepFn?: (ms: number) => Promise<void>;
+  },
+): Promise<T> {
+  const sleepFn = options?.sleepFn ?? sleep;
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < TRANSIENT_ETH_READ_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (!isTransientEthReadError(err) || attempt >= TRANSIENT_ETH_READ_MAX_ATTEMPTS - 1) {
+        throw err;
+      }
+      options?.onRetry?.({ attempt: attempt + 1, error: err });
+      const delayMs =
+        TRANSIENT_ETH_READ_RETRY_DELAYS_MS[attempt] ??
+        TRANSIENT_ETH_READ_RETRY_DELAYS_MS[TRANSIENT_ETH_READ_RETRY_DELAYS_MS.length - 1];
+      await sleepFn(delayMs);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

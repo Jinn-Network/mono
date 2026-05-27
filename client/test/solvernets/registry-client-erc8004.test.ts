@@ -35,6 +35,7 @@ import {
   type SetMetadataEvent,
 } from '../../src/solvernets/most-recent-wins.js';
 import type { DiscoveryAPI, SolverNetLifecycleStatus } from '../../src/discovery/types.js';
+import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
 
 /**
  * Heuristic for "this object looks like a SolverNetManifestV1". We only
@@ -774,7 +775,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     expect(fetched.signature.value).toBe(manifest.signature.value);
   });
 
-  it('uses the CID-bound IPFS manifest when the discoveryApi hash check is unavailable', async () => {
+  it('rethrows DiscoveryUnavailableError from discoveryApi hash check with a structured warning', async () => {
     const sharedIpfs = makeMockIpfs();
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
@@ -784,15 +785,20 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const { manifest, signer } = await buildSignedManifest();
     const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
 
-    // Provide a discoveryApi whose getLifecycleStatus throws — the client
-    // should fall back to CID-bound IPFS content and log the error.
+    const unavailable = new DiscoveryUnavailableError(
+      'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
+      new Error('HTTP 429: Too Many Requests'),
+      'rpc_rate_limited',
+    );
     const failingDiscoveryApi: DiscoveryAPI = {
-      async getLifecycleStatus() { throw new Error('discoveryApi unavailable 429'); },
+      async getLifecycleStatus() {
+        throw unavailable;
+      },
       async listLaunchedSolverNets() { return []; },
       async findClaimableTasks() { return []; },
       async queryEnvelopes() { return []; },
     };
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
@@ -801,13 +807,12 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     });
 
     try {
-      const fetched = await reader.getManifest({ manifestCid });
-      expect(fetched.solverNetId).toBe(manifest.solverNetId);
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('hash check unavailable'),
+      await expect(reader.getManifest({ manifestCid })).rejects.toBe(unavailable);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('hash check unavailable (rpc_rate_limited)'),
       );
     } finally {
-      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 

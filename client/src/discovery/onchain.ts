@@ -48,7 +48,7 @@ import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
 import { canClaimTask } from '../adapters/mech/contracts.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
-import { isRateLimitedEthReadError } from '../chain-read-errors.js';
+import { isRateLimitedEthReadError, withTransientEthReadRetry } from '../chain-read-errors.js';
 import { PLUGIN_PAYLOAD_TUPLE, REVOCATION_PAYLOAD_TUPLE } from '../erc8004/abis.js';
 import { PLUGIN_METADATA_KEY_PREFIX } from '../erc8004/plugin-registry.js';
 
@@ -838,7 +838,9 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     const client = getClient();
     let currentBlock: bigint;
     try {
-      currentBlock = await (client as PublicClient).getBlockNumber();
+      currentBlock = await withTransientEthReadRetry(() =>
+        (client as PublicClient).getBlockNumber(),
+      );
     } catch (err) {
       throw discoveryUnavailableFromReadError(
         `OnchainDiscoveryAPI: failed to get block number`,
@@ -851,24 +853,25 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     let events: SetMetadataEvent[];
     try {
       events = await scanLogsInChunks(
-        async (start, end) => {
-          const logs = await (client as PublicClient).getLogs({
-            address: identityRegistryAddress,
-            fromBlock: start,
-            toBlock: end,
-          });
-          const decoded: SetMetadataEvent[] = [];
-          for (const log of logs) {
-            const event = decodeSolvernetMetadataLog(log as {
-              data: Hex;
-              topics: readonly Hex[];
-              blockNumber: bigint | null;
-              transactionIndex: number | null;
+        async (start, end) =>
+          withTransientEthReadRetry(async () => {
+            const logs = await (client as PublicClient).getLogs({
+              address: identityRegistryAddress,
+              fromBlock: start,
+              toBlock: end,
             });
-            if (event) decoded.push(event);
-          }
-          return decoded;
-        },
+            const decoded: SetMetadataEvent[] = [];
+            for (const log of logs) {
+              const event = decodeSolvernetMetadataLog(log as {
+                data: Hex;
+                topics: readonly Hex[];
+                blockNumber: bigint | null;
+                transactionIndex: number | null;
+              });
+              if (event) decoded.push(event);
+            }
+            return decoded;
+          }),
         fromBlock,
         currentBlock,
         chunk,
