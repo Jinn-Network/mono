@@ -176,10 +176,24 @@ today — operators could converge on dominant codeDigests by
 observation alone. One path to cross-operator amplification that
 requires no new infrastructure.
 
-The concrete first sprint is three small issues: a Ponder index
-addition, a Consolidator extension that does the sample-window /
-indexer-query / revert-decision work, and a one-paragraph
-promoter-prompt edit. All independent.
+The concrete first sprint is three small issues, now filed as
+sub-issues of [#689](https://github.com/Jinn-Network/mono/issues/689):
+
+- [**#763**](https://github.com/Jinn-Network/mono/issues/763) —
+  `chore`: add the `codeDigest` index on `attemptEnvelopeMeta` so the
+  per-codeDigest aggregation query runs fast.
+- [**#764**](https://github.com/Jinn-Network/mono/issues/764) —
+  `feat`: per-codeDigest selection-on-reward in Memory consolidation,
+  i.e. wire the Consolidator (or sibling subagent) to query the
+  indexer for aggregate reward per codeDigest and revert Improve
+  commits whose presence correlates negatively, under a documented
+  confidence threshold.
+- [**#765**](https://github.com/Jinn-Network/mono/issues/765) —
+  `feat`: one-paragraph promoter-prompt nudge toward higher
+  action-surface tiers (skill / hook / new-tool over notes-only), with
+  one worked skill-edit example.
+
+#763 and #765 are fully independent; #764 builds on #763.
 
 ## What this doesn't yet prove
 
