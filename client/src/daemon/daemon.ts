@@ -303,15 +303,18 @@ export class Daemon {
   }
 
   async start(): Promise<void> {
+    // adapter.initialize() is read-only (verified for MechAdapter and LocalAdapter
+    // as part of #649): getBlockNumber, in-memory cursors, store reads only.
     await this.adapter.initialize();
-    this.store.setShutdownState('running');
-    this.store.setDaemonStartedAt(new Date().toISOString());
-    this.cachedShutdownState = 'running';
-    emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
-    // Start HTTP API server (or adopt the one main.ts started early in
-    // setup-mode). When injected, ownership stays with the caller — see
-    // DaemonConfig.apiServer.
+    // Bind the API port BEFORE mutating shared store state or emitting the
+    // `startup` activity event. The port bind is the cross-process mutex —
+    // a racing `jinn run` invocation that survived the pidfile preflight
+    // (rare, e.g. ms-scale TOCTOU) will throw EADDRINUSE here, and we'd
+    // rather throw than corrupt shutdown_state / daemon_started_at / the
+    // activity-events log. See issue #649.
+    //
+    // DO NOT add store mutations above this line — see #649.
     const corpus = this.config.corpusFactory
       ? this.config.corpusFactory(this.store)
       : undefined;
@@ -330,6 +333,13 @@ export class Daemon {
       });
       this.ownsApiServer = true;
     }
+
+    // Only after the port is bound do we declare ourselves "running" in the
+    // store and emit the startup lifecycle event. Order matters: see #649.
+    this.store.setShutdownState('running');
+    this.store.setDaemonStartedAt(new Date().toISOString());
+    this.cachedShutdownState = 'running';
+    emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
     // Start peer sync if peers configured
     const peers = this.config.peers ?? (process.env['JINN_PEERS'] ?? '').split(',').filter(Boolean);
