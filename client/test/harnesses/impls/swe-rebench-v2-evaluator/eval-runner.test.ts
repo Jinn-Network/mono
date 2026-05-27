@@ -146,12 +146,17 @@ describe('PythonEvalRunner', () => {
     const upstreamRepoDir = makeUpstreamFixture();
     await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
       ...REQUEST,
+      // Pin install to a line that already mentions pytest so the #493
+      // install guard is suppressed in this test (which asserts the exact
+      // command shape pre-guard).
+      install: ['pip install -e .', 'pip install pytest'],
       fail_to_pass: ['tests/a.py::test_x'],
       pass_to_pass: ['tests/a.py::test_y', 'tests/a.py::test_z[0]'],
     });
     const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
     expect(observedTask.install_config.test_cmd).toEqual([
       'pip install -e .',
+      'pip install pytest',
       `python -m pytest --no-header -rA --tb=no -p no:cacheprovider 'tests/a.py::test_x' 'tests/a.py::test_y' 'tests/a.py::test_z[0]'`,
     ]);
     // The dataset's broad/`-v` test command is not used.
@@ -167,6 +172,75 @@ describe('PythonEvalRunner', () => {
     });
     const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
     expect(observedTask.install_config.test_cmd).toEqual(['pip install -e .', 'go test ./...']);
+  });
+
+  // #493 — pytest-install guard. The single highest-yield blocker on the
+  // Stage-1 reason histogram was `ungradeable:pytest_missing` (~18% of all
+  // unscorable instances). When the dataset's `install_config.install` does
+  // not already install pytest, prepend a best-effort install line so the
+  // SWE-bench resolved-semantics test_cmd can find the binary.
+  describe('pytest-install guard (#493)', () => {
+    it('prepends a pytest install when install does not already mention pytest', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+        ...REQUEST,
+        install: 'pip install -e .',
+      });
+      const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
+      const testCmd: string[] = observedTask.install_config.test_cmd;
+      // The very first command is the prepended pytest install guard.
+      expect(testCmd[0]).toContain('python -m pip install');
+      expect(testCmd[0]).toContain('pytest');
+      // The dataset's install line still runs.
+      expect(testCmd).toContain('pip install -e .');
+      // The final command is still the SWE-bench resolved-semantics pytest run.
+      expect(testCmd[testCmd.length - 1]).toContain('python -m pytest');
+    });
+
+    it('does NOT prepend when install_config.install already installs pytest', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+        ...REQUEST,
+        install: ['pip install -e .', 'pip install pytest==7.4'],
+      });
+      const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
+      const testCmd: string[] = observedTask.install_config.test_cmd;
+      // Exactly the two original install lines + the pytest run — no guard.
+      expect(testCmd).toEqual([
+        'pip install -e .',
+        'pip install pytest==7.4',
+        expect.stringContaining('python -m pytest'),
+      ]);
+    });
+
+    it('does NOT prepend for non-pytest log parsers regardless of install contents', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+        ...REQUEST,
+        log_parser: 'parse_log_go',
+        install: 'go mod download',
+        test_cmd: 'go test ./...',
+      });
+      const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
+      expect(observedTask.install_config.test_cmd).toEqual(['go mod download', 'go test ./...']);
+    });
+
+    it('detects pytest even when the install line uses pip install -r requirements that pin pytest', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+        ...REQUEST,
+        // A bare `pytest-cov` should not be enough to skip the guard.
+        // Only an explicit `pytest` word boundary counts.
+        install: ['pip install -e .', 'pip install pytest-cov'],
+      });
+      const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
+      const testCmd: string[] = observedTask.install_config.test_cmd;
+      // pytest-cov by itself does NOT install pytest as a top-level command;
+      // the guard SHOULD still fire to be safe. (`\bpytest\b` matches pytest
+      // but not pytest-cov per the word-boundary on the trailing `-`.)
+      expect(testCmd[0]).toContain('python -m pip install');
+      expect(testCmd[0]).toContain('pytest');
+    });
   });
 
   it('pins the docker platform to linux/amd64 for the eval subprocess', async () => {
