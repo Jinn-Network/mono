@@ -5,11 +5,24 @@
 # alerts under legacy/jinn-cli-agents-reference/ are cleared in a sibling
 # commit via .github/scripts/dismiss-legacy-dependabot-alerts.sh.
 #
-# Adding a new live npm manifest? Add an entry below.
+# Wave-shape policy (issue #769):
+#   - Minor + patch updates are GROUPED into one weekly PR per ecosystem
+#     so the routine drift is reviewable at a glance.
+#   - Major bumps come as INDIVIDUAL PRs so each can be assessed on its
+#     own merits.
+#   - A short list of framework majors is `ignore`-d below — these are
+#     known migrations tracked in #768. The ignore is per-package, not a
+#     blanket "no majors" rule: anything not in the list still surfaces
+#     as a PR, which is how we hear about drift.
+#
+# Adding a new live npm manifest? Add an entry below. To accept a major
+# bump that's currently ignored, remove the corresponding entry from
+# `npm-major-ignores` AND close out the migration row in #768.
 
 version: 2
 updates:
-  # GitHub Actions workflows
+  # GitHub Actions workflows. Majors come as individual PRs by design —
+  # GHA actions are usually safe to bump and the wave is small.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -20,63 +33,171 @@ updates:
           - minor
           - patch
 
-  # Live npm components — Jinn daemon + dashboard SPA
+  # Live npm components — Jinn daemon + dashboard SPA.
+  # First npm entry defines the shared `npm-major-ignores` anchor that
+  # subsequent entries reference. Adding/removing a dep here applies to
+  # every npm manifest.
   - package-ecosystem: npm
     directory: "/client"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: &npm-major-ignores
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/client/src/dashboard/spa"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   # Solidity tooling workspace (Hardhat + OZ contracts)
   - package-ecosystem: npm
     directory: "/contracts"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   # First-party packages
   - package-ecosystem: npm
     directory: "/packages/claim-relayer"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   - package-ecosystem: npm
     directory: "/packages/indexer"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   - package-ecosystem: npm
     directory: "/packages/indexer/explorer"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   - package-ecosystem: npm
     directory: "/packages/sdk"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   # Apps
   - package-ecosystem: npm
     directory: "/apps/broadcast-bot"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   # External harness examples
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/alternative-harness"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/polymarket-forecaster"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
 
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/prediction-evaluator"
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
