@@ -334,8 +334,8 @@ describe('ValidatedPoolStore — extended substrate fields (semantics v3)', () =
     expect(entry!.upstreamEvalCommit).toBeUndefined();
   });
 
-  it('is "3" — bump this when grading semantics change, and update the JSDoc history block above', () => {
-    expect(EVAL_SEMANTICS_VERSION).toBe('3');
+  it('is "4" — bump this when grading semantics change, and update the JSDoc history block above', () => {
+    expect(EVAL_SEMANTICS_VERSION).toBe('4');
   });
 });
 

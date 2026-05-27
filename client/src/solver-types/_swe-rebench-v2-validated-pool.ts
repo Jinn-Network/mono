@@ -66,8 +66,13 @@ function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
  *         `upstreamEvalCommit`) and extended ungradeable classifier
  *         (venv collision, missing pytest, dependency warnings, conftest
  *         import/setup failures) — jinn-mono-fufn.
+ *   '4' — adds the buildTestCommands pytest-install guard (#493): for
+ *         parse_log_pytest rows whose install_config.install does not
+ *         already mention pytest, prepend a best-effort install line so
+ *         the `ungradeable:pytest_missing` bucket (the highest-yield
+ *         capacity blocker on the Stage-1 histogram) becomes scorable.
  */
-export const EVAL_SEMANTICS_VERSION = '3';
+export const EVAL_SEMANTICS_VERSION = '4';
 
 const SCHEMA_VERSION = 'swe-rebench-v2-validated-pool.v1' as const;
 export const SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE = 'swe-rebench-v2-vetted-pool.v1' as const;
