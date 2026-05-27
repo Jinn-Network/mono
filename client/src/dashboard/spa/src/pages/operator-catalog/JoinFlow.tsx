@@ -281,6 +281,21 @@ export function JoinFlow({
     ? readiness.get(evaluatorHarnessName)
     : undefined;
 
+  // Cost-protection hooks must run before any conditional return (Rules of
+  // Hooks). Pass undefined harness when solver fields are hidden — the hook
+  // treats that as no paid-key surface.
+  const showSolverFields = form.roles.includes('solver');
+  const usesPaidApiKey = useHarnessUsesPaidApiKey(
+    showSolverFields ? form.harness : undefined,
+  );
+  const costDecision = decideCostSurface(
+    usesPaidApiKey,
+    showSolverFields ? form.model : undefined,
+  );
+  const requiresCostConfirmation =
+    showSolverFields && costDecision.requiresConfirmation;
+  const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
+
   const submitMutation = useMutation({
     mutationFn: () =>
       api.operator.join(cid!, {
@@ -381,19 +396,7 @@ export function JoinFlow({
     });
   };
 
-  const showSolverFields = form.roles.includes('solver');
   const showEvaluatorInfo = form.roles.includes('evaluator');
-
-  // Cost-protection surface (Issue #331). Only consulted when the solver
-  // role is selected — the evaluator role binds to a manifest-supplied
-  // implementation and bypasses operator harness choice entirely.
-  const usesPaidApiKey = useHarnessUsesPaidApiKey(showSolverFields ? form.harness : undefined);
-  const costDecision = decideCostSurface(
-    usesPaidApiKey,
-    showSolverFields ? form.model : undefined,
-  );
-  const requiresCostConfirmation = showSolverFields && costDecision.requiresConfirmation;
-  const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
 
   // Readiness gate (#332): block Save & Join when the selected solver harness
   // reports a definitive `ready: false`. A still-loading or unknown probe
