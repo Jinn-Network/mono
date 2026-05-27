@@ -100,7 +100,7 @@ export class HermesHarness implements Harness {
     const config: { hermesPath?: string; hermesDoctorTimeoutMs?: number } = {};
     if (this.hermesPath !== undefined) config.hermesPath = this.hermesPath;
     if (this.hermesDoctorTimeoutMs !== undefined) config.hermesDoctorTimeoutMs = this.hermesDoctorTimeoutMs;
-    const result = probeHermesDoctor(config);
+    const result = await probeHermesDoctor(config);
     if (!result.installed) {
       return {
         ready: false,
@@ -127,7 +127,7 @@ export class HermesHarness implements Harness {
     // Third gate: `hermes doctor` exits 0 even when every model provider is
     // logged out. Hermes is OpenRouter-only, so probe OpenRouter auth
     // directly — a logged-out OpenRouter means Hermes cannot run a task.
-    const auth = probeHermesAuthStatus('openrouter', config);
+    const auth = await probeHermesAuthStatus('openrouter', config);
     if (!auth.authed) {
       return {
         ready: false,

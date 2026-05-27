@@ -1,9 +1,15 @@
 /**
  * GET /api/codex/doctor
  *
- * Runs `codex --version` via spawnSync and inspects the auth configuration so
- * the operator dashboard can show an install-required / sign-in-required panel
- * before the operator saves a Codex harness selection.
+ * Runs `codex --version` via async execFile and inspects the auth configuration
+ * so the operator dashboard can show an install-required / sign-in-required
+ * panel before the operator saves a Codex harness selection.
+ *
+ * Async (#778 follow-up): the readiness registry refreshes the learner
+ * harness's `isReady()` periodically; that path calls `probeCodexDoctor`. The
+ * original `spawnSync` blocked the daemon main event loop on every refresh,
+ * same wedge class as the Hermes endpoint (see hermes-doctor-endpoint.ts file
+ * header). Converted to `promisify(execFile)` with a 10s timeout.
  *
  * Response shape:
  *   { installed: boolean, authenticated: boolean,
@@ -38,10 +44,13 @@
  * same-shape bug as #330; liveness tightening from #366).
  */
 import type { Hono } from 'hono';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 /** Classification of Codex credentials. */
 export type CodexAuthStatus = 'ok' | 'expired' | 'not_configured';
@@ -301,20 +310,50 @@ function classifyVersion(cliVersion: string | null): CodexVersionStatus {
 let untestedVersionWarningEmitted = false;
 
 /**
- * Synchronously runs `codex --version` and classifies install + auth state.
+ * Asynchronously runs `codex --version` and classifies install + auth state.
  * Pure (no Hono dependency) so the harness layer can call it without pulling
  * the API server in.
+ *
+ * Async (#778 follow-up): see file header — `execFile` failures (non-zero
+ * exit OR kill-by-timeout) throw with `{stdout, stderr, code, signal}`
+ * attached; we unwrap that into the same classification surface the old
+ * sync code produced.
  */
-export function probeCodexDoctor(config: CodexDoctorConfig = {}): CodexDoctorResponse {
+export async function probeCodexDoctor(config: CodexDoctorConfig = {}): Promise<CodexDoctorResponse> {
   const codexBin = config.codexPath ?? 'codex';
-  const timeoutMs = config.codexDoctorTimeoutMs ?? 30_000;
+  // Defaults to 10s here (vs 30s on the sync path) because this fires on the
+  // readiness-registry refresh tick — a hung shell-out must not snowball into
+  // an outstanding 30s timer per tick.
+  const timeoutMs = config.codexDoctorTimeoutMs ?? 10_000;
 
-  const result = spawnSync(codexBin, ['--version'], {
-    timeout: timeoutMs,
-    encoding: 'utf8',
-  });
+  let status: number | null = 0;
+  let signal: NodeJS.Signals | null = null;
+  let stdout = '';
+  let stderr = '';
+  let errorCode: string | undefined;
 
-  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  try {
+    const ok = await execFileAsync(codexBin, ['--version'], {
+      timeout: timeoutMs,
+      encoding: 'utf8',
+    });
+    stdout = ok.stdout;
+    stderr = ok.stderr;
+  } catch (err) {
+    const errno = err as NodeJS.ErrnoException & {
+      stdout?: string | Buffer;
+      stderr?: string | Buffer;
+      code?: number | string;
+      signal?: NodeJS.Signals;
+    };
+    const codeIsString = typeof errno.code === 'string';
+    status = !codeIsString && typeof errno.code === 'number' ? errno.code : null;
+    errorCode = codeIsString ? (errno.code as string) : undefined;
+    signal = errno.signal ?? null;
+    stdout = typeof errno.stdout === 'string' ? errno.stdout : errno.stdout?.toString() ?? '';
+    stderr = typeof errno.stderr === 'string' ? errno.stderr : errno.stderr?.toString() ?? '';
+  }
+
   // installed=true means we found the binary on disk. ENOENT is the only
   // definitive not-installed signal. Other errors (EACCES = wrong
   // permissions; ETIMEDOUT = ran but didn't finish in time) indicate the
@@ -322,20 +361,20 @@ export function probeCodexDoctor(config: CodexDoctorConfig = {}): CodexDoctorRes
   // config-issue, not missing.
   const notFound = errorCode === 'ENOENT';
   const installed = !notFound && (
-    result.status !== null
-    || result.signal !== null
+    status !== null
+    || signal !== null
     || (errorCode != null && errorCode !== 'ENOENT')
   );
 
   // Auth is only meaningful once the binary is present and runnable.
-  const runnable = installed && result.status === 0;
+  const runnable = installed && status === 0;
   const authStatus: CodexAuthStatus = runnable
     ? detectCodexAuthStatus(config)
     : 'not_configured';
 
   // Version surfacing (#675). Parse only when we have a runnable binary;
   // otherwise the stdout is meaningless.
-  const cliVersion = runnable ? parseCodexVersion(result.stdout ?? '') : null;
+  const cliVersion = runnable ? parseCodexVersion(stdout) : null;
   const versionStatus: CodexVersionStatus = runnable
     ? classifyVersion(cliVersion)
     : 'unknown';
@@ -356,14 +395,14 @@ export function probeCodexDoctor(config: CodexDoctorConfig = {}): CodexDoctorRes
     authStatus,
     cliVersion,
     versionStatus,
-    exitCode: result.status,
-    stdout: (result.stdout ?? '').slice(0, 4000),
-    stderr: (result.stderr ?? '').slice(0, 4000),
+    exitCode: status,
+    stdout: stdout.slice(0, 4000),
+    stderr: stderr.slice(0, 4000),
   };
 }
 
 export function addCodexDoctorRoutes(app: Hono, config: CodexDoctorConfig = {}): void {
-  app.get('/api/codex/doctor', (c) => {
-    return c.json(probeCodexDoctor(config));
+  app.get('/api/codex/doctor', async (c) => {
+    return c.json(await probeCodexDoctor(config));
   });
 }

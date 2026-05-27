@@ -3,19 +3,97 @@
  *
  * Unit tests for GET /api/hermes/doctor.
  *
- * The route calls spawnSync to run `hermes doctor`. We mock spawnSync via
- * vi.mock so the tests run without a real hermes binary.
+ * Per #778 follow-up the route uses `promisify(execFile)` to run
+ * `hermes doctor` / `hermes auth list` — the original `spawnSync` blocked the
+ * daemon event loop on every readiness-registry refresh tick. We mock
+ * `execFile` via vi.mock so the tests run without a real hermes binary.
+ *
+ * `execFile`'s callback signature: `(err, stdout, stderr)`. A non-zero exit
+ * (or a spawn-error like ENOENT) surfaces as a thrown error whose payload
+ * carries `code`, `signal`, `stdout`, `stderr`, etc. — so the mock invokes
+ * the trailing callback with the appropriate args.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 
-// Mock node:child_process before importing the module under test so vi.mock
-// hoisting applies correctly.
-const spawnSyncMock = vi.fn();
+interface ExecFileExitOk {
+  type: 'ok';
+  stdout: string;
+  stderr: string;
+}
+interface ExecFileExitError {
+  type: 'error';
+  /** Numeric exit code (process ran, exited non-zero) OR string errno (spawn failed). */
+  code?: number | string;
+  signal?: NodeJS.Signals | null;
+  stdout?: string;
+  stderr?: string;
+  message?: string;
+}
+type ExecFileOutcome = ExecFileExitOk | ExecFileExitError;
 
-vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
+// Mock node:child_process before importing the module under test so vi.mock
+// hoisting applies correctly. The production code uses `promisify(execFile)`,
+// and `child_process.execFile` ships a `util.promisify.custom` impl that
+// resolves to `{stdout, stderr}` (rejecting with the same shape on error).
+// We MUST re-attach that custom symbol on the mock — without it,
+// `promisify(execFile)` falls back to "resolve with first non-error
+// callback arg", which would lose stderr and corrupt the unwrap path.
+const { execFileMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn<unknown[], unknown>(),
 }));
+
+vi.mock('node:child_process', async () => {
+  const { promisify: promisifyImpl } = await import('node:util');
+
+  function mockedExecFile(...args: unknown[]): unknown {
+    const callback = args[args.length - 1] as
+      | ((err: (Error & Record<string, unknown>) | null, stdout: string, stderr: string) => void)
+      | undefined;
+    const outcome = execFileMock(...args) as ExecFileOutcome;
+    queueMicrotask(() => {
+      if (!callback) return;
+      if (outcome.type === 'ok') {
+        callback(null, outcome.stdout, outcome.stderr);
+      } else {
+        const err = Object.assign(new Error(outcome.message ?? 'execFile failed'), {
+          code: outcome.code,
+          signal: outcome.signal ?? null,
+          stdout: outcome.stdout ?? '',
+          stderr: outcome.stderr ?? '',
+          killed: outcome.signal != null,
+        });
+        callback(err as Error & Record<string, unknown>, outcome.stdout ?? '', outcome.stderr ?? '');
+      }
+    });
+    return { stdin: null, kill: () => {} };
+  }
+
+  (mockedExecFile as unknown as { [k: symbol]: unknown })[promisifyImpl.custom] = (
+    file: string,
+    args: readonly string[],
+    options?: Record<string, unknown>,
+  ): Promise<{ stdout: string; stderr: string }> =>
+    new Promise((resolve, reject) => {
+      mockedExecFile(
+        file,
+        args,
+        options ?? {},
+        (err: Error | null, stdout: string, stderr: string) => {
+          if (err) {
+            const errAny = err as Error & { stdout?: string; stderr?: string };
+            if (errAny.stdout === undefined) errAny.stdout = stdout;
+            if (errAny.stderr === undefined) errAny.stderr = stderr;
+            reject(err);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        },
+      );
+    });
+
+  return { execFile: mockedExecFile };
+});
 
 const {
   addHermesDoctorRoutes,
@@ -37,18 +115,18 @@ function buildApp(config: { hermesPath?: string; hermesDoctorTimeoutMs?: number 
   return app;
 }
 
+/** Test-only sugar: pin the next execFile call's outcome. */
+function mockNext(outcome: ExecFileOutcome): void {
+  execFileMock.mockReturnValueOnce(outcome);
+}
+
 beforeEach(() => {
-  spawnSyncMock.mockReset();
+  execFileMock.mockReset();
 });
 
 describe('GET /api/hermes/doctor', () => {
   it('returns installed:false when hermes binary is not found (ENOENT)', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
-      error: Object.assign(new Error('spawn hermes ENOENT'), { code: 'ENOENT' }),
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'error', code: 'ENOENT', message: 'spawn hermes ENOENT' });
 
     const app = buildApp();
     const res = await app.request('/api/hermes/doctor');
@@ -62,12 +140,7 @@ describe('GET /api/hermes/doctor', () => {
   });
 
   it('returns installed:true, exitCode:0 when hermes doctor succeeds', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
-      stdout: 'hermes doctor: all checks passed\n',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: 'hermes doctor: all checks passed\n', stderr: '' });
 
     const app = buildApp();
     const res = await app.request('/api/hermes/doctor');
@@ -82,12 +155,7 @@ describe('GET /api/hermes/doctor', () => {
 
   it('returns installed:true, exitCode:1 with stderr when hermes doctor reports a config issue', async () => {
     const diagnosticMsg = 'error: no provider configured; run `hermes model` to set one';
-    spawnSyncMock.mockReturnValue({
-      status: 1,
-      error: undefined,
-      stdout: '',
-      stderr: diagnosticMsg,
-    });
+    mockNext({ type: 'error', code: 1, stdout: '', stderr: diagnosticMsg });
 
     const app = buildApp();
     const res = await app.request('/api/hermes/doctor');
@@ -101,28 +169,30 @@ describe('GET /api/hermes/doctor', () => {
   });
 
   it('uses the configured hermesPath binary', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, error: undefined, stdout: '', stderr: '' });
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
 
     const app = buildApp({ hermesPath: '/opt/hermes/bin/hermes' });
     await app.request('/api/hermes/doctor');
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       '/opt/hermes/bin/hermes',
       ['doctor'],
-      expect.objectContaining({ timeout: 30_000 }),
+      expect.objectContaining({ timeout: 10_000 }),
+      expect.any(Function),
     );
   });
 
   it('uses the configured hermesDoctorTimeoutMs', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, error: undefined, stdout: '', stderr: '' });
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
 
     const app = buildApp({ hermesDoctorTimeoutMs: 5_000 });
     await app.request('/api/hermes/doctor');
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       'hermes',
       ['doctor'],
       expect.objectContaining({ timeout: 5_000 }),
+      expect.any(Function),
     );
   });
 
@@ -130,13 +200,7 @@ describe('GET /api/hermes/doctor', () => {
     // Realistic scenario: operator did `curl ... | bash` but the script
     // didn't chmod +x the binary. The bare `hermes doctor` invocation fails
     // with EACCES; the file IS on disk.
-    spawnSyncMock.mockReturnValue({
-      status: null,
-      signal: null,
-      error: Object.assign(new Error('spawn hermes EACCES'), { code: 'EACCES' }),
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'error', code: 'EACCES', message: 'spawn hermes EACCES' });
 
     const app = buildApp();
     const res = await app.request('/api/hermes/doctor');
@@ -146,16 +210,17 @@ describe('GET /api/hermes/doctor', () => {
     expect(body.exitCode).toBeNull();
   });
 
-  it('treats spawnSync timeout as installed:true with exitCode null (config-issue, not missing binary)', async () => {
-    // Node's spawnSync sets result.signal when the child is killed by SIGTERM
-    // on timeout; error.code is ETIMEDOUT. The binary did execute, it just
-    // didn't finish — so installed must be true, not false.
-    spawnSyncMock.mockReturnValue({
-      status: null,
+  it('treats execFile timeout as installed:true with exitCode null (config-issue, not missing binary)', async () => {
+    // Node's execFile kills the child by SIGTERM on timeout and rejects with
+    // a `killed: true` error. The binary did execute, it just didn't finish —
+    // so installed must be true, not false.
+    mockNext({
+      type: 'error',
+      code: 'ETIMEDOUT',
       signal: 'SIGTERM',
-      error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }),
       stdout: '',
       stderr: '',
+      message: 'ETIMEDOUT',
     });
 
     const app = buildApp();
@@ -168,12 +233,7 @@ describe('GET /api/hermes/doctor', () => {
 
   it('truncates stdout and stderr to 4000 characters', async () => {
     const longOutput = 'x'.repeat(5000);
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
-      stdout: longOutput,
-      stderr: longOutput,
-    });
+    mockNext({ type: 'ok', stdout: longOutput, stderr: longOutput });
 
     const app = buildApp();
     const res = await app.request('/api/hermes/doctor');
@@ -190,99 +250,88 @@ describe('probeHermesAuthStatus', () => {
   // credentials, not just interactive-OAuth sessions — so an operator
   // authenticated via `OPENROUTER_API_KEY` is correctly reported as authed.
 
-  it('reports authed for a healthy api_key credential (the OPENROUTER_API_KEY setup)', () => {
+  it('reports authed for a healthy api_key credential (the OPENROUTER_API_KEY setup)', async () => {
     // Verbatim shape of `hermes auth list openrouter` for an env-var api_key
     // credential — the case `auth status` wrongly calls "logged out".
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+    mockNext({
+      type: 'ok',
       stdout:
         'openrouter (1 credentials):\n' +
         '  #1  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY ←\n\n',
       stderr: '',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.provider).toBe('openrouter');
     expect(result.authed).toBe(true);
     expect(result.raw).toContain('api_key');
   });
 
-  it('reports authed for a healthy oauth credential', () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+  it('reports authed for a healthy oauth credential', async () => {
+    mockNext({
+      type: 'ok',
       stdout:
         'openrouter (1 credentials):\n' +
         '  #1  user@example.com   oauth   openrouter_pkce ←\n\n',
       stderr: '',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(true);
   });
 
-  it('reports not-authed when the credential pool is empty (no provider section printed)', () => {
+  it('reports not-authed when the credential pool is empty (no provider section printed)', async () => {
     // `auth_list_command` skips a provider with zero pooled credentials, so
     // stdout is empty even though exit code is 0.
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(false);
   });
 
-  it('reports not-authed when the only credential is exhausted with a wait window still open', () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+  it('reports not-authed when the only credential is exhausted with a wait window still open', async () => {
+    mockNext({
+      type: 'ok',
       stdout:
         'openrouter (1 credentials):\n' +
         '  #1  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY rate-limited (429) (12m 3s left) ←\n\n',
       stderr: '',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(false);
   });
 
-  it('reports not-authed when the only credential is a hard auth failure', () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+  it('reports not-authed when the only credential is a hard auth failure', async () => {
+    mockNext({
+      type: 'ok',
       stdout:
         'openrouter (1 credentials):\n' +
         '  #1  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY auth failed (401) (re-auth may be required) ←\n\n',
       stderr: '',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(false);
   });
 
-  it('reports authed when an exhausted credential has reached its retry window', () => {
+  it('reports authed when an exhausted credential has reached its retry window', async () => {
     // `(ready to retry)` means the exhaustion window elapsed — usable again.
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+    mockNext({
+      type: 'ok',
       stdout:
         'openrouter (1 credentials):\n' +
         '  #1  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY rate-limited (429) (ready to retry) ←\n\n',
       stderr: '',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(true);
   });
 
-  it('reports authed when at least one of several credentials is usable', () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+  it('reports authed when at least one of several credentials is usable', async () => {
+    mockNext({
+      type: 'ok',
       stdout:
         'openrouter (2 credentials):\n' +
         '  #1  key-one   api_key env:OPENROUTER_API_KEY rate-limited (429) (5m 0s left)\n' +
@@ -290,53 +339,49 @@ describe('probeHermesAuthStatus', () => {
       stderr: '',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(true);
   });
 
-  it('reports not-authed gracefully when the hermes binary is not found (ENOENT)', () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
-      error: Object.assign(new Error('spawn hermes ENOENT'), { code: 'ENOENT' }),
-      stdout: '',
-      stderr: '',
-    });
+  it('reports not-authed gracefully when the hermes binary is not found (ENOENT)', async () => {
+    mockNext({ type: 'error', code: 'ENOENT', message: 'spawn hermes ENOENT' });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(false);
     expect(result.raw).toBe('');
   });
 
-  it('reports not-authed when spawnSync errors (e.g. timeout) regardless of stdout', () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
+  it('reports not-authed when execFile errors (e.g. timeout) regardless of stdout', async () => {
+    mockNext({
+      type: 'error',
+      code: 'ETIMEDOUT',
       signal: 'SIGTERM',
-      error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }),
       stdout: 'openrouter (1 credentials):\n  #1  key   api_key manual ←\n',
       stderr: '',
+      message: 'ETIMEDOUT',
     });
 
-    const result = probeHermesAuthStatus('openrouter');
+    const result = await probeHermesAuthStatus('openrouter');
     expect(result.authed).toBe(false);
   });
 
-  it('invokes `hermes auth list <provider>` with the configured binary and timeout', () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      error: undefined,
+  it('invokes `hermes auth list <provider>` with the configured binary and timeout', async () => {
+    mockNext({
+      type: 'ok',
       stdout: 'openrouter (1 credentials):\n  #1  key   api_key manual ←\n',
       stderr: '',
     });
 
-    probeHermesAuthStatus('openrouter', {
+    await probeHermesAuthStatus('openrouter', {
       hermesPath: '/opt/hermes/bin/hermes',
       hermesDoctorTimeoutMs: 5_000,
     });
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       '/opt/hermes/bin/hermes',
       ['auth', 'list', 'openrouter'],
       expect.objectContaining({ timeout: 5_000, encoding: 'utf8' }),
+      expect.any(Function),
     );
   });
 });

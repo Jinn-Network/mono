@@ -33,7 +33,7 @@ class NoOpAdapter implements HarnessAdapter {
 
 describe('LearnerHarness.isReady — Codex variant (#348)', () => {
   it('returns ready=true when probeCodexDoctor reports installed, exit 0, authenticated', async () => {
-    vi.mocked(probeCodexDoctor).mockReturnValue({
+    vi.mocked(probeCodexDoctor).mockResolvedValue({
       installed: true,
       authenticated: true,
       authStatus: 'ok',
@@ -50,7 +50,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
   });
 
   it('returns ready=false with install nextStep when codex binary missing', async () => {
-    vi.mocked(probeCodexDoctor).mockReturnValue({
+    vi.mocked(probeCodexDoctor).mockResolvedValue({
       installed: false,
       authenticated: false,
       authStatus: 'not_configured',
@@ -69,7 +69,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
   });
 
   it('returns ready=false with sign-in nextStep when codex auth not configured', async () => {
-    vi.mocked(probeCodexDoctor).mockReturnValue({
+    vi.mocked(probeCodexDoctor).mockResolvedValue({
       installed: true,
       authenticated: false,
       authStatus: 'not_configured',
@@ -90,7 +90,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
   // be distinct from the not-configured case so the operator sees a
   // re-login hint rather than a first-time sign-in hint.
   it('returns ready=false with a distinct re-login reason when codex auth is expired', async () => {
-    vi.mocked(probeCodexDoctor).mockReturnValue({
+    vi.mocked(probeCodexDoctor).mockResolvedValue({
       installed: true,
       authenticated: false,
       authStatus: 'expired',

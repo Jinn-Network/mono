@@ -5,7 +5,7 @@ import { HERMES_AGENT_HARNESS } from '../../../../src/harnesses/names.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
 vi.mock('../../../../src/harnesses/impls/learner/harvest.js', () => ({
-  harvestOutput: vi.fn(() => ({
+  harvestOutput: vi.fn(async () => ({
     schemaVersion: 'swe-rebench-v2-solution.v1',
     patch: '--- a/x\n+++ b/x\n',
     venueRef: { name: 'placeholder-from-harvest', version: '0' },

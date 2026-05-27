@@ -32,10 +32,10 @@ function makeMinimalCtx(mode: 'train' | 'frozen'): HarnessContext {
 
 describe('claude-code-learner mode gate', () => {
   it('forwards mode = "train" through TaskSessionInputs', async () => {
-    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockReturnValue({
+    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockResolvedValue({
       venueRef: { name: 'claude-code-learner' },
       gating: {},
-    } as ReturnType<typeof harvestModule.harvestOutput>);
+    } as Awaited<ReturnType<typeof harvestModule.harvestOutput>>);
     try {
       const adapter = new CapturingAdapter();
       const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
@@ -47,10 +47,10 @@ describe('claude-code-learner mode gate', () => {
   });
 
   it('forwards mode = "frozen" through TaskSessionInputs', async () => {
-    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockReturnValue({
+    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockResolvedValue({
       venueRef: { name: 'claude-code-learner' },
       gating: {},
-    } as ReturnType<typeof harvestModule.harvestOutput>);
+    } as Awaited<ReturnType<typeof harvestModule.harvestOutput>>);
     try {
       const adapter = new CapturingAdapter();
       const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });

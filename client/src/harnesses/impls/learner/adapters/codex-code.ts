@@ -197,6 +197,14 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     const env = buildAgentEnv(baseEnv);
 
     if (this.runSessionStartHook) {
+      // Sync spawnSync is acceptable here (#778, #398): this runs once per
+      // claimed task during the synchronous `runTask` setup phase before the
+      // long-running codex child is spawned. The hook is a well-known
+      // session-start script (not an unbounded user diff), runs against the
+      // task's working dir, and any hang would already trip the harness's
+      // outer task-execution timeout. The wedge fixed in #778 was the
+      // post-execution `git diff --binary` in harvest.ts, which ran on every
+      // delivery on the main thread with no upstream timeout.
       const hook = spawnSync('bash', [join(pluginRoot, 'hooks', 'session-start')], {
         cwd: inputs.workingDir,
         env,

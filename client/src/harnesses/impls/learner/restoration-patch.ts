@@ -17,7 +17,13 @@
  *     `git apply --numstat` parse catches that before the patch ships.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+
+// Async execFile — see #778. The sibling `git diff` wedge in harvest.ts
+// could starve the entire daemon main thread; the same risk applies to
+// this `git apply --numstat` call (any git invocation can hang on a repo
+// lock, FS issue, etc.). 60s timeout matches harvest.ts.
+const GIT_APPLY_TIMEOUT_MS = 60_000;
 
 /**
  * Whether `path` (a forward-slash repo-relative path) looks like a test file
@@ -116,13 +122,33 @@ export function stripTestPathHunks(unifiedDiff: string): string {
  * "corrupt patch at line N", "unexpected line", etc. — before the patch is
  * submitted as a verdict-bound solution payload.
  */
-export function gitApplyParseCheck(repoDir: string, patch: string): { ok: true } | { ok: false; stderr: string } {
+export async function gitApplyParseCheck(
+  repoDir: string,
+  patch: string,
+): Promise<{ ok: true } | { ok: false; stderr: string }> {
   if (!patch.trim()) return { ok: false, stderr: 'empty patch' };
   try {
-    execFileSync('git', ['-C', repoDir, 'apply', '--numstat', '-'], {
-      input: patch,
-      encoding: 'utf8',
-      stdio: ['pipe', 'ignore', 'pipe'],
+    // Async + 60s timeout (#778) — see header note. Production callers
+    // already await this; only the test suite called it synchronously.
+    // We use the callback form of execFile (not promisify) so the returned
+    // ChildProcess handle is available to write the patch via stdin.
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile(
+        'git',
+        ['-C', repoDir, 'apply', '--numstat', '-'],
+        {
+          encoding: 'utf8',
+          timeout: GIT_APPLY_TIMEOUT_MS,
+        },
+        (err) => {
+          if (err) reject(err);
+          else resolve();
+        },
+      );
+      // `child` is undefined only if the spawn itself synchronously failed,
+      // in which case the callback above will already be queued to reject.
+      child?.stdin?.write(patch);
+      child?.stdin?.end();
     });
     return { ok: true };
   } catch (err) {

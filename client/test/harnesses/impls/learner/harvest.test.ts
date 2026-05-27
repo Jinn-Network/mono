@@ -86,7 +86,7 @@ describe('harvestOutput', () => {
 
   // ── Required artifact validation ────────────────────────────────────────────
 
-  it('throws when a required phase artifact is missing (full range — orient)', () => {
+  it('throws when a required phase artifact is missing (full range — orient)', async () => {
     // Write all phases except orient.
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
@@ -94,65 +94,65 @@ describe('harvestOutput', () => {
     writePhaseArtifact(workingDir, 'debrief', 'analysis.json', { successCriteriaMet: 'yes' });
     writePhaseArtifact(workingDir, 'improve', 'summary.json', { changesAccepted: 0 });
     writePhaseArtifact(workingDir, 'memory-consolidation', 'consolidation_record.json', {});
-    expect(() => harvestOutput(workingDir, 'full')).toThrow();
+    await expect(harvestOutput(workingDir, 'full')).rejects.toThrow();
   });
 
-  it('throws when a required phase artifact contains corrupt JSON (full range — orient)', () => {
+  it('throws when a required phase artifact contains corrupt JSON (full range — orient)', async () => {
     writeFullPipeline(workingDir);
     writeFileSync(join(workingDir, '.orient', 'summary.json'), 'corrupt{{{');
-    expect(() => harvestOutput(workingDir, 'full')).toThrow();
+    await expect(harvestOutput(workingDir, 'full')).rejects.toThrow();
   });
 
-  it('throws when a required phase artifact is missing (pre-execute range — orient)', () => {
+  it('throws when a required phase artifact is missing (pre-execute range — orient)', async () => {
     // Strategize and plan present; orient missing.
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
-    expect(() => harvestOutput(workingDir, 'pre-execute')).toThrow();
+    await expect(harvestOutput(workingDir, 'pre-execute')).rejects.toThrow();
   });
 
-  it('throws when a required phase artifact is missing (post-execute range — debrief)', () => {
+  it('throws when a required phase artifact is missing (post-execute range — debrief)', async () => {
     // Improve and memory-consolidation present; debrief missing.
     writePhaseArtifact(workingDir, 'improve', 'summary.json', { changesAccepted: 0 });
     writePhaseArtifact(workingDir, 'memory-consolidation', 'consolidation_record.json', {});
-    expect(() => harvestOutput(workingDir, 'post-execute')).toThrow();
+    await expect(harvestOutput(workingDir, 'post-execute')).rejects.toThrow();
   });
 
-  it('succeeds when all required phase artifacts are present (full range)', () => {
+  it('succeeds when all required phase artifacts are present (full range)', async () => {
     writeFullPipeline(workingDir);
-    expect(() => harvestOutput(workingDir, 'full')).not.toThrow();
+    await expect(harvestOutput(workingDir, 'full')).resolves.toBeDefined();
   });
 
-  it('succeeds when all required phase artifacts are present (pre-execute range)', () => {
+  it('succeeds when all required phase artifacts are present (pre-execute range)', async () => {
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
-    expect(() => harvestOutput(workingDir, 'pre-execute')).not.toThrow();
+    await expect(harvestOutput(workingDir, 'pre-execute')).resolves.toBeDefined();
   });
 
-  it('succeeds when all required phase artifacts are present (post-execute range)', () => {
+  it('succeeds when all required phase artifacts are present (post-execute range)', async () => {
     writePhaseArtifact(workingDir, 'debrief', 'analysis.json', { successCriteriaMet: 'yes' });
     writePhaseArtifact(workingDir, 'improve', 'summary.json', { changesAccepted: 0 });
     writePhaseArtifact(workingDir, 'memory-consolidation', 'consolidation_record.json', {});
-    expect(() => harvestOutput(workingDir, 'post-execute')).not.toThrow();
+    await expect(harvestOutput(workingDir, 'post-execute')).resolves.toBeDefined();
   });
 
   // ── Optional artifact handling (warn, don't throw) ──────────────────────────
 
-  it('does not throw when optional artifact is absent; logs a warning', () => {
+  it('does not throw when optional artifact is absent; logs a warning', async () => {
     // In pre-execute range, execute is optional.
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      expect(() => harvestOutput(workingDir, 'pre-execute')).not.toThrow();
+      await expect(harvestOutput(workingDir, 'pre-execute')).resolves.toBeDefined();
       expect(warnSpy).toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it('does not throw when optional artifact is corrupt; logs a warning (reframes malformed-JSON test)', () => {
+  it('does not throw when optional artifact is corrupt; logs a warning (reframes malformed-JSON test)', async () => {
     // In pre-execute range, execute is optional — corrupt execute summary must warn, not throw.
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
@@ -162,7 +162,7 @@ describe('harvestOutput', () => {
     writeFileSync(join(dir, 'summary.json'), 'not-json{');
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      expect(() => harvestOutput(workingDir, 'pre-execute')).not.toThrow();
+      await expect(harvestOutput(workingDir, 'pre-execute')).resolves.toBeDefined();
       expect(warnSpy).toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
@@ -171,29 +171,29 @@ describe('harvestOutput', () => {
 
   // ── Phase range from env var ────────────────────────────────────────────────
 
-  it('reads LEARNER_PHASE_RANGE from env when phaseRange arg not provided', () => {
+  it('reads LEARNER_PHASE_RANGE from env when phaseRange arg not provided', async () => {
     process.env.LEARNER_PHASE_RANGE = 'pre-execute';
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
     // pre-execute only needs orient/strategize/plan; should succeed
-    expect(() => harvestOutput(workingDir)).not.toThrow();
+    await expect(harvestOutput(workingDir)).resolves.toBeDefined();
   });
 
-  it('defaults to full range when LEARNER_PHASE_RANGE is not set', () => {
+  it('defaults to full range when LEARNER_PHASE_RANGE is not set', async () => {
     delete process.env.LEARNER_PHASE_RANGE;
     // Only pre-execute phases present — full range requires all 7
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
-    expect(() => harvestOutput(workingDir)).toThrow();
+    await expect(harvestOutput(workingDir)).rejects.toThrow();
   });
 
   // ── Gating field extraction ────────────────────────────────────────────────
 
-  it('reports phasesCompleted from per-phase output presence', () => {
+  it('reports phasesCompleted from per-phase output presence', async () => {
     writeFullPipeline(workingDir);
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.gating).toMatchObject({
       phasesCompleted: [
         'orient',
@@ -207,7 +207,7 @@ describe('harvestOutput', () => {
     });
   });
 
-  it('lifts execute summary fields into gating when present', () => {
+  it('lifts execute summary fields into gating when present', async () => {
     writeFullPipeline(workingDir);
     writePhaseArtifact(workingDir, 'execute', 'summary.json', {
       stepsCompleted: ['step-1', 'step-2'],
@@ -215,7 +215,7 @@ describe('harvestOutput', () => {
       returnReason: 'all-steps-completed',
       elapsedMs: 12345,
     });
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.gating).toMatchObject({
       executeReturnReason: 'all-steps-completed',
       executeStepsCompleted: 2,
@@ -223,41 +223,41 @@ describe('harvestOutput', () => {
     });
   });
 
-  it('lifts strategize timingPosture into gating when present', () => {
+  it('lifts strategize timingPosture into gating when present', async () => {
     writeFullPipeline(workingDir);
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', {
       approach: 'foo',
       timingPosture: 'hold-and-revise',
     });
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.gating.timingPosture).toEqual('hold-and-revise');
   });
 
-  it('reports debrief.successCriteriaMet into gating when present', () => {
+  it('reports debrief.successCriteriaMet into gating when present', async () => {
     writeFullPipeline(workingDir);
     writePhaseArtifact(workingDir, 'debrief', 'analysis.json', {
       successCriteriaMet: 'partial',
     });
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.gating.debriefVerdict).toEqual('partial');
   });
 
-  it('returns correct venueRef', () => {
+  it('returns correct venueRef', async () => {
     writeFullPipeline(workingDir);
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.venueRef.name).toEqual('claude-code-learner');
   });
 
   // -- prediction.v1 typed solution harvesting --------------------------------
 
-  it('requires learner-authored prediction.v1 solution output for prediction tasks', () => {
+  it('requires learner-authored prediction.v1 solution output for prediction tasks', async () => {
     writeFullPipeline(workingDir);
-    expect(() => harvestOutput(workingDir, 'full', makePredictionV1Task())).toThrow(
+    await expect(harvestOutput(workingDir, 'full', makePredictionV1Task())).rejects.toThrow(
       /prediction\.v1 learner solution missing/,
     );
   });
 
-  it('harvests learner-authored prediction.v1 solution payload and artifact metadata', () => {
+  it('harvests learner-authored prediction.v1 solution payload and artifact metadata', async () => {
     writeFullPipeline(workingDir);
     fakePredictionV1Solution(workingDir, {
       probabilityYes: '62%',
@@ -266,7 +266,7 @@ describe('harvestOutput', () => {
       confidence: 'high',
     });
 
-    const out = harvestOutput(workingDir, 'full', makePredictionV1Task());
+    const out = await harvestOutput(workingDir, 'full', makePredictionV1Task());
 
     expect(out.venueRef.name).toEqual('claude-code-learner');
     expect(out.solutionPayload).toMatchObject({
@@ -317,14 +317,14 @@ describe('harvestOutput', () => {
 
   // ── Optional learner feedback artifacts ───────────────────────────────────
 
-  it('does not invent learner feedback artifacts when retrieval output is absent', () => {
+  it('does not invent learner feedback artifacts when retrieval output is absent', async () => {
     writeFullPipeline(workingDir);
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.artifacts ?? []).toEqual([]);
     expect(out.informational?.learnerFeedbackArtifacts).toBeUndefined();
   });
 
-  it('harvests prediction corpus retrieval attempts with no results', () => {
+  it('harvests prediction corpus retrieval attempts with no results', async () => {
     writeFullPipeline(workingDir);
     fakePredictionCorpusRetrieval(workingDir, {
       retrievalUsed: false,
@@ -335,7 +335,7 @@ describe('harvestOutput', () => {
       affectedForecast: false,
     });
 
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.artifacts).toEqual([
       expect.objectContaining({
         path: '.execute/prediction-corpus-retrieval.json',
@@ -358,7 +358,7 @@ describe('harvestOutput', () => {
     ]);
   });
 
-  it('harvests cited and used prediction corpus record refs without ranking in the Harness', () => {
+  it('harvests cited and used prediction corpus record refs without ranking in the Harness', async () => {
     writeFullPipeline(workingDir);
     fakePredictionCorpusRetrieval(workingDir, {
       recordsConsidered: ['record:older', 'record:same-condition'],
@@ -368,7 +368,7 @@ describe('harvestOutput', () => {
       affectedForecast: true,
     });
 
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.artifacts?.[0]).toMatchObject({
       path: '.execute/prediction-corpus-retrieval.json',
       metadata: {
@@ -387,7 +387,7 @@ describe('harvestOutput', () => {
     });
   });
 
-  it('preserves explicit acquisition and payment metadata authored by the agent', () => {
+  it('preserves explicit acquisition and payment metadata authored by the agent', async () => {
     writeFullPipeline(workingDir);
     fakePredictionCorpusRetrieval(workingDir, {
       recordsConsidered: ['record:paid-context'],
@@ -406,7 +406,7 @@ describe('harvestOutput', () => {
       ],
     });
 
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.artifacts?.[0].metadata).toMatchObject({
       acquiredArtifacts: 1,
     });
@@ -424,7 +424,7 @@ describe('harvestOutput', () => {
     });
   });
 
-  it('harvests verdict-linked generic learner feedback when debrief writes it', () => {
+  it('harvests verdict-linked generic learner feedback when debrief writes it', async () => {
     writeFullPipeline(workingDir);
     fakeLearnerFeedback(workingDir, {
       recordsConsidered: ['record:a', 'record:b'],
@@ -435,7 +435,7 @@ describe('harvestOutput', () => {
       brierSpread: '-0.040500',
     });
 
-    const out = harvestOutput(workingDir, 'full');
+    const out = await harvestOutput(workingDir, 'full');
     expect(out.artifacts).toEqual([
       expect.objectContaining({
         path: '.debrief/learner-feedback.json',
@@ -479,14 +479,14 @@ describe('harvestOutput — generic typed-payload path', () => {
     writeFileSync(join(dir, 'solution-payload.json'), JSON.stringify(payload, null, 2));
   }
 
-  it('reads .execute/solution-payload.json when solverType is not prediction.v1 (restoration role)', () => {
+  it('reads .execute/solution-payload.json when solverType is not prediction.v1 (restoration role)', async () => {
     const swePayload = {
       schemaVersion: 'swe-rebench-v2-solution.v1',
       patch: 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-old\n+new\n',
     };
     writeTypedPayload(swePayload);
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -506,7 +506,7 @@ describe('harvestOutput — generic typed-payload path', () => {
     });
   });
 
-  it('does not fail typed-payload harvest when learner execute summary is missing', () => {
+  it('does not fail typed-payload harvest when learner execute summary is missing', async () => {
     rmSync(join(workingDir, '.execute', 'summary.json'), { force: true });
     const swePayload = {
       schemaVersion: 'swe-rebench-v2-solution.v1',
@@ -514,7 +514,7 @@ describe('harvestOutput — generic typed-payload path', () => {
     };
     writeTypedPayload(swePayload);
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -527,11 +527,11 @@ describe('harvestOutput — generic typed-payload path', () => {
     });
   });
 
-  it('normalizes a direct SWE patch-only payload before validation', () => {
+  it('normalizes a direct SWE patch-only payload before validation', async () => {
     const patch = 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-old\n+new\n';
     writeTypedPayload({ patch });
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -546,38 +546,38 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(JSON.parse(readFileSync(payloadPath, 'utf8'))).toEqual(out.solutionPayload);
   });
 
-  it('rejects malformed direct SWE typed payloads at harvest time', () => {
+  it('rejects malformed direct SWE typed payloads at harvest time', async () => {
     writeTypedPayload({
       schemaVersion: 'swe-rebench-v2-solution.v1',
       patch: '',
     });
 
-    expect(() =>
+    await expect(
       harvestOutput(workingDir, undefined, {
         id: 'task-1',
         description: 'd',
         solverType: 'swe-rebench-v2.v1',
         role: 'restoration',
       } as never),
-    ).toThrow(/failed swe-rebench-v2\.v1\/solution validation/);
+    ).rejects.toThrow(/failed swe-rebench-v2\.v1\/solution validation/);
   });
 
-  it('rejects corrupt direct typed payload files at harvest time', () => {
+  it('rejects corrupt direct typed payload files at harvest time', async () => {
     const dir = join(workingDir, '.execute');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'solution-payload.json'), '{');
 
-    expect(() =>
+    await expect(
       harvestOutput(workingDir, undefined, {
         id: 'task-1',
         description: 'd',
         solverType: 'swe-rebench-v2.v1',
         role: 'restoration',
       } as never),
-    ).toThrow(/invalid JSON in typed payload/);
+    ).rejects.toThrow(/invalid JSON in typed payload/);
   });
 
-  it('reads typed payload as verdictPayload for evaluation role', () => {
+  it('reads typed payload as verdictPayload for evaluation role', async () => {
     const verdict = {
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: 1,
@@ -586,7 +586,7 @@ describe('harvestOutput — generic typed-payload path', () => {
     };
     writeTypedPayload(verdict);
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -601,7 +601,7 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(swArtifact?.artifactType).toBe('swe-rebench-v2_v1_verdict');
   });
 
-  it('materializes a swe-rebench restoration payload from repo diff when phase summaries are absent', () => {
+  it('materializes a swe-rebench restoration payload from repo diff when phase summaries are absent', async () => {
     rmSync(workingDir, { recursive: true, force: true });
     mkdirSync(workingDir, { recursive: true });
     const repoDir = join(workingDir, 'repo');
@@ -614,7 +614,7 @@ describe('harvestOutput — generic typed-payload path', () => {
     execFileSync('git', ['commit', '-m', 'base'], { cwd: repoDir });
     writeFileSync(join(repoDir, 'example.py'), 'old = False\n');
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -651,12 +651,12 @@ describe('harvestOutput — generic typed-payload path', () => {
     return repoDir;
   }
 
-  it('strips test-file changes from the materialized git-diff restoration patch', () => {
+  it('strips test-file changes from the materialized git-diff restoration patch', async () => {
     rmSync(workingDir, { recursive: true, force: true });
     mkdirSync(workingDir, { recursive: true });
     makeRepoWithDiff(workingDir);
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -670,7 +670,7 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(patch).not.toContain('test_new');
   });
 
-  it('prefers the git-diff harvest over a stale agent-authored solution-payload.json for swe-rebench restoration', () => {
+  it('prefers the git-diff harvest over a stale agent-authored solution-payload.json for swe-rebench restoration', async () => {
     rmSync(workingDir, { recursive: true, force: true });
     mkdirSync(workingDir, { recursive: true });
     makeRepoWithDiff(workingDir);
@@ -684,7 +684,7 @@ describe('harvestOutput — generic typed-payload path', () => {
       }),
     );
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',
@@ -696,9 +696,9 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(patch).not.toContain('STALE');
   });
 
-  it('falls through to phase-artifact-only shape when no typed payload was submitted', () => {
+  it('falls through to phase-artifact-only shape when no typed payload was submitted', async () => {
     // No .execute/solution-payload.json written.
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'd',
       solverType: 'swe-rebench-v2.v1',

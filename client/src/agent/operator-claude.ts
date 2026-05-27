@@ -105,6 +105,14 @@ function findNodePtyFixScript(): string | null {
 }
 
 function runNodePtyRepair(): string | null {
+  // Sync spawnSync is acceptable here (#778, #398, #778-followup): this is on
+  // the operator-agent WebSocket spawn path, not a daemon-hot-path readiness
+  // probe. It runs at most once per agent-panel session when the initial
+  // spawnPty() throws an ABI/ENOENT error, gated by an outer 15s timeout, and
+  // the agent panel is awaited by a human-driven action — blocking the WS
+  // handler for a few hundred ms while node-pty rebuilds is acceptable. The
+  // wedge classes fixed in #778 and the #778 follow-up were per-task /
+  // per-tick spawns on the daemon main thread.
   const script = findNodePtyFixScript();
   if (!script) return 'node-pty repair script was not found in this install.';
   const result = spawnSync(process.execPath, [script, '--verify'], {

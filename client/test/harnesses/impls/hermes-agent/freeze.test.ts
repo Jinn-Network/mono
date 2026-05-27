@@ -15,7 +15,7 @@ import { runHarnessWithFreezeFence } from '../../../../src/daemon/freeze-fence.j
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
 vi.mock('../../../../src/harnesses/impls/learner/harvest.js', () => ({
-  harvestOutput: () => ({
+  harvestOutput: async () => ({
     schemaVersion: 'swe-rebench-v2-solution.v1',
     patch: '',
     venueRef: { name: 'placeholder-from-harvest', version: '0' },

@@ -1,9 +1,9 @@
 /**
  * GET /api/hermes/doctor
  *
- * Runs `hermes doctor` via spawnSync and returns the result so the operator
- * dashboard can show an install-required panel before the operator saves a
- * Hermes Agent harness selection.
+ * Runs `hermes doctor` via async execFile and returns the result so the
+ * operator dashboard can show an install-required panel before the operator
+ * saves a Hermes Agent harness selection.
  *
  * Response shape:
  *   { installed: boolean, exitCode: number | null, stdout: string, stderr: string }
@@ -15,10 +15,20 @@
  * The probe logic is exported as `probeHermesDoctor` so the Hermes harness
  * can reuse it from `isReady()` — same source of truth for the SPA
  * precheck panel and the daemon's claim-readiness gate (#330).
+ *
+ * Async (#778 follow-up): the readiness registry refreshes Hermes isReady()
+ * periodically. Before this conversion both `hermes doctor` and `hermes auth
+ * list openrouter` ran via `spawnSync`, blocking the main event loop for the
+ * duration of each shell-out. Live observation: ~2 sync spawns/sec keeping
+ * ~99% main-thread sample time in `node::SyncProcessRunner::Spawn`. Same
+ * wedge class as the harvest/restoration-patch fix in #778 — converted to
+ * `promisify(execFile)` with a 10s timeout per call.
  */
 import type { Hono } from 'hono';
-import type { SpawnSyncReturns } from 'node:child_process';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export interface HermesDoctorResponse {
   installed: boolean;
@@ -32,34 +42,81 @@ export interface HermesDoctorConfig {
   hermesDoctorTimeoutMs?: number;
 }
 
-/**
- * Shared `hermes <args>` spawn scaffolding for both probes: resolves the binary
- * and timeout from config, runs `spawnSync`, and extracts the spawn-error code.
- * Each probe applies its own classification/parsing to the returned result.
- */
-function runHermes(
-  args: string[],
-  config: HermesDoctorConfig,
-): { result: SpawnSyncReturns<string>; errorCode: string | undefined } {
-  const hermesBin = config.hermesPath ?? 'hermes';
-  const timeoutMs = config.hermesDoctorTimeoutMs ?? 30_000;
-
-  const result = spawnSync(hermesBin, args, {
-    timeout: timeoutMs,
-    encoding: 'utf8',
-  });
-
-  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
-  return { result, errorCode };
+/** Internal result shape mirroring the subset of SpawnSyncReturns the probes use. */
+interface HermesRunResult {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
 }
 
 /**
- * Synchronously runs `hermes doctor` and classifies the result. Pure (no
+ * Shared `hermes <args>` spawn scaffolding for both probes: resolves the binary
+ * and timeout from config, runs async `execFile`, and extracts the spawn-error
+ * code. Each probe applies its own classification/parsing to the returned
+ * result.
+ *
+ * Async (#778 follow-up): previously `spawnSync` — see file header. A non-zero
+ * exit OR a kill-by-timeout surfaces here as a thrown `child_process` error
+ * whose payload carries `stdout`, `stderr`, `code`, `signal`, and `killed`. We
+ * unwrap that into the same `{status, signal, stdout, stderr}` shape the old
+ * sync code returned so callers don't have to special-case throw vs exit.
+ */
+async function runHermes(
+  args: string[],
+  config: HermesDoctorConfig,
+): Promise<{ result: HermesRunResult; errorCode: string | undefined }> {
+  const hermesBin = config.hermesPath ?? 'hermes';
+  // Default 10s here (vs 30s on the sync path) because these probes fire every
+  // readiness-registry tick. A truly stuck shell-out must not snowball into a
+  // per-tick 30s timer outstanding.
+  const timeoutMs = config.hermesDoctorTimeoutMs ?? 10_000;
+
+  try {
+    const { stdout, stderr } = await execFileAsync(hermesBin, args, {
+      timeout: timeoutMs,
+      encoding: 'utf8',
+    });
+    return {
+      result: { status: 0, signal: null, stdout, stderr },
+      errorCode: undefined,
+    };
+  } catch (err) {
+    const errno = err as NodeJS.ErrnoException & {
+      stdout?: string | Buffer;
+      stderr?: string | Buffer;
+      code?: number | string;
+      signal?: NodeJS.Signals;
+      killed?: boolean;
+    };
+    // `code` is either a numeric exit code (process ran and exited non-zero)
+    // OR a string errno like `ENOENT` (spawn failed entirely). Disambiguate
+    // so the classification logic in probeHermesDoctor matches the sync
+    // semantics it always had.
+    const codeIsString = typeof errno.code === 'string';
+    const numericStatus = !codeIsString && typeof errno.code === 'number' ? errno.code : null;
+    const errorCode = codeIsString ? (errno.code as string) : undefined;
+    const stdout = typeof errno.stdout === 'string' ? errno.stdout : errno.stdout?.toString() ?? '';
+    const stderr = typeof errno.stderr === 'string' ? errno.stderr : errno.stderr?.toString() ?? '';
+    return {
+      result: {
+        status: numericStatus,
+        signal: errno.signal ?? null,
+        stdout,
+        stderr,
+      },
+      errorCode,
+    };
+  }
+}
+
+/**
+ * Asynchronously runs `hermes doctor` and classifies the result. Pure (no
  * Hono dependency) so the harness layer can call it without pulling the API
  * server in.
  */
-export function probeHermesDoctor(config: HermesDoctorConfig = {}): HermesDoctorResponse {
-  const { result, errorCode } = runHermes(['doctor'], config);
+export async function probeHermesDoctor(config: HermesDoctorConfig = {}): Promise<HermesDoctorResponse> {
+  const { result, errorCode } = await runHermes(['doctor'], config);
 
   // installed=true means we found the binary on disk. ENOENT is the only
   // definitive not-installed signal. Other errors (EACCES = wrong
@@ -117,7 +174,7 @@ function isCredentialLineUnusable(line: string): boolean {
 }
 
 /**
- * Synchronously runs `hermes auth list <provider>` and classifies whether the
+ * Asynchronously runs `hermes auth list <provider>` and classifies whether the
  * provider has a usable credential (API-key OR OAuth) in Hermes's credential
  * pool.
  *
@@ -144,11 +201,11 @@ function isCredentialLineUnusable(line: string): boolean {
  * `hermes doctor` exits 0 even when every provider is logged out (it treats
  * missing providers as warnings), so the harness must probe auth directly.
  */
-export function probeHermesAuthStatus(
+export async function probeHermesAuthStatus(
   provider: string,
   config: HermesDoctorConfig = {},
-): HermesAuthStatus {
-  const { result, errorCode } = runHermes(['auth', 'list', provider], config);
+): Promise<HermesAuthStatus> {
+  const { result, errorCode } = await runHermes(['auth', 'list', provider], config);
   const raw = (result.stdout ?? '').trim().slice(0, 4000);
 
   // Binary not found, or any other spawn error, or no output → not authed.
@@ -176,8 +233,8 @@ export function probeHermesAuthStatus(
 }
 
 export function addHermesDoctorRoutes(app: Hono, config: HermesDoctorConfig = {}): void {
-  app.get('/api/hermes/doctor', (c) => {
-    return c.json(probeHermesDoctor(config));
+  app.get('/api/hermes/doctor', async (c) => {
+    return c.json(await probeHermesDoctor(config));
   });
 }
 

@@ -467,9 +467,15 @@ export class TaskEngine {
    * Performance contract (issue #398): this runs once per task announcement,
    * on the engine-watcher hot path, for every observed task. It MUST NOT
    * perform per-task blocking I/O. In particular it does not probe
-   * `impl.isReady()` — for the Hermes harness that runs two blocking
-   * `spawnSync` child processes, so a backlog would pay per-task blocking
-   * spawns and starve the daemon event loop.
+   * `impl.isReady()` — historically the Hermes harness ran child processes
+   * inside its readiness probe, so a backlog would pay per-task blocking
+   * spawns and starve the daemon event loop. (#778 converted the matching
+   * post-execution `git diff` wedge in harvest.ts to async + 60s timeout;
+   * the #778 follow-up converted the readiness-probe spawns themselves —
+   * Hermes `doctor` / `auth list` and the codex-doctor `--version` probe —
+   * to async, so the registry's background refresh loop no longer blocks the
+   * main thread either. The readiness path remains O(1) here via the cache
+   * below.)
    *
    * Harness readiness for the claim gate is instead served O(1) from the
    * daemon's cached `HarnessReadinessRegistry` snapshot: the engine-watcher

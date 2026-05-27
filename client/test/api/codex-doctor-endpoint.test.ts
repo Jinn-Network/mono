@@ -12,20 +12,91 @@
  * dead session has no refresh_token and no usable credential (#366) — that
  * must still read as not-live.
  *
- * We mock spawnSync (install probe) and readFileSync (auth-file read) so the
- * tests run without a real codex binary or a real `~/.codex/auth.json`.
+ * Per #778 follow-up the install probe uses `promisify(execFile)` (the
+ * original `spawnSync` blocked the daemon event loop on every
+ * readiness-registry refresh). We mock `execFile` (callback-style) and
+ * `readFileSync` so the tests run without a real codex binary or a real
+ * `~/.codex/auth.json`.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 
-// Mock node:child_process and node:fs before importing the module under test
-// so vi.mock hoisting applies correctly.
-const spawnSyncMock = vi.fn();
-const readFileSyncMock = vi.fn();
+interface ExecFileExitOk {
+  type: 'ok';
+  stdout: string;
+  stderr: string;
+}
+interface ExecFileExitError {
+  type: 'error';
+  code?: number | string;
+  signal?: NodeJS.Signals | null;
+  stdout?: string;
+  stderr?: string;
+  message?: string;
+}
+type ExecFileOutcome = ExecFileExitOk | ExecFileExitError;
 
-vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
+// Mock node:child_process and node:fs before importing the module under test
+// so vi.mock hoisting applies correctly. See the matching block in
+// hermes-doctor-endpoint.test.ts for the rationale on re-attaching
+// `util.promisify.custom` — without it the mocked execFile loses the
+// `{stdout, stderr}` resolution shape and the production unwrap path breaks.
+const { execFileMock, readFileSyncMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn<unknown[], unknown>(),
+  readFileSyncMock: vi.fn(),
 }));
+
+vi.mock('node:child_process', async () => {
+  const { promisify: promisifyImpl } = await import('node:util');
+
+  function mockedExecFile(...args: unknown[]): unknown {
+    const callback = args[args.length - 1] as
+      | ((err: (Error & Record<string, unknown>) | null, stdout: string, stderr: string) => void)
+      | undefined;
+    const outcome = execFileMock(...args) as ExecFileOutcome;
+    queueMicrotask(() => {
+      if (!callback) return;
+      if (outcome.type === 'ok') {
+        callback(null, outcome.stdout, outcome.stderr);
+      } else {
+        const err = Object.assign(new Error(outcome.message ?? 'execFile failed'), {
+          code: outcome.code,
+          signal: outcome.signal ?? null,
+          stdout: outcome.stdout ?? '',
+          stderr: outcome.stderr ?? '',
+          killed: outcome.signal != null,
+        });
+        callback(err as Error & Record<string, unknown>, outcome.stdout ?? '', outcome.stderr ?? '');
+      }
+    });
+    return { stdin: null, kill: () => {} };
+  }
+
+  (mockedExecFile as unknown as { [k: symbol]: unknown })[promisifyImpl.custom] = (
+    file: string,
+    args: readonly string[],
+    options?: Record<string, unknown>,
+  ): Promise<{ stdout: string; stderr: string }> =>
+    new Promise((resolve, reject) => {
+      mockedExecFile(
+        file,
+        args,
+        options ?? {},
+        (err: Error | null, stdout: string, stderr: string) => {
+          if (err) {
+            const errAny = err as Error & { stdout?: string; stderr?: string };
+            if (errAny.stdout === undefined) errAny.stdout = stdout;
+            if (errAny.stderr === undefined) errAny.stderr = stderr;
+            reject(err);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        },
+      );
+    });
+
+  return { execFile: mockedExecFile };
+});
 
 vi.mock('node:fs', () => ({
   readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
@@ -63,6 +134,11 @@ function buildApp(config: CodexDoctorConfig = {}) {
   return app;
 }
 
+/** Test-only sugar: pin the next execFile call's outcome. */
+function mockNext(outcome: ExecFileOutcome): void {
+  execFileMock.mockReturnValueOnce(outcome);
+}
+
 /** Builds a JWT-shaped token whose payload carries the given `exp` (seconds). */
 function jwtWithExp(expSeconds: number | undefined): string {
   const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString(
@@ -94,7 +170,7 @@ function oauthAuthJson(expSeconds: number): string {
 }
 
 beforeEach(() => {
-  spawnSyncMock.mockReset();
+  execFileMock.mockReset();
   readFileSyncMock.mockReset();
   // Default: no auth file on disk (ENOENT) unless a test opts in.
   readFileSyncMock.mockImplementation(() => {
@@ -107,13 +183,7 @@ beforeEach(() => {
 
 describe('GET /api/codex/doctor — install detection', () => {
   it('returns installed:false when codex binary is not found (ENOENT)', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
-      signal: null,
-      error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }),
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'error', code: 'ENOENT', message: 'spawn codex ENOENT' });
 
     const app = buildApp();
     const res = await app.request('/api/codex/doctor');
@@ -129,13 +199,7 @@ describe('GET /api/codex/doctor — install detection', () => {
   });
 
   it('returns installed:true, exitCode:0 when codex --version succeeds', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout: 'codex 1.2.3\n',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: 'codex 1.2.3\n', stderr: '' });
 
     const app = buildApp({ env: {} });
     const res = await app.request('/api/codex/doctor');
@@ -150,13 +214,7 @@ describe('GET /api/codex/doctor — install detection', () => {
 
   it('returns installed:true, exitCode:1 with stderr when codex --version reports a config issue', async () => {
     const diagnosticMsg = 'error: failed to load configuration';
-    spawnSyncMock.mockReturnValue({
-      status: 1,
-      signal: null,
-      error: undefined,
-      stdout: '',
-      stderr: diagnosticMsg,
-    });
+    mockNext({ type: 'error', code: 1, stdout: '', stderr: diagnosticMsg });
 
     const app = buildApp({ env: {} });
     const res = await app.request('/api/codex/doctor');
@@ -173,13 +231,7 @@ describe('GET /api/codex/doctor — install detection', () => {
   });
 
   it('treats EACCES (binary exists but not executable) as installed:true (config-issue, not install prompt)', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
-      signal: null,
-      error: Object.assign(new Error('spawn codex EACCES'), { code: 'EACCES' }),
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'error', code: 'EACCES', message: 'spawn codex EACCES' });
 
     const app = buildApp({ env: {} });
     const res = await app.request('/api/codex/doctor');
@@ -190,13 +242,14 @@ describe('GET /api/codex/doctor — install detection', () => {
     expect(body.exitCode).toBeNull();
   });
 
-  it('treats spawnSync timeout (ETIMEDOUT) as installed:true with exitCode null', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
+  it('treats execFile timeout (ETIMEDOUT) as installed:true with exitCode null', async () => {
+    mockNext({
+      type: 'error',
+      code: 'ETIMEDOUT',
       signal: 'SIGTERM',
-      error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }),
       stdout: '',
       stderr: '',
+      message: 'ETIMEDOUT',
     });
 
     const app = buildApp({ env: {} });
@@ -209,52 +262,36 @@ describe('GET /api/codex/doctor — install detection', () => {
   });
 
   it('uses the configured codexPath binary', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
 
     const app = buildApp({ codexPath: '/opt/codex/bin/codex', env: {} });
     await app.request('/api/codex/doctor');
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       '/opt/codex/bin/codex',
       ['--version'],
-      expect.objectContaining({ timeout: 30_000 }),
+      expect.objectContaining({ timeout: 10_000 }),
+      expect.any(Function),
     );
   });
 
   it('uses the configured codexDoctorTimeoutMs', async () => {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout: '',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: '', stderr: '' });
 
     const app = buildApp({ codexDoctorTimeoutMs: 5_000, env: {} });
     await app.request('/api/codex/doctor');
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       'codex',
       ['--version'],
       expect.objectContaining({ timeout: 5_000 }),
+      expect.any(Function),
     );
   });
 
   it('truncates stdout and stderr to 4000 characters', async () => {
     const longOutput = 'x'.repeat(5000);
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout: longOutput,
-      stderr: longOutput,
-    });
+    mockNext({ type: 'ok', stdout: longOutput, stderr: longOutput });
 
     const app = buildApp({ env: {} });
     const res = await app.request('/api/codex/doctor');
@@ -267,19 +304,13 @@ describe('GET /api/codex/doctor — install detection', () => {
 
 describe('probeCodexDoctor — auth detection (presence)', () => {
   function okSpawn() {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout: 'codex 1.2.3\n',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: 'codex 1.2.3\n', stderr: '' });
   }
 
-  it('authStatus:ok when OPENAI_API_KEY env var is present', () => {
+  it('authStatus:ok when OPENAI_API_KEY env var is present', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-test-123' } });
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-test-123' } });
     expect(result.installed).toBe(true);
     expect(result.authenticated).toBe(true);
     expect(result.authStatus).toBe('ok');
@@ -287,23 +318,23 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
 
-  it('authStatus:not_configured when OPENAI_API_KEY is absent and no auth file exists', () => {
+  it('authStatus:not_configured when OPENAI_API_KEY is absent and no auth file exists', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({ env: {} });
+    const result = await probeCodexDoctor({ env: {} });
     expect(result.installed).toBe(true);
     expect(result.authenticated).toBe(false);
     expect(result.authStatus).toBe('not_configured');
   });
 
-  it('treats an empty/whitespace OPENAI_API_KEY as absent', () => {
+  it('treats an empty/whitespace OPENAI_API_KEY as absent', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: '   ' } });
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: '   ' } });
     expect(result.authStatus).toBe('not_configured');
   });
 
-  it('reads ~/.codex/auth.json when CODEX_HOME is unset', () => {
+  it('reads ~/.codex/auth.json when CODEX_HOME is unset', async () => {
     okSpawn();
     readFileSyncMock.mockImplementation((p: string) => {
       if (typeof p === 'string' && p.endsWith('/.codex/auth.json')) {
@@ -312,11 +343,11 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
 
-    const result = probeCodexDoctor({ env: {} });
+    const result = await probeCodexDoctor({ env: {} });
     expect(result.authStatus).toBe('ok');
   });
 
-  it('reads $CODEX_HOME/auth.json when CODEX_HOME is set', () => {
+  it('reads $CODEX_HOME/auth.json when CODEX_HOME is set', async () => {
     okSpawn();
     readFileSyncMock.mockImplementation((p: string) => {
       if (p === '/custom/codex/auth.json') {
@@ -325,23 +356,23 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
 
-    const result = probeCodexDoctor({ env: { CODEX_HOME: '/custom/codex' } });
+    const result = await probeCodexDoctor({ env: { CODEX_HOME: '/custom/codex' } });
     expect(result.authStatus).toBe('ok');
     expect(readFileSyncMock).toHaveBeenCalledWith('/custom/codex/auth.json', 'utf8');
   });
 
-  it('authStatus:not_configured when CODEX_HOME is set but its auth.json is absent', () => {
+  it('authStatus:not_configured when CODEX_HOME is set but its auth.json is absent', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({ env: { CODEX_HOME: '/custom/codex' } });
+    const result = await probeCodexDoctor({ env: { CODEX_HOME: '/custom/codex' } });
     expect(result.authStatus).toBe('not_configured');
     expect(readFileSyncMock).toHaveBeenCalledWith('/custom/codex/auth.json', 'utf8');
   });
 
-  it('authStatus:ok via the readAuthFile override (api-key-mode file)', () => {
+  it('authStatus:ok via the readAuthFile override (api-key-mode file)', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       readAuthFile: () => JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-file-123' }),
     });
@@ -350,34 +381,28 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
 
-  it('authStatus:not_configured via the readAuthFile override (no file, no api key)', () => {
+  it('authStatus:not_configured via the readAuthFile override (no file, no api key)', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({ env: {}, readAuthFile: () => undefined });
+    const result = await probeCodexDoctor({ env: {}, readAuthFile: () => undefined });
     expect(result.authStatus).toBe('not_configured');
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
 
-  it('OPENAI_API_KEY env still authenticates even when readAuthFile returns nothing', () => {
+  it('OPENAI_API_KEY env still authenticates even when readAuthFile returns nothing', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: { OPENAI_API_KEY: 'sk-test-123' },
       readAuthFile: () => undefined,
     });
     expect(result.authStatus).toBe('ok');
   });
 
-  it('authStatus:not_configured when binary is not installed even if credentials exist', () => {
-    spawnSyncMock.mockReturnValue({
-      status: null,
-      signal: null,
-      error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }),
-      stdout: '',
-      stderr: '',
-    });
+  it('authStatus:not_configured when binary is not installed even if credentials exist', async () => {
+    mockNext({ type: 'error', code: 'ENOENT', message: 'spawn codex ENOENT' });
 
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-test-123' } });
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-test-123' } });
     expect(result.installed).toBe(false);
     expect(result.authStatus).toBe('not_configured');
   });
@@ -385,22 +410,16 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
 
 describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
   function okSpawn() {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout: 'codex 1.2.3\n',
-      stderr: '',
-    });
+    mockNext({ type: 'ok', stdout: 'codex 1.2.3\n', stderr: '' });
   }
 
   const NOW_MS = Date.UTC(2026, 4, 20, 12, 0, 0);
 
-  it('authStatus:ok for a non-expired OAuth (chatgpt-mode) auth.json', () => {
+  it('authStatus:ok for a non-expired OAuth (chatgpt-mode) auth.json', async () => {
     okSpawn();
     const futureExp = Math.floor(NOW_MS / 1000) + 3600;
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () => oauthAuthJson(futureExp),
@@ -415,11 +434,11 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
   // refresh_token, so this is a live login. Gating it 'expired' deadlocked the
   // readiness gate: the probe shells `codex --version`, which never refreshes,
   // so the daemon never claims, never runs codex, and the tokens never rotate.
-  it('authStatus:ok for a healthy login whose id_token + access_token have lapsed but a refresh_token is present (#464)', () => {
+  it('authStatus:ok for a healthy login whose id_token + access_token have lapsed but a refresh_token is present (#464)', async () => {
     okSpawn();
     const pastExp = Math.floor(NOW_MS / 1000) - 3600; // both short-lived tokens expired an hour ago
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () => oauthAuthJson(pastExp),
@@ -430,12 +449,12 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
 
   // #464: the precise live failure — the ~1h OIDC id_token has rotated out,
   // the access_token is still valid, the refresh_token is present.
-  it('authStatus:ok when only the short-lived id_token has expired (#464)', () => {
+  it('authStatus:ok when only the short-lived id_token has expired (#464)', async () => {
     okSpawn();
     const past = Math.floor(NOW_MS / 1000) - 3600;
     const future = Math.floor(NOW_MS / 1000) + 7 * 86_400;
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () =>
@@ -456,11 +475,11 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
   // expired AND no refresh_token to renew them — must still read 'expired'.
   // #464 corrected the prior model, which mislabelled a healthy login (tokens
   // lapsed but refresh_token present) as 'stale'.
-  it('authStatus:expired for a dead session — tokens expired and no refresh_token', () => {
+  it('authStatus:expired for a dead session — tokens expired and no refresh_token', async () => {
     okSpawn();
     const pastExp = Math.floor(NOW_MS / 1000) - 3600;
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () =>
@@ -478,10 +497,10 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     expect(result.authStatus).toBe('expired');
   });
 
-  it('authStatus:expired for a malformed (unparseable) auth.json — never crashes', () => {
+  it('authStatus:expired for a malformed (unparseable) auth.json — never crashes', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () => '{ "auth_mode": "chatgpt", "tokens": {',
@@ -490,10 +509,10 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     expect(result.authStatus).toBe('expired');
   });
 
-  it('authStatus:expired for an auth.json with no tokens and no api key', () => {
+  it('authStatus:expired for an auth.json with no tokens and no api key', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () => JSON.stringify({ auth_mode: 'chatgpt', OPENAI_API_KEY: null }),
@@ -501,10 +520,10 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     expect(result.authStatus).toBe('expired');
   });
 
-  it('authStatus:expired for an auth.json whose tokens are not JWTs (no exp claim)', () => {
+  it('authStatus:expired for an auth.json whose tokens are not JWTs (no exp claim)', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () =>
@@ -519,11 +538,11 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
 
   // With no refresh_token the classifier falls back to a bearer-token expiry
   // check — access_token first, id_token only as a last resort.
-  it('authStatus:ok via the access_token bearer check when there is no refresh_token', () => {
+  it('authStatus:ok via the access_token bearer check when there is no refresh_token', async () => {
     okSpawn();
     const futureExp = Math.floor(NOW_MS / 1000) + 3600;
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () =>
@@ -536,10 +555,10 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     expect(result.authStatus).toBe('ok');
   });
 
-  it('authStatus:ok for an api-key-mode auth.json (no expiry to check)', () => {
+  it('authStatus:ok for an api-key-mode auth.json (no expiry to check)', async () => {
     okSpawn();
 
-    const result = probeCodexDoctor({
+    const result = await probeCodexDoctor({
       env: {},
       now: NOW_MS,
       readAuthFile: () =>
@@ -548,13 +567,13 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     expect(result.authStatus).toBe('ok');
   });
 
-  it('treats an unreadable (EACCES) auth.json as expired, not not_configured', () => {
+  it('treats an unreadable (EACCES) auth.json as expired, not not_configured', async () => {
     okSpawn();
     readFileSyncMock.mockImplementation(() => {
       throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
     });
 
-    const result = probeCodexDoctor({ env: {}, now: NOW_MS });
+    const result = await probeCodexDoctor({ env: {}, now: NOW_MS });
     expect(result.authStatus).toBe('expired');
   });
 });
@@ -564,45 +583,39 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
 // cannot recover from. The doctor parses `codex --version` stdout, classifies
 // it against the tested range, and emits a single console.warn on out-of-range.
 describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
-  function spawnVersion(stdout: string) {
-    spawnSyncMock.mockReturnValue({
-      status: 0,
-      signal: null,
-      error: undefined,
-      stdout,
-      stderr: '',
-    });
+  function execVersion(stdout: string) {
+    execFileMock.mockReturnValue({ type: 'ok', stdout, stderr: '' });
   }
 
-  it('parses cliVersion from `codex --version` stdout', () => {
-    spawnVersion('codex-cli 0.120.5\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('parses cliVersion from `codex --version` stdout', async () => {
+    execVersion('codex-cli 0.120.5\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.cliVersion).toBe('0.120.5');
   });
 
-  it('reports cliVersion=null and versionStatus=unknown when stdout has no semver triple', () => {
-    spawnVersion('codex CLI (build deadbeef)\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('reports cliVersion=null and versionStatus=unknown when stdout has no semver triple', async () => {
+    execVersion('codex CLI (build deadbeef)\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.cliVersion).toBeNull();
     expect(result.versionStatus).toBe('unknown');
   });
 
-  it('reports versionStatus=ok for a version inside the tested range', () => {
-    spawnVersion('codex-cli 0.120.0\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('reports versionStatus=ok for a version inside the tested range', async () => {
+    execVersion('codex-cli 0.120.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('ok');
   });
 
-  it('reports versionStatus=untested for a version below MIN_TESTED', () => {
-    spawnVersion('codex-cli 0.10.0\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('reports versionStatus=untested for a version below MIN_TESTED', async () => {
+    execVersion('codex-cli 0.10.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('untested');
     expect(result.cliVersion).toBe('0.10.0');
   });
 
-  it('reports versionStatus=untested for a version above MAX_TESTED', () => {
-    spawnVersion('codex-cli 0.200.0\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('reports versionStatus=untested for a version above MAX_TESTED', async () => {
+    execVersion('codex-cli 0.200.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('untested');
     expect(result.cliVersion).toBe('0.200.0');
   });
@@ -611,23 +624,23 @@ describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
   // 'ok' — codex patch bumps almost never break the CLI contract, and warning
   // on every patch would produce alarm fatigue. Bump MAX on minor/major
   // upgrades only.
-  it('reports versionStatus=ok for a patch release within the tested minor (0.133.5)', () => {
-    spawnVersion('codex-cli 0.133.5\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('reports versionStatus=ok for a patch release within the tested minor (0.133.5)', async () => {
+    execVersion('codex-cli 0.133.5\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('ok');
     expect(result.cliVersion).toBe('0.133.5');
   });
 
-  it('reports versionStatus=untested for a minor bump above MAX_TESTED (0.134.0)', () => {
-    spawnVersion('codex-cli 0.134.0\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('reports versionStatus=untested for a minor bump above MAX_TESTED (0.134.0)', async () => {
+    execVersion('codex-cli 0.134.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('untested');
     expect(result.cliVersion).toBe('0.134.0');
   });
 
-  it('readiness is not affected by versionStatus (an untested version still authenticates)', () => {
-    spawnVersion('codex-cli 0.200.0\n');
-    const result = probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+  it('readiness is not affected by versionStatus (an untested version still authenticates)', async () => {
+    execVersion('codex-cli 0.200.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.installed).toBe(true);
     expect(result.authenticated).toBe(true);
     expect(result.authStatus).toBe('ok');
@@ -643,10 +656,10 @@ describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
     );
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    spawnVersion('codex-cli 0.200.0\n');
-    probe({ env: { OPENAI_API_KEY: 'sk-x' } });
-    probe({ env: { OPENAI_API_KEY: 'sk-x' } });
-    probe({ env: { OPENAI_API_KEY: 'sk-x' } });
+    execVersion('codex-cli 0.200.0\n');
+    await probe({ env: { OPENAI_API_KEY: 'sk-x' } });
+    await probe({ env: { OPENAI_API_KEY: 'sk-x' } });
+    await probe({ env: { OPENAI_API_KEY: 'sk-x' } });
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0]![0]).toContain('0.200.0');

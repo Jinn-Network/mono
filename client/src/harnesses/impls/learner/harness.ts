@@ -66,7 +66,7 @@ export class LearnerHarness implements Harness {
     ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
   ): Promise<ReadyStatus> {
     if (canonicalHarnessName(this.name) === CODEX_HARNESS) {
-      return this.codexIsReady();
+      return await this.codexIsReady();
     }
     return this.claudeIsReady(ctx);
   }
@@ -88,13 +88,13 @@ export class LearnerHarness implements Harness {
    *     operator with a leftover file is not treated as ready (#366).
    *   - otherwise → ready=true.
    */
-  private codexIsReady(): ReadyStatus {
+  private async codexIsReady(): Promise<ReadyStatus> {
     const config: { codexPath?: string; codexDoctorTimeoutMs?: number } = {};
     if (this.codexPath !== undefined) config.codexPath = this.codexPath;
     if (this.codexDoctorTimeoutMs !== undefined) {
       config.codexDoctorTimeoutMs = this.codexDoctorTimeoutMs;
     }
-    const result = probeCodexDoctor(config);
+    const result = await probeCodexDoctor(config);
     if (!result.installed) {
       return {
         ready: false,

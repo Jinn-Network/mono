@@ -17,17 +17,56 @@ import {
 // `node:child_process` is stubbed so the real `probeHermesAuthStatus` (used
 // by the regression block below) can run against synthetic `hermes auth
 // list` output without a hermes binary. `authListStdout` is the stdout the
-// next `spawnSync(['auth','list',...])` call returns.
-let authListStdout = '';
-const spawnSyncMock = vi.fn((_bin: string, args: string[]) => {
-  if (args[0] === 'auth' && args[1] === 'list') {
-    return { status: 0, signal: null, error: undefined, stdout: authListStdout, stderr: '' };
-  }
-  return { status: 0, signal: null, error: undefined, stdout: '', stderr: '' };
-});
-vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => spawnSyncMock(...(args as [string, string[]])),
+// next `execFile(['auth','list',...])` call returns.
+//
+// Per #778 follow-up, the probes now use `promisify(execFile)`, so we mock
+// the callback-style `execFile` rather than `spawnSync`. We MUST re-attach
+// `util.promisify.custom` so the promisified call resolves with the
+// `{stdout, stderr}` shape that the real `child_process.execFile` carries —
+// without it, the production unwrap path receives a bare stdout string.
+const { authListState } = vi.hoisted(() => ({
+  authListState: { stdout: '' },
 }));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const { promisify: promisifyImpl } = await import('node:util');
+
+  function mockedExecFile(
+    _bin: string,
+    args: readonly string[],
+    ..._rest: unknown[]
+  ): unknown {
+    const callback = _rest.find((arg) => typeof arg === 'function') as
+      | ((err: Error | null, stdout: string, stderr: string) => void)
+      | undefined;
+    if (callback) {
+      if (args[0] === 'auth' && args[1] === 'list') {
+        callback(null, authListState.stdout, '');
+      } else {
+        callback(null, '', '');
+      }
+    }
+    return { stdin: null, kill: () => {} };
+  }
+
+  (mockedExecFile as unknown as { [k: symbol]: unknown })[promisifyImpl.custom] = (
+    file: string,
+    args: readonly string[],
+    options?: Record<string, unknown>,
+  ): Promise<{ stdout: string; stderr: string }> =>
+    new Promise((resolve, reject) => {
+      mockedExecFile(file, args, options ?? {}, (err: Error | null, stdout: string, stderr: string) => {
+        if (err) reject(err);
+        else resolve({ stdout, stderr });
+      });
+    });
+
+  return {
+    ...actual,
+    execFile: mockedExecFile,
+  };
+});
 
 // The real endpoint module — the regression block swaps the mocked
 // `probeHermesAuthStatus` for this genuine implementation to get end-to-end
@@ -54,7 +93,7 @@ beforeEach(() => {
   vi.mocked(probeOpenRouterCredit).mockReset();
   // Default: OpenRouter authed so the auth gate passes unless a test
   // overrides it. The doctor-level gates run first regardless.
-  vi.mocked(probeHermesAuthStatus).mockReturnValue({
+  vi.mocked(probeHermesAuthStatus).mockResolvedValue({
     provider: 'openrouter',
     authed: true,
     raw: 'openrouter: logged in',
@@ -72,7 +111,7 @@ beforeEach(() => {
 
 describe('HermesHarness.isReady', () => {
   it('returns ready=true when doctor reports installed+exit0 AND OpenRouter is authed', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,
       exitCode: 0,
       stdout: 'ok',
@@ -84,7 +123,7 @@ describe('HermesHarness.isReady', () => {
   });
 
   it('returns ready=false with install nextStep when hermes binary missing', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: false,
       exitCode: null,
       stdout: '',
@@ -98,7 +137,7 @@ describe('HermesHarness.isReady', () => {
   });
 
   it('returns ready=false with config nextStep when hermes doctor exit != 0', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,
       exitCode: 1,
       stdout: '',
@@ -115,13 +154,13 @@ describe('HermesHarness.isReady', () => {
   // auth gate must catch that — ready MUST be false even though the doctor
   // probe says exit 0.
   it('returns ready=false when OpenRouter is NOT authed even though hermes doctor exit is 0', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,
       exitCode: 0,
       stdout: 'all checks passed',
       stderr: '',
     });
-    vi.mocked(probeHermesAuthStatus).mockReturnValue({
+    vi.mocked(probeHermesAuthStatus).mockResolvedValue({
       provider: 'openrouter',
       authed: false,
       raw: 'openrouter: logged out',
@@ -135,7 +174,7 @@ describe('HermesHarness.isReady', () => {
   });
 
   it('probes OpenRouter auth specifically', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,
       exitCode: 0,
       stdout: 'ok',
@@ -147,7 +186,7 @@ describe('HermesHarness.isReady', () => {
   });
 
   it('does not reach the auth gate when the binary is missing', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: false,
       exitCode: null,
       stdout: '',
@@ -174,7 +213,7 @@ describe('HermesHarness.isReady — credential-pool auth gate (regression)', () 
     vi.mocked(probeHermesAuthStatus).mockImplementation((provider, cfg) =>
       actualHermesDoctorEndpoint.probeHermesAuthStatus(provider, cfg),
     );
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,
       exitCode: 0,
       stdout: 'ok',
@@ -194,7 +233,7 @@ describe('HermesHarness.isReady — credential-pool auth gate (regression)', () 
   it('is ready when OpenRouter has a healthy api_key credential in the pool', async () => {
     // Verbatim `hermes auth list openrouter` stdout for an env-var api_key
     // credential — exactly the output `auth status` calls "logged out".
-    authListStdout =
+    authListState.stdout =
       'openrouter (1 credentials):\n' +
       '  #1  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY ←\n\n';
     const h = new HermesHarness({ adapter: fakeAdapter as any });
@@ -205,7 +244,7 @@ describe('HermesHarness.isReady — credential-pool auth gate (regression)', () 
   it('is not ready when OpenRouter has no credential in the pool', async () => {
     // `hermes auth list openrouter` prints nothing when the credential pool
     // has no entry for the provider.
-    authListStdout = '';
+    authListState.stdout = '';
     const h = new HermesHarness({ adapter: fakeAdapter as any });
     const result = await h.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
     expect(result.ready).toBe(false);
@@ -222,7 +261,7 @@ describe('HermesHarness.isReady — credential-pool auth gate (regression)', () 
 // `/api/v1/key` for spendable credit; tests below pin its behavior.
 describe('HermesHarness.isReady — OpenRouter credit gate (production bug 2026-05-23)', () => {
   beforeEach(() => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,
       exitCode: 0,
       stdout: 'ok',
@@ -292,7 +331,7 @@ describe('HermesHarness.isReady — OpenRouter credit gate (production bug 2026-
   });
 
   it('does not reach the credit gate when the binary is missing', async () => {
-    vi.mocked(probeHermesDoctor).mockReturnValue({
+    vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: false,
       exitCode: null,
       stdout: '',
@@ -304,7 +343,7 @@ describe('HermesHarness.isReady — OpenRouter credit gate (production bug 2026-
   });
 
   it('does not reach the credit gate when OpenRouter has no credential in the pool', async () => {
-    vi.mocked(probeHermesAuthStatus).mockReturnValue({
+    vi.mocked(probeHermesAuthStatus).mockResolvedValue({
       provider: 'openrouter',
       authed: false,
       raw: 'openrouter: logged out',

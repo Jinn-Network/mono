@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { buildSolutionOutput } from '@jinn-network/sdk/solvernets/prediction-v1';
 import type { Role } from '../../../types/envelope.js';
 import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../types/payloads/index.js';
@@ -8,6 +9,17 @@ import type { OutputArtifact } from '../../../types/portfolio.js';
 import type { Task } from '../../../types/task.js';
 import type { Solution } from '../../types.js';
 import { stripTestPathHunks } from './restoration-patch.js';
+
+// Async execFile — see #778. Replaces execFileSync at the two harvest /
+// restoration-patch git invocations that previously blocked the daemon's
+// main event loop when `git diff` hung. The 60s timeout below surfaces a
+// hang as a clean throw so the harness can mark the task FAILED instead of
+// wedging every other daemon loop (claims, deliveries, jinn-claim emissions,
+// etc.). Co-located with #398 which fixed the sibling problem on the
+// canAcceptTask hot path; this issue (#778) reaches the wedge path #398 did
+// not.
+const execFileAsync = promisify(execFile);
+const GIT_DIFF_TIMEOUT_MS = 60_000;
 
 const PHASE_ORDER = [
   'orient',
@@ -167,10 +179,10 @@ function findPredictionV1Solution(workingDir: string): { path: string; payload: 
   return null;
 }
 
-function maybeMaterializeSweRebenchPatchPayload(
+async function maybeMaterializeSweRebenchPatchPayload(
   workingDir: string,
   task?: Task,
-): Record<string, unknown> | null {
+): Promise<Record<string, unknown> | null> {
   if (task?.solverType !== 'swe-rebench-v2.v1' || task.role === 'evaluation') {
     return null;
   }
@@ -181,10 +193,17 @@ function maybeMaterializeSweRebenchPatchPayload(
 
   let rawPatch = '';
   try {
-    rawPatch = execFileSync('git', ['-C', repoDir, 'diff', '--binary'], {
+    // Async + bounded timeout (#778). A hang here used to wedge the entire
+    // daemon — every loop ran on the same blocked main thread. The 60s
+    // timeout is well above any realistic `git diff` on a SWE-rebench-v2
+    // checkout (single-package repos, normally <1s); if it ever trips, the
+    // task fails fast and the daemon keeps ticking.
+    const { stdout } = await execFileAsync('git', ['-C', repoDir, 'diff', '--binary'], {
       encoding: 'utf8',
       maxBuffer: 50 * 1024 * 1024,
+      timeout: GIT_DIFF_TIMEOUT_MS,
     });
+    rawPatch = stdout;
   } catch (err) {
     console.warn(
       `[claude-code-learner] harvestOutput: unable to derive swe-rebench-v2 patch from git diff: ${err instanceof Error ? err.message : String(err)}`,
@@ -464,7 +483,7 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
  * Required phase artifacts: hard-fail (throw) if missing or corrupt JSON.
  * Optional phase artifacts (outside the required range): safeReadJson + warn on null.
  */
-export function harvestOutput(workingDir: string, phaseRange?: string, task?: Task): Solution {
+export async function harvestOutput(workingDir: string, phaseRange?: string, task?: Task): Promise<Solution> {
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
   const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
@@ -473,7 +492,7 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   // maybeMaterialize* returns null for any other case, so the agent-authored
   // .execute/solution-payload.json path is preserved everywhere else.
   const rawTypedPayload =
-    maybeMaterializeSweRebenchPatchPayload(workingDir, task) ??
+    (await maybeMaterializeSweRebenchPatchPayload(workingDir, task)) ??
     readTypedPayloadJson(typedPayloadPath);
   const typedPayload = rawTypedPayload
     ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)

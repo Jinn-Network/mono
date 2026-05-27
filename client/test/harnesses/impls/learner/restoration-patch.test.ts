@@ -166,7 +166,7 @@ describe('gitApplyParseCheck', () => {
     return dir;
   }
 
-  it('accepts a well-formed diff', () => {
+  it('accepts a well-formed diff', async () => {
     const dir = makeRepo();
     const patch = [
       'diff --git a/src/a.py b/src/a.py',
@@ -178,10 +178,10 @@ describe('gitApplyParseCheck', () => {
       ' keep = 1',
       '',
     ].join('\n');
-    expect(gitApplyParseCheck(dir, patch)).toEqual({ ok: true });
+    expect(await gitApplyParseCheck(dir, patch)).toEqual({ ok: true });
   });
 
-  it('rejects a malformed diff (context line missing its leading space)', () => {
+  it('rejects a malformed diff (context line missing its leading space)', async () => {
     const dir = makeRepo();
     const patch = [
       'diff --git a/src/a.py b/src/a.py',
@@ -193,12 +193,12 @@ describe('gitApplyParseCheck', () => {
       'keep = 1', // <-- should be ' keep = 1' — corruption
       '',
     ].join('\n');
-    const r = gitApplyParseCheck(dir, patch);
+    const r = await gitApplyParseCheck(dir, patch);
     expect(r.ok).toBe(false);
   });
 
-  it('rejects an empty patch', () => {
+  it('rejects an empty patch', async () => {
     const dir = makeRepo();
-    expect(gitApplyParseCheck(dir, '   ').ok).toBe(false);
+    expect((await gitApplyParseCheck(dir, '   ')).ok).toBe(false);
   });
 });
