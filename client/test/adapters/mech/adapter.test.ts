@@ -368,6 +368,134 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('discovery re-yields a previously-claimed taskId when canClaimTask still ok (multi-claim per operator)', async () => {
+    // Regression for #582: the adapter used to keep an in-memory
+    // `claimedRestorationTaskIds` set that suppressed a taskId from the
+    // DiscoveryAPI path after the daemon had claimed it once. For Tasks
+    // with `maxClaimsPerOperator > 1`, that silently blocked the second
+    // (and any subsequent) claim. The authoritative per-operator cap is
+    // `canClaimTask` (on-chain simulation) — when it still returns ok the
+    // adapter must re-yield, not filter.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimTask, claimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const candidate: ClaimableTaskCandidate = {
+      taskId: '42',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      createdAtBlock: 80,
+      createdAtTx: TX_HASH,
+      attemptCount: 0,
+      operatorAttemptCount: 0,
+    };
+    const mockDiscoveryApi: DiscoveryAPI = {
+      // Return the same candidate on every poll — the contract still says
+      // canClaimTask ok, so the operator should be allowed to claim again.
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([candidate]).mockResolvedValueOnce([candidate]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    // Only queue a single signed-task mock — on the bugged path the second
+    // iteration never reaches the hydrate step (the in-memory gate filters
+    // first). After the fix the second iteration falls through to the
+    // shared baseline mock, which is fine because we only assert on taskId.
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'multi-claim-task' }));
+    // Pin the claim result's taskId to '42' so the (since-removed) in-memory
+    // `claimedRestorationTaskIds.add(claimed.taskId)` gate would actually
+    // suppress this candidate on the second poll. The shared baseline mock
+    // returns taskId '1', which would never collide with '42' and would mask
+    // the bug.
+    vi.mocked(claimTask).mockResolvedValueOnce({
+      taskId: '42',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      txHash: TX_HASH,
+      blockNumber: 124,
+    });
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 0,
+      },
+    });
+    await adapter.initialize();
+
+    // First discovery poll yields the candidate.
+    const iter1 = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter1.next();
+    expect(first.value).toMatchObject({ taskId: '42' });
+
+    // Claim it — this used to populate the in-memory gate that suppressed
+    // the second discovery yield.
+    await adapter.claimTask(first.value!.taskId);
+    expect(claimTask).toHaveBeenCalledTimes(1);
+
+    // Second discovery poll — canClaimTask still returns ok, so the
+    // candidate must be re-yielded. With the in-memory gate present this
+    // call would resolve to `{ value: undefined, done: true }`.
+    const iter2 = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const second = await iter2.next();
+    expect(second.value).toMatchObject({ taskId: '42' });
+
+    await adapter.stop();
+  });
+
+  it('discovery skips a candidate when canClaimTask returns TCOperatorClaimLimitReached', async () => {
+    // Companion to #582: the on-chain per-operator cap is the authoritative
+    // gate. When `canClaimTask` returns the operator-cap revert the adapter
+    // must NOT yield the candidate, regardless of whether the in-memory
+    // gate is present.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+
+    const candidate: ClaimableTaskCandidate = {
+      taskId: '77',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      createdAtBlock: 80,
+      createdAtTx: TX_HASH,
+      attemptCount: 0,
+      operatorAttemptCount: 0,
+    };
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([candidate]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(canClaimTask).mockResolvedValueOnce({
+      ok: false,
+      reason: 'operator has reached per-operator claim limit',
+      revertName: 'TCOperatorClaimLimitReached',
+    });
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 0,
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const result = await iter.next();
+
+    // The generator finishes without yielding — canClaimTask blocked the
+    // only candidate.
+    expect(result.done).toBe(true);
+    expect(result.value).toBeUndefined();
+    expect(canClaimTask).toHaveBeenCalledTimes(1);
+
+    await adapter.stop();
+  });
+
   it('discovery filters out pre-floor candidates (ghost-task floor)', async () => {
     // The DiscoveryAPI (Ponder indexer or onchain-floor listClaimableTasks)
     // returns all claimable tasks regardless of when they were created.

@@ -190,7 +190,6 @@ export class MechAdapter implements ExecutionAdapter {
    */
   private restorationBodyCache = new Map<string, TaskAnnouncement>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
-  private claimedRestorationTaskIds = new Set<string>();
   private evaluationOpportunities = new Map<string, {
     taskId: string;
     attemptIndex: number;
@@ -688,7 +687,6 @@ export class MechAdapter implements ExecutionAdapter {
 
     for (const candidate of candidates) {
       if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
-      if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
 
       // gh #300 ghost-task floor — same floor as the on-chain TaskCreated
       // backlog scan, applied to the DiscoveryAPI path too. Without this,
@@ -925,7 +923,7 @@ export class MechAdapter implements ExecutionAdapter {
           const createdTasks = decodeTaskCreatedLogs(logs);
           for (const { taskId, taskCidDigest, manifestDigest, transactionHash, blockNumber } of createdTasks) {
             if (!this.isDiscoveryTaskAllowed(taskId)) continue;
-            if (this.claimedRestorationTaskIds.has(taskId) || this.observedTasks.has(taskId)) continue;
+            if (this.observedTasks.has(taskId)) continue;
             if (joinedManifestDigests.size > 0 && !joinedManifestDigests.has(manifestDigest.toLowerCase())) continue;
             try {
               const claimable = await canClaimTask(
@@ -1012,7 +1010,6 @@ export class MechAdapter implements ExecutionAdapter {
     );
 
     const task = announcement.task;
-    this.claimedRestorationTaskIds.add(claimed.taskId);
     this.pendingEvaluations.set(claimed.requestId, task);
     this.originalStates.set(claimed.requestId, { ...task, role: task.role ?? 'restoration' });
     this.requestKinds.set(claimed.requestId, 'solution');

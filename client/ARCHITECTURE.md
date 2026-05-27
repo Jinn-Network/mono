@@ -156,7 +156,7 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises a fixed s
 |---|---|---|
 | `recoverInFlight` (one-shot) | `harnesses/engine/engine.ts` | On startup, walks SQLite for tasks left mid-state by a previous crash and re-enters their state machines. |
 | Creator | `daemon/creator.ts` | Pulls Tasks from configured `TaskSource`s and posts each via `JinnRouter.createTask`. Idempotent per `(creatorMultisig, desiredStateId)`. |
-| Engine-watcher | `daemon/daemon.ts` (`_runEngineWatcherLoop`) | Consumes `adapter.watchForTasks()` async iterator, calls `engine.canAcceptTask`, claims via `adapter.claimTask`, then `engine.observe` + fire-and-forget `engine.process`. Claim eligibility is gated by `joinedSolverNets[<manifestCid>]` — see §6.1 below. |
+| Engine-watcher | `daemon/daemon.ts` (`_runEngineWatcherLoop`) | Consumes `adapter.watchForTasks()` async iterator, calls `engine.canAcceptTask`, claims via `adapter.claimTask`, then `engine.observe` + fire-and-forget `engine.process`. Claim eligibility is gated by `joinedSolverNets[<manifestCid>]` — see §6.1 below. Per-operator claim policy is enforced on-chain via `canClaimTask`; the adapter must not impose an additional in-memory floor. |
 | Engine-tick | `harnesses/engine/engine.ts` (`runTickLoop`) | Every `pollIntervalMs`, drives in-flight Tasks whose state transitions are time-based rather than event-driven. |
 | Delivery-watcher | `daemon/delivery-watcher.ts` | Watches for delivered Solutions, calls `JinnRouter.claimDelivery` to settle them, and (for restoration role) creates the paired evaluation job. |
 | Reward-claim | `daemon/reward-claim-loop.ts` | Periodically pulls pending stOLAS distributor rewards for the master EOA. Disabled when `rewardClaimIntervalMs <= 0`. |
