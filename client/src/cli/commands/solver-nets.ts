@@ -20,7 +20,11 @@ import {
   runPredictionSample,
   type PredictionOperatorStatus,
 } from '../../solver-nets/prediction-operator-ux.js';
-import { EVAL_SEMANTICS_VERSION } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
+import {
+  EVAL_SEMANTICS_VERSION,
+  summarizeValidatedPool,
+  type ValidatedPoolSummary,
+} from '../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { defaultStateDir as sweRebenchV2DefaultStateDir } from '../../solver-types/swe-rebench-v2.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
@@ -392,6 +396,7 @@ const command: CommandModule = {
   jinn solver-nets validate-pool swe-rebench-v2 [--limit <n>] [--force]
                                 [--instance-id <id>]... [--instances-file <path>]
                                 [--seed-positive] [--known-bad]
+                                [--known-pytest-missing]
             Run the gold patch of each pool instance through the eval harness
             and cache which instances are scorable; the generator then posts
             only those. Requires Docker + \`jinn harnesses enable
@@ -402,8 +407,17 @@ const command: CommandModule = {
             --known-bad scopes the run to instances in
             client/scripts/swe-rebench-v2-known-bad.json (gold eval runs;
             expected to record scorable:false).
+            --known-pytest-missing scopes the run to instances in
+            client/scripts/swe-rebench-v2-pytest-missing.json (Stage-1 #493
+            sample of ungradeable:pytest_missing instances; under v4
+            EVAL_SEMANTICS_VERSION + the pytest-install guard these should
+            re-validate as scorable:true).
             Repeatable --instance-id and --instances-file scope the run to
             a specific subset.
+  jinn solver-nets validate-pool-report swe-rebench-v2 [--human|--json]
+            Read-only report of the local validated-pool.json: total entries,
+            scorable/unscorable counts, histogram by normalised reason, and
+            the highest-yield unscorable blocker. Does not run any eval.
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by
@@ -468,6 +482,67 @@ Output flags:
             `generator=${n.taskGeneratorEnabled ? 'on' : 'off'}  source=${n.source}  cid=${n.manifestCid}`,
           )
           .join('\n');
+      });
+      return;
+    }
+
+    if (subverb === 'validate-pool-report') {
+      if (name !== 'swe-rebench-v2') {
+        fail(ctx, 'solver-nets validate-pool-report currently supports only `swe-rebench-v2`');
+        return;
+      }
+      const stateDir = ctx.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
+      const path = join(stateDir, 'validated-pool.json');
+      let raw: unknown;
+      try {
+        raw = JSON.parse(readFileSync(path, 'utf8'));
+      } catch {
+        fail(ctx, `validated-pool.json is absent or unreadable at ${path}`);
+        return;
+      }
+      let summary: ValidatedPoolSummary;
+      try {
+        summary = summarizeValidatedPool(raw);
+      } catch (err) {
+        fail(ctx, `validated-pool.json is malformed: ${(err as Error).message}`);
+        return;
+      }
+      const evalSemanticsVersion = (raw as { evalSemanticsVersion?: string }).evalSemanticsVersion ?? 'unknown';
+      const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
+      const highestYieldBlocker = summary.byReason.find((b) => b.reason !== 'gold-patch-resolves')?.reason ?? null;
+      const value = {
+        verb: 'solver-nets validate-pool-report',
+        solverNet: 'swe-rebench-v2',
+        evalSemanticsVersion,
+        currentEvalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+        stateDir,
+        ...summary,
+        highestYieldBlocker,
+        freshness,
+      };
+      emit(ctx, value, human, json, (v) => {
+        const s = v as typeof value;
+        const lines: string[] = [
+          `SolverNet: swe-rebench-v2`,
+          `  stateDir: ${s.stateDir}`,
+          `  evalSemanticsVersion (file): ${s.evalSemanticsVersion}`,
+          `  evalSemanticsVersion (current): ${s.currentEvalSemanticsVersion}`,
+          `  total entries: ${s.totalEntries}`,
+          `  scorable: ${s.scorable}`,
+          `  unscorable: ${s.unscorable}`,
+          `Histogram (by normalised reason, descending):`,
+        ];
+        for (const bucket of s.byReason) {
+          lines.push(`  ${String(bucket.count).padStart(6)}  ${bucket.reason}`);
+        }
+        if (s.highestYieldBlocker) {
+          lines.push(`Highest-yield unscorable blocker: ${s.highestYieldBlocker}`);
+        }
+        if (s.freshness.status === 'stale') {
+          lines.push(`Freshness: stale — ${s.freshness.reason}`);
+          lines.push(`  run: ${s.freshness.cli}`);
+        }
+        return lines.join('\n');
       });
       return;
     }
