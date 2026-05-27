@@ -51,7 +51,7 @@ import { CodexSessionParser } from './transcript-parsers/codex-session.js';
 import { GeminiSessionParser } from './transcript-parsers/gemini-session.js';
 import { AiderHistoryParser } from './transcript-parsers/aider-history.js';
 import { ContinueDevDataParser } from './transcript-parsers/continue-devdata.js';
-import { listSessionJsonlFilesForSpec, type TranscriptWatchDirectorySpec } from './transcript-session-dirs.js';
+import { listSessionJsonlFiles } from './transcript-session-dirs.js';
 
 export type WatchedTool =
   | 'claude-code'
@@ -161,11 +161,11 @@ export async function startTranscriptWatcher(
 
   const registerSource = async (
     source: WatchedSource,
-    opts: { tailFromEnd: boolean },
+    opts: { tailFromEnd: boolean; parser?: TranscriptParser },
   ): Promise<void> => {
     const normalizedPath = resolvePath(source.path);
     const nextOffset = opts.tailFromEnd ? await tailOffsetForPath(normalizedPath) : 0;
-    const parser = makeParser(source.tool);
+    const parser = opts.parser ?? makeParser(source.tool);
     states.set(normalizedPath, {
       source: { ...source, path: normalizedPath },
       parser,
@@ -181,12 +181,7 @@ export async function startTranscriptWatcher(
   for (const dir of directories) {
     const parser = makeParser(dir.tool);
     directoryParsers.set(dir.tool, parser);
-    const spec: TranscriptWatchDirectorySpec = {
-      tool: dir.tool,
-      directory: dir.directory,
-      recursive: dir.recursive === true,
-    };
-    const files = await listSessionJsonlFilesForSpec(spec);
+    const files = await listSessionJsonlFiles(dir.directory, dir.recursive === true);
     for (const filePath of files) {
       await registerSource(
         {
@@ -194,7 +189,7 @@ export async function startTranscriptWatcher(
           path: filePath,
           sessionId: dir.sessionIdFromPath(filePath),
         },
-        { tailFromEnd: true },
+        { tailFromEnd: true, parser },
       );
     }
   }
@@ -210,9 +205,6 @@ export async function startTranscriptWatcher(
     persistent: true,
     awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
     ignoreInitial: true,
-    ...(directories.some((d) => d.recursive)
-      ? { depth: undefined }
-      : {}),
   });
 
   const resolveDirectoryForPath = (filepath: string): WatchedDirectory | undefined => {

@@ -47,28 +47,23 @@ async function listJsonlFilesRecursive(dir: string): Promise<string[]> {
   return out;
 }
 
-/** Lists `*.jsonl` session files directly under a directory (non-recursive). */
-export async function listCodexSessionJsonlFiles(sessionsDir: string): Promise<string[]> {
+/** Lists `*.jsonl` session files under `directory` (flat or recursive). */
+export async function listSessionJsonlFiles(
+  directory: string,
+  recursive: boolean,
+): Promise<string[]> {
+  if (recursive) {
+    return listJsonlFilesRecursive(directory);
+  }
   let entries: Dirent[];
   try {
-    entries = await readdir(sessionsDir, { withFileTypes: true });
+    entries = await readdir(directory, { withFileTypes: true });
   } catch {
     return [];
   }
   return entries
     .filter((e) => e.isFile() && e.name.endsWith('.jsonl'))
-    .map((e) => join(sessionsDir, e.name));
-}
-
-/** Lists all `*.jsonl` files under `~/.claude/projects/**`. */
-export async function listClaudeCodeSessionJsonlFiles(projectsDir: string): Promise<string[]> {
-  return listJsonlFilesRecursive(projectsDir);
-}
-
-export interface TranscriptWatchDirectorySpec {
-  tool: WatchedDirectory['tool'];
-  directory: string;
-  recursive: boolean;
+    .map((e) => join(directory, e.name));
 }
 
 /**
@@ -76,34 +71,24 @@ export interface TranscriptWatchDirectorySpec {
  * locations. Missing directories are omitted so a fresh operator machine does
  * not fail daemon startup.
  */
-export function defaultTranscriptWatchDirectorySpecs(): TranscriptWatchDirectorySpec[] {
-  const specs: TranscriptWatchDirectorySpec[] = [];
+export function defaultTranscriptWatchDirectories(): WatchedDirectory[] {
+  const dirs: WatchedDirectory[] = [];
   const codexSessions = resolveCodexSessionsDir();
   if (existsSync(codexSessions)) {
-    specs.push({ tool: 'codex', directory: codexSessions, recursive: false });
+    dirs.push({
+      tool: 'codex',
+      directory: codexSessions,
+      sessionIdFromPath: sessionIdFromJsonlPath,
+    });
   }
   const claudeProjects = resolveClaudeProjectsDir();
   if (existsSync(claudeProjects)) {
-    specs.push({ tool: 'claude-code', directory: claudeProjects, recursive: true });
+    dirs.push({
+      tool: 'claude-code',
+      directory: claudeProjects,
+      recursive: true,
+      sessionIdFromPath: sessionIdFromJsonlPath,
+    });
   }
-  return specs;
-}
-
-export function toWatchedDirectories(
-  specs: TranscriptWatchDirectorySpec[],
-): WatchedDirectory[] {
-  return specs.map((spec) => ({
-    tool: spec.tool,
-    directory: spec.directory,
-    recursive: spec.recursive,
-    sessionIdFromPath: sessionIdFromJsonlPath,
-  }));
-}
-
-export async function listSessionJsonlFilesForSpec(
-  spec: TranscriptWatchDirectorySpec,
-): Promise<string[]> {
-  return spec.recursive
-    ? listClaudeCodeSessionJsonlFiles(spec.directory)
-    : listCodexSessionJsonlFiles(spec.directory);
+  return dirs;
 }

@@ -1,8 +1,8 @@
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   sessionIdFromJsonlPath,
-  defaultTranscriptWatchDirectorySpecs,
-  toWatchedDirectories,
+  defaultTranscriptWatchDirectories,
 } from '../../src/trajectory/transcript-session-dirs.js';
 
 describe('transcript-session-dirs', () => {
@@ -11,18 +11,12 @@ describe('transcript-session-dirs', () => {
     expect(sessionIdFromJsonlPath('/home/op/.claude/projects/foo/bar-sess.jsonl')).toBe('bar-sess');
   });
 
-  it('maps specs to watched directories with sessionIdFromPath', () => {
-    const dirs = toWatchedDirectories([
-      { tool: 'codex', directory: '/tmp/codex-sessions', recursive: false },
-    ]);
-    expect(dirs[0]?.sessionIdFromPath('/tmp/codex-sessions/s1.jsonl')).toBe('s1');
-  });
-
-  it('defaultTranscriptWatchDirectorySpecs only includes dirs that exist', () => {
-    const specs = defaultTranscriptWatchDirectorySpecs();
-    for (const spec of specs) {
-      expect(spec.directory.length).toBeGreaterThan(0);
-      expect(['codex', 'claude-code']).toContain(spec.tool);
+  it('defaultTranscriptWatchDirectories maps session ids from jsonl paths', () => {
+    const dirs = defaultTranscriptWatchDirectories();
+    for (const dir of dirs) {
+      expect(dir.directory.length).toBeGreaterThan(0);
+      expect(['codex', 'claude-code']).toContain(dir.tool);
+      expect(dir.sessionIdFromPath(join(dir.directory, 's1.jsonl'))).toBe('s1');
     }
   });
 });

@@ -114,10 +114,7 @@ import {
   type DispatchEnvelope,
   type TranscriptWatcher,
 } from './trajectory/transcript-watcher.js';
-import {
-  defaultTranscriptWatchDirectorySpecs,
-  toWatchedDirectories,
-} from './trajectory/transcript-session-dirs.js';
+import { defaultTranscriptWatchDirectories } from './trajectory/transcript-session-dirs.js';
 import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
@@ -267,23 +264,14 @@ class EnsurePendingCaptureProcessor implements SpanProcessor {
 
   onEnd(span: ReadableSpan): void {
     const sessionId = stringAttribute(span.attributes['jinn.session.id']);
-    if (!sessionId || this.captures.getBySession(sessionId)) return;
-
-    try {
-      this.captures.savePending({
-        sessionId,
-        capturedAt: hrTimeToIso(span.startTime),
-        originatingTool: { name: inferCaptureTool(span) },
-        capturePath: inferCapturePath(span),
-        status: 'pending',
-        spanCount: 0,
-        durationMs: 0,
-        redactedSpanCount: 0,
-        ...repoMetadataFromSpan(span),
-      });
-    } catch (err) {
-      if (!this.captures.getBySession(sessionId)) throw err;
-    }
+    if (!sessionId) return;
+    ensurePendingCapture(this.captures, {
+      sessionId,
+      capturedAt: hrTimeToIso(span.startTime),
+      tool: inferCaptureTool(span),
+      capturePath: inferCapturePath(span),
+      ...repoMetadataFromSpan(span),
+    });
   }
 }
 
@@ -338,45 +326,33 @@ function parserForStopHookTool(tool: StopHookTool): TranscriptParser {
   }
 }
 
-function ensurePendingStopHookCapture(
+function ensurePendingCapture(
   captures: CapturesStore,
-  payload: StopHookPayload,
+  params: {
+    sessionId: string;
+    capturedAt: string;
+    tool: string;
+    capturePath: 'A' | 'B' | 'C' | 'D';
+    repoRemoteUrl?: string;
+    repoCommitHash?: string;
+  },
 ): void {
-  if (captures.getBySession(payload.sessionId)) return;
+  if (captures.getBySession(params.sessionId)) return;
   try {
     captures.savePending({
-      sessionId: payload.sessionId,
-      capturedAt: payload.stoppedAt,
-      originatingTool: { name: payload.tool },
-      capturePath: 'D',
+      sessionId: params.sessionId,
+      capturedAt: params.capturedAt,
+      originatingTool: { name: params.tool },
+      capturePath: params.capturePath,
       status: 'pending',
       spanCount: 0,
       durationMs: 0,
       redactedSpanCount: 0,
+      ...(params.repoRemoteUrl ? { repoRemoteUrl: params.repoRemoteUrl } : {}),
+      ...(params.repoCommitHash ? { repoCommitHash: params.repoCommitHash } : {}),
     });
   } catch (err) {
-    if (!captures.getBySession(payload.sessionId)) throw err;
-  }
-}
-
-function ensurePendingTranscriptCapture(
-  captures: CapturesStore,
-  envelope: DispatchEnvelope,
-): void {
-  if (captures.getBySession(envelope.sessionId)) return;
-  try {
-    captures.savePending({
-      sessionId: envelope.sessionId,
-      capturedAt: new Date().toISOString(),
-      originatingTool: { name: envelope.tool },
-      capturePath: 'B',
-      status: 'pending',
-      spanCount: 0,
-      durationMs: 0,
-      redactedSpanCount: 0,
-    });
-  } catch (err) {
-    if (!captures.getBySession(envelope.sessionId)) throw err;
+    if (!captures.getBySession(params.sessionId)) throw err;
   }
 }
 
@@ -385,7 +361,12 @@ async function ingestStopHookCapture(
   receiver: Receiver | undefined,
   payload: StopHookPayload,
 ): Promise<void> {
-  ensurePendingStopHookCapture(captures, payload);
+  ensurePendingCapture(captures, {
+    sessionId: payload.sessionId,
+    capturedAt: payload.stoppedAt,
+    tool: payload.tool,
+    capturePath: 'D',
+  });
   if (!payload.transcriptPath) return;
   if (!receiver) {
     console.warn('[main] stop-hook capture received but OTLP receiver is unavailable; pending capture has no transcript spans.');
@@ -952,11 +933,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   const closePathBTranscriptWatcher = async () => {
     const watcher = transcriptWatcher;
-    transcriptWatcher = undefined;
-    await watcher?.shutdown().catch(() => undefined);
     const provider = pathBSyntheticSpanProvider;
+    transcriptWatcher = undefined;
     pathBSyntheticSpanProvider = undefined;
-    await provider?.shutdown().catch(() => undefined);
+    await Promise.all([
+      watcher?.shutdown().catch(() => undefined),
+      provider?.shutdown().catch(() => undefined),
+    ]);
   };
 
   const closeCaptureReceiver = async () => {
@@ -968,21 +951,26 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   if (captureReceiver) {
     try {
-      const directorySpecs = defaultTranscriptWatchDirectorySpecs();
-      if (directorySpecs.length > 0) {
+      const watchDirectories = defaultTranscriptWatchDirectories();
+      if (watchDirectories.length > 0) {
         pathBSyntheticSpanProvider = startSyntheticSpanProvider({
           otlpHttpEndpoint: `http://127.0.0.1:${captureReceiver.httpPort}/v1/traces`,
         });
         transcriptWatcher = await startTranscriptWatcher({
-          directories: toWatchedDirectories(directorySpecs),
+          directories: watchDirectories,
           onEvent: (envelope) => {
-            ensurePendingTranscriptCapture(capturesStore, envelope);
+            ensurePendingCapture(capturesStore, {
+              sessionId: envelope.sessionId,
+              capturedAt: new Date().toISOString(),
+              tool: envelope.tool,
+              capturePath: 'B',
+            });
             emitSyntheticSpan(pathBSyntheticSpanProvider!, envelope);
           },
         });
         console.log(
           '[main] Path-B transcript watcher started for ' +
-            directorySpecs.map((s) => `${s.tool}@${s.directory}`).join(', '),
+            watchDirectories.map((d) => `${d.tool}@${d.directory}`).join(', '),
         );
       } else {
         console.log(
