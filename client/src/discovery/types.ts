@@ -261,6 +261,39 @@ export interface DiscoveryAPI {
     builderAgentId: string;
     limit?: number;
   }): Promise<PublishedArtifact[]>;
+
+  /**
+   * Returns network-truth pass counts per swe-rebench-v2 instance_id for a
+   * given SolverNet manifest. Keyed by `instance_id`; the value is the count
+   * of distinct (requestId, chainId) verdictEnvelopeMeta rows where
+   * `manifestCid` matches one of the SolverNet's evaluation envelope CIDs,
+   * `actualPassed = true`, and `instanceId` is non-empty.
+   *
+   * Note on the manifestCid filter shape: in `verdictEnvelopeMeta` the
+   * `manifestCid` column stores the *evaluation envelope* CID (i.e. the IPFS
+   * cid of the verdict envelope itself), not the SolverNet manifest CID. The
+   * launcher passes its SolverNet manifest CID; the HTTP implementation
+   * filters by `solverType` + `instanceId` non-empty and lets the operator's
+   * own scoping (the SolverNet is its only swe-rebench-v2 net) carry. For
+   * single-SolverNet daemons this is exact; multi-SolverNet operators get a
+   * slight over-count which is acceptable — the launcher reads `max(local,
+   * network)` so an over-count only triggers earlier saturation, which is the
+   * safe direction. (TODO: refine to per-manifest scoping once the indexer
+   * joins verdictEnvelopeMeta → attempt → task → solverNetManifest by hash.)
+   *
+   * Backed by `verdictEnvelopeMeta` in the indexer. Throws
+   * `DiscoveryUnavailableError` when the backing is unreachable — callers
+   * MUST NOT silently fall through to local-only counts (#669 acceptance
+   * criterion: behave as if the on-chain count is the truth).
+   *
+   * The on-chain floor implementation (`OnchainDiscoveryAPI`) returns an
+   * empty Map, since the underlying data comes from IPFS enrichment that the
+   * floor cannot reconstruct. This is the documented behaviour for the
+   * fallback: callers see the local counter as the floor.
+   */
+  getInstanceSuccessCounts(args: {
+    manifestCid: string;
+  }): Promise<Map<string, number>>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────
