@@ -709,4 +709,33 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(out.verdictPayload).toBeUndefined();
     expect(out.gating).toBeDefined();
   });
+
+  it('accepts arbitrary solution-payload.json when task has no solverType (learner-full-cycle smoke)', () => {
+    const genericPayload = { foo: 'world', bar: 'world', baz: 'world' };
+    writeTypedPayload(genericPayload);
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'write output.json',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toEqual(genericPayload);
+    const artifact = out.artifacts?.find((a) => a.path === '.execute/solution-payload.json');
+    expect(artifact?.artifactType).toBe('learner_solution');
+    expect(artifact?.metadata?.solverType).toBeUndefined();
+  });
+
+  it('rejects portfolio-shaped payloads only when solverType is portfolio.v0', () => {
+    writeTypedPayload({ foo: 'world', bar: 'world', baz: 'world' });
+
+    expect(() =>
+      harvestOutput(workingDir, undefined, {
+        id: 'task-1',
+        description: 'd',
+        solverType: 'portfolio.v0',
+        role: 'restoration',
+      } as never),
+    ).toThrow(/failed portfolio\.v0\/solution validation/);
+  });
 });

@@ -297,7 +297,6 @@ function buildTaskForCycle(
 ): Task {
   return {
     id: params.goalId,
-    solverType: 'portfolio.v0',
     role: 'restoration',
     description: [
       params.goalDescription,
