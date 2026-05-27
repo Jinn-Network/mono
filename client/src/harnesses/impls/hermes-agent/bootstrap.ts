@@ -81,6 +81,7 @@ export interface WritePerTaskConfigInputs {
   workingDir: string;
   model?: string;
   provider?: string;
+  baseUrl?: string;
   solverPluginRoots: readonly string[];
   env: ConfigBuilderEnv;
   /**
@@ -165,7 +166,7 @@ function readOperatorConfigYaml(seedFrom: string): Record<string, unknown> {
 function mergePerTaskConfig(
   operator: Record<string, unknown>,
   jinn: HermesConfigSnippet,
-  opts: { model?: string; provider?: string; workingDir: string },
+  opts: { model?: string; provider?: string; baseUrl?: string; workingDir: string },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...operator };
 
@@ -175,11 +176,12 @@ function mergePerTaskConfig(
   // JINN_HERMES_MAX_TOKENS_CAP (operators may pin lower, never higher).
   // See the JINN_HERMES_MAX_TOKENS_CAP docstring for the OpenRouter
   // pre-billing rationale (production bug, 2026-05-23).
-  if (opts.model || opts.provider || isObj(out.model)) {
+  if (opts.model || opts.provider || opts.baseUrl || isObj(out.model)) {
     const opModel = isObj(out.model) ? out.model : {};
     const jinnModel: Record<string, unknown> = {};
     if (opts.model) jinnModel.default = opts.model;
     if (opts.provider) jinnModel.provider = opts.provider;
+    if (opts.baseUrl) jinnModel.base_url = opts.baseUrl;
     const merged: Record<string, unknown> = { ...opModel, ...jinnModel };
     const opMaxTokens = typeof opModel.max_tokens === 'number' ? opModel.max_tokens : undefined;
     merged.max_tokens = opMaxTokens != null
@@ -265,6 +267,7 @@ export function writePerTaskHermesConfig(inputs: WritePerTaskConfigInputs): void
   const merged = mergePerTaskConfig(operator, snippet, {
     model: inputs.model,
     provider: inputs.provider,
+    baseUrl: inputs.baseUrl,
     workingDir: inputs.workingDir,
   });
   writeFileSync(

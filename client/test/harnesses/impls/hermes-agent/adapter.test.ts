@@ -1,10 +1,11 @@
 // client/test/harnesses/impls/hermes-agent/adapter.test.ts
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { parse as yamlParse } from 'yaml';
 import { HermesHarnessAdapter } from '../../../../src/harnesses/impls/hermes-agent/adapter.js';
 import type { TaskSessionInputs } from '../../../../src/harnesses/impls/learner/types.js';
 
@@ -142,6 +143,47 @@ describe('HermesHarnessAdapter', () => {
       const call = spawnCalls[0];
       expect(call.args).toContain('--provider');
       expect(call.args).toContain('openrouter');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('uses Hermes custom provider and writes base_url when a local provider URL is configured', async () => {
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        hermesProvider: 'openrouter',
+        hermesBaseUrl: 'http://127.0.0.1:11434/v1',
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.model = 'qwen2.5-coder:7b';
+      await adapter.runTask(taskInputs);
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--model');
+      expect(call.args).toContain('qwen2.5-coder:7b');
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('custom');
+
+      const cfg = yamlParse(readFileSync(join(home, 'config.yaml'), 'utf8')) as any;
+      expect(cfg.model.default).toBe('qwen2.5-coder:7b');
+      expect(cfg.model.provider).toBe('custom');
+      expect(cfg.model.base_url).toBe('http://127.0.0.1:11434/v1');
     } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });

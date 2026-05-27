@@ -22,6 +22,7 @@ import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
 import { parseRpcUrls } from './rpc/transport.js';
+import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,23 @@ export const JinnConfigSchema = z.object({
 
   /** Hermes provider (e.g. 'anthropic'). */
   hermesProvider: z.string().optional(),
+
+  /** Local OpenAI-compatible Hermes base URL, e.g. http://127.0.0.1:11434/v1 for Ollama. */
+  hermesBaseUrl: z
+    .string()
+    .url()
+    .transform((value, ctx) => {
+      const canonical = canonicalLocalHttpBaseUrl(value);
+      if (!canonical) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'hermesBaseUrl must be a local HTTP(S) URL',
+        });
+        return z.NEVER;
+      }
+      return canonical;
+    })
+    .optional(),
 
   /**
    * Timeout in ms for `hermes doctor` health-check runs.
@@ -907,6 +925,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_HERMES_PATH'])       merged.hermesPath = env['JINN_HERMES_PATH'];
   if (env['JINN_HERMES_MODEL'])      merged.hermesModel = env['JINN_HERMES_MODEL'];
   if (env['JINN_HERMES_PROVIDER'])   merged.hermesProvider = env['JINN_HERMES_PROVIDER'];
+  if (env['JINN_HERMES_BASE_URL'])   merged.hermesBaseUrl = env['JINN_HERMES_BASE_URL'];
   if (env['JINN_HERMES_DOCTOR_TIMEOUT_MS']) {
     merged.hermesDoctorTimeoutMs = parseInt(env['JINN_HERMES_DOCTOR_TIMEOUT_MS'], 10);
   }
@@ -1321,6 +1340,7 @@ const TRACKED_ENV_VARS = [
   'JINN_HERMES_PATH',
   'JINN_HERMES_MODEL',
   'JINN_HERMES_PROVIDER',
+  'JINN_HERMES_BASE_URL',
   'JINN_HERMES_DOCTOR_TIMEOUT_MS',
   'JINN_RUNTIME_MODE',
   'JINN_PEERS',

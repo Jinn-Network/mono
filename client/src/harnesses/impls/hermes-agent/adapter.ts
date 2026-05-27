@@ -67,6 +67,7 @@ export interface HermesHarnessAdapterConfig {
   hermesPath?: string;
   hermesModel?: string;
   hermesProvider?: string;
+  hermesBaseUrl?: string;
   daemonApiUrl: string;
   daemonApiToken: string;
   corpusEnv: ConfigBuilderEnv['corpusEnv'];
@@ -105,6 +106,7 @@ export class HermesHarnessAdapter {
   private readonly hermesPath: string;
   private readonly hermesModel: string | undefined;
   private readonly hermesProvider: string | undefined;
+  private readonly hermesBaseUrl: string | undefined;
   private readonly daemonApiUrl: string;
   private readonly daemonApiToken: string;
   private readonly corpusEnv: ConfigBuilderEnv['corpusEnv'];
@@ -116,6 +118,7 @@ export class HermesHarnessAdapter {
     this.hermesPath = config.hermesPath ?? 'hermes';
     this.hermesModel = config.hermesModel;
     this.hermesProvider = config.hermesProvider;
+    this.hermesBaseUrl = config.hermesBaseUrl;
     this.daemonApiUrl = config.daemonApiUrl;
     this.daemonApiToken = config.daemonApiToken;
     this.corpusEnv = config.corpusEnv;
@@ -128,10 +131,10 @@ export class HermesHarnessAdapter {
   async runTask(inputs: TaskSessionInputs): Promise<void> {
     const hermesHome = inputs.implStateDir;
     const model = inputs.model ?? inputs.claudeModel ?? this.hermesModel;
-    // Provider resolution: explicit `hermesProvider` wins. If unset, fall back
-    // to inference from the model id format. See `inferProviderFromModelId`
-    // above + gh #293 / #295.
-    const provider = this.hermesProvider ?? inferProviderFromModelId(model);
+    // Provider resolution: local OpenAI-compatible endpoints must use Hermes'
+    // custom provider. Otherwise, explicit `hermesProvider` wins, then model-id
+    // inference. See `inferProviderFromModelId` above + gh #293 / #295.
+    const provider = this.hermesBaseUrl ? 'custom' : (this.hermesProvider ?? inferProviderFromModelId(model));
 
     // Step 1: bootstrap — seed auth from the operator's home, write config.yaml + .env.
     //
@@ -149,6 +152,7 @@ export class HermesHarnessAdapter {
       workingDir: inputs.workingDir,
       model,
       provider,
+      baseUrl: this.hermesBaseUrl,
       solverPluginRoots: inputs.pluginRoots ?? [],
       env: {
         storePath: this.storePath,

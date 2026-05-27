@@ -64,6 +64,32 @@ describe('writePerTaskHermesConfig', () => {
     }
   });
 
+  it('writes a local OpenAI-compatible base_url when supplied by Jinn', () => {
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    try {
+      writePerTaskHermesConfig({
+        hermesHome: home,
+        workingDir: '/work',
+        model: 'qwen2.5-coder:7b',
+        provider: 'custom',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        solverPluginRoots: [],
+        env: {
+          daemonApiUrl: 'http://127.0.0.1:7331',
+          daemonApiToken: 'tok',
+          corpusEnv: {},
+        },
+      });
+
+      const cfg = readConfig(home);
+      expect(cfg.model.default).toBe('qwen2.5-coder:7b');
+      expect(cfg.model.provider).toBe('custom');
+      expect(cfg.model.base_url).toBe('http://127.0.0.1:11434/v1');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('writes .env with daemon credentials', () => {
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
     try {

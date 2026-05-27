@@ -110,6 +110,8 @@ export interface HarnessEnv {
   hermesModel?: string;
   /** Hermes provider (e.g. 'anthropic'). */
   hermesProvider?: string;
+  /** Local OpenAI-compatible Hermes base URL. */
+  hermesBaseUrl?: string;
   /** Timeout (ms) for the `hermes doctor` probe in HermesHarness.isReady. */
   hermesDoctorTimeoutMs?: number;
 }
@@ -272,6 +274,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     hermesPath: env.hermesPath,
     hermesModel: env.hermesModel,
     hermesProvider: env.hermesProvider,
+    hermesBaseUrl: env.hermesBaseUrl,
     daemonApiUrl: env.daemonApiUrl ?? 'http://127.0.0.1:7331',
     daemonApiToken: env.daemonApiToken ?? '',
     storePath: env.storePath,
@@ -280,6 +283,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(new HermesHarness({
     adapter: hermesAdapter,
     ...(env.hermesPath !== undefined ? { hermesPath: env.hermesPath } : {}),
+    ...(env.hermesBaseUrl !== undefined ? { hermesBaseUrl: env.hermesBaseUrl } : {}),
     ...(env.hermesDoctorTimeoutMs !== undefined ? { hermesDoctorTimeoutMs: env.hermesDoctorTimeoutMs } : {}),
   }));
 

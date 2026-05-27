@@ -136,6 +136,79 @@ describe('HermesHarness.isReady', () => {
     expect(result.nextStep?.description).toMatch(/install/i);
   });
 
+  it('uses a local OpenAI-compatible provider instead of OpenRouter gates when hermesBaseUrl is configured', async () => {
+    vi.mocked(probeHermesDoctor).mockReturnValue({
+      installed: true,
+      exitCode: 1,
+      stdout: '',
+      stderr: 'no OpenRouter provider configured',
+    });
+    const providerFetch = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    const h = new HermesHarness({
+      adapter: fakeAdapter as any,
+      hermesBaseUrl: 'http://127.0.0.1:11434/v1',
+      hermesProviderFetch: providerFetch as typeof fetch,
+    });
+
+    const result = await h.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+
+    expect(result.ready).toBe(true);
+    expect(providerFetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/v1/models',
+      expect.objectContaining({
+        method: 'GET',
+        headers: { Authorization: 'Bearer jinn-local' },
+      }),
+    );
+    expect(probeHermesAuthStatus).not.toHaveBeenCalled();
+    expect(probeOpenRouterCredit).not.toHaveBeenCalled();
+  });
+
+  it('reports not-ready when the configured local provider does not answer /models', async () => {
+    vi.mocked(probeHermesDoctor).mockReturnValue({
+      installed: true,
+      exitCode: 0,
+      stdout: 'ok',
+      stderr: '',
+    });
+    const providerFetch = vi.fn(async () => new Response('missing', { status: 404 }));
+    const h = new HermesHarness({
+      adapter: fakeAdapter as any,
+      hermesBaseUrl: 'http://127.0.0.1:11434/v1',
+      hermesProviderFetch: providerFetch as typeof fetch,
+    });
+
+    const result = await h.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+
+    expect(result.ready).toBe(false);
+    expect(result.reason).toMatch(/\/models returned HTTP 404/i);
+    expect(probeHermesAuthStatus).not.toHaveBeenCalled();
+    expect(probeOpenRouterCredit).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-local hermesBaseUrl before probing provider auth', async () => {
+    vi.mocked(probeHermesDoctor).mockReturnValue({
+      installed: true,
+      exitCode: 0,
+      stdout: 'ok',
+      stderr: '',
+    });
+    const providerFetch = vi.fn();
+    const h = new HermesHarness({
+      adapter: fakeAdapter as any,
+      hermesBaseUrl: 'https://api.openai.com/v1',
+      hermesProviderFetch: providerFetch as typeof fetch,
+    });
+
+    const result = await h.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+
+    expect(result.ready).toBe(false);
+    expect(result.reason).toMatch(/base URL must be local/i);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(probeHermesAuthStatus).not.toHaveBeenCalled();
+    expect(probeOpenRouterCredit).not.toHaveBeenCalled();
+  });
+
   it('returns ready=false with config nextStep when hermes doctor exit != 0', async () => {
     vi.mocked(probeHermesDoctor).mockResolvedValue({
       installed: true,

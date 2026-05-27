@@ -12,6 +12,9 @@ import {
   DEFAULT_OPENROUTER_CREDIT_FLOOR_USD,
   type OpenRouterCreditConfig,
 } from '../../../api/hermes-doctor-endpoint.js';
+import { isLocalHttpBaseUrl, urlAtBasePath } from '../../../local-provider-url.js';
+
+const DEFAULT_HERMES_PROVIDER_PROBE_TIMEOUT_MS = 2_000;
 
 export interface HermesHarnessConfig {
   adapter: HermesHarnessAdapter;
@@ -20,6 +23,12 @@ export interface HermesHarnessConfig {
   hermesPath?: string;
   /** Timeout for the `hermes doctor` probe. Defaults to 30s. */
   hermesDoctorTimeoutMs?: number;
+  /** Local OpenAI-compatible Hermes base URL. */
+  hermesBaseUrl?: string;
+  /** Timeout (ms) for probing the local OpenAI-compatible provider. */
+  hermesProviderProbeTimeoutMs?: number;
+  /** Test hook for the local provider readiness probe. */
+  hermesProviderFetch?: typeof fetch;
   /**
    * Per-task OpenRouter credit floor in USD. Below this, `isReady()` reports
    * not-ready with a top-up nextStep. Defaults to
@@ -54,6 +63,9 @@ export class HermesHarness implements Harness {
   private readonly adapter: HermesHarnessAdapter;
   private readonly hermesPath: string | undefined;
   private readonly hermesDoctorTimeoutMs: number | undefined;
+  private readonly hermesBaseUrl: string | undefined;
+  private readonly hermesProviderProbeTimeoutMs: number;
+  private readonly hermesProviderFetch: typeof fetch;
   private readonly openrouterCreditFloorUsd: number;
   private readonly creditProbe: (config: OpenRouterCreditConfig) => Promise<Awaited<ReturnType<typeof probeOpenRouterCredit>>>;
 
@@ -62,6 +74,10 @@ export class HermesHarness implements Harness {
     this.version = config.version ?? '0.1.0';
     this.hermesPath = config.hermesPath;
     this.hermesDoctorTimeoutMs = config.hermesDoctorTimeoutMs;
+    this.hermesBaseUrl = config.hermesBaseUrl;
+    this.hermesProviderProbeTimeoutMs =
+      config.hermesProviderProbeTimeoutMs ?? DEFAULT_HERMES_PROVIDER_PROBE_TIMEOUT_MS;
+    this.hermesProviderFetch = config.hermesProviderFetch ?? fetch;
     this.openrouterCreditFloorUsd = config.openrouterCreditFloorUsd ?? DEFAULT_OPENROUTER_CREDIT_FLOOR_USD;
     this.creditProbe = config.creditProbe ?? probeOpenRouterCredit;
   }
@@ -73,6 +89,9 @@ export class HermesHarness implements Harness {
    *   - `installed: false` → binary not on PATH → ready=false with install
    *     nextStep so the operator sees an actionable message instead of
    *     N/N failed claims (#330).
+   *   - `JINN_HERMES_BASE_URL` set → binary exists and the configured local
+   *     OpenAI-compatible provider answers `/models` → ready=true. This mode
+   *     deliberately bypasses the OpenRouter-specific auth/credit gates.
    *   - `exitCode !== 0` → binary exists but `hermes doctor` reports a
    *     configuration problem (e.g. provider not signed in) → ready=false
    *     with a nextStep that points at the SPA precheck panel.
@@ -82,9 +101,10 @@ export class HermesHarness implements Harness {
    *     openrouter` directly. `auth list` reads the credential pool, so it
    *     recognises API-key credentials (the normal `OPENROUTER_API_KEY`
    *     setup) as well as OAuth — unlike `auth status`, which only reflects
-   *     interactive-OAuth-login state. Hermes is OpenRouter-only, so an
-   *     OpenRouter with no usable credential means Hermes has no model
-   *     provider and every claim would burn (#332/#330/#348).
+   *     interactive-OAuth-login state. In the default Jinn/Hermes path,
+   *     Hermes uses OpenRouter, so an OpenRouter with no usable credential
+   *     means Hermes has no model provider and every claim would burn
+   *     (#332/#330/#348).
    *   - OpenRouter credential is present but credit is exhausted → ready=false.
    *     Production bug, 2026-05-23: `auth list openrouter` reported the
    *     api_key credential as healthy, but every solve attempt for the day
@@ -113,6 +133,19 @@ export class HermesHarness implements Harness {
         },
       };
     }
+    if (this.hermesBaseUrl) {
+      if (!isLocalHttpBaseUrl(this.hermesBaseUrl)) {
+        return {
+          ready: false,
+          reason: 'hermes base URL must be local',
+          nextStep: {
+            description:
+              'Use a local Hermes provider URL such as http://127.0.0.1:11434/v1 or unset JINN_HERMES_BASE_URL.',
+          },
+        };
+      }
+      return this.probeLocalHermesProvider(this.hermesBaseUrl);
+    }
     if (result.exitCode !== 0) {
       const stderr = result.stderr.trim();
       const stdout = result.stdout.trim();
@@ -127,8 +160,9 @@ export class HermesHarness implements Harness {
       };
     }
     // Third gate: `hermes doctor` exits 0 even when every model provider is
-    // logged out. Hermes is OpenRouter-only, so probe OpenRouter auth
-    // directly — a logged-out OpenRouter means Hermes cannot run a task.
+    // logged out. The default Jinn/Hermes path relies on OpenRouter, so probe
+    // OpenRouter auth directly — a logged-out OpenRouter means Hermes cannot
+    // run a task.
     const auth = await probeHermesAuthStatus('openrouter', config);
     if (!auth.authed) {
       return {
@@ -162,6 +196,43 @@ export class HermesHarness implements Harness {
       };
     }
     return { ready: true };
+  }
+
+  private async probeLocalHermesProvider(baseUrl: string): Promise<ReadyStatus> {
+    const modelsUrl = urlAtBasePath(baseUrl, 'models');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.hermesProviderProbeTimeoutMs);
+    try {
+      const response = await this.hermesProviderFetch(modelsUrl, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer jinn-local' },
+        signal: controller.signal,
+      });
+      if (response.ok) return { ready: true };
+      return {
+        ready: false,
+        reason: `local Hermes provider /models returned HTTP ${response.status}`,
+        nextStep: {
+          description:
+            'Start the local OpenAI-compatible provider and verify its /v1/models endpoint responds.',
+        },
+      };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const reason = err instanceof Error && err.name === 'AbortError'
+        ? 'local Hermes provider /models probe timed out'
+        : `local Hermes provider unavailable${detail ? `: ${detail}` : ''}`;
+      return {
+        ready: false,
+        reason,
+        nextStep: {
+          description:
+            'Start the local OpenAI-compatible provider and verify its /v1/models endpoint responds.',
+        },
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {

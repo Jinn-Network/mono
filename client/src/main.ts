@@ -2000,6 +2000,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesPath: config.hermesPath,
     hermesModel: config.hermesModel,
     hermesProvider: config.hermesProvider,
+    hermesBaseUrl: config.hermesBaseUrl,
     hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
     codexPath: config.codexPath,
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,

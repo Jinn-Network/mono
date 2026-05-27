@@ -1206,6 +1206,7 @@ describe('hermes config keys', () => {
     'JINN_HERMES_PATH',
     'JINN_HERMES_MODEL',
     'JINN_HERMES_PROVIDER',
+    'JINN_HERMES_BASE_URL',
     'JINN_HERMES_DOCTOR_TIMEOUT_MS',
   ] as const;
   const saved: Record<string, string | undefined> = {};
@@ -1233,18 +1234,60 @@ describe('hermes config keys', () => {
       hermesPath: '/usr/local/bin/hermes',
       hermesModel: 'anthropic/claude-opus-4.6',
       hermesProvider: 'anthropic',
+      hermesBaseUrl: 'http://127.0.0.1:11434/v1',
     });
     const cfg = loadConfig(configPath);
     expect(cfg.hermesPath).toBe('/usr/local/bin/hermes');
     expect(cfg.hermesModel).toBe('anthropic/claude-opus-4.6');
     expect(cfg.hermesProvider).toBe('anthropic');
+    expect(cfg.hermesBaseUrl).toBe('http://127.0.0.1:11434/v1');
   });
 
   it('env vars override hermes config values', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
     process.env['JINN_HERMES_PATH'] = '/opt/hermes/bin/hermes';
+    process.env['JINN_HERMES_BASE_URL'] = 'http://localhost:11434/v1';
     const cfg = loadConfig(configPath);
     expect(cfg.hermesPath).toBe('/opt/hermes/bin/hermes');
+    expect(cfg.hermesBaseUrl).toBe('http://localhost:11434/v1');
+  });
+
+  it.each([
+    ['http://2130706433:11434/v1', 'http://127.0.0.1:11434/v1'],
+    ['http://127.0.0.1:11434\\@api.openai.com/v1', 'http://127.0.0.1:11434/@api.openai.com/v1'],
+  ])('canonicalizes Hermes local provider base URL before use: %s', async (input, expected) => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      hermesBaseUrl: input,
+    });
+
+    const cfg = loadConfig(configPath);
+
+    expect(cfg.hermesBaseUrl).toBe(expected);
+  });
+
+  it.each([
+    'https://api.openai.com/v1',
+    'http://user:pass@127.0.0.1:11434/v1',
+    'http://127.0.0.1:11434/v1?api_key=secret',
+    'http://127.0.0.1:11434/v1#secret',
+  ])('rejects unsafe Hermes local provider base URLs: %s', async (hermesBaseUrl) => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      hermesBaseUrl,
+    });
+
+    let caught: any;
+    try {
+      loadConfig(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe('config_invalid');
+    const issues: Array<{ path: string; message: string }> = caught.details?.issues ?? [];
+    expect(issues.some((issue) =>
+      issue.path === 'hermesBaseUrl' && /must be a local/i.test(issue.message)
+    )).toBe(true);
   });
 });
 
