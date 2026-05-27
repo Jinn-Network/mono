@@ -33,7 +33,7 @@ const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 // resolveValidatePoolInstanceIds — exported for unit testing
 // ---------------------------------------------------------------------------
 
-function readInstanceIdFile(name: 'swe-rebench-v2-seed-pool.json' | 'swe-rebench-v2-known-bad.json'): string[] {
+function readInstanceIdFile(name: 'swe-rebench-v2-seed-pool.json' | 'swe-rebench-v2-known-bad.json' | 'swe-rebench-v2-pytest-missing.json'): string[] {
   // Resolve relative to this compiled file's location. At runtime the file is
   // at dist/cli/commands/<this>.js and the data files are at dist/scripts/<name>
   // (copied there during `yarn build`). In dev/test the source file is at
@@ -55,6 +55,7 @@ export function resolveValidatePoolInstanceIds(flags: {
   instancesFile?: string;
   seedPositive?: boolean;
   knownBad?: boolean;
+  knownPytestMissing?: boolean;
 }): string[] {
   const collected: string[] = [];
   if (flags.instanceId) collected.push(...flags.instanceId);
@@ -79,6 +80,9 @@ export function resolveValidatePoolInstanceIds(flags: {
   }
   if (flags.knownBad) {
     collected.push(...readInstanceIdFile('swe-rebench-v2-known-bad.json'));
+  }
+  if (flags.knownPytestMissing) {
+    collected.push(...readInstanceIdFile('swe-rebench-v2-pytest-missing.json'));
   }
   return Array.from(new Set(collected));
 }
@@ -445,6 +449,7 @@ Output flags:
         'instances-file': { type: 'string' },
         'seed-positive': { type: 'boolean' },
         'known-bad': { type: 'boolean' },
+        'known-pytest-missing': { type: 'boolean' },
       },
     });
     const human = Boolean(parsed.values['human']);
@@ -584,6 +589,7 @@ Output flags:
         instancesFile: parsed.values['instances-file'] as string | undefined,
         seedPositive: Boolean(parsed.values['seed-positive']),
         knownBad: Boolean(parsed.values['known-bad']),
+        knownPytestMissing: Boolean(parsed.values['known-pytest-missing']),
       });
 
       process.stderr.write('[validate-pool] loading the SWE-rebench v2 pool…\n');

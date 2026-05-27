@@ -1,0 +1,16 @@
+{
+  "comment": "Instance IDs that triaged to ungradeable:pytest_missing during the #493 Stage-1 reason-histogram sweep (operator's local validated-pool.json on 2026-05-28, 136 of 741 entries). Under EVAL_SEMANTICS_VERSION '4' + the buildTestCommands pytest-install guard, validate-pool --known-pytest-missing should re-record each as scorable:true (gold-patch-resolves) — the AC (d) demonstration for issue #493. Refresh this list against your own validated-pool.json before relying on it for reproducibility, since dataset rows shift.",
+  "source": "issue #493 — Stage-1 sample on 2026-05-28",
+  "instance_ids": [
+    "BerriAI__litellm-13868",
+    "zarr-developers__zarr-python-2668",
+    "Blaizzy__mlx-vlm-179",
+    "qBraid__pyqasm-120",
+    "zarr-developers__VirtualiZarr-410",
+    "unionai-oss__pandera-1898",
+    "DS4SD__docling-824",
+    "noppanut15__depthviz-55",
+    "Toloka__crowd-kit-128",
+    "IAMconsortium__nomenclature-460"
+  ]
+}
