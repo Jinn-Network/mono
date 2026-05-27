@@ -4,9 +4,19 @@
  * no spurious `startup` activity row, no `daemon_started_at` rewrite.
  *
  * In-process pattern (mirrors `restart-daemon-cleanup-frees-ports.test.ts`): we
- * don't fork a second node process; we exercise the liveness helper against a
- * real Daemon on port 0 inside one vitest worker, asserting the side-effect
- * surface the operator dashboard cares about.
+ * don't fork a second node process; we exercise the gate against a real Daemon
+ * on port 0 inside one vitest worker, asserting the side-effect surface the
+ * operator dashboard cares about.
+ *
+ * Three cases:
+ *   1. Classifier-under-Daemon: `checkPidfileLiveness` returns `refuse` and
+ *      no shared state changes (side-effect-free sanity check).
+ *   2. main.ts wire-in: `applyPidfileLivenessGate` + the subsequent
+ *      writeFileSync, with `process.exit` spied to throw. Proves the gate's
+ *      `emitEnvelope → process.exit` halts control flow *before* the pidfile
+ *      write line runs.
+ *   3. Stale-pidfile (ESRCH): classifier returns `unlink-stale` so the caller
+ *      can clean up and proceed.
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,7 +29,10 @@ import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
 import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
-import { checkPidfileLiveness } from '../../src/preflight/pidfile-liveness.js';
+import {
+  applyPidfileLivenessGate,
+  checkPidfileLiveness,
+} from '../../src/preflight/pidfile-liveness.js';
 
 function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
   const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
@@ -80,6 +93,73 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
     //  - touched the pidfile,
     //  - bumped daemon_started_at,
     //  - written a second `startup` activity row.
+    expect(readFileSync(pidPath, 'utf-8')).toBe(pidfileBefore);
+    expect(store.getDaemonStartedAt()).toBe(startedAtBefore);
+    expect(store.getActivityCountsByKind()['startup'] ?? 0).toBe(startupCountBefore);
+  });
+
+  it('main.ts wire-in halts before writeFileSync on refuse, leaving store + pidfile untouched', () => {
+    // This mirrors the three-line wire-in at client/src/main.ts (the
+    // `applyPidfileLivenessGate(pidPath); writeFileSyncMain(pidPath, ...)`
+    // sequence). The pure classifier already proves the *decision*; this
+    // test proves the *wire-in itself* — that `process.exit` (inside
+    // `emitEnvelope`) halts control flow before the pidfile write runs.
+
+    const startedAtBefore = store.getDaemonStartedAt();
+    const startupCountBefore = store.getActivityCountsByKind()['startup'] ?? 0;
+    const pidfileBefore = readFileSync(pidPath, 'utf-8');
+
+    // Spy on process.exit: throw so control halts immediately, mirroring how
+    // the real process.exit terminates the event loop.
+    class ExitInvoked extends Error {
+      constructor(public readonly code: number) {
+        super(`process.exit(${code})`);
+      }
+    }
+    const exitCalls: Array<number | undefined> = [];
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation(((code?: number) => {
+        exitCalls.push(code);
+        throw new ExitInvoked(typeof code === 'number' ? code : 0);
+      }) as never);
+    // Route the wire-in's writeFileSync through a counter (ESM exports are
+    // read-only bindings, so `vi.spyOn(fs, 'writeFileSync')` is rejected by
+    // Node). The wire-in below calls *this* wrapper, so the assertion is
+    // equivalent in intent: did the write line execute, or did process.exit
+    // halt control flow first.
+    let writeCalls = 0;
+    const writeProbe = {
+      writeFileSync: (...args: Parameters<typeof writeFileSync>) => {
+        writeCalls += 1;
+        return writeFileSync(...args);
+      },
+    };
+
+    let thrown: unknown = null;
+    try {
+      // === replicated main.ts wire-in (see client/src/main.ts) ===
+      applyPidfileLivenessGate(pidPath);
+      // emitEnvelope inside the gate calls process.exit on `refuse`; the spy
+      // throws so this line MUST NOT execute on the refuse path.
+      writeProbe.writeFileSync(pidPath, `${process.pid}\n`, 'utf-8');
+      // === end wire-in ===
+    } catch (err) {
+      thrown = err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    // The gate refused, so process.exit was invoked (and the spy threw).
+    expect(thrown).toBeInstanceOf(ExitInvoked);
+    expect((thrown as ExitInvoked).code).toBeGreaterThan(0);
+    expect(exitCalls).toHaveLength(1);
+    expect(typeof exitCalls[0]).toBe('number');
+
+    // The wire-in's writeFileSync MUST NOT have been called.
+    expect(writeCalls).toBe(0);
+
+    // Shared state is untouched.
     expect(readFileSync(pidPath, 'utf-8')).toBe(pidfileBefore);
     expect(store.getDaemonStartedAt()).toBe(startedAtBefore);
     expect(store.getActivityCountsByKind()['startup'] ?? 0).toBe(startupCountBefore);
