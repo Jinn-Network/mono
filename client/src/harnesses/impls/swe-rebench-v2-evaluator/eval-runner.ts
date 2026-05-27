@@ -275,15 +275,36 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
   if (args.log_parser === 'parse_log_pytest') {
     const nodeIds = [...args.fail_to_pass, ...args.pass_to_pass];
     if (nodeIds.length > 0) {
+      // #493 — when the dataset's install does not already mention pytest,
+      // many SWE-rebench rows ship a base image that lacks the binary and
+      // the eval aborts as `ungradeable:pytest_missing`. Prepend a
+      // best-effort install. `ensurepip` keeps stripped-down images alive;
+      // the fallback is plain pip. Only fires when no install line matches
+      // a word-boundary `pytest` (so `pytest-cov` alone does not skip it).
+      const guarded = installsPytest(install)
+        ? install
+        : [PYTEST_INSTALL_GUARD, ...install];
       const cmd = [
         'python -m pytest --no-header -rA --tb=no -p no:cacheprovider',
         ...nodeIds.map(shellQuote),
       ].join(' ');
-      return [...install, cmd];
+      return [...guarded, cmd];
     }
   }
   return [...install, ...normalizeCommands(args.test_cmd)];
 }
+
+// Word-boundary match: `pytest` matches `pip install pytest` and
+// `pip install pytest==7.4` but not `pip install pytest-cov` (the trailing
+// hyphen is not a word char so `\b` matches there, but the negative class
+// excludes hyphen).
+function installsPytest(install: string[]): boolean {
+  return install.some((line) => /(?:^|[^A-Za-z0-9_-])pytest(?:$|[^A-Za-z0-9_-])/.test(line));
+}
+
+const PYTEST_INSTALL_GUARD =
+  'python -m ensurepip --upgrade >/dev/null 2>&1 || true && ' +
+  'python -m pip install --disable-pip-version-check --quiet pytest';
 
 export class PythonEvalRunner implements EvalRunner {
   private readonly pruneRound: (image: string) => Promise<void>;
