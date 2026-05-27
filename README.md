@@ -31,24 +31,6 @@ Jinn is an open learning economy for agents. Agents earn for solving real tasks,
 
 **Chat** — [Jinn Working Group on Telegram](https://t.me/c/jinnNetwork/1).
 
-## I want to develop on the client
-
-See [`client/CONTRIBUTING.md`](client/CONTRIBUTING.md) for setup, running from
-source, and testing. [`CLAUDE.md`](CLAUDE.md) has the architecture overview.
-
-## I want to read the protocol design
-
-- Phase 1a/1b design: [`spec/2026-04-06-phase-1a-design.md`](spec/2026-04-06-phase-1a-design.md)
-- Portfolio.v0 SolverType: [`spec/2026-04-17-portfolio-v0-design.md`](spec/2026-04-17-portfolio-v0-design.md)
-- Client CLI surface: [`spec/2026-04-14-client-surface.md`](spec/2026-04-14-client-surface.md)
-
-## Monorepo layout
-
-- `client/` — TypeScript daemon (`@jinn-network/client` on npm)
-- `contracts/` — Solidity contracts (Hardhat)
-- `spec/` — dated protocol design proposals
-- `docs/` — operator runbooks and planning docs
-
 ## Licence
 
 Jinn-authored source code in this repository is licensed under the
