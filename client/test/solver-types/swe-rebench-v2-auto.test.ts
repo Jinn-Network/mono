@@ -102,6 +102,37 @@ describe('selectNextPostingCandidate', () => {
     });
     expect(next?.language).toBe('go');
   });
+
+  it('does not select the same instance_id more than once when doing so would exceed N_max_postings_per_task', () => {
+    const dupePool = [
+      { instance_id: 'x', language: 'python' },
+      { instance_id: 'x', language: 'python' },
+    ];
+    const counters = new Map([
+      ['x', { posted: 9, successful: 0, last_posted_at: 0 }],
+    ]);
+    const batch = selectNextPostingCandidates({
+      pool: dupePool,
+      counters,
+      config: { ...config, post_batch_size: 2 },
+      now: 1_000_000_000,
+    });
+    expect(batch).toHaveLength(1);
+  });
+
+  it('returns empty slice when the only candidate is already at N_max_postings_per_task', () => {
+    const dupePool = [{ instance_id: 'x', language: 'python' }];
+    const counters = new Map([
+      ['x', { posted: 10, successful: 0, last_posted_at: 0 }],
+    ]);
+    const batch = selectNextPostingCandidates({
+      pool: dupePool,
+      counters,
+      config: { ...config, post_batch_size: 2 },
+      now: 1_000_000_000,
+    });
+    expect(batch).toHaveLength(0);
+  });
 });
 
 const FIXED_NOW_ISO = '2026-05-08T10:12:45.000Z';

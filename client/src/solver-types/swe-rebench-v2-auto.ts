@@ -124,7 +124,17 @@ export function selectNextPostingCandidates(args: SelectArgs): PoolTask[] {
     if (cA.last_posted_at !== cB.last_posted_at) return cA.last_posted_at - cB.last_posted_at;
     return a.instance_id.localeCompare(b.instance_id);
   });
-  return candidates.slice(0, args.config.post_batch_size);
+  const inBatchCounters = new Map<string, number>();
+  const selected: PoolTask[] = [];
+  for (const candidate of candidates) {
+    if (selected.length >= args.config.post_batch_size) break;
+    const persisted = args.counters.get(candidate.instance_id)?.posted ?? 0;
+    const inBatch = inBatchCounters.get(candidate.instance_id) ?? 0;
+    if (persisted + inBatch >= args.config.N_max_postings_per_task) continue;
+    inBatchCounters.set(candidate.instance_id, inBatch + 1);
+    selected.push(candidate);
+  }
+  return selected;
 }
 
 export function selectNextPostingCandidate(args: SelectArgs): PoolTask | undefined {
