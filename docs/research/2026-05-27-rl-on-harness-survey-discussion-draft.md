@@ -64,8 +64,13 @@ v2 ExecutionPayload, and the indexer materialises it into
 `verdictEnvelopeMeta.actualPassed` / `actualScore` via the request
 ID — so "for this harness state, what was the verdict?" is one
 SQL/GraphQL query against the indexer, both per-operator and across
-the network. The explorer SPA runs essentially this query for
-frozen-mode SolverNet views.
+the network. The same query already runs in the explorer SPA for
+frozen-mode SolverNet views (proof that the data is wired end-to-end).
+The train-mode version is the same SQL minus the mode filter;
+train-mode `codeDigest`s mutate per Task and so have smaller
+per-codeDigest sample counts than frozen, but the Consolidator can
+apply confidence-threshold and minimum-sample discipline that a
+leaderboard UI can't.
 
 **Structured trajectories per run.** A `TrajectoryCollector` produces
 hash-chained, secret-scrubbed, content-addressable spans; the envelope
