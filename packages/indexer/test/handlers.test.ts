@@ -1442,8 +1442,9 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     });
   });
 
-  it('populates instanceId from the task IPFS body for swe-rebench-v2 verdicts', async () => {
+  it('populates instanceId and solverNetManifestCid from the task IPFS body for swe-rebench-v2 verdicts', async () => {
     const TASK_CID = 'bafytaskbody-sympy';
+    const SOLVER_NET_MANIFEST_CID = 'bafyManifestSweA';
     const verdictBody = {
       ...SWE_REBENCH_FAIL_BODY,
       task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1, cid: TASK_CID },
@@ -1453,6 +1454,9 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       schemaVersion: 'task.v1',
       id: 'task-uuid',
       solverType: 'swe-rebench-v2.v1',
+      // task.v1's top-level solverNetManifestCid — the join key the launcher's
+      // getInstanceSuccessCounts uses to scope per-SolverNet (#669 Finding 2).
+      solverNetManifestCid: SOLVER_NET_MANIFEST_CID,
       spec: { instance_id: 'sympy__sympy-27510' },
     };
     const stubFetch: FetchLike = async (url) => {
@@ -1483,6 +1487,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
     expect(row).toMatchObject({
       instanceId: 'sympy__sympy-27510',
+      solverNetManifestCid: SOLVER_NET_MANIFEST_CID,
       actualPassed: true,
       solverType: 'swe-rebench-v2.v1',
     });
@@ -1518,6 +1523,9 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     });
     const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
     expect(row?.instanceId).toBe('');
+    // solverNetManifestCid comes from the same task body fetch as instanceId;
+    // an unfetchable task body leaves both empty (#669 Finding 2).
+    expect(row?.solverNetManifestCid).toBe('');
     expect(row?.actualPassed).toBe(false);  // verdict row still written
     expect(calls).toBeGreaterThanOrEqual(2); // verdict + task body attempt
   });

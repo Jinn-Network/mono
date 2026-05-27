@@ -266,30 +266,28 @@ export interface DiscoveryAPI {
    * Returns network-truth pass counts per swe-rebench-v2 instance_id for a
    * given SolverNet manifest. Keyed by `instance_id`; the value is the count
    * of distinct (requestId, chainId) verdictEnvelopeMeta rows where
-   * `manifestCid` matches one of the SolverNet's evaluation envelope CIDs,
-   * `actualPassed = true`, and `instanceId` is non-empty.
+   * `solverNetManifestCid` equals `args.manifestCid`, `actualPassed = true`,
+   * `solverType` starts with `swe-rebench-v2`, and `instanceId` is non-empty.
    *
-   * Note on the manifestCid filter shape: in `verdictEnvelopeMeta` the
-   * `manifestCid` column stores the *evaluation envelope* CID (i.e. the IPFS
-   * cid of the verdict envelope itself), not the SolverNet manifest CID. The
-   * launcher passes its SolverNet manifest CID; the HTTP implementation
-   * filters by `solverType` + `instanceId` non-empty and lets the operator's
-   * own scoping (the SolverNet is its only swe-rebench-v2 net) carry. For
-   * single-SolverNet daemons this is exact; multi-SolverNet operators get a
-   * slight over-count which is acceptable — the launcher reads `max(local,
-   * network)` so an over-count only triggers earlier saturation, which is the
-   * safe direction. (TODO: refine to per-manifest scoping once the indexer
-   * joins verdictEnvelopeMeta → attempt → task → solverNetManifest by hash.)
+   * Per-SolverNet scoping (#669 Finding 2): the indexer enrichment pass reads
+   * the task body's top-level `solverNetManifestCid` (task.v1 schema; see
+   * `client/src/types/task-document.ts`) on the same IPFS round-trip that
+   * resolves `instance_id`, and writes it to `verdictEnvelopeMeta`. The
+   * GraphQL filter pins to that column, so multi-SolverNet operators with
+   * overlapping instance_id pools do NOT cross-tenant over-count — successes
+   * on SolverNet-B can no longer prematurely saturate SolverNet-A's launcher.
    *
    * Backed by `verdictEnvelopeMeta` in the indexer. Throws
    * `DiscoveryUnavailableError` when the backing is unreachable — callers
    * MUST NOT silently fall through to local-only counts (#669 acceptance
-   * criterion: behave as if the on-chain count is the truth).
+   * criterion: behave as if the on-chain count is the truth). The
+   * `withFallback` wrapper enforces this by never routing
+   * `getInstanceSuccessCounts` to the floor.
    *
    * The on-chain floor implementation (`OnchainDiscoveryAPI`) returns an
    * empty Map, since the underlying data comes from IPFS enrichment that the
-   * floor cannot reconstruct. This is the documented behaviour for the
-   * fallback: callers see the local counter as the floor.
+   * floor cannot reconstruct. The floor's empty Map is therefore not the
+   * runtime path — `withFallback` propagates the error instead.
    */
   getInstanceSuccessCounts(args: {
     manifestCid: string;

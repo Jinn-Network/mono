@@ -219,7 +219,10 @@ query OperatorCountAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, 
 `;
 
 /**
- * Paginated read of verdictEnvelopeMeta rows for swe-rebench-v2 successes.
+ * Paginated read of verdictEnvelopeMeta rows for swe-rebench-v2 successes,
+ * scoped to a single SolverNet via `solverNetManifestCid` so multi-SolverNet
+ * operators with overlapping instance_id pools don't cross-tenant over-count
+ * (#669 Finding 2).
  *
  * Ponder's auto-GraphQL does not expose GROUP BY / count aggregations, so
  * getInstanceSuccessCounts pages this query with the `after` cursor and
@@ -227,9 +230,10 @@ query OperatorCountAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, 
  * plural-query `limit`).
  */
 const INSTANCE_SUCCESS_COUNTS_QUERY = `
-query InstanceSuccessCounts($limit: Int!, $after: String) {
+query InstanceSuccessCounts($solverNetManifestCid: String!, $limit: Int!, $after: String) {
   verdictEnvelopeMetas(
     where: {
+      solverNetManifestCid: $solverNetManifestCid,
       solverType_starts_with: "swe-rebench-v2",
       actualPassed: true,
       enrichmentStatus: "ok",
@@ -1002,10 +1006,13 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   }
 
   // ── getInstanceSuccessCounts (#669) ────────────────────────────────────────
-  // `manifestCid` is ignored in the GraphQL filter (see types.ts JSDoc); kept
-  // on the signature so per-manifest scoping is a non-breaking change later.
+  // Scoped to a single SolverNet via `verdictEnvelopeMeta.solverNetManifestCid`
+  // — the indexer enrichment writes this column from the task body's top-level
+  // `solverNetManifestCid` (task.v1 schema). Prevents multi-SolverNet operators
+  // with overlapping instance_id pools from cross-tenant over-counting
+  // (#669 Finding 2).
 
-  async function getInstanceSuccessCounts(_args: {
+  async function getInstanceSuccessCounts(args: {
     manifestCid: string;
   }): Promise<Map<string, number>> {
     await ensureReady();
@@ -1023,7 +1030,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         gqlUrl,
         fetchImpl,
         INSTANCE_SUCCESS_COUNTS_QUERY,
-        { limit: PAGE_LIMIT, after: cursor },
+        { solverNetManifestCid: args.manifestCid, limit: PAGE_LIMIT, after: cursor },
       );
       const rows = data.verdictEnvelopeMetas?.items ?? [];
       for (const row of rows) {

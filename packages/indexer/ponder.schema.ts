@@ -640,6 +640,20 @@ export const verdictEnvelopeMeta = onchainTable(
      */
     instanceId: t.text().notNull().default(''),
     /**
+     * SolverNet manifest CID the task was posted under, read from the task
+     * body's top-level `solverNetManifestCid` field (task.v1 schema; see
+     * `client/src/types/task-document.ts`). Populated in the same IPFS task-body
+     * fetch that resolves `instanceId`, so the read pays no extra round-trip.
+     * Empty string when the enrichment branch did not run (non-swe-rebench-v2
+     * solverTypes) or when the task body was unfetchable.
+     *
+     * Scopes `getInstanceSuccessCounts` to a single SolverNet so multi-SolverNet
+     * operators with overlapping instance_id pools don't cross-tenant
+     * over-count: successes on SolverNet-B no longer saturate SolverNet-A's
+     * launcher. Spec: issue #669 (Finding 2 — manifest-scoped success counts).
+     */
+    solverNetManifestCid: t.text().notNull().default(''),
+    /**
      * Normalized off-chain verdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN'.
      * 'UNKNOWN' when the envelope body lacks a recognizable verdict field.
      */
@@ -659,6 +673,14 @@ export const verdictEnvelopeMeta = onchainTable(
     evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
     taskIdIdx: index().on(table.taskId),
     instanceIdIdx: index().on(table.manifestCid, table.actualPassed, table.instanceId),
+    // Filter shape used by getInstanceSuccessCounts (#669 Finding 2): scope
+    // success counts to a single SolverNet so multi-SolverNet operators don't
+    // cross-tenant over-count.
+    solverNetInstanceIdIdx: index().on(
+      table.solverNetManifestCid,
+      table.actualPassed,
+      table.instanceId,
+    ),
   }),
 );
 

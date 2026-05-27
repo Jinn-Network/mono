@@ -1111,6 +1111,36 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     expect(counts.size).toBe(2);
   });
 
+  it('scopes the GraphQL filter by solverNetManifestCid so multi-SolverNet operators don\'t cross-tenant over-count (#669 Finding 2)', async () => {
+    const MANIFEST = 'bafyManifestSolverNetA';
+    const requestBodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      if (init && typeof init.body === 'string') {
+        requestBodies.push(JSON.parse(init.body));
+      }
+      return new Response(
+        JSON.stringify({
+          data: {
+            verdictEnvelopeMetas: {
+              items: [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    await api.getInstanceSuccessCounts({ manifestCid: MANIFEST });
+
+    expect(requestBodies.length).toBeGreaterThan(0);
+    const body = requestBodies[0] as { query: string; variables: Record<string, unknown> };
+    expect(body.query).toContain('solverNetManifestCid: $solverNetManifestCid');
+    expect(body.variables.solverNetManifestCid).toBe(MANIFEST);
+  });
+
   it('throws DiscoveryUnavailableError when GraphQL returns errors', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (isReadyProbe(url)) return new Response('ok', { status: 200 });

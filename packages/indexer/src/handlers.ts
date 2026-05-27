@@ -1113,7 +1113,15 @@ export async function handleMetadataSet({
           // other types pay no extra IPFS round-trip. Failures degrade
           // gracefully: instanceId stays '' and the launcher falls back to
           // its local counter for that instance (#669).
+          //
+          // We also read the task body's top-level `solverNetManifestCid`
+          // (task.v1 schema; see client/src/types/task-document.ts) so the
+          // launcher's getInstanceSuccessCounts can scope by SolverNet —
+          // preventing multi-SolverNet operators with overlapping
+          // instance_id pools from cross-tenant over-counting
+          // (#669 Finding 2). Same IPFS fetch, no extra round-trip.
           let instanceId = '';
+          let bodySolverNetManifestCid = '';
           if (meta.solverType.startsWith('swe-rebench-v2') && meta.taskCid) {
             try {
               const taskBody = await fetchIpfsJson(ipfsGateway, meta.taskCid, {
@@ -1125,6 +1133,10 @@ export async function handleMetadataSet({
                 if (spec && typeof spec === 'object') {
                   const raw = (spec as Record<string, unknown>)['instance_id'];
                   if (typeof raw === 'string' && raw.length > 0) instanceId = raw;
+                }
+                const cidRaw = (taskBody as Record<string, unknown>)['solverNetManifestCid'];
+                if (typeof cidRaw === 'string' && cidRaw.length > 0) {
+                  bodySolverNetManifestCid = cidRaw;
                 }
               }
             } catch (err) {
@@ -1148,6 +1160,7 @@ export async function handleMetadataSet({
               actualPassed: meta.actualPassed,
               actualScore: meta.actualScore,
               instanceId,
+              solverNetManifestCid: bodySolverNetManifestCid,
               evaluatorVerdict: meta.evaluatorVerdict,
               enrichmentStatus: 'ok',
               enrichedAtBlock: blockNumber,
@@ -1167,6 +1180,7 @@ export async function handleMetadataSet({
                   actualPassed: meta.actualPassed,
                   actualScore: meta.actualScore,
                   instanceId,
+                  solverNetManifestCid: bodySolverNetManifestCid,
                   evaluatorVerdict: meta.evaluatorVerdict,
                   enrichmentStatus: 'ok',
                   enrichedAtBlock: blockNumber,
@@ -1185,6 +1199,7 @@ export async function handleMetadataSet({
                 actualPassed: row.actualPassed,
                 actualScore: row.actualScore,
                 instanceId: row.instanceId,
+                solverNetManifestCid: row.solverNetManifestCid,
                 evaluatorVerdict: row.evaluatorVerdict,
                 enrichmentStatus: row.enrichmentStatus,
                 enrichedAtBlock: row.enrichedAtBlock,
