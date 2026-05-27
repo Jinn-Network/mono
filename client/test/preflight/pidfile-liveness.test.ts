@@ -1,0 +1,88 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { checkPidfileLiveness } from '../../src/preflight/pidfile-liveness.js';
+
+describe('pidfile-liveness preflight', () => {
+  let tmp: string;
+  let pidPath: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'jinn-pidfile-liveness-'));
+    pidPath = join(tmp, 'daemon.pid');
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('returns proceed when no pidfile exists', () => {
+    expect(checkPidfileLiveness({ pidPath })).toEqual({ decision: 'proceed' });
+  });
+
+  it('returns unlink-stale when the pidfile is malformed (not a number)', () => {
+    writeFileSync(pidPath, 'not-a-pid\n', 'utf-8');
+    const decision = checkPidfileLiveness({ pidPath });
+    expect(decision).toMatchObject({ decision: 'unlink-stale', reason: 'malformed', pidfilePath: pidPath });
+  });
+
+  it('returns unlink-stale on ESRCH (recorded PID is gone)', () => {
+    writeFileSync(pidPath, '987654\n', 'utf-8');
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      const err = new Error('ESRCH') as NodeJS.ErrnoException;
+      err.code = 'ESRCH';
+      throw err;
+    });
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      expect(decision).toMatchObject({ decision: 'unlink-stale', pid: 987654, reason: 'esrch' });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('returns refuse when the recorded PID is alive', () => {
+    writeFileSync(pidPath, '987654\n', 'utf-8');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      expect(decision).toMatchObject({ decision: 'refuse', pid: 987654, reason: 'alive' });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('returns refuse on EPERM (process exists but owned by another user)', () => {
+    writeFileSync(pidPath, '987654\n', 'utf-8');
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      const err = new Error('EPERM') as NodeJS.ErrnoException;
+      err.code = 'EPERM';
+      throw err;
+    });
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      expect(decision).toMatchObject({ decision: 'refuse', pid: 987654, reason: 'eperm' });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('treats unknown errno conservatively as refuse', () => {
+    writeFileSync(pidPath, '987654\n', 'utf-8');
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      const err = new Error('EIO') as NodeJS.ErrnoException;
+      err.code = 'EIO';
+      throw err;
+    });
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      // Conservative: if we can't classify the errno, the safe move is to
+      // refuse (don't risk trampling a daemon we just don't understand).
+      expect(decision).toMatchObject({ decision: 'refuse', pid: 987654, reason: 'unknown' });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+});
