@@ -1066,3 +1066,63 @@ describe('/ready readiness probe', () => {
     expect(readyProbes).toBe(2);
   });
 });
+
+describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
+  it('aggregates pass counts per instance_id across pages, deduping by (requestId, chainId)', async () => {
+    const page1 = {
+      data: {
+        verdictEnvelopeMetas: {
+          items: [
+            { requestId: '0xa1', chainId: 84532, instanceId: 'sympy__sympy-27510' },
+            { requestId: '0xa2', chainId: 84532, instanceId: 'sympy__sympy-27510' },
+            { requestId: '0xa3', chainId: 84532, instanceId: 'django__django-100' },
+          ],
+          pageInfo: { hasNextPage: true, endCursor: 'cur1' },
+        },
+      },
+    };
+    const page2 = {
+      data: {
+        verdictEnvelopeMetas: {
+          items: [
+            { requestId: '0xa4', chainId: 84532, instanceId: 'sympy__sympy-27510' },
+            // Duplicate of page-1 row — must be deduped.
+            { requestId: '0xa1', chainId: 84532, instanceId: 'sympy__sympy-27510' },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    let call = 0;
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      call += 1;
+      return new Response(JSON.stringify(call === 1 ? page1 : page2), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const counts = await api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' });
+
+    expect(counts.get('sympy__sympy-27510')).toBe(3);   // 3 distinct, 1 dedup'd
+    expect(counts.get('django__django-100')).toBe(1);
+    expect(counts.size).toBe(2);
+  });
+
+  it('throws DiscoveryUnavailableError when GraphQL returns errors', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(
+        JSON.stringify({ errors: [{ message: 'indexer cold' }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    await expect(api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' })).rejects.toBeInstanceOf(
+      DiscoveryUnavailableError,
+    );
+  });
+});

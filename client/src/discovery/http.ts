@@ -218,6 +218,47 @@ query OperatorCountAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, 
 }
 `;
 
+/**
+ * Paginated read of verdictEnvelopeMeta rows for swe-rebench-v2 successes.
+ *
+ * Ponder's auto-GraphQL does not expose GROUP BY / count aggregations, so the
+ * aggregator (below in getInstanceSuccessCounts) pages this query with the
+ * `after` cursor and groups client-side. Capped at 1000 per page (Ponder's
+ * upper bound on plural-query `limit`).
+ *
+ * The `solverType_starts_with` filter is GraphQL-syntactic — verify it
+ * matches the Ponder generated filter shape; if Ponder requires the explicit
+ * suffix (`solverType: { startsWith: "..." }`) shape, adjust accordingly when
+ * the test fails. As of jinn-mono today the Ponder GraphQL layer accepts
+ * `solverType_starts_with: "swe-rebench-v2"` directly.
+ */
+const INSTANCE_SUCCESS_COUNTS_QUERY = `
+query InstanceSuccessCounts($limit: Int!, $after: String) {
+  verdictEnvelopeMetas(
+    where: {
+      solverType_starts_with: "swe-rebench-v2",
+      actualPassed: true,
+      enrichmentStatus: "ok",
+      instanceId_not: ""
+    },
+    limit: $limit,
+    after: $after,
+    orderBy: "enrichedAtBlock",
+    orderDirection: "asc"
+  ) {
+    items {
+      requestId
+      chainId
+      instanceId
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
 const QUERY_ENVELOPES_QUERY = `
 query QueryEnvelopes($where: envelopeFilter, $limit: Int!) {
   envelopes(
@@ -323,6 +364,13 @@ interface OperatorCountTasksPage {
 interface OperatorCountAttemptsPage {
   attempts: {
     items: Array<{ operator: string }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface InstanceSuccessCountsPage {
+  verdictEnvelopeMetas: {
+    items: Array<{ requestId: string; chainId: number; instanceId: string }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -959,6 +1007,49 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return plugins;
   }
 
+  // ── getInstanceSuccessCounts (#669) ────────────────────────────────────────
+  // manifestCid is ignored in the GraphQL filter — see types.ts JSDoc for why.
+  // It is preserved on the call-signature so a future refinement (per-manifest
+  // scoping) is a non-breaking change.
+
+  async function getInstanceSuccessCounts(_args: {
+    manifestCid: string;
+  }): Promise<Map<string, number>> {
+    await ensureReady();
+
+    // Cap on total rows scanned, defensive: 10 pages × 1000 = 10k rows. A
+    // healthy SolverNet has ~25 candidates × N_target_successes = 125 expected
+    // successes; 10k is two orders of magnitude headroom.
+    const MAX_PAGES = 10;
+    const PAGE_LIMIT = 1000;
+    const counts = new Map<string, number>();
+    const seen = new Set<string>();   // (requestId|chainId) dedupe across pages
+    let cursor: string | null = null;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await postGql<InstanceSuccessCountsPage>(
+        gqlUrl,
+        fetchImpl,
+        INSTANCE_SUCCESS_COUNTS_QUERY,
+        { limit: PAGE_LIMIT, after: cursor },
+      );
+      const rows = data.verdictEnvelopeMetas?.items ?? [];
+      for (const row of rows) {
+        const key = `${row.requestId}|${row.chainId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const id = row.instanceId;
+        if (!id) continue;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      cursor = pageInfo.endCursor;
+    }
+
+    return counts;
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -968,5 +1059,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     listPluginPublications,
     getPluginScores,
     listBuilderArtifacts,
+    getInstanceSuccessCounts,
   };
 }
