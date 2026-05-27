@@ -77,6 +77,13 @@ interface PendingEvaluationSolution {
   operator: string;
   transactionHash?: Hex;
   blockNumber?: number;
+  /**
+   * Defense-in-depth backstop for #645: count of consecutive failures (catch-arm
+   * throws or transient `canClaimEvaluation` reverts) for this requestId.
+   * Persisted across restarts so a wedge can't re-spam the log after every
+   * daemon bounce. Pruned once it exceeds MAX_EVALUATION_RETRY_ATTEMPTS.
+   */
+  failedAttempts?: number;
 }
 
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
@@ -86,6 +93,20 @@ const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
 /** Yield to the event loop every N evaluation opportunities so a large retry
  *  backlog can't starve the HTTP API mid-cycle. */
 const EVALUATION_RETRY_YIELD_EVERY = 10;
+
+/**
+ * Bound the number of consecutive transient/uncaught failures for a single
+ * pending evaluation solution. Once exceeded, the solution is pruned from
+ * `pendingEvaluationSolutions` to stop unbounded log spam (#645). At default
+ * pollIntervalMs=5000, twenty cycles ≈ 100 s — comfortably above a normal
+ * transient RPC outage window, well below "spamming the log forever".
+ *
+ * The signal-driven prunes (terminal claimability, `null` delivery-envelope
+ * CID per #553, !isDiscoveryTaskAllowed) still fire on their own conditions;
+ * this counter is the backstop for failure modes that don't surface a clean
+ * terminal signal.
+ */
+const MAX_EVALUATION_RETRY_ATTEMPTS = 20;
 
 /**
  * Decide whether a `canClaimEvaluation` failure means the opportunity can NEVER
@@ -350,6 +371,10 @@ export class MechAdapter implements ExecutionAdapter {
             ? item.transactionHash as Hex
             : undefined,
           blockNumber: typeof item.blockNumber === 'number' ? item.blockNumber : undefined,
+          failedAttempts:
+            typeof item.failedAttempts === 'number' && Number.isFinite(item.failedAttempts)
+              ? item.failedAttempts
+              : 0,
         };
         this.pendingEvaluationSolutions.set(solution.requestId, solution);
       }
