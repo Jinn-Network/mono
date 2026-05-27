@@ -105,6 +105,60 @@ describe('TranscriptWatcher', () => {
     expect(tools.has('codex')).toBe(true);
   });
 
+  it('captures jsonl files created after the watcher starts', async () => {
+    const sessionsDir = path.join(tmpDir, 'codex-sessions-new');
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    watcher = await startTranscriptWatcher({
+      directories: [
+        {
+          tool: 'codex',
+          directory: sessionsDir,
+          sessionIdFromPath: (p) => path.basename(p, '.jsonl'),
+        },
+      ],
+      onEvent: (envelope) => collected.push(envelope),
+    });
+
+    await new Promise((r) => setTimeout(r, 150));
+
+    const session = path.join(sessionsDir, 'brand-new.jsonl');
+    await fs.writeFile(
+      session,
+      JSON.stringify({ role: 'user', ts: '2026-05-07T00:00:00.000Z', content: 'hi' }) + '\n',
+    );
+
+    await waitFor(() => collected.length > 0, 8000);
+    expect(collected[0]?.sessionId).toBe('brand-new');
+  });
+
+  it('registers existing directory jsonl files and tails appends', async () => {
+    const sessionsDir = path.join(tmpDir, 'codex-sessions');
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const session = path.join(sessionsDir, 'live-session.jsonl');
+    await fs.writeFile(session, '');
+
+    watcher = await startTranscriptWatcher({
+      directories: [
+        {
+          tool: 'codex',
+          directory: sessionsDir,
+          sessionIdFromPath: (p) => path.basename(p, '.jsonl'),
+        },
+      ],
+      onEvent: (envelope) => collected.push(envelope),
+    });
+
+    await fs.appendFile(
+      session,
+      JSON.stringify({ role: 'user', ts: '2026-05-07T00:00:00.000Z', content: 'hi' }) + '\n',
+    );
+
+    await waitFor(() => collected.length > 0, 8000);
+    expect(collected[0]?.sessionId).toBe('live-session');
+    expect(collected[0]?.tool).toBe('codex');
+  });
+
   it('shutdown stops further dispatches', async () => {
     const session = path.join(tmpDir, 'sess-3.jsonl');
     await fs.writeFile(session, '');

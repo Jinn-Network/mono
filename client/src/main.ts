@@ -109,6 +109,15 @@ import { GeminiSessionParser } from './trajectory/transcript-parsers/gemini-sess
 import { CursorSqliteParser } from './trajectory/transcript-parsers/cursor-sqlite.js';
 import type { TranscriptParser } from './trajectory/transcript-parsers/types.js';
 import type { StopHookPayload, StopHookTool } from './api/stop-hook.js';
+import {
+  startTranscriptWatcher,
+  type DispatchEnvelope,
+  type TranscriptWatcher,
+} from './trajectory/transcript-watcher.js';
+import {
+  defaultTranscriptWatchDirectorySpecs,
+  toWatchedDirectories,
+} from './trajectory/transcript-session-dirs.js';
 import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
@@ -265,7 +274,7 @@ class EnsurePendingCaptureProcessor implements SpanProcessor {
         sessionId,
         capturedAt: hrTimeToIso(span.startTime),
         originatingTool: { name: inferCaptureTool(span) },
-        capturePath: 'A',
+        capturePath: inferCapturePath(span),
         status: 'pending',
         spanCount: 0,
         durationMs: 0,
@@ -291,6 +300,11 @@ function inferCaptureTool(span: ReadableSpan): string {
   return stringAttribute(span.attributes['transcript.tool'])
     ?? stringAttribute(span.resource.attributes['service.name'])
     ?? 'otel';
+}
+
+function inferCapturePath(span: ReadableSpan): 'A' | 'B' | 'C' | 'D' {
+  if (stringAttribute(span.attributes['transcript.tool'])) return 'B';
+  return 'A';
 }
 
 function repoMetadataFromSpan(span: ReadableSpan): { repoRemoteUrl?: string; repoCommitHash?: string } {
@@ -342,6 +356,27 @@ function ensurePendingStopHookCapture(
     });
   } catch (err) {
     if (!captures.getBySession(payload.sessionId)) throw err;
+  }
+}
+
+function ensurePendingTranscriptCapture(
+  captures: CapturesStore,
+  envelope: DispatchEnvelope,
+): void {
+  if (captures.getBySession(envelope.sessionId)) return;
+  try {
+    captures.savePending({
+      sessionId: envelope.sessionId,
+      capturedAt: new Date().toISOString(),
+      originatingTool: { name: envelope.tool },
+      capturePath: 'B',
+      status: 'pending',
+      spanCount: 0,
+      durationMs: 0,
+      redactedSpanCount: 0,
+    });
+  } catch (err) {
+    if (!captures.getBySession(envelope.sessionId)) throw err;
   }
 }
 
@@ -912,11 +947,56 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         `${err instanceof Error ? err.message : String(err)}`,
     );
   }
+  let transcriptWatcher: TranscriptWatcher | undefined;
+  let pathBSyntheticSpanProvider: ReturnType<typeof startSyntheticSpanProvider> | undefined;
+
+  const closePathBTranscriptWatcher = async () => {
+    const watcher = transcriptWatcher;
+    transcriptWatcher = undefined;
+    await watcher?.shutdown().catch(() => undefined);
+    const provider = pathBSyntheticSpanProvider;
+    pathBSyntheticSpanProvider = undefined;
+    await provider?.shutdown().catch(() => undefined);
+  };
+
   const closeCaptureReceiver = async () => {
+    await closePathBTranscriptWatcher();
     const receiver = captureReceiver;
     captureReceiver = undefined;
     await receiver?.shutdown().catch(() => undefined);
   };
+
+  if (captureReceiver) {
+    try {
+      const directorySpecs = defaultTranscriptWatchDirectorySpecs();
+      if (directorySpecs.length > 0) {
+        pathBSyntheticSpanProvider = startSyntheticSpanProvider({
+          otlpHttpEndpoint: `http://127.0.0.1:${captureReceiver.httpPort}/v1/traces`,
+        });
+        transcriptWatcher = await startTranscriptWatcher({
+          directories: toWatchedDirectories(directorySpecs),
+          onEvent: (envelope) => {
+            ensurePendingTranscriptCapture(capturesStore, envelope);
+            emitSyntheticSpan(pathBSyntheticSpanProvider!, envelope);
+          },
+        });
+        console.log(
+          '[main] Path-B transcript watcher started for ' +
+            directorySpecs.map((s) => `${s.tool}@${s.directory}`).join(', '),
+        );
+      } else {
+        console.log(
+          '[main] Path-B transcript watcher skipped — no Codex/Claude session directories on disk yet',
+        );
+      }
+    } catch (err) {
+      await closePathBTranscriptWatcher();
+      console.warn(
+        '[main] Path-B transcript watcher disabled: ' +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   const capturePublishRef: {
     current: ((sessionId: string) => Promise<{ envelopeCid: string }>) | undefined;
   } = { current: undefined };
@@ -1030,9 +1110,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             // requestDaemonRestart so the operator is never stranded.
             preSpawnCleanup: async () => {
               await setupApiServer.close().catch(() => undefined);
-              if (captureReceiver) {
-                await captureReceiver.shutdown().catch(() => undefined);
-              }
+              await closeCaptureReceiver();
             },
           }),
       },
