@@ -49,4 +49,10 @@ describe('resolveValidatePoolInstanceIds', () => {
     // came first, so its position wins.
     expect(ids[0]).toBe('basicmachines-co__basic-memory-341');
   });
+
+  it('reads --known-pytest-missing from client/scripts/swe-rebench-v2-pytest-missing.json (#493)', () => {
+    const ids = resolveValidatePoolInstanceIds({ knownPytestMissing: true });
+    expect(ids.length).toBeGreaterThanOrEqual(6);
+    expect(ids[0]).toMatch(/__/);
+  });
 });
