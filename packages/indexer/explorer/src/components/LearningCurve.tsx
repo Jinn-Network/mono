@@ -13,7 +13,7 @@
  *   - Guarded against jsdom / no-DOM environments
  */
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 // uPlot uses `export =` (CommonJS default), so we import the type separately
 // and do a dynamic import to avoid SSR/jsdom issues with canvas.
 import type uPlotType from 'uplot';
@@ -129,6 +129,12 @@ export function LearningCurve({
 }: LearningCurveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<unknown>(null);
+
+  // Hover state — tracks which legend entry is currently hovered/focused so
+  // we can surface the "→ filter to this" hint on the active entry only.
+  // Pattern A (inline state + opacity) matches Leaderboard.tsx — this file
+  // uses no CSS rules, only inline styles.
+  const [hoveredLegend, setHoveredLegend] = useState<number | null>(null);
 
   // Resolve effective multi-series payload. When `series` is provided with
   // >= 2 entries, we override the single-line rendering. Otherwise we keep
@@ -333,6 +339,14 @@ export function LearningCurve({
                   key={key}
                   type="button"
                   onClick={() => onLegendClick(s.label)}
+                  onMouseEnter={() => setHoveredLegend(i)}
+                  onMouseLeave={() =>
+                    setHoveredLegend((prev) => (prev === i ? null : prev))
+                  }
+                  onFocus={() => setHoveredLegend(i)}
+                  onBlur={() =>
+                    setHoveredLegend((prev) => (prev === i ? null : prev))
+                  }
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -349,6 +363,22 @@ export function LearningCurve({
                   }}
                 >
                   {content}
+                  <span
+                    data-hover-hint="true"
+                    className="legend-hover-hint"
+                    style={{
+                      marginLeft: 6,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 8,
+                      letterSpacing: '0.04em',
+                      color: 'var(--fg-dim)',
+                      opacity: hoveredLegend === i ? 1 : 0,
+                      transition: 'opacity 80ms linear',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    → filter to this
+                  </span>
                 </button>
               );
             }

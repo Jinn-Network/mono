@@ -365,25 +365,25 @@ describe('SolverNetView', () => {
   });
 });
 
-// ─── ExploreControls inline on SolverNetView ─────────────────────────────────
+// ─── Slice control surface (spec §3 progressive-disclosure chrome) ───────────
 
-describe('SolverNetView — ExploreControls inline', () => {
-  it('renders the GROUP BY chip row above the chart', async () => {
+describe('SolverNetView — slice control surface', () => {
+  it('exposes the Group by dropdown trigger above the chart', async () => {
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
-      expect(screen.getByText(/^group by$/i)).toBeInTheDocument();
+      // The GroupByDropdown trigger reads "Group by: none ▾".
+      expect(
+        screen.getByRole('button', { name: /^group by: none$/i }),
+      ).toBeInTheDocument();
     });
-    // The "none" group chip is rendered as a button with aria-pressed
-    expect(
-      screen.getByRole('button', { name: 'none', pressed: true }),
-    ).toBeInTheDocument();
   });
 
   it('renders the WINDOW SegmentedControl with 20 / 30 / 50 / 100 / ALL options', async () => {
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
+      // The WINDOW selector now lives inline next to the chart caption.
       expect(screen.getByText(/^window$/i)).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: '20' })).toBeInTheDocument();
@@ -393,13 +393,23 @@ describe('SolverNetView — ExploreControls inline', () => {
     expect(screen.getByRole('button', { name: 'ALL' })).toBeInTheDocument();
   });
 
-  it('renders the Raw toggle button', async () => {
+  it('opens the Raw toggle inside the ⚙ settings popover', async () => {
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
-      // The Raw toggle is a button labelled "Raw"
-      expect(screen.getByRole('button', { name: /^raw$/i })).toBeInTheDocument();
+      // The ⚙ Slice settings trigger is the entry point.
+      expect(
+        screen.getByRole('button', { name: /slice settings/i }),
+      ).toBeInTheDocument();
     });
+    // Raw is hidden until the popover opens.
+    expect(
+      screen.queryByRole('switch', { name: /include raw data/i }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /slice settings/i }));
+    expect(
+      screen.getByRole('switch', { name: /include raw data/i }),
+    ).toBeInTheDocument();
   });
 
   it('calls useSlice with group=harness when URL has ?group=harness', async () => {
@@ -447,6 +457,88 @@ describe('SolverNetView — ExploreControls inline', () => {
   });
 });
 
+// ─── KPI hero uses aggregate kpis.resolvedRate (bug 6.2) ─────────────────────
+
+describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)', () => {
+  it('shows aggregate rate (slice.kpis.resolvedRate) when group !== none', async () => {
+    // Spec §6.2: visiting /solvernet/<cid>?group=harness must show the gold
+    // KPI hero as the slice's aggregate resolvedRate (63.5%) — NOT the first
+    // series' resolvedRate (70.0%) and NOT a buggy per-bucket sample (2.6%).
+    // Series array shapes the chart; the headline reflects the slice as a whole.
+    const groupedSlice = {
+      ...SLICE_DATA,
+      params: { ...SLICE_DATA.params, group: 'harness' as const },
+      kpis: {
+        attempts: 500,
+        verdicts: 400,
+        verdictsPass: 254,
+        resolvedRate: 0.635, // aggregate — the headline MUST be 63.5%
+        jinnEarned: '0',
+      },
+      series: [
+        {
+          groupValue: 'codex',
+          buckets: [],
+          rolling: [0.7],
+          kpis: {
+            attempts: 200,
+            verdicts: 150,
+            verdictsPass: 105,
+            resolvedRate: 0.7, // distractor — NOT the headline
+            jinnEarned: '0',
+          },
+        },
+        {
+          groupValue: 'hermes-agent',
+          buckets: [],
+          rolling: [0.4],
+          kpis: {
+            attempts: 150,
+            verdicts: 130,
+            verdictsPass: 52,
+            resolvedRate: 0.4,
+            jinnEarned: '0',
+          },
+        },
+        {
+          groupValue: '(unknown)',
+          buckets: [],
+          rolling: [0.74],
+          kpis: {
+            attempts: 150,
+            verdicts: 120,
+            verdictsPass: 89,
+            resolvedRate: 0.74,
+            jinnEarned: '0',
+          },
+        },
+      ],
+    };
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: groupedSlice,
+    } as any);
+
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?group=harness`,
+    );
+    render(<WrappedView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('kpi-hero-resolved-rate')).toBeInTheDocument();
+    });
+
+    const hero = screen.getByTestId('kpi-hero-resolved-rate');
+    // The aria-label uses the un-animated value directly (pct of
+    // slice.kpis.resolvedRate), making it the stable readout.
+    expect(hero).toHaveAttribute('aria-label', 'Resolved rate: 63.5%');
+    // And it must NOT be series[0]'s rate.
+    expect(hero).not.toHaveAttribute('aria-label', 'Resolved rate: 70.0%');
+  });
+});
+
 // ─── Chart legend → filter ───────────────────────────────────────────────────
 
 describe('SolverNetView — chart legend click adds filter', () => {
@@ -486,10 +578,12 @@ describe('SolverNetView — chart legend click adds filter', () => {
     await waitFor(() => {
       expect(screen.getByTestId('learning-curve-legend')).toBeInTheDocument();
     });
-    // Find the legend button for 'codex'
+    // Find the legend button for 'codex'. The button contains a "→ filter to
+    // this" hover-hint sibling span (Task 7), so match by partial text rather
+    // than exact equality.
     const legend = screen.getByTestId('learning-curve-legend');
-    const codexBtn = Array.from(legend.querySelectorAll('button')).find(
-      (b) => b.textContent === 'codex',
+    const codexBtn = Array.from(legend.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('codex'),
     );
     expect(codexBtn).toBeDefined();
     fireEvent.click(codexBtn!);
@@ -499,6 +593,128 @@ describe('SolverNetView — chart legend click adds filter', () => {
       const chips = screen.getByTestId('active-slice-chips');
       expect(chips).toHaveTextContent(/harness:codex/i);
     });
+  });
+});
+
+// ─── Degenerate filter+group auto-clear (bug 6.1) ────────────────────────────
+
+describe('SolverNetView — degenerate filter+group auto-clears group (bug 6.1)', () => {
+  it('drops group=<dim> from URL when filter[<dim>] is set for the same dim', async () => {
+    // Spec §6.1: when group=harness AND filter[harness]=codex are both in the
+    // URL, the resulting slice has exactly one series — equivalent to what
+    // group=none would yield. The chart panel previously rendered "No data
+    // yet" despite KPIs reading real verdicts. Fix option (b): auto-clear the
+    // redundant group on mount.
+    vi.mocked(useSlice).mockClear();
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?group=harness&filter[harness]=codex`,
+      { static: false },
+    );
+    render(<WrappedView />);
+
+    // After the auto-clear effect fires, useSlice should be called with
+    // group: 'none' (not 'harness'). filter[harness]=['codex'] stays put.
+    await waitFor(() => {
+      const calls = vi.mocked(useSlice).mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      expect(lastCall?.group).toBe('none');
+      expect(lastCall?.filter).toEqual({ harness: ['codex'] });
+    });
+  });
+});
+
+// ─── New filter chrome (spec §3) ─────────────────────────────────────────────
+
+describe('SolverNetView — new filter chrome (spec §3)', () => {
+  it('renders PersistentControlsRow when no filters are active', async () => {
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: SLICE_DATA,
+    } as any);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      // The + filter chip is the persistent affordance.
+      expect(
+        screen.getByRole('button', { name: /^add filter$/i }),
+      ).toBeInTheDocument();
+    });
+    // Group by: none ▾ dropdown trigger visible.
+    expect(
+      screen.getByRole('button', { name: /^group by: none$/i }),
+    ).toBeInTheDocument();
+    // FilterChipStrip region MUST NOT render when no filters are active.
+    expect(
+      screen.queryByRole('region', { name: /active filters/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders FilterChipStrip + inline GroupByDropdown when filters are active', async () => {
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: SLICE_DATA,
+    } as any);
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(
+        CID,
+      )}?filter[harness]=codex&filter[model]=gpt-5.4-mini`,
+    );
+    render(<WrappedView />);
+    await waitFor(() => {
+      const region = screen.getByRole('region', { name: /active filters/i });
+      expect(region).toHaveTextContent(/harness:codex/i);
+      expect(region).toHaveTextContent(/model:gpt-5\.4-mini/i);
+    });
+    // Group by dropdown is still rendered alongside the chip strip.
+    expect(
+      screen.getByRole('button', { name: /^group by: /i }),
+    ).toBeInTheDocument();
+  });
+
+  it('removes a filter when its × is clicked', async () => {
+    vi.mocked(useSlice).mockClear();
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(CID)}?filter[harness]=codex`,
+      { static: false },
+    );
+    render(<WrappedView />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /remove harness=codex/i }),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: /remove harness=codex/i }),
+    );
+    // After removal, useSlice should be called with empty filter set.
+    await waitFor(() => {
+      const calls = vi.mocked(useSlice).mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      expect(lastCall?.filter).toEqual({});
+    });
+  });
+
+  it('does NOT render the legacy ExploreControls section labels (GROUP BY, FILTERS)', async () => {
+    vi.mocked(useSlice).mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: SLICE_DATA,
+    } as any);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await waitFor(() => {
+      expect(screen.getByText('Learning curve')).toBeInTheDocument();
+    });
+    // The legacy "GROUP BY" and "FILTERS" section labels must not render as
+    // standalone caps-mono labels. The WINDOW chart-caption inline selector is
+    // allowed; that label still lives alongside the chart.
+    expect(screen.queryByText(/^group by$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^filters$/i)).not.toBeInTheDocument();
   });
 });
 

@@ -197,8 +197,15 @@ export type GroupValue = (typeof GROUP_VALUES)[number];
 /**
  * Read/write the slice-engine `group` URL param, restricted to the allowed
  * enum. Unknown values fall back to 'none'.
+ *
+ * Setting the default ('none') removes the key from the URL — keeps the URL
+ * clean when the user picks "Group by: none" in the dropdown, so the cold
+ * landing URL stays `/solvernet/<cid>` (no `?group=none` pollution).
  */
 export function useGroupParam(): [GroupValue, (v: GroupValue) => void] {
   const [raw, setRaw] = useEnumParam('group', 'none', GROUP_VALUES as unknown as string[]);
-  return [raw as GroupValue, setRaw];
+  function set(v: GroupValue) {
+    setRaw(v === 'none' ? null : v);
+  }
+  return [raw as GroupValue, set];
 }

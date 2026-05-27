@@ -15,6 +15,7 @@
  * TODO(ebu7.<later>): virtualize rows when operator counts grow
  */
 
+import { useState } from 'react';
 import { Link } from 'wouter';
 import type { RankedLeaderboardRow, LeaderboardRow } from '../lib/api';
 import { DataTable, cellStyle, cellNumStyle, cellMutedStyle } from './DataTable';
@@ -137,6 +138,12 @@ export function Leaderboard({
   const [sortKey, setSortKey] = useEnumParam('sort', 'resolvedRate', SORT_KEYS);
   const [sortDir, setSortDir] = useEnumParam('dir', 'desc', ['asc', 'desc']);
 
+  // Hover state — tracks which operator row is currently hovered so we can
+  // surface the "→ filter to this" hint on the active row only. Pattern A
+  // (inline state + opacity) keeps consistency with the rest of this file,
+  // which uses no CSS rules.
+  const [hoveredOperator, setHoveredOperator] = useState<string | null>(null);
+
   function handleSort(key: string) {
     if (key === sortKey) {
       // Toggle direction
@@ -216,6 +223,18 @@ export function Leaderboard({
             <button
               type="button"
               onClick={() => onOperatorClick(row.operator)}
+              onMouseEnter={() => setHoveredOperator(row.operator)}
+              onMouseLeave={() =>
+                setHoveredOperator((prev) =>
+                  prev === row.operator ? null : prev,
+                )
+              }
+              onFocus={() => setHoveredOperator(row.operator)}
+              onBlur={() =>
+                setHoveredOperator((prev) =>
+                  prev === row.operator ? null : prev,
+                )
+              }
               style={{
                 ...operatorTextStyle,
                 background: 'transparent',
@@ -225,6 +244,22 @@ export function Leaderboard({
               }}
             >
               {shortAddr(row.operator)}
+              <span
+                data-hover-hint="true"
+                className="leaderboard-row-hint"
+                style={{
+                  marginLeft: 6,
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 8,
+                  letterSpacing: '0.04em',
+                  color: 'var(--fg-dim)',
+                  opacity: hoveredOperator === row.operator ? 1 : 0,
+                  transition: 'opacity 80ms linear',
+                  pointerEvents: 'none',
+                }}
+              >
+                → filter to this
+              </span>
             </button>
           ) : (
             <Link

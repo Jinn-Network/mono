@@ -257,3 +257,32 @@ describe('Leaderboard', () => {
     );
   });
 });
+
+describe('Leaderboard hover affordance', () => {
+  it('renders a sibling hint element after the operator address with "→ filter to this"', () => {
+    const onOperatorClick = vi.fn();
+    const { Wrapper } = wrap();
+    render(
+      <Leaderboard
+        ranked={[
+          {
+            rank: 1,
+            operator: '0xaaa0000000000000000000000000000000000bbb',
+            attempts: 10,
+            settledContribution: 8,
+            verdictsTotal: 10,
+            verdictsPass: 7,
+            resolvedRate: 0.7,
+            jinnEarned: '0',
+          },
+        ]}
+        lowVolume={[]}
+        onOperatorClick={onOperatorClick}
+      />,
+      { wrapper: Wrapper },
+    );
+    const hint = screen.getByText(/→ filter to this/i);
+    expect(hint).toBeInTheDocument();
+    expect(hint).toHaveAttribute('data-hover-hint', 'true');
+  });
+});

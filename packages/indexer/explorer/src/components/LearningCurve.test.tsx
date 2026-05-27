@@ -147,3 +147,38 @@ describe('LearningCurve', () => {
     expect(onLegendClick).toHaveBeenCalledWith('hermes');
   });
 });
+
+describe('LearningCurve legend hover affordance', () => {
+  it('renders a sibling hint after each legend label when onLegendClick is supplied', () => {
+    const onLegendClick = vi.fn();
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        onLegendClick={onLegendClick}
+        series={[
+          { rolling: ROLLING, label: 'codex', color: '#7aa7dc' },
+          { rolling: ROLLING, label: 'hermes-agent', color: '#6b9fc5' },
+        ]}
+      />,
+    );
+    const hints = screen.getAllByText(/→ filter to this/i);
+    expect(hints).toHaveLength(2);
+  });
+
+  it('does NOT render legend hints when onLegendClick is not supplied', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        series={[
+          { rolling: ROLLING, label: 'codex', color: '#7aa7dc' },
+          { rolling: ROLLING, label: 'hermes-agent', color: '#6b9fc5' },
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/→ filter to this/i)).not.toBeInTheDocument();
+  });
+});

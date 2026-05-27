@@ -2,16 +2,20 @@
  * SolverNetView — per-SolverNet detail with the Learning panel.
  *
  * After the /explore merge (refactor #676), this view owns the full engine
- * control surface — group-by chips, filter pills, window selector, raw toggle,
- * and the active-slice chip strip — directly above the learning curve. The
- * legacy /explore/<cid> route redirects here preserving its query string.
+ * control surface. The progressive-disclosure filter chrome (spec §3) is
+ * composed of FilterChipStrip + GroupByDropdown + PersistentControlsRow +
+ * AddFilterPopover above the chart; the WINDOW SegmentedControl sits inline
+ * next to the chart caption (it's chart-shaping, not slice-defining), and the
+ * ⚙ Slice settings popover holds Raw + Reset. The active-slice chip strip
+ * stays below the chrome. The legacy /explore/<cid> route redirects here
+ * preserving its query string.
  *
  * Gold element: the big headline resolved-rate (ONE gold per surface rule).
  * URL state owned here: window, group, filters, include, bucket, curveMode, board.
  * Legacy `?k=N` query is migrated once-per-mount to `?window=N`.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'wouter';
 import {
   useSlice,
@@ -35,7 +39,11 @@ import { CheckpointTimeline } from '../components/CheckpointTimeline';
 import { FreezeIntegrity } from '../components/FreezeIntegrity';
 import { Leaderboard } from '../components/Leaderboard';
 import { SegmentedControl } from '../components/SegmentedControl';
-import { ExploreControls } from '../components/ExploreControls';
+import { FilterChipStrip } from '../components/FilterChipStrip';
+import { GroupByDropdown } from '../components/GroupByDropdown';
+import { PersistentControlsRow } from '../components/PersistentControlsRow';
+import { AddFilterPopover } from '../components/AddFilterPopover';
+import { SliceSettingsPopover } from '../components/SliceSettingsPopover';
 import {
   ChartWithMilestoneMark,
   ActiveSliceChips,
@@ -45,6 +53,8 @@ import {
   useEnumParam,
   useGroupParam,
   useFilterParams,
+  FILTER_DIMS,
+  type FilterDim,
   type FilterMap,
 } from '../lib/url-state';
 import { useCountUp } from '../hooks/useCountUp';
@@ -55,6 +65,18 @@ import { pct, int, shortAddr, shortCid } from '../lib/format';
 const WINDOW_ALL = 999999;
 const DEFAULT_WINDOW = 50;
 const MAX_SERIES = 5;
+
+// WINDOW SegmentedControl options — kept inline next to the chart caption.
+// The new filter chrome (spec §3) removes the GROUP BY / FILTERS labels from
+// the panel but leaves window inline because it's a chart-shaping control,
+// not a slice-defining one.
+const WINDOW_OPTIONS = [
+  { label: '20', value: '20' },
+  { label: '30', value: '30' },
+  { label: '50', value: '50' },
+  { label: '100', value: '100' },
+  { label: 'ALL', value: String(WINDOW_ALL) },
+];
 
 // ── Slice leaderboard → Leaderboard component row adapter ────────────────────
 
@@ -153,6 +175,19 @@ export function SolverNetView() {
   ]);
   const [board, setBoard] = useEnumParam('board', 'train', ['train', 'frozen']);
 
+  // Progressive-disclosure filter chrome (spec §3) — popover open state.
+  const [addFilterOpen, setAddFilterOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Bug fix 6.1 (spec §6.1): when filter[<dim>] is set AND group === <dim>,
+  // the group is degenerate (one series, equals what group=none would show).
+  // Auto-clear group to keep the URL clean and the chart correctly rendered.
+  useEffect(() => {
+    if (group !== 'none' && filters[group] && filters[group]!.length > 0) {
+      setGroup('none');
+    }
+  }, [group, filters, setGroup]);
+
   // Legacy ?k=N → ?window=N migration. Fires once per mount (URL stays at the
   // current location for the rest of the session unless the user navigates).
   const migratedRef = useRef(false);
@@ -179,6 +214,7 @@ export function SolverNetView() {
     group !== 'none' ||
     Object.keys(filters).length > 0 ||
     searchParams.has('window');
+  const hasFilters = Object.keys(filters).length > 0;
 
   // Engine consumer. SolverNetView is now the engine's reference consumer
   // for the full surface — no more parallel /explore view.
@@ -210,6 +246,9 @@ export function SolverNetView() {
   const isError = sliceError || metaError;
 
   // Animate the gold headline resolved-rate; respects prefers-reduced-motion.
+  // Bug fix 6.2 (spec §6.2): KPI hero ALWAYS reflects the slice's aggregate
+  // `kpis.resolvedRate`, regardless of grouping. The series array shapes the
+  // chart; the headline reflects the slice as a whole.
   const animatedRate = useCountUp(slice?.kpis.resolvedRate ?? 0, 400);
 
   return (
@@ -391,6 +430,7 @@ export function SolverNetView() {
             <div style={{ textAlign: 'right' }}>
               <div
                 className="data"
+                data-testid="kpi-hero-resolved-rate"
                 style={{
                   fontFamily: 'var(--font-display)',
                   fontSize: 'var(--text-6xl)',
@@ -429,17 +469,87 @@ export function SolverNetView() {
             <Kpi label="Verdicts passed" value={int(slice.kpis.verdictsPass)} />
           </KpiRow>
 
-          {/* ── Explore controls (group / filters / window / raw) ── */}
-          <ExploreControls
-            group={group}
-            onGroupChange={setGroup}
-            filters={filters}
-            onFiltersChange={setFilters}
-            includeRaw={includeUnenriched}
-            onIncludeRawChange={(v) => setInclude(v ? 'raw' : null)}
-            window={window}
-            onWindowChange={(v) => setWindow(v)}
-          />
+          {/* ── Progressive-disclosure filter chrome (spec §3) ──
+              - Empty filters: PersistentControlsRow (+ filter chip + Group by ▾).
+              - Active filters: FilterChipStrip on the left, GroupByDropdown
+                right-aligned, both inside a hairline-bordered band.
+              The ⚙ settings popover lives in the chart-caption row below. */}
+          {(() => {
+            // Available values for the add-filter popover come from the slice
+            // engine's series array when the user has grouped by a dimension.
+            // The engine emits one series per distinct value of the group dim.
+            // For dimensions the user hasn't grouped on, the popover falls back
+            // to "No values to filter by".
+            const availableValues: Partial<Record<FilterDim, string[]>> = {};
+            if (group !== 'none') {
+              const dim = group as FilterDim;
+              const values = slice.series
+                .map((s) => s.groupValue)
+                .filter((v): v is string => v !== null && v !== '');
+              if (values.length > 0) availableValues[dim] = values;
+            }
+            return (
+              <div style={{ position: 'relative' }}>
+                {hasFilters ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 0',
+                      borderTop: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
+                      background: 'rgba(122,167,220,0.04)',
+                    }}
+                  >
+                    <FilterChipStrip
+                      filters={filters}
+                      onRemove={(dim, value) => {
+                        const next: FilterMap = { ...filters };
+                        const arr = (next[dim] ?? []).filter(
+                          (v) => v !== value,
+                        );
+                        if (arr.length === 0) delete next[dim];
+                        else next[dim] = arr;
+                        setFilters(next);
+                      }}
+                      onAddFilter={() => setAddFilterOpen(true)}
+                    />
+                    <GroupByDropdown value={group} onChange={setGroup} />
+                  </div>
+                ) : (
+                  <PersistentControlsRow
+                    group={group}
+                    onGroupChange={setGroup}
+                    onAddFilter={() => setAddFilterOpen(true)}
+                  />
+                )}
+                {addFilterOpen ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      right: 0,
+                      zIndex: 10,
+                      marginTop: 4,
+                    }}
+                  >
+                    <AddFilterPopover
+                      availableValues={availableValues}
+                      onSelect={(dim, value) => {
+                        const next: FilterMap = { ...filters };
+                        next[dim] = [...(next[dim] ?? []), value];
+                        setFilters(next);
+                        setAddFilterOpen(false);
+                      }}
+                      onDismiss={() => setAddFilterOpen(false)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
 
           {/* ── Active-slice chip strip ── */}
           {hasExplicitSlice && (
@@ -452,17 +562,48 @@ export function SolverNetView() {
 
           {/* ── Learning curve ── */}
           <Card title="Learning curve">
-            {/* curveMode (Rolling / Buckets) selector lives inline above the
-                chart; group=none uses it, grouped views are rolling-only. */}
-            {group === 'none' && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  marginBottom: 16,
-                }}
-              >
+            {/* Chart-caption row:
+                  - View (Rolling / Buckets) — only when group=none.
+                  - Window (20 / 30 / 50 / 100 / ALL) — always.
+                  - ⚙ Slice settings — opens SliceSettingsPopover (Raw + Reset).
+                Window stays here because it's a chart-shaping control (how much
+                of the trailing history to render), not a slice-defining one. */}
+            <div
+              style={{
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                flexWrap: 'wrap',
+                marginBottom: 16,
+              }}
+            >
+              {group === 'none' && (
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                >
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      letterSpacing: '0.10em',
+                      textTransform: 'uppercase',
+                      color: 'var(--fg-dim)',
+                    }}
+                  >
+                    View
+                  </span>
+                  <SegmentedControl
+                    options={[
+                      { label: 'Rolling', value: 'rolling' },
+                      { label: 'Buckets', value: 'buckets' },
+                    ]}
+                    value={curveMode as 'rolling' | 'buckets'}
+                    onChange={(v) => setCurveMode(v)}
+                  />
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span
                   style={{
                     fontFamily: 'var(--font-mono)',
@@ -472,18 +613,76 @@ export function SolverNetView() {
                     color: 'var(--fg-dim)',
                   }}
                 >
-                  View
+                  Window
                 </span>
                 <SegmentedControl
-                  options={[
-                    { label: 'Rolling', value: 'rolling' },
-                    { label: 'Buckets', value: 'buckets' },
-                  ]}
-                  value={curveMode as 'rolling' | 'buckets'}
-                  onChange={(v) => setCurveMode(v)}
+                  options={WINDOW_OPTIONS}
+                  value={String(window >= WINDOW_ALL ? WINDOW_ALL : window)}
+                  onChange={(v) => setWindow(Number(v))}
                 />
               </div>
-            )}
+              <div style={{ marginLeft: 'auto', position: 'relative' }}>
+                <button
+                  type="button"
+                  aria-label="Slice settings"
+                  aria-expanded={settingsOpen}
+                  onClick={() => setSettingsOpen((p) => !p)}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-pill)',
+                    background: 'transparent',
+                    color: 'var(--fg-dim)',
+                    padding: '3px 9px',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    lineHeight: 1,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ⚙
+                </button>
+                {settingsOpen ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      right: 0,
+                      zIndex: 10,
+                    }}
+                  >
+                    <SliceSettingsPopover
+                      includeRaw={includeUnenriched}
+                      onIncludeRawChange={(v) => {
+                        setInclude(v ? 'raw' : null);
+                        setSettingsOpen(false);
+                      }}
+                      onReset={() => {
+                        // Atomic clear — each per-hook setter has its own
+                        // stale `tempSearchParams` closure inside wouter's
+                        // useSearchParams (last call wins). Drop straight to
+                        // setSearchParams with all slice keys deleted in a
+                        // single update so the resulting URL is just
+                        // `/solvernet/<cid>` (spec §8 acceptance).
+                        setSearchParams(
+                          (prev) => {
+                            const next = new URLSearchParams(prev);
+                            for (const dim of FILTER_DIMS) {
+                              next.delete(`filter[${dim}]`);
+                            }
+                            next.delete('group');
+                            next.delete('window');
+                            next.delete('include');
+                            return next;
+                          },
+                          { replace: true },
+                        );
+                        setSettingsOpen(false);
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
 
             {group === 'none' ? (
               curveMode === 'rolling' ? (
