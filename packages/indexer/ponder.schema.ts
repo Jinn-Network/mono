@@ -627,6 +627,19 @@ export const verdictEnvelopeMeta = onchainTable(
      */
     actualScore: t.text().notNull().default(''),
     /**
+     * SWE-rebench v2 instance identifier (e.g. 'sympy__sympy-27510'). Populated
+     * by the IPFS enrichment pass: when solverType starts with 'swe-rebench-v2',
+     * the handler fetches the task body via the envelope's task.cid and reads
+     * spec.instance_id. Empty string for other solverTypes (they have no
+     * instance_id concept) and for swe-rebench-v2 envelopes whose task body
+     * could not be fetched. Indexed alongside manifestCid + actualPassed so the
+     * launcher's getInstanceSuccessCounts can filter cheaply.
+     *
+     * Spec: issue #669 — launcher under-counts successes when verdicts arrive
+     * via other operators' delivery-watchers.
+     */
+    instanceId: t.text().notNull().default(''),
+    /**
      * Normalized off-chain verdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN'.
      * 'UNKNOWN' when the envelope body lacks a recognizable verdict field.
      */
@@ -645,6 +658,7 @@ export const verdictEnvelopeMeta = onchainTable(
     actualPassedIdx: index().on(table.actualPassed),
     evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
     taskIdIdx: index().on(table.taskId),
+    instanceIdIdx: index().on(table.manifestCid, table.actualPassed, table.instanceId),
   }),
 );
 
