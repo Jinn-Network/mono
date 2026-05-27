@@ -41,6 +41,40 @@ way to push the loop from "writes notes" to "actually learns" — and
 what does the broader literature on non-weight self-improvement
 suggest about the order of moves?
 
+## The RL components, mapped to Jinn
+
+A useful frame for what follows: every RL system has six components.
+Naming where each lives in Jinn — and which one is missing — makes the
+rest of the note legible at a glance.
+
+1. **Policy** — what produces actions. *In Jinn:* the harness (prompts,
+   skills, tools, retrieval). Foundation-model weights are frozen by
+   design wager.
+2. **Environment** — what the policy acts on. *In Jinn:* SolverNet
+   tasks.
+3. **Reward** — what scores actions. *In Jinn:*
+   `verdictEnvelopeMeta.actualPassed` / `actualScore` from the
+   evaluator, with JINN minted downstream.
+4. **Trajectory** — the action/observation sequence inside one run.
+   *In Jinn:* `TrajectoryCollector` publishes structured spans per run,
+   sha256-referenced from the Solution envelope. Evaluator-side spans
+   are rich; solver-side spans are sparse today
+   (`state_transition` only).
+5. **Credit assignment** — how reward attributes back to specific
+   actions in the policy. *In Jinn:* this is the gap. The Consolidator
+   today reverts on a qualitative trend signal; nothing reads
+   quantitative per-codeDigest reward to decide what to revert.
+6. **Policy update** — how the policy changes given a credit signal.
+   *In Jinn:* the Improve phase's Promoter writes git commits to
+   `implStateDir`; the Memory-consolidation phase's Consolidator
+   reverts or prunes.
+
+Today 1, 2, 3, 6 all exist. 4 exists but is sparse on the solver path.
+5 runs on a qualitative signal, not quantitative reward. **The ladder
+later in this note is the progression of #5 — closing the
+credit-assignment gap with successively richer mechanisms, each
+addressing a known weakness of the one before it.**
+
 ## Substrate
 
 Jinn's learning substrate has two layers and a feedback channel
