@@ -54,5 +54,6 @@ describe('resolveValidatePoolInstanceIds', () => {
     const ids = resolveValidatePoolInstanceIds({ knownPytestMissing: true });
     expect(ids.length).toBeGreaterThanOrEqual(6);
     expect(ids[0]).toMatch(/__/);
+    expect(ids).toContain('BerriAI__litellm-13868');
   });
 });
