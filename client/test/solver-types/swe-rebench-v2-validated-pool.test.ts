@@ -11,6 +11,8 @@ import {
   hashVettedPoolArtifact,
   loadVettedPoolArtifactScorableEntries,
   sweRebenchV2VettedPoolArtifactMetadataKey,
+  normalizeReason,
+  summarizeValidatedPool,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
@@ -38,6 +40,83 @@ function poolTask(id: string, overrides: Partial<PoolTask> = {}): PoolTask {
     ...overrides,
   };
 }
+
+describe('normalizeReason (#493 reason histogram)', () => {
+  it('collapses gold-patch-not-resolved (f2p X, p2p_broke Y) into the bucket name', () => {
+    expect(normalizeReason('gold-patch-not-resolved (f2p 1, p2p_broke 0)')).toBe('gold-patch-not-resolved');
+    expect(normalizeReason('gold-patch-not-resolved (f2p 0, p2p_broke 5)')).toBe('gold-patch-not-resolved');
+  });
+
+  it('collapses transient:HF-429:<msg> variants into transient:HF-429', () => {
+    expect(normalizeReason('transient:HF-429:HF datasets-server returned 429 for X/2026_02')).toBe('transient:HF-429');
+    expect(normalizeReason('transient:HF-429:anything')).toBe('transient:HF-429');
+  });
+
+  it('collapses error:HF datasets-server returned 429 ... variants into error:HF-429', () => {
+    // Legacy 429 reasons emitted before the transient classifier shipped
+    // (issue #578). The histogram should still bucket them by family so
+    // operators can see "this is the same problem" at a glance.
+    expect(normalizeReason('error:HF datasets-server returned 429 for nebius/SWE-rebench-leaderboard/2026_02')).toBe('error:HF-429');
+    expect(normalizeReason('error:HF datasets-server returned 429 for nebius/SWE-rebench-leaderboard/2025_05')).toBe('error:HF-429');
+  });
+
+  it('preserves canonical reasons unchanged', () => {
+    expect(normalizeReason('gold-patch-resolves')).toBe('gold-patch-resolves');
+    expect(normalizeReason('ungradeable:pytest_missing')).toBe('ungradeable:pytest_missing');
+    expect(normalizeReason('ungradeable:docker_unavailable')).toBe('ungradeable:docker_unavailable');
+    expect(normalizeReason('error:HF-429-permanent-after-5-passes')).toBe('error:HF-429-permanent-after-5-passes');
+    expect(normalizeReason('non-pytest-unsupported')).toBe('non-pytest-unsupported');
+    expect(normalizeReason('unresolvable-image-digest')).toBe('unresolvable-image-digest');
+    expect(normalizeReason('missing-gold-patch')).toBe('missing-gold-patch');
+  });
+});
+
+describe('summarizeValidatedPool (#493 reason histogram)', () => {
+  it('returns total/scorable/unscorable counts and a descending-sorted byReason map', () => {
+    const file = {
+      schemaVersion: 'swe-rebench-v2-validated-pool.v1',
+      evalSemanticsVersion: '4',
+      updatedAt: '2026-05-25T00:00:00Z',
+      entries: {
+        'a__1': { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__2': { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__3': { scorable: false, reason: 'ungradeable:pytest_missing', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__4': { scorable: false, reason: 'ungradeable:pytest_missing', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__5': { scorable: false, reason: 'ungradeable:pytest_missing', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__6': { scorable: false, reason: 'gold-patch-not-resolved (f2p 1, p2p_broke 0)', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__7': { scorable: false, reason: 'gold-patch-not-resolved (f2p 0, p2p_broke 5)', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__8': { scorable: false, reason: 'transient:HF-429:HF datasets-server returned 429 for X/2026_02', checkedAt: '2026-05-25T00:00:00Z' },
+        'a__9': { scorable: false, reason: 'error:HF datasets-server returned 429 for X/2025_05', checkedAt: '2026-05-25T00:00:00Z' },
+      },
+    };
+    const summary = summarizeValidatedPool(file);
+    expect(summary.totalEntries).toBe(9);
+    expect(summary.scorable).toBe(2);
+    expect(summary.unscorable).toBe(7);
+    // byReason is an array of {reason, count} sorted descending by count then ascending by reason.
+    expect(summary.byReason).toEqual([
+      { reason: 'ungradeable:pytest_missing', count: 3 },
+      { reason: 'gold-patch-not-resolved', count: 2 },
+      { reason: 'gold-patch-resolves', count: 2 },
+      { reason: 'error:HF-429', count: 1 },
+      { reason: 'transient:HF-429', count: 1 },
+    ]);
+  });
+
+  it('handles an empty entries map', () => {
+    const summary = summarizeValidatedPool({
+      schemaVersion: 'swe-rebench-v2-validated-pool.v1',
+      evalSemanticsVersion: '4',
+      updatedAt: '2026-05-25T00:00:00Z',
+      entries: {},
+    });
+    expect(summary).toEqual({ totalEntries: 0, scorable: 0, unscorable: 0, byReason: [] });
+  });
+
+  it('throws when the file is malformed (missing entries)', () => {
+    expect(() => summarizeValidatedPool({ schemaVersion: 'x' })).toThrow();
+  });
+});
 
 describe('ValidatedPoolStore', () => {
   it('records entries and round-trips them via getEntry / getScorableIds', async () => {
