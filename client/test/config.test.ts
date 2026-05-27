@@ -1338,6 +1338,28 @@ describe('codex local provider config keys', () => {
       issue.path === 'codexBaseUrl' && /must be a local/i.test(issue.message)
     )).toBe(true);
   });
+
+  it.each([
+    'http://127.0.0.1:11434/v1?api_key=secret',
+    'http://127.0.0.1:11434/v1#secret',
+  ])('rejects Codex provider base URLs with query or fragment: %s', async (codexBaseUrl) => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      codexBaseUrl,
+    });
+
+    let caught: any;
+    try {
+      loadConfig(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe('config_invalid');
+    const issues: Array<{ path: string; message: string }> = caught.details?.issues ?? [];
+    expect(issues.some((issue) =>
+      issue.path === 'codexBaseUrl' && /must be a local/i.test(issue.message)
+    )).toBe(true);
+  });
 });
 
 describe('migrateLegacySolverNets', () => {
