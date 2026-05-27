@@ -21,6 +21,10 @@ export interface LaunchedRecordGeneratorStaticConfig {
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
+  /** Shared DiscoveryAPI passed through to the swe-rebench-v2 generator so it
+   *  can reconcile its local `successful` counter against network truth
+   *  (#669). Omit on test paths where the generator's tick is not exercised. */
+  discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
 }
 
 export interface LaunchedRecordGeneratorFactories {
