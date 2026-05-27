@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "drizzle-orm": "0.41.0",
     "hono": "^4.0.0",
     "ponder": "^0.16.6",
     "viem": "^2.0.0"

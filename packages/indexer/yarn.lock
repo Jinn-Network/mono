@@ -459,6 +459,7 @@ __metadata:
   dependencies:
     "@hono/node-server": "npm:^1.13.0"
     "@types/node": "npm:^22.0.0"
+    drizzle-orm: "npm:0.41.0"
     hono: "npm:^4.0.0"
     ponder: "npm:^0.16.6"
     typescript: "npm:^5.4.0"
