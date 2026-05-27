@@ -34,8 +34,11 @@ import {
   resolveMostRecentWins,
   type SetMetadataEvent,
 } from '../../src/solvernets/most-recent-wins.js';
-import type { DiscoveryAPI, SolverNetLifecycleStatus } from '../../src/discovery/types.js';
-import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
+import {
+  DiscoveryUnavailableError,
+  type DiscoveryAPI,
+  type SolverNetLifecycleStatus,
+} from '../../src/discovery/types.js';
 
 /**
  * Heuristic for "this object looks like a SolverNetManifestV1". We only

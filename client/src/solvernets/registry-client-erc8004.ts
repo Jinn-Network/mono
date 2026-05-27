@@ -49,6 +49,17 @@ import { DiscoveryUnavailableError } from '../discovery/types.js';
  */
 export const SOLVERNET_MANIFEST_KEY_PREFIX = 'solvernet-manifest:';
 
+function warnAndRethrowDiscoveryUnavailable(manifestCid: string, err: unknown): void {
+  if (!(err instanceof DiscoveryUnavailableError)) {
+    return;
+  }
+  const codeSuffix = err.code ? ` (${err.code})` : '';
+  console.warn(
+    `[solvernet] manifest ${manifestCid}: discoveryApi hash check unavailable${codeSuffix}: ${err.message}`,
+  );
+  throw err;
+}
+
 /**
  * Schema version embedded in every lifecycle payload. Keep in sync with
  * spec §6.3.
@@ -407,13 +418,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
             advertisedHash = lifecycleStatus.manifestHash;
           }
         } catch (err) {
-          if (err instanceof DiscoveryUnavailableError) {
-            const codeSuffix = err.code ? ` (${err.code})` : '';
-            console.warn(
-              `[solvernet] manifest ${args.manifestCid}: discoveryApi hash check unavailable${codeSuffix}: ${err.message}`,
-            );
-            throw err;
-          }
+          warnAndRethrowDiscoveryUnavailable(args.manifestCid, err);
           console.error(
             `[solvernet] manifest ${args.manifestCid}: discoveryApi hash check unavailable; ` +
             `using IPFS CID-bound manifest (${err instanceof Error ? err.message : String(err)})`,
@@ -507,13 +512,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
           hash = lifecycleStatus.manifestHash;
         }
       } catch (err) {
-        if (err instanceof DiscoveryUnavailableError) {
-          const codeSuffix = err.code ? ` (${err.code})` : '';
-          console.warn(
-            `[solvernet] manifest ${manifestCid}: discoveryApi hash check unavailable${codeSuffix}: ${err.message}`,
-          );
-          throw err;
-        }
+        warnAndRethrowDiscoveryUnavailable(manifestCid, err);
         console.error(
           `[solvernet] manifest ${manifestCid}: discoveryApi hash check unavailable; ` +
           `using IPFS CID-bound manifest (${err instanceof Error ? err.message : String(err)})`,

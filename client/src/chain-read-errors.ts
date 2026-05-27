@@ -83,29 +83,21 @@ export function isRateLimitedEthReadError(error: unknown): boolean {
  */
 export async function withTransientEthReadRetry<T>(
   fn: () => Promise<T>,
-  options?: {
-    onRetry?: (info: { attempt: number; error: unknown }) => void;
-    sleepFn?: (ms: number) => Promise<void>;
-  },
+  options?: { sleepFn?: (ms: number) => Promise<void> },
 ): Promise<T> {
   const sleepFn = options?.sleepFn ?? sleep;
 
-  let lastError: unknown;
   for (let attempt = 0; attempt < TRANSIENT_ETH_READ_MAX_ATTEMPTS; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      lastError = err;
-      if (!isTransientEthReadError(err) || attempt >= TRANSIENT_ETH_READ_MAX_ATTEMPTS - 1) {
+      const isLastAttempt = attempt === TRANSIENT_ETH_READ_MAX_ATTEMPTS - 1;
+      if (!isTransientEthReadError(err) || isLastAttempt) {
         throw err;
       }
-      options?.onRetry?.({ attempt: attempt + 1, error: err });
-      const delayMs =
-        TRANSIENT_ETH_READ_RETRY_DELAYS_MS[attempt] ??
-        TRANSIENT_ETH_READ_RETRY_DELAYS_MS[TRANSIENT_ETH_READ_RETRY_DELAYS_MS.length - 1];
-      await sleepFn(delayMs);
+      await sleepFn(TRANSIENT_ETH_READ_RETRY_DELAYS_MS[attempt]!);
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  throw new Error('withTransientEthReadRetry: exhausted attempts without throwing');
 }
