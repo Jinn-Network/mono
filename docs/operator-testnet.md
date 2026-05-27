@@ -65,6 +65,21 @@ JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn 
 
 When `JINN_PASSWORD` is set, no password file is written to disk. Use `--password-fd N` for CI pipelines where the password comes from a secret manager.
 
+### Agent-assisted setup (Claude Code / Codex / Cursor / Gemini)
+
+If you'd rather have a coding agent handle the setup, wire it in:
+
+```bash
+npm install -g @jinn-network/client@latest
+jinn integrations install     # wires the jinn-operator skill + MCP into your agent
+```
+
+Then open your agent and paste:
+
+> Set up a Jinn Network testnet operator on this machine. Run `jinn run`, fund the master address via CDP if needed, and report back when the daemon is running. Keep me in the loop if anything needs my input.
+
+The agent will follow the same path as the manual quickstart above.
+
 ## What `jinn run` does under the hood
 
 The state machine, one line per step:
