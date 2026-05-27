@@ -2237,6 +2237,34 @@ describe('MechAdapter TaskCoordinator flow', () => {
     );
     expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
   });
+
+  it('clamps a tampered failedAttempts in the persisted store to a non-negative integer (#645)', async () => {
+    // Defense in depth for the persisted-counter load path: a tampered or
+    // corrupted store row carrying a negative (or fractional) failedAttempts
+    // would otherwise defeat the prune budget for a huge number of cycles
+    // (e.g. -1_000_000_000 → ~10^9 cycles before the counter crosses
+    // MAX_EVALUATION_RETRY_ATTEMPTS again). Clamp on load.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+    const store = makeConfigStore({
+      mech_pending_evaluation_solutions_v1: JSON.stringify([{
+        taskId: '1',
+        attemptIndex: 0,
+        requestId: REQUEST_ID,
+        operator: solverSafe,
+        transactionHash: TX_HASH,
+        blockNumber: 333,
+        failedAttempts: -1_000_000_000,
+      }]),
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter.initialize();
+
+    const restored = (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID);
+    expect(restored).toBeDefined();
+    expect(restored.failedAttempts).toBe(0);
+  });
 });
 
 describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (ghost-task floor)', () => {

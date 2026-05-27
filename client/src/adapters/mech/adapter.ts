@@ -371,9 +371,13 @@ export class MechAdapter implements ExecutionAdapter {
             ? item.transactionHash as Hex
             : undefined,
           blockNumber: typeof item.blockNumber === 'number' ? item.blockNumber : undefined,
+          // #645: clamp to a non-negative integer. A tampered or corrupted
+          // store row carrying a negative or fractional failedAttempts could
+          // otherwise underflow the prune budget (e.g. -1_000_000_000 would
+          // defeat the bound for ~10^9 cycles).
           failedAttempts:
             typeof item.failedAttempts === 'number' && Number.isFinite(item.failedAttempts)
-              ? item.failedAttempts
+              ? Math.max(0, Math.floor(item.failedAttempts))
               : 0,
         };
         this.pendingEvaluationSolutions.set(solution.requestId, solution);
