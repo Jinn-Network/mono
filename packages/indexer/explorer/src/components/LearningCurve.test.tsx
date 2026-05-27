@@ -148,6 +148,116 @@ describe('LearningCurve', () => {
   });
 });
 
+describe('LearningCurve — baseline + right-edge delta (#696)', () => {
+  // Acceptance criteria from issue #696:
+  // 1. baseline=0.5, rolling mode, single series → dashed reference + delta
+  //    label both render.
+  // 2. omit baseline → neither renders.
+  // 3. mode='buckets' → neither renders.
+  // 4. series.length >= 2 (grouped) → neither renders.
+  // 5. rolling=[] (empty / below-floor handled by parent) → neither renders.
+  //
+  // The dashed line itself is painted by uPlot, which doesn't render in jsdom.
+  // These tests cover the DOM annotations (labels + testids); the line is
+  // verified visually + by chrome-MCP smoke against the live deploy.
+
+  it('renders BASELINE and delta labels when baseline + rolling + no series', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={ROLLING}
+        mode="rolling"
+        baseline={0.65}
+      />,
+    );
+    expect(screen.getByTestId('learning-curve-baseline-label')).toBeInTheDocument();
+    expect(screen.getByTestId('learning-curve-delta-label')).toBeInTheDocument();
+    expect(screen.getByTestId('learning-curve-baseline-label')).toHaveTextContent(
+      /baseline\s*65\.0%/i,
+    );
+  });
+
+  it('formats a positive delta with leading + and pp suffix', () => {
+    // ROLLING last value is 0.85. Baseline 0.65. Delta = +0.20 → +20.0pp.
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={ROLLING}
+        mode="rolling"
+        baseline={0.65}
+      />,
+    );
+    expect(screen.getByTestId('learning-curve-delta-label')).toHaveTextContent(
+      /\+20\.0\s*pp/i,
+    );
+  });
+
+  it('formats a negative delta with leading minus sign and pp suffix', () => {
+    // ROLLING last value is 0.85. Baseline 0.95. Delta = −0.10 → −10.0pp.
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={ROLLING}
+        mode="rolling"
+        baseline={0.95}
+      />,
+    );
+    // U+2212 minus sign (preferred) or hyphen-minus both acceptable.
+    expect(screen.getByTestId('learning-curve-delta-label')).toHaveTextContent(
+      /[−-]10\.0\s*pp/,
+    );
+  });
+
+  it('does NOT render the labels when baseline is omitted', () => {
+    render(<LearningCurve buckets={[]} rolling={ROLLING} mode="rolling" />);
+    expect(screen.queryByTestId('learning-curve-baseline-label')).toBeNull();
+    expect(screen.queryByTestId('learning-curve-delta-label')).toBeNull();
+  });
+
+  it('does NOT render the labels in buckets mode', () => {
+    render(
+      <LearningCurve
+        buckets={BUCKETS}
+        rolling={ROLLING}
+        mode="buckets"
+        baseline={0.65}
+      />,
+    );
+    expect(screen.queryByTestId('learning-curve-baseline-label')).toBeNull();
+    expect(screen.queryByTestId('learning-curve-delta-label')).toBeNull();
+  });
+
+  it('does NOT render the labels when the chart is grouped (series >= 2)', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        baseline={0.65}
+        series={[
+          { rolling: ROLLING, label: 'codex', color: '#7aa7dc' },
+          { rolling: ROLLING, label: 'hermes', color: '#6b9fc5' },
+        ]}
+      />,
+    );
+    expect(screen.queryByTestId('learning-curve-baseline-label')).toBeNull();
+    expect(screen.queryByTestId('learning-curve-delta-label')).toBeNull();
+  });
+
+  it('does NOT render the labels when rolling is empty (no chart drawn)', () => {
+    render(
+      <LearningCurve
+        buckets={[]}
+        rolling={[]}
+        mode="rolling"
+        baseline={0.65}
+      />,
+    );
+    expect(screen.queryByTestId('learning-curve-baseline-label')).toBeNull();
+    expect(screen.queryByTestId('learning-curve-delta-label')).toBeNull();
+  });
+});
+
 describe('LearningCurve legend hover affordance', () => {
   it('renders a sibling hint after each legend label when onLegendClick is supplied', () => {
     const onLegendClick = vi.fn();

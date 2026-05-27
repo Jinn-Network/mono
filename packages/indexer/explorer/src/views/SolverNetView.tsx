@@ -699,6 +699,7 @@ export function SolverNetView() {
                       : window
                   }
                   showMilestoneChrome={hasExplicitSlice}
+                  baseline={slice.kpis.resolvedRate ?? undefined}
                 />
               ) : (
                 <LearningCurve

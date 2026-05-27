@@ -25,10 +25,20 @@ export function ChartWithMilestoneMark({
   rolling,
   window,
   showMilestoneChrome,
+  baseline,
 }: {
   rolling: number[];
   window: number;
   showMilestoneChrome: boolean;
+  /**
+   * Lifetime resolved-rate forwarded to `LearningCurve` as the dashed
+   * reference line + right-edge delta. #696 — surfaces #647's acceptance
+   * criterion ("right edge above baseline") visibly. Hidden by the inner
+   * gates when conditions don't apply (buckets mode, grouped, empty data);
+   * also gated here by the below-floor empty-state path which returns early
+   * before any chart renders.
+   */
+  baseline?: number;
 }) {
   if (showMilestoneChrome && rolling.length < ROLLING_FLOOR) {
     return (
@@ -56,7 +66,12 @@ export function ChartWithMilestoneMark({
 
   return (
     <div style={{ position: 'relative' }}>
-      <LearningCurve buckets={[]} rolling={rolling} mode="rolling" />
+      <LearningCurve
+        buckets={[]}
+        rolling={rolling}
+        mode="rolling"
+        baseline={baseline}
+      />
       {showMilestoneChrome && rolling.length >= ROLLING_FLOOR && (
         <div
           style={{

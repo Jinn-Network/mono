@@ -51,10 +51,32 @@ export interface LearningCurveProps {
    * filters without the chart owning URL state.
    */
   onLegendClick?: (label: string) => void;
+  /**
+   * Optional lifetime resolved-rate (0..1). When present alongside non-empty
+   * rolling data in single-series rolling mode, the chart paints a dashed
+   * reference line at this y-value and surfaces:
+   *   - a `BASELINE Y.Y%` label at the top-left of the chart
+   *   - a `+X.Xpp` (or `−X.Xpp`) right-edge delta label at the top-right,
+   *     gold when positive and `--fg-dim` when zero/negative.
+   *
+   * Hidden in buckets mode, in grouped mode (series >= 2), and when rolling
+   * is empty. #696, supports #647 milestone-2 acceptance.
+   */
+  baseline?: number;
 }
 
 const SKY = '#7aa7dc';
+// Quiet reference color for the lifetime baseline line — matches the
+// design-token `--wane` family (muted neutral, never competing with the
+// primary sky line). Hard-coded because uPlot strokes can't read CSS vars.
+const BASELINE_STROKE = '#5b6478';
 const FONT_MONO = "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace";
+
+/** Format a delta as a leading-signed pp (percentage-point) label. */
+function formatPp(delta: number): string {
+  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+  return `${sign}${Math.abs(delta * 100).toFixed(1)}pp`;
+}
 
 // Up-to-5 series palette: sky / sky-muted / sage / rose / lilac. Series
 // colors never use gold — gold remains reserved as single-point emphasis
@@ -69,13 +91,27 @@ function buildOpts(
   buckets: LearningCurveBucket[],
   seriesCount: number,
   seriesColors: string[],
+  baselineIndex: number | null,
 ): object {
-  const lineSeries = Array.from({ length: seriesCount }, (_, i) => ({
-    stroke: seriesColors[i] ?? SKY,
-    width: 1.5,
-    points: { show: false },
-    fill: undefined,
-  }));
+  const lineSeries = Array.from({ length: seriesCount }, (_, i) => {
+    // The baseline reference series (when present) is the last entry and
+    // gets a dashed, thinner stroke so it reads as a reference, not data.
+    if (baselineIndex !== null && i === baselineIndex) {
+      return {
+        stroke: BASELINE_STROKE,
+        width: 1,
+        dash: [4, 4],
+        points: { show: false },
+        fill: undefined,
+      };
+    }
+    return {
+      stroke: seriesColors[i] ?? SKY,
+      width: 1.5,
+      points: { show: false },
+      fill: undefined,
+    };
+  });
   return {
     width,
     height,
@@ -126,6 +162,7 @@ export function LearningCurve({
   height = 220,
   series,
   onLegendClick,
+  baseline,
 }: LearningCurveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<unknown>(null);
@@ -140,6 +177,19 @@ export function LearningCurve({
   // >= 2 entries, we override the single-line rendering. Otherwise we keep
   // the canonical single-series rolling/buckets behaviour.
   const effectiveSeries = series && series.length >= 2 ? series.slice(0, MAX_SERIES) : null;
+
+  // #696 — Baseline reference renders only in single-series rolling mode
+  // with non-empty data. The below-floor (< 130 verdicts) empty-state gate
+  // lives in SliceChrome (the caller), so this component just checks for
+  // rolling data; the floor is enforced upstream.
+  const showBaseline =
+    baseline !== undefined &&
+    mode === 'rolling' &&
+    !effectiveSeries &&
+    rolling.length > 0;
+  const rightEdgeDelta = showBaseline
+    ? (rolling[rolling.length - 1] ?? 0) - baseline
+    : 0;
 
   useEffect(() => {
     // Guard: jsdom / SSR has no proper canvas support
@@ -178,6 +228,18 @@ export function LearningCurve({
       colors = [SKY];
     }
 
+    // Append the baseline reference series (constant value across all xs)
+    // when conditions allow. Tracked separately so buildOpts can style it as
+    // a dashed reference instead of a primary data line. uPlot will paint
+    // it underneath the rolling line because it's the last series and
+    // ordering in the data array maps 1:1 to series-style ordering.
+    let baselineIndex: number | null = null;
+    if (showBaseline && baseline !== undefined) {
+      baselineIndex = yseries.length;
+      yseries.push(Array.from({ length: xs.length }, () => baseline));
+      colors.push(BASELINE_STROKE);
+    }
+
     if (xs.length === 0) {
       return;
     }
@@ -206,7 +268,15 @@ export function LearningCurve({
         UPlot = (mod as unknown as { default?: typeof uPlotType }).default
           ?? (mod as unknown as typeof uPlotType);
 
-        const opts = buildOpts(w, height, mode, buckets, yseries.length, colors);
+        const opts = buildOpts(
+          w,
+          height,
+          mode,
+          buckets,
+          yseries.length,
+          colors,
+          baselineIndex,
+        );
 
         instance = new UPlot(
           opts as uPlotType.Options,
@@ -268,7 +338,7 @@ export function LearningCurve({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buckets, rolling, mode, height, effectiveSeries]);
+  }, [buckets, rolling, mode, height, effectiveSeries, showBaseline, baseline]);
 
   const isEmpty = effectiveSeries
     ? effectiveSeries.every((s) => s.rolling.length === 0)
@@ -301,6 +371,45 @@ export function LearningCurve({
           style={{ width: '100%' }}
           data-testid="learning-curve-plot"
         />
+      )}
+      {showBaseline && baseline !== undefined && (
+        <>
+          <span
+            data-testid="learning-curve-baseline-label"
+            style={{
+              position: 'absolute',
+              top: 4,
+              left: 8,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--fg-dim)',
+              pointerEvents: 'none',
+            }}
+          >
+            Baseline {(baseline * 100).toFixed(1)}%
+          </span>
+          <span
+            data-testid="learning-curve-delta-label"
+            style={{
+              position: 'absolute',
+              top: 4,
+              right: 8,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              letterSpacing: '0.10em',
+              textTransform: 'uppercase',
+              color:
+                rightEdgeDelta > 0
+                  ? 'var(--accent-gold)'
+                  : 'var(--fg-dim)',
+              pointerEvents: 'none',
+            }}
+          >
+            {formatPp(rightEdgeDelta)}
+          </span>
+        </>
       )}
       {effectiveSeries && (
         <div
