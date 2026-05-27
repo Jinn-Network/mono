@@ -571,11 +571,13 @@ describe('findClaimableTasks', () => {
       operatorAddress: '0x3333333333333333333333333333333333333333',
     });
 
-    const expectedAsc = [...taskIds].sort((a, b) => {
-      const diff = BigInt(a) - BigInt(b);
-      return diff < 0n ? -1 : diff > 0n ? 1 : 0;
-    });
-    expect(result.map((c) => c.taskId)).toEqual(expectedAsc);
+    expect(result.map((c) => c.taskId)).toEqual([
+      '1',
+      String(MAX - 1),
+      String(MAX),
+      String(MAX + 1),
+      String(1n << 54n),
+    ]);
   });
 });
 
