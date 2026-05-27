@@ -219,7 +219,7 @@ jobs:
       # artifact is captured even when the Tier 1 gate exits non-zero.
       - name: Upload Tier 1 evidence
         if: always() && steps.meta.outputs.dist_tag == 'latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tier-1-evidence-${{ github.event.release.tag_name || github.sha }}
           path: client/tier-1-evidence/
