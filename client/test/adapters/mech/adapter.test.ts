@@ -2265,6 +2265,78 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(restored).toBeDefined();
     expect(restored.failedAttempts).toBe(0);
   });
+
+  it("resets failedAttempts to 0 on a successful announcement so transient errors don't accumulate (#645)", async () => {
+    // A candidate stays in pendingEvaluationSolutions from announcement
+    // through CLAIM (forgetPendingEvaluationSolution only fires at the
+    // claim handler). Without this reset, every cycle re-runs
+    // evaluationAnnouncementForSolution and any transient IPFS / RPC hiccup
+    // in the announce → claim window keeps charging the prune budget across
+    // the candidate's lifetime — a 100s IPFS outage at 5s polls = 20 retries
+    // = false-prune of legitimate work.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValue({ ok: true });
+    vi.mocked(getMarketplaceRequestDeliveryMech)
+      .mockResolvedValue(('0x' + 'aa'.repeat(20)) as `0x${string}`);
+    // Phase 1: drive 5 catch-arm failures with a throwing delivery lookup.
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockRejectedValue(
+      new Error('transient: ipfs gateway unreachable'),
+    );
+
+    const store = makeConfigStore();
+    const adapter = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    for (let i = 0; i < 5; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of (adapter as any).retryPendingEvaluationSolutions()) {
+        // No announcements expected — the lookup throws.
+      }
+    }
+    expect(
+      (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID).failedAttempts,
+    ).toBe(5);
+
+    // Phase 2: lookup recovers, announcement succeeds → counter resets to 0
+    // so future transient errors don't compound with the pre-recovery count.
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockReset();
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValue(TASK_CID_DIGEST);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+
+    const yielded: unknown[] = [];
+    for await (const announcement of (adapter as any).retryPendingEvaluationSolutions()) {
+      yielded.push(announcement);
+    }
+    expect(yielded).toHaveLength(1);
+    expect(yielded[0]).toMatchObject({
+      taskId: `evaluation:1:0:${REQUEST_ID}`,
+      task: { role: 'evaluation', restorationRequestId: REQUEST_ID },
+    });
+    expect(
+      (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID).failedAttempts,
+    ).toBe(0);
+    // Reset must be persisted so a daemon restart between announcement and
+    // claim doesn't resurrect the stale pre-recovery counter.
+    expect(store.values.get('mech_pending_evaluation_solutions_v1')).toContain(
+      '"failedAttempts":0',
+    );
+  });
 });
 
 describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (ghost-task floor)', () => {

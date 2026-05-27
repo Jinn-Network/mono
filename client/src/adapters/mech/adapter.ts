@@ -931,6 +931,14 @@ export class MechAdapter implements ExecutionAdapter {
       task: evaluationTask,
     });
     this.observedTasks.set(opportunityId, announcement);
+    // #645: a successful announcement means the candidate has made progress;
+    // reset the transient-failure counter so that subsequent transient errors
+    // (e.g. IPFS hiccups in the announce → claim window) don't accumulate
+    // across the candidate's lifetime and silently false-prune legitimate work.
+    if (solution.failedAttempts) {
+      solution.failedAttempts = 0;
+      this.persistPendingEvaluationSolutions();
+    }
     return announcement;
   }
 
