@@ -401,6 +401,38 @@ export class MechAdapter implements ExecutionAdapter {
     this.persistPendingEvaluationSolutions();
   }
 
+  /**
+   * Increment the per-solution failure counter and prune when it exceeds the
+   * MAX_EVALUATION_RETRY_ATTEMPTS budget. Persistence runs on every increment
+   * so a crash mid-cycle does not lose the count (and let a wedge resume
+   * log-spamming after a restart).
+   *
+   * Call sites: ONLY the two paths that fail to make progress on this specific
+   * solution — the transient `canClaimEvaluation` branch in
+   * evaluationAnnouncementForSolution, and the `catch (err)` arm of
+   * retryPendingEvaluationSolutions. Do NOT call from the signal-driven prune
+   * paths (terminal claimability, null delivery-envelope CID,
+   * !isDiscoveryTaskAllowed) — those already prune cleanly.
+   *
+   * Returns true when the solution was pruned (caller should stop work on it).
+   */
+  private recordEvaluationFailureAndMaybePrune(
+    solution: PendingEvaluationSolution,
+  ): boolean {
+    const next = (solution.failedAttempts ?? 0) + 1;
+    solution.failedAttempts = next;
+    if (next > MAX_EVALUATION_RETRY_ATTEMPTS) {
+      console.log(
+        `[mech] pruning evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ` +
+          `exceeded retry budget (${MAX_EVALUATION_RETRY_ATTEMPTS}) — pruned`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
+      return true;
+    }
+    this.persistPendingEvaluationSolutions();
+    return false;
+  }
+
   private clearPendingDeliveryRecoveryState(requestId: string): void {
     this.originalStates.delete(requestId);
     this.pendingEvaluations.delete(requestId);
@@ -846,6 +878,10 @@ export class MechAdapter implements ExecutionAdapter {
       );
       if (terminal) {
         this.forgetPendingEvaluationSolution(solution.requestId);
+      } else {
+        // #645 backstop: bound retries on transient/unclassified claimability
+        // failures so a wedged opportunity can't log-spam forever.
+        this.recordEvaluationFailureAndMaybePrune(solution);
       }
       return undefined;
     }
@@ -915,6 +951,10 @@ export class MechAdapter implements ExecutionAdapter {
           `[mech] evaluation opportunity retry failed for ${requestId}:`,
           err,
         );
+        // #645 backstop: bound retries on any uncaught failure so a wedged
+        // requestId (e.g. an RPC failure path that re-throws every cycle)
+        // can't log-spam forever.
+        this.recordEvaluationFailureAndMaybePrune(solution);
       }
     }
   }
