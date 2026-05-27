@@ -9,6 +9,15 @@ import {
   matchInfraSignature,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
+// CI runners can have <20 GB free; tests construct PythonEvalRunner without
+// passing freeDiskBytes/diskFloorBytes, so the production env-driven 20 GB
+// floor triggers InsufficientDiskError before any test logic runs. Pin the
+// floor to a sub-MB positive value (resolveDiskFloorBytes rejects 0/negative
+// as invalid and warns, then falls back to the 20 GB default — so we need a
+// positive value here). Tests that exercise the disk-floor path pass their
+// own freeDiskBytes/diskFloorBytes options and are unaffected by this env.
+process.env['JINN_EVAL_DISK_FLOOR_GB'] = '0.000001';
+
 const tempDirs: string[] = [];
 
 // #515 — the default disk floor is 20 GB (set in #476 for the real eval
