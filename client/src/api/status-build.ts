@@ -13,6 +13,10 @@ import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
 import { DEFAULT_HARNESS_ROLLUP, type HarnessRollup } from './status-harness-rollup.js';
+import {
+  buildCostSurfaceStatus,
+  type CostSurfaceStatus,
+} from '../spend/cost-surface-status.js';
 
 // Mirror of DEFAULT_MASTER_ETH_DAILY_WEI in client/src/earning/bootstrap.ts —
 // see that constant for the full #288 rationale. A follow-up will collapse
@@ -280,6 +284,8 @@ export interface StatusV1Response {
   taskRuns?: TaskRunsStatus;
   /** Per-credential daily spend block — present when caps are configured. */
   spend?: SpendStatus;
+  /** Per-harness billing path for join/settings cost UI (#474). */
+  costSurface: CostSurfaceStatus;
   /**
    * Harness readiness rollup — always present (default-ready when no rollup
    * input was threaded through gather-status). Consumed by the SPA's
@@ -607,6 +613,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       hint: buildEarningsHint(raw, fleetSum),
     },
     nextActions: buildNextActions(raw, fleetSum),
+    costSurface: buildCostSurfaceStatus(process.env),
     harness: raw.harnessRollup ?? DEFAULT_HARNESS_ROLLUP,
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),

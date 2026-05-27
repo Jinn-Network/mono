@@ -29,6 +29,7 @@ import {
 } from '../configuration/harnessNames.js';
 import { PluginPicker } from '../configuration/PluginPicker.js';
 import { CostEstimatePanel, useCostSurfaceDecision } from '../configuration/CostEstimatePanel.js';
+import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 import { InlineHelp } from '../../components/InlineHelp.js';
 
@@ -385,8 +386,9 @@ export function JoinFlow({
   // Cost-protection surface (Issue #331). Only consulted when the solver
   // role is selected — the evaluator role binds to a manifest-supplied
   // implementation and bypasses operator harness choice entirely.
+  const usesPaidApiKey = useHarnessUsesPaidApiKey(showSolverFields ? form.harness : undefined);
   const costDecision = useCostSurfaceDecision(
-    showSolverFields ? form.harness : undefined,
+    usesPaidApiKey,
     showSolverFields ? form.model : undefined,
   );
   const requiresCostConfirmation = showSolverFields && costDecision.requiresConfirmation;
@@ -717,6 +719,7 @@ export function JoinFlow({
           <CostEstimatePanel
             harness={form.harness}
             modelId={form.model}
+            usesPaidApiKey={usesPaidApiKey}
             testIdPrefix="join-flow-cost"
           />
 

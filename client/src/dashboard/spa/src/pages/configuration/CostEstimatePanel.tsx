@@ -1,15 +1,15 @@
 /**
  * Shared cost-estimate surface used by `JoinFlow` (operator catalog) and
- * `JoinedNetCard` (Settings). Reads the harness/model billing model from
+ * `JoinedNetCard` (Settings). Billing path (`usesPaidApiKey`) comes from
+ * daemon `GET /v1/status` `costSurface`; model pricing heuristics from
  * `client/src/harnesses/cost-estimates.ts`.
  *
  * Issue #331 (P0 tier). The component:
- *   - Renders nothing for subscription harnesses (Claude Code, Codex) —
- *     callers see `decision.showEstimate === false` and the parent omits
- *     this panel. We still render a tiny "Included in subscription"
- *     reassurance row when `mode='inline'` so the operator gets explicit
- *     confirmation instead of an absent UI.
- *   - For paid-API-key harnesses, surfaces the per-task USD estimate and
+ *   - Renders nothing for subscription billing paths — callers see
+ *     `decision.showEstimate === false` and the parent omits this panel.
+ *     We still render a tiny "Included in subscription" reassurance row
+ *     when `mode='inline'` so the operator gets explicit confirmation.
+ *   - For paid-API-key paths, surfaces the per-task USD estimate and
  *     the heuristic that produced it.
  *   - When the estimate trips the configured high-cost threshold the
  *     confirmation gate ("I understand — I have a budget for this") must
@@ -30,6 +30,8 @@ import { cn } from '../../lib/utils.js';
 export interface CostEstimatePanelProps {
   harness: string | undefined;
   modelId: string | undefined;
+  /** Daemon-resolved billing path from `/v1/status` `costSurface`. */
+  usesPaidApiKey: boolean;
   /** Override the gate threshold. Defaults to $1/task. */
   thresholdUsd?: number;
   /**
@@ -43,25 +45,24 @@ export interface CostEstimatePanelProps {
 }
 
 export function useCostSurfaceDecision(
-  harness: string | undefined,
+  usesPaidApiKey: boolean,
   modelId: string | undefined,
   thresholdUsd: number = DEFAULT_HIGH_COST_THRESHOLD_USD,
 ): CostSurfaceDecision {
-  return decideCostSurface(harness, modelId, thresholdUsd);
+  return decideCostSurface(usesPaidApiKey, modelId, thresholdUsd);
 }
 
 export function CostEstimatePanel({
-  harness,
+  harness: _harness,
   modelId,
+  usesPaidApiKey,
   thresholdUsd = DEFAULT_HIGH_COST_THRESHOLD_USD,
   variant = 'card',
   testIdPrefix = 'cost-estimate',
 }: CostEstimatePanelProps): JSX.Element | null {
-  const decision = decideCostSurface(harness, modelId, thresholdUsd);
+  const decision = decideCostSurface(usesPaidApiKey, modelId, thresholdUsd);
 
   if (!decision.showEstimate) {
-    // Subscription harness — render the explicit reassurance row so the
-    // operator gets confirmation that there is no per-task API cost.
     return (
       <div
         data-testid={`${testIdPrefix}-subscription`}

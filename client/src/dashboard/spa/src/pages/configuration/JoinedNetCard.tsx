@@ -25,6 +25,7 @@ import {
 } from './harnessNames.js';
 import { PluginPicker } from './PluginPicker.js';
 import { CostEstimatePanel, useCostSurfaceDecision } from './CostEstimatePanel.js';
+import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
@@ -217,8 +218,9 @@ export function JoinedNetCard({
 
   const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
   const isSolver = joined.roles.includes('solver');
+  const usesPaidApiKey = useHarnessUsesPaidApiKey(isSolver ? form.harness : undefined);
   const costDecision = useCostSurfaceDecision(
-    isSolver ? form.harness : undefined,
+    usesPaidApiKey,
     isSolver ? form.model : undefined,
   );
   const requiresCostConfirmation = isSolver && costDecision.requiresConfirmation;
@@ -501,6 +503,7 @@ export function JoinedNetCard({
             <CostEstimatePanel
               harness={form.harness}
               modelId={form.model}
+              usesPaidApiKey={usesPaidApiKey}
               variant="inline"
               testIdPrefix="joined-net-card-cost"
             />

@@ -4,11 +4,11 @@
  * Acceptance criteria pulled from Issue #331 (cost protection P0):
  *   - MODEL_COST_TABLE lookup returns the heuristic per-task estimate.
  *   - decideCostSurface suppresses the cost surface for subscription
- *     harnesses (Claude Code, Codex).
+ *     billing paths (usesPaidApiKey false).
  *   - decideCostSurface requires the confirmation gate when estimate
  *     exceeds the default $1/task threshold (e.g. Opus 4.7).
  *   - decideCostSurface does NOT require the gate below threshold or for
- *     subscription harnesses (no false-positive gate fire).
+ *     subscription paths (no false-positive gate fire).
  *   - Heuristic value for Opus 4.7 on SWE-rebench-v2 typical task lands
  *     near $2.25 (the figure called out in the issue body).
  */
@@ -20,7 +20,6 @@ import {
   decideCostSurface,
   estimateModelCost,
   formatUsd,
-  harnessUsesPaidApiKey,
 } from '../../src/harnesses/cost-estimates.js';
 
 describe('MODEL_COST_TABLE', () => {
@@ -72,59 +71,29 @@ describe('estimateModelCost', () => {
   });
 });
 
-describe('harnessUsesPaidApiKey', () => {
-  it('returns false for subscription harnesses (Claude Code, Codex)', () => {
-    expect(harnessUsesPaidApiKey('claude-code')).toBe(false);
-    expect(harnessUsesPaidApiKey('codex')).toBe(false);
-  });
-
-  it('returns true for Hermes (paid raw API key path)', () => {
-    expect(harnessUsesPaidApiKey('hermes-agent')).toBe(true);
-  });
-
-  it('canonicalises learner-prefixed harness names before classification', () => {
-    // `claude-code-learner` aliases to `claude-code` in canonicalHarnessName.
-    expect(harnessUsesPaidApiKey('claude-code-learner')).toBe(false);
-    expect(harnessUsesPaidApiKey('codex-code-learner')).toBe(false);
-  });
-
-  it('treats unknown harnesses conservatively as paid (so we never silently hide a cost surface)', () => {
-    expect(harnessUsesPaidApiKey('some-future-harness')).toBe(true);
-  });
-
-  it('returns false for an undefined harness (nothing to show)', () => {
-    expect(harnessUsesPaidApiKey(undefined)).toBe(false);
-  });
-});
-
-describe('decideCostSurface — subscription harnesses', () => {
-  it('suppresses the estimate for Claude Code regardless of model', () => {
-    const decision = decideCostSurface('claude-code', 'claude-opus-4-7');
+describe('decideCostSurface — subscription billing path', () => {
+  it('suppresses the estimate when usesPaidApiKey is false regardless of model', () => {
+    const decision = decideCostSurface(false, 'claude-opus-4-7');
     expect(decision.showEstimate).toBe(false);
     expect(decision.requiresConfirmation).toBe(false);
     expect(decision.suppressedReason).toMatch(/subscription/i);
   });
 
-  it('suppresses the estimate for Codex regardless of model', () => {
-    const decision = decideCostSurface('codex', 'gpt-5.5');
-    expect(decision.showEstimate).toBe(false);
-    expect(decision.requiresConfirmation).toBe(false);
-    expect(decision.suppressedReason).toMatch(/subscription/i);
-  });
-
-  it('does NOT trigger the confirmation gate for Claude Code + Opus 4.7 (false-positive guard)', () => {
-    // This is the explicit non-false-positive test called out in the
-    // PR scope: subscription harnesses must never demand the budget
-    // confirmation, even when paired with what would otherwise be a
-    // high-cost API-priced model.
-    const decision = decideCostSurface('claude-code', 'claude-opus-4-7');
+  it('does NOT trigger the confirmation gate for subscription path + Opus 4.7', () => {
+    const decision = decideCostSurface(false, 'claude-opus-4-7');
     expect(decision.requiresConfirmation).toBe(false);
   });
 });
 
-describe('decideCostSurface — paid-API-key harnesses', () => {
+describe('decideCostSurface — paid-API-key billing path', () => {
+  it('shows estimate and gate for paid claude-code + Opus when usesPaidApiKey is true', () => {
+    const decision = decideCostSurface(true, 'claude-opus-4-7');
+    expect(decision.showEstimate).toBe(true);
+    expect(decision.requiresConfirmation).toBe(true);
+  });
+
   it('shows the estimate and triggers the gate for Hermes + Opus 4.7 ($2.25 > $1)', () => {
-    const decision = decideCostSurface('hermes-agent', 'anthropic/claude-opus-4.7');
+    const decision = decideCostSurface(true, 'anthropic/claude-opus-4.7');
     expect(decision.showEstimate).toBe(true);
     expect(decision.estimate).not.toBeNull();
     expect(decision.estimate!.usd).toBeGreaterThan(DEFAULT_HIGH_COST_THRESHOLD_USD);
@@ -132,7 +101,7 @@ describe('decideCostSurface — paid-API-key harnesses', () => {
   });
 
   it('shows the estimate but does NOT trigger the gate for Hermes + DeepSeek V4 Flash (well under $1)', () => {
-    const decision = decideCostSurface('hermes-agent', 'deepseek/deepseek-v4-flash');
+    const decision = decideCostSurface(true, 'deepseek/deepseek-v4-flash');
     expect(decision.showEstimate).toBe(true);
     expect(decision.estimate).not.toBeNull();
     expect(decision.estimate!.usd).toBeLessThan(DEFAULT_HIGH_COST_THRESHOLD_USD);
@@ -140,18 +109,14 @@ describe('decideCostSurface — paid-API-key harnesses', () => {
   });
 
   it('shows the estimate slot but does NOT trigger the gate when the model is unknown', () => {
-    // Unknown model — caller will render "estimate unavailable" rather
-    // than a number. We deliberately don't gate, to avoid blocking joins
-    // on operator-pinned custom ids we haven't priced yet.
-    const decision = decideCostSurface('hermes-agent', 'unknown-vendor/custom-finetune');
+    const decision = decideCostSurface(true, 'unknown-vendor/custom-finetune');
     expect(decision.showEstimate).toBe(true);
     expect(decision.estimate).toBeNull();
     expect(decision.requiresConfirmation).toBe(false);
   });
 
   it('honours a caller-supplied threshold', () => {
-    // Bump the threshold so even Opus 4.7 no longer trips the gate.
-    const decision = decideCostSurface('hermes-agent', 'anthropic/claude-opus-4.7', 10);
+    const decision = decideCostSurface(true, 'anthropic/claude-opus-4.7', 10);
     expect(decision.showEstimate).toBe(true);
     expect(decision.requiresConfirmation).toBe(false);
   });

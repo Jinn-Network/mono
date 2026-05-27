@@ -45,6 +45,20 @@ export interface TjinnStatus {
   error: string | null;
 }
 
+// ── cost surface (#474) ─────────────────────────────────────────────────────
+//
+// Mirror of `CostSurfaceStatus` from `client/src/spend/cost-surface-status.ts`.
+// Surfaced on `/v1/status` as `costSurface` for join/settings cost UI.
+
+export interface CostSurfaceHarnessStatusWire {
+  credentialId: string | null;
+  usesPaidApiKey: boolean;
+}
+
+export interface CostSurfaceStatusWire {
+  harnesses: Record<string, CostSurfaceHarnessStatusWire>;
+}
+
 export interface StructuredEvent {
   schemaVersion: 1;
   id: string;

@@ -17,14 +17,15 @@
  * Heuristic shape per the spec:
  *   per-1k-token rate × typical task length, by model id.
  *
- * Subscription harnesses (Claude Code, Codex) are flagged via
- * `subscriptionPath: true` on the harness; in that case the surface shows
- * "Included in subscription, no per-task API cost" and **does not** trigger
- * the confirmation gate, regardless of the model selected.
+ * Subscription billing paths (`usesPaidApiKey: false` from daemon
+ * `/v1/status` `costSurface`) show "Included in subscription, no per-task
+ * API cost" and **do not** trigger the confirmation gate.
  *
  * To add a new model: append an entry to `MODEL_COST_TABLE`. The id is the
- * exact `model` string persisted to `joinedSolverNets[<cid>].model`. To
- * shape a new harness: append to `HARNESS_BILLING`. Keep the units
+ * exact `model` string persisted to `joinedSolverNets[<cid>].model`. Paid
+ * vs subscription is resolved on the daemon via `resolveCredentialId` and
+ * exposed on `GET /v1/status` as `costSurface.harnesses[<canonical>]`.
+ * Keep the units
  * consistent: token counts in tokens, rates in USD-per-1k-tokens.
  *
  * Units note: Anthropic + OpenAI publish prices per million tokens; we
@@ -43,13 +44,6 @@
  * These are heuristics. Provider-API reconciliation (actual usage) is
  * deferred to the P1 follow-up tracked in #331.
  */
-
-import {
-  CLAUDE_CODE_HARNESS,
-  CODEX_HARNESS,
-  HERMES_AGENT_HARNESS,
-  canonicalHarnessName,
-} from './names.js';
 
 export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'nous' | 'other';
 
@@ -219,24 +213,6 @@ export const MODEL_COST_TABLE: Readonly<Record<string, ModelCostEntry>> = {
   },
 };
 
-/**
- * Harness-level billing classification.
- *
- * `subscriptionPath: true` means the harness shells out to a
- * subscription-billed CLI (Claude Code, Codex) and the operator does NOT
- * incur per-task API charges — the cost surface is suppressed entirely
- * and the confirmation gate is never triggered.
- *
- * `subscriptionPath: false` means the harness routes to a paid API key
- * (Hermes via OpenRouter / Anthropic API / Nous Portal). The cost surface
- * is shown and the gate fires above the configured threshold.
- */
-export const HARNESS_BILLING: Readonly<Record<string, { subscriptionPath: boolean }>> = {
-  [CLAUDE_CODE_HARNESS]: { subscriptionPath: true },
-  [CODEX_HARNESS]: { subscriptionPath: true },
-  [HERMES_AGENT_HARNESS]: { subscriptionPath: false },
-};
-
 /** Default per-task USD threshold above which the confirmation gate fires. */
 export const DEFAULT_HIGH_COST_THRESHOLD_USD = 1;
 
@@ -275,20 +251,6 @@ export function estimateModelCost(modelId: string): CostEstimate | null {
   };
 }
 
-/**
- * `true` when the harness routes through a paid API key. Subscription
- * harnesses (Claude Code, Codex) return `false`; unknown harnesses
- * conservatively return `true` so a misnamed harness doesn't silently
- * skip the cost surface.
- */
-export function harnessUsesPaidApiKey(harness: string | undefined): boolean {
-  if (!harness) return false;
-  const canonical = canonicalHarnessName(harness);
-  const billing = HARNESS_BILLING[canonical];
-  if (!billing) return true;
-  return !billing.subscriptionPath;
-}
-
 export interface CostSurfaceDecision {
   /** Whether to show a numeric cost-per-task estimate at all. */
   showEstimate: boolean;
@@ -310,16 +272,16 @@ export interface CostSurfaceDecision {
  *
  * Defaults:
  *   - threshold: $1 / task (see DEFAULT_HIGH_COST_THRESHOLD_USD).
- *   - subscription harness → suppress surface + skip gate.
- *   - unknown model on a paid harness → show estimate slot (caller may
+ *   - `usesPaidApiKey: false` → suppress surface + skip gate.
+ *   - unknown model on a paid path → show estimate slot (caller may
  *     render "estimate unavailable") but DO NOT trigger the gate.
  */
 export function decideCostSurface(
-  harness: string | undefined,
+  usesPaidApiKey: boolean,
   modelId: string | undefined,
   thresholdUsd: number = DEFAULT_HIGH_COST_THRESHOLD_USD,
 ): CostSurfaceDecision {
-  if (!harnessUsesPaidApiKey(harness)) {
+  if (!usesPaidApiKey) {
     return {
       showEstimate: false,
       estimate: null,
