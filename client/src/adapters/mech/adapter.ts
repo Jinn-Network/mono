@@ -441,12 +441,7 @@ export class MechAdapter implements ExecutionAdapter {
     return false;
   }
 
-  /**
-   * Drop a terminal evaluation opportunity from every in-memory working set so
-   * the poll loop never re-pays announcement or claim cost. Used when
-   * `canClaimEvaluation` says the slot is gone and when `claimEvaluation` loses
-   * a TOCTOU race after the gate passed (#512).
-   */
+  /** Prune terminal evaluation state so the poll loop stops retrying (#512). */
   private pruneTerminalEvaluationOpportunity(params: {
     opportunityId?: string;
     solutionRequestId?: string;
@@ -463,6 +458,40 @@ export class MechAdapter implements ExecutionAdapter {
     }
     if (solutionRequestId) {
       this.forgetPendingEvaluationSolution(solutionRequestId);
+    }
+  }
+
+  private async claimEvaluationWithTerminalPrune(
+    opportunityId: string,
+    evaluationOpportunity: {
+      taskId: string;
+      attemptIndex: number;
+      task: SignedTaskV1;
+    },
+    evaluationTaskCidDigest: Hex,
+  ): Promise<{
+    taskId: string;
+    attemptIndex: number;
+    verdictIndex: number;
+    requestId: string;
+    txHash: Hex;
+    blockNumber?: number;
+  }> {
+    try {
+      return await this.claimEvaluation(
+        evaluationOpportunity.taskId,
+        evaluationOpportunity.attemptIndex,
+        evaluationTaskCidDigest,
+      );
+    } catch (err) {
+      if (err instanceof SafeInnerRevertError && isNonRecoverableInnerRevert(err.decodedName)) {
+        this.pruneTerminalEvaluationOpportunity({
+          opportunityId,
+          solutionRequestId: evaluationOpportunity.task.restorationRequestId,
+          reason: formatDecodedRevert(err.decodedName!, err.decodedArgs),
+        });
+      }
+      throw err;
     }
   }
 
@@ -1078,23 +1107,11 @@ export class MechAdapter implements ExecutionAdapter {
       const signedEvaluationTask = await this.signTaskDocument(evaluationOpportunity.task);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, signedEvaluationTask);
       const evaluationTaskCidDigest = cidToDigestHex(evaluationCid);
-      let claimed;
-      try {
-        claimed = await this.claimEvaluation(
-          evaluationOpportunity.taskId,
-          evaluationOpportunity.attemptIndex,
-          evaluationTaskCidDigest,
-        );
-      } catch (err) {
-        if (err instanceof SafeInnerRevertError && isNonRecoverableInnerRevert(err.decodedName)) {
-          this.pruneTerminalEvaluationOpportunity({
-            opportunityId: taskId,
-            solutionRequestId: evaluationOpportunity.task.restorationRequestId,
-            reason: formatDecodedRevert(err.decodedName!, err.decodedArgs),
-          });
-        }
-        throw err;
-      }
+      const claimed = await this.claimEvaluationWithTerminalPrune(
+        taskId,
+        evaluationOpportunity,
+        evaluationTaskCidDigest,
+      );
 
       this.pendingEvaluations.set(claimed.requestId, evaluationOpportunity.task);
       this.originalStates.set(claimed.requestId, evaluationOpportunity.task);

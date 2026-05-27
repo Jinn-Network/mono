@@ -30,16 +30,24 @@ import type { RequestId, TaskRequest } from '../../src/types/index.js';
  * it indirectly today.
  */
 
-class FailingClaimLocalAdapter extends LocalAdapter {
-  readonly failureMessage: string;
+function tcMaxVerdictsRaceLoss(): SafeInnerRevertError {
+  return new SafeInnerRevertError(
+    'Safe execTransaction inner revert (estimate): TCMaxVerdictsReached(1, 0)',
+    '0x39d0ed4c' as Hex,
+    null,
+    'TCMaxVerdictsReached',
+    [1n, 0],
+    null,
+  );
+}
 
-  constructor(failureMessage = 'forced claim failure') {
+class FailingClaimLocalAdapter extends LocalAdapter {
+  constructor(private readonly claimError: Error = new Error('forced claim failure')) {
     super();
-    this.failureMessage = failureMessage;
   }
 
   override async claimTask(_taskId: string): Promise<TaskRequest> {
-    throw new Error(this.failureMessage);
+    throw this.claimError;
   }
 }
 
@@ -73,7 +81,7 @@ describe('Daemon claim-failed emission', () => {
   });
 
   it('emits a paired claim_failed structured event AND a tick_error activity row when claimTask throws', async () => {
-    const adapter = new FailingClaimLocalAdapter('forced claim failure');
+    const adapter = new FailingClaimLocalAdapter();
     const dbPath = join(mkdtempSync(join(tmpdir(), 'jinn-claim-failed-db-')), 'jinn.db');
 
     const daemon = new Daemon({
@@ -133,18 +141,7 @@ describe('Daemon claim-failed emission', () => {
   });
 
   it('does not emit claim_failed when claimTask throws a terminal evaluation race loss (issue #512)', async () => {
-    const adapter = new FailingClaimLocalAdapter();
-    adapter.claimTask = async (taskId: string): Promise<never> => {
-      throw new SafeInnerRevertError(
-        'Safe execTransaction inner revert (estimate): TCMaxVerdictsReached(1, 0)',
-        '0x39d0ed4c' as Hex,
-        null,
-        'TCMaxVerdictsReached',
-        [1n, 0],
-        null,
-      );
-    };
-
+    const adapter = new FailingClaimLocalAdapter(tcMaxVerdictsRaceLoss());
     const store = new Store(':memory:');
     const daemon = new Daemon({
       adapter,
