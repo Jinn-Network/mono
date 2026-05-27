@@ -435,6 +435,91 @@ describe('ValidatedPoolStore — concurrent record() does not lose entries', () 
   });
 });
 
+describe('validatePoolInstances — #493 pytest_missing → scorable under v4', () => {
+  it('demonstrates a v3 ungradeable:pytest_missing entry re-validates as scorable under v4 + the install-guard', async () => {
+    // The stub EvalRunner simulates the in-container behavior: if no install
+    // line installs pytest, the eval aborts as ungradeable:pytest_missing
+    // (the actual fingerprint matched by matchInfraSignature on
+    // "No module named pytest"). Under v4, validatePoolInstances feeds the
+    // runner an install array still drawn from the HF row, but the
+    // PythonEvalRunner's buildTestCommands prepends the install-guard.
+    // For this test we simulate the same behavior at the validatePoolInstances
+    // level: the runner stub treats v3 (no guard) like the pre-#493 behaviour
+    // and v4 (guard) like the post-#493 behaviour.
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+
+    // Pre-seed a v3 entry with the terminal pytest_missing reason.
+    const PRIOR_V3 = '3';
+    await store.record(
+      'pkg__1',
+      {
+        scorable: false,
+        reason: 'ungradeable:pytest_missing',
+        checkedAt: '2026-05-25T00:00:00Z',
+      },
+      PRIOR_V3,
+    );
+
+    // Build a runner stub keyed on semanticsVersion: under v3 it throws
+    // pytest_missing; under v4 (current) it returns passed_match=true,
+    // simulating the install-guard providing pytest in-container.
+    function makeRunnerForVersion(v: string) {
+      return {
+        runEval: vi.fn(async () => {
+          if (v === EVAL_SEMANTICS_VERSION) {
+            return { passed_match: true, passed: ['t::a'], failed: [], log: '', exitCode: 0, imageDigest: 'sha256:' + 'd'.repeat(64) };
+          }
+          throw Object.assign(new Error('eval could not grade'), { name: 'EvalCouldNotGradeError', reason: 'pytest_missing' });
+        }),
+      };
+    }
+
+    const fetcher = {
+      fetchTaskRow: async () => ({
+        instance_id: 'pkg__1',
+        repo: 'acme/widget',
+        image_name: 'acme/widget:latest',
+        FAIL_TO_PASS: ['t::a'],
+        PASS_TO_PASS: ['t::b'],
+        test_patch: 'diff b',
+        // The HF row's install does NOT include pytest — pre-#493 this is
+        // exactly the shape that triggered ungradeable:pytest_missing.
+        install_config: { install: ['pip install -e .'], test_cmd: ['pytest tests/'], log_parser: 'parse_log_pytest' },
+      }),
+    };
+    const commandRunner = async () => ({ exitCode: 1, stdout: '', stderr: '' });
+
+    // Under v3 (pre-#493) the runner throws and the entry stays unscorable.
+    const v3Summary = await validatePoolInstances(
+      [poolTask('pkg__1')],
+      { fetcher, runner: makeRunnerForVersion(PRIOR_V3), store, semanticsVersion: PRIOR_V3, upstreamRepoDir: '/fake/upstream', commandRunner },
+      { force: true },
+    );
+    expect(v3Summary.scorable).toBe(0);
+    expect((await store.getEntry('pkg__1', PRIOR_V3))?.reason).toMatch(/pytest_missing/);
+
+    // Under v4 (post-#493) the install-guard provides pytest and the
+    // gold-patch eval succeeds. Same gold-patch-resolves admission rule.
+    expect(EVAL_SEMANTICS_VERSION).toBe('4');
+    const v4Summary = await validatePoolInstances(
+      [poolTask('pkg__1')],
+      { fetcher, runner: makeRunnerForVersion(EVAL_SEMANTICS_VERSION), store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(v4Summary.scorable).toBe(1);
+    const v4Entry = await store.getEntry('pkg__1', EVAL_SEMANTICS_VERSION);
+    expect(v4Entry?.scorable).toBe(true);
+    expect(v4Entry?.reason).toBe('gold-patch-resolves');
+
+    // The store partitions by semantics version: querying for v3 entries
+    // after a v4 record() returns null (the on-disk file was rewritten under
+    // v4), which is the expected re-validation behaviour. The "previously
+    // unscorable" claim is grounded in the operator's prior reality, not
+    // a cross-version on-disk fossil.
+    expect(await store.getEntry('pkg__1', PRIOR_V3)).toBeNull();
+  });
+});
+
 describe('validatePoolInstances — base_commit sentinel alignment', () => {
   it('uses the 40-hex sentinel when PoolTask.base_commit is undefined', async () => {
     const dir = tmpDir();
