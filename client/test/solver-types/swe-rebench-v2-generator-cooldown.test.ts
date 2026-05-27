@@ -413,7 +413,15 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
   beforeEach(() => {
     stateDir = tmpDir();
     ipfsUploadCount = 0;
-    vi.useFakeTimers();
+    // `shouldAdvanceTime` lets real time bleed into the fake clock so the
+    // shared HF request limiter's `minRequestIntervalMs` sleep (500ms by
+    // default — see hf-fetcher.ts) actually fires between /splits and /rows
+    // calls. Without this, the second fetchHfWithRetry in loadSweRebenchV2Pool
+    // hangs at the limiter and the test times out at 30s. Issue #578 added
+    // this min-interval after the rows-fetcher rewrite (which `next` now
+    // ships and PR #570 rebases onto), so the older `vi.useFakeTimers()`
+    // pattern from the previous describe blocks doesn't carry forward here.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-05-22T00:00:00.000Z'));
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
@@ -423,6 +431,11 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
           status: 200,
           text: async () => `${JSON.stringify({ Hash: `bafy-vetted-pool-cid-${ipfsUploadCount}` })}\n`,
         } as Response;
+      }
+      // /rows API → return mock rows so buildHistoricalPool gets a non-empty
+      // pool. /splits API → return one split. Default → splits payload.
+      if (url.includes('/rows')) {
+        return { ok: true, json: async () => ({ rows: DEFAULT_MOCK_ROWS }) } as Response;
       }
       return {
         ok: true,
