@@ -466,7 +466,7 @@ export class MechAdapter implements ExecutionAdapter {
     evaluationOpportunity: {
       taskId: string;
       attemptIndex: number;
-      task: SignedTaskV1;
+      task: Task;
     },
     evaluationTaskCidDigest: Hex,
   ): Promise<{
