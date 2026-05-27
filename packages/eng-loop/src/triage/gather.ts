@@ -9,11 +9,18 @@
  * Sequence:
  *
  *   1. `git fetch --all --quiet`                                   (once)
- *   2. `gh search prs "#<N> in:body" --repo Jinn-Network/mono --state all
- *       --json number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit`
- *   3. `gh issue view <N> --json closedByPullRequestsReferences`
- *   4. `git log --all --grep="#<N>" --format="%H%x09%D%x09%s"`
- *   5. for each commit SHA: `git branch -a --contains <sha>`
+ *   2. `gh search prs "#<N> in:body" --repo Jinn-Network/mono --json number,body`
+ *      (no `--state` flag — `gh search prs` rejects `--state all`; its
+ *      default already returns both open and closed PRs, which is what the
+ *      classifier needs. The JSON projection is narrow because
+ *      `gh search prs --json` does not expose `headRefName` / `mergedAt` /
+ *      `mergeCommit`; those are fetched per-PR in step 3.)
+ *   3. for each PR number found in step 2:
+ *      `gh pr view <n> --repo Jinn-Network/mono
+ *        --json number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit`
+ *   4. `gh issue view <N> --json closedByPullRequestsReferences`
+ *   5. `git log --all --grep="#<N>" --format="%H%x09%D%x09%s"`
+ *   6. for each commit SHA: `git branch -a --contains <sha>`
  *
  * Failures from any of the above are re-thrown — fail-loud per the design
  * note. The classifier never sees partial data.
@@ -44,10 +51,22 @@ const ISSUE_REF_RE = (issueNumber: number): RegExp =>
   new RegExp(`#${issueNumber}\\b`);
 
 // ---------------------------------------------------------------------------
-// gh search prs response shape (we only consume a subset)
+// gh response shapes
 // ---------------------------------------------------------------------------
 
-interface GhSearchPr {
+/**
+ * `gh search prs --json number,body` — the only fields `gh search prs --json`
+ * supports that we need for discovery + closure-keyword detection. Other
+ * fields (`headRefName`, `mergedAt`, `mergeCommit`) are not exposed by
+ * `gh search prs` and must be fetched via `gh pr view`.
+ */
+interface GhSearchPrLite {
+  number: number;
+  body: string;
+}
+
+/** `gh pr view <n> --json …` — the per-PR detail call supports all fields. */
+interface GhPrView {
   number: number;
   state: string; // "OPEN" | "MERGED" | "CLOSED" — gh normalises uppercase
   title: string;
@@ -58,8 +77,15 @@ interface GhSearchPr {
   closedAt: string | null;
 }
 
+/**
+ * `gh issue view <n> --json closedByPullRequestsReferences` returns the
+ * field as a flat array of PR refs, not the GraphQL `{nodes: […]}` wrapper.
+ * Live shape:
+ *
+ *   {"closedByPullRequestsReferences":[{"id":"…","number":613,"repository":{…},"url":"…"}]}
+ */
 interface GhIssueViewClosedByRefs {
-  closedByPullRequestsReferences?: { nodes: { number: number }[] };
+  closedByPullRequestsReferences?: { number: number }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -84,18 +110,34 @@ export async function gatherRealityCheckSignals(
   //    means something genuinely wrong).
   await runner('git', ['fetch', '--all', '--quiet']);
 
-  // 2. PRs.
-  const prsRaw = await runner('gh', [
+  // 2. PR numbers via search. The search API supports a narrow set of JSON
+  //    fields; per-PR detail (headRefName / mergeCommit / mergedAt /
+  //    closedAt) comes from `gh pr view` in step 3.
+  const prsSearchRaw = await runner('gh', [
     'search', 'prs',
     `#${issueNumber} in:body`,
     '--repo', REPO,
-    '--state', 'all',
-    '--json', 'number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit',
+    '--json', 'number,body',
     '--limit', '50',
   ]);
-  const prsParsed: GhSearchPr[] = parseJsonArray(prsRaw);
+  const prsLite: GhSearchPrLite[] = parseJsonArray(prsSearchRaw);
 
-  // 3. closedByPullRequestsReferences via gh issue view.
+  // 3. Per-PR detail for each unique PR number found in the search. Dedup
+  //    defensively in case the search ever returns duplicates.
+  const seenPrNums = new Set<number>();
+  const prsDetail: GhPrView[] = [];
+  for (const lite of prsLite) {
+    if (seenPrNums.has(lite.number)) continue;
+    seenPrNums.add(lite.number);
+    const viewRaw = await runner('gh', [
+      'pr', 'view', String(lite.number),
+      '--repo', REPO,
+      '--json', 'number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit',
+    ]);
+    prsDetail.push(safeJsonObject<GhPrView>(viewRaw));
+  }
+
+  // 4. closedByPullRequestsReferences via gh issue view.
   const issueViewRaw = await runner('gh', [
     'issue', 'view', String(issueNumber),
     '--repo', REPO,
@@ -103,10 +145,10 @@ export async function gatherRealityCheckSignals(
   ]);
   const issueView: GhIssueViewClosedByRefs = safeJsonObject(issueViewRaw);
   const closedByPrNumbers: number[] =
-    issueView.closedByPullRequestsReferences?.nodes.map((n) => n.number) ?? [];
+    issueView.closedByPullRequestsReferences?.map((n) => n.number) ?? [];
   const closedBySet = new Set<number>(closedByPrNumbers);
 
-  // 4. Commits via git log.
+  // 5. Commits via git log.
   const logRaw = await runner('git', [
     'log', '--all',
     `--grep=#${issueNumber}`,
@@ -118,7 +160,7 @@ export async function gatherRealityCheckSignals(
   const issueRe = ISSUE_REF_RE(issueNumber);
   const relevantCommits = rawCommits.filter((c) => issueRe.test(c.subject));
 
-  // 5. For each commit, list containing branches.
+  // 6. For each commit, list containing branches.
   const commits: CommitSignal[] = [];
   for (const c of relevantCommits) {
     const branchOut = await runner('git', ['branch', '-a', '--contains', c.sha]);
@@ -133,7 +175,7 @@ export async function gatherRealityCheckSignals(
 
   // Convert PRs to PrSignals.
   const closeRe = CLOSE_KEYWORD_RE(issueNumber);
-  const prs: PrSignal[] = prsParsed.map((p) => ({
+  const prs: PrSignal[] = prsDetail.map((p) => ({
     number: p.number,
     state: normalisePrState(p.state),
     mergeCommitOid: p.mergeCommit?.oid ?? null,

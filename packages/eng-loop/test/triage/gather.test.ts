@@ -56,8 +56,19 @@ const isGitFetch = (cmd: string, args: string[]) =>
 const isGhSearchPrs = (cmd: string, args: string[]) =>
   cmd === 'gh' && args[0] === 'search' && args[1] === 'prs';
 
+const isGhPrView = (cmd: string, args: string[]) =>
+  cmd === 'gh' && args[0] === 'pr' && args[1] === 'view';
+
 const isGhIssueView = (cmd: string, args: string[]) =>
   cmd === 'gh' && args[0] === 'issue' && args[1] === 'view';
+
+/**
+ * Match `gh pr view <n> …` for a specific PR number. The CLI receives the
+ * PR number as a string, so we compare against the third positional arg.
+ */
+const isGhPrViewFor = (prNumber: number) =>
+  (cmd: string, args: string[]): boolean =>
+    isGhPrView(cmd, args) && args[2] === String(prNumber);
 
 const isGitLog = (cmd: string, args: string[]) =>
   cmd === 'git' && args[0] === 'log' && args.includes('--all');
@@ -72,23 +83,24 @@ const isGitBranchContains = (cmd: string, args: string[]) =>
 describe('gatherRealityCheckSignals', () => {
   it('issue 561 with c627afc2 only on release/v2026.05.25 → fixed-pending-backmerge (AC #4)', async () => {
     const rec = recorder();
-    // gh search prs reply: empty (the fix wasn't via a PR onto next; the side-branch
-    // commit may itself have come from a PR, but for this AC we model it as
-    // a merged PR landing on release that did not back-merge to next).
+    // `gh search prs --json number,body` now returns only the lite shape;
+    // full PR detail (state / headRefName / mergeCommit / mergedAt /
+    // closedAt) comes from a follow-up `gh pr view <n>` call per PR.
     const ghSearchReply = JSON.stringify([
-      {
-        number: 562,
-        state: 'MERGED',
-        title: 'fix: scarce thing',
-        headRefName: 'fix/561-scarce-thing',
-        body: 'Closes #561',
-        mergeCommit: { oid: 'c627afc28abcd0000000000000000000000000ab' },
-        mergedAt: '2026-05-25T00:00:00Z',
-        closedAt: '2026-05-25T00:00:00Z',
-      },
+      { number: 562, body: 'Closes #561' },
     ]);
+    const ghPrViewReply = JSON.stringify({
+      number: 562,
+      state: 'MERGED',
+      title: 'fix: scarce thing',
+      headRefName: 'fix/561-scarce-thing',
+      body: 'Closes #561',
+      mergeCommit: { oid: 'c627afc28abcd0000000000000000000000000ab' },
+      mergedAt: '2026-05-25T00:00:00Z',
+      closedAt: '2026-05-25T00:00:00Z',
+    });
     const ghIssueViewReply = JSON.stringify({
-      closedByPullRequestsReferences: { nodes: [{ number: 562 }] },
+      closedByPullRequestsReferences: [{ number: 562 }],
     });
     // git log --all --grep='#561\b' --format='%H%x09%D%x09%s'
     // One commit, with refs containing release branch (DEcoration not used by gatherer)
@@ -103,6 +115,7 @@ describe('gatherRealityCheckSignals', () => {
     const runner = makeRunner(rec, [
       { matcher: isGitFetch, reply: '' },
       { matcher: isGhSearchPrs, reply: ghSearchReply },
+      { matcher: isGhPrViewFor(562), reply: ghPrViewReply },
       { matcher: isGhIssueView, reply: ghIssueViewReply },
       { matcher: isGitLog, reply: gitLogReply },
       { matcher: isGitBranchContains, reply: gitBranchReply },
@@ -140,7 +153,7 @@ describe('gatherRealityCheckSignals', () => {
     const runner = makeRunner(rec, [
       { matcher: isGitFetch, reply: '' },
       { matcher: isGhSearchPrs, reply: '[]' },
-      { matcher: isGhIssueView, reply: JSON.stringify({ closedByPullRequestsReferences: { nodes: [] } }) },
+      { matcher: isGhIssueView, reply: JSON.stringify({ closedByPullRequestsReferences: [] }) },
       { matcher: isGitLog, reply: '' },
     ]);
 
@@ -172,7 +185,7 @@ describe('gatherRealityCheckSignals', () => {
       if (isGitFetch(cmd, args)) return '';
       if (isGhSearchPrs(cmd, args)) return '[]';
       if (isGhIssueView(cmd, args)) {
-        return JSON.stringify({ closedByPullRequestsReferences: { nodes: [] } });
+        return JSON.stringify({ closedByPullRequestsReferences: [] });
       }
       if (isGitLog(cmd, args)) throw new Error('git: fatal: bad revision');
       throw new Error(`unhandled command: ${cmd} ${args.join(' ')}`);
@@ -197,7 +210,7 @@ describe('gatherRealityCheckSignals', () => {
       { matcher: isGhSearchPrs, reply: '[]' },
       {
         matcher: isGhIssueView,
-        reply: JSON.stringify({ closedByPullRequestsReferences: { nodes: [] } }),
+        reply: JSON.stringify({ closedByPullRequestsReferences: [] }),
       },
       { matcher: isGitLog, reply: gitLogReply },
     ]);
@@ -217,7 +230,7 @@ describe('gatherRealityCheckSignals', () => {
       { matcher: isGhSearchPrs, reply: '[]' },
       {
         matcher: isGhIssueView,
-        reply: JSON.stringify({ closedByPullRequestsReferences: { nodes: [] } }),
+        reply: JSON.stringify({ closedByPullRequestsReferences: [] }),
       },
       { matcher: isGitLog, reply: gitLogReply },
       {
@@ -234,24 +247,26 @@ describe('gatherRealityCheckSignals', () => {
   it('marks bodyClosesIssue=true when the PR is in closedByPullRequestsReferences even without a closure keyword', async () => {
     const rec = recorder();
     const ghSearchReply = JSON.stringify([
-      {
-        number: 700,
-        state: 'MERGED',
-        title: 'feat: thing',
-        headRefName: 'feat/700-thing',
-        body: 'Related to #572 but no closure keyword',
-        mergeCommit: { oid: 'cafecafe' },
-        mergedAt: '2026-05-25T00:00:00Z',
-        closedAt: '2026-05-25T00:00:00Z',
-      },
+      { number: 700, body: 'Related to #572 but no closure keyword' },
     ]);
+    const ghPrViewReply = JSON.stringify({
+      number: 700,
+      state: 'MERGED',
+      title: 'feat: thing',
+      headRefName: 'feat/700-thing',
+      body: 'Related to #572 but no closure keyword',
+      mergeCommit: { oid: 'cafecafe' },
+      mergedAt: '2026-05-25T00:00:00Z',
+      closedAt: '2026-05-25T00:00:00Z',
+    });
     const ghIssueViewReply = JSON.stringify({
-      closedByPullRequestsReferences: { nodes: [{ number: 700 }] },
+      closedByPullRequestsReferences: [{ number: 700 }],
     });
 
     const runner = makeRunner(rec, [
       { matcher: isGitFetch, reply: '' },
       { matcher: isGhSearchPrs, reply: ghSearchReply },
+      { matcher: isGhPrViewFor(700), reply: ghPrViewReply },
       { matcher: isGhIssueView, reply: ghIssueViewReply },
       { matcher: isGitLog, reply: '' },
     ]);
@@ -263,24 +278,26 @@ describe('gatherRealityCheckSignals', () => {
   it('marks bodyClosesIssue=false when neither body keyword nor closedByPrs reference', async () => {
     const rec = recorder();
     const ghSearchReply = JSON.stringify([
-      {
-        number: 700,
-        state: 'MERGED',
-        title: 'feat: thing',
-        headRefName: 'feat/700-thing',
-        body: 'See also #572 for context',
-        mergeCommit: { oid: 'cafecafe' },
-        mergedAt: '2026-05-25T00:00:00Z',
-        closedAt: '2026-05-25T00:00:00Z',
-      },
+      { number: 700, body: 'See also #572 for context' },
     ]);
+    const ghPrViewReply = JSON.stringify({
+      number: 700,
+      state: 'MERGED',
+      title: 'feat: thing',
+      headRefName: 'feat/700-thing',
+      body: 'See also #572 for context',
+      mergeCommit: { oid: 'cafecafe' },
+      mergedAt: '2026-05-25T00:00:00Z',
+      closedAt: '2026-05-25T00:00:00Z',
+    });
     const ghIssueViewReply = JSON.stringify({
-      closedByPullRequestsReferences: { nodes: [] },
+      closedByPullRequestsReferences: [],
     });
 
     const runner = makeRunner(rec, [
       { matcher: isGitFetch, reply: '' },
       { matcher: isGhSearchPrs, reply: ghSearchReply },
+      { matcher: isGhPrViewFor(700), reply: ghPrViewReply },
       { matcher: isGhIssueView, reply: ghIssueViewReply },
       { matcher: isGitLog, reply: '' },
     ]);
@@ -295,6 +312,116 @@ describe('gatherRealityCheckSignals', () => {
       await expect(gatherRealityCheckSignals(bad, runner)).rejects.toThrow(
         /must be a positive integer/,
       );
+    }
+  });
+
+  it('regression: parses the real flat-array shape of gh issue view --json closedByPullRequestsReferences', async () => {
+    // Live shape captured from `gh issue view 602 --repo Jinn-Network/mono
+    // --json closedByPullRequestsReferences`:
+    //   {"closedByPullRequestsReferences":[{"id":"…","number":613,
+    //    "repository":{"id":"…","name":"mono","owner":{…}},
+    //    "url":"https://github.com/Jinn-Network/mono/pull/613"}]}
+    // The earlier code assumed a GraphQL `{nodes: [...]}` wrapper that gh
+    // does NOT emit for this field; parsing crashed with
+    // "Cannot read properties of undefined (reading 'map')".
+    const rec = recorder();
+    const liveIssueViewReply = JSON.stringify({
+      closedByPullRequestsReferences: [
+        {
+          id: 'PR_kwDORvo7lc7fLaQS',
+          number: 613,
+          repository: {
+            id: 'R_kgDORvo7lQ',
+            name: 'mono',
+            owner: { id: 'O_kgDODh3-AQ', login: 'Jinn-Network' },
+          },
+          url: 'https://github.com/Jinn-Network/mono/pull/613',
+        },
+      ],
+    });
+
+    const runner = makeRunner(rec, [
+      { matcher: isGitFetch, reply: '' },
+      { matcher: isGhSearchPrs, reply: '[]' },
+      { matcher: isGhIssueView, reply: liveIssueViewReply },
+      { matcher: isGitLog, reply: '' },
+    ]);
+
+    const input = await gatherRealityCheckSignals(602, runner);
+    expect(input.closedByPrNumbers).toEqual([613]);
+  });
+
+  it('regression: gh search prs --json only requests fields gh search prs actually supports', async () => {
+    // `gh search prs --json` exposes a narrower set than `gh pr view --json`.
+    // Asking for `headRefName` / `mergedAt` / `mergeCommit` here makes gh
+    // exit non-zero ("Unknown JSON field"), breaking `yarn triage:check`
+    // end-to-end. The per-PR detail call (`gh pr view`) covers those.
+    const SEARCH_SUPPORTED = new Set([
+      'assignees', 'author', 'authorAssociation', 'body', 'closedAt',
+      'commentsCount', 'createdAt', 'id', 'isDraft', 'isLocked',
+      'isPullRequest', 'labels', 'number', 'repository', 'state', 'title',
+      'updatedAt', 'url',
+    ]);
+
+    const rec = recorder();
+    const runner = makeRunner(rec, [
+      { matcher: isGitFetch, reply: '' },
+      { matcher: isGhSearchPrs, reply: '[]' },
+      {
+        matcher: isGhIssueView,
+        reply: JSON.stringify({ closedByPullRequestsReferences: [] }),
+      },
+      { matcher: isGitLog, reply: '' },
+    ]);
+
+    await gatherRealityCheckSignals(675, runner);
+
+    const ghSearch = rec.calls.find((c) => isGhSearchPrs(c.cmd, c.args));
+    expect(ghSearch).toBeDefined();
+    const args = ghSearch!.args;
+    const jsonIdx = args.indexOf('--json');
+    expect(jsonIdx).toBeGreaterThan(-1);
+    const fields = args[jsonIdx + 1].split(',');
+    for (const f of fields) {
+      expect(SEARCH_SUPPORTED).toContain(f);
+    }
+    // Belt-and-braces: the three fields that broke this in the wild must
+    // never appear in the search-prs argv.
+    for (const banned of ['headRefName', 'mergedAt', 'mergeCommit']) {
+      expect(fields).not.toContain(banned);
+    }
+  });
+
+  it('regression: gh search prs argv never contains `--state all` (gh rejects it)', async () => {
+    const rec = recorder();
+    const runner = makeRunner(rec, [
+      { matcher: isGitFetch, reply: '' },
+      { matcher: isGhSearchPrs, reply: '[]' },
+      {
+        matcher: isGhIssueView,
+        reply: JSON.stringify({ closedByPullRequestsReferences: [] }),
+      },
+      { matcher: isGitLog, reply: '' },
+    ]);
+
+    await gatherRealityCheckSignals(675, runner);
+
+    const ghSearch = rec.calls.find((c) => isGhSearchPrs(c.cmd, c.args));
+    expect(ghSearch).toBeDefined();
+    const args = ghSearch!.args;
+    // `gh search prs --state` accepts only {open|closed}. Passing "all"
+    // makes gh exit non-zero, which broke `yarn triage:check` end-to-end.
+    const stateIdx = args.indexOf('--state');
+    if (stateIdx !== -1) {
+      expect(args[stateIdx + 1]).not.toBe('all');
+      expect(['open', 'closed']).toContain(args[stateIdx + 1]);
+    }
+    // Belt-and-braces: regardless of `--state` placement, `all` must not
+    // appear as the immediate successor of any `--state` token.
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i] === '--state') {
+        expect(args[i + 1]).not.toBe('all');
+      }
     }
   });
 
@@ -314,7 +441,7 @@ describe('gatherRealityCheckSignals', () => {
       { matcher: isGhSearchPrs, reply: '[]' },
       {
         matcher: isGhIssueView,
-        reply: JSON.stringify({ closedByPullRequestsReferences: { nodes: [] } }),
+        reply: JSON.stringify({ closedByPullRequestsReferences: [] }),
       },
       { matcher: isGitLog, reply: gitLogReply },
       { matcher: isGitBranchContains, reply: gitBranchReply },

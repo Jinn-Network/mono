@@ -26,7 +26,7 @@ describe('runTriageCheck', () => {
       if (cmd === 'git' && args[0] === 'fetch') return '';
       if (cmd === 'gh' && args[0] === 'search') return '[]';
       if (cmd === 'gh' && args[0] === 'issue' && args[1] === 'view') {
-        return JSON.stringify({ closedByPullRequestsReferences: { nodes: [] } });
+        return JSON.stringify({ closedByPullRequestsReferences: [] });
       }
       if (cmd === 'git' && args[0] === 'log') return '';
       throw new Error(`unhandled: ${cmd} ${args.join(' ')}`);
@@ -71,21 +71,24 @@ describe('runTriageCheck', () => {
       if (cmd === 'git' && args[0] === 'fetch') return '';
       if (cmd === 'gh' && args[0] === 'search') {
         return JSON.stringify([
-          {
-            number: 562,
-            state: 'MERGED',
-            title: 'fix: scarce thing',
-            headRefName: 'fix/561-scarce-thing',
-            body: 'Closes #561',
-            mergeCommit: { oid: 'c627afc2' },
-            mergedAt: '2026-05-25T00:00:00Z',
-            closedAt: '2026-05-25T00:00:00Z',
-          },
+          { number: 562, body: 'Closes #561' },
         ]);
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+        return JSON.stringify({
+          number: 562,
+          state: 'MERGED',
+          title: 'fix: scarce thing',
+          headRefName: 'fix/561-scarce-thing',
+          body: 'Closes #561',
+          mergeCommit: { oid: 'c627afc2' },
+          mergedAt: '2026-05-25T00:00:00Z',
+          closedAt: '2026-05-25T00:00:00Z',
+        });
       }
       if (cmd === 'gh' && args[0] === 'issue' && args[1] === 'view') {
         return JSON.stringify({
-          closedByPullRequestsReferences: { nodes: [{ number: 562 }] },
+          closedByPullRequestsReferences: [{ number: 562 }],
         });
       }
       if (cmd === 'git' && args[0] === 'log') {
