@@ -189,7 +189,8 @@ describe('PythonEvalRunner', () => {
       const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
       const testCmd: string[] = observedTask.install_config.test_cmd;
       // The very first command is the prepended pytest install guard.
-      expect(testCmd[0]).toContain('python -m pip install');
+      expect(testCmd[0]).toContain('python3 -m ensurepip');
+      expect(testCmd[0]).toContain('python3 -m pip install');
       expect(testCmd[0]).toContain('pytest');
       // The dataset's install line still runs.
       expect(testCmd).toContain('pip install -e .');
@@ -238,7 +239,7 @@ describe('PythonEvalRunner', () => {
       // pytest-cov by itself does NOT install pytest as a top-level command;
       // the guard SHOULD still fire to be safe. (`\bpytest\b` matches pytest
       // but not pytest-cov per the word-boundary on the trailing `-`.)
-      expect(testCmd[0]).toContain('python -m pip install');
+      expect(testCmd[0]).toContain('python3 -m pip install');
       expect(testCmd[0]).toContain('pytest');
     });
   });

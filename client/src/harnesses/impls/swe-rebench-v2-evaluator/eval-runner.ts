@@ -298,8 +298,8 @@ function installsPytest(install: string[]): boolean {
 }
 
 const PYTEST_INSTALL_GUARD =
-  'python -m ensurepip --upgrade >/dev/null 2>&1 || true && ' +
-  'python -m pip install --disable-pip-version-check --quiet pytest';
+  'python3 -m ensurepip --upgrade >/dev/null 2>&1 || true && ' +
+  'python3 -m pip install --disable-pip-version-check --quiet pytest';
 
 export class PythonEvalRunner implements EvalRunner {
   private readonly pruneRound: (image: string) => Promise<void>;
