@@ -190,7 +190,7 @@ __metadata:
     smol-toml: "npm:^1.3.0"
     twitter-api-v2: "npm:^1.18.0"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.0.0"
+    viem: "npm:^2.51.2"
     vitest: "npm:^2.1.9"
     zod: "npm:^3.23.0"
   bin:
@@ -898,9 +898,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.20":
-  version: 0.14.20
-  resolution: "ox@npm:0.14.20"
+"ox@npm:0.14.25":
+  version: 0.14.25
+  resolution: "ox@npm:0.14.25"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -915,7 +915,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/fe1c34577536aea3bda5ec47e083be9069d99cb35a270527921f1c7b406283f12bc4b7e9348b46aa3ba88555fc8abc963129c6b5b8b3b375d5e1549f65f2ce9a
+  checksum: 10c0/9e00a0528333915ac20bce2300eff77b3c782d67c93e533e4a075e0c4b2bbfea1851938240eeca518cb0eeca153575c593cd31aca83ced07b69ca25dba72953f
   languageName: node
   linkType: hard
 
@@ -1198,9 +1198,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.0.0":
-  version: 2.49.3
-  resolution: "viem@npm:2.49.3"
+"viem@npm:^2.51.2":
+  version: 2.51.2
+  resolution: "viem@npm:2.51.2"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1208,14 +1208,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.20"
-    ws: "npm:8.18.3"
+    ox: "npm:0.14.25"
+    ws: "npm:8.20.1"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/f98d0601ec6fecbca0e223735ea59694ac6c6925f85e64b00e46ec57bb1f59c3c5efc84a52abc372875ec730c35254ce6a9cad313dfdcc151ffd6b5d45102a4c
+  checksum: 10c0/1245c95bbecf41caf555516670e5c9720ff3562ae1eae706ecfbf53f42616f52a6cd78f92e0b0cac0c75f2952bd52a73ba6d807eefcd6b0c27a3157f18e9bed0
   languageName: node
   linkType: hard
 
@@ -1350,9 +1350,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ws@npm:8.18.3":
-  version: 8.18.3
-  resolution: "ws@npm:8.18.3"
+"ws@npm:8.20.1":
+  version: 8.20.1
+  resolution: "ws@npm:8.20.1"
   peerDependencies:
     bufferutil: ^4.0.1
     utf-8-validate: ">=5.0.2"
@@ -1361,7 +1361,7 @@ __metadata:
       optional: true
     utf-8-validate:
       optional: true
-  checksum: 10c0/eac918213de265ef7cb3d4ca348b891a51a520d839aa51cdb8ca93d4fa7ff9f6ccb339ccee89e4075324097f0a55157c89fa3f7147bde9d8d7e90335dc087b53
+  checksum: 10c0/ce162433218399cdedeb76fd33363d4d86a7d910058d4e3c679dce08cea65d6da6b39f11baa4d7808d024cf46ed88f6a05c17611621aaad8fc5e62edacc30c5d
   languageName: node
   linkType: hard
 
