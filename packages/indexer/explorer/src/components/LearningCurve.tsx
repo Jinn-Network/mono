@@ -112,10 +112,14 @@ function buildOpts(
       fill: undefined,
     };
   });
+  // Top padding leaves room above the plot canvas for the BASELINE / delta
+  // labels (#696) so they don't collide with the topmost y-axis tick (the
+  // "100%" label uPlot renders inside the plot area's top-left corner).
+  const topPad = baselineIndex !== null ? 28 : 12;
   return {
     width,
     height,
-    padding: [12, 8, 0, 4],
+    padding: [topPad, 8, 0, 4],
     cursor: { show: false },
     legend: { show: false },
     series: [{}, ...lineSeries],
