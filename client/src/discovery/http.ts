@@ -1027,7 +1027,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     let cursor: string | null = null;
 
     for (let page = 0; page < MAX_PAGES; page++) {
-      const data = await postGql<InstanceSuccessCountsPage>(
+      const data: InstanceSuccessCountsPage = await postGql<InstanceSuccessCountsPage>(
         gqlUrl,
         fetchImpl,
         INSTANCE_SUCCESS_COUNTS_QUERY,
@@ -1042,7 +1042,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         if (!id) continue;
         counts.set(id, (counts.get(id) ?? 0) + 1);
       }
-      const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
+      const pageInfo: InstanceSuccessCountsPage['verdictEnvelopeMetas']['pageInfo'] = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;
     }

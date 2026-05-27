@@ -378,6 +378,21 @@ describe('withFallback — all four methods', () => {
     expect(result).toBe(1);
     expect(floor.getSolverNetOperatorCount).toHaveBeenCalledOnce();
   });
+
+  it('getInstanceSuccessCounts routes to floor on DiscoveryUnavailableError (#669)', async () => {
+    const primary = {
+      getInstanceSuccessCounts: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getInstanceSuccessCounts: vi.fn(async () => new Map([['foo', 7]])),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const counts = await api.getInstanceSuccessCounts({ manifestCid: 'bafy' });
+    expect(counts.get('foo')).toBe(7);
+    expect(floor.getInstanceSuccessCounts).toHaveBeenCalledOnce();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {

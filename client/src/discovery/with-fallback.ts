@@ -243,5 +243,12 @@ export function withFallback(
         () => floor.listBuilderArtifacts(args),
       );
     },
+
+    getInstanceSuccessCounts(args) {
+      return dispatch(
+        () => primary.getInstanceSuccessCounts(args),
+        () => floor.getInstanceSuccessCounts(args),
+      );
+    },
   };
 }
