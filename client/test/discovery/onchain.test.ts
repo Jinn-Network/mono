@@ -1431,3 +1431,17 @@ describe('limitedConcurrency — partial-failure resilience', () => {
     expect(results).not.toContain(3);
   });
 });
+
+describe('OnchainDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
+  it('returns an empty Map as the floor stub', async () => {
+    // Construct cheaply — the stub never makes RPC calls. We pass an inert
+    // rpcUrl and the chainId; the stub bypasses any client construction.
+    const api = createOnchainDiscoveryAPI({
+      rpcUrl: 'http://127.0.0.1:65535',
+      chainId: 84532,
+    });
+    const counts = await api.getInstanceSuccessCounts({ manifestCid: 'bafyany' });
+    expect(counts).toBeInstanceOf(Map);
+    expect(counts.size).toBe(0);
+  });
+});

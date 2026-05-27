@@ -1275,6 +1275,18 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
 
   async function getPluginScores(): Promise<PluginScoreHistoryRow[]> { return []; }
 
+  // ── getInstanceSuccessCounts (#669) — empty Map stub ───────────────────────
+  // Network-truth success counts are derived from the indexer's IPFS
+  // enrichment of evaluation envelopes (verdictEnvelopeMeta.instanceId), which
+  // the on-chain floor cannot reconstruct without fetching IPFS bodies for
+  // every MetadataSet event with key 'evaluation:*'. That is a non-trivial
+  // scan + IPFS fan-out and is out of scope for the floor. Returning an empty
+  // Map is the documented contract: callers see local counters as the floor.
+
+  async function getInstanceSuccessCounts(): Promise<Map<string, number>> {
+    return new Map();
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1284,5 +1296,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     listPluginPublications,
     getPluginScores,
     listBuilderArtifacts,
+    getInstanceSuccessCounts,
   };
 }
