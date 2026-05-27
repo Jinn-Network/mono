@@ -23,6 +23,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const apiMock = vi.hoisted(() => ({
   getManifest: vi.fn(),
   getSolverNets: vi.fn(),
+  getStatus: vi.fn(),
   operatorJoin: vi.fn(),
   operatorLeave: vi.fn(),
   hermesDoctor: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('../../api/client.js', () => ({
       getManifest: (cid: string) => apiMock.getManifest(cid),
     },
     getSolverNets: () => apiMock.getSolverNets(),
+    getStatus: () => apiMock.getStatus(),
     operator: {
       join: (cid: string, body: unknown) => apiMock.operatorJoin(cid, body),
       leave: (cid: string) => apiMock.operatorLeave(cid),
@@ -144,6 +146,7 @@ function wrap(
 beforeEach(() => {
   apiMock.getManifest.mockReset();
   apiMock.getSolverNets.mockReset();
+  apiMock.getStatus.mockReset();
   apiMock.operatorJoin.mockReset();
   apiMock.operatorLeave.mockReset();
   apiMock.hermesDoctor.mockReset();
@@ -1222,6 +1225,17 @@ describe('JoinFlow — cost surfacing + confirmation gate', () => {
   }
 
   it('renders the subscription reassurance row and NO confirmation gate for Claude Code', async () => {
+    apiMock.getStatus.mockResolvedValue({
+      costSurface: {
+        harnesses: {
+          'claude-code': {
+            credentialId: 'anthropic:subscription',
+            usesPaidApiKey: false,
+          },
+        },
+      },
+    });
+
     const harnessSelect = await setupSolverWithMixedHarnesses();
     fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
 
