@@ -2050,6 +2050,114 @@ describe('MechAdapter TaskCoordinator flow', () => {
     // re-pay it because the solution is now pruned.
     expect(fetchSignedTaskFromIpfs).toHaveBeenCalled();
   });
+
+  // ── issue #645: bounded retry counter for unrecoverable transient failures ─
+  // The #553 immediate-prune covers the case where `deliveryEnvelopeCidForSolution`
+  // returns `null`. But that requires `canClaimEvaluation` to PASS first. If the
+  // earlier work *throws* (e.g. `findLatestDeliveryDataHexForRequest` throws
+  // before the `null` return path is reached, as on the pre-#555 daemon), the
+  // catch-arm inside `retryPendingEvaluationSolutions` swallows the error and the
+  // candidate stays pending — re-logging the same failure every poll cycle
+  // forever. A bounded `failedAttempts` counter forces a prune after
+  // MAX_EVALUATION_RETRY_ATTEMPTS = 20 consecutive failures.
+
+  it('prunes a pending evaluation solution after MAX_EVALUATION_RETRY_ATTEMPTS catch-arm failures', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValue({ ok: true });
+    vi.mocked(getMarketplaceRequestDeliveryMech)
+      .mockResolvedValue(('0x' + 'aa'.repeat(20)) as `0x${string}`);
+    // `findLatestDeliveryDataHexForRequest` THROWS — this is the catch-arm path
+    // inside `retryPendingEvaluationSolutions`, NOT the existing #553 null path.
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockRejectedValue(
+      new Error('No Deliver event data found'),
+    );
+
+    const store = makeConfigStore();
+    const adapter = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    // Drive the retry loop 20 times — candidate should still be present.
+    for (let i = 0; i < 20; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of (adapter as any).retryPendingEvaluationSolutions()) {
+        // No announcements expected — the lookup always throws.
+      }
+    }
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+    const persistedAt20 = (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID);
+    expect(persistedAt20.failedAttempts).toBe(20);
+
+    // 21st cycle: counter exceeds MAX_EVALUATION_RETRY_ATTEMPTS → prune.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const _ of (adapter as any).retryPendingEvaluationSolutions()) {
+      // still nothing yielded
+    }
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+
+    // The counter is persisted, so a daemon restart cannot re-spam the log for
+    // the same wedge: the value at prune time was already in the store.
+    expect(store.setConfigValue).toHaveBeenCalledWith(
+      'mech_pending_evaluation_solutions_v1',
+      expect.any(String),
+    );
+  });
+
+  it('prunes a pending evaluation solution after MAX_EVALUATION_RETRY_ATTEMPTS transient canClaimEvaluation failures', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+
+    // Unclassified revertName → isTerminalEvaluationReason() returns false →
+    // transient path → the new failedAttempts counter should increment.
+    vi.mocked(canClaimEvaluation).mockResolvedValue({
+      ok: false,
+      reason: 'simulated transient failure',
+      revertName: 'SomeUnknownRevert',
+    } as never);
+
+    const store = makeConfigStore();
+    const adapter = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    for (let i = 0; i < 20; i++) {
+      await (adapter as any).evaluationAnnouncementForSolution(
+        (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID),
+      );
+    }
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+    expect(
+      (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID).failedAttempts,
+    ).toBe(20);
+
+    // 21st call — exceeds threshold → prune.
+    await (adapter as any).evaluationAnnouncementForSolution(
+      (adapter as any).pendingEvaluationSolutions.get(REQUEST_ID),
+    );
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+  });
 });
 
 describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (ghost-task floor)', () => {
