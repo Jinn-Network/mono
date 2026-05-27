@@ -25,7 +25,7 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.0.0",
     "ponder": "^0.16.6",
-    "viem": "^2.0.0"
+    "viem": "^2.51.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
