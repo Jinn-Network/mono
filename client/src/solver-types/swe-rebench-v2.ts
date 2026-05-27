@@ -89,6 +89,8 @@ export interface SweRebenchV2GeneratorStaticConfig {
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
+  /** Optional DiscoveryAPI for network-truth success reconciliation (#669). */
+  discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
 }
 
 export interface MakeSweRebenchV2GeneratorForLaunchedRecordOpts {
@@ -126,6 +128,7 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
   getGeneratorConfig?: () => SweRebenchV2GeneratorRuntimeConfig | unknown;
   solverNetManifestCid?: string;
   ipfsRegistryUrl?: string;
+  discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
   creator?: {
     agentEoa?: `0x${string}`;
     safeAddress?: `0x${string}`;
@@ -580,6 +583,47 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       counters.set(task.instance_id, await stateStore.getCounters(task.instance_id));
     }
 
+    // Reconcile against network truth (#669). For each eligible instance, take
+    // max(local.successful, network[instance_id] ?? 0). On DiscoveryUnavailableError
+    // (indexer outage), the tick aborts: we MUST NOT silently fall through to
+    // local-only counters — that is exactly the bug this fix is addressing.
+    // No discoveryApi configured (test paths) → skip the merge silently.
+    if (config.discoveryApi && config.solverNetManifestCid) {
+      try {
+        const networkSuccesses = await config.discoveryApi.getInstanceSuccessCounts({
+          manifestCid: config.solverNetManifestCid,
+        });
+        for (const task of eligiblePool) {
+          const local = counters.get(task.instance_id);
+          if (!local) continue;
+          const networkSuccess = networkSuccesses.get(task.instance_id) ?? 0;
+          if (networkSuccess > local.successful) {
+            counters.set(task.instance_id, {
+              ...local,
+              successful: networkSuccess,
+            });
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = {
+          message: `network-truth reconciliation failed: ${message}`,
+          at: new Date().toISOString(),
+        };
+        console.warn(`[swe-rebench-v2-gen] ${lastError.message} — skipping this tick`);
+        lastPollSummary = {
+          poolSize: eligiblePool.length,
+          posted: 0,
+          unposted: 0,
+          live: 0,
+          repostable: 0,
+          saturated: 0,
+          abandoned: 0,
+        };
+        return null;
+      }
+    }
+
     const candidates = selectNextPostingCandidates({
       pool: eligiblePool,
       counters,
@@ -744,6 +788,7 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
     getGeneratorConfig: () => configRef.current,
     solverNetManifestCid: recordRef.current.manifestCid,
     ipfsRegistryUrl: staticConfig.ipfsRegistryUrl,
+    discoveryApi: staticConfig.discoveryApi,
     creator: {
       agentEoa: staticConfig.agentEoa,
       safeAddress: staticConfig.safeAddress,
