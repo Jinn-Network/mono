@@ -9,6 +9,7 @@ import { api } from '../../api/client.js';
 
 vi.mock('../../api/client.js', () => ({
   api: {
+    getStatus: vi.fn(),
     operator: {
       join: vi.fn(),
       leave: vi.fn(),
@@ -450,6 +451,23 @@ describe('<JoinedNetCard />', () => {
 });
 
 describe('<JoinedNetCard /> — cost surfacing + confirmation gate (Issue #331 P0)', () => {
+  beforeEach(() => {
+    vi.mocked(api.getStatus).mockResolvedValue({
+      costSurface: {
+        harnesses: {
+          'claude-code': {
+            credentialId: 'anthropic:subscription',
+            usesPaidApiKey: false,
+          },
+          'hermes-agent': {
+            credentialId: 'openrouter:api-key',
+            usesPaidApiKey: true,
+          },
+        },
+      },
+    });
+  });
+
   const HERMES_CATALOG: SolverNetCatalogEntry = {
     name: 'Prediction Markets',
     description: 'Predict things',
@@ -463,9 +481,11 @@ describe('<JoinedNetCard /> — cost surfacing + confirmation gate (Issue #331 P
     compatiblePlugins: [],
   };
 
-  it('renders the subscription reassurance row for Claude Code (no false-positive gate)', () => {
+  it('renders the subscription reassurance row for Claude Code (no false-positive gate)', async () => {
     wrap(<JoinedNetCard joined={ENTRY} catalogEntry={HERMES_CATALOG} defaultExpanded />);
-    expect(screen.getByTestId('joined-net-card-cost-subscription')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('joined-net-card-cost-subscription')).toBeTruthy(),
+    );
     expect(screen.getByTestId('joined-net-card-cost-subscription').textContent).toMatch(
       /subscription/i,
     );
@@ -510,14 +530,16 @@ describe('<JoinedNetCard /> — cost surfacing + confirmation gate (Issue #331 P
     await waitFor(() => expect(api.operator.join).toHaveBeenCalled());
   });
 
-  it('does NOT show the confirmation gate when the model stays under $1/task', () => {
+  it('does NOT show the confirmation gate when the model stays under $1/task', async () => {
     const sonnetEntry: JoinedNetEntry = {
       ...ENTRY,
       harness: 'hermes-agent',
       model: 'deepseek/deepseek-v4-flash',
     };
     wrap(<JoinedNetCard joined={sonnetEntry} catalogEntry={HERMES_CATALOG} defaultExpanded />);
-    expect(screen.getByTestId('joined-net-card-cost-panel')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('joined-net-card-cost-panel')).toBeTruthy(),
+    );
     expect(screen.getByTestId('joined-net-card-cost-panel').getAttribute('data-cost-high-cost')).toBe(
       'false',
     );
