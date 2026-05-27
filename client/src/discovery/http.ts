@@ -707,7 +707,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       // by id ASC and pages are appended in page order), but sort defensively
       // so the round-robin always pulls the lowest unclaimed id from each CID
       // even if upstream ordering ever changes.
-      bucket.sort((a, b) => Number(BigInt(a.taskId) - BigInt(b.taskId)));
+      bucket.sort((a, b) => {
+        const diff = BigInt(a.taskId) - BigInt(b.taskId);
+        return diff < 0n ? -1 : diff > 0n ? 1 : 0;
+      });
       buckets.push(bucket);
     }
 

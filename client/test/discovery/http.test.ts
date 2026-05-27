@@ -522,6 +522,61 @@ describe('findClaimableTasks', () => {
     expect(result[1].taskId).toBe('210');
     expect(result[2].taskId).toBe('171');
   });
+
+  it('sorts per-CID bucket by taskId ASC using BigInt (uint256-safe above MAX_SAFE_INTEGER)', async () => {
+    const MAX = Number.MAX_SAFE_INTEGER;
+    const taskIds = [
+      String(MAX + 1),
+      '1',
+      String((1n << 54n)),
+      String(MAX - 1),
+      String(MAX),
+    ];
+
+    const tasksResponse = {
+      data: {
+        tasks: {
+          items: taskIds.map((id) => ({
+            id,
+            taskCidDigest: '0x' + 'ab'.repeat(32),
+            manifestDigest: '0x' + 'cd'.repeat(32),
+            chainId: 84532,
+          })),
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    };
+    const emptyAttemptsResponse = {
+      data: { attempts: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    };
+
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      const body = JSON.parse(init?.body as string) as { query: string };
+      if (body.query.includes('query Tasks(')) {
+        return new Response(JSON.stringify(tasksResponse), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify(emptyAttemptsResponse), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const result = await client.findClaimableTasks({
+      solverNetManifestCids: ['bafyreiabc123'],
+      operatorAddress: '0x3333333333333333333333333333333333333333',
+    });
+
+    const expectedAsc = [...taskIds].sort((a, b) => {
+      const diff = BigInt(a) - BigInt(b);
+      return diff < 0n ? -1 : diff > 0n ? 1 : 0;
+    });
+    expect(result.map((c) => c.taskId)).toEqual(expectedAsc);
+  });
 });
 
 // ── listLaunchedSolverNets ────────────────────────────────────────────────────
