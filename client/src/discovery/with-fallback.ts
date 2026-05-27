@@ -245,10 +245,14 @@ export function withFallback(
     },
 
     getInstanceSuccessCounts(args) {
-      return dispatch(
-        () => primary.getInstanceSuccessCounts(args),
-        () => floor.getInstanceSuccessCounts(args),
-      );
+      // Never fall through to the floor for this method — an empty Map from
+      // the floor is indistinguishable from "all instances have 0 successes",
+      // which is the under-count bug this method was introduced to fix (#669).
+      // If the primary is degraded, propagate the error so the launcher aborts
+      // its tick rather than silently posting against local-only counters.
+      // The DiscoveryAPI.getInstanceSuccessCounts JSDoc encodes this contract
+      // ("callers MUST NOT silently fall through to local-only counts").
+      return primary.getInstanceSuccessCounts(args);
     },
   };
 }

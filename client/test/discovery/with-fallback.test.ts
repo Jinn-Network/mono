@@ -379,19 +379,23 @@ describe('withFallback — all four methods', () => {
     expect(floor.getSolverNetOperatorCount).toHaveBeenCalledOnce();
   });
 
-  it('getInstanceSuccessCounts routes to floor on DiscoveryUnavailableError (#669)', async () => {
+  it('does NOT fall through to floor for getInstanceSuccessCounts — propagates DiscoveryUnavailableError so launcher aborts (#669)', async () => {
+    // An empty Map from the floor is indistinguishable from "all instances
+    // have 0 successes", which is the under-count bug #669 fixes. The wrapper
+    // must propagate DiscoveryUnavailableError so the launcher tick aborts.
     const primary = {
       getInstanceSuccessCounts: vi.fn(async () => {
         throw new DiscoveryUnavailableError('indexer down');
       }),
     } as unknown as DiscoveryAPI;
     const floor = {
-      getInstanceSuccessCounts: vi.fn(async () => new Map([['foo', 7]])),
+      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
     } as unknown as DiscoveryAPI;
     const api = makeWrapper(primary, floor);
-    const counts = await api.getInstanceSuccessCounts({ manifestCid: 'bafy' });
-    expect(counts.get('foo')).toBe(7);
-    expect(floor.getInstanceSuccessCounts).toHaveBeenCalledOnce();
+    await expect(
+      api.getInstanceSuccessCounts({ manifestCid: 'bafy' }),
+    ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
+    expect(floor.getInstanceSuccessCounts).not.toHaveBeenCalled();
   });
 });
 
