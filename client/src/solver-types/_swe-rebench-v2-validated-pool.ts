@@ -519,48 +519,6 @@ function parsePublication(raw: unknown): VettedPoolArtifactPublication {
   };
 }
 
-/**
- * Detect whether a vetted-pool publication was built against an older
- * EVAL_SEMANTICS_VERSION than the running daemon expects. The daemon's
- * read helpers filter mismatched publications to null, so the operator-
- * dashboard cannot today distinguish "no publication yet" from "stale
- * publication blocked by version mismatch". Surface that distinction
- * with this helper so downstream callers can render a one-line
- * "re-publish needed" hint (#493).
- *
- * TODO(#493): wire this into the operator-dashboard's SolverNet detail
- * view (separate PR — the dashboard data model lives in
- * client/OPERATOR-APP-SPEC.md and the wiring path is non-trivial).
- */
-export function isPublicationStale(
-  publication: VettedPoolArtifactPublication | null,
-  currentEvalSemanticsVersion: string,
-): boolean {
-  if (publication === null) return false;
-  return publication.ref.evalSemanticsVersion !== currentEvalSemanticsVersion;
-}
-
-/**
- * Like {@link readVettedPoolArtifactPublication} but does not filter by
- * `evalSemanticsVersion`. Returns the publication regardless of version
- * mismatch so callers can use {@link isPublicationStale} to render a
- * stale-publication hint.
- */
-export async function readVettedPoolArtifactPublicationUnfiltered(args: {
-  stateDir: string;
-  manifestCid?: string;
-}): Promise<VettedPoolArtifactPublication | null> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await readFile(publicationPath(args.stateDir), 'utf8'));
-  } catch {
-    return null;
-  }
-  const publication = parsePublication(raw);
-  if (args.manifestCid !== undefined && publication.ref.manifestCid !== args.manifestCid) return null;
-  return publication;
-}
-
 export async function readVettedPoolArtifactPublication(args: {
   stateDir: string;
   manifestCid?: string;
