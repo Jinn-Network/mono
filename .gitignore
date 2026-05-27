@@ -8,6 +8,8 @@ node_modules/
 # (jinn-mono-2cl.15). Sub-paths inside .claude/skills/ that are themselves
 # operator-local (e.g. cached state files) can be added back here with
 # explicit .claude/skills/<name>/<path> ignore rules.
+# Cursor/Codex: .cursor/skills/ and .codex/skills/ are symlinks into
+# .claude/skills/ — run ./scripts/sync-skills.sh after adding a skill.
 .claude/*
 !.claude/skills/
 
