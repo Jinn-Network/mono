@@ -2127,7 +2127,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       ok: false,
       reason: 'simulated transient failure',
       revertName: 'SomeUnknownRevert',
-    } as never);
+    });
 
     const store = makeConfigStore();
     const adapter = new MechAdapter(TEST_CONFIG, store as never);
