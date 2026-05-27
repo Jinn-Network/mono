@@ -6,7 +6,6 @@ describe('CostEstimatePanel', () => {
   it('renders subscription reassurance when usesPaidApiKey is false', () => {
     render(
       <CostEstimatePanel
-        harness="claude-code"
         modelId="claude-opus-4-7"
         usesPaidApiKey={false}
         testIdPrefix="cost-test"
@@ -19,7 +18,6 @@ describe('CostEstimatePanel', () => {
   it('renders paid-api panel with high-cost gate for claude-code + Opus when usesPaidApiKey is true', () => {
     render(
       <CostEstimatePanel
-        harness="claude-code"
         modelId="claude-opus-4-7"
         usesPaidApiKey={true}
         testIdPrefix="cost-test"
@@ -34,7 +32,6 @@ describe('CostEstimatePanel', () => {
   it('renders paid-api panel without high-cost gate for hermes + cheap model', () => {
     render(
       <CostEstimatePanel
-        harness="hermes-agent"
         modelId="deepseek/deepseek-v4-flash"
         usesPaidApiKey={true}
         testIdPrefix="cost-test"

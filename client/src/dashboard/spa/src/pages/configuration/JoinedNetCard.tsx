@@ -24,7 +24,8 @@ import {
   harnessOptionLabel,
 } from './harnessNames.js';
 import { PluginPicker } from './PluginPicker.js';
-import { CostEstimatePanel, useCostSurfaceDecision } from './CostEstimatePanel.js';
+import { decideCostSurface } from '../../../../../harnesses/cost-estimates.js';
+import { CostEstimatePanel } from './CostEstimatePanel.js';
 import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
 
 /**
@@ -219,7 +220,7 @@ export function JoinedNetCard({
   const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
   const isSolver = joined.roles.includes('solver');
   const usesPaidApiKey = useHarnessUsesPaidApiKey(isSolver ? form.harness : undefined);
-  const costDecision = useCostSurfaceDecision(
+  const costDecision = decideCostSurface(
     usesPaidApiKey,
     isSolver ? form.model : undefined,
   );
@@ -501,7 +502,6 @@ export function JoinedNetCard({
 
           {isSolver && (
             <CostEstimatePanel
-              harness={form.harness}
               modelId={form.model}
               usesPaidApiKey={usesPaidApiKey}
               variant="inline"

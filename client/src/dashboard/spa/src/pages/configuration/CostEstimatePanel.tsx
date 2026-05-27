@@ -23,12 +23,10 @@ import {
   decideCostSurface,
   DEFAULT_HIGH_COST_THRESHOLD_USD,
   formatUsd,
-  type CostSurfaceDecision,
 } from '../../../../../harnesses/cost-estimates.js';
 import { cn } from '../../lib/utils.js';
 
 export interface CostEstimatePanelProps {
-  harness: string | undefined;
   modelId: string | undefined;
   /** Daemon-resolved billing path from `/v1/status` `costSurface`. */
   usesPaidApiKey: boolean;
@@ -44,16 +42,7 @@ export interface CostEstimatePanelProps {
   testIdPrefix?: string;
 }
 
-export function useCostSurfaceDecision(
-  usesPaidApiKey: boolean,
-  modelId: string | undefined,
-  thresholdUsd: number = DEFAULT_HIGH_COST_THRESHOLD_USD,
-): CostSurfaceDecision {
-  return decideCostSurface(usesPaidApiKey, modelId, thresholdUsd);
-}
-
 export function CostEstimatePanel({
-  harness: _harness,
   modelId,
   usesPaidApiKey,
   thresholdUsd = DEFAULT_HIGH_COST_THRESHOLD_USD,

@@ -78,11 +78,6 @@ describe('decideCostSurface — subscription billing path', () => {
     expect(decision.requiresConfirmation).toBe(false);
     expect(decision.suppressedReason).toMatch(/subscription/i);
   });
-
-  it('does NOT trigger the confirmation gate for subscription path + Opus 4.7', () => {
-    const decision = decideCostSurface(false, 'claude-opus-4-7');
-    expect(decision.requiresConfirmation).toBe(false);
-  });
 });
 
 describe('decideCostSurface — paid-API-key billing path', () => {

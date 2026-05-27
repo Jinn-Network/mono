@@ -28,7 +28,8 @@ import {
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
 import { PluginPicker } from '../configuration/PluginPicker.js';
-import { CostEstimatePanel, useCostSurfaceDecision } from '../configuration/CostEstimatePanel.js';
+import { decideCostSurface } from '../../../../../harnesses/cost-estimates.js';
+import { CostEstimatePanel } from '../configuration/CostEstimatePanel.js';
 import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 import { InlineHelp } from '../../components/InlineHelp.js';
@@ -387,7 +388,7 @@ export function JoinFlow({
   // role is selected — the evaluator role binds to a manifest-supplied
   // implementation and bypasses operator harness choice entirely.
   const usesPaidApiKey = useHarnessUsesPaidApiKey(showSolverFields ? form.harness : undefined);
-  const costDecision = useCostSurfaceDecision(
+  const costDecision = decideCostSurface(
     usesPaidApiKey,
     showSolverFields ? form.model : undefined,
   );
@@ -717,7 +718,6 @@ export function JoinFlow({
           </div>
 
           <CostEstimatePanel
-            harness={form.harness}
             modelId={form.model}
             usesPaidApiKey={usesPaidApiKey}
             testIdPrefix="join-flow-cost"
