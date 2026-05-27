@@ -210,24 +210,22 @@ today — operators could converge on dominant codeDigests by
 observation alone. One path to cross-operator amplification that
 requires no new infrastructure.
 
-The concrete first sprint is three small issues, now filed as
-sub-issues of [#689](https://github.com/Jinn-Network/mono/issues/689):
+The concrete first sprint lands as four sub-issues of
+[**#689**](https://github.com/Jinn-Network/mono/issues/689), the
+design pass for harness-as-policy learning, which sits under
+[**#601**](https://github.com/Jinn-Network/mono/issues/601) — the
+EPIC for demonstrating solver learning. The four pieces:
 
-- [**#763**](https://github.com/Jinn-Network/mono/issues/763) —
-  `chore`: add the `codeDigest` index on `attemptEnvelopeMeta` so the
-  per-codeDigest aggregation query runs fast.
-- [**#764**](https://github.com/Jinn-Network/mono/issues/764) —
-  `feat`: per-codeDigest selection-on-reward in Memory consolidation,
-  i.e. wire the Consolidator (or sibling subagent) to query the
-  indexer for aggregate reward per codeDigest and revert Improve
-  commits whose presence correlates negatively, under a documented
-  confidence threshold.
-- [**#765**](https://github.com/Jinn-Network/mono/issues/765) —
-  `feat`: one-paragraph promoter-prompt nudge toward higher
-  action-surface tiers (skill / hook / new-tool over notes-only), with
-  one worked skill-edit example.
+- The Ponder index that makes the per-codeDigest aggregation query fast.
+- The Consolidator extension that closes the feedback loop on
+  aggregate reward (the actual hill-climbing step).
+- The promoter-prompt nudge toward higher action-surface tiers.
+- A measurement-infrastructure spike so we can tell whether Level 1
+  actually improved the agent.
 
-#763 and #765 are fully independent; #764 builds on #763.
+The full dependency map — including adjacent prerequisites that sit
+under #601 directly — is in [the consolidated comment on
+#689](https://github.com/Jinn-Network/mono/issues/689#issuecomment-4555858041).
 
 ## What this doesn't yet prove
 
