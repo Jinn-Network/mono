@@ -452,16 +452,15 @@ export interface ValidatedPoolSummary {
  * sorted descending by count, with ties broken alphabetically by reason.
  */
 export function summarizeValidatedPool(file: unknown): ValidatedPoolSummary {
-  if (!isObject(file) || !isObject((file as Record<string, unknown>)['entries'])) {
+  if (!isObject(file) || !isObject(file['entries'])) {
     throw new Error('summarizeValidatedPool: file must include an `entries` object');
   }
-  const entries = (file as { entries: Record<string, unknown> }).entries;
   let scorable = 0;
   let unscorable = 0;
   const counts = new Map<string, number>();
-  for (const entry of Object.values(entries)) {
+  for (const entry of Object.values(file['entries'])) {
     if (!isObject(entry)) continue;
-    const raw = typeof entry['reason'] === 'string' ? (entry['reason'] as string) : 'unknown';
+    const raw = typeof entry['reason'] === 'string' ? entry['reason'] : 'unknown';
     const reason = normalizeReason(raw);
     counts.set(reason, (counts.get(reason) ?? 0) + 1);
     if (entry['scorable'] === true) scorable += 1; else unscorable += 1;
