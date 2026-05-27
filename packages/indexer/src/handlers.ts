@@ -1105,14 +1105,14 @@ export async function handleMetadataSet({
         });
         const meta = parseVerdictEnvelopeLite(body);
         if (meta) {
-          // For swe-rebench-v2 verdicts, fetch the task IPFS body so we can store
-          // spec.instance_id alongside the verdict. The verdict envelope's
-          // payload does NOT carry instance_id (see SweRebenchV2VerdictPayloadSchema
-          // in packages/sdk/src/payloads/swe-rebench-v2.ts), so the only honest
-          // source is the task body itself. One extra IPFS fetch per verdict,
-          // gated by solverType so it does not penalise other types.
-          // Failures degrade gracefully — instanceId stays '' and the launcher
-          // falls back to local counters for that instance (#669).
+          // The verdict payload does NOT carry instance_id
+          // (SweRebenchV2VerdictPayloadSchema in
+          // packages/sdk/src/payloads/swe-rebench-v2.ts), so for
+          // swe-rebench-v2 verdicts the only honest source is the task body
+          // itself — fetched here via meta.taskCid. Gated by solverType so
+          // other types pay no extra IPFS round-trip. Failures degrade
+          // gracefully: instanceId stays '' and the launcher falls back to
+          // its local counter for that instance (#669).
           let instanceId = '';
           if (meta.solverType.startsWith('swe-rebench-v2') && meta.taskCid) {
             try {
@@ -1120,12 +1120,12 @@ export async function handleMetadataSet({
                 timeoutMs: 5000,
                 fetchImpl,
               });
-              const spec = (taskBody && typeof taskBody === 'object'
-                ? (taskBody as Record<string, unknown>)['spec']
-                : undefined);
-              if (spec && typeof spec === 'object') {
-                const raw = (spec as Record<string, unknown>)['instance_id'];
-                if (typeof raw === 'string' && raw.length > 0) instanceId = raw;
+              if (taskBody && typeof taskBody === 'object') {
+                const spec = (taskBody as Record<string, unknown>)['spec'];
+                if (spec && typeof spec === 'object') {
+                  const raw = (spec as Record<string, unknown>)['instance_id'];
+                  if (typeof raw === 'string' && raw.length > 0) instanceId = raw;
+                }
               }
             } catch (err) {
               console.warn(
