@@ -2109,12 +2109,91 @@ describe('MechAdapter TaskCoordinator flow', () => {
     }
     expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
 
-    // The counter is persisted, so a daemon restart cannot re-spam the log for
-    // the same wedge: the value at prune time was already in the store.
+    // Persisted on every increment so a restart resumes the counter — see the
+    // restart-resume test below for the load-path coverage.
     expect(store.setConfigValue).toHaveBeenCalledWith(
       'mech_pending_evaluation_solutions_v1',
       expect.any(String),
     );
+  });
+
+  it('resumes the failedAttempts counter across a simulated daemon restart (#645)', async () => {
+    // Acceptance criterion #2: on a fresh daemon start against a backlog
+    // containing an unrecoverable solution, the retry counter is restored from
+    // the store and the prune fires after the *remaining* budget — not after a
+    // full new MAX_EVALUATION_RETRY_ATTEMPTS window. This exercises the
+    // `failedAttempts` branch of `loadPendingEvaluationSolutions`, which the
+    // existing catch-arm test does NOT touch (that test seeds the in-memory
+    // map directly and never re-instantiates the adapter).
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(canClaimEvaluation).mockResolvedValue({ ok: true });
+    vi.mocked(getMarketplaceRequestDeliveryMech)
+      .mockResolvedValue(('0x' + 'aa'.repeat(20)) as `0x${string}`);
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockRejectedValue(
+      new Error('No Deliver event data found'),
+    );
+
+    const store = makeConfigStore();
+
+    // ── adapter1 (pre-restart): drive the counter to 10 ────────────────────
+    const adapter1 = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter1.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter1 as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    for (let i = 0; i < 10; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of (adapter1 as any).retryPendingEvaluationSolutions()) {
+        // No announcements expected — the lookup always throws.
+      }
+    }
+    expect(
+      (adapter1 as any).pendingEvaluationSolutions.get(REQUEST_ID).failedAttempts,
+    ).toBe(10);
+    // The persisted JSON must already carry the counter — adapter2 will read
+    // it back via `loadPendingEvaluationSolutions`.
+    expect(store.values.get('mech_pending_evaluation_solutions_v1')).toContain(
+      '"failedAttempts":10',
+    );
+
+    // ── adapter2 (post-restart): load and verify counter is restored ───────
+    const adapter2 = new MechAdapter(TEST_CONFIG, store as never);
+    await adapter2.initialize();
+    const restored = (adapter2 as any).pendingEvaluationSolutions.get(REQUEST_ID);
+    expect(restored).toBeDefined();
+    expect(restored.failedAttempts).toBe(10);
+
+    // ── drive 10 more cycles on adapter2 → still present at 20 ─────────────
+    for (let i = 0; i < 10; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of (adapter2 as any).retryPendingEvaluationSolutions()) {
+        // still nothing yielded
+      }
+    }
+    expect((adapter2 as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+    expect(
+      (adapter2 as any).pendingEvaluationSolutions.get(REQUEST_ID).failedAttempts,
+    ).toBe(20);
+
+    // ── 21st cycle (total across both lifetimes) → prune ───────────────────
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const _ of (adapter2 as any).retryPendingEvaluationSolutions()) {
+      // still nothing yielded
+    }
+    expect((adapter2 as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
   });
 
   it('prunes a pending evaluation solution after MAX_EVALUATION_RETRY_ATTEMPTS transient canClaimEvaluation failures', async () => {
