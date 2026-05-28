@@ -3,7 +3,7 @@ id: DR-2026-05-28
 title: Outcome-measurement infrastructure for the harness-RL ladder — the held-out exam
 date: 2026-05-28
 verb: Steer
-status: proposed
+status: ratified
 authors: opus (spike on exciting-mayer-68adc9 worktree)
 spike: issue [#766](https://github.com/Jinn-Network/mono/issues/766)
 relates-to: [#689](https://github.com/Jinn-Network/mono/issues/689) (design issue this feeds), [#683](https://github.com/Jinn-Network/mono/issues/683) (multi-task tracker — subsumed here, see §6), [#601](https://github.com/Jinn-Network/mono/issues/601) (parent EPIC), DR-2026-05-06-c (frozen-state contract — the freeze mechanism this builds on), DR-2026-05-27 (the RL ladder this supplies measurement for), [#669](https://github.com/Jinn-Network/mono/issues/669) (launcher under-count — degrades option A)
@@ -331,7 +331,9 @@ Per BRAND.md, naming the gap is more Legible than papering over it.
 
 ## Status
 
-Proposed — pending Captain ratification. Authored as the spike finding for
+Ratified by Captain ritsukai on 2026-05-28. Authored as the spike finding for
 [#766](https://github.com/Jinn-Network/mono/issues/766). The C
 re-homing in §3.3 (synthetic as construction-method-for-non-replayable,
 not global rejection) was prompted by Captain dialogue during the spike.
+Follow-up work tracked under umbrella
+[#824](https://github.com/Jinn-Network/mono/issues/824).
