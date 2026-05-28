@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
@@ -1305,6 +1305,17 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return [];
   }
 
+  // ── getInstanceClaimCounts (#802) — empty Map stub ─────────────────────────
+  // The claim data (task.maxClaims + attempt counts) IS reconstructible from
+  // TaskCreated / TaskAttemptCreated logs, but the floor stays a no-op to keep
+  // the abort-on-outage guarantee symmetric with getInstanceSuccessCounts:
+  // withFallback never routes this method to the floor, so an empty Map here is
+  // never the runtime path. Returning empty (rather than a live scan) avoids a
+  // floor that would mark every posting `live` and suppress all reposts (#802).
+  async function getInstanceClaimCounts(): Promise<Map<string, InstanceClaimCount>> {
+    return new Map();
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1316,5 +1327,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     listBuilderArtifacts,
     getInstanceSuccessCounts,
     getCodeDigestRewards,
+    getInstanceClaimCounts,
   };
 }

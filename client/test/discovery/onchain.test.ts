@@ -1538,3 +1538,15 @@ describe('OnchainDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     expect(counts.size).toBe(0);
   });
 });
+
+describe('OnchainDiscoveryAPI.getInstanceClaimCounts (#802)', () => {
+  it('returns an empty Map as the floor stub (never the runtime path)', async () => {
+    const api = createOnchainDiscoveryAPI({
+      rpcUrl: 'http://127.0.0.1:65535',
+      chainId: 84532,
+    });
+    const counts = await api.getInstanceClaimCounts({ manifestCid: 'bafyany' });
+    expect(counts).toBeInstanceOf(Map);
+    expect(counts.size).toBe(0);
+  });
+});
