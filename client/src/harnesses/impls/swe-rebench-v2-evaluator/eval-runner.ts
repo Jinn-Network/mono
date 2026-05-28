@@ -297,9 +297,16 @@ function installsPytest(install: string[]): boolean {
   return install.some((line) => /(?:^|[^A-Za-z0-9_-])pytest(?:$|[^A-Za-z0-9_-])/.test(line));
 }
 
+// Why: import-gated so the guard is a provable no-op when pytest is already
+// importable (e.g. baked into the base image or pulled by a `.[test]` extra
+// that `installsPytest` can't see). That protects previously-scorable
+// instances from any perturbation — `import pytest` succeeds, the brace group
+// is skipped, and nothing is installed. The install runs only when pytest is
+// genuinely absent, which is exactly the `ungradeable:pytest_missing` case.
 const PYTEST_INSTALL_GUARD =
-  'python3 -m ensurepip --upgrade >/dev/null 2>&1 || true && ' +
-  'python3 -m pip install --disable-pip-version-check --quiet pytest';
+  "python3 -c 'import pytest' 2>/dev/null || { " +
+  'python3 -m ensurepip --upgrade >/dev/null 2>&1 || true; ' +
+  'python3 -m pip install --disable-pip-version-check --quiet pytest; }';
 
 export class PythonEvalRunner implements EvalRunner {
   private readonly pruneRound: (image: string) => Promise<void>;

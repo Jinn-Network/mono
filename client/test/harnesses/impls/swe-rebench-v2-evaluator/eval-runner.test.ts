@@ -192,6 +192,10 @@ describe('PythonEvalRunner', () => {
       expect(testCmd[0]).toContain('python3 -m ensurepip');
       expect(testCmd[0]).toContain('python3 -m pip install');
       expect(testCmd[0]).toContain('pytest');
+      // #493 hardening: the guard is import-gated so it is a provable no-op
+      // when pytest is already present, protecting previously-scorable
+      // instances from any perturbation (no pip/ensurepip call at all).
+      expect(testCmd[0]).toContain("python3 -c 'import pytest'");
       // The dataset's install line still runs.
       expect(testCmd).toContain('pip install -e .');
       // The final command is still the SWE-bench resolved-semantics pytest run.
