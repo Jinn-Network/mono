@@ -64,6 +64,18 @@ In rough order:
 3. **[`BRAND.md`](BRAND.md)** — voice, headless-brand posture, content non-negotiables. Read before any user-facing copy.
 4. Canonical docs as needed: [`SPEC.md`](SPEC.md), [`THESIS.md`](THESIS.md), [`GROWTH.md`](GROWTH.md), [`GLOSSARY.md`](GLOSSARY.md).
 
+## Contributing shape
+
+Jinn has no canonical implementation. The client and frontend in this repo are *one* implementation of the protocol. Contributing to Jinn can take any of several shapes — all welcomed:
+
+- **Contributing to this implementation**: bug fixes, features, refactors, docs. See the work-shape table below.
+- **Building an alternative implementation**: an alternative client, frontend, explorer, operator UI, or broadcast bot. Fork freely. Add your implementation to the known-instances list in the README when it's ready (open a PR with the entry).
+- **Running infrastructure**: hosting a frontend mirror, running a community chat room, running a broadcast bot instance under your own account. Add it to the README's community-run surfaces list.
+- **Design input**: open a [Discussion](https://github.com/Jinn-Network/mono/discussions) on protocol design, governance scope, documentation, or any canonical artifact. We actively want this input. No formal RFC process — Discussions and PRs are the input mechanism.
+- **Articulating an alternative narrative**: [`BRAND.md`](BRAND.md), [`THESIS.md`](THESIS.md), [`GROWTH.md`](GROWTH.md) are *the current articulating contributor entity's* narrative, not the protocol's. If you disagree, articulate your own — the protocol doesn't privilege ours.
+
+The only thing we ask: don't structurally privilege your contribution above others. The posture is plurality; contributions that try to install themselves as canonical defeat it. See [Discussion #316](https://github.com/Jinn-Network/mono/discussions/316) for the full statement of this posture.
+
 ## How work is shaped
 
 Jinn engineering recognises seven shapes of work plus one emergency sub-flow, keyed to Conventional Commits prefixes:
