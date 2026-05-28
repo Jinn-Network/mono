@@ -254,5 +254,13 @@ export function withFallback(
       // ("callers MUST NOT silently fall through to local-only counts").
       return primary.getInstanceSuccessCounts(args);
     },
+
+    getCodeDigestRewards(args) {
+      // Never fall through to the floor — an empty array from the floor is
+      // indistinguishable from "no successes", the exact failure mode #764's
+      // revert logic must avoid. Propagate the error so the Consolidator skips
+      // reverts on degraded data (substrate-incident policy; mirrors #669).
+      return primary.getCodeDigestRewards(args);
+    },
   };
 }

@@ -1135,7 +1135,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const requestKeyToDigest = new Map<string, string>(); // "requestId|chainId" -> codeDigest
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
-      const data = await postGql<CodeDigestAttemptsPage>(
+      const data: CodeDigestAttemptsPage = await postGql<CodeDigestAttemptsPage>(
         gqlUrl, fetchImpl, CODEDIGEST_ATTEMPTS_QUERY,
         { codeDigests: args.codeDigests, limit: PAGE_LIMIT, after: cursor },
       );
@@ -1155,7 +1155,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       const reqIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
       cursor = null;
       for (let page = 0; page < MAX_PAGES; page++) {
-        const data = await postGql<CodeDigestOperatorAttemptsPage>(
+        const data: CodeDigestOperatorAttemptsPage = await postGql<CodeDigestOperatorAttemptsPage>(
           gqlUrl, fetchImpl, CODEDIGEST_OPERATOR_ATTEMPTS_QUERY,
           { requestIds: reqIds, operator: args.operator, limit: PAGE_LIMIT, after: cursor },
         );
@@ -1171,7 +1171,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const requestIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
     cursor = null;
     for (let page = 0; page < MAX_PAGES; page++) {
-      const data = await postGql<CodeDigestVerdictsPage>(
+      const data: CodeDigestVerdictsPage = await postGql<CodeDigestVerdictsPage>(
         gqlUrl, fetchImpl, CODEDIGEST_VERDICTS_QUERY,
         { requestIds, limit: PAGE_LIMIT, after: cursor },
       );
