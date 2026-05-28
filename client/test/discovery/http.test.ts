@@ -1213,3 +1213,102 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     );
   });
 });
+
+describe('HttpDiscoveryAPI.getInstanceClaimCounts (#802)', () => {
+  it('returns consumed-vs-maxClaims per taskId for the SolverNet', async () => {
+    // Leg 1: tasks-for-digest page (id + maxClaims + chainId).
+    const tasksPage = {
+      data: {
+        tasks: {
+          items: [
+            { id: '100', maxClaims: 5, chainId: 84532 },
+            { id: '101', maxClaims: 3, chainId: 84532 },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    // Leg 2: attempts for those task ids (5 for task 100 = exhausted; 1 for 101 = live).
+    const attemptsPage = {
+      data: {
+        attempts: {
+          items: [
+            { taskId: '100' }, { taskId: '100' }, { taskId: '100' },
+            { taskId: '100' }, { taskId: '100' },
+            { taskId: '101' },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    let leg = 0;
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      leg += 1;
+      return new Response(JSON.stringify(leg === 1 ? tasksPage : attemptsPage), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const counts = await api.getInstanceClaimCounts({ manifestCid: 'bafymanifest' });
+
+    expect(counts.get('100')).toEqual({ taskId: '100', consumed: 5, maxClaims: 5 });
+    expect(counts.get('101')).toEqual({ taskId: '101', consumed: 1, maxClaims: 3 });
+    expect(counts.size).toBe(2);
+  });
+
+  it('reports zero consumed for a task with no attempts yet', async () => {
+    const tasksPage = {
+      data: {
+        tasks: {
+          items: [{ id: '200', maxClaims: 4, chainId: 84532 }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    const attemptsPage = {
+      data: { attempts: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    };
+    let leg = 0;
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      leg += 1;
+      return new Response(JSON.stringify(leg === 1 ? tasksPage : attemptsPage), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const counts = await api.getInstanceClaimCounts({ manifestCid: 'bafymanifest' });
+    expect(counts.get('200')).toEqual({ taskId: '200', consumed: 0, maxClaims: 4 });
+  });
+
+  it('returns an empty Map when the SolverNet has no tasks', async () => {
+    const empty = {
+      data: { tasks: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    };
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify(empty), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const counts = await api.getInstanceClaimCounts({ manifestCid: 'bafymanifest' });
+    expect(counts.size).toBe(0);
+  });
+
+  it('throws DiscoveryUnavailableError when GraphQL returns errors', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify({ errors: [{ message: 'indexer cold' }] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    await expect(api.getInstanceClaimCounts({ manifestCid: 'bafymanifest' }))
+      .rejects.toBeInstanceOf(DiscoveryUnavailableError);
+  });
+});

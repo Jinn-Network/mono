@@ -16,6 +16,7 @@
 import type {
   DiscoveryAPI,
   ClaimableTaskCandidate,
+  InstanceClaimCount,
   SolverNetManifestSummary,
   SolverNetLifecycleStatus,
   EnvelopeRef,
@@ -258,6 +259,34 @@ query InstanceSuccessCounts($solverNetManifestCid: String!, $limit: Int!, $after
 }
 `;
 
+/**
+ * Leg 1 of getInstanceClaimCounts (#802): page every task id + maxClaims for a
+ * SolverNet's manifestDigest. Leg 2 reuses ATTEMPTS_FOR_TASKS_QUERY to count
+ * attempts (= consumed slots) per task. Same two-leg shape as
+ * getSolverNetOperatorCount; the only delta is selecting maxClaims here.
+ */
+const CLAIM_COUNT_TASKS_QUERY = `
+query ClaimCountTasks($manifestDigest: String!, $limit: Int!, $after: String) {
+  tasks(
+    where: { manifestDigest: $manifestDigest },
+    limit: $limit,
+    after: $after,
+    orderBy: "id",
+    orderDirection: "asc"
+  ) {
+    items {
+      id
+      maxClaims
+      chainId
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
 const QUERY_ENVELOPES_QUERY = `
 query QueryEnvelopes($where: envelopeFilter, $limit: Int!) {
   envelopes(
@@ -363,6 +392,13 @@ interface OperatorCountTasksPage {
 interface OperatorCountAttemptsPage {
   attempts: {
     items: Array<{ operator: string }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface ClaimCountTasksPage {
+  tasks: {
+    items: Array<{ id: string; maxClaims: number; chainId: number }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -1252,6 +1288,72 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return rows;
   }
 
+  // ── getInstanceClaimCounts (#802) ──────────────────────────────────────────
+  // Per-task consumed-vs-maxClaims for a SolverNet. Two legs, mirroring
+  // getSolverNetOperatorCount: leg 1 pages tasks (+ maxClaims) for the
+  // manifestDigest; leg 2 pages attempts (consumed slots) batched by taskId_in.
+  async function getInstanceClaimCounts(args: {
+    manifestCid: string;
+  }): Promise<Map<string, InstanceClaimCount>> {
+    await ensureReady();
+
+    const manifestDigest = manifestDigestForCid(args.manifestCid).toLowerCase();
+
+    // Leg 1: task ids + maxClaims for this SolverNet (single-chain → shared chainId).
+    const maxClaimsByTaskId = new Map<string, number>();
+    const taskIds: string[] = [];
+    let chainId: number | undefined;
+    let taskCursor: string | null = null;
+    for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
+      const data: ClaimCountTasksPage = await postGql<ClaimCountTasksPage>(
+        gqlUrl,
+        fetchImpl,
+        CLAIM_COUNT_TASKS_QUERY,
+        { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
+      );
+      for (const row of data.tasks?.items ?? []) {
+        taskIds.push(row.id);
+        maxClaimsByTaskId.set(row.id, row.maxClaims);
+        if (chainId === undefined) chainId = row.chainId;
+      }
+      const pageInfo = data.tasks?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      taskCursor = pageInfo.endCursor;
+    }
+
+    if (taskIds.length === 0 || chainId === undefined) {
+      return new Map();
+    }
+
+    // Leg 2: count attempts per taskId (= consumed slots), batched by taskId_in.
+    const consumedByTaskId = new Map<string, number>();
+    let attemptCursor: string | null = null;
+    for (;;) {
+      const data: AttemptsPage = await postGql<AttemptsPage>(
+        gqlUrl,
+        fetchImpl,
+        ATTEMPTS_FOR_TASKS_QUERY,
+        { taskIds, chainId, limit: ATTEMPTS_PAGE_LIMIT, after: attemptCursor },
+      );
+      for (const a of data.attempts?.items ?? []) {
+        consumedByTaskId.set(a.taskId, (consumedByTaskId.get(a.taskId) ?? 0) + 1);
+      }
+      const pageInfo = data.attempts?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      attemptCursor = pageInfo.endCursor;
+    }
+
+    const out = new Map<string, InstanceClaimCount>();
+    for (const taskId of taskIds) {
+      out.set(taskId, {
+        taskId,
+        consumed: consumedByTaskId.get(taskId) ?? 0,
+        maxClaims: maxClaimsByTaskId.get(taskId) ?? 0,
+      });
+    }
+    return out;
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1263,5 +1365,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     listBuilderArtifacts,
     getInstanceSuccessCounts,
     getCodeDigestRewards,
+    getInstanceClaimCounts,
   };
 }
