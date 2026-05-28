@@ -47,4 +47,28 @@ describe('GeneratorStateStore', () => {
     expect((await store.getCounters('b')).posted).toBe(0);
     expect((await store.getCounters('b')).successful).toBe(1);
   });
+
+  it('defaults last_task_id to undefined', async () => {
+    const store = new GeneratorStateStore({ stateDir: dir });
+    expect((await store.getCounters('a')).last_task_id).toBeUndefined();
+  });
+
+  it('records and persists last_task_id without disturbing other counters', async () => {
+    const store = new GeneratorStateStore({ stateDir: dir });
+    await store.recordPosted('a');
+    await store.recordLastTaskId('a', '12345');
+    const c = await store.getCounters('a');
+    expect(c.last_task_id).toBe('12345');
+    expect(c.posted).toBe(1);
+
+    const reloaded = new GeneratorStateStore({ stateDir: dir });
+    expect((await reloaded.getCounters('a')).last_task_id).toBe('12345');
+  });
+
+  it('overwrites last_task_id on a fresh posting', async () => {
+    const store = new GeneratorStateStore({ stateDir: dir });
+    await store.recordLastTaskId('a', '100');
+    await store.recordLastTaskId('a', '200');
+    expect((await store.getCounters('a')).last_task_id).toBe('200');
+  });
 });
