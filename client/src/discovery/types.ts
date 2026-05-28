@@ -319,7 +319,11 @@ export interface DiscoveryAPI {
    * scoped to mode='train'. Joins attemptEnvelopeMeta (codeDigest) to
    * verdictEnvelopeMeta (actualPassed, actualScore) on (requestId, chainId).
    * When `operator` is provided, further restricts to attempts the operator
-   * claimed (via the `attempt` table, joined on requestId).
+   * claimed (via the `attempt` table, joined on requestId). When
+   * `solverNetManifestCid` is provided, scopes the aggregate to a single
+   * SolverNet via `verdictEnvelopeMeta.solverNetManifestCid` (the only table in
+   * this join carrying the column) — attempts whose verdicts belong to other
+   * SolverNets are excluded. Omitted → unscoped across all SolverNets (#764).
    *
    * Like getInstanceSuccessCounts (#669), this throws DiscoveryUnavailableError
    * on a degraded backing and MUST NOT silently fall through to the on-chain

@@ -391,10 +391,20 @@ query CodeDigestAttempts($codeDigests: [String!]!, $limit: Int!, $after: String)
 }
 `;
 
-const CODEDIGEST_VERDICTS_QUERY = `
-query CodeDigestVerdicts($requestIds: [String!]!, $limit: Int!, $after: String) {
+// The verdict leg is the only place per-SolverNet scoping is queryable: of the
+// tables this method touches, only `verdictEnvelopeMeta` carries
+// `solverNetManifestCid` (ponder.schema.ts:657 — written by the same IPFS
+// task-body enrichment that resolves instanceId). `attemptEnvelopeMeta` has no
+// SolverNet column. Aggregation (step 4) only counts requests that HAVE a
+// verdict, so filtering the verdict leg correctly scopes the whole aggregate to
+// the given SolverNet. The filter is emitted only when scoping is requested —
+// Ponder treats a `null` `where` value as "IS NULL", not "skip the filter", so
+// an unscoped call must omit the field entirely (#764).
+function codeDigestVerdictsQuery(scopeBySolverNet: boolean): string {
+  return `
+query CodeDigestVerdicts($requestIds: [String!]!, $limit: Int!, $after: String${scopeBySolverNet ? ', $solverNetManifestCid: String!' : ''}) {
   verdictEnvelopeMetas(
-    where: { requestId_in: $requestIds },
+    where: { requestId_in: $requestIds${scopeBySolverNet ? ', solverNetManifestCid: $solverNetManifestCid' : ''} },
     limit: $limit,
     after: $after,
     orderBy: "requestId",
@@ -405,6 +415,7 @@ query CodeDigestVerdicts($requestIds: [String!]!, $limit: Int!, $after: String) 
   }
 }
 `;
+}
 
 // Optional operator scoping: restrict attempts to those the operator claimed.
 const CODEDIGEST_OPERATOR_ATTEMPTS_QUERY = `
@@ -1168,12 +1179,18 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     }
 
     // 3) Pull verdict-meta rows for those requestIds (actualPassed/actualScore).
+    // Optionally scope to a single SolverNet: verdictEnvelopeMeta is the only
+    // queryable table carrying solverNetManifestCid, and only requests with a
+    // verdict are aggregated (step 4), so filtering here scopes the aggregate.
+    const scopeBySolverNet = typeof args.solverNetManifestCid === 'string' && args.solverNetManifestCid.length > 0;
+    const verdictsQuery = codeDigestVerdictsQuery(scopeBySolverNet);
     const verdictByKey = new Map<string, { passed: boolean; score: number | null }>();
     cursor = null;
     for (let page = 0; page < MAX_PAGES; page++) {
+      const variables: Record<string, unknown> = { requestIds, limit: PAGE_LIMIT, after: cursor };
+      if (scopeBySolverNet) variables.solverNetManifestCid = args.solverNetManifestCid;
       const data: CodeDigestVerdictsPage = await postGql<CodeDigestVerdictsPage>(
-        gqlUrl, fetchImpl, CODEDIGEST_VERDICTS_QUERY,
-        { requestIds, limit: PAGE_LIMIT, after: cursor },
+        gqlUrl, fetchImpl, verdictsQuery, variables,
       );
       for (const row of data.verdictEnvelopeMetas?.items ?? []) {
         const key = `${row.requestId}|${row.chainId}`;
