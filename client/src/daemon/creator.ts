@@ -6,6 +6,7 @@ import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { TaskPostingService } from '../tasks/posting-service.js';
 import type { TaskSource } from '../tasks/sources.js';
+import { getSweRebenchV2StateStore } from '../solver-types/swe-rebench-v2.js';
 
 export interface ActiveAttempt {
   task: Task;
@@ -78,6 +79,21 @@ export class CreatorLoop {
           status: 'pending',
         });
         postedTaskIds.push(taskId);
+
+        // #802: record the on-chain taskId for swe-rebench-v2 postings so the
+        // generator can detect claim-budget exhaustion via the indexer
+        // (getInstanceClaimCounts). Mirrors the delivery-watcher recordSuccess
+        // hook. Only on a fresh post (idempotent results carry no new task).
+        if (state.solverType === 'swe-rebench-v2.v1') {
+          const instanceId = state.spec?.['instance_id'];
+          if (typeof instanceId === 'string' && instanceId.length > 0) {
+            getSweRebenchV2StateStore().recordLastTaskId(instanceId, taskId).catch((err) => {
+              console.warn(
+                `[creator] swe-rebench-v2 recordLastTaskId failed for ${instanceId}: ${err instanceof Error ? err.message : err}`,
+              );
+            });
+          }
+        }
       } catch (err) {
         if (err instanceof TransientError) continue;
         if (err instanceof PermanentError) {
