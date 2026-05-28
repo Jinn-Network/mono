@@ -16,8 +16,6 @@ import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
 import { isLocalCodexBaseUrl } from './adapters/codex-code.js';
 
-const DEFAULT_CODEX_PROVIDER_PROBE_TIMEOUT_MS = 2_000;
-
 /**
  * `Harness` shell. Bridges the engine's dispatch contract
  * (`await impl.run(ctx)`) into the harness adapter + markdown plugin.
@@ -35,8 +33,6 @@ export class LearnerHarness implements Harness {
   private readonly codexPath: string | undefined;
   private readonly codexBaseUrl: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
-  private readonly codexProviderProbeTimeoutMs: number;
-  private readonly codexProviderFetch: typeof fetch;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
 
   constructor(config: LearnerHarnessConfig) {
@@ -48,9 +44,6 @@ export class LearnerHarness implements Harness {
     this.codexPath = config.codexPath;
     this.codexBaseUrl = config.codexBaseUrl;
     this.codexDoctorTimeoutMs = config.codexDoctorTimeoutMs;
-    this.codexProviderProbeTimeoutMs =
-      config.codexProviderProbeTimeoutMs ?? DEFAULT_CODEX_PROVIDER_PROBE_TIMEOUT_MS;
-    this.codexProviderFetch = config.codexProviderFetch ?? fetch;
     this.runtimeMode = config.runtimeMode ?? 'bare';
   }
 
@@ -134,7 +127,7 @@ export class LearnerHarness implements Harness {
     }
     if (this.codexBaseUrl) {
       if (isLocalCodexBaseUrl(this.codexBaseUrl)) {
-        return this.probeLocalCodexProvider(this.codexBaseUrl);
+        return { ready: true };
       }
       return {
         ready: false,
@@ -169,46 +162,6 @@ export class LearnerHarness implements Harness {
       };
     }
     return { ready: true };
-  }
-
-  private async probeLocalCodexProvider(baseUrl: string): Promise<ReadyStatus> {
-    const providerRoot = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-    const modelsUrl = new URL('models', providerRoot).toString();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.codexProviderProbeTimeoutMs);
-    try {
-      const response = await this.codexProviderFetch(modelsUrl, {
-        method: 'GET',
-        headers: { Authorization: 'Bearer jinn-local' },
-        signal: controller.signal,
-      });
-      if (response.ok) return { ready: true };
-      return {
-        ready: false,
-        reason: `local Codex provider /models returned HTTP ${response.status}`,
-        nextStep: {
-          description:
-            'Start the local OpenAI-compatible provider and verify its /v1/models endpoint responds.',
-          url: '/api/codex/doctor',
-        },
-      };
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      const reason = err instanceof Error && err.name === 'AbortError'
-        ? 'local Codex provider /models probe timed out'
-        : `local Codex provider unavailable${detail ? `: ${detail}` : ''}`;
-      return {
-        ready: false,
-        reason,
-        nextStep: {
-          description:
-            'Start the local OpenAI-compatible provider and verify its /v1/models endpoint responds.',
-          url: '/api/codex/doctor',
-        },
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {

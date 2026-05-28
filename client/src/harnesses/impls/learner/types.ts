@@ -139,8 +139,4 @@ export interface LearnerHarnessConfig {
    * `isReady()`. Defaults to 30s.
    */
   codexDoctorTimeoutMs?: number;
-  /** Timeout (ms) for probing a local OpenAI-compatible Codex provider. */
-  codexProviderProbeTimeoutMs?: number;
-  /** Test hook for the local provider readiness probe. */
-  codexProviderFetch?: typeof fetch;
 }

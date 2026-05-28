@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
 import { probeCodexDoctor } from '../../../src/api/codex-doctor-endpoint.js';
@@ -19,10 +19,6 @@ const ENV = {
   claudePath: 'claude',
   claudeModel: 'claude-haiku-4-5-20251001',
 };
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 function makeFake(name: string): Harness {
   return {
@@ -100,7 +96,6 @@ describe('buildHarnesses — external impls + disabledNames', () => {
       stdout: 'codex 1.2.3',
       stderr: '',
     });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
     const impls = buildHarnesses({
       ...ENV,
       codexBaseUrl: 'http://127.0.0.1:11434/v1',

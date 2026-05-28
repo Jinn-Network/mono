@@ -95,63 +95,13 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       stdout: 'codex 1.2.3',
       stderr: '',
     });
-    const providerFetch = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
     const harness = new LearnerHarness({
       name: CODEX_HARNESS,
       adapter: new NoOpAdapter(),
       codexBaseUrl: 'http://127.0.0.1:11434/v1',
-      codexProviderFetch: providerFetch as typeof fetch,
     });
     const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
     expect(result.ready).toBe(true);
-    expect(providerFetch).toHaveBeenCalledWith('http://127.0.0.1:11434/v1/models', expect.objectContaining({
-      method: 'GET',
-    }));
-  });
-
-  it('returns ready=false for local Codex provider when /models is unreachable', async () => {
-    vi.mocked(probeCodexDoctor).mockReturnValue({
-      installed: true,
-      authenticated: false,
-      authStatus: 'not_configured',
-      exitCode: 0,
-      stdout: 'codex 1.2.3',
-      stderr: '',
-    });
-    const providerFetch = vi.fn(async () => {
-      throw new Error('connect ECONNREFUSED 127.0.0.1:11434');
-    });
-    const harness = new LearnerHarness({
-      name: CODEX_HARNESS,
-      adapter: new NoOpAdapter(),
-      codexBaseUrl: 'http://127.0.0.1:11434/v1',
-      codexProviderFetch: providerFetch as typeof fetch,
-    });
-    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
-    expect(result.ready).toBe(false);
-    expect(result.reason).toMatch(/provider unavailable/i);
-    expect(result.nextStep?.description).toMatch(/local OpenAI-compatible provider/i);
-  });
-
-  it('returns ready=false for local Codex provider when /models is not OK', async () => {
-    vi.mocked(probeCodexDoctor).mockReturnValue({
-      installed: true,
-      authenticated: false,
-      authStatus: 'not_configured',
-      exitCode: 0,
-      stdout: 'codex 1.2.3',
-      stderr: '',
-    });
-    const providerFetch = vi.fn(async () => new Response('nope', { status: 404 }));
-    const harness = new LearnerHarness({
-      name: CODEX_HARNESS,
-      adapter: new NoOpAdapter(),
-      codexBaseUrl: 'http://127.0.0.1:11434/v1',
-      codexProviderFetch: providerFetch as typeof fetch,
-    });
-    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
-    expect(result.ready).toBe(false);
-    expect(result.reason).toMatch(/HTTP 404/i);
   });
 
   it('still requires the Codex binary for local provider readiness', async () => {

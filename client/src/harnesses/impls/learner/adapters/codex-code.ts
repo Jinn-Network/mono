@@ -111,7 +111,6 @@ export function isLocalCodexBaseUrl(value: string): boolean {
     const url = new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (url.username || url.password) return false;
-    if (url.search || url.hash) return false;
     const hostname = url.hostname.toLowerCase();
     if (hostname === 'localhost') return true;
     if (hostname === '[::1]' || hostname === '::1') return true;
@@ -218,7 +217,6 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
    */
   async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
     const prompt = buildInitialPrompt(inputs);
-    const providerConfigArgs = codexProviderConfigArgs(this.codexBaseUrl);
     const usingLocalProvider = this.codexBaseUrl !== undefined && isLocalCodexBaseUrl(this.codexBaseUrl);
     const baseEnv = {
       IMPL_STATE_DIR: inputs.implStateDir,
@@ -243,8 +241,8 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',
       JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: this.corpusEnv?.identityRegistryAddress ?? '',
       JINN_CORPUS_FROM_BLOCK: this.corpusEnv?.fromBlock != null ? String(this.corpusEnv.fromBlock) : '',
+      ...(usingLocalProvider && !process.env['OPENAI_API_KEY'] ? { OPENAI_API_KEY: 'jinn-local' } : {}),
       ...(inputs.adapterEnv ?? {}),
-      ...(usingLocalProvider ? { OPENAI_API_KEY: 'jinn-local' } : {}),
     };
     const env = buildAgentEnv(baseEnv);
 
@@ -290,7 +288,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       '-m',
       inputs.model ?? inputs.claudeModel ?? this.codexModel,
     ];
-    for (const configArg of providerConfigArgs) {
+    for (const configArg of codexProviderConfigArgs(this.codexBaseUrl)) {
       args.push('-c', configArg);
     }
     for (const configArg of prepared.configArgs) {

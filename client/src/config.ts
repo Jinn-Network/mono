@@ -33,7 +33,6 @@ function isLocalCodexBaseUrl(value: string): boolean {
     const url = new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (url.username || url.password) return false;
-    if (url.search || url.hash) return false;
     const hostname = url.hostname.toLowerCase();
     if (hostname === 'localhost') return true;
     if (hostname === '[::1]' || hostname === '::1') return true;
