@@ -90,12 +90,6 @@ export interface SetupRoutesConfig {
    *  the operator clears the field to revert to the default. */
   defaultRpcUrlForChain?: () => string;
   /**
-   * When set, POST /v1/setup/restake/:serviceId is enabled.
-   * Calls the provided function to re-stake an evicted service on demand
-   * (the "Re-stake now" dashboard CTA). jinn-mono-hjex.3
-   */
-  restake?: (serviceId: number) => Promise<{ ok: boolean; error?: string }>;
-  /**
    * When set, POST /v1/setup/bootstrap/retry is enabled.
    * Re-enters the bootstrap state machine in-process — no daemon restart
    * required. The closure signals main()'s halt-and-resume loop to call
@@ -718,31 +712,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   if (config.retryBootstrap) {
     addSetupRetryEndpoint(app, { retryBootstrap: config.retryBootstrap });
   }
-
-  // POST /v1/setup/restake/:serviceId — operator-triggered re-stake for an
-  // evicted service. Backs the "Re-stake now" dashboard CTA. jinn-mono-hjex.3
-  app.post('/v1/setup/restake/:serviceId', async (c) => {
-    if (!config.restake) {
-      return c.json({ error: 'restake_not_configured' }, 503);
-    }
-    const raw = c.req.param('serviceId');
-    const serviceId = Number.parseInt(raw, 10);
-    if (!Number.isFinite(serviceId) || serviceId <= 0) {
-      return c.json({ error: 'invalid_service_id' }, 400);
-    }
-    try {
-      const result = await config.restake(serviceId);
-      if (!result.ok) {
-        return c.json({ ok: false, error: result.error ?? 'restake_failed' }, 500);
-      }
-      return c.json({ ok: true });
-    } catch (err) {
-      return c.json(
-        { ok: false, error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
-    }
-  });
 
   app.post('/v1/setup/change-password', async (c) => {
     let body: unknown;

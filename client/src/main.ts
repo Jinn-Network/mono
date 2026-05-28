@@ -987,12 +987,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
-  // hjex.3: holder for the restake callback. Populated in running mode after
-  // bootstrap completes (when mnemonic + distributorAddress are available).
-  const restakeCallbackRef: { current: ((serviceId: number) => Promise<{ ok: boolean; error?: string }>) | undefined } = {
-    current: undefined,
-  };
-
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
   // timeout), main() waits on this promise instead of returning, so the setup
@@ -1224,13 +1218,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // The cache-invalidation hook is no longer needed here.
         onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
-        },
-        // hjex.3: delegate to the live callback populated once running mode starts.
-        restake: (serviceId) => {
-          if (!restakeCallbackRef.current) {
-            return Promise.resolve({ ok: false, error: 'restake_not_available_in_setup_mode' });
-          }
-          return restakeCallbackRef.current(serviceId);
         },
         // hjex.6: re-trigger the bootstrap state machine from the SPA Retry button.
         // Resolves the halt-and-resume promise; main() will loop back and call
@@ -1660,31 +1647,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
-
-  // hjex.3: populate the restake callback now that mnemonic is available.
-  if (config.stakingMode === 'standard' && CHAIN_CONFIG.distributorAddress) {
-    const fleetStore = earningStore;
-    restakeCallbackRef.current = async (serviceId: number) => {
-      try {
-        const state = await fleetStore.load(NETWORK_CHAIN);
-        const svc = state.services.find(s => s.service_id === serviceId);
-        if (!svc) return { ok: false, error: `service_not_found:${serviceId}` };
-        if (!svc.staking_address) return { ok: false, error: 'staking_address_missing' };
-        await recoverEvictedServiceFn({
-          serviceDisplayIndex: Math.max(0, svc.index - 1),
-          serviceId,
-          stakingAddress: svc.staking_address,
-          distributorAddress: CHAIN_CONFIG.distributorAddress!,
-          rpcUrl: config.rpcUrl,
-          chain: NETWORK_CHAIN,
-          mnemonic: mnemonicForMaster,
-        });
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    };
-  }
 
   const evictionRecovery =
     config.stakingMode === 'standard' &&
