@@ -43,6 +43,19 @@ export class GeneratorStateStore {
     return this.cache!;
   }
 
+  /**
+   * Drop the in-memory cache so the next read re-reads from disk (#802). The
+   * generator holds a long-lived store, but `last_task_id` (and `successful`)
+   * are written by *other* loops (CreatorLoop, delivery-watcher) through their
+   * own store instances against the same file. Calling this at the START of
+   * each generator tick makes those out-of-band disk writes visible; without
+   * it the generator's first-load cache never sees the creator's
+   * `recordLastTaskId` write and classifies every posting as unposted forever.
+   */
+  invalidate(): void {
+    this.cache = null;
+  }
+
   private async save(): Promise<void> {
     if (!this.cache) return;
     await mkdir(join(this.stateFile, '..'), { recursive: true });

@@ -73,7 +73,9 @@ export interface SweRebenchV2ClaimPolicyRuntimeConfig {
 }
 
 export type SweRebenchV2GeneratorRuntimeConfig = Partial<GeneratorConfig> & {
-  /** @deprecated ignored; posting_window_ms controls repost timing. */
+  /** @deprecated ignored. Reposts now trigger on claim-budget exhaustion
+   *  observed via the indexer (#802); posting_window_ms is only the on-chain
+   *  claim-window deadline, not a repost timer. */
   cooldown_ms?: number;
   /** @deprecated legacy nested shape tolerated on read and flattened on write. */
   claimPolicy?: SweRebenchV2ClaimPolicyRuntimeConfig;
@@ -185,13 +187,6 @@ function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
     cfg['N_target_successes'],
     DEFAULT_GENERATOR_CONFIG.N_target_successes,
   );
-  const N_max_postings_per_task = Math.max(
-    N_target_successes,
-    positiveInt(
-      cfg['N_max_postings_per_task'],
-      DEFAULT_GENERATOR_CONFIG.N_max_postings_per_task,
-    ),
-  );
   const rawMode = cfg['admissionMode'];
   const admissionMode: AdmissionMode =
     rawMode === 'python-floor' ? 'python-floor' : DEFAULT_ADMISSION_MODE;
@@ -201,7 +196,6 @@ function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
   );
   return {
     N_target_successes,
-    N_max_postings_per_task,
     posting_window_ms: positiveInt(
       cfg['posting_window_ms'],
       DEFAULT_GENERATOR_CONFIG.posting_window_ms,
@@ -451,6 +445,12 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
 
   const tick = async (): Promise<Task[] | null> => {
     const now = Date.now();
+    // #802: re-read counters from disk at the start of every tick. last_task_id
+    // (and successful) are written by other loops (CreatorLoop.recordLastTaskId,
+    // delivery-watcher.recordSuccess) through separate store instances against
+    // the same file; without invalidating the long-lived cache here the
+    // generator never observes those writes and reposts every tick.
+    stateStore.invalidate();
     const runtimeConfig = config.getGeneratorConfig
       ? config.getGeneratorConfig()
       : config.generatorConfig;
@@ -619,9 +619,13 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
 
     // Reconcile claim-budget exhaustion against network truth (#802): a posting
     // is exhausted when its on-chain consumed slots reach maxClaims. Keyed by
-    // taskId; the classifier joins via each instance's last_task_id. On indexer
-    // outage the tick aborts — falling through to "no exhaustion observed" would
-    // mark every posting live and suppress all reposts (the under-count bug).
+    // taskId; the classifier joins via each instance's last_task_id. On a
+    // genuine indexer outage (throw) the tick aborts — silently continuing with
+    // no claim snapshot would mask real exhaustion (exhausted postings classify
+    // `live`), suppress legitimate reposts, and under-serve N. A *successful*
+    // empty map (e.g. onchain-floor mode) is NOT an outage and is allowed
+    // through: it makes every posting inert (post-once), which is the safe
+    // degradation, not a storm.
     let claimCounts: Map<string, InstanceClaimSnapshot> | undefined;
     if (config.discoveryApi && config.solverNetManifestCid) {
       try {
