@@ -1,29 +1,10 @@
 /**
- * Acceptance-test for issue #651: auto-restake suppression window must hide
- * BOTH the inline `EvictionBanner` on /overview AND the `service_evicted`
- * notification in the global notifications row, while the daemon's
- * `EvictionLoop` is still inside its 2 × checkIntervalMs grace window.
+ * Regression for issue #773: operator dashboard must not surface eviction
+ * banner or `service_evicted` notification. Daemon EvictionLoop handles
+ * auto-restake in-process; the SPA does not alarm the operator.
  *
- * Stage 7 (testing-jinn-app) regression. The predicate
- * (`isWithinAutoRestakeWindow`) and the two surfaces that consume it
- * (`selectVisibleEvictedService` for the banner; `deriveNotifications`'s
- * `service_evicted` aggregator for the notice) are each covered by unit /
- * component tests under `client/src/dashboard/spa/src/notifications/` and
- * `client/src/dashboard/spa/src/pages/Overview.test.tsx`. This E2E exercises
- * the production wiring end-to-end: real `useQuery` against the mocked
- * `/v1/status` endpoint, real `OverviewPage` mounted via the routing shell,
- * real `useNotifications` composing the snapshot deriver — so a regression
- * in either consumer surfaces before it ships.
- *
- * Three scenarios, one per acceptance branch:
- *   (a) `autoRestake.enabled === true` + fresh `evictedSince`  — both surfaces hidden.
- *   (b) `autoRestake.enabled === true` + aged-past `evictedSince` — both surfaces visible.
- *   (c) `autoRestake.enabled === false`                         — both surfaces visible.
- *
- * Backward-compat fallback (no `autoRestake` on the wire at all) is
- * exhaustively covered by the unit test `auto-restake-window.test.ts`
- * ("returns false when autoRestake is undefined (older daemon)") — covering
- * it here would buy no additional wiring evidence beyond scenario (c).
+ * Three `autoRestake` variants plus absent block — surfaces must stay hidden
+ * in every case while `/v1/status` reports an evicted service.
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -92,12 +73,6 @@ test.afterAll(async () => {
   }
 });
 
-/**
- * Build a `/v1/status` payload with a single evicted service plus the
- * supplied `autoRestake` block. Carries enough non-eviction state to mount
- * the running-mode shell — `masterGas.balanceWei` is non-zero so the
- * baseline `funding_low` notification does not fire and confuse the assertions.
- */
 function buildEvictedStatus(opts: {
   evictedSinceMs: number;
   autoRestake: { enabled: boolean; checkIntervalMs: number } | undefined;
@@ -119,18 +94,11 @@ function buildEvictedStatus(opts: {
         },
       ],
     },
-    // Bring masterGas balance well above zero so the deriver does NOT emit
-    // `funding_low` (which would still pass assertions but adds noise).
     masterGas: { balanceWei: '1000000000000000000', runwayDaysExcess: '7' },
     autoRestake,
   } as Record<string, unknown>;
 }
 
-/**
- * Install standard daemon mocks and override `/v1/status` with the supplied
- * payload. Last-registered route wins in Playwright, so the override must
- * come after `mockDaemonApi`.
- */
 async function installStatusMock(
   page: import('@playwright/test').Page,
   status: Record<string, unknown>,
@@ -144,58 +112,49 @@ async function installStatusMock(
         body: JSON.stringify(status),
       }),
   );
-  // Use the default bootstrap so the SPA mounts the running dashboard. The
-  // helper already wires this, but make the dependency explicit for readers.
   void DEFAULT_RUNNING_BOOTSTRAP;
 }
 
-test('autoRestake within window suppresses banner and notification (#651)', async ({ page }) => {
-  // evictedSince = 30s ago; checkIntervalMs = 60s → window is 120s → well inside.
-  const status = buildEvictedStatus({
+const scenarios: Array<{
+  name: string;
+  evictedSinceMs: number;
+  autoRestake: { enabled: boolean; checkIntervalMs: number } | undefined;
+}> = [
+  {
+    name: 'autoRestake within window',
     evictedSinceMs: Date.now() - 30_000,
     autoRestake: { enabled: true, checkIntervalMs: 60_000 },
-  });
-  await installStatusMock(page, status);
-  await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
-
-  // The dashboard must mount — wait for any stable non-eviction landmark
-  // before asserting on absence (otherwise we'd race the initial render).
-  // The notifications list region is present in running-mode regardless of
-  // whether it has items, so wait for the body to settle by waiting for a
-  // network-idle moment after the status query resolves.
-  await page.waitForLoadState('networkidle');
-
-  // Banner must NOT be visible while inside the suppression window.
-  await expect(page.getByTestId('overview-eviction-banner')).toHaveCount(0);
-  // Notification must NOT be emitted either.
-  await expect(page.locator('[data-kind="service_evicted"]')).toHaveCount(0);
-});
-
-test('autoRestake past window shows banner and notification (#651)', async ({ page }) => {
-  // evictedSince = 5 minutes ago; checkIntervalMs = 60s → window = 120s → past.
-  const status = buildEvictedStatus({
+  },
+  {
+    name: 'autoRestake past window',
     evictedSinceMs: Date.now() - 5 * 60_000,
     autoRestake: { enabled: true, checkIntervalMs: 60_000 },
-  });
-  await installStatusMock(page, status);
-  await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
-
-  // Both surfaces visible — the operator is now alarmed because the loop
-  // failed to settle within its grace window.
-  await expect(page.getByTestId('overview-eviction-banner')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('overview-eviction-banner')).toContainText(/service evicted/i);
-  await expect(page.locator('[data-kind="service_evicted"]')).toBeVisible({ timeout: 15_000 });
-});
-
-test('autoRestake disabled shows banner and notification immediately (#651)', async ({ page }) => {
-  // evictedSince = 1s ago; loop disabled → no suppression regardless of age.
-  const status = buildEvictedStatus({
+  },
+  {
+    name: 'autoRestake disabled',
     evictedSinceMs: Date.now() - 1_000,
     autoRestake: { enabled: false, checkIntervalMs: 0 },
-  });
-  await installStatusMock(page, status);
-  await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
+  },
+  {
+    name: 'autoRestake absent (older daemon)',
+    evictedSinceMs: Date.now() - 1_000,
+    autoRestake: undefined,
+  },
+];
 
-  await expect(page.getByTestId('overview-eviction-banner')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-kind="service_evicted"]')).toBeVisible({ timeout: 15_000 });
-});
+for (const scenario of scenarios) {
+  test(`never shows eviction surfaces — ${scenario.name} (#773)`, async ({ page }) => {
+    const status = buildEvictedStatus({
+      evictedSinceMs: scenario.evictedSinceMs,
+      autoRestake: scenario.autoRestake,
+    });
+    await installStatusMock(page, status);
+    await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
+
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByTestId('overview-eviction-banner')).toHaveCount(0);
+    await expect(page.locator('[data-kind="service_evicted"]')).toHaveCount(0);
+    await expect(page.getByText(/re-stake/i)).toHaveCount(0);
+  });
+}

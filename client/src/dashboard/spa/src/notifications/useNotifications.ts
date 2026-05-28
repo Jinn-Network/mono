@@ -5,7 +5,6 @@ import { useConnectionState } from '../api/connection-state.js';
 import { useEventStream } from '../api/events.js';
 import { useRestartPending } from '../shell/RestartPendingContext.js';
 import { deriveNotifications, type DeriveInput } from './derive.js';
-import type { AutoRestakeStatus } from './auto-restake-window.js';
 import type { OperatorNotification } from './taxonomy.js';
 
 const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
@@ -84,19 +83,6 @@ function mapStatusToDeriveInput(
       ? b.joinedSolverNets
       : {};
 
-  // Forward the `autoRestake` block when the daemon emits it (#651). Older
-  // daemons predate the field, in which case it's undefined and the deriver
-  // falls through to the immediate-emit branch (backwards compat).
-  const autoRestake: AutoRestakeStatus | undefined =
-    s.autoRestake && typeof s.autoRestake === 'object'
-      ? {
-          enabled: Boolean(s.autoRestake.enabled),
-          checkIntervalMs: Number.isFinite(s.autoRestake.checkIntervalMs)
-            ? Number(s.autoRestake.checkIntervalMs)
-            : 0,
-        }
-      : undefined;
-
   return {
     funds: {
       eth: masterEth,
@@ -125,17 +111,11 @@ function mapStatusToDeriveInput(
       evicted: Boolean(svc?.evicted),
       // safeBound defaults to true (no notice) unless safeBoundToAgent is explicitly false.
       safeBound: svc?.safeBoundToAgent !== false,
-      // ISO timestamp the daemon attaches once it observes the eviction (#651).
-      // Absent on older daemons / non-evicted services — null lets the deriver
-      // fall through to immediate-emit when the suppression window can't be
-      // computed.
-      evictedSince: typeof svc?.evictedSince === 'string' ? svc.evictedSince : null,
     })),
     joinedSolverNets,
     // No /v1/status field for last password rotation today; follow-up Issue
     // tracks adding it. Until then, password_rotation_due never fires.
     passwordRotatedAt: undefined,
-    autoRestake,
   };
 }
 

@@ -179,17 +179,15 @@ export interface GatheredStatusRaw {
   /**
    * Per-service first-observed-evicted timestamps (ISO 8601) keyed by display
    * index. Populated by gather-status's module-scoped first-seen tracker.
-   * Absent when the service is not currently evicted. Used together with
-   * `autoRestakeEnabled` + `evictionCheckIntervalMs` to suppress the
-   * `service_evicted` notification during the EvictionLoop's settlement
-   * budget (issue #651).
+   * Absent when the service is not currently evicted. Exposed on `/v1/status`
+   * for observability; operator dashboard no longer surfaces eviction alarms
+   * (issue #773).
    */
   evictedSinceByServiceIndex?: Record<number, string>;
   /**
    * Mirror of the `main.ts` predicate that gates the EvictionLoop:
    * `evictionCheckIntervalMs > 0 && stakingMode === 'standard' && !!distributorAddress`.
-   * When true, the notifications deriver + Overview banner suppress eviction
-   * surfaces for `2 × evictionCheckIntervalMs` after first observation.
+   * Exposed on `/v1/status` as `autoRestake` for observability.
    */
   autoRestakeEnabled?: boolean;
   /** Configured EvictionLoop poll interval in milliseconds (0 when the loop is disabled). */

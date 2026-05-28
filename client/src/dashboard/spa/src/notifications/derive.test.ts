@@ -113,20 +113,6 @@ describe('deriveNotifications', () => {
     }));
   });
 
-  it('emits service_evicted when at least one service has evicted === true', () => {
-    const out = deriveNotifications({
-      ...baseState,
-      status: {
-        ...baseState.status,
-        services: [
-          { evicted: false, safeBound: true },
-          { evicted: true, safeBound: true },
-        ],
-      },
-    });
-    expect(out.map(n => n.kind)).toContain('service_evicted');
-  });
-
   it('emits safe_binding_pending when at least one service has safeBound === false', () => {
     const out = deriveNotifications({
       ...baseState,
@@ -186,53 +172,54 @@ describe('deriveNotifications', () => {
   });
 });
 
-// Per-scenario gating (loop on/off, missing/malformed timestamps, in-window vs
-// past-window) is exhaustively tested in `auto-restake-window.test.ts`. These
-// tests just exercise the aggregator on top of that predicate: `some` across
-// services, and the empty-evicted-list early exit.
-describe('deriveNotifications — eviction aggregator (#651)', () => {
+describe('deriveNotifications — eviction (#773)', () => {
   const evictedAt = '2026-05-26T10:00:00.000Z';
   const evictedAtMs = new Date(evictedAt).getTime();
 
-  it('suppresses service_evicted when ALL evicted services are within window', () => {
+  it('never emits service_evicted when a service has evicted === true', () => {
     const out = deriveNotifications({
       ...baseState,
-      now: evictedAtMs + 60_000,
       status: {
         ...baseState.status,
         services: [
-          { evicted: true, safeBound: true, evictedSince: evictedAt },
-          { evicted: true, safeBound: true, evictedSince: evictedAt },
+          { evicted: false, safeBound: true },
+          { evicted: true, safeBound: true },
         ],
-        autoRestake: { enabled: true, checkIntervalMs: 60_000 },
       },
     });
     expect(out.map(n => n.kind)).not.toContain('service_evicted');
   });
 
-  it('emits service_evicted when ANY evicted service is past window', () => {
+  it('never emits service_evicted when evictedSince is fresh (within former #651 window)', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      now: evictedAtMs + 60_000,
+      status: {
+        ...baseState.status,
+        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
+      },
+    });
+    expect(out.map(n => n.kind)).not.toContain('service_evicted');
+  });
+
+  it('never emits service_evicted when evictedSince is aged past former window', () => {
     const out = deriveNotifications({
       ...baseState,
       now: evictedAtMs + 121_000,
       status: {
         ...baseState.status,
-        services: [
-          // One fresh (within window), one stuck past window — must emit.
-          { evicted: true, safeBound: true, evictedSince: new Date(evictedAtMs + 90_000).toISOString() },
-          { evicted: true, safeBound: true, evictedSince: evictedAt },
-        ],
-        autoRestake: { enabled: true, checkIntervalMs: 60_000 },
+        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
       },
     });
-    expect(out.map(n => n.kind)).toContain('service_evicted');
+    expect(out.map(n => n.kind)).not.toContain('service_evicted');
   });
 
-  it('does not emit when no services are evicted', () => {
+  it('never emits service_evicted when evictedSince is absent', () => {
     const out = deriveNotifications({
       ...baseState,
       status: {
         ...baseState.status,
-        services: [{ evicted: false, safeBound: true }],
+        services: [{ evicted: true, safeBound: true }],
       },
     });
     expect(out.map(n => n.kind)).not.toContain('service_evicted');

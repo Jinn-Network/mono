@@ -23,7 +23,6 @@ vi.mock('../api/client.js', () => ({
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
     getSolverNets: () => Promise.resolve({ nets: [] }),
-    restake: vi.fn(),
     triggerDrip: vi.fn(),
     stopDaemon: vi.fn(),
     restartDaemon: vi.fn(),

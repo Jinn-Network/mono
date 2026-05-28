@@ -1,6 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client.js';
 import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
@@ -10,12 +9,6 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
 import type { SolverNetsCatalogResponse, TjinnStatus } from '../api/types.js';
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
-import { Button } from '../components/ui/button.js';
-import {
-  isWithinAutoRestakeWindow,
-  type AutoRestakeStatus,
-} from '../notifications/auto-restake-window.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -70,12 +63,8 @@ interface OverviewStatusV1 {
       agentId?: number | null;
       safeBoundToAgent?: boolean;
       evicted?: boolean;
-      /** ISO 8601 first-observed-evicted; null when not evicted (#651). */
-      evictedSince?: string | null;
     }>;
   };
-  /** EvictionLoop gating exposed by /v1/status (#651). */
-  autoRestake?: AutoRestakeStatus;
   /**
    * Real Sepolia tJINN ERC-20 Safe balance (#406, daemon half PR #447).
    * Optional: older daemons predate this field.
@@ -196,85 +185,8 @@ function truncTx(hash?: string): string | null {
   return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
 }
 
-/**
- * Banner-gating predicate (#651). Returns the first evicted service that
- * should be surfaced — i.e. one whose suppression window has elapsed (or
- * whose loop is disabled, or whose `evictedSince` is missing/malformed —
- * bad data falls through to show). Lifted out of OverviewPage so it can
- * be unit-tested without rendering the full page.
- *
- * Must mirror the predicate in `notifications/derive.ts`'s `service_evicted`
- * branch so the inline banner and the notification rail never disagree.
- */
-export function selectVisibleEvictedService(
-  services: NonNullable<OverviewStatusV1['fleet']>['services'],
-  autoRestake: OverviewStatusV1['autoRestake'],
-  nowMs: number,
-): NonNullable<NonNullable<OverviewStatusV1['fleet']>['services']>[number] | undefined {
-  if (!services) return undefined;
-  // Any-past-window emits: one stuck restake should not hide behind a healthy
-  // in-flight one — return the first evicted service that has aged past its
-  // suppression window. Mirrors `derive.ts:96` (`anyPastWindow`).
-  return services
-    .filter((s) => s.evicted === true)
-    .find((s) => !isWithinAutoRestakeWindow(s, autoRestake, nowMs));
-}
-
-/**
- * Inline blocking banner that surfaces when a service has been evicted from
- * staking. Lives in the main column above everything else so the operator
- * sees the Re-stake action without scrolling. The `service_evicted`
- * notification covers operators who land elsewhere; this banner covers the
- * operator who's already on /overview.
- */
-function EvictionBanner({
-  serviceId,
-  onRestake,
-}: {
-  serviceId: number | null;
-  onRestake: (serviceId: number) => Promise<void>;
-}): JSX.Element {
-  const [restaking, setRestaking] = useState(false);
-  return (
-    <Alert
-      variant="blocking"
-      data-testid="overview-eviction-banner"
-      aria-live="polite"
-      className="flex flex-col gap-2"
-    >
-      <AlertTriangle className="h-4 w-4 text-[var(--break-red)]" />
-      <AlertTitle className="text-[var(--break-red)]">Service evicted</AlertTitle>
-      <AlertDescription className="text-base text-foreground">
-        A service has been evicted from staking. Re-stake to resume earning.
-      </AlertDescription>
-      {serviceId != null && (
-        <Button
-          variant="destructive"
-          size="sm"
-          type="button"
-          data-testid="overview-eviction-restake"
-          disabled={restaking}
-          onClick={async () => {
-            if (restaking) return;
-            setRestaking(true);
-            try {
-              await onRestake(serviceId);
-            } finally {
-              setRestaking(false);
-            }
-          }}
-          className="mt-2 self-start"
-        >
-          {restaking ? 'Working…' : 'Re-stake now'}
-        </Button>
-      )}
-    </Alert>
-  );
-}
-
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const queryClient = useQueryClient();
   const { data: status, isError: statusIsError } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -322,23 +234,6 @@ export function OverviewPage(): JSX.Element {
     };
     return Array.from(collect(bootstrap?.joinedSolverNets)).sort();
   }, [bootstrap]);
-
-  // Eviction state — surfaces as an inline blocking banner above the main
-  // column. Gated by the same suppression-window predicate as the
-  // notifications deriver (#651) so the two surfaces never disagree: when
-  // auto-restake is enabled and the eviction is within 2 × checkIntervalMs of
-  // first observation, the banner stays hidden so the EvictionLoop can settle
-  // a restake before alarming the operator. Disabled loop, missing timestamp,
-  // or aged-past services all fall through to show.
-  // Banner freshness is bounded by the SPA's poll interval — `Date.now()`
-  // only re-evaluates when the status query refetches, not continuously.
-  const firstEvictedService = selectVisibleEvictedService(
-    status?.fleet?.services,
-    status?.autoRestake,
-    Date.now(),
-  );
-  const isEvicted = firstEvictedService != null;
-  const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
   // tJINN earned — the real Sepolia ERC-20 Safe balance (#406). When the read
   // has resolved (`state === 'ready'`) a null `safeBalanceWei` is a
@@ -447,9 +342,8 @@ export function OverviewPage(): JSX.Element {
   const rpcStatus: RpcStatus = 'healthy';
   // No daemon state-message line under "Running" — the prior `liveNow.line`
   // text was idle copy like "waiting for next task" that added nothing.
-  // Attention-worthy state (harness mismatch, eviction) surfaces through
-  // the notifications row (spec §2.10) and the eviction banner above;
-  // Node Health stays a glance-level health card.
+  // Attention-worthy state (harness mismatch, etc.) surfaces through the
+  // notifications row (spec §2.10). Node Health stays a glance-level health card.
   const daemonStateMessage: string | undefined = undefined;
 
   // Action confirmation now flows through sonner toast() — the
@@ -486,19 +380,6 @@ export function OverviewPage(): JSX.Element {
     >
       {/* ── MAIN COLUMN ──────────────────────────────────────────────── */}
       <div className="flex min-w-0 flex-col gap-6">
-        {isEvicted && (
-          <EvictionBanner
-            serviceId={evictedServiceId}
-            onRestake={async (serviceId) => {
-              const res = await api.restake(serviceId);
-              if (!res.ok) {
-                throw new Error(res.error ?? 'Re-stake failed.');
-              }
-              await queryClient.invalidateQueries({ queryKey: ['status'] });
-            }}
-          />
-        )}
-
         {/*
          * Identity — §2.2 surface promoted out of WalletCard in #427. Stable
          * address-of-record stats (master / agent / Safe / serviceId / agentId)

@@ -1,5 +1,4 @@
 import type { OperatorNotification } from './taxonomy.js';
-import { isWithinAutoRestakeWindow, type AutoRestakeStatus } from './auto-restake-window.js';
 
 // Loose shape — refine to the concrete BootstrapState + StatusSnapshot types
 // when wiring this up in Task 1.4. Kept loose here so the deriver can be tested
@@ -18,13 +17,6 @@ export interface DeriveInput {
     services: { evicted: boolean; safeBound: boolean; evictedSince?: string | null }[];
     joinedSolverNets: Record<string, unknown>;
     passwordRotatedAt?: string; // ISO
-    /**
-     * EvictionLoop gating mirrored from the daemon (#651). When `enabled` is
-     * true, `service_evicted` is suppressed for each evicted service that has
-     * been observed evicted for less than `2 × checkIntervalMs`. When absent
-     * or `enabled === false`, eviction emits immediately (backwards compat).
-     */
-    autoRestake?: AutoRestakeStatus;
   };
 }
 
@@ -80,28 +72,6 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
       message: 'No SolverNets joined. Browse the registry to start earning.',
       jumpTo: '/operator/registry',
     });
-  }
-
-  // Eviction suppression window (#651): when auto-restake is enabled, hide the
-  // notification for `2 × checkIntervalMs` after first observation so the
-  // EvictionLoop has time to settle a restake before alarming the operator.
-  // Suppress only when EVERY evicted service is still inside its window; any
-  // aged-past service tips the whole notification on (one stuck restake should
-  // not hide behind a healthy in-flight one). Bad data falls through to emit.
-  const evictedServices = s.services.filter(svc => svc.evicted);
-  if (evictedServices.length > 0) {
-    const now = input.now ?? Date.now();
-    const anyPastWindow = evictedServices.some(
-      svc => !isWithinAutoRestakeWindow(svc, s.autoRestake, now),
-    );
-    if (anyPastWindow) {
-      out.push({
-        kind: 'service_evicted',
-        severity: 'blocking',
-        message: 'A service has been evicted from staking. Re-stake to resume.',
-        jumpTo: '/overview',
-      });
-    }
   }
 
   if (s.services.some(svc => !svc.safeBound)) {

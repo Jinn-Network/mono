@@ -5,7 +5,6 @@ export const CANONICAL_KINDS = [
   'password_rotation_due',
   'harness_not_ready',
   'bootstrap_blocked',
-  'service_evicted',
   'restart_required',
   'update_available',
   'rpc_unreachable',

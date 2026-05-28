@@ -9,7 +9,7 @@ import { Toaster } from '../components/ui/sonner.js';
  * Overview integration tests. With the IA reshuffle, the per-card behaviour
  * (Activity / Wallet / Node Health) is covered by each card's own test file
  * under `./overview/*.test.tsx`. This file covers the wiring inside
- * Overview itself: the eviction banner, the dashboard-action notice, and
+ * Overview itself: dashboard-action notice and
  * the SPA-level action plumbing (top-up, claim, restart) through their
  * respective wallet/node-health surfaces.
  */
@@ -19,7 +19,6 @@ const getBootstrapMock = vi.fn();
 const triggerDripMock = vi.fn();
 const restartDaemonMock = vi.fn();
 const stopDaemonMock = vi.fn();
-const restakeMock = vi.fn();
 const retryAgentBindingMock = vi.fn();
 const harnessReadinessMock = vi.fn();
 
@@ -30,14 +29,13 @@ vi.mock('../api/client.js', () => ({
     triggerDrip: (opts?: { singleDrip?: boolean }) => triggerDripMock(opts),
     restartDaemon: (opts?: { forceRespawn?: boolean }) => restartDaemonMock(opts),
     stopDaemon: () => stopDaemonMock(),
-    restake: (serviceId: number) => restakeMock(serviceId),
     retryAgentBinding: (opts: { serviceIndex: number }) => retryAgentBindingMock(opts),
     harnessReadiness: (name: string) => harnessReadinessMock(name),
   },
 }));
 
 // Import after the mock so the page picks up the mocked client.
-const { OverviewPage, selectVisibleEvictedService } = await import('./Overview.js');
+const { OverviewPage } = await import('./Overview.js');
 
 beforeEach(() => {
   getStatusMock.mockReset();
@@ -45,13 +43,11 @@ beforeEach(() => {
   triggerDripMock.mockReset();
   restartDaemonMock.mockReset();
   stopDaemonMock.mockReset();
-  restakeMock.mockReset();
   retryAgentBindingMock.mockReset();
   harnessReadinessMock.mockReset();
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
   stopDaemonMock.mockResolvedValue({ ok: true });
-  restakeMock.mockResolvedValue({ ok: true });
   // Default harness-readiness response keeps existing tests green when they
   // don't bother to set a specific response. Empty harnessNames means
   // HarnessStatusPanel renders the empty state and the readiness mock is
@@ -232,37 +228,30 @@ describe('OverviewPage wave-2 SOLVING-ON empty-state (issue #421)', () => {
   });
 });
 
-describe('OverviewPage eviction banner', () => {
-  it('renders the inline eviction banner when a service is evicted', async () => {
+describe('OverviewPage eviction surfaces (#773)', () => {
+  it('does not render eviction banner or Re-stake when a service is evicted', async () => {
     getStatusMock.mockResolvedValue({
       fleet: {
         services: [
-          { index: 0, step: 'complete', serviceId: 99, evicted: true },
+          {
+            index: 0,
+            step: 'complete',
+            serviceId: 99,
+            evicted: true,
+            evictedSince: new Date().toISOString(),
+          },
         ],
       },
+      autoRestake: { enabled: true, checkIntervalMs: 60_000 },
       predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
     });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    const banner = await screen.findByTestId('overview-eviction-banner');
-    expect(banner.textContent).toMatch(/service evicted/i);
-  });
-
-  it('invokes api.restake with the evicted service id when Re-stake is clicked', async () => {
-    getStatusMock.mockResolvedValue({
-      fleet: {
-        services: [
-          { index: 0, step: 'complete', serviceId: 42, evicted: true },
-        ],
-      },
-      predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
-    });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    fireEvent.click(await screen.findByTestId('overview-eviction-restake'));
-    await waitFor(() => expect(restakeMock).toHaveBeenCalledWith(42));
+    await screen.findByTestId('overview-page-grid');
+    expect(screen.queryByTestId('overview-eviction-banner')).toBeNull();
+    expect(screen.queryByTestId('overview-eviction-restake')).toBeNull();
+    expect(screen.queryByText(/re-stake/i)).toBeNull();
   });
 });
 
@@ -439,49 +428,3 @@ describe('OverviewPage Node Health wiring', () => {
   });
 });
 
-// Per-scenario gating (loop on/off, missing/malformed timestamps, in/past
-// window) is exhaustively tested in `notifications/auto-restake-window.test.ts`.
-// These tests just exercise the aggregator on top of that predicate: `.find`
-// across services + the non-evicted filter.
-describe('selectVisibleEvictedService (#651)', () => {
-  const evictedAt = '2026-05-26T10:00:00.000Z';
-  const evictedAtMs = new Date(evictedAt).getTime();
-
-  it('returns undefined when ALL evicted services are within window', () => {
-    const out = selectVisibleEvictedService(
-      [
-        { index: 0, step: 'complete', evicted: true, evictedSince: evictedAt },
-        { index: 1, step: 'complete', evicted: true, evictedSince: evictedAt },
-      ],
-      { enabled: true, checkIntervalMs: 60_000 },
-      evictedAtMs + 60_000,
-    );
-    expect(out).toBeUndefined();
-  });
-
-  it('returns the first past-window service when one of several is stuck', () => {
-    const out = selectVisibleEvictedService(
-      [
-        // Within-window service first; should be skipped.
-        { index: 0, step: 'complete', evicted: true, evictedSince: new Date(evictedAtMs + 90_000).toISOString() },
-        // Past-window service; should be picked.
-        { index: 1, step: 'complete', evicted: true, evictedSince: evictedAt },
-      ],
-      { enabled: true, checkIntervalMs: 60_000 },
-      evictedAtMs + 121_000,
-    );
-    expect(out?.index).toBe(1);
-  });
-
-  it('skips non-evicted services', () => {
-    const out = selectVisibleEvictedService(
-      [
-        { index: 0, step: 'complete', evicted: false },
-        { index: 1, step: 'complete', evicted: false },
-      ],
-      undefined,
-      evictedAtMs + 1_000,
-    );
-    expect(out).toBeUndefined();
-  });
-});

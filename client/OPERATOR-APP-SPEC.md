@@ -113,8 +113,6 @@ The SolverNets this operator has joined. One entry per joined SolverNet, keyed b
     - task
 - **State messages**
   - harness not ready
-  - evicted from staking
-  - restake pending
   - no roles enabled
   - SolverNet paused upstream
   - SolverNet retired upstream
@@ -253,7 +251,6 @@ Components raise state messages locally. The Notifications component is the unio
 - `password_rotation_due`
 - `harness_not_ready`
 - `bootstrap_blocked`
-- `service_evicted`
 - `restart_required`
 - `update_available`
 - `rpc_unreachable`
