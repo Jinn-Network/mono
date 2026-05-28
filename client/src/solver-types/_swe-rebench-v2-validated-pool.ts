@@ -132,6 +132,28 @@ export interface ValidatedPoolEntry {
 export const MAX_TRANSIENT_PASSES = 5;
 const PERMANENT_HF_429_REASON = `error:HF-429-permanent-after-${MAX_TRANSIENT_PASSES}-passes`;
 
+/**
+ * The operator-environment subset of `EvalCouldNotGradeError` reasons that are
+ * worth a bounded retry rather than being cached terminal (issue #811). These
+ * may differ on a later pass — Docker comes back, a stale `.venv` is cleaned,
+ * the host's missing venv is provisioned. `image_arch_mismatch` is fixed
+ * per-machine, but the bounded retry caps the waste: it converges to the
+ * terminal `ungradeable:` reason after {@link MAX_TRANSIENT_PASSES}, so there
+ * is no infinite loop.
+ *
+ * Every OTHER `EvalCouldNotGradeError` reason (pytest_missing,
+ * install_build_failed, conftest_import_error, requests_dep_mismatch,
+ * eval_setup_error, …) is a real per-instance problem where a blind retry
+ * won't help; those stay `ungradeable:` terminal. `pytest_missing` in
+ * particular needs the #493 code fix, not a retry.
+ */
+export const TRANSIENT_INFRA_REASONS: ReadonlySet<string> = new Set([
+  'docker_unavailable',
+  'venv_collision',
+  'venv_missing',
+  'image_arch_mismatch',
+]);
+
 interface ValidatedPoolFile {
   schemaVersion: typeof SCHEMA_VERSION;
   evalSemanticsVersion: string;
@@ -702,6 +724,39 @@ function reasonOf(err: unknown): string {
 }
 
 /**
+ * Build a bounded-transient `ValidatedPoolEntry`. Shared by the HF-429 branch
+ * and the operator-environment infra branch (issue #811): both record a
+ * `transient:` reason that the next non-force pass re-processes, bumping
+ * `transientRetryCount` until it reaches {@link MAX_TRANSIENT_PASSES}, at which
+ * point the reason converges to a permanent terminal so a permanently-broken
+ * instance stops churning.
+ */
+function buildBoundedTransientEntry(args: {
+  priorCount: number;
+  transientReason: string;
+  permanentReason: string;
+  checkedAt: string;
+  rowHash?: string;
+  imageName?: string;
+  // `null` is accepted (the upstream-commit resolver returns null when the repo
+  // dir is unavailable) and dropped by the truthiness spread below.
+  upstreamEvalCommit?: string | null;
+}): ValidatedPoolEntry {
+  const next = args.priorCount + 1;
+  const reason = next >= MAX_TRANSIENT_PASSES ? args.permanentReason : args.transientReason;
+  return {
+    scorable: false,
+    reason,
+    checkedAt: args.checkedAt,
+    transientRetryCount: next,
+    lastTransientAt: args.checkedAt,
+    ...(args.rowHash ? { rowHash: args.rowHash } : {}),
+    ...(args.imageName ? { imageName: args.imageName } : {}),
+    ...(args.upstreamEvalCommit ? { upstreamEvalCommit: args.upstreamEvalCommit } : {}),
+  };
+}
+
+/**
  * Validate pool instances by running their gold patch through the eval harness.
  * Idempotent: instances already recorded for `semanticsVersion` are skipped
  * unless `opts.force`. `opts.limit` caps how many gold-evals one run does.
@@ -811,30 +866,46 @@ export async function validatePoolInstances(
         ? (err as { httpStatus: number }).httpStatus
         : undefined;
       const checkedAt = new Date().toISOString();
+      const evalInfraReason = nameOf(err) === 'EvalCouldNotGradeError' ? reasonOf(err) : null;
       if (httpStatus === 429) {
         // Transient HF rate-limit: classify so the next pass re-processes
         // (issue #578). Re-read the prior entry inside the catch so the
         // count reflects the persisted state, not a stale in-memory copy.
         const priorEntry = await deps.store.getEntry(task.instance_id, deps.semanticsVersion);
-        const prior = priorEntry?.transientRetryCount ?? 0;
-        const next = prior + 1;
         const msg = (err instanceof Error ? err.message : String(err)).slice(0, 200);
-        const reason = next >= MAX_TRANSIENT_PASSES
-          ? PERMANENT_HF_429_REASON
-          : `transient:HF-429:${msg}`;
-        entry = {
-          scorable: false,
-          reason,
+        entry = buildBoundedTransientEntry({
+          priorCount: priorEntry?.transientRetryCount ?? 0,
+          transientReason: `transient:HF-429:${msg}`,
+          permanentReason: PERMANENT_HF_429_REASON,
           checkedAt,
-          transientRetryCount: next,
-          lastTransientAt: checkedAt,
-          ...(rowHash ? { rowHash } : {}),
-          ...(row ? { imageName: row.image_name } : {}),
-          ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
-        };
+          rowHash,
+          imageName: row?.image_name,
+          upstreamEvalCommit,
+        });
+      } else if (evalInfraReason !== null && TRANSIENT_INFRA_REASONS.has(evalInfraReason)) {
+        // Operator-environment infra failure that may differ on a retry
+        // (issue #811). Route through the same bounded-transient path as
+        // HF-429 instead of caching it terminal. Re-read the prior entry so
+        // the count reflects persisted state. After MAX_TRANSIENT_PASSES it
+        // converges to the terminal `ungradeable:<reason>` — the same resting
+        // state today's code reaches immediately, just after bounded retries.
+        //
+        // Histogram: the transient reason is `transient:<infra_reason>` with no
+        // message suffix, so it is already a clean self-describing bucket and
+        // needs no normalize rule (unlike `transient:HF-429:<msg>`).
+        const priorEntry = await deps.store.getEntry(task.instance_id, deps.semanticsVersion);
+        entry = buildBoundedTransientEntry({
+          priorCount: priorEntry?.transientRetryCount ?? 0,
+          transientReason: `transient:${evalInfraReason}`,
+          permanentReason: `ungradeable:${evalInfraReason}`,
+          checkedAt,
+          rowHash,
+          imageName: row?.image_name,
+          upstreamEvalCommit,
+        });
       } else {
-        const reason = nameOf(err) === 'EvalCouldNotGradeError'
-          ? `ungradeable:${reasonOf(err)}`
+        const reason = evalInfraReason !== null
+          ? `ungradeable:${evalInfraReason}`
           : `error:${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
         entry = {
           scorable: false,
