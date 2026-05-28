@@ -71,6 +71,15 @@ follow-up.
 
 ## Decision
 
+> **Superseded in part by #802 (2026-05-28).** §Decision (4)–(6) below specified
+> the swe-rebench-v2 repost trigger as *time-expiry* (`last_posted_at +
+> posting_window_ms`), with an `N_max_postings_per_task` abandon cap. Issue #802
+> promotes Option B (see §Alternatives): the repost trigger is now **claim-budget
+> exhaustion** observed via the indexer (`getInstanceClaimCounts`), not the timer,
+> and the abandon cap is removed (defaults to unbounded). `posting_window_ms`
+> stays as each posting's on-chain claim-window deadline; only its role as the
+> repost trigger is gone. Escrow reclaim remains out of scope (no refunds).
+
 ### Generic task-generator knobs
 
 The task-generator framework exposes, configurable per SolverNet:
