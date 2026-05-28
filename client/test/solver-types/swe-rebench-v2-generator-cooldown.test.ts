@@ -147,13 +147,12 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
     rmSync(stateDir, { recursive: true, force: true });
   });
 
-  it('does not let one live posting stall the rest of the pool', async () => {
+  it('posts across the pool round-robin without a time window', async () => {
     vi.setSystemTime(new Date('2026-05-08T12:00:00.000Z'));
     const recordRef = { current: launchedRecord() };
     const configRef = {
       current: {
         N_target_successes: 1,
-        N_max_postings_per_task: 1,
         posting_window_ms: 86_400_000,
         post_batch_size: 1,
         admissionMode: 'python-floor',
@@ -172,8 +171,9 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
     expect(expectTaskArray(second)[0].spec).toMatchObject({ instance_id: 'org__repo-2' });
     expect(gen.getState()).toMatchObject({
       totalPosted: 2,
-      lastPollSummary: { posted: 1, abandoned: 2, unposted: 0 },
+      lastPollSummary: { posted: 1 },
     });
+    expect(gen.getState().lastPollSummary).not.toHaveProperty('abandoned');
   });
 
   it('sizes maxClaims to remaining target successes', async () => {
@@ -185,7 +185,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
       stateDir,
       admissionMode: 'python-floor',
       N_target_successes: 3,
-      N_max_postings_per_task: 3,
       post_batch_size: 2,
     });
 
@@ -207,7 +206,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord posting windows', () => {
     const configRef = {
       current: {
         N_target_successes: 3,
-        N_max_postings_per_task: 1,
         posting_window_ms: 86_400_000,
         post_batch_size: 1,
         admissionMode: 'python-floor',
