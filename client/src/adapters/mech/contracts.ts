@@ -738,7 +738,7 @@ export async function scanTasks(
   toBlock: bigint,
 ): Promise<TaskRecord[]> {
   const results: TaskRecord[] = [];
-  const chunkSize = 9999n;
+  const chunkSize = 1000n; // see LOG_SCAN_CHUNK rationale (#807): small chunks fit every provider's getLogs cap + keep responses small
 
   for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {
     const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
@@ -949,7 +949,16 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
   return results;
 }
 
-const LOG_SCAN_CHUNK = 9999n;
+// 1000-block chunks (was 9999): a 9999-block getLogs over a delivery-dense
+// region (e.g. after a posting burst) returns responses large enough that
+// publicnode/Tenderly reject or time out, AND exceeds the 2k getLogs range cap
+// of the sepolia.base.org fallback — so every provider in the fallback chain
+// fails and the per-chunk delivery cursor never advances (it gets stuck
+// re-scanning the same failing chunk forever, starving evaluator discovery and
+// spamming rpc-fallback errors). 1000 blocks fits every provider's range cap
+// and keeps response sizes small so the cursor advances through dense regions.
+// See #807 (delivery-path) and #801/#803 (same large-getLogs class, startup path).
+const LOG_SCAN_CHUNK = 1000n;
 
 export async function scanLatestRequestDataByRid(
   publicClient: PublicClient,

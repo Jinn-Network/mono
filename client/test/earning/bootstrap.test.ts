@@ -588,7 +588,7 @@ describe('Fleet bootstrap', () => {
     expect(sweepSpy).not.toHaveBeenCalled();
   }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
-  it('surfaces an actionable error when distributor.reStake reverts with UnauthorizedAccount', async () => {
+  it('logs an actionable (non-fatal) error and continues launch when startup reStake reverts with UnauthorizedAccount (#789)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 
@@ -654,12 +654,23 @@ describe('Fleet bootstrap', () => {
       },
     );
 
+    // #789: a startup reStake revert (incl. the permanent UnauthorizedAccount
+    // case) is non-fatal — the daemon still launches because work delivery +
+    // JINN claims are decoupled from OLAS staking. The actionable operator
+    // message is surfaced via the startup catch's console.error log (not a
+    // fatal result), and must still name the real recovery steps (earning dir
+    // / master EOA) and NOT the misleading setCuratingAgents path.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
     const result = await bootstrapper.bootstrap('test-password');
-    expect(result.ok).toBe(false);
-    expect(result.message).toMatch(/is evicted on the staking proxy/);
-    expect(result.message).toMatch(/original master EOA/);
-    expect(result.message).toMatch(/JINN_EARNING_DIR/);
-    expect(result.message).not.toMatch(/setCuratingAgents/);
+    expect(result.ok).toBe(true);
+
+    const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(logged).toMatch(/startup reStake failed \(non-fatal\)/);
+    expect(logged).toMatch(/is evicted on the staking proxy/);
+    expect(logged).toMatch(/original master EOA/);
+    expect(logged).toMatch(/JINN_EARNING_DIR/);
+    expect(logged).not.toMatch(/setCuratingAgents/);
   });
 
   // ── ERC-8004 IdentityRegistry mint (jinn-mono-j07) ─────────────────────────
