@@ -1135,15 +1135,27 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     codeDigests: string[];
     operator?: `0x${string}`;
     solverNetManifestCid?: string;
+    window?: number;
   }): Promise<CodeDigestRewardRow[]> {
     if (args.codeDigests.length === 0) return [];
     await ensureReady();
 
     const MAX_PAGES = 20;
     const PAGE_LIMIT = 1000;
+    // Per-digest recency cap (#764 C1). CODEDIGEST_ATTEMPTS_QUERY orders by
+    // enrichedAtBlock desc, so attempt rows arrive newest-first. Ponder's
+    // GraphQL `limit` is global across all requested codeDigests, so the window
+    // MUST be enforced client-side per-digest — we keep only the first `window`
+    // rows seen for each codeDigest (i.e. the most recent). When undefined, no
+    // cap is applied (behaviour identical to before this change).
+    const windowCap = typeof args.window === 'number' && Number.isFinite(args.window) && args.window > 0
+      ? Math.floor(args.window)
+      : undefined;
 
-    // 1) Pull all train-mode attempt-meta rows for the requested codeDigests.
+    // 1) Pull train-mode attempt-meta rows for the requested codeDigests,
+    //    capped to the most-recent `window` per codeDigest when set.
     const requestKeyToDigest = new Map<string, string>(); // "requestId|chainId" -> codeDigest
+    const keptPerDigest = new Map<string, number>();       // codeDigest -> rows kept
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const data: CodeDigestAttemptsPage = await postGql<CodeDigestAttemptsPage>(
@@ -1151,10 +1163,19 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { codeDigests: args.codeDigests, limit: PAGE_LIMIT, after: cursor },
       );
       for (const row of data.attemptEnvelopeMetas?.items ?? []) {
+        if (windowCap !== undefined) {
+          const kept = keptPerDigest.get(row.codeDigest) ?? 0;
+          if (kept >= windowCap) continue; // already have the window's worth for this digest
+          keptPerDigest.set(row.codeDigest, kept + 1);
+        }
         requestKeyToDigest.set(`${row.requestId}|${row.chainId}`, row.codeDigest);
       }
       const pi = data.attemptEnvelopeMetas?.pageInfo;
       if (!pi?.hasNextPage || !pi.endCursor) break;
+      // Short-circuit pagination once every requested digest has filled its
+      // window — no need to keep paging history we'll discard.
+      if (windowCap !== undefined &&
+          args.codeDigests.every((d) => (keptPerDigest.get(d) ?? 0) >= windowCap)) break;
       cursor = pi.endCursor;
     }
     if (requestKeyToDigest.size === 0) return [];

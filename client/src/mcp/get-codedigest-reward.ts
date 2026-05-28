@@ -9,7 +9,7 @@ import { DiscoveryUnavailableError } from '../discovery/types.js';
  */
 export async function handleGetCodeDigestReward(
   discovery: DiscoveryAPI | null,
-  args: { codeDigests: string[]; operator?: `0x${string}`; solverNetManifestCid?: string },
+  args: { codeDigests: string[]; operator?: `0x${string}`; solverNetManifestCid?: string; window?: number },
 ): Promise<Record<string, unknown>> {
   if (!discovery) {
     return { ok: false, error: { kind: 'no_discovery', message: 'discovery not configured' }, rows: [] };

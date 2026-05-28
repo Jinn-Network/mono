@@ -1294,7 +1294,14 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
   // Per-codeDigest aggregates derive from the indexer's IPFS enrichment
   // (attempt/verdict envelope meta), which the on-chain floor cannot
   // reconstruct. withFallback never routes here (no silent fall-through).
-  async function getCodeDigestRewards(): Promise<CodeDigestRewardRow[]> {
+  async function getCodeDigestRewards(_args?: {
+    codeDigests: string[];
+    operator?: `0x${string}`;
+    solverNetManifestCid?: string;
+    window?: number;
+  }): Promise<CodeDigestRewardRow[]> {
+    // `window` accepted for interface parity; the floor returns no rows.
+    void _args;
     return [];
   }
 

@@ -333,11 +333,18 @@ export interface DiscoveryAPI {
    * "insufficient samples", not pass-rate zero).
    *
    * Rides PR #783's attemptEnvelopeMeta.codeDigest index.
+   *
+   * `window` (#764 C1) caps each codeDigest's aggregate to its most-recent
+   * `window` attempts (by enrichedAtBlock desc). Because Ponder's GraphQL
+   * `limit` is global across all requested codeDigests, the cap is applied
+   * client-side per-digest, not as a query limit. Omitted → no cap (aggregate
+   * over the full paginated history, byte-identical to the prior behaviour).
    */
   getCodeDigestRewards(args: {
     codeDigests: string[];
     operator?: `0x${string}`;
     solverNetManifestCid?: string;
+    window?: number;
   }): Promise<CodeDigestRewardRow[]>;
 }
 

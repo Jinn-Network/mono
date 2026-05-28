@@ -131,6 +131,91 @@ describe('getCodeDigestRewards', () => {
     expect(a.avgScore).toBeCloseTo(1.0);
   });
 
+  it('caps aggregation to the most-recent `window` attempts per codeDigest', async () => {
+    // Seed 5 attempts for one codeDigest in enrichedAtBlock-desc order (the
+    // CODEDIGEST_ATTEMPTS_QUERY ordering). With window=2, only the two
+    // most-recent (0x1, 0x2) must be aggregated. Their verdicts are both
+    // passes; the older three (0x3-0x5) are fails — if the window were
+    // ignored the passRate would be 2/5, not 1.0.
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, codeDigest: 'sha256:A' }, // newest
+        { requestId: '0x2', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x3', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x4', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x5', chainId: 8453, codeDigest: 'sha256:A' }, // oldest
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+        { requestId: '0x2', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+        { requestId: '0x3', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+        { requestId: '0x4', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+        { requestId: '0x5', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const rows = await client.getCodeDigestRewards({ codeDigests: ['sha256:A'], window: 2 });
+    expect(rows).toHaveLength(1);
+    const a = rows[0]!;
+    expect(a.attempts).toBe(2);
+    expect(a.passes).toBe(2);
+    expect(a.passRate).toBeCloseTo(1);
+    expect(a.avgScore).toBeCloseTo(1.0);
+  });
+
+  it('applies the window cap independently per codeDigest', async () => {
+    // Two codeDigests interleaved in desc order. window=1 keeps only the most
+    // recent attempt of EACH digest (a global limit would wrongly keep just
+    // one row total).
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0xa1', chainId: 8453, codeDigest: 'sha256:A' }, // A newest
+        { requestId: '0xb1', chainId: 8453, codeDigest: 'sha256:B' }, // B newest
+        { requestId: '0xa2', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0xb2', chainId: 8453, codeDigest: 'sha256:B' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0xa1', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+        { requestId: '0xb1', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+        { requestId: '0xa2', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+        { requestId: '0xb2', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const rows = await client.getCodeDigestRewards({ codeDigests: ['sha256:A', 'sha256:B'], window: 1 });
+    const byDigest = new Map(rows.map((r) => [r.codeDigest, r]));
+    expect(byDigest.get('sha256:A')!.attempts).toBe(1);
+    expect(byDigest.get('sha256:A')!.passes).toBe(1); // newest A passed
+    expect(byDigest.get('sha256:B')!.attempts).toBe(1);
+    expect(byDigest.get('sha256:B')!.passes).toBe(0); // newest B failed
+  });
+
+  it('aggregates over ALL attempts when window is omitted (regression)', async () => {
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x2', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x3', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x4', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x5', chainId: 8453, codeDigest: 'sha256:A' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+        { requestId: '0x2', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+        { requestId: '0x3', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+        { requestId: '0x4', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+        { requestId: '0x5', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const rows = await client.getCodeDigestRewards({ codeDigests: ['sha256:A'] });
+    expect(rows).toHaveLength(1);
+    const a = rows[0]!;
+    expect(a.attempts).toBe(5);
+    expect(a.passes).toBe(2);
+    expect(a.passRate).toBeCloseTo(2 / 5);
+  });
+
   it('omits solverNetManifestCid from the verdict query when not provided', async () => {
     const { impl, calls } = routedFetch({
       attemptMeta: { data: { attemptEnvelopeMetas: { items: [

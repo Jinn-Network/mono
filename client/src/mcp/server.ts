@@ -422,11 +422,12 @@ server.tool(
     codeDigests: z.array(z.string()).min(1).describe('Executor codeDigests, e.g. ["sha256:abc", "sha256:def"]'),
     operator: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional().describe('Restrict to attempts this operator Safe claimed'),
     solverNetManifestCid: z.string().optional().describe('Optional SolverNet manifest CID scope'),
+    window: z.number().int().positive().optional().describe('Cap each codeDigest to its most-recent N attempts (recentAttemptsWindow; omitted → no cap)'),
   },
   async (args) => {
     const out = await handleGetCodeDigestReward(
       discoveryForTools,
-      args as { codeDigests: string[]; operator?: `0x${string}`; solverNetManifestCid?: string },
+      args as { codeDigests: string[]; operator?: `0x${string}`; solverNetManifestCid?: string; window?: number },
     );
     return { content: [{ type: 'text' as const, text: JSON.stringify(out) }] };
   },
