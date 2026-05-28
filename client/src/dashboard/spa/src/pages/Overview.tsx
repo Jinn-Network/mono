@@ -292,6 +292,12 @@ export function OverviewPage(): JSX.Element {
       out.push({
         name: entry.name ?? entry.manifestCid ?? key,
         manifestCid: entry.manifestCid ?? key,
+        // Derive the membership's solverType from its contract identity so the
+        // Activity table can scope runs by solverType instead of the delivery
+        // CID that delivered runs carry in manifestCid (#838).
+        solverType: entry.contract
+          ? `${entry.contract.id}.${entry.contract.version}`
+          : undefined,
         roles: Array.isArray(entry.roles) ? entry.roles : [],
         harness: entry.harness,
         model: entry.model,
@@ -315,6 +321,7 @@ export function OverviewPage(): JSX.Element {
         out.set(r.requestId, {
           requestId: r.requestId,
           manifestCid: r.manifestCid ?? null,
+          solverType: r.solverType ?? null,
           taskRole: r.taskRole,
           state: r.state,
           implName: r.implName ?? null,

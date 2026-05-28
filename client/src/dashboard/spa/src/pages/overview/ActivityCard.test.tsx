@@ -34,6 +34,7 @@ const joined: ActivityJoinedNet[] = [
 const baseTask: ActivityTask = {
   requestId: '0xabc1234567890abcdef',
   manifestCid: 'bafkreiswe',
+  solverType: 'swe-rebench-v2.v1',
   taskRole: 'restoration',
   state: 'COMPLETE',
   implName: 'hermes-agent',
@@ -124,6 +125,29 @@ describe('ActivityCard', () => {
     expect(screen.queryByTestId('activity-task-row-kept-real-fail')).not.toBeNull();
     expect(screen.queryByTestId('activity-task-row-dropped-never-started')).toBeNull();
     expect(screen.queryByTestId('activity-task-row-dropped-impl-not-ready')).toBeNull();
+  });
+
+  it('keeps delivered COMPLETE runs by scoping on solverType, not the delivery CID (#838)', () => {
+    // Multi-SolverNet operator: the old filter scoped by manifestCid equality,
+    // but a delivered run's manifestCid is the delivery/solution CID — never the
+    // SolverNet manifest CID — so every COMPLETE row was hidden. Scope by
+    // solverType instead.
+    const multiJoined: ActivityJoinedNet[] = [
+      { name: 'SWE-rebench v2', manifestCid: 'bafkreiswe', solverType: 'swe-rebench-v2.v1', roles: ['solver'] },
+      { name: 'prediction', manifestCid: 'bafkreipred', solverType: 'prediction.v1', roles: ['solver'] },
+    ];
+    const tasks: ActivityTask[] = [
+      // Delivered swe-rebench run: manifestCid is the delivery CID (≠ selected
+      // SolverNet manifest), but solverType matches the selected net.
+      { ...baseTask, requestId: 'delivered-complete', state: 'COMPLETE', solverType: 'swe-rebench-v2.v1', manifestCid: 'bafkreiDELIVERYcid' },
+      // A different SolverNet's run must stay scoped out of this view.
+      { ...baseTask, requestId: 'other-net', state: 'COMPLETE', solverType: 'prediction.v1', manifestCid: 'bafkreiOTHER' },
+    ];
+    const { ui } = wrap(<ActivityCard joined={multiJoined} tasks={tasks} />);
+    render(ui);
+    expect(screen.queryByTestId('activity-task-row-delivered-complete')).not.toBeNull();
+    expect(screen.queryByTestId('activity-task-row-other-net')).toBeNull();
+    expect(screen.getByTestId('activity-tasks-table').textContent).toMatch(/succeeded/i);
   });
 
   it('shows STARTED from runStartedAt instead of an old task window start', () => {

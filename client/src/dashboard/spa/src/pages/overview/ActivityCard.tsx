@@ -49,6 +49,12 @@ export interface ActivityTask {
   taskRole: 'restoration' | 'evaluation' | null;
   /** Current state in the harness engine state machine (DISCOVERED .. COMPLETE / FAILED). */
   state: string;
+  /**
+   * SolverType the run executed under (e.g. "swe-rebench-v2.v1"). Stable across
+   * the run lifecycle — unlike `manifestCid`, which becomes the delivery/solution
+   * CID once delivered. Used to scope rows to the selected SolverNet (#838).
+   */
+  solverType: string | null;
   /** Harness/impl name the task ran under. */
   implName: string | null;
   /** Unix ms timestamp for the task's execution window start. */
@@ -68,6 +74,12 @@ export interface ActivityJoinedNet {
   name: string;
   /** Manifest CID — the canonical identifier per spec §12. */
   manifestCid?: string;
+  /**
+   * SolverType for this membership (`${contract.id}.${contract.version}`). Used
+   * to scope run rows reliably — delivered runs carry a delivery CID in their
+   * `manifestCid`, which never matches the SolverNet manifest CID (#838).
+   */
+  solverType?: string;
   /** Roles the operator joined under (`solver`, `evaluator`, or legacy `solving`/`evaluating`). */
   roles: string[];
   /** Harness bound to this membership. */
@@ -209,11 +221,16 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
           return false;
         }
       }
-      // SolverNet scoping: only restrict by manifestCid when the operator
-      // has joined multiple SolverNets. Single-SolverNet operators see all
-      // their rows regardless of whether the row carries a delivery CID
-      // (which doesn't match the SolverNet manifest CID).
+      // SolverNet scoping: only restrict when the operator has joined multiple
+      // SolverNets. Scope by solverType — it is stable across the run lifecycle.
+      // A run's `manifestCid` becomes the delivery/solution CID once delivered
+      // (it never equals the SolverNet manifest CID), so the old manifestCid
+      // equality silently hid every COMPLETE/settled run, making a healthy node
+      // look like "all failed" (#838). manifestCid stays as a back-compat
+      // fallback for older payloads that don't carry solverType.
       if (joined.length <= 1) return true;
+      if (t.solverType && selected.solverType)
+        return t.solverType === selected.solverType;
       if (t.manifestCid && selected.manifestCid)
         return t.manifestCid === selected.manifestCid;
       return true;
