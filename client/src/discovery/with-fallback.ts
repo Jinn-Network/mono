@@ -262,5 +262,14 @@ export function withFallback(
       // reverts on degraded data (substrate-incident policy; mirrors #669).
       return primary.getCodeDigestRewards(args);
     },
+
+    getInstanceClaimCounts(args) {
+      // Never fall through to the floor for this method — an empty Map from the
+      // floor is indistinguishable from "every task has 0 consumed slots",
+      // which would mark every posting `live` and suppress all reposts (#802,
+      // mirroring the #669 contract on getInstanceSuccessCounts). Propagate the
+      // error so the launcher aborts its tick rather than under-counting.
+      return primary.getInstanceClaimCounts(args);
+    },
   };
 }

@@ -397,6 +397,25 @@ describe('withFallback — all four methods', () => {
     ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
     expect(floor.getInstanceSuccessCounts).not.toHaveBeenCalled();
   });
+
+  it('does NOT fall through to floor for getInstanceClaimCounts — propagates DiscoveryUnavailableError so the launcher aborts (#802)', async () => {
+    // An empty Map from the floor is indistinguishable from "every task has 0
+    // consumed slots", which would mark every posting `live` and suppress all
+    // reposts. The wrapper must propagate the error so the launcher tick aborts.
+    const primary = {
+      getInstanceClaimCounts: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    await expect(
+      api.getInstanceClaimCounts({ manifestCid: 'bafy' }),
+    ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
+    expect(floor.getInstanceClaimCounts).not.toHaveBeenCalled();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {
