@@ -360,59 +360,6 @@ describe('CodexCodeHarnessAdapter', () => {
     }
   });
 
-  it('passes local Codex provider config for Ollama-compatible endpoints', async () => {
-    const calls: SpawnCall[] = [];
-    const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {
-      calls.push({ command, args, options });
-      return fakeCodexChild();
-    });
-    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-ollama-work-'));
-    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-ollama-state-'));
-    try {
-      const adapter = new CodexCodeHarnessAdapter({
-        codexPath: 'codex-test',
-        codexModel: 'llama3.1',
-        codexBaseUrl: 'http://127.0.0.1:11434/v1',
-        clientRoot: '/client/root',
-        _spawnFn: spawnFn as never,
-        _runSessionStartHook: false,
-      });
-
-      await adapter.runTask({
-        taskId: 'swe-rebench-task-restoration',
-        requestId: '0x' + '7'.repeat(64),
-        solverType: 'swe-rebench-v2.v1',
-        taskBody: sweTask() as never,
-        implStateDir,
-        workingDir,
-        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
-        windowStartTs: 1,
-        windowEndTs: 2,
-        msUntilEndTs: 1,
-        mode: 'train',
-        abort: new AbortController().signal,
-      }, learnerPluginRoot);
-
-      expect(calls).toHaveLength(1);
-      expect(calls[0]!.args).toEqual(expect.arrayContaining([
-        '--ignore-user-config',
-        '-m',
-        'llama3.1',
-        '-c',
-        'model_provider="jinn-local"',
-        '-c',
-        'model_providers.jinn-local.name="jinn-local"',
-        '-c',
-        'model_providers.jinn-local.base_url="http://127.0.0.1:11434/v1"',
-        '-c',
-        'model_providers.jinn-local.wire_api="responses"',
-      ]));
-    } finally {
-      rmSync(workingDir, { recursive: true, force: true });
-      rmSync(implStateDir, { recursive: true, force: true });
-    }
-  });
-
   it('closes stdin even when the child errors before reading the prompt (#675)', async () => {
     let captured: FakeCodexChild | undefined;
     const spawnFn = vi.fn(() => {
@@ -448,74 +395,6 @@ describe('CodexCodeHarnessAdapter', () => {
 
       expect(captured).toBeDefined();
       expect(captured!.stdin.end).toHaveBeenCalledTimes(1);
-    } finally {
-      rmSync(workingDir, { recursive: true, force: true });
-      rmSync(implStateDir, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects non-local Codex provider URLs before spawning', async () => {
-    const spawnFn = vi.fn();
-    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-remote-work-'));
-    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-remote-state-'));
-    try {
-      const adapter = new CodexCodeHarnessAdapter({
-        codexPath: 'codex-test',
-        codexBaseUrl: 'https://api.openai.com/v1',
-        clientRoot: '/client/root',
-        _spawnFn: spawnFn as never,
-        _runSessionStartHook: false,
-      });
-
-      await expect(adapter.runTask({
-        taskId: 'swe-rebench-task-restoration',
-        requestId: '0x' + '7'.repeat(64),
-        solverType: 'swe-rebench-v2.v1',
-        taskBody: sweTask() as never,
-        implStateDir,
-        workingDir,
-        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
-        windowStartTs: 1,
-        windowEndTs: 2,
-        msUntilEndTs: 1,
-        mode: 'train',
-        abort: new AbortController().signal,
-      }, learnerPluginRoot)).rejects.toThrow(/codexBaseUrl must be local/i);
-      expect(spawnFn).not.toHaveBeenCalled();
-    } finally {
-      rmSync(workingDir, { recursive: true, force: true });
-      rmSync(implStateDir, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects Codex provider URLs with embedded credentials before spawning', async () => {
-    const spawnFn = vi.fn();
-    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-url-creds-work-'));
-    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-url-creds-state-'));
-    try {
-      const adapter = new CodexCodeHarnessAdapter({
-        codexPath: 'codex-test',
-        codexBaseUrl: 'http://user:pass@127.0.0.1:11434/v1',
-        clientRoot: '/client/root',
-        _spawnFn: spawnFn as never,
-        _runSessionStartHook: false,
-      });
-
-      await expect(adapter.runTask({
-        taskId: 'swe-rebench-task-restoration',
-        requestId: '0x' + '7'.repeat(64),
-        solverType: 'swe-rebench-v2.v1',
-        taskBody: sweTask() as never,
-        implStateDir,
-        workingDir,
-        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
-        windowStartTs: 1,
-        windowEndTs: 2,
-        msUntilEndTs: 1,
-        mode: 'train',
-        abort: new AbortController().signal,
-      }, learnerPluginRoot)).rejects.toThrow(/codexBaseUrl must be local/i);
-      expect(spawnFn).not.toHaveBeenCalled();
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });

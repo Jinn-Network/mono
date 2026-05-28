@@ -1919,8 +1919,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesProvider: config.hermesProvider,
     hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
     codexPath: config.codexPath,
-    codexModel: config.codexModel,
-    codexBaseUrl: config.codexBaseUrl,
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
   })) {
     implRegistry.register(impl);
