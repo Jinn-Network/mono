@@ -12,7 +12,6 @@ import type { AdmissionMode } from './_swe-rebench-v2-validated-pool.js';
 
 export interface GeneratorConfig {
   N_target_successes: number;
-  N_max_postings_per_task: number;
   posting_window_ms: number;
   post_batch_size: number;
   maxClaimsPerOperator?: number;
@@ -26,9 +25,9 @@ export interface GeneratorConfig {
 
 export const DEFAULT_GENERATOR_CONFIG: GeneratorConfig = {
   N_target_successes: 5,
-  // #802: abandon cap is opt-in; default unbounded so hard instances retry
-  // indefinitely. A launcher may still set a finite ceiling in the manifest.
-  N_max_postings_per_task: Infinity,
+  // #802: the repost trigger is claim-budget exhaustion (indexer-observed), not
+  // a posting count. The former N_max_postings_per_task abandon cap is removed —
+  // hard instances retry indefinitely until they reach N successes.
   posting_window_ms: 24 * 60 * 60 * 1000, // on-chain claim-window deadline only (AC#5)
   post_batch_size: 25,
   claimLeaseTtlSeconds: 60 * 60,
@@ -79,9 +78,18 @@ export function classifyPoolTask(
   if (counters.successful >= config.N_target_successes) return 'saturated';
   // Never posted ⇒ unposted.
   if (counters.posted === 0 || !counters.last_task_id) return 'unposted';
-  // Posted, but the indexer shows no live posting for its last_task_id (the
-  // task left the claimable set — finalized/refunded/exhausted). Repost.
-  if (!claim) return 'repostable';
+  // Posted, but the claim snapshot has no entry for this last_task_id. The
+  // indexer never deletes task rows (finalized/refunded are flags, and the
+  // leg-1 query carries no lifecycle filter, so a finalized/refunded task is
+  // still present with consumed >= maxClaims ⇒ classified repostable below).
+  // The ONLY cause of a missing entry for a known last_task_id is indexing lag
+  // (or a reorg): the task was posted on-chain but the indexer has not reflected
+  // it yet. Treat it as `live` (assume not-yet-indexed); it reconciles to
+  // live/repostable once the indexer catches up. Returning `repostable` here
+  // would re-post a just-posted task before the indexer sees it (double-post,
+  // #802 #3), and in onchain mode — where getInstanceClaimCounts is an
+  // empty-success floor — would storm every posting every tick (#802 #2).
+  if (!claim) return 'live';
   // Live while the on-chain claim budget has slots left; exhausted ⇒ repostable.
   return claim.consumed >= claim.maxClaims ? 'repostable' : 'live';
 }

@@ -264,11 +264,13 @@ export function withFallback(
     },
 
     getInstanceClaimCounts(args) {
-      // Never fall through to the floor for this method — an empty Map from the
-      // floor is indistinguishable from "every task has 0 consumed slots",
-      // which would mark every posting `live` and suppress all reposts (#802,
-      // mirroring the #669 contract on getInstanceSuccessCounts). Propagate the
-      // error so the launcher aborts its tick rather than under-counting.
+      // Never fall through to the floor for this method — a *successful* empty
+      // Map from the floor is indistinguishable from "every task has 0 consumed
+      // slots", so on a real outage it would mask exhaustion: exhausted
+      // postings would classify `live`, their reposts would be suppressed, and
+      // the SolverNet would under-serve N (#802, mirroring the #669 contract on
+      // getInstanceSuccessCounts). Propagate the error so the launcher aborts
+      // its tick rather than treating absent data as truth.
       return primary.getInstanceClaimCounts(args);
     },
   };

@@ -1307,11 +1307,17 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
 
   // ── getInstanceClaimCounts (#802) — empty Map stub ─────────────────────────
   // The claim data (task.maxClaims + attempt counts) IS reconstructible from
-  // TaskCreated / TaskAttemptCreated logs, but the floor stays a no-op to keep
-  // the abort-on-outage guarantee symmetric with getInstanceSuccessCounts:
-  // withFallback never routes this method to the floor, so an empty Map here is
-  // never the runtime path. Returning empty (rather than a live scan) avoids a
-  // floor that would mark every posting `live` and suppress all reposts (#802).
+  // TaskCreated / TaskAttemptCreated logs, but the floor stays a no-op for two
+  // distinct paths:
+  //   (1) http + fallbackToOnchain=true — withFallback never routes this method
+  //       to the floor, so this stub is never reached; the primary's error
+  //       propagates and the launcher aborts the tick (abort-on-outage).
+  //   (2) mode='onchain' (mainnet default) — the factory returns this floor
+  //       un-wrapped, so this stub IS the runtime path. The empty Map makes the
+  //       generator's classifier treat every known posting's taskId as absent =
+  //       not-yet-indexed = `live`, so the generator goes safely INERT (posts
+  //       each instance once, never tops up) instead of storming. A live
+  //       on-chain claim scan is deferred to its own scoped issue.
   async function getInstanceClaimCounts(): Promise<Map<string, InstanceClaimCount>> {
     return new Map();
   }

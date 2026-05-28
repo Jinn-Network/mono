@@ -373,12 +373,19 @@ export interface DiscoveryAPI {
    *
    * Modelled one-for-one on `getInstanceSuccessCounts`: backed by the indexer's
    * `task` + `attempt` tables. Throws `DiscoveryUnavailableError` when the
-   * backing is unreachable — callers MUST NOT silently fall through to
-   * local-only state. The `withFallback` wrapper enforces this by never routing
-   * `getInstanceClaimCounts` to the floor: an empty Map from the floor is
-   * indistinguishable from "every task has 0 consumed slots", which would mark
-   * every posting `live` and suppress all reposts (the under-count bug this
-   * method exists to avoid — #802, mirroring #669).
+   * backing is unreachable — on a genuine error the caller MUST abort the tick,
+   * not treat the absence of data as truth. The `withFallback` wrapper enforces
+   * this by never routing `getInstanceClaimCounts` to the floor: a *successful*
+   * empty Map from the floor is indistinguishable from "every task has 0
+   * consumed slots", so on a real outage it would silently mask exhaustion —
+   * exhausted postings would classify `live`, their reposts would be suppressed,
+   * and the SolverNet would under-serve N (#802, mirroring #669).
+   *
+   * Note the generator's own classifier treats a *missing entry for a known
+   * taskId* as `live` (assume not-yet-indexed; the indexer never deletes task
+   * rows, so a finalized/refunded/exhausted task is still present), which is why
+   * the floor must propagate the error rather than return an empty success: a
+   * whole-map empty-success would make every posting inert, not storm.
    *
    * The on-chain floor implementation returns an empty Map (the runtime path is
    * never the floor for this method — `withFallback` propagates the error
