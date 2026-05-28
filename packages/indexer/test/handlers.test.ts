@@ -518,6 +518,113 @@ describe('VerdictDeliveryClaimed → verdict', () => {
     await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
     expect(db.count(verdict)).toBe(1);
   });
+
+  it('issue #530: does not finalize below requiredVerdicts (1 of 2 delivered)', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 2 }),
+      context,
+      task,
+    });
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
+      context,
+      verdict,
+      task,
+    });
+    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
+  });
+
+  it('issue #530: finalizes when delivered verdicts reach requiredVerdicts (2 of 2)', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 2 }),
+      context,
+      task,
+    });
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
+      context,
+      verdict,
+      task,
+    });
+    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 1 }, { block: 101n }),
+      context,
+      verdict,
+      task,
+    });
+    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
+  });
+
+  it('issue #530: stays finalized on a replayed (idempotent) verdict event', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 1 }),
+      context,
+      task,
+    });
+    const ev = verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n });
+    await handleVerdictDeliveryClaimed({ event: ev, context, verdict, task });
+    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
+    // Replay: onConflictDoNothing keeps one verdict row; recount is order-independent
+    // and must not flip finalized back to false.
+    await handleVerdictDeliveryClaimed({ event: ev, context, verdict, task });
+    expect(db.count(verdict)).toBe(1);
+    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
+  });
+
+  it('issue #530: never finalizes when requiredVerdicts == 0', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 0 }),
+      context,
+      task,
+    });
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
+      context,
+      verdict,
+      task,
+    });
+    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
+  });
+
+  it('issue #530: skips finalized recompute when the task row is absent (predates startBlock), still writes the verdict', async () => {
+    // No handleTaskCreated — the task row does not exist.
+    await expect(
+      handleVerdictDeliveryClaimed({
+        event: verdictDeliveryClaimedEvent({ taskId: 4242n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
+        context,
+        verdict,
+        task,
+      }),
+    ).resolves.toBeUndefined();
+    // Verdict row is still recorded (acceleration data is not lost)...
+    expect(db.get(verdict, { taskId: '4242', attemptIndex: 0, verdictIndex: 0, chainId: CHAIN_ID })).toBeDefined();
+    // ...and no task row was conjured.
+    expect(db.count(task)).toBe(0);
+  });
+
+  it('issue #530: counts only the matching attempt scope (other attempts do not bleed into the count)', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 2 }),
+      context,
+      task,
+    });
+    // One delivered verdict on attempt 0 and one on attempt 1 — neither attempt
+    // alone reaches requiredVerdicts=2, so the task must not finalize.
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
+      context,
+      verdict,
+      task,
+    });
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 1, verdictIndex: 0 }, { block: 101n }),
+      context,
+      verdict,
+      task,
+    });
+    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
+  });
 });
 
 // ── TaskBudgetRefunded → task.refunded ───────────────────────────────────────
