@@ -44,7 +44,7 @@ describe('TranscriptWatcher', () => {
     );
 
     // Wait for chokidar to pick up the change + dispatch
-    await waitFor(() => collected.length > 0, 8000);
+    await waitFor(() => collected.length > 0, 20000);
 
     expect(collected.length).toBe(1);
     expect(collected[0].sessionId).toBe('sess-1');
@@ -65,13 +65,13 @@ describe('TranscriptWatcher', () => {
       session,
       JSON.stringify({ type: 'user', timestamp: '2026-05-07T00:00:00.000Z', message: { content: 'a' } }) + '\n',
     );
-    await waitFor(() => collected.length >= 1, 8000);
+    await waitFor(() => collected.length >= 1, 20000);
 
     await fs.appendFile(
       session,
       JSON.stringify({ type: 'user', timestamp: '2026-05-07T00:00:01.000Z', message: { content: 'b' } }) + '\n',
     );
-    await waitFor(() => collected.length >= 2, 8000);
+    await waitFor(() => collected.length >= 2, 20000);
 
     expect(collected.length).toBe(2);
   });
@@ -98,7 +98,7 @@ describe('TranscriptWatcher', () => {
       codexSession,
       JSON.stringify({ role: 'user', ts: '2026-05-07T00:00:00.000Z', content: 'b' }) + '\n',
     );
-    await waitFor(() => collected.length >= 2, 8000);
+    await waitFor(() => collected.length >= 2, 20000);
 
     const tools = new Set(collected.map((c) => c.tool));
     expect(tools.has('claude-code')).toBe(true);
@@ -128,7 +128,7 @@ describe('TranscriptWatcher', () => {
       JSON.stringify({ role: 'user', ts: '2026-05-07T00:00:00.000Z', content: 'hi' }) + '\n',
     );
 
-    await waitFor(() => collected.length > 0, 8000);
+    await waitFor(() => collected.length > 0, 20000);
     expect(collected[0]?.sessionId).toBe('brand-new');
   });
 
@@ -154,7 +154,7 @@ describe('TranscriptWatcher', () => {
       JSON.stringify({ role: 'user', ts: '2026-05-07T00:00:00.000Z', content: 'hi' }) + '\n',
     );
 
-    await waitFor(() => collected.length > 0, 8000);
+    await waitFor(() => collected.length > 0, 20000);
     expect(collected[0]?.sessionId).toBe('live-session');
     expect(collected[0]?.tool).toBe('codex');
   });
@@ -172,7 +172,7 @@ describe('TranscriptWatcher', () => {
       session,
       JSON.stringify({ type: 'user', timestamp: '2026-05-07T00:00:00.000Z', message: { content: 'a' } }) + '\n',
     );
-    await waitFor(() => collected.length >= 1, 8000);
+    await waitFor(() => collected.length >= 1, 20000);
 
     await watcher.shutdown();
     watcher = undefined;

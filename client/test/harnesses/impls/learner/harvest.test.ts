@@ -710,11 +710,11 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(out.gating).toBeDefined();
   });
 
-  it('accepts arbitrary solution-payload.json when task has no solverType (learner-full-cycle smoke)', () => {
+  it('accepts arbitrary solution-payload.json when task has no solverType (learner-full-cycle smoke)', async () => {
     const genericPayload = { foo: 'world', bar: 'world', baz: 'world' };
     writeTypedPayload(genericPayload);
 
-    const out = harvestOutput(workingDir, undefined, {
+    const out = await harvestOutput(workingDir, undefined, {
       id: 'task-1',
       description: 'write output.json',
       role: 'restoration',
@@ -726,16 +726,16 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(artifact?.metadata?.solverType).toBeUndefined();
   });
 
-  it('rejects portfolio-shaped payloads only when solverType is portfolio.v0', () => {
+  it('rejects portfolio-shaped payloads only when solverType is portfolio.v0', async () => {
     writeTypedPayload({ foo: 'world', bar: 'world', baz: 'world' });
 
-    expect(() =>
+    await expect(
       harvestOutput(workingDir, undefined, {
         id: 'task-1',
         description: 'd',
         solverType: 'portfolio.v0',
         role: 'restoration',
       } as never),
-    ).toThrow(/failed portfolio\.v0\/solution validation/);
+    ).rejects.toThrow(/failed portfolio\.v0\/solution validation/);
   });
 });
