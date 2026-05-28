@@ -664,7 +664,6 @@ function GeneratorPoolSummary({ record }: { record: LaunchedSolverNetRecord }): 
       <MetaItem label="Live" value={String(summary.live)} testid="launcher-launched-generator-live" />
       <MetaItem label="Repostable" value={String(summary.repostable)} testid="launcher-launched-generator-repostable" />
       <MetaItem label="Saturated" value={String(summary.saturated)} testid="launcher-launched-generator-saturated" />
-      <MetaItem label="Abandoned" value={String(summary.abandoned)} testid="launcher-launched-generator-abandoned" />
     </dl>
   );
 }
@@ -676,7 +675,6 @@ function isPoolSummary(value: unknown): value is {
   live: number;
   repostable: number;
   saturated: number;
-  abandoned: number;
 } {
   if (typeof value !== 'object' || value === null) return false;
   const summary = value as Record<string, unknown>;
@@ -687,7 +685,6 @@ function isPoolSummary(value: unknown): value is {
     'live',
     'repostable',
     'saturated',
-    'abandoned',
   ].every((key) => typeof summary[key] === 'number');
 }
 

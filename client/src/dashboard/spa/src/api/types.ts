@@ -223,7 +223,6 @@ export interface LauncherStatusGeneratorView {
       live: number;
       repostable: number;
       saturated: number;
-      abandoned: number;
     };
   lastError?: { message: string; at: string };
   cadenceMs?: number;

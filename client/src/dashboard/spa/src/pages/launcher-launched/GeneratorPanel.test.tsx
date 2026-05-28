@@ -288,7 +288,6 @@ describe('GeneratorPanel', () => {
               live: 11,
               repostable: 4,
               saturated: 5,
-              abandoned: 6,
             },
           },
         })}
@@ -298,7 +297,7 @@ describe('GeneratorPanel', () => {
 
     expect(screen.getByTestId('launcher-launched-generator-pool-summary')).toBeTruthy();
     expect(screen.getByTestId('launcher-launched-generator-repostable').textContent).toBe('4');
-    expect(screen.getByTestId('launcher-launched-generator-abandoned').textContent).toBe('6');
+    expect(screen.getByTestId('launcher-launched-generator-saturated').textContent).toBe('5');
   });
 
   it('renders swe-rebench-v2 generator fields for swe launched records', () => {

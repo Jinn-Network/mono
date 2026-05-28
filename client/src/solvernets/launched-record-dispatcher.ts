@@ -185,7 +185,6 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
     const live = finiteNumber(rawSummary['live']);
     const repostable = finiteNumber(rawSummary['repostable']);
     const saturated = finiteNumber(rawSummary['saturated']);
-    const abandoned = finiteNumber(rawSummary['abandoned']);
     const posted = finiteNumber(rawSummary['posted']);
     if (
       poolSize !== undefined &&
@@ -193,8 +192,7 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
       unposted !== undefined &&
       live !== undefined &&
       repostable !== undefined &&
-      saturated !== undefined &&
-      abandoned !== undefined
+      saturated !== undefined
     ) {
       projected.lastPollSummary = {
         poolSize,
@@ -203,7 +201,6 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
         live,
         repostable,
         saturated,
-        abandoned,
       };
     } else {
       const evaluated = finiteNumber(rawSummary['evaluated']) ?? poolSize;

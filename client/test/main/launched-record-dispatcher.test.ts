@@ -55,7 +55,6 @@ describe('launched-record generator dispatcher', () => {
           live: 20,
           repostable: 3,
           saturated: 4,
-          abandoned: 5,
         },
         totalPosted: 4,
         config: {
@@ -129,7 +128,6 @@ describe('launched-record generator dispatcher', () => {
         live: 20,
         repostable: 3,
         saturated: 4,
-        abandoned: 5,
       },
     });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unknown.v1'));

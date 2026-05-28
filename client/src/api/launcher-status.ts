@@ -44,7 +44,6 @@ export type LauncherGeneratorPollSummary =
     live: number;
     repostable: number;
     saturated: number;
-    abandoned: number;
   };
 
 export interface LauncherStatusBudgetView {
