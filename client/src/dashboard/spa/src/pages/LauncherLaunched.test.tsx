@@ -435,9 +435,10 @@ describe('LauncherLaunchedPage', () => {
     fireEvent.click(screen.getByTestId('launcher-launched-generator-toggle'));
 
     expect(screen.getByTestId('launcher-launched-generator-N_target_successes')).toBeTruthy();
+    // #802: the abandon-cap field is removed from the launched-record editor.
     expect(
-      screen.getByTestId('launcher-launched-generator-N_max_postings_per_task'),
-    ).toBeTruthy();
+      screen.queryByTestId('launcher-launched-generator-N_max_postings_per_task'),
+    ).toBeNull();
     expect(screen.getByTestId('launcher-launched-generator-posting_window_ms')).toBeTruthy();
     expect(screen.getByTestId('launcher-launched-generator-post_batch_size')).toBeTruthy();
     expect(screen.queryByTestId('launcher-launched-generator-cadenceMs')).toBeNull();

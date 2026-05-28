@@ -651,6 +651,7 @@ export interface GeneratorConfig {
   maxYesSpread?: string;
   maxOrderbookAgeSeconds?: number;
   N_target_successes?: number;
+  /** @deprecated #802 — abandon cap removed; tolerated on read, no longer edited. */
   N_max_postings_per_task?: number;
   posting_window_ms?: number;
   post_batch_size?: number;

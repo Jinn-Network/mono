@@ -59,7 +59,6 @@ describe('launched-record generator dispatcher', () => {
         totalPosted: 4,
         config: {
           N_target_successes: 5,
-          N_max_postings_per_task: 15,
           posting_window_ms: 604_800_000,
           post_batch_size: 25,
           claimLeaseTtlSeconds: 3_600,
@@ -80,7 +79,6 @@ describe('launched-record generator dispatcher', () => {
       status: 'paused',
       generatorConfig: {
         N_target_successes: 5,
-        N_max_postings_per_task: 15,
         posting_window_ms: 604_800_000,
         post_batch_size: 25,
       },

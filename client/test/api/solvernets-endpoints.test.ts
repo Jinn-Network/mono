@@ -1183,22 +1183,20 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     );
 
     expect(res.status).toBe(200);
+    // #802: N_max_postings_per_task is dropped on canonical write (abandon cap removed).
     expect(await res.json()).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 15,
       maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 1_800,
     });
     expect(configRef.current).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 15,
       maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 1_800,
     });
     const onDisk = await store.loadRecord(launched.solverNetId);
     expect(onDisk?.generatorConfig).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 15,
       maxClaimsPerOperator: 5,
       claimLeaseTtlSeconds: 1_800,
     });
@@ -1244,9 +1242,9 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     );
 
     expect(res.status).toBe(200);
+    // #802: N_max_postings_per_task is dropped on canonical write (abandon cap removed).
     expect(await res.json()).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 15,
     });
   });
 
@@ -1284,15 +1282,15 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     );
 
     expect(res.status).toBe(200);
+    // #802: N_max_postings_per_task is dropped on canonical write (abandon cap removed).
     expect(await res.json()).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 15,
       maxClaimsPerOperator: 4,
       claimLeaseTtlSeconds: 1_800,
     });
   });
 
-  it('rejects partial swe-rebench-v2 patches that violate merged posting invariants', async () => {
+  it('drops the legacy N_max_postings_per_task cap on canonical write (#802)', async () => {
     const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
     const launchBundle = makeLaunchDeps({ store, pendingGenerators });
     const { app } = buildTestApp({ store, launch: launchBundle.launch });
@@ -1310,6 +1308,8 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     };
     await store.writeRecord(launched);
 
+    // The abandon cap is gone: bumping N_target_successes above the old cap is
+    // now allowed, and the dead N_max_postings_per_task key is dropped on write.
     const res = await app.request(
       `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
       {
@@ -1319,18 +1319,10 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
       },
     );
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as {
-      message?: string;
-      issues?: Array<{ path: string; message: string }>;
-    };
-    expect(body.message).toMatch(/N_target_successes/);
-    expect(body.issues).toContainEqual({
-      path: 'N_max_postings_per_task',
-      message: 'must be >= N_target_successes',
-    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ N_target_successes: 20 });
     const onDisk = await store.loadRecord(launched.solverNetId);
-    expect(onDisk?.generatorConfig).toEqual(launched.generatorConfig);
+    expect(onDisk?.generatorConfig).toEqual({ N_target_successes: 20 });
   });
 
   it('rejects prediction-shaped patches for swe-rebench-v2 records with schema issues', async () => {

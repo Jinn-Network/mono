@@ -53,7 +53,6 @@ interface FormState {
 
 interface SweRebenchV2FormState {
   N_target_successes: string;
-  N_max_postings_per_task: string;
   posting_window_ms: string;
   post_batch_size: string;
   maxClaimsPerOperator: string;
@@ -93,7 +92,6 @@ function initialSweRebenchV2Form(
   };
   return {
     N_target_successes: stringField(c.N_target_successes),
-    N_max_postings_per_task: stringField(c.N_max_postings_per_task),
     posting_window_ms: stringField(c.posting_window_ms),
     post_batch_size: stringField(c.post_batch_size),
     maxClaimsPerOperator: stringField(
@@ -200,12 +198,8 @@ export function buildSweRebenchV2Patch(
   const errors: Partial<Record<keyof SweRebenchV2FormState, string>> = {};
   const patch: Record<string, unknown> = {};
 
-  const parsedTarget = parsePositiveInt(form.N_target_successes);
-  const parsedMaxPostings = parsePositiveInt(form.N_max_postings_per_task);
-
   for (const key of [
     'N_target_successes',
-    'N_max_postings_per_task',
     'posting_window_ms',
     'post_batch_size',
     'maxClaimsPerOperator',
@@ -223,15 +217,6 @@ export function buildSweRebenchV2Patch(
       continue;
     }
     patch[key] = parsed;
-  }
-
-  if (
-    parsedTarget !== null &&
-    parsedMaxPostings !== null &&
-    parsedMaxPostings < parsedTarget
-  ) {
-    errors.N_max_postings_per_task =
-      'Max postings must be >= target successes.';
   }
 
   return {
@@ -551,14 +536,6 @@ function SweRebenchV2GeneratorPanel({
               value={form.N_target_successes}
               onChange={(v) => set('N_target_successes', v)}
               error={validation.errors.N_target_successes}
-              disabled={saving}
-            />
-            <NumField
-              label="Max Task postings per instance"
-              testid="launcher-launched-generator-N_max_postings_per_task"
-              value={form.N_max_postings_per_task}
-              onChange={(v) => set('N_max_postings_per_task', v)}
-              error={validation.errors.N_max_postings_per_task}
               disabled={saving}
             />
             <NumField

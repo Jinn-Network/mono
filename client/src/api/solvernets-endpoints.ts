@@ -301,6 +301,7 @@ const PredictionV1GeneratorConfigPatchSchema = z
 const SweRebenchV2GeneratorConfigPatchSchema = z
   .object({
     N_target_successes: z.number().int().positive().optional(),
+    /** @deprecated #802 — abandon cap removed; tolerated on read, dropped on canonical write. */
     N_max_postings_per_task: z.number().int().positive().optional(),
     posting_window_ms: z.number().int().positive().optional(),
     post_batch_size: z.number().int().positive().optional(),
@@ -319,20 +320,7 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
       .strict()
       .optional(),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (
-      value.N_target_successes !== undefined &&
-      value.N_max_postings_per_task !== undefined &&
-      value.N_max_postings_per_task < value.N_target_successes
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['N_max_postings_per_task'],
-        message: 'must be >= N_target_successes',
-      });
-    }
-  });
+  .strict();
 
 function isContractRefFor(
   contract: LaunchedRecordContractRef | null,
@@ -352,7 +340,6 @@ function canonicalSweRebenchV2GeneratorConfig(
   const next: Record<string, unknown> = {};
   for (const key of [
     'N_target_successes',
-    'N_max_postings_per_task',
     'posting_window_ms',
     'post_batch_size',
   ] as const) {
@@ -406,30 +393,6 @@ function mergeGeneratorConfigPatchForRecord(
     nextConfig = canonicalSweRebenchV2GeneratorConfig(nextConfig);
   }
   return nextConfig;
-}
-
-function validateSweRebenchV2EffectiveConfig(
-  contract: LaunchedRecordContractRef | null,
-  config: Record<string, unknown>,
-): { path: string; message: string } | undefined {
-  if (!isContractRefFor(contract, 'swe-rebench-v2', 'v1')) return undefined;
-  const targetSuccesses = typeof config.N_target_successes === 'number'
-    ? config.N_target_successes
-    : undefined;
-  const maxPostingsPerTask = typeof config.N_max_postings_per_task === 'number'
-    ? config.N_max_postings_per_task
-    : undefined;
-  if (
-    targetSuccesses !== undefined &&
-    maxPostingsPerTask !== undefined &&
-    maxPostingsPerTask < targetSuccesses
-  ) {
-    return {
-      path: 'N_max_postings_per_task',
-      message: 'must be >= N_target_successes',
-    };
-  }
-  return undefined;
 }
 
 function parseGeneratorConfigPatchForRecord(
@@ -1326,23 +1289,6 @@ export function registerSolverNetsEndpoints(
     // Patch semantics: merge the provided fields over the existing config.
     // Operators editing one field shouldn't have to re-send the rest.
     const nextConfig = mergeGeneratorConfigPatchForRecord(record, contract, parsed.data);
-    const effectiveConfigError = validateSweRebenchV2EffectiveConfig(contract, nextConfig);
-    if (effectiveConfigError) {
-      return c.json(
-        {
-          error: 'invalid_body',
-          kind: 'schema_validation_failed',
-          issues: [
-            {
-              path: effectiveConfigError.path,
-              message: effectiveConfigError.message,
-            },
-          ],
-          message: effectiveConfigError.message,
-        },
-        400,
-      );
-    }
 
     // Persist on disk. The store schema treats generatorConfig as an opaque
     // record; we widen the strongly-typed runtime config back to that shape

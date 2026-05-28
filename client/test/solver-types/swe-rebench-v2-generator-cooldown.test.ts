@@ -82,7 +82,6 @@ interface MakeTestGeneratorOpts {
   stateDir: string;
   admissionMode?: AdmissionMode;
   poolTasks?: PoolTask[];
-  N_max_postings_per_task?: number;
   N_target_successes?: number;
   posting_window_ms?: number;
   post_batch_size?: number;
@@ -93,7 +92,6 @@ function makeTestGenerator(opts: MakeTestGeneratorOpts) {
     stateDir,
     admissionMode,
     N_target_successes = 1,
-    N_max_postings_per_task = 3,
     posting_window_ms = 24 * 60 * 60 * 1000,
     post_batch_size = 25,
   } = opts;
@@ -101,7 +99,6 @@ function makeTestGenerator(opts: MakeTestGeneratorOpts) {
   const configRef = {
     current: {
       N_target_successes,
-      N_max_postings_per_task,
       posting_window_ms,
       post_batch_size,
       ...(admissionMode !== undefined ? { admissionMode } : {}),
@@ -381,7 +378,6 @@ describe('swe-rebench-v2 generator — admissionMode: required', () => {
     const gen = makeTestGenerator({
       stateDir,
       admissionMode: 'required',
-      N_max_postings_per_task: 1,
       post_batch_size: 1,
     });
 
@@ -508,7 +504,6 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     const gen = makeTestGenerator({
       stateDir,
       admissionMode: 'required',
-      N_max_postings_per_task: 1,
       post_batch_size: 1,
     });
 
@@ -556,7 +551,6 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     const gen = makeTestGenerator({
       stateDir,
       admissionMode: 'required',
-      N_max_postings_per_task: 1,
       post_batch_size: 1,
     });
 

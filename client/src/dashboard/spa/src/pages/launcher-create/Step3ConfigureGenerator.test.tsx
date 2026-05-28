@@ -181,9 +181,8 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     expect(
       (screen.getByTestId('launcher-create-N_target_successes') as HTMLInputElement).value,
     ).toBe('5');
-    expect(
-      (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
-    ).toBe('10');
+    // #802: the abandon-cap field is removed from the wizard.
+    expect(screen.queryByTestId('launcher-create-N_max_postings_per_task')).toBeNull();
     expect(
       (screen.getByTestId('launcher-create-posting_window_ms') as HTMLInputElement).value,
     ).toBe(String(24 * 60 * 60 * 1000));
@@ -207,7 +206,6 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
         draft={buildSweDraft({
           generatorConfig: {
             N_target_successes: 5,
-            N_max_postings_per_task: 20,
             posting_window_ms: 60_000,
             post_batch_size: 7,
             maxClaimsPerOperator: 2,
@@ -222,9 +220,6 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     expect(
       (screen.getByTestId('launcher-create-N_target_successes') as HTMLInputElement).value,
     ).toBe('5');
-    expect(
-      (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
-    ).toBe('20');
     expect(
       (screen.getByTestId('launcher-create-posting_window_ms') as HTMLInputElement).value,
     ).toBe('60000');
@@ -254,29 +249,6 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     expect(screen.getByText(/positive integer \(ms\)/)).toBeTruthy();
   });
 
-  it('rejects max-postings < target-successes', () => {
-    const onAdvance = vi.fn();
-    render(
-      <Step3ConfigureGenerator
-        draft={buildSweDraft()}
-        template={SWE_REBENCH_V2_V1_TEMPLATE}
-        onAdvance={onAdvance}
-        onBack={() => undefined}
-      />,
-    );
-    fireEvent.change(screen.getByTestId('launcher-create-N_target_successes'), {
-      target: { value: '5' },
-    });
-    fireEvent.change(screen.getByTestId('launcher-create-N_max_postings_per_task'), {
-      target: { value: '3' },
-    });
-    fireEvent.click(screen.getByTestId('launcher-create-next'));
-    expect(onAdvance).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(/Max postings must be ≥ target successes/),
-    ).toBeTruthy();
-  });
-
   it('persists parsed numeric values on Next', () => {
     const onAdvance = vi.fn().mockResolvedValue(undefined);
     render(
@@ -296,7 +268,6 @@ describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
     expect(patch.completedSteps).toEqual(['define', 'reviewContract', 'configureGenerator']);
     expect(patch.generatorConfig).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 10,
       posting_window_ms: 60_000,
       post_batch_size: 25,
       maxClaimsPerOperator: 5,
@@ -342,16 +313,16 @@ describe('validateSweRebenchV2GeneratorConfig', () => {
   it('accepts the swe-rebench-v2 defaults', () => {
     const r = validateSweRebenchV2GeneratorConfig({
       N_target_successes: '5',
-      N_max_postings_per_task: '10',
       posting_window_ms: String(24 * 60 * 60 * 1000),
       post_batch_size: '25',
       maxClaimsPerOperator: '5',
       claimLeaseTtlSeconds: '3600',
     });
     expect(r.ok).toBe(true);
+    // #802: N_max_postings_per_task removed — the abandon cap is gone; the
+    // canonical generator config no longer carries it.
     expect(r.generatorConfig).toEqual({
       N_target_successes: 5,
-      N_max_postings_per_task: 10,
       posting_window_ms: 24 * 60 * 60 * 1000,
       post_batch_size: 25,
       maxClaimsPerOperator: 5,
@@ -359,23 +330,9 @@ describe('validateSweRebenchV2GeneratorConfig', () => {
     });
   });
 
-  it('rejects max-postings < target-successes', () => {
-    const r = validateSweRebenchV2GeneratorConfig({
-      N_target_successes: '5',
-      N_max_postings_per_task: '3',
-      posting_window_ms: '60000',
-      post_batch_size: '25',
-      maxClaimsPerOperator: '3',
-      claimLeaseTtlSeconds: '3600',
-    });
-    expect(r.ok).toBe(false);
-    expect(r.errors.N_max_postings_per_task).toBeTruthy();
-  });
-
   it('rejects empty posting window', () => {
     const r = validateSweRebenchV2GeneratorConfig({
       N_target_successes: '3',
-      N_max_postings_per_task: '10',
       posting_window_ms: '',
       post_batch_size: '25',
       maxClaimsPerOperator: '3',

@@ -288,7 +288,6 @@ describe('Step5ReviewLaunch', () => {
           templateContractVersion: 'v1',
           generatorConfig: {
             N_target_successes: 5,
-            N_max_postings_per_task: 10,
             posting_window_ms: 86_400_000,
             post_batch_size: 25,
           },
@@ -305,6 +304,8 @@ describe('Step5ReviewLaunch', () => {
     expect(summary.textContent).toContain('86400000 ms');
     expect(summary.textContent).toContain('Batch size');
     expect(summary.textContent).toContain('25');
+    // #802: the abandon-cap summary line is removed.
+    expect(summary.textContent).not.toContain('Max postings');
     // No prediction-only labels
     expect(summary.textContent).not.toContain('Cadence');
     expect(summary.textContent).not.toContain('Allowlist');

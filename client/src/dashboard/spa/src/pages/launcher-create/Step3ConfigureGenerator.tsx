@@ -375,7 +375,6 @@ function PredictionGeneratorForm({
 
 export interface SweRebenchV2GeneratorConfigDraft {
   N_target_successes: string;
-  N_max_postings_per_task: string;
   posting_window_ms: string;
   post_batch_size: string;
   maxClaimsPerOperator: string;
@@ -397,10 +396,6 @@ function buildSweRebenchV2Initial(
     : {};
   return {
     N_target_successes: asString(existing?.N_target_successes, d.N_target_successes),
-    N_max_postings_per_task: asString(
-      existing?.N_max_postings_per_task,
-      d.N_max_postings_per_task,
-    ),
     posting_window_ms: asString(existing?.posting_window_ms, d.posting_window_ms),
     post_batch_size: asString(existing?.post_batch_size, d.post_batch_size),
     maxClaimsPerOperator: asString(
@@ -422,17 +417,6 @@ export function validateSweRebenchV2GeneratorConfig(
   const N_target_successes = parsePositiveInt(draft.N_target_successes);
   if (N_target_successes === null)
     errors.N_target_successes = 'Must be a positive integer.';
-
-  const N_max_postings_per_task = parsePositiveInt(draft.N_max_postings_per_task);
-  if (N_max_postings_per_task === null)
-    errors.N_max_postings_per_task = 'Must be a positive integer.';
-  else if (
-    N_target_successes !== null &&
-    N_max_postings_per_task < N_target_successes
-  ) {
-    errors.N_max_postings_per_task =
-      'Max postings must be ≥ target successes — otherwise saturation is unreachable.';
-  }
 
   const posting_window_ms = parsePositiveInt(draft.posting_window_ms);
   if (posting_window_ms === null)
@@ -459,7 +443,6 @@ export function validateSweRebenchV2GeneratorConfig(
     errors: {},
     generatorConfig: {
       N_target_successes,
-      N_max_postings_per_task,
       posting_window_ms,
       post_batch_size,
       maxClaimsPerOperator,
@@ -536,23 +519,8 @@ function SweRebenchV2GeneratorForm({
           />
         </FieldShell>
         <FieldShell
-          label="Max Task postings per instance"
-          helperText="Hard ceiling on Task postings to bound spend on impossible SWE instances."
-          error={fieldErrors.N_max_postings_per_task ?? null}
-        >
-          <Input
-            data-testid="launcher-create-N_max_postings_per_task"
-            type="text"
-            inputMode="numeric"
-            value={form.N_max_postings_per_task}
-            onChange={(e) => set('N_max_postings_per_task', e.target.value)}
-            className={cn(fieldErrors.N_max_postings_per_task && 'border-break-red')}
-            disabled={busy}
-          />
-        </FieldShell>
-        <FieldShell
           label="Posting window (ms)"
-          helperText="A posting stays live for this long; expired unsaturated instances can be reposted."
+          helperText="On-chain claim-window deadline for each posting. Reposts trigger on claim-budget exhaustion observed via the indexer, not this window."
           error={fieldErrors.posting_window_ms ?? null}
         >
           <Input

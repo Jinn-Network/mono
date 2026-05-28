@@ -48,7 +48,6 @@ function buildSweRebenchRecord(
   return buildRecord({
     generatorConfig: {
       N_target_successes: 5,
-      N_max_postings_per_task: 10,
       posting_window_ms: 86_400_000,
       post_batch_size: 25,
       maxClaimsPerOperator: 5,
@@ -306,11 +305,8 @@ describe('GeneratorPanel', () => {
     expect(
       (screen.getByTestId('launcher-launched-generator-N_target_successes') as HTMLInputElement).value,
     ).toBe('5');
-    expect(
-      (screen.getByTestId(
-        'launcher-launched-generator-N_max_postings_per_task',
-      ) as HTMLInputElement).value,
-    ).toBe('10');
+    // #802: the abandon-cap field is removed from the launched-record editor.
+    expect(screen.queryByTestId('launcher-launched-generator-N_max_postings_per_task')).toBeNull();
     expect(
       (screen.getByTestId('launcher-launched-generator-posting_window_ms') as HTMLInputElement).value,
     ).toBe('86400000');
@@ -337,9 +333,6 @@ describe('GeneratorPanel', () => {
     fireEvent.change(screen.getByTestId('launcher-launched-generator-N_target_successes'), {
       target: { value: '3' },
     });
-    fireEvent.change(screen.getByTestId('launcher-launched-generator-N_max_postings_per_task'), {
-      target: { value: '11' },
-    });
     fireEvent.change(screen.getByTestId('launcher-launched-generator-posting_window_ms'), {
       target: { value: '300000' },
     });
@@ -362,7 +355,6 @@ describe('GeneratorPanel', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
       N_target_successes: 3,
-      N_max_postings_per_task: 11,
       posting_window_ms: 300000,
       post_batch_size: 7,
       maxClaimsPerOperator: 2,
@@ -469,7 +461,6 @@ describe('buildPatch', () => {
 describe('buildSweRebenchV2Patch', () => {
   const prior = {
     N_target_successes: '5',
-    N_max_postings_per_task: '10',
     posting_window_ms: '86400000',
     post_batch_size: '25',
     maxClaimsPerOperator: '5',
@@ -480,23 +471,14 @@ describe('buildSweRebenchV2Patch', () => {
     const r = buildSweRebenchV2Patch({
       ...prior,
       N_target_successes: '6',
-      N_max_postings_per_task: '12',
+      post_batch_size: '12',
     }, prior);
     expect(r.ok).toBe(true);
+    // #802: N_max_postings_per_task is no longer a patch key.
     expect(r.patch).toEqual({
       N_target_successes: 6,
-      N_max_postings_per_task: 12,
+      post_batch_size: 12,
     });
-  });
-
-  it('requires max postings to cover target successes', () => {
-    const r = buildSweRebenchV2Patch({
-      ...prior,
-      N_target_successes: '3',
-      N_max_postings_per_task: '2',
-    }, prior);
-    expect(r.ok).toBe(false);
-    expect(r.errors.N_max_postings_per_task).toMatch(/target successes/);
   });
 
   it('rejects invalid posting window', () => {
