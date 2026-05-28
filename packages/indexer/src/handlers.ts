@@ -47,6 +47,19 @@ export interface HandlerDb {
     table: unknown,
     key: Record<string, unknown>,
   ) => { set: (values: Record<string, unknown> | ((row: any) => Record<string, unknown>)) => Promise<unknown> };
+  /**
+   * Count delivered verdict rows for one attempt scope — the indexer's proxy for
+   * TaskCoordinator's on-chain `validVerdictCount`. One indexed `verdict` row per
+   * delivered verdict (one `VerdictDeliveryClaimed` event). Used by
+   * handleVerdictDeliveryClaimed to recompute task.finalized (issue #530).
+   *
+   * Real wiring (src/index.ts) backs this with `context.db.sql` (Ponder's raw
+   * drizzle escape hatch); the in-memory fake scans its rows.
+   */
+  countVerdicts: (
+    table: unknown,
+    scope: { taskId: string; attemptIndex: number; chainId: number },
+  ) => Promise<number>;
 }
 
 export interface HandlerContext {
@@ -333,43 +346,86 @@ export async function handleTaskAttemptCreated({
     .onConflictDoNothing();
 }
 
-// ── JinnRouter: VerdictDeliveryClaimed → verdict ─────────────────────────────
+// ── JinnRouter: VerdictDeliveryClaimed → verdict (+ recompute task.finalized) ─
 // One row per delivered verdict. verdictCode 0..4 per the VerdictCode enum.
 // Idempotent: a replayed event with the same (taskId, attemptIndex, verdictIndex,
-// chainId) does not clobber the original.
+// chainId) does not clobber the original (onConflictDoNothing).
+//
+// Finalization (issue #530): on JinnRouter V3, on-chain finalization is
+// `attempt.validVerdictCount == requiredVerdicts` (TaskCoordinator.recordVerdict).
+// VerdictDeliveryClaimed fires once per *delivered* verdict, so the count of
+// delivered `verdict` rows for this attempt scope equals validVerdictCount.
+// After inserting the verdict row, recompute: finalized iff
+// requiredVerdicts > 0 && deliveredCount >= requiredVerdicts. Mirrors
+// metrics.ts:attemptFinalization. Monotonic — never flips finalized back to
+// false (db.update only ever sets it to true here).
+//
+// Existence guard (mirrors handleSolutionDeliveryClaimed): the matching
+// TaskCreated may predate `startBlock`, leaving no `task` row. db.update on a
+// missing row throws and crashes the indexer, so look it up first and skip the
+// finalized recompute if absent. The verdict row is still written either way.
 export async function handleVerdictDeliveryClaimed({
   event,
   context,
   verdict,
+  task,
 }: {
   event: VerdictDeliveryClaimedEvent;
   context: HandlerContext;
   verdict: unknown;
+  task: unknown;
 }): Promise<void> {
+  const taskId = event.args.taskId.toString();
+  const attemptIndex = Number(event.args.attemptIndex);
+  const chainId = context.chain.id;
+
   await context.db
     .insert(verdict)
     .values({
-      taskId: event.args.taskId.toString(),
-      attemptIndex: Number(event.args.attemptIndex),
+      taskId,
+      attemptIndex,
       verdictIndex: Number(event.args.verdictIndex),
       evaluator: event.args.evaluator,
       requestId: event.args.requestId,
       verdictCode: Number(event.args.verdictCode),
       createdAtBlock: event.block.number,
-      chainId: context.chain.id,
+      chainId,
     })
     .onConflictDoNothing();
+
+  // Recompute finalized from the task's requiredVerdicts vs delivered verdicts.
+  const existing = (await context.db.find(task, { id: taskId })) as
+    | { requiredVerdicts: number; finalized: boolean }
+    | null;
+  if (!existing) return; // TaskCreated predates startBlock — skip; verdict row already written.
+  if (existing.finalized) return; // Monotonic — already final, nothing to do.
+
+  const requiredVerdicts = existing.requiredVerdicts;
+  if (requiredVerdicts <= 0) return; // requiredVerdicts == 0 → never finalizes.
+
+  const deliveredCount = await context.db.countVerdicts(verdict, {
+    taskId,
+    attemptIndex,
+    chainId,
+  });
+  if (deliveredCount >= requiredVerdicts) {
+    await context.db.update(task, { id: taskId }).set({ finalized: true });
+  }
 }
 
 // ── JinnRouter: SolutionDeliveryClaimed ──────────────────────────────────────
-// Used as a proxy for task finalization. JinnRouter V3 has no standalone
-// TaskFinalized event; SolutionDeliveryClaimed is the terminal success state.
+// A solution-slot delivery — the START of the evaluation phase, NOT finalization
+// (issue #530). On-chain finalization is `validVerdictCount >= requiredVerdicts`
+// and is handled in handleVerdictDeliveryClaimed. This handler deliberately does
+// NOT touch task.finalized.
 //
-// Existence guard: the matching TaskCreated may predate `startBlock` (or, in a
-// future multi-chain config, live on a chain this indexer doesn't cover), in
-// which case there is no `task` row. `db.update` on a missing row throws and
-// crashes the indexer — so look it up first and skip if absent. The daemon's
-// canClaimTask simulation is the correctness gate regardless.
+// At v0.1 there is nothing for this handler to persist beyond what TaskAttempt /
+// Verdict events already record, but it keeps the existence guard + signature so
+// src/index.ts can still register it (and so a future per-attempt
+// solution-delivery column has a home). The guard: the matching TaskCreated may
+// predate `startBlock`, leaving no `task` row; we look it up and skip if absent
+// rather than crash. The daemon's canClaimTask simulation is the correctness
+// gate regardless.
 export async function handleSolutionDeliveryClaimed({
   event,
   context,
@@ -382,7 +438,9 @@ export async function handleSolutionDeliveryClaimed({
   const id = event.args.taskId.toString();
   const existing = await context.db.find(task, { id });
   if (!existing) return;
-  await context.db.update(task, { id }).set({ finalized: true });
+  // Intentionally a no-op on task.finalized — see issue #530. SolutionDeliveryClaimed
+  // is the start of evaluation; finalization is recomputed in
+  // handleVerdictDeliveryClaimed from delivered-verdict count vs requiredVerdicts.
 }
 
 // ── JinnRouter: TaskBudgetRefunded → task.refunded = true ────────────────────

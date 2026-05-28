@@ -32,6 +32,7 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
+import { and, count, eq } from 'ponder';
 import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
 
 // ── Enrichment config (read once at module scope) ─────────────────────────────
@@ -87,10 +88,34 @@ ponder.on('JinnRouter:SolutionDeliveryClaimed', async ({ event, context }) => {
 });
 
 ponder.on('JinnRouter:VerdictDeliveryClaimed', async ({ event, context }) => {
+  const baseDb = context.db as unknown as HandlerContext['db'];
+  const handlerContext: HandlerContext = {
+    chain: context.chain as unknown as HandlerContext['chain'],
+    db: {
+      ...baseDb,
+      // Back countVerdicts with Ponder's raw drizzle (context.db.sql) — the
+      // documented read/aggregate escape hatch inside indexing functions
+      // (https://ponder.sh/docs/indexing/write#raw-sql).
+      countVerdicts: async (table, scope) => {
+        const rows = await (context.db as any).sql
+          .select({ c: count() })
+          .from(table)
+          .where(
+            and(
+              eq((table as any).taskId, scope.taskId),
+              eq((table as any).attemptIndex, scope.attemptIndex),
+              eq((table as any).chainId, scope.chainId),
+            ),
+          );
+        return Number(rows[0]?.c ?? 0);
+      },
+    },
+  };
   await handleVerdictDeliveryClaimed({
     event: event as unknown as VerdictDeliveryClaimedEvent,
-    context: context as unknown as HandlerContext,
+    context: handlerContext,
     verdict,
+    task,
   });
 });
 

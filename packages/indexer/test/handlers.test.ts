@@ -486,6 +486,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
       ),
       context,
       verdict,
+      task,
     });
 
     const row = db.get(verdict, { taskId: '7', attemptIndex: 0, verdictIndex: 0, chainId: CHAIN_ID });
@@ -514,8 +515,8 @@ describe('VerdictDeliveryClaimed → verdict', () => {
       },
       { block: 41_153_400n },
     );
-    await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
-    await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
+    await handleVerdictDeliveryClaimed({ event: ev, context, verdict, task });
+    await handleVerdictDeliveryClaimed({ event: ev, context, verdict, task });
     expect(db.count(verdict)).toBe(1);
   });
 

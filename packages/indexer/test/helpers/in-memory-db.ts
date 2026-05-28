@@ -163,6 +163,16 @@ export function createInMemoryDb(pks: PkMap): InMemoryDb {
     count(table) {
       return tableMap(table).size;
     },
+
+    async countVerdicts(table, scope) {
+      const { taskId, attemptIndex, chainId } = scope;
+      return [...tableMap(table).values()].filter(
+        (r) =>
+          r['taskId'] === taskId &&
+          r['attemptIndex'] === attemptIndex &&
+          r['chainId'] === chainId,
+      ).length;
+    },
   };
 
   return db;
