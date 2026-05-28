@@ -20,122 +20,92 @@ const config: GeneratorConfig = {
   claimLeaseTtlSeconds: 60 * 60,
 };
 
-describe('selectNextPostingCandidate', () => {
+describe('classifyPoolTask (claim-budget model, #802)', () => {
   const pool = [
     { instance_id: 'a', language: 'python' },
     { instance_id: 'b', language: 'go' },
     { instance_id: 'c', language: 'python' },
   ];
 
-  it('skips saturated tasks (successful_count >= N_target_successes)', () => {
+  it('classifies successful >= N as saturated (unchanged)', () => {
     const counters = new Map([
-      ['a', { posted: 5, successful: 3, last_posted_at: 0 }],
+      ['a', { posted: 5, successful: 5, last_posted_at: 0 }],
       ['b', { posted: 0, successful: 0, last_posted_at: 0 }],
     ]);
     const next = selectNextPostingCandidate({ pool, counters, config, now: 1000 });
     expect(next?.instance_id).toBe('b');
   });
 
-  it('skips tasks with a live posting inside the posting window', () => {
-    const now = 1_000_000;
+  it('keeps a posting with slots remaining as live (does NOT repost)', () => {
     const counters = new Map([
-      ['a', { posted: 1, successful: 0, last_posted_at: now - 1000 }],
+      ['a', { posted: 1, successful: 0, last_posted_at: 1, last_task_id: '10' }],
       ['b', { posted: 0, successful: 0, last_posted_at: 0 }],
     ]);
-    const next = selectNextPostingCandidate({ pool, counters, config, now });
+    const claimCounts = new Map([['10', { consumed: 2, maxClaims: 5 }]]);
+    const next = selectNextPostingCandidate({ pool, counters, claimCounts, config, now: 1000 });
+    // a is live (2 < 5), so b (unposted) is chosen.
     expect(next?.instance_id).toBe('b');
+    expect(summarizePoolState({ pool, counters, claimCounts, config, now: 1000 }))
+      .toMatchObject({ live: 1, unposted: 2, repostable: 0, saturated: 0 });
   });
 
-  it('skips tasks at max-postings cap', () => {
+  it('classifies an exhausted posting with successes < N as repostable', () => {
     const counters = new Map([
-      ['a', { posted: 10, successful: 0, last_posted_at: 0 }],
-      ['b', { posted: 0, successful: 0, last_posted_at: 0 }],
+      ['a', { posted: 1, successful: 1, last_posted_at: 1, last_task_id: '10' }],
     ]);
-    const next = selectNextPostingCandidate({ pool, counters, config, now: 1_000_000_000 });
-    expect(next?.instance_id).toBe('b');
+    const claimCounts = new Map([['10', { consumed: 5, maxClaims: 5 }]]);
+    const batch = selectNextPostingCandidates({ pool, counters, claimCounts, config, now: 1000 });
+    expect(batch.map((t) => t.instance_id)).toContain('a');
+    expect(summarizePoolState({ pool, counters, claimCounts, config, now: 1000 }))
+      .toMatchObject({ repostable: 1 });
   });
 
-  it('selects expired unsaturated instances as repostable', () => {
-    const now = 1_000_000_000;
+  it('treats a posted instance with no claim snapshot as repostable (its task left the live set)', () => {
     const counters = new Map([
-      ['a', { posted: 1, successful: 0, last_posted_at: now - config.posting_window_ms - 1 }],
-      ['b', { posted: 0, successful: 0, last_posted_at: 0 }],
+      ['a', { posted: 3, successful: 0, last_posted_at: 1, last_task_id: '99' }],
     ]);
-    const next = selectNextPostingCandidate({ pool, counters, config, now });
-    expect(next?.instance_id).toBe('b');
-    const batch = selectNextPostingCandidates({ pool, counters, config, now });
-    expect(batch.map((task) => task.instance_id)).toContain('a');
-    expect(summarizePoolState({ pool, counters, config, now })).toMatchObject({
-      unposted: 2,
-      repostable: 1,
-      live: 0,
-    });
+    const claimCounts = new Map(); // '99' not present → finalized/refunded out
+    const batch = selectNextPostingCandidates({ pool, counters, claimCounts, config, now: 1000 });
+    expect(batch.map((t) => t.instance_id)).toContain('a');
   });
 
-  it('does not select saturated or abandoned instances', () => {
+  it('retries a hard instance indefinitely — no abandon cap', () => {
     const counters = new Map([
-      ['a', { posted: 2, successful: 5, last_posted_at: 0 }],
-      ['b', { posted: 10, successful: 0, last_posted_at: 0 }],
-      ['c', { posted: 1, successful: 0, last_posted_at: 1 }],
+      ['a', { posted: 9999, successful: 0, last_posted_at: 1, last_task_id: '10' }],
     ]);
-    const batch = selectNextPostingCandidates({
-      pool,
-      counters,
-      config: { ...config, posting_window_ms: 1 },
-      now: 3,
-    });
-    expect(batch.map((task) => task.instance_id)).toEqual(['c']);
+    const claimCounts = new Map([['10', { consumed: 5, maxClaims: 5 }]]);
+    // Even with the default N_max_postings_per_task, an exhausted hard instance reposts.
+    const batch = selectNextPostingCandidates({ pool, counters, claimCounts, config, now: 1000 });
+    expect(batch.map((t) => t.instance_id)).toContain('a');
   });
 
-  it('returns undefined when all tasks are saturated or capped', () => {
-    const counters = new Map([
-      ['a', { posted: 10, successful: 5, last_posted_at: 0 }],
-      ['b', { posted: 10, successful: 0, last_posted_at: 0 }],
-      ['c', { posted: 10, successful: 5, last_posted_at: 0 }],
-    ]);
-    const next = selectNextPostingCandidate({ pool, counters, config, now: 1_000_000_000 });
-    expect(next).toBeUndefined();
+  it('classifies an unposted instance as unposted', () => {
+    const counters = new Map([['a', { posted: 0, successful: 0, last_posted_at: 0 }]]);
+    const claimCounts = new Map();
+    expect(summarizePoolState({ pool: [{ instance_id: 'a', language: 'python' }], counters, claimCounts, config, now: 1 }))
+      .toMatchObject({ unposted: 1, live: 0, repostable: 0, saturated: 0 });
   });
 
-  it('balances by language (round-robin) when multiple eligible', () => {
+  it('round-robins language among eligible candidates', () => {
     const counters = new Map();
-    counters.set('a', { posted: 1, successful: 0, last_posted_at: 1 });
     const next = selectNextPostingCandidate({
-      pool, counters, config, now: 2 + config.posting_window_ms,
-      lastPostedLanguage: 'python',
+      pool, counters, claimCounts: new Map(), config, now: 1, lastPostedLanguage: 'python',
     });
     expect(next?.language).toBe('go');
   });
 
-  it('does not select the same instance_id more than once when doing so would exceed N_max_postings_per_task', () => {
-    const dupePool = [
-      { instance_id: 'x', language: 'python' },
-      { instance_id: 'x', language: 'python' },
-    ];
+  it('returns empty when all instances are live or saturated', () => {
     const counters = new Map([
-      ['x', { posted: 9, successful: 0, last_posted_at: 0 }],
+      ['a', { posted: 1, successful: 5, last_posted_at: 1, last_task_id: '10' }], // saturated
+      ['b', { posted: 1, successful: 0, last_posted_at: 1, last_task_id: '11' }], // live
+      ['c', { posted: 1, successful: 5, last_posted_at: 1, last_task_id: '12' }], // saturated
     ]);
-    const batch = selectNextPostingCandidates({
-      pool: dupePool,
-      counters,
-      config: { ...config, post_batch_size: 2 },
-      now: 1_000_000_000,
-    });
-    expect(batch).toHaveLength(1);
-  });
-
-  it('returns empty slice when the only candidate is already at N_max_postings_per_task', () => {
-    const dupePool = [{ instance_id: 'x', language: 'python' }];
-    const counters = new Map([
-      ['x', { posted: 10, successful: 0, last_posted_at: 0 }],
+    const claimCounts = new Map([
+      ['10', { consumed: 5, maxClaims: 5 }],
+      ['11', { consumed: 0, maxClaims: 5 }],
+      ['12', { consumed: 5, maxClaims: 5 }],
     ]);
-    const batch = selectNextPostingCandidates({
-      pool: dupePool,
-      counters,
-      config: { ...config, post_batch_size: 2 },
-      now: 1_000_000_000,
-    });
-    expect(batch).toHaveLength(0);
+    expect(selectNextPostingCandidate({ pool, counters, claimCounts, config, now: 1 })).toBeUndefined();
   });
 });
 
