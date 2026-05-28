@@ -26,6 +26,15 @@ import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
 export class LearnerHarness implements Harness {
   readonly name: string;
   readonly version: string;
+  /**
+   * Exclude `.git` from the freeze codeDigest. `implStateDir` is git-backed
+   * (`plugins/learner/hooks/session-start` runs `git init`), so hashing `.git`
+   * would make a commit's codeDigest irreproducible from its tree — breaking
+   * the commit→codeDigest mapping the per-codeDigest revert selection relies on
+   * (#764). With `.git` ignored, `git archive <sha>` + re-hash reproduces the
+   * indexed codeDigest exactly.
+   */
+  readonly freezeStateHashIgnore = ['.git'] as const;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
   private readonly claudePath: string;
