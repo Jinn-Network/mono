@@ -71,6 +71,12 @@ function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
  *         already mention pytest, prepend a best-effort install line so
  *         the `ungradeable:pytest_missing` bucket (the highest-yield
  *         capacity blocker on the Stage-1 histogram) becomes scorable.
+ *         The v3→v4 transition is a *targeted* migration, not a wholesale
+ *         invalidation: only `ungradeable:pytest_missing` entries can flip
+ *         under the install guard, so they alone are dropped (re-validated);
+ *         every other verdict (scorable, gold-patch-not-resolved,
+ *         transient/error/other ungradeable) is carried forward verbatim
+ *         (see {@link loadOrMigrateFile}).
  */
 export const EVAL_SEMANTICS_VERSION = '4';
 
@@ -178,6 +184,65 @@ function isValidFile(raw: unknown, evalSemanticsVersion: string): raw is Validat
     (raw as ValidatedPoolFile).evalSemanticsVersion === evalSemanticsVersion &&
     typeof (raw as ValidatedPoolFile).entries === 'object' && (raw as ValidatedPoolFile).entries !== null
   );
+}
+
+/** Structurally a `ValidatedPoolFile` at *any* semantics version (schema + entries shape). */
+function hasValidShape(raw: unknown): raw is ValidatedPoolFile {
+  return (
+    typeof raw === 'object' && raw !== null &&
+    (raw as ValidatedPoolFile).schemaVersion === SCHEMA_VERSION &&
+    typeof (raw as ValidatedPoolFile).evalSemanticsVersion === 'string' &&
+    typeof (raw as ValidatedPoolFile).entries === 'object' && (raw as ValidatedPoolFile).entries !== null
+  );
+}
+
+/**
+ * Explicit, version-keyed carry-forward migrations. A migration maps the source
+ * version's entries onto the target version's entries; only verdict classes that
+ * the target's grading change could flip are dropped (so the validate loop
+ * re-processes them), everything else is carried forward verbatim.
+ *
+ * Why: the only thing the v4 buildTestCommands pytest-install guard can alter is a
+ * `parse_log_pytest` instance whose install lacked pytest — i.e. exactly the
+ * `ungradeable:pytest_missing` bucket. Every other verdict (scorable
+ * `gold-patch-resolves`, `gold-patch-not-resolved`, transient/error/other
+ * ungradeable) ran the test runner or is install-independent, so its verdict
+ * cannot change under v4 and is carried forward unchanged. A future v4→vN bump
+ * must add its own entry here choosing which verdicts it can flip — this is NOT a
+ * general "carry forward everything except pytest_missing" rule.
+ */
+const MIGRATIONS: Record<string, Record<string, (entries: Record<string, ValidatedPoolEntry>) => Record<string, ValidatedPoolEntry>>> = {
+  // from version '3' → to version '4'
+  '3': {
+    '4': (entries) => Object.fromEntries(
+      Object.entries(entries).filter(([, e]) => e.reason !== 'ungradeable:pytest_missing'),
+    ),
+  },
+};
+
+/**
+ * Load `raw` for `targetVersion`, applying a defined migration where one exists.
+ * Pure — callers persist the result via their own write path.
+ *
+ *   - already valid at `targetVersion` → returned as-is.
+ *   - structurally valid at a prior version with a defined migration → migrated
+ *     file (carried-forward entries keep their original `checkedAt`/verdict).
+ *   - otherwise (unknown/unmapped version, wrong schema, garbage) → `freshFile`.
+ */
+function loadOrMigrateFile(raw: unknown, targetVersion: string): ValidatedPoolFile {
+  if (isValidFile(raw, targetVersion)) return raw;
+  if (hasValidShape(raw)) {
+    const migrate = MIGRATIONS[raw.evalSemanticsVersion]?.[targetVersion];
+    if (migrate) {
+      return {
+        schemaVersion: SCHEMA_VERSION,
+        evalSemanticsVersion: targetVersion,
+        updatedAt: new Date().toISOString(),
+        entries: migrate(raw.entries),
+      };
+    }
+  }
+  return freshFile(targetVersion);
 }
 
 function publicationPath(stateDir: string): string {
@@ -360,7 +425,7 @@ export class ValidatedPoolStore {
   private async loadForWrite(evalSemanticsVersion: string): Promise<ValidatedPoolFile> {
     if (this.cache && this.cache.evalSemanticsVersion === evalSemanticsVersion) return this.cache;
     const raw = await this.readRaw();
-    this.cache = isValidFile(raw, evalSemanticsVersion) ? raw : freshFile(evalSemanticsVersion);
+    this.cache = loadOrMigrateFile(raw, evalSemanticsVersion);
     return this.cache;
   }
 
@@ -379,8 +444,11 @@ export class ValidatedPoolStore {
       return cached.ids;
     }
     const raw = await this.readRaw();
-    const ids = isValidFile(raw, evalSemanticsVersion)
-      ? new Set(Object.entries(raw.entries).filter(([, e]) => e.scorable).map(([id]) => id))
+    // No data on disk (or wrong schema/unmapped version) stays `null` — the
+    // generator's no-validation-data floor. A migratable prior version yields
+    // the carried-forward scorable set, never `null`.
+    const ids = (isValidFile(raw, evalSemanticsVersion) || (hasValidShape(raw) && MIGRATIONS[raw.evalSemanticsVersion]?.[evalSemanticsVersion]))
+      ? new Set(Object.entries(loadOrMigrateFile(raw, evalSemanticsVersion).entries).filter(([, e]) => e.scorable).map(([id]) => id))
       : null;
     this.scorableIdsCache = { mtimeMs, semanticsVersion: evalSemanticsVersion, ids };
     return ids;
@@ -391,10 +459,11 @@ export class ValidatedPoolStore {
     updatedAt: string;
   } | null> {
     const raw = await this.readRaw();
-    if (!isValidFile(raw, evalSemanticsVersion)) return null;
+    if (!isValidFile(raw, evalSemanticsVersion) && !(hasValidShape(raw) && MIGRATIONS[raw.evalSemanticsVersion]?.[evalSemanticsVersion])) return null;
+    const file = loadOrMigrateFile(raw, evalSemanticsVersion);
     return {
-      updatedAt: raw.updatedAt,
-      entries: Object.fromEntries(Object.entries(raw.entries).filter(([, entry]) => entry.scorable)),
+      updatedAt: file.updatedAt,
+      entries: Object.fromEntries(Object.entries(file.entries).filter(([, entry]) => entry.scorable)),
     };
   }
 
@@ -411,7 +480,7 @@ export class ValidatedPoolStore {
       this.cache = null;
       this.scorableIdsCache = null;
       const raw = await this.readRaw();
-      const file = isValidFile(raw, evalSemanticsVersion) ? raw : freshFile(evalSemanticsVersion);
+      const file = loadOrMigrateFile(raw, evalSemanticsVersion);
       file.entries[instanceId] = entry;
       file.updatedAt = new Date().toISOString();
       await this.writeAtomic(file);
