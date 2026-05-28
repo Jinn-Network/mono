@@ -117,6 +117,53 @@ describe('jinn codedigest-revert-check', () => {
     expect(payload).toHaveProperty('recommendRevert');
   });
 
+  // A leading-dash sha would be parsed by `git archive` as an OPTION rather
+  // than a tree-ish (e.g. `--output=/tmp/evil` writes a tarball to an
+  // attacker-chosen path; `--remote=...` triggers an outbound connection).
+  // Pass these via `--commit=<value>` so the malformed value survives parseArgs
+  // and reaches the command's own sha-shape validation. `nothex` covers the
+  // non-dash-but-still-malformed case.
+  it.each([
+    'commit=--output=/tmp/evil',
+    'commit=-foo',
+    'commit=nothex',
+    'commit=--remote=evil.example',
+    'parent=--output=/tmp/evil',
+    'parent=-foo',
+    'parent=nothex',
+  ])('rejects a malformed sha (--%s) before invoking git/discovery (#764 M1)', async (spec) => {
+    const exit = vi.fn();
+    let discoveryReached = false;
+    const flag = spec.startsWith('commit=') ? '--commit' : '--parent';
+    // Provide a valid value for the other sha so only `flag` is malformed.
+    const validSha = 'a'.repeat(40);
+    const other = flag === '--commit' ? '--parent' : '--commit';
+    const cmd = createCodedigestRevertCheckCommand({
+      buildDiscovery: () => ({
+        getCodeDigestRewards: async () => { discoveryReached = true; return []; },
+      }) as never,
+    });
+    const out: string[] = [];
+    const c = {
+      argv: [
+        '--impl-state-dir', '/nonexistent-implstate-dir',
+        `--${spec}`,
+        other, validSha,
+        '--json',
+      ],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { out.push(s); return true; } },
+      exit,
+      env: {},
+    };
+    await cmd.run(c as never);
+    const payload = JSON.parse(out.join(''));
+    expect(payload.code).toBe('invalid_invocation');
+    expect(payload.message).toMatch(/sha/i);
+    expect(exit).toHaveBeenCalledWith(11);
+    expect(discoveryReached).toBe(false); // never reached the discovery call
+  });
+
   it('hashes impl-state-dir commits directly and queries those two codeDigests (#764 Task 12)', async () => {
     const git = (cwd: string, ...args: string[]): string =>
       execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();

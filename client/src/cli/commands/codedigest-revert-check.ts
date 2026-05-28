@@ -36,6 +36,19 @@ const PRODUCTION_DEPS: CodedigestRevertCheckDeps = {
 };
 
 /**
+ * A commit sha as it appears in the operator's local `improvePromotionsDir`
+ * records: 7-64 hex chars (abbreviated through full git object ids). Rejecting
+ * anything else BEFORE handing the value to `git archive` closes the
+ * argument-injection class where a leading-dash value (`--output=...`,
+ * `--remote=...`) is parsed as a git option instead of a tree-ish (#764 M1).
+ */
+const COMMIT_SHA_RE = /^[0-9a-fA-F]{7,64}$/;
+
+export function isValidCommitSha(sha: string): boolean {
+  return COMMIT_SHA_RE.test(sha);
+}
+
+/**
  * Hash a commit's tree the way production stamps codeDigest: export the tree
  * with `git archive` (no `.git`) and re-hash with the same deterministic hasher
  * `hashImplStateDir` uses, ignoring `.git`. Returns the `sha256:`-prefixed
@@ -43,9 +56,15 @@ const PRODUCTION_DEPS: CodedigestRevertCheckDeps = {
  * never reimplements the hasher (the single largest correctness risk, #764).
  */
 export async function codeDigestForCommit(implStateDir: string, sha: string): Promise<string> {
+  if (!isValidCommitSha(sha)) {
+    throw new Error(`commit sha must be 7-64 hex chars (got "${sha}")`);
+  }
   const exportDir = mkdtempSync(join(tmpdir(), 'cd-export-'));
   try {
-    const tar = execFileSync('git', ['archive', sha], { cwd: implStateDir, maxBuffer: 1 << 28 });
+    // `--` is an end-of-options separator: even though `sha` is shape-validated
+    // above, this is defense-in-depth so `git archive` can never parse a
+    // leading-dash value as an option (#764 M1, git argument-injection class).
+    const tar = execFileSync('git', ['archive', '--', sha], { cwd: implStateDir, maxBuffer: 1 << 28 });
     execFileSync('tar', ['-x', '-C', exportDir], { input: tar });
     const hex = await hashImplStateDir(exportDir, { ignoreRelPaths: ['.git'] });
     return `sha256:${hex}`;
@@ -165,6 +184,28 @@ On indexer outage emits recommendRevert=false reason=discovery_unavailable (the 
       const commitSha = parsed.values.commit;
       const parentSha = parsed.values.parent;
       if ((!child || !parent) && implStateDir && commitSha && parentSha) {
+        // Validate sha shape before any git invocation. A leading-dash value
+        // would be parsed by `git archive` as an option, not a tree-ish
+        // (#764 M1 argument-injection). Reject with the command's existing
+        // invalid_invocation envelope (exit 11) rather than letting it flow
+        // into git.
+        const badSha = !isValidCommitSha(commitSha)
+          ? { field: 'commit', value: commitSha }
+          : !isValidCommitSha(parentSha)
+            ? { field: 'parent', value: parentSha }
+            : undefined;
+        if (badSha) {
+          emitEnvelope(
+            {
+              code: 'invalid_invocation',
+              message: `--${badSha.field} sha must be 7-64 hex chars (got "${badSha.value}")`,
+              exampleCli: 'jinn codedigest-revert-check --impl-state-dir <path> --commit <sha> --parent <sha>',
+              details: { field: badSha.field },
+            },
+            { writer: ctx.writer, exit: ctx.exit },
+          );
+          return;
+        }
         try {
           [child, parent] = await Promise.all([
             codeDigestForCommit(implStateDir, commitSha),
