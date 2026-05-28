@@ -520,6 +520,115 @@ describe('validatePoolInstances — #493 pytest_missing → scorable under v4', 
   });
 });
 
+describe('ValidatedPoolStore — targeted v3→v4 carry-forward migration (#493)', () => {
+  const SCHEMA = 'swe-rebench-v2-validated-pool.v1';
+  function writeV3File(dir: string, entries: Record<string, { scorable: boolean; reason: string; checkedAt: string }>): void {
+    writeFileSync(join(dir, 'validated-pool.json'), JSON.stringify({
+      schemaVersion: SCHEMA,
+      evalSemanticsVersion: '3',
+      updatedAt: '2026-05-25T00:00:00Z',
+      entries,
+    }));
+  }
+
+  it('carries forward gold-patch-resolves and gold-patch-not-resolved entries verbatim under v4', async () => {
+    const dir = tmpDir();
+    writeV3File(dir, {
+      scor__1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' },
+      unres__1: { scorable: false, reason: 'gold-patch-not-resolved (f2p 1, p2p_broke 0)', checkedAt: '2026-05-20T11:00:00Z' },
+    });
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    expect(await store.getScorableIds('4')).toEqual(new Set(['scor__1']));
+    const scor = await store.getEntry('scor__1', '4');
+    expect(scor).toMatchObject({ scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' });
+    // The non-resolved verdict is retained too — it can't flip under the install guard.
+    const unres = await store.getEntry('unres__1', '4');
+    expect(unres).toMatchObject({ scorable: false, reason: 'gold-patch-not-resolved (f2p 1, p2p_broke 0)', checkedAt: '2026-05-20T11:00:00Z' });
+  });
+
+  it('drops ungradeable:pytest_missing entries so the validate loop re-processes them under v4', async () => {
+    const dir = tmpDir();
+    writeV3File(dir, {
+      scor__1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' },
+      pyt__1: { scorable: false, reason: 'ungradeable:pytest_missing', checkedAt: '2026-05-20T12:00:00Z' },
+    });
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    expect(await store.getEntry('pyt__1', '4')).toBeNull();
+    // The carried-forward scorable entry is untouched.
+    expect((await store.getEntry('scor__1', '4'))?.scorable).toBe(true);
+  });
+
+  it('read-path getScorableEntries / getScorableIds reflect the carried-forward set before any write', async () => {
+    const dir = tmpDir();
+    writeV3File(dir, {
+      scor__1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' },
+      scor__2: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:05:00Z' },
+      pyt__1: { scorable: false, reason: 'ungradeable:pytest_missing', checkedAt: '2026-05-20T12:00:00Z' },
+    });
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const entries = await store.getScorableEntries('4');
+    expect(entries).not.toBeNull();
+    expect(new Set(Object.keys(entries!.entries))).toEqual(new Set(['scor__1', 'scor__2']));
+    expect(await store.getScorableIds('4')).toEqual(new Set(['scor__1', 'scor__2']));
+  });
+
+  it('falls back to a fresh empty pool for an unknown prior version (no defined migration)', async () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'validated-pool.json'), JSON.stringify({
+      schemaVersion: SCHEMA,
+      evalSemanticsVersion: '2',
+      updatedAt: '2026-05-25T00:00:00Z',
+      entries: { scor__1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' } },
+    }));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    expect(await store.getScorableIds('4')).toBeNull();
+    expect(await store.getEntry('scor__1', '4')).toBeNull();
+  });
+
+  it('falls back to a fresh empty pool for a wrong schemaVersion', async () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'validated-pool.json'), JSON.stringify({
+      schemaVersion: 'bogus-schema',
+      evalSemanticsVersion: '3',
+      updatedAt: '2026-05-25T00:00:00Z',
+      entries: { scor__1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' } },
+    }));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    expect(await store.getScorableIds('4')).toBeNull();
+    expect(await store.getEntry('scor__1', '4')).toBeNull();
+  });
+
+  it('does not re-validate carried-forward terminals: runner fires only for the dropped pytest_missing id', async () => {
+    const dir = tmpDir();
+    writeV3File(dir, {
+      scor__1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-20T10:00:00Z' },
+      pyt__1: { scorable: false, reason: 'ungradeable:pytest_missing', checkedAt: '2026-05-20T12:00:00Z' },
+    });
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const runEval = vi.fn(async () => ({
+      passed_match: true, passed: ['t::a'], failed: [], log: '', exitCode: 0, imageDigest: 'sha256:' + 'd'.repeat(64),
+    }));
+    const fetcher = {
+      fetchTaskRow: async (a: { instance_id: string }) => ({
+        instance_id: a.instance_id, repo: 'acme/widget', image_name: 'acme/widget:latest',
+        FAIL_TO_PASS: ['t::a'], PASS_TO_PASS: ['t::b'], test_patch: 'tp',
+        install_config: { install: ['pip install -e .'], test_cmd: ['pytest tests/'], log_parser: 'parse_log_pytest' },
+      }),
+    };
+    const commandRunner = async () => ({ exitCode: 1, stdout: '', stderr: '' });
+    const summary = await validatePoolInstances(
+      [poolTask('scor__1'), poolTask('pyt__1')],
+      { fetcher, runner: { runEval }, store, semanticsVersion: '4', upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    // scor__1 carried forward → skipped; pyt__1 dropped → re-validated.
+    expect(runEval).toHaveBeenCalledTimes(1);
+    expect(runEval.mock.calls.every(([a]) => (a as { instance_id: string }).instance_id === 'pyt__1')).toBe(true);
+    expect(summary.checked).toBe(1);
+    expect((await store.getEntry('scor__1', '4'))?.reason).toBe('gold-patch-resolves');
+    expect((await store.getEntry('pyt__1', '4'))?.scorable).toBe(true);
+  });
+});
+
 describe('validatePoolInstances — base_commit sentinel alignment', () => {
   it('uses the 40-hex sentinel when PoolTask.base_commit is undefined', async () => {
     const dir = tmpDir();
