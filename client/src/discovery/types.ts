@@ -147,6 +147,27 @@ export interface BuilderAttributedRun {
  * temporarily unavailable. The `withFallback` wrapper catches these and routes
  * to the floor implementation for the duration of the outage.
  */
+
+/**
+ * Per-codeDigest network-truth reward aggregate (issue #764). One row per
+ * distinct executor.codeDigest, joining attemptEnvelopeMeta (codeDigest, mode)
+ * to verdictEnvelopeMeta (actualPassed, actualScore) on (requestId, chainId).
+ * `actualPassed` is the source of truth (NOT the on-chain verdictCode, which
+ * defaults to Pass — see verdictEnvelopeMeta JSDoc).
+ */
+export interface CodeDigestRewardRow {
+  /** The executor.codeDigest, e.g. "sha256:<hex>". */
+  codeDigest: string;
+  /** Count of distinct (requestId, chainId) attempts with a verdict, mode='train'. */
+  attempts: number;
+  /** Count where verdictEnvelopeMeta.actualPassed === true. */
+  passes: number;
+  /** passes / attempts; 0 when attempts === 0. */
+  passRate: number;
+  /** Mean of numeric actualScore over verdicts that carried one; 0 when none. */
+  avgScore: number;
+}
+
 export interface DiscoveryAPI {
   /**
    * Returns claimable task candidates for a set of SolverNet manifests,
@@ -292,6 +313,28 @@ export interface DiscoveryAPI {
   getInstanceSuccessCounts(args: {
     manifestCid: string;
   }): Promise<Map<string, number>>;
+
+  /**
+   * Returns per-codeDigest reward aggregates (#764) for the given codeDigests,
+   * scoped to mode='train'. Joins attemptEnvelopeMeta (codeDigest) to
+   * verdictEnvelopeMeta (actualPassed, actualScore) on (requestId, chainId).
+   * When `operator` is provided, further restricts to attempts the operator
+   * claimed (via the `attempt` table, joined on requestId).
+   *
+   * Like getInstanceSuccessCounts (#669), this throws DiscoveryUnavailableError
+   * on a degraded backing and MUST NOT silently fall through to the on-chain
+   * floor (substrate-incident policy) — the floor returns an empty array and
+   * withFallback never routes this method to it. A codeDigest with zero indexed
+   * attempts is simply absent from the result (callers treat absence as
+   * "insufficient samples", not pass-rate zero).
+   *
+   * Rides PR #783's attemptEnvelopeMeta.codeDigest index.
+   */
+  getCodeDigestRewards(args: {
+    codeDigests: string[];
+    operator?: `0x${string}`;
+    solverNetManifestCid?: string;
+  }): Promise<CodeDigestRewardRow[]>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────
