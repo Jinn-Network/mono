@@ -8,14 +8,16 @@ import {
   summarizePoolState,
   type GeneratorConfig,
 } from '../../src/solver-types/swe-rebench-v2-auto.js';
-import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
+import {
+  makeSweRebenchV2GeneratorForLaunchedRecord,
+  getSweRebenchV2StateStore,
+} from '../../src/solver-types/swe-rebench-v2.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { DiscoveryAPI } from '../../src/discovery/types.js';
 import type { Task } from '../../src/types/task.js';
 
 const config: GeneratorConfig = {
   N_target_successes: 5,
-  N_max_postings_per_task: 10,
   posting_window_ms: 24 * 60 * 60 * 1000,
   post_batch_size: 25,
   claimLeaseTtlSeconds: 60 * 60,
@@ -61,13 +63,34 @@ describe('classifyPoolTask (claim-budget model, #802)', () => {
       .toMatchObject({ repostable: 1 });
   });
 
-  it('treats a posted instance with no claim snapshot as repostable (its task left the live set)', () => {
+  it('treats a posted instance with no claim snapshot as live (not-yet-indexed, NOT a repost)', () => {
     const counters = new Map([
       ['a', { posted: 3, successful: 0, last_posted_at: 1, last_task_id: '99' }],
     ]);
-    const claimCounts = new Map(); // '99' not present → finalized/refunded out
+    // '99' absent from the snapshot: the indexer never deletes task rows, so the
+    // only cause is indexing lag — assume not-yet-indexed and treat as live.
+    // Re-posting here would double-post a just-posted task (#802 #3) and, in
+    // onchain/empty-map mode, storm every tick (#802 #2).
+    const claimCounts = new Map<string, { consumed: number; maxClaims: number }>();
     const batch = selectNextPostingCandidates({ pool, counters, claimCounts, config, now: 1000 });
-    expect(batch.map((t) => t.instance_id)).toContain('a');
+    expect(batch.map((t) => t.instance_id)).not.toContain('a');
+    expect(summarizePoolState({ pool, counters, claimCounts, config, now: 1000 }))
+      .toMatchObject({ live: 1, repostable: 0 });
+  });
+
+  it('goes inert (no storm) when the claim map is empty for every posted instance (onchain mode)', () => {
+    // mode='onchain' returns an empty-success claim map. Every posted instance
+    // is absent → live → not re-posted. Only the unposted instance is selected.
+    const counters = new Map([
+      ['a', { posted: 1, successful: 0, last_posted_at: 1, last_task_id: '50' }],
+      ['b', { posted: 1, successful: 0, last_posted_at: 1, last_task_id: '51' }],
+      ['c', { posted: 0, successful: 0, last_posted_at: 0 }],
+    ]);
+    const claimCounts = new Map<string, { consumed: number; maxClaims: number }>();
+    const batch = selectNextPostingCandidates({ pool, counters, claimCounts, config, now: 1000 });
+    expect(batch.map((t) => t.instance_id)).toEqual(['c']);
+    expect(summarizePoolState({ pool, counters, claimCounts, config, now: 1000 }))
+      .toMatchObject({ live: 2, unposted: 1, repostable: 0, saturated: 0 });
   });
 
   it('retries a hard instance indefinitely — no abandon cap', () => {
@@ -75,7 +98,8 @@ describe('classifyPoolTask (claim-budget model, #802)', () => {
       ['a', { posted: 9999, successful: 0, last_posted_at: 1, last_task_id: '10' }],
     ]);
     const claimCounts = new Map([['10', { consumed: 5, maxClaims: 5 }]]);
-    // Even with the default N_max_postings_per_task, an exhausted hard instance reposts.
+    // No abandon cap (#802): an exhausted hard instance reposts no matter how
+    // many times it has been posted before.
     const batch = selectNextPostingCandidates({ pool, counters, claimCounts, config, now: 1000 });
     expect(batch.map((t) => t.instance_id)).toContain('a');
   });
@@ -139,7 +163,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord', () => {
     const configRef = {
       current: {
         N_target_successes: 5,
-        N_max_postings_per_task: 15,
         posting_window_ms: 300_000,
       },
     };
@@ -238,7 +261,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
     const configRef = {
       current: {
         N_target_successes: 5,
-        N_max_postings_per_task: 10,
         posting_window_ms: 300_000,
         // Use 'python-floor' so the test doesn't have to publish a vetted pool.
         admissionMode: 'python-floor' as const,
@@ -359,5 +381,149 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — claim-exhaustion repost
     expect(g.getState().lastError?.message).toContain('claim-budget reconciliation failed');
     expect(g.getState().lastPollSummary).toMatchObject({ posted: 0 });
     fetchSpy.mockRestore();
+  });
+});
+
+// Integration-style: drive ONE long-lived generator instance through the real
+// post → record-last_task_id → next-tick cycle (#802). The seed-disk-then-fresh-
+// construct tests above structurally cannot catch Blocker 1 (a fresh generator's
+// first load happens to read the seeded last_task_id); these do, because the
+// generator must observe a last_task_id written by a SEPARATE store instance
+// (the CreatorLoop hook) on a SUBSEQUENT tick.
+//
+// HF is mocked to RESOLVE a single-instance pool (not reject) so each tick loads
+// the pool fast without the retry backoff — multiple ticks per test would
+// otherwise time out on the shared HF retry limiter.
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→repost cycle (#802)', () => {
+  // Mirror production: do NOT pass staticConfig.stateDir; both the generator and
+  // getSweRebenchV2StateStore() resolve via JINN_SWE_REBENCH_V2_STATE_DIR so they
+  // share one file (the equivalence that makes Blocker 1's reload load-bearing).
+  const SINGLE_INSTANCE_ROWS = [
+    {
+      row: {
+        instance_id: 'org__repo-1',
+        repo: 'org/repo',
+        base_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        language: 'python',
+        problem_statement: 'fix the bug',
+      },
+    },
+  ];
+
+  function mockHfFetchSingleInstance() {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/splits')) {
+        return { ok: true, json: async () => ({ splits: [{ split: '2026_02' }] }) } as Response;
+      }
+      return { ok: true, json: async () => ({ rows: SINGLE_INSTANCE_ROWS }) } as Response;
+    });
+  }
+
+  // A single generator instance whose indexer claim map is a mutable closure —
+  // lets us change what the indexer reports BETWEEN ticks on the SAME generator,
+  // which is what exercises Blocker 1 (the long-lived in-memory cache must pick
+  // up the creator's out-of-band disk write at tick start).
+  function liveGeneratorWithMutableClaims(claimsRef: {
+    current: Map<string, { taskId: string; consumed: number; maxClaims: number }>;
+  }) {
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
+    const discoveryApi = {
+      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
+      getInstanceClaimCounts: vi.fn(async () => claimsRef.current),
+      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed, listPluginPublications: notUsed,
+      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
+    } as DiscoveryAPI;
+    return makeSweRebenchV2GeneratorForLaunchedRecord({
+      recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy802live' }) },
+      configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
+      // staticConfig deliberately omits stateDir — env var drives both the
+      // generator's store and getSweRebenchV2StateStore() (production path).
+      staticConfig: { discoveryApi },
+    });
+  }
+
+  it('one instance does NOT re-post a live instance after the creator hook records its last_task_id (Blocker 1)', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-live-'));
+    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
+    const fetchSpy = mockHfFetchSingleInstance();
+    try {
+      const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
+      const g = liveGeneratorWithMutableClaims(claimsRef);
+
+      // Tick 1: instance is unposted (no last_task_id) → posted. Indexer still
+      // empty (brand-new task not yet seen).
+      const first = await g();
+      expect((first as Task[])[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
+
+      // Simulate the CreatorLoop hook via the SAME accessor daemon code uses —
+      // a SEPARATE store instance writing last_task_id to the shared file.
+      await getSweRebenchV2StateStore().recordLastTaskId('org__repo-1', '777');
+      // Indexer now reflects the task with slots remaining (live).
+      claimsRef.current = new Map([['777', { taskId: '777', consumed: 2, maxClaims: 5 }]]);
+
+      // Tick 2 on the SAME generator. Blocker 1's bug: the generator's first-load
+      // cache still has last_task_id=undefined → unposted → re-post storm. With
+      // the tick-start reload it observes '777' → live → no re-post.
+      const second = await g();
+      expect(second).toBeNull();
+      expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
+      expect(g.getState().totalPosted).toBe(1);
+    } finally {
+      delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('one instance does NOT re-post when the indexer has not yet reflected the just-posted task (lag, Blocker 3)', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-lag-'));
+    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
+    const fetchSpy = mockHfFetchSingleInstance();
+    try {
+      const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
+      const g = liveGeneratorWithMutableClaims(claimsRef);
+
+      await g(); // posts org__repo-1
+      await getSweRebenchV2StateStore().recordLastTaskId('org__repo-1', '888');
+      // Indexer STILL missing '888' (lag): a known last_task_id absent from the
+      // snapshot must classify `live` (not-yet-indexed), NOT repostable.
+
+      const second = await g();
+      expect(second).toBeNull();
+      expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
+      expect(g.getState().totalPosted).toBe(1);
+    } finally {
+      delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('one instance goes inert (no per-tick storm) in onchain/empty-claim-map mode (Blocker 2)', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-onchain-'));
+    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
+    const fetchSpy = mockHfFetchSingleInstance();
+    try {
+      // onchain floor returns an empty success map on EVERY tick.
+      const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
+      const g = liveGeneratorWithMutableClaims(claimsRef);
+
+      const first = await g();
+      expect((first as Task[])[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
+      await getSweRebenchV2StateStore().recordLastTaskId('org__repo-1', '999');
+
+      // Subsequent ticks: empty map + known last_task_id → live → no re-post.
+      // (Pre-fix this storms a fresh post every tick.)
+      const second = await g();
+      const third = await g();
+      expect(second).toBeNull();
+      expect(third).toBeNull();
+      expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
+      expect(g.getState().totalPosted).toBe(1);
+    } finally {
+      delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
+      fetchSpy.mockRestore();
+    }
   });
 });
