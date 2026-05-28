@@ -49,6 +49,23 @@ export interface ClaimableTaskCandidate {
   operatorAttemptCount: number;
 }
 
+/**
+ * Per-on-chain-task claim-budget snapshot for a launched SolverNet. Returned by
+ * `getInstanceClaimCounts`, keyed by **on-chain taskId** (decimal string) — NOT
+ * by instance_id, because the on-chain `task`/`attempt` tables carry no
+ * instance_id (only IPFS enrichment does). The generator owns the
+ * taskId → instance_id join via its local `generator-state.json` ledger
+ * (`last_task_id`), so it looks up its known posted taskIds in this map.
+ */
+export interface InstanceClaimCount {
+  /** On-chain taskId (decimal string), matching `task.id` in the indexer. */
+  taskId: string;
+  /** Number of attempt rows recorded for this task = consumed claim slots. */
+  consumed: number;
+  /** maxClaims from the task's TaskCreated event = the one-way claim budget. */
+  maxClaims: number;
+}
+
 // ── PublishedArtifact base (attd) ────────────────────────────────────────────
 //
 // A common read-shape for builder-published artifacts. Today only plug-ins
@@ -346,6 +363,32 @@ export interface DiscoveryAPI {
     solverNetManifestCid?: string;
     window?: number;
   }): Promise<CodeDigestRewardRow[]>;
+
+  /**
+   * Returns the per-task claim-budget snapshot for every task posted on the
+   * SolverNet identified by `manifestCid`. Keyed by on-chain taskId; each value
+   * carries `consumed` (count of `attempt` rows) and `maxClaims` (the one-way
+   * claim budget from TaskCreated). A task is *exhausted* when
+   * `consumed >= maxClaims`.
+   *
+   * Modelled one-for-one on `getInstanceSuccessCounts`: backed by the indexer's
+   * `task` + `attempt` tables. Throws `DiscoveryUnavailableError` when the
+   * backing is unreachable — callers MUST NOT silently fall through to
+   * local-only state. The `withFallback` wrapper enforces this by never routing
+   * `getInstanceClaimCounts` to the floor: an empty Map from the floor is
+   * indistinguishable from "every task has 0 consumed slots", which would mark
+   * every posting `live` and suppress all reposts (the under-count bug this
+   * method exists to avoid — #802, mirroring #669).
+   *
+   * The on-chain floor implementation returns an empty Map (the runtime path is
+   * never the floor for this method — `withFallback` propagates the error
+   * instead). The claim data IS reconstructible on-chain, but the floor stays a
+   * no-op to keep the abort-on-outage guarantee symmetric with
+   * `getInstanceSuccessCounts`.
+   */
+  getInstanceClaimCounts(args: {
+    manifestCid: string;
+  }): Promise<Map<string, InstanceClaimCount>>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────
