@@ -27,6 +27,7 @@ import {
   summarizePoolState,
   DEFAULT_GENERATOR_CONFIG,
   type GeneratorConfig,
+  type InstanceClaimSnapshot,
 } from './swe-rebench-v2-auto.js';
 import { GeneratorStateStore } from './_swe-rebench-v2-state.js';
 import type { TaskCounters } from './_swe-rebench-v2-state.js';
@@ -621,16 +622,14 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     // taskId; the classifier joins via each instance's last_task_id. On indexer
     // outage the tick aborts — falling through to "no exhaustion observed" would
     // mark every posting live and suppress all reposts (the under-count bug).
-    let claimCounts: Map<string, { consumed: number; maxClaims: number }> | undefined;
+    let claimCounts: Map<string, InstanceClaimSnapshot> | undefined;
     if (config.discoveryApi && config.solverNetManifestCid) {
       try {
-        const network = await config.discoveryApi.getInstanceClaimCounts({
+        // getInstanceClaimCounts is keyed by taskId; its values are a structural
+        // superset of InstanceClaimSnapshot, so the map is used directly.
+        claimCounts = await config.discoveryApi.getInstanceClaimCounts({
           manifestCid: config.solverNetManifestCid,
         });
-        claimCounts = new Map();
-        for (const [taskId, snap] of network) {
-          claimCounts.set(taskId, { consumed: snap.consumed, maxClaims: snap.maxClaims });
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         lastError = {
