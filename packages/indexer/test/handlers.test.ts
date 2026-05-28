@@ -202,10 +202,14 @@ describe('TaskAttemptCreated → attempt', () => {
   });
 });
 
-// ── Area 4: SolutionDeliveryClaimed missing-row guard ────────────────────────
+// ── Area 4: SolutionDeliveryClaimed no longer finalizes (issue #530) ──────────
+// SolutionDeliveryClaimed is a solution-slot delivery — the START of evaluation,
+// not finalization. On-chain finalization is validVerdictCount >= requiredVerdicts
+// (TaskCoordinator.recordVerdict). The finalized flag is recomputed in
+// handleVerdictDeliveryClaimed; this handler must leave finalized untouched.
 
 describe('SolutionDeliveryClaimed', () => {
-  it('marks an existing task finalized = true', async () => {
+  it('does NOT mark the task finalized (it is the start of evaluation, not the end)', async () => {
     await handleTaskCreated({ event: taskCreatedEvent({ taskId: 7n }), context, task });
     expect(db.get(task, { id: '7' })?.finalized).toBe(false);
     await handleSolutionDeliveryClaimed({
@@ -213,7 +217,9 @@ describe('SolutionDeliveryClaimed', () => {
       context,
       task,
     });
-    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
+    // Issue #530: finalized must stay false — the task is still Open until
+    // delivered verdicts reach requiredVerdicts.
+    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
   });
 
   it('skips (does not crash) when the task row does not exist (TaskCreated predates startBlock)', async () => {
