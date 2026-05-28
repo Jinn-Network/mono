@@ -45,6 +45,7 @@ import solverPluginsCommand from './commands/solver-plugins.js';
 import integrationsCommand from './commands/integrations.js';
 import predictionScoreboardCommand from './commands/prediction-scoreboard.js';
 import captureCommand from './commands/capture.js';
+import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -79,6 +80,7 @@ const COMMANDS: CommandModule[] = [
   harnessesCommand,
   solverPluginsCommand,
   integrationsCommand,
+  codedigestRevertCheckCommand,
 ];
 
 /**
