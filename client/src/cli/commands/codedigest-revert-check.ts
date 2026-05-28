@@ -54,6 +54,42 @@ export async function codeDigestForCommit(implStateDir: string, sha: string): Pr
   }
 }
 
+/**
+ * Validate the optional numeric CLI flags (#764 M1). Each is only checked when
+ * the operator actually provided it (omitted → policy default applies). Returns
+ * the first failure, or `undefined` when all provided flags are in range.
+ *   - min-samples: finite integer >= 1
+ *   - window:      finite integer >= 1
+ *   - alpha:       finite number in the open interval (0, 1)
+ */
+export function validateNumericFlags(flags: {
+  minSamples?: string;
+  window?: string;
+  alpha?: string;
+}): { field: string; message: string } | undefined {
+  const isPositiveInt = (n: number): boolean => Number.isFinite(n) && Number.isInteger(n) && n >= 1;
+
+  if (flags.minSamples !== undefined) {
+    const n = Number(flags.minSamples);
+    if (!isPositiveInt(n)) {
+      return { field: 'min-samples', message: `--min-samples must be a finite integer >= 1 (got "${flags.minSamples}")` };
+    }
+  }
+  if (flags.window !== undefined) {
+    const n = Number(flags.window);
+    if (!isPositiveInt(n)) {
+      return { field: 'window', message: `--window must be a finite integer >= 1 (got "${flags.window}")` };
+    }
+  }
+  if (flags.alpha !== undefined) {
+    const n = Number(flags.alpha);
+    if (!Number.isFinite(n) || n <= 0 || n >= 1) {
+      return { field: 'alpha', message: `--alpha must be a finite number in (0, 1) (got "${flags.alpha}")` };
+    }
+  }
+  return undefined;
+}
+
 function toAggregate(
   codeDigest: string,
   rows: Array<{ codeDigest: string; attempts: number; passes: number; passRate: number }>,
@@ -161,6 +197,28 @@ On indexer outage emits recommendRevert=false reason=discovery_unavailable (the 
         return;
       }
 
+      // Validate provided numeric flags. `Number('abc')` is NaN, `--alpha 0`
+      // silently disables every revert, `--window 0` is nonsensical — reject
+      // out-of-range input with the command's existing invalid_invocation
+      // envelope (exit 11) rather than letting a bad value flow into the policy.
+      const numErr = validateNumericFlags({
+        minSamples: parsed.values['min-samples'],
+        window: parsed.values.window,
+        alpha: parsed.values.alpha,
+      });
+      if (numErr) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: numErr.message,
+            exampleCli: 'jinn codedigest-revert-check --code-digest sha256:.. --parent-code-digest sha256:.. --alpha 0.05 --window 200 --min-samples 30',
+            details: { field: numErr.field },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+
       const policy: RevertPolicy = resolveRevertPolicy({
         ...(parsed.values['min-samples'] ? { minSamplesPerArm: Number(parsed.values['min-samples']) } : {}),
         ...(parsed.values.alpha ? { alpha: Number(parsed.values.alpha) } : {}),
@@ -172,6 +230,7 @@ On indexer outage emits recommendRevert=false reason=discovery_unavailable (the 
       try {
         rows = await discovery.getCodeDigestRewards({
           codeDigests: [child, parent],
+          window: policy.recentAttemptsWindow,
           ...(parsed.values.operator ? { operator: parsed.values.operator as `0x${string}` } : {}),
           ...(parsed.values.solvernet ? { solverNetManifestCid: parsed.values.solvernet } : {}),
         });

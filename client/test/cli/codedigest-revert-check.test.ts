@@ -65,6 +65,58 @@ describe('jinn codedigest-revert-check', () => {
     expect(payload.reason).toBe('discovery_unavailable');
   });
 
+  it.each([
+    ['--alpha', '0'],
+    ['--alpha', '1'],
+    ['--alpha', '1.5'],
+    ['--alpha', 'abc'],
+    ['--window', '0'],
+    ['--window', 'abc'],
+    ['--window', '1.5'],
+    ['--min-samples', '0'],
+    ['--min-samples', 'abc'],
+  ])('rejects invalid numeric flag %s %s with invalid_invocation', async (flag, value) => {
+    const exit = vi.fn();
+    let called = false;
+    const cmd = createCodedigestRevertCheckCommand({
+      buildDiscovery: () => ({
+        getCodeDigestRewards: async () => { called = true; return []; },
+      }) as never,
+    });
+    const out: string[] = [];
+    const c = {
+      argv: ['--code-digest', 'sha256:CHILD', '--parent-code-digest', 'sha256:PARENT', flag, value, '--json'],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { out.push(s); return true; } },
+      exit,
+      env: {},
+    };
+    await cmd.run(c as never);
+    const payload = JSON.parse(out.join(''));
+    expect(payload.code).toBe('invalid_invocation');
+    expect(exit).toHaveBeenCalledWith(11);
+    expect(called).toBe(false); // never reached the discovery call
+  });
+
+  it('accepts valid numeric flags at the edges of their ranges', async () => {
+    const cmd = createCodedigestRevertCheckCommand({
+      buildDiscovery: () => ({
+        getCodeDigestRewards: async () => [
+          { codeDigest: 'sha256:CHILD', attempts: 100, passes: 80, passRate: 0.8, avgScore: 0.8 },
+          { codeDigest: 'sha256:PARENT', attempts: 100, passes: 80, passRate: 0.8, avgScore: 0.8 },
+        ],
+      }) as never,
+    });
+    const { ctx: c, out } = ctx([
+      '--code-digest', 'sha256:CHILD', '--parent-code-digest', 'sha256:PARENT',
+      '--alpha', '0.5', '--window', '1', '--min-samples', '1', '--json',
+    ]);
+    await cmd.run(c as never);
+    const payload = JSON.parse(out.join(''));
+    expect(payload.code).toBeUndefined(); // not an error envelope
+    expect(payload).toHaveProperty('recommendRevert');
+  });
+
   it('hashes impl-state-dir commits directly and queries those two codeDigests (#764 Task 12)', async () => {
     const git = (cwd: string, ...args: string[]): string =>
       execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
