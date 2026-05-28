@@ -19,7 +19,9 @@
  *   3. Most-recent-wins — later block overwrites; earlier does not; same
  *      block+tx, higher logIndex wins (the PR #138 tiebreak); idempotent replay.
  *   4. SolutionDeliveryClaimed missing-row guard — unknown taskId is skipped,
- *      not crashed; existing task gets finalized = true.
+ *      not crashed; existing task is NOT finalized (finalized stays false —
+ *      that event is evaluation-start, not finalization; finalization happens
+ *      in VerdictDeliveryClaimed).
  *   5. Task / Attempt folding — TaskCreated → task row; TaskAttemptCreated →
  *      attempt row; shapes match the GraphQL fields client/src/discovery/http.ts
  *      queries.
