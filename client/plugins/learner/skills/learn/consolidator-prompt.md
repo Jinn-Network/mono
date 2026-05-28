@@ -16,7 +16,24 @@ All paths listed in the memory-consolidation skill's spawn-input block. Read the
 Anything that writes to `implStateDir` happens here, including:
 
 - **Unused skills / hooks / tools** — anything not invoked in the last N runs (default 20; check policy override). Move to `implStateDir/.archive/<ts>/` or delete per policy.
-- **Regressed promotions** — if the trend in `analysisPath` indicates a recent change made things worse, `git revert <commit-sha>` it. Be specific: revert the exact commit identified, not a bulk rollback. The target sha is `improvePromotionsDir/<n>.json`'s `implStateDirShaAfter`.
+- **Regressed promotions** — revert an Improve commit only when it actually made things worse. There are two triggers; act on either:
+  1. **Qualitative trigger** — if the trend in `analysisPath` (the Debrief signal) indicates a recent change made things worse, `git revert <commit-sha>` it. Be specific: revert the exact commit identified, not a bulk rollback. The target sha is `improvePromotionsDir/<n>.json`'s `implStateDirShaAfter`.
+  2. **Quantitative trigger (#764)** — for each candidate Improve commit on recent `implStateDir` git history (the commits since `implStateDirShaBefore`, identified from each `improvePromotionsDir/<n>.json` `implStateDirShaAfter`), ask the network-truth indexer whether the commit's per-codeDigest pass rate is significantly worse than its parent's. **Do not hand-roll the codeDigest hash or the statistics — shell out to the CLI**, which exports each commit's tree (`git archive`, no `.git`) and hashes it the way production stamps codeDigest, then runs the documented test:
+
+     ```bash
+     IMPL_STATE_DIR="<implStateDir from spawn input>"
+     # $sha = a candidate Improve commit; $parent = its git parent ($sha^).
+     decision=$(jinn codedigest-revert-check \
+       --impl-state-dir "$IMPL_STATE_DIR" \
+       --commit "$sha" \
+       --parent "$(cd "$IMPL_STATE_DIR" && git rev-parse "$sha^")" \
+       --json)
+     # decision = { withCommit:{codeDigest,n,passRate}, atParent:{...}, delta, pValue, significant, recommendRevert, reason }
+     ```
+
+     Act ONLY on `recommendRevert === true` (then `git revert "$sha"`). Do NOT re-derive the thresholds here. On `reason: "discovery_unavailable"` or `"insufficient_samples"`, **do not revert** — the indexer is degraded, or the commit has not accumulated enough frozen-eval attempts yet (expected plateau, not a regression). Carry the decision's `reason` into the output record's `promotionsReverted[].reason`.
+
+  **Documented thresholds (canonical in `client/src/learner/revert-decision.ts` — do not redefine):** `min-samples = 30` per arm, `alpha = 0.05` (95% confidence), `window = 200` recent attempts. The test is a two-proportion z-test on pass/total (codeDigest-with-commit vs codeDigest-at-parent); a revert fires only when `delta < 0 AND p < alpha AND both arms ≥ min-samples`. These defaults are overridable via `implStateDir/policy.json` `policy.revert.*` (and per-invocation via `--min-samples/--alpha/--window`).
 - **Noisy notes / records** — if `implStateDir/notes/` has accumulated more than `policy.maxNotesBytes` (default 1 MB), keep the last 50 by mtime, archive the rest.
 - **Conflicts between recent promotions** — Improve may have promoted two skills with conflicting prompts. Detect and resolve (favor newer; flag conflict in the output record).
 - **Migrate operator-private content from this run.** Operator-private session transcripts and operator-requests should be persisted into `implStateDir` so the operator has a durable history across runs:
