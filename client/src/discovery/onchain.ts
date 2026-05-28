@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
@@ -1290,6 +1290,14 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return new Map();
   }
 
+  // ── getCodeDigestRewards (#764) — empty-array stub ─────────────────────────
+  // Per-codeDigest aggregates derive from the indexer's IPFS enrichment
+  // (attempt/verdict envelope meta), which the on-chain floor cannot
+  // reconstruct. withFallback never routes here (no silent fall-through).
+  async function getCodeDigestRewards(): Promise<CodeDigestRewardRow[]> {
+    return [];
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1300,5 +1308,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getPluginScores,
     listBuilderArtifacts,
     getInstanceSuccessCounts,
+    getCodeDigestRewards,
   };
 }
