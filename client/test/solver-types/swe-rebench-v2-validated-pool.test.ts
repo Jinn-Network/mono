@@ -7,6 +7,8 @@ import {
   filterToScorablePool,
   validatePoolInstances,
   EVAL_SEMANTICS_VERSION,
+  MAX_TRANSIENT_PASSES,
+  TRANSIENT_INFRA_REASONS,
   exportScorableVettedPoolArtifact,
   hashVettedPoolArtifact,
   loadVettedPoolArtifactScorableEntries,
@@ -924,5 +926,172 @@ describe('validatePoolInstances — populates substrate fields', () => {
     expect(entry!.rowHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(entry!.imageName).toBe('acme/widget:latest');
     expect(entry!.upstreamEvalCommit).toBe('0123456789abcdef0123456789abcdef01234567');
+  });
+});
+
+describe('validatePoolInstances — transient operator-environment infra handling (#811)', () => {
+  // Fetcher succeeds (the row resolves); the runner throws an
+  // EvalCouldNotGradeError so the eval never grades the solution. Constructed
+  // the same duck-typed way the existing ungradeable test does (line ~216):
+  // the catch-block classifier keys on `err.name === 'EvalCouldNotGradeError'`.
+  function makeInfraFetcher() {
+    return {
+      fetchTaskRow: vi.fn(async (a: { instance_id: string }) => ({
+        instance_id: a.instance_id, repo: 'acme/widget', image_name: 'acme/widget:latest',
+        FAIL_TO_PASS: ['t::a'], PASS_TO_PASS: ['t::b'], test_patch: 'diff b',
+        install_config: { install: ['pip install .'], test_cmd: ['pytest'], log_parser: 'parse_log_pytest' },
+      })),
+    };
+  }
+  function ungradeableRunner(reason: string) {
+    return {
+      runEval: vi.fn(async () => {
+        throw Object.assign(new Error(`eval could not grade (${reason})`), {
+          name: 'EvalCouldNotGradeError',
+          reason,
+        });
+      }),
+    };
+  }
+  // docker succeeds (digest resolves), git fails (upstreamEvalCommit omitted, non-fatal).
+  const commandRunner = async (bin: string, args: string[]) => {
+    if (bin === 'docker' && args[0] === 'image') {
+      return { exitCode: 0, stdout: '["acme/widget@sha256:' + 'a'.repeat(64) + '"]', stderr: '' };
+    }
+    return { exitCode: 1, stdout: '', stderr: '' };
+  };
+
+  it('TRANSIENT_INFRA_REASONS has exactly the operator-environment infra subset', () => {
+    expect(TRANSIENT_INFRA_REASONS).toEqual(
+      new Set(['docker_unavailable', 'venv_collision', 'venv_missing', 'image_arch_mismatch']),
+    );
+    // Real per-instance ungradeable reasons must NOT be in the transient set.
+    expect(TRANSIENT_INFRA_REASONS.has('pytest_missing')).toBe(false);
+    expect(TRANSIENT_INFRA_REASONS.has('install_build_failed')).toBe(false);
+    expect(TRANSIENT_INFRA_REASONS.has('conftest_import_error')).toBe(false);
+    expect(TRANSIENT_INFRA_REASONS.has('eval_setup_error')).toBe(false);
+  });
+
+  it('docker_unavailable records transient:docker_unavailable with transientRetryCount=1 (not terminal)', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const fetcher = makeInfraFetcher();
+    const runner = ungradeableRunner('docker_unavailable');
+    const summary = await validatePoolInstances(
+      [poolTask('a__docker')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary).toMatchObject({ checked: 1, scorable: 0, unscorable: 1 });
+    const entry = await store.getEntry('a__docker', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: false,
+      reason: 'transient:docker_unavailable',
+      transientRetryCount: 1,
+    });
+    expect(typeof entry?.lastTransientAt).toBe('string');
+    expect(entry?.lastTransientAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // Substrate fields are available because the fetcher succeeded before the runner threw.
+    expect(entry?.rowHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(entry?.imageName).toBe('acme/widget:latest');
+  });
+
+  it('re-processes a transient infra entry on the next pass (skip-check does NOT fire) and increments the count', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const fetcher = makeInfraFetcher();
+    const runner = ungradeableRunner('docker_unavailable');
+    await validatePoolInstances(
+      [poolTask('a__docker')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect((await store.getEntry('a__docker', EVAL_SEMANTICS_VERSION))?.transientRetryCount).toBe(1);
+    // Second pass — no force. The idempotence guard must NOT skip a transient entry below the boundary.
+    const summary2 = await validatePoolInstances(
+      [poolTask('a__docker')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary2.checked).toBe(1);
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
+    expect((await store.getEntry('a__docker', EVAL_SEMANTICS_VERSION))?.transientRetryCount).toBe(2);
+  });
+
+  it(`converges to terminal ungradeable:docker_unavailable at count=${MAX_TRANSIENT_PASSES}; a subsequent pass then skips`, async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    // Seed a transient entry one below the convergence boundary.
+    await store.record(
+      'a__docker',
+      {
+        scorable: false,
+        reason: 'transient:docker_unavailable',
+        checkedAt: '2026-05-27T00:00:00Z',
+        transientRetryCount: MAX_TRANSIENT_PASSES - 1,
+        lastTransientAt: '2026-05-27T00:00:00Z',
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const fetcher = makeInfraFetcher();
+    const runner = ungradeableRunner('docker_unavailable');
+    await validatePoolInstances(
+      [poolTask('a__docker')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    const converged = await store.getEntry('a__docker', EVAL_SEMANTICS_VERSION);
+    // Final resting state is identical to today's immediate behaviour, just reached after bounded retries.
+    expect(converged).toMatchObject({
+      scorable: false,
+      reason: 'ungradeable:docker_unavailable',
+      transientRetryCount: MAX_TRANSIENT_PASSES,
+    });
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
+    // A subsequent non-force pass now skips it (terminal).
+    const summary = await validatePoolInstances(
+      [poolTask('a__docker')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary.checked).toBe(0);
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('install_build_failed stays terminal ungradeable:install_build_failed and a non-force pass skips it', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const fetcher = makeInfraFetcher();
+    const runner = ungradeableRunner('install_build_failed');
+    await validatePoolInstances(
+      [poolTask('a__build')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    const entry = await store.getEntry('a__build', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({ scorable: false, reason: 'ungradeable:install_build_failed' });
+    expect(entry?.transientRetryCount).toBeUndefined();
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
+    // Second non-force pass skips it — terminal.
+    const summary2 = await validatePoolInstances(
+      [poolTask('a__build')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary2.checked).toBe(0);
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('pytest_missing stays terminal (guards the #493 bucket against accidental auto-retry)', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const fetcher = makeInfraFetcher();
+    const runner = ungradeableRunner('pytest_missing');
+    await validatePoolInstances(
+      [poolTask('a__pytest')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    const entry = await store.getEntry('a__pytest', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({ scorable: false, reason: 'ungradeable:pytest_missing' });
+    expect(entry?.transientRetryCount).toBeUndefined();
+    const summary2 = await validatePoolInstances(
+      [poolTask('a__pytest')],
+      { fetcher, runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
+    );
+    expect(summary2.checked).toBe(0);
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
   });
 });
