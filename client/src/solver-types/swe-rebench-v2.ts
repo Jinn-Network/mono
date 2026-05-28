@@ -29,6 +29,7 @@ import {
   type GeneratorConfig,
 } from './swe-rebench-v2-auto.js';
 import { GeneratorStateStore } from './_swe-rebench-v2-state.js';
+import type { TaskCounters } from './_swe-rebench-v2-state.js';
 import {
   ValidatedPoolStore,
   filterToScorablePool,
@@ -109,7 +110,6 @@ export interface SweRebenchV2GeneratorStateSnapshot {
     live: number;
     repostable: number;
     saturated: number;
-    abandoned: number;
   };
   lastError?: { message: string; at: string };
   totalPosted: number;
@@ -469,7 +469,6 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         live: 0,
         repostable: 0,
         saturated: 0,
-        abandoned: 0,
       };
       return null;
     }
@@ -519,7 +518,6 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         live: 0,
         repostable: 0,
         saturated: 0,
-        abandoned: 0,
       };
       return null;
     }
@@ -571,14 +569,13 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         live: 0,
         repostable: 0,
         saturated: 0,
-        abandoned: 0,
       };
       lastError = undefined;
       return null;
     }
 
     // Load all counters for eligible tasks
-    const counters = new Map<string, { posted: number; successful: number; last_posted_at: number }>();
+    const counters = new Map<string, TaskCounters>();
     for (const task of eligiblePool) {
       counters.set(task.instance_id, await stateStore.getCounters(task.instance_id));
     }
@@ -614,7 +611,40 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
           live: 0,
           repostable: 0,
           saturated: 0,
-          abandoned: 0,
+        };
+        return null;
+      }
+    }
+
+    // Reconcile claim-budget exhaustion against network truth (#802): a posting
+    // is exhausted when its on-chain consumed slots reach maxClaims. Keyed by
+    // taskId; the classifier joins via each instance's last_task_id. On indexer
+    // outage the tick aborts — falling through to "no exhaustion observed" would
+    // mark every posting live and suppress all reposts (the under-count bug).
+    let claimCounts: Map<string, { consumed: number; maxClaims: number }> | undefined;
+    if (config.discoveryApi && config.solverNetManifestCid) {
+      try {
+        const network = await config.discoveryApi.getInstanceClaimCounts({
+          manifestCid: config.solverNetManifestCid,
+        });
+        claimCounts = new Map();
+        for (const [taskId, snap] of network) {
+          claimCounts.set(taskId, { consumed: snap.consumed, maxClaims: snap.maxClaims });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = {
+          message: `claim-budget reconciliation failed: ${message}`,
+          at: new Date().toISOString(),
+        };
+        console.warn(`[swe-rebench-v2-gen] ${lastError.message} — skipping this tick`);
+        lastPollSummary = {
+          poolSize: eligiblePool.length,
+          posted: 0,
+          unposted: 0,
+          live: 0,
+          repostable: 0,
+          saturated: 0,
         };
         return null;
       }
@@ -625,6 +655,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       counters,
       config: genConfig,
       now,
+      claimCounts,
       lastPostedLanguage,
     });
     if (candidates.length === 0) {
@@ -633,6 +664,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         counters,
         config: genConfig,
         now,
+        claimCounts,
         lastPostedLanguage,
       });
       lastError = undefined;
@@ -707,6 +739,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         counters,
         config: genConfig,
         now,
+        claimCounts,
         lastPostedLanguage,
       }),
       posted: tasks.length,

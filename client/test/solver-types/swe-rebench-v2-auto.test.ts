@@ -11,6 +11,7 @@ import {
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { DiscoveryAPI } from '../../src/discovery/types.js';
+import type { Task } from '../../src/types/task.js';
 
 const config: GeneratorConfig = {
   N_target_successes: 5,
@@ -217,6 +218,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
     const notUsed = vi.fn(async () => { throw new Error('not used'); });
     const discoveryApi = {
       getInstanceSuccessCounts: vi.fn(async () => successCounts),
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
       findClaimableTasks: notUsed,
       listLaunchedSolverNets: notUsed,
       getLifecycleStatus: notUsed,
@@ -262,6 +264,100 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
       posted: 0,
     });
 
+    fetchSpy.mockRestore();
+  });
+});
+
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — claim-exhaustion repost (#802)', () => {
+  async function seed(stateDir: string, counters: Record<string, unknown>) {
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, 'generator-state.json'),
+      JSON.stringify({ schemaVersion: 'swe-rebench-v2-generator-state.v1', tasks: counters }),
+    );
+    await writeFile(
+      join(stateDir, 'pool-cache.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-pool-cache.v1',
+        savedAt: new Date().toISOString(),
+        tasks: [{
+          instance_id: 'org__repo-1', language: 'python',
+          hf_dataset: 'nebius/SWE-rebench-leaderboard', hf_split: '2024_12',
+          base_commit: '0000000000000000000000000000000000000000',
+        }],
+      }),
+    );
+  }
+
+  function stubDiscovery(over: Partial<DiscoveryAPI>): DiscoveryAPI {
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
+    return {
+      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
+      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed, listPluginPublications: notUsed,
+      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
+      ...over,
+    } as DiscoveryAPI;
+  }
+
+  function gen(stateDir: string, discoveryApi: DiscoveryAPI) {
+    return makeSweRebenchV2GeneratorForLaunchedRecord({
+      recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy802' }) },
+      configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
+      staticConfig: { stateDir, discoveryApi },
+    });
+  }
+
+  it('reposts an exhausted instance whose successes < N', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
+    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 1, last_posted_at: 0, last_task_id: '10' } });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
+    const discovery = stubDiscovery({
+      getInstanceClaimCounts: vi.fn(async () => new Map([['10', { taskId: '10', consumed: 5, maxClaims: 5 }]])),
+    });
+    const g = gen(stateDir, discovery);
+
+    const result = await g();
+
+    expect(result).not.toBeNull();
+    expect((result as Task[])[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(g.getState().lastPollSummary).toMatchObject({ posted: 1 });
+    fetchSpy.mockRestore();
+  });
+
+  it('does NOT repost an instance with claim slots remaining (live)', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
+    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 0, last_posted_at: 0, last_task_id: '11' } });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
+    const discovery = stubDiscovery({
+      getInstanceClaimCounts: vi.fn(async () => new Map([['11', { taskId: '11', consumed: 2, maxClaims: 5 }]])),
+    });
+    const g = gen(stateDir, discovery);
+
+    const result = await g();
+
+    expect(result).toBeNull();
+    expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0 });
+    fetchSpy.mockRestore();
+  });
+
+  it('aborts the tick when getInstanceClaimCounts throws (never under-counts)', async () => {
+    const { DiscoveryUnavailableError } = await import('../../src/discovery/types.js');
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
+    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 1, last_posted_at: 0, last_task_id: '10' } });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
+    const discovery = stubDiscovery({
+      getInstanceClaimCounts: vi.fn(async () => { throw new DiscoveryUnavailableError('indexer down'); }),
+    });
+    const g = gen(stateDir, discovery);
+
+    const result = await g();
+
+    expect(result).toBeNull(); // aborted, nothing posted
+    expect(g.getState().lastError?.message).toContain('claim-budget reconciliation failed');
+    expect(g.getState().lastPollSummary).toMatchObject({ posted: 0 });
     fetchSpy.mockRestore();
   });
 });
