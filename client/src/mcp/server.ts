@@ -23,6 +23,8 @@ import { createCorpus, type Corpus } from '../corpus/index.js';
 import { createHttpDiscoveryAPI } from '../discovery/http.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
+import { handleGetCodeDigestReward } from './get-codedigest-reward.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 import { SOLVER_TYPE_PAYLOADS } from '../types/payloads/index.js';
 import { CanonicalRoleSchema, normalizeEnvelopeRole } from '../types/envelope.js';
 
@@ -121,6 +123,20 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   };
 }
 const corpus = buildReadOnlyCorpus();
+
+/**
+ * Build a read-only DiscoveryAPI handle for tools that query the indexer
+ * directly (e.g. get_codedigest_reward, #764). Reuses the same env reads as
+ * buildReadOnlyCorpus so the two surfaces stay in sync. Returns null when no
+ * http indexer is configured — tools then surface a structured "no discovery".
+ */
+function buildDiscoveryForTools(): DiscoveryAPI | null {
+  const discoveryUrl = process.env['JINN_DISCOVERY_URL'] ?? '';
+  const discoveryMode = process.env['JINN_DISCOVERY_MODE'] ?? (discoveryUrl ? 'http' : 'onchain');
+  if (!discoveryUrl || discoveryMode !== 'http') return null;
+  return createHttpDiscoveryAPI({ url: discoveryUrl, fetchImpl: globalThis.fetch });
+}
+const discoveryForTools = buildDiscoveryForTools();
 
 /**
  * Format a structured error response for an MCP tool call. The body is a
@@ -397,6 +413,23 @@ server.tool(
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(out) }],
     };
+  },
+);
+
+server.tool(
+  'get_codedigest_reward',
+  'Network-truth pass-rate and average-score aggregates per executor codeDigest, from the indexer (verdictEnvelopeMeta.actualPassed is the source of truth). Use during Memory consolidation to compare a candidate Improve commit\'s codeDigest against its parent\'s before deciding to revert. Read-only; on indexer outage returns a structured discovery_unavailable error (do not revert on degraded data).',
+  {
+    codeDigests: z.array(z.string()).min(1).describe('Executor codeDigests, e.g. ["sha256:abc", "sha256:def"]'),
+    operator: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional().describe('Restrict to attempts this operator Safe claimed'),
+    solverNetManifestCid: z.string().optional().describe('Optional SolverNet manifest CID scope'),
+  },
+  async (args) => {
+    const out = await handleGetCodeDigestReward(
+      discoveryForTools,
+      args as { codeDigests: string[]; operator?: `0x${string}`; solverNetManifestCid?: string },
+    );
+    return { content: [{ type: 'text' as const, text: JSON.stringify(out) }] };
   },
 );
 
