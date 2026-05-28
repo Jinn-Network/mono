@@ -126,9 +126,8 @@ const corpus = buildReadOnlyCorpus();
 
 /**
  * Build a read-only DiscoveryAPI handle for tools that query the indexer
- * directly (e.g. get_codedigest_reward, #764). Reuses the same env reads as
- * buildReadOnlyCorpus so the two surfaces stay in sync. Returns null when no
- * http indexer is configured — tools then surface a structured "no discovery".
+ * directly (e.g. get_codedigest_reward, #764). Returns null when no http
+ * indexer is configured — tools then surface a structured "no discovery".
  */
 function buildDiscoveryForTools(): DiscoveryAPI | null {
   const discoveryUrl = process.env['JINN_DISCOVERY_URL'] ?? '';

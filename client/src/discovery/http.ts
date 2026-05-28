@@ -1148,16 +1148,17 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     }
     if (requestKeyToDigest.size === 0) return [];
 
+    const requestIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
+
     // 2) Optional operator scoping: keep only requests the operator claimed.
     let allowedKeys: Set<string> | null = null;
     if (args.operator) {
       allowedKeys = new Set<string>();
-      const reqIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
       cursor = null;
       for (let page = 0; page < MAX_PAGES; page++) {
         const data: CodeDigestOperatorAttemptsPage = await postGql<CodeDigestOperatorAttemptsPage>(
           gqlUrl, fetchImpl, CODEDIGEST_OPERATOR_ATTEMPTS_QUERY,
-          { requestIds: reqIds, operator: args.operator, limit: PAGE_LIMIT, after: cursor },
+          { requestIds, operator: args.operator, limit: PAGE_LIMIT, after: cursor },
         );
         for (const row of data.attempts?.items ?? []) allowedKeys.add(`${row.requestId}|${row.chainId}`);
         const pi = data.attempts?.pageInfo;
@@ -1168,7 +1169,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
 
     // 3) Pull verdict-meta rows for those requestIds (actualPassed/actualScore).
     const verdictByKey = new Map<string, { passed: boolean; score: number | null }>();
-    const requestIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
     cursor = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const data: CodeDigestVerdictsPage = await postGql<CodeDigestVerdictsPage>(
