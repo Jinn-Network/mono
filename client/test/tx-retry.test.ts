@@ -55,6 +55,22 @@ describe('tx-retry', () => {
       );
     });
 
+    it('returns true for the viem fallback "All RPC providers ... failed" transient', () => {
+      // Daemon-observed: an execTransaction whose eth_estimateGas/eth_call
+      // transiently failed on every provider in the fallback chain at once.
+      // There is no decodable inner revert (those are caught by
+      // SafeInnerRevertError / GS013 / GS026 first), so this is a transient
+      // transport failure — the next attempt hits a healthy provider. It must
+      // retry, not fail the task. Before this case, claim/deliver tasks failed
+      // immediately on a transient all-providers blip.
+      const error = new Error(
+        'An unknown error occurred while executing the contract function "execTransaction".\n' +
+          'Details: All RPC providers in the fallback chain failed ' +
+          '(providers=base-sepolia.publicnode.com, base-sepolia.gateway.tenderly.co, sepolia.base.org)',
+      );
+      expect(isRecoverableTransactionError(error)).toBe(true);
+    });
+
     it('returns false for insufficient funds', () => {
       expect(isRecoverableTransactionError(new Error('insufficient funds for gas'))).toBe(false);
     });

@@ -162,7 +162,13 @@ export function isRecoverableTransactionError(error: unknown): boolean {
     lower.includes('fetch failed') ||
     lower.includes('network error') ||
     lower.includes('connection refused') ||
-    lower.includes('connect timeout')
+    lower.includes('connect timeout') ||
+    // viem fallback() throws this when EVERY provider in the chain failed the
+    // request at once (transient multi-provider blip). A decodable inner revert
+    // is caught earlier (SafeInnerRevertError / GS013 / GS026), so reaching here
+    // with this message means a transport-level failure — retry hits a healthy
+    // provider instead of failing the claim/deliver task outright.
+    lower.includes('all rpc providers in the fallback chain failed')
   ) {
     return true;
   }
