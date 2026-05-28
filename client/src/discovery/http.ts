@@ -23,6 +23,7 @@ import type {
   PluginPublication,
   PluginScoreHistoryRow,
   PublishedArtifact,
+  CodeDigestRewardRow,
 } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
@@ -369,6 +370,73 @@ interface OperatorCountAttemptsPage {
 interface InstanceSuccessCountsPage {
   verdictEnvelopeMetas: {
     items: Array<{ requestId: string; chainId: number; instanceId: string }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+// ── Per-codeDigest reward aggregates (#764) ──────────────────────────────────
+
+const CODEDIGEST_ATTEMPTS_QUERY = `
+query CodeDigestAttempts($codeDigests: [String!]!, $limit: Int!, $after: String) {
+  attemptEnvelopeMetas(
+    where: { codeDigest_in: $codeDigests, mode: "train", enrichmentStatus: "ok" },
+    limit: $limit,
+    after: $after,
+    orderBy: "enrichedAtBlock",
+    orderDirection: "desc"
+  ) {
+    items { requestId chainId codeDigest }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+`;
+
+const CODEDIGEST_VERDICTS_QUERY = `
+query CodeDigestVerdicts($requestIds: [String!]!, $limit: Int!, $after: String) {
+  verdictEnvelopeMetas(
+    where: { requestId_in: $requestIds },
+    limit: $limit,
+    after: $after,
+    orderBy: "requestId",
+    orderDirection: "asc"
+  ) {
+    items { requestId chainId actualPassed actualScore }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+`;
+
+// Optional operator scoping: restrict attempts to those the operator claimed.
+const CODEDIGEST_OPERATOR_ATTEMPTS_QUERY = `
+query CodeDigestOperatorAttempts($requestIds: [String!]!, $operator: String!, $limit: Int!, $after: String) {
+  attempts(
+    where: { requestId_in: $requestIds, operator: $operator },
+    limit: $limit,
+    after: $after,
+    orderBy: "createdAtBlock",
+    orderDirection: "asc"
+  ) {
+    items { requestId chainId }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+`;
+
+interface CodeDigestAttemptsPage {
+  attemptEnvelopeMetas: {
+    items: Array<{ requestId: string; chainId: number; codeDigest: string }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+interface CodeDigestVerdictsPage {
+  verdictEnvelopeMetas: {
+    items: Array<{ requestId: string; chainId: number; actualPassed: boolean; actualScore: string }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+interface CodeDigestOperatorAttemptsPage {
+  attempts: {
+    items: Array<{ requestId: string; chainId: number }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -1052,6 +1120,100 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return counts;
   }
 
+  async function getCodeDigestRewards(args: {
+    codeDigests: string[];
+    operator?: `0x${string}`;
+    solverNetManifestCid?: string;
+  }): Promise<CodeDigestRewardRow[]> {
+    if (args.codeDigests.length === 0) return [];
+    await ensureReady();
+
+    const MAX_PAGES = 20;
+    const PAGE_LIMIT = 1000;
+
+    // 1) Pull all train-mode attempt-meta rows for the requested codeDigests.
+    const requestKeyToDigest = new Map<string, string>(); // "requestId|chainId" -> codeDigest
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await postGql<CodeDigestAttemptsPage>(
+        gqlUrl, fetchImpl, CODEDIGEST_ATTEMPTS_QUERY,
+        { codeDigests: args.codeDigests, limit: PAGE_LIMIT, after: cursor },
+      );
+      for (const row of data.attemptEnvelopeMetas?.items ?? []) {
+        requestKeyToDigest.set(`${row.requestId}|${row.chainId}`, row.codeDigest);
+      }
+      const pi = data.attemptEnvelopeMetas?.pageInfo;
+      if (!pi?.hasNextPage || !pi.endCursor) break;
+      cursor = pi.endCursor;
+    }
+    if (requestKeyToDigest.size === 0) return [];
+
+    // 2) Optional operator scoping: keep only requests the operator claimed.
+    let allowedKeys: Set<string> | null = null;
+    if (args.operator) {
+      allowedKeys = new Set<string>();
+      const reqIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
+      cursor = null;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const data = await postGql<CodeDigestOperatorAttemptsPage>(
+          gqlUrl, fetchImpl, CODEDIGEST_OPERATOR_ATTEMPTS_QUERY,
+          { requestIds: reqIds, operator: args.operator, limit: PAGE_LIMIT, after: cursor },
+        );
+        for (const row of data.attempts?.items ?? []) allowedKeys.add(`${row.requestId}|${row.chainId}`);
+        const pi = data.attempts?.pageInfo;
+        if (!pi?.hasNextPage || !pi.endCursor) break;
+        cursor = pi.endCursor;
+      }
+    }
+
+    // 3) Pull verdict-meta rows for those requestIds (actualPassed/actualScore).
+    const verdictByKey = new Map<string, { passed: boolean; score: number | null }>();
+    const requestIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
+    cursor = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await postGql<CodeDigestVerdictsPage>(
+        gqlUrl, fetchImpl, CODEDIGEST_VERDICTS_QUERY,
+        { requestIds, limit: PAGE_LIMIT, after: cursor },
+      );
+      for (const row of data.verdictEnvelopeMetas?.items ?? []) {
+        const key = `${row.requestId}|${row.chainId}`;
+        const scoreNum = Number(row.actualScore);
+        verdictByKey.set(key, {
+          passed: Boolean(row.actualPassed),
+          score: Number.isFinite(scoreNum) && row.actualScore !== '' ? scoreNum : null,
+        });
+      }
+      const pi = data.verdictEnvelopeMetas?.pageInfo;
+      if (!pi?.hasNextPage || !pi.endCursor) break;
+      cursor = pi.endCursor;
+    }
+
+    // 4) Aggregate per codeDigest (only requests that HAVE a verdict count).
+    const agg = new Map<string, { attempts: number; passes: number; scoreSum: number; scoreN: number }>();
+    for (const [key, digest] of requestKeyToDigest) {
+      if (allowedKeys && !allowedKeys.has(key)) continue;
+      const v = verdictByKey.get(key);
+      if (!v) continue; // no verdict yet — not a completed attempt
+      const cur = agg.get(digest) ?? { attempts: 0, passes: 0, scoreSum: 0, scoreN: 0 };
+      cur.attempts += 1;
+      if (v.passed) cur.passes += 1;
+      if (v.score !== null) { cur.scoreSum += v.score; cur.scoreN += 1; }
+      agg.set(digest, cur);
+    }
+
+    const rows: CodeDigestRewardRow[] = [];
+    for (const [codeDigest, a] of agg) {
+      rows.push({
+        codeDigest,
+        attempts: a.attempts,
+        passes: a.passes,
+        passRate: a.attempts > 0 ? a.passes / a.attempts : 0,
+        avgScore: a.scoreN > 0 ? a.scoreSum / a.scoreN : 0,
+      });
+    }
+    return rows;
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1062,5 +1224,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     getPluginScores,
     listBuilderArtifacts,
     getInstanceSuccessCounts,
+    getCodeDigestRewards,
   };
 }
