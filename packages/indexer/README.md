@@ -76,9 +76,13 @@ The `/builders/:agentId/runs` route and `DiscoveryAPI.getPluginScores` return em
 
 ### No TaskFinalized / TaskRefunded events
 
-JinnRouter V3 does not emit a standalone `TaskFinalized` event.
-The indexer sets `task.finalized = true` when a `SolutionDeliveryClaimed` event
-is received for that task (the terminal success state in V3).
+JinnRouter V3 does not emit a standalone `TaskFinalized` event. The indexer
+recomputes `task.finalized` in the `VerdictDeliveryClaimed` handler: it sets
+`finalized = true` once the count of delivered `verdict` rows for an attempt
+reaches the task's `requiredVerdicts`, mirroring TaskCoordinator's on-chain
+`validVerdictCount == requiredVerdicts` rule (issue #530). `finalized` is NOT
+set on `SolutionDeliveryClaimed` — that event is the start of the evaluation
+phase, not finalization. When `requiredVerdicts == 0` the task never finalizes.
 
 `task.refunded` is populated from `JinnRouter.TaskBudgetRefunded` (wired in
 `ebu7.2`). `TaskBudgetRefunded` does exist on V3 — the prior comment claiming
@@ -139,7 +143,7 @@ the indexer adapter.
 
 ### Task
 
-One JinnRouter task (created on `TaskCreated`, marked finalized on `SolutionDeliveryClaimed`). Primary key: `id` (taskId as decimal string). Supports `findClaimableTasks` filtering by manifest digest, finalized flag, refunded flag, and joining with `Attempt` for attempt counts.
+One JinnRouter task (created on `TaskCreated`; `finalized` recomputed on `VerdictDeliveryClaimed` when delivered verdicts reach `requiredVerdicts`, issue #530). Primary key: `id` (taskId as decimal string). Supports `findClaimableTasks` filtering by manifest digest, finalized flag, refunded flag, and joining with `Attempt` for attempt counts.
 
 ### Attempt
 

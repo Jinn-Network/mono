@@ -3,7 +3,7 @@
  *
  * Ten entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X + attd:
  *
- *   Task                  — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
+ *   Task                  — from JinnRouter.TaskCreated; finalized recomputed from VerdictDeliveryClaimed
  *   Attempt               — from JinnRouter.TaskAttemptCreated
  *   Verdict               — from JinnRouter.VerdictDeliveryClaimed
  *   RewardDistribution    — from JinnDistributor.Claimed on Sepolia L1
@@ -26,11 +26,14 @@
  *
  * NOTE on Task.finalized / Task.refunded:
  *   JinnRouter does not emit standalone TaskFinalized or TaskRefunded events at
- *   v0.1. The finalized flag is set to true when a SolutionDeliveryClaimed event
- *   is received for a task (indicating the solution delivery was claimed by the
- *   operator, which is the terminal success state). refunded remains false in the
- *   indexer until contract events are added; the daemon's canClaimTask simulation
- *   compensates at claim time. See README.md §Known limitations.
+ *   v0.1. `finalized` is recomputed in handleVerdictDeliveryClaimed: it is set to
+ *   true once the count of delivered `verdict` rows for an attempt reaches the
+ *   task's `requiredVerdicts` — the indexer's proxy for TaskCoordinator's
+ *   on-chain `validVerdictCount == requiredVerdicts` finalization rule (issue
+ *   #530). It is NOT set on SolutionDeliveryClaimed (that is the start of
+ *   evaluation, not the end). `refunded` is set from TaskBudgetRefunded. The
+ *   daemon's canClaimTask simulation compensates at claim time. See
+ *   README.md §Known limitations.
  *
  * NOTE on claimWindowStart / claimWindowEnd:
  *   These fields are not emitted in the TaskCreated event on JinnRouter V3. They
@@ -47,8 +50,9 @@ import { onchainTable, index, relations, primaryKey } from 'ponder';
 // ── Task ─────────────────────────────────────────────────────────────────────
 
 /**
- * One JinnRouter task. Created on TaskCreated, marked finalized on
- * SolutionDeliveryClaimed.
+ * One JinnRouter task. Created on TaskCreated; `finalized` recomputed on
+ * VerdictDeliveryClaimed when delivered verdicts reach requiredVerdicts
+ * (issue #530).
  *
  * Supports findClaimableTasks: filter by manifestDigest, finalized, refunded;
  * join with Attempt for attempt/operatorAttempt counts.
@@ -86,9 +90,11 @@ export const task = onchainTable(
      */
     claimWindowEnd: t.bigint(),
     /**
-     * True when a SolutionDeliveryClaimed event is received for this task.
-     * JinnRouter V3 has no standalone TaskFinalized event; this is the
-     * best available proxy at v0.1.
+     * True once delivered verdicts for any attempt reach the task's
+     * requiredVerdicts — the indexer's proxy for TaskCoordinator's on-chain
+     * `validVerdictCount == requiredVerdicts` finalization (issue #530).
+     * Recomputed in handleVerdictDeliveryClaimed; NOT set on
+     * SolutionDeliveryClaimed. Monotonic.
      */
     finalized: t.boolean().notNull().default(false),
     /**
