@@ -62,7 +62,6 @@ interface OverviewStatusV1 {
       safeAddress?: string | null;
       agentId?: number | null;
       safeBoundToAgent?: boolean;
-      evicted?: boolean;
     }>;
   };
   /**

@@ -10,7 +10,7 @@ const baseState = {
     restartPending: false,
     daemonVersion: '0.1.5',
     latestVersion: '0.1.5',
-    services: [{ evicted: false, safeBound: true }],
+    services: [{ safeBound: true }],
     joinedSolverNets: { 'bafkreic-x': {} },
   },
 };
@@ -118,7 +118,7 @@ describe('deriveNotifications', () => {
       ...baseState,
       status: {
         ...baseState.status,
-        services: [{ evicted: false, safeBound: false }],
+        services: [{ safeBound: false }],
       },
     });
     expect(out).toContainEqual(expect.objectContaining({
@@ -173,53 +173,12 @@ describe('deriveNotifications', () => {
 });
 
 describe('deriveNotifications — eviction (#773)', () => {
-  const evictedAt = '2026-05-26T10:00:00.000Z';
-  const evictedAtMs = new Date(evictedAt).getTime();
-
-  it('never emits service_evicted when a service has evicted === true', () => {
+  it('does not emit service_evicted (removed from taxonomy)', () => {
     const out = deriveNotifications({
       ...baseState,
       status: {
         ...baseState.status,
-        services: [
-          { evicted: false, safeBound: true },
-          { evicted: true, safeBound: true },
-        ],
-      },
-    });
-    expect(out.map(n => n.kind)).not.toContain('service_evicted');
-  });
-
-  it('never emits service_evicted when evictedSince is fresh (within former #651 window)', () => {
-    const out = deriveNotifications({
-      ...baseState,
-      now: evictedAtMs + 60_000,
-      status: {
-        ...baseState.status,
-        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
-      },
-    });
-    expect(out.map(n => n.kind)).not.toContain('service_evicted');
-  });
-
-  it('never emits service_evicted when evictedSince is aged past former window', () => {
-    const out = deriveNotifications({
-      ...baseState,
-      now: evictedAtMs + 121_000,
-      status: {
-        ...baseState.status,
-        services: [{ evicted: true, safeBound: true, evictedSince: evictedAt }],
-      },
-    });
-    expect(out.map(n => n.kind)).not.toContain('service_evicted');
-  });
-
-  it('never emits service_evicted when evictedSince is absent', () => {
-    const out = deriveNotifications({
-      ...baseState,
-      status: {
-        ...baseState.status,
-        services: [{ evicted: true, safeBound: true }],
+        services: [{ safeBound: true }, { safeBound: true }],
       },
     });
     expect(out.map(n => n.kind)).not.toContain('service_evicted');

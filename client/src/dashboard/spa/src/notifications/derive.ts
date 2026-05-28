@@ -14,7 +14,7 @@ export interface DeriveInput {
     restartPending: boolean;
     daemonVersion: string;
     latestVersion?: string;
-    services: { evicted: boolean; safeBound: boolean; evictedSince?: string | null }[];
+    services: { safeBound: boolean }[];
     joinedSolverNets: Record<string, unknown>;
     passwordRotatedAt?: string; // ISO
   };

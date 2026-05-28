@@ -223,8 +223,7 @@ export interface StatusV1Response {
       evicted: boolean;
       /**
        * ISO 8601 first-observed-evicted timestamp. `null` when the service is
-       * not currently evicted. Drives the suppression-window logic on the
-       * deriver + Overview banner (issue #651).
+       * not currently evicted. Observability only (issue #773).
        */
       evictedSince: string | null;
     }>;
@@ -233,8 +232,7 @@ export interface StatusV1Response {
   };
   /**
    * Auto-restake (EvictionLoop) feature gating. Mirrors `main.ts`'s
-   * `evictionCheck` predicate so the SPA can suppress eviction notifications
-   * for `2 × checkIntervalMs` after first observation (issue #651).
+   * `evictionCheck` predicate. Observability on `/v1/status` (issue #773).
    */
   autoRestake: {
     enabled: boolean;

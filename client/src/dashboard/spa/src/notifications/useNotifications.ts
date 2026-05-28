@@ -36,7 +36,7 @@ const INTENT_KINDS: ['intent'] = ['intent'];
  * field mapping and defaults every unmapped field to a non-triggering value.
  *
  * Reviewed-by-Ritsu mapping (review of PR #426):
- * - `s.fleet.services[]` (NOT top-level `services`); per-service `evicted` and
+ * - `s.fleet.services[]` (NOT top-level `services`); per-service
  *   `safeBoundToAgent` (NOT `safeBound`). See `client/src/api/status-build.ts`.
  * - `joinedSolverNets` comes from `/v1/bootstrap`, NOT `/v1/status`. See
  *   `client/src/api/bootstrap-endpoint.ts`.
@@ -69,8 +69,7 @@ function mapStatusToDeriveInput(
   }
 
   // Map fleet.services → DeriveInput.services. The real field is
-  // `safeBoundToAgent`, not `safeBound`. Default missing flags to non-triggering
-  // values (evicted=false, safeBound=true).
+  // `safeBoundToAgent`, not `safeBound`. Default missing safeBound to true.
   const fleetServices: any[] = Array.isArray(s.fleet?.services) ? s.fleet.services : [];
 
   // joinedSolverNets lives on /v1/bootstrap. If empty AND bootstrap.mode is
@@ -108,8 +107,6 @@ function mapStatusToDeriveInput(
     daemonVersion: String(s.version ?? '0.0.0'),
     latestVersion: undefined,
     services: fleetServices.map((svc: any) => ({
-      evicted: Boolean(svc?.evicted),
-      // safeBound defaults to true (no notice) unless safeBoundToAgent is explicitly false.
       safeBound: svc?.safeBoundToAgent !== false,
     })),
     joinedSolverNets,

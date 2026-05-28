@@ -11,11 +11,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  mockDaemonApi,
-  DEFAULT_STATUS_PAYLOAD,
-  DEFAULT_RUNNING_BOOTSTRAP,
-} from './helpers/mock-daemon-api';
+import { mockDaemonApi, DEFAULT_STATUS_PAYLOAD } from './helpers/mock-daemon-api';
 
 const PORT = 17335;
 
@@ -112,7 +108,6 @@ async function installStatusMock(
         body: JSON.stringify(status),
       }),
   );
-  void DEFAULT_RUNNING_BOOTSTRAP;
 }
 
 const scenarios: Array<{
