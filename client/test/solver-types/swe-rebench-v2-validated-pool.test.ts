@@ -294,7 +294,7 @@ describe('validatePoolInstances', () => {
     const runner = makeRunner({
       a__pass: { passed_match: true, passed: ['tests/test_x.py::test_new'] },
       a__fail: { passed_match: false, passed: [], failed: [] },
-      a__ungradeable: Object.assign(new Error('eval could not grade'), { name: 'EvalCouldNotGradeError', reason: 'docker_unavailable' }),
+      a__ungradeable: Object.assign(new Error('eval could not grade'), { name: 'EvalCouldNotGradeError', reason: 'install_build_failed' }),
     });
     // commandRunner: docker returns a valid digest so substrate fields resolve;
     // git returns exitCode 1 so upstreamEvalCommit is omitted (non-fatal).
@@ -313,7 +313,7 @@ describe('validatePoolInstances', () => {
     expect((await store.getEntry('a__fail', EVAL_SEMANTICS_VERSION))?.scorable).toBe(false);
     const ung = await store.getEntry('a__ungradeable', EVAL_SEMANTICS_VERSION);
     expect(ung?.scorable).toBe(false);
-    expect(ung?.reason).toMatch(/docker_unavailable/);
+    expect(ung?.reason).toBe('ungradeable:install_build_failed');
   });
 
   it('skips non-Python instances (records them unscorable, never invokes the runner)', async () => {
