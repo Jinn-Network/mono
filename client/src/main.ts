@@ -1763,12 +1763,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       ? {
           discoveryApi: sharedDiscoveryApi,
           solverNetManifestCids: taskDiscoveryManifestCids,
-          // No explicit `onchainFromBlock` — let `MechAdapter`'s
+          // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
           // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow
           // through. Hardcoding here shadowed the adapter's default and
           // re-introduced the ghost-task floor every release; removing the
           // shadow makes `adapter.ts` the single source of truth. See gh
-          // #300.
+          // #300. An operator MAY opt in to a recent floor via
+          // `taskDiscoveryOnchainFromBlock` to bound the canonical getLogs
+          // scan (which otherwise parses a large history on the main thread
+          // and can stall the loop) and lean on the indexer DiscoveryAPI.
+          ...(config.taskDiscoveryOnchainFromBlock !== undefined
+            ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
+            : {}),
           ...(config.taskDiscoveryAllowedTaskIds?.length
             ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
             : {}),

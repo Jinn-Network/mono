@@ -1369,8 +1369,25 @@ export class FleetBootstrapper {
         console.error(
           `[jinn-earning] Noticed service ${svc.service_id} (fleet index ${index}) evicted on-chain; running distributor reStake to restake.`,
         );
-        state = await this.recoverEvictedService(state, mnemonic, index);
-        svc = state.services.find(s => s.index === index)!;
+        // #789: a startup reStake can revert (e.g. NotEnoughTimeStaked when the
+        // service was re-staked < minStakingDuration ago) or fail transiently.
+        // Treat it as non-fatal so the daemon still launches — work delivery and
+        // JINN claims are decoupled from OLAS staking (JinnDistributor mints on
+        // delivered-work counts, not stake state), so a failed startup reStake
+        // must not block the operator from earning. The standalone EvictionLoop
+        // retries on its own cadence when enabled; when staking is intentionally
+        // dropped (evictionCheckIntervalMs=0) this simply leaves the service
+        // evicted, which does not affect JINN earning.
+        try {
+          state = await this.recoverEvictedService(state, mnemonic, index);
+          svc = state.services.find(s => s.index === index)!;
+        } catch (err) {
+          console.error(
+            `[jinn-earning] Service ${svc.service_id} (fleet index ${index}) startup reStake failed (non-fatal); ` +
+            `continuing launch and deferring to EvictionLoop if enabled: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
 

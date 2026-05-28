@@ -191,6 +191,17 @@ export const JinnConfigSchema = z.object({
    */
   taskDiscoveryAllowedTaskIds: z.array(z.string()).optional(),
 
+  /**
+   * Opt-in lower bound (L2 block number) for the mech adapter's canonical
+   * on-chain TaskCreated backlog scan. Unset → the adapter's per-chain default
+   * (DEFAULT_TASK_DISCOVERY_FROM_BLOCK) flows through (see gh #300). Set this to
+   * a recent block to bound the scan to a small recent window so the indexer
+   * (DiscoveryAPI.findClaimableTasks) carries the bulk of discovery — the
+   * canonical getLogs scan over a large/bloated history parses huge responses
+   * on the main thread and can stall the event loop. Env: JINN_TASK_DISCOVERY_FROM_BLOCK.
+   */
+  taskDiscoveryOnchainFromBlock: z.number().int().min(0).optional(),
+
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint: z.string().optional(),
 
@@ -872,6 +883,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_EVICTION_CHECK_INTERVAL_MS']) merged.evictionCheckIntervalMs = Number.parseInt(env['JINN_EVICTION_CHECK_INTERVAL_MS'], 10);
   if (env['JINN_CHECKPOINT_INTERVAL_MS'] !== undefined) {
     merged.checkpointIntervalMs = Number.parseInt(env['JINN_CHECKPOINT_INTERVAL_MS'], 10);
+  }
+  if (env['JINN_TASK_DISCOVERY_FROM_BLOCK'] !== undefined) {
+    merged.taskDiscoveryOnchainFromBlock = Number.parseInt(env['JINN_TASK_DISCOVERY_FROM_BLOCK'], 10);
   }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
