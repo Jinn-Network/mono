@@ -44,6 +44,7 @@
 
 import * as fs from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
+import { once } from 'node:events';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { TranscriptEvent, TranscriptParser } from './transcript-parsers/types.js';
 import { ClaudeCodeJsonlParser } from './transcript-parsers/claude-code-jsonl.js';
@@ -256,6 +257,16 @@ export async function startTranscriptWatcher(
 
   watcher.on('add', enqueue);
   watcher.on('change', enqueue);
+
+  // Resolve only once chokidar has finished its initial scan and bound the
+  // underlying OS watches. With `awaitWriteFinish` enabled, chokidar does not
+  // process `add`/`change` events until `ready` has fired (see chokidar's
+  // `_emit` guard on `_readyEmitted`), so returning the watcher before `ready`
+  // means appends made immediately after `startTranscriptWatcher` can be
+  // silently dropped. Awaiting `ready` makes detection deterministic — the
+  // caller is guaranteed a live watcher — instead of racing fs-watch setup
+  // latency against a fixed polling budget (the root of #304's CI flake).
+  await once(watcher, 'ready');
 
   async function handleChange(state: SourceState): Promise<void> {
     if (shuttingDown) return;

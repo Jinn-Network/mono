@@ -175,6 +175,10 @@ describe('TranscriptWatcher', () => {
       session,
       JSON.stringify({ type: 'user', timestamp: '2026-05-07T00:00:00.000Z', message: { content: 'a' } }) + '\n',
     );
+    // startTranscriptWatcher now awaits chokidar's `ready`, so the watcher is
+    // guaranteed live before this append — detection is deterministic, not a
+    // race against fs-watch setup latency. The budget stays generous only to
+    // absorb OS-level detection latency under CI load.
     await waitFor(() => collected.length >= 1, 20000);
 
     await watcher.shutdown();
@@ -185,8 +189,31 @@ describe('TranscriptWatcher', () => {
       session,
       JSON.stringify({ type: 'user', timestamp: '2026-05-07T00:00:01.000Z', message: { content: 'b' } }) + '\n',
     );
-    // Should NOT trigger a dispatch
-    await new Promise((r) => setTimeout(r, 500));
+
+    // Assert the watcher is genuinely quiesced rather than polling for an
+    // absence over an arbitrary sleep. `shutdown()` resolves only after
+    // chokidar's `close()` and every in-flight handler settle, so a post-
+    // shutdown append cannot produce a dispatch. To prove that deterministically
+    // we stand up a *fresh* watcher on the same file and wait for it to observe
+    // the very append we just made: once the live control has detected the
+    // change, fs-watch has demonstrably surfaced it, so any dispatch the dead
+    // watcher were going to make would already have happened.
+    const controlCollected: typeof collected = [];
+    const control = await startTranscriptWatcher({
+      sources: [{ tool: 'claude-code', path: session, sessionId: 'sess-3-control' }],
+      onEvent: (envelope) => controlCollected.push(envelope),
+    });
+    try {
+      await fs.appendFile(
+        session,
+        JSON.stringify({ type: 'user', timestamp: '2026-05-07T00:00:02.000Z', message: { content: 'c' } }) + '\n',
+      );
+      await waitFor(() => controlCollected.length >= 1, 20000);
+    } finally {
+      await control.shutdown();
+    }
+
+    // The dead watcher must not have dispatched the post-shutdown append(s).
     expect(collected.length).toBe(before);
   });
 });
