@@ -22,7 +22,19 @@ The full task body carries the following fields under `goal.spec`:
 
 ## Repository handling
 
-Treat `$workingDir/repo` as the only task repository checkout. Do not reuse a repo from another `workingDir` or from `implStateDir`. If `$workingDir/repo/.git` is missing, clone `https://github.com/<goal.spec.repo>.git` into `$workingDir/repo` and checkout `<goal.spec.base_commit>` before editing. All in-tree edits must live in `$workingDir/repo` — that's both where the test infrastructure expects to find them and where the daemon's harvester reads a `git diff` from as a last-resort fallback if a typed-payload submission never lands.
+Treat `$workingDir/repo` as the only task repository checkout. Do not reuse a repo from another `workingDir` or from `implStateDir`. All in-tree edits must live in `$workingDir/repo` — that's both where the test infrastructure expects to find them and where the daemon's harvester reads a `git diff` from as a last-resort fallback if a typed-payload submission never lands.
+
+If `$workingDir/repo/.git` is missing, materialise the repo at `<goal.spec.base_commit>` by fetching that exact SHA — **do not** `git clone` and then `git checkout`. Run these commands verbatim (substituting the two task fields):
+
+```bash
+mkdir -p "$workingDir/repo" && cd "$workingDir/repo"
+git init
+git remote add origin https://github.com/<goal.spec.repo>.git
+git fetch --depth 1 origin <goal.spec.base_commit>
+git checkout FETCH_HEAD
+```
+
+Why this exact sequence, and not a clone: `<goal.spec.base_commit>` is frequently **off the default branch** (a commit on a PR branch or an old point in history). A `git clone` only brings down the default branch tip, so `git checkout <goal.spec.base_commit>` then fails with `fatal: reference is not a tree` / `unable to read tree`, and a plain `git fetch origin` without the SHA won't help (it only pulls branch refs). GitHub serves any SHA by id, so `git fetch --depth 1 origin <goal.spec.base_commit>` retrieves exactly that one commit — fast, shallow, and robust whether or not the SHA is on a branch. After `git checkout FETCH_HEAD`, confirm you are on the base commit with `git rev-parse HEAD` (it must equal `<goal.spec.base_commit>`) before editing.
 
 ## Test semantics: FAIL_TO_PASS and PASS_TO_PASS
 
