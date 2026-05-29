@@ -626,9 +626,9 @@ export class TaskRunPersistence {
   }
 
   /**
-   * Fetch all terminal tasks (COMPLETE or FAILED).
-   * Used by the working-dir reaper (issue #320) to decide which on-disk
-   * scratch directories are safe to delete.
+   * Fetch all terminal tasks (every state in `TERMINAL_STATES`: COMPLETE,
+   * FAILED, RACE_LOST). Used by the working-dir reaper (issue #320) to
+   * decide which on-disk scratch directories are safe to delete.
    */
   getTerminal(): PersistedTaskRun[] {
     const terminalList = [...TERMINAL_STATES];
@@ -640,7 +640,8 @@ export class TaskRunPersistence {
 
   /**
    * Atomic snapshot for the working-dir reaper (issue #320): every task run's
-   * request ID partitioned into terminal (COMPLETE / FAILED) vs in-flight.
+   * request ID partitioned into terminal (every state in `TERMINAL_STATES`)
+   * vs in-flight.
    *
    * The reaper must NOT read in-flight and terminal sets as two separate
    * queries — a task transitioning DELIVERING → COMPLETE between the two reads

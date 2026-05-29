@@ -2235,11 +2235,9 @@ export class TaskEngine {
       if (current && current.state === task.state) {
         const classification = this._classifyAndMarkTerminal(task, err, 'recovery');
         const reason = err instanceof Error ? err.message : String(err);
-        if (classification === 'race_lost') {
-          console.log(`[harness-engine] resume pruned for ${task.requestId}: ${reason}`);
-        } else {
-          console.error(`[harness-engine] resume failed for ${task.requestId}: ${reason}`);
-        }
+        const log = classification === 'race_lost' ? console.log : console.error;
+        const verb = classification === 'race_lost' ? 'pruned' : 'failed';
+        log(`[harness-engine] resume ${verb} for ${task.requestId}: ${reason}`);
       }
       throw err;
     }

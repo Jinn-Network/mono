@@ -69,31 +69,17 @@ function raceLossRevert(name: string): SafeInnerRevertError {
 }
 
 /**
- * Engine subclass that lets the test inject the error a given transition
- * should throw. Records which transition was called.
+ * Engine subclass that lets the test inject the error `deliver()` should
+ * throw. All three tests pre-position the row at DELIVERING via direct
+ * `persistence.transition` calls, so only the deliver path needs an
+ * override.
  */
 class FailingEngine extends TaskEngine {
-  readonly called: Map<string, string[]> = new Map();
   deliverError: Error | null = null;
-  claimError: Error | null = null;
-
-  private record(task: PersistedTaskRun, name: string): void {
-    if (!this.called.has(task.requestId)) this.called.set(task.requestId, []);
-    this.called.get(task.requestId)!.push(name);
-  }
 
   get testPersistence(): TaskRunPersistence { return this.persistence; }
 
-  override async claim(task: PersistedTaskRun): Promise<void> {
-    this.record(task, 'claim');
-    if (this.claimError) throw this.claimError;
-    // No-op: advance DISCOVERED → CLAIMED so process()'s outer state machine
-    // doesn't loop.
-    this.persistence.transition(task.requestId, TaskRunState.CLAIMED);
-  }
-
-  override async deliver(task: PersistedTaskRun): Promise<void> {
-    this.record(task, 'deliver');
+  override async deliver(_task: PersistedTaskRun): Promise<void> {
     if (this.deliverError) throw this.deliverError;
   }
 }
