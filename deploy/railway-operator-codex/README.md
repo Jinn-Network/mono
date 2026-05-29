@@ -11,7 +11,7 @@ Operators who want to run locally should use `jinn run` directly (see `client/RE
   - Sets a global git identity so the harness's plugin session-start hooks can `git commit --allow-empty` to initialise their per-task workdirs without an `"Author identity unknown"` error.
   - Decodes the base64 `CODEX_AUTH_JSON` env var into `$CODEX_HOME/auth.json` so the Codex CLI is authenticated without an interactive login.
   - Seeds `/data/config.json` from `CONFIG_TEMPLATE_JSON` on first boot only — durable config lives on the Railway volume after that.
-- **`railway.toml`** at the monorepo root — points Railway at this Dockerfile and sets `restartPolicyType=ON_FAILURE` with 10 retries.
+- **`railway.toml`** (in this directory — **must NOT be at the monorepo root**) — points Railway at this Dockerfile and sets `restartPolicyType=ON_FAILURE` with 10 retries. ⚠️ A root `railway.toml` is applied by Railway to *every* service that deploys from this monorepo — including `jinn-indexer` (Ponder), `jinn-worker`, etc. — overriding their own build configs and forcing this operator-codex image on them. That is exactly what broke the indexer for hours (#846): the indexer started building this image instead of `packages/indexer/deploy/Dockerfile`, OOM-failed every deploy, and the `ON_FAILURE` retry churn knocked the live indexer offline. So this recipe lives here, not at root, and **the codex-operator service must set its Railway "Config as code" path to `deploy/railway-operator-codex/railway.toml`** (Settings → Config-as-code) so the recipe applies only to it.
 
 ## Required Railway env vars
 
@@ -71,6 +71,8 @@ railway up --service <name> --environment production --ci -m "<message>"
 ```
 
 The Railway CLI uploads the worktree (respecting `.gitignore`, so `node_modules` is skipped) and builds the Dockerfile remotely.
+
+**One-time service setup (required since the recipe is no longer at the repo root):** in this service's Railway settings, set **Config as code → `deploy/railway-operator-codex/railway.toml`**. Without it the service falls back to nixpacks/auto-detect and won't build this Dockerfile. Do **not** move `railway.toml` back to the repo root — see the warning above (it hijacks `jinn-indexer` and every other monorepo service, #846).
 
 ## Open follow-ups
 
