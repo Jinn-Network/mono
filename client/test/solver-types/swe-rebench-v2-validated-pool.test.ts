@@ -44,9 +44,22 @@ function poolTask(id: string, overrides: Partial<PoolTask> = {}): PoolTask {
 }
 
 describe('normalizeReason (#493 reason histogram)', () => {
-  it('collapses gold-patch-not-resolved (f2p X, p2p_broke Y) into the bucket name', () => {
+  it('splits gold-patch-not-resolved by PASS_TO_PASS breakage (#806)', () => {
+    // p2p_broke == 0: genuinely-hard / mislabeled instance — leave alone.
     expect(normalizeReason('gold-patch-not-resolved (f2p 1, p2p_broke 0)')).toBe('gold-patch-not-resolved');
-    expect(normalizeReason('gold-patch-not-resolved (f2p 0, p2p_broke 5)')).toBe('gold-patch-not-resolved');
+    expect(normalizeReason('gold-patch-not-resolved (f2p 0, p2p_broke 0)')).toBe('gold-patch-not-resolved');
+    // p2p_broke > 0: PASS_TO_PASS tests that should still pass are failing —
+    // environment/setup problem, a chase-able evaluator-capacity blocker.
+    expect(normalizeReason('gold-patch-not-resolved (f2p 0, p2p_broke 5)')).toBe('gold-patch-not-resolved:p2p-broke');
+    expect(normalizeReason('gold-patch-not-resolved (f2p 0, p2p_broke 53)')).toBe('gold-patch-not-resolved:p2p-broke');
+    expect(normalizeReason('gold-patch-not-resolved (f2p 2, p2p_broke 1)')).toBe('gold-patch-not-resolved:p2p-broke');
+  });
+
+  it('falls back to the base bucket when the p2p_broke detail is absent or unparseable', () => {
+    // Defensive: a bare or legacy reason with no parseable count must not
+    // be miscounted as an environment break.
+    expect(normalizeReason('gold-patch-not-resolved')).toBe('gold-patch-not-resolved');
+    expect(normalizeReason('gold-patch-not-resolved (malformed)')).toBe('gold-patch-not-resolved');
   });
 
   it('collapses transient:HF-429:<msg> variants into transient:HF-429', () => {
@@ -96,12 +109,34 @@ describe('summarizeValidatedPool (#493 reason histogram)', () => {
     expect(summary.scorable).toBe(2);
     expect(summary.unscorable).toBe(7);
     // byReason is an array of {reason, count} sorted descending by count then ascending by reason.
+    // Per #806 the two gold-patch-not-resolved entries split: a__6 (p2p_broke 0)
+    // stays in the base bucket; a__7 (p2p_broke 5) moves to the :p2p-broke bucket.
     expect(summary.byReason).toEqual([
       { reason: 'ungradeable:pytest_missing', count: 3 },
-      { reason: 'gold-patch-not-resolved', count: 2 },
       { reason: 'gold-patch-resolves', count: 2 },
       { reason: 'error:HF-429', count: 1 },
+      { reason: 'gold-patch-not-resolved', count: 1 },
+      { reason: 'gold-patch-not-resolved:p2p-broke', count: 1 },
       { reason: 'transient:HF-429', count: 1 },
+    ]);
+  });
+
+  it('separates p2p-intact and p2p-broke gold-patch-not-resolved entries into distinct buckets (#806)', () => {
+    const file = {
+      schemaVersion: 'swe-rebench-v2-validated-pool.v1',
+      evalSemanticsVersion: '4',
+      updatedAt: '2026-05-28T00:00:00Z',
+      entries: {
+        intact__1: { scorable: false, reason: 'gold-patch-not-resolved (f2p 1, p2p_broke 0)', checkedAt: '2026-05-28T00:00:00Z' },
+        intact__2: { scorable: false, reason: 'gold-patch-not-resolved (f2p 0, p2p_broke 0)', checkedAt: '2026-05-28T00:00:00Z' },
+        // the #806 concrete example: noppanut15__depthviz-55 with 53 broken p2p tests
+        broke__1: { scorable: false, reason: 'gold-patch-not-resolved (f2p 0, p2p_broke 53)', checkedAt: '2026-05-28T00:00:00Z' },
+      },
+    };
+    const summary = summarizeValidatedPool(file);
+    expect(summary.byReason).toEqual([
+      { reason: 'gold-patch-not-resolved', count: 2 },
+      { reason: 'gold-patch-not-resolved:p2p-broke', count: 1 },
     ]);
   });
 

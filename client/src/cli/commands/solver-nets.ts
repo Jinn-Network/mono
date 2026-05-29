@@ -543,6 +543,15 @@ Output flags:
         if (s.highestYieldBlocker) {
           lines.push(`Highest-yield unscorable blocker: ${s.highestYieldBlocker}`);
         }
+        // #806: gold-patch-not-resolved entries whose PASS_TO_PASS tests broke
+        // (p2p_broke > 0) are usually an environment/setup problem, not a
+        // non-resolving gold patch — a chase-able, recoverable capacity blocker.
+        const p2pBroke = s.byReason.find((b) => b.reason === 'gold-patch-not-resolved:p2p-broke');
+        if (p2pBroke && p2pBroke.count > 0) {
+          lines.push(
+            `Candidate capacity blocker: ${p2pBroke.count} gold-patch-not-resolved entr${p2pBroke.count === 1 ? 'y' : 'ies'} broke PASS_TO_PASS (environment/setup problem, likely recoverable — investigate before treating as non-resolving patches)`,
+          );
+        }
         if (s.freshness.status === 'stale') {
           lines.push(`Freshness: stale — ${s.freshness.reason}`);
           lines.push(`  run: ${s.freshness.cli}`);

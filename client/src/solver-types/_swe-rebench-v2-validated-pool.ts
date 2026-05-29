@@ -512,13 +512,33 @@ export class ValidatedPoolStore {
 }
 
 /**
+ * Histogram bucket for gold-patch-not-resolved entries whose PASS_TO_PASS
+ * tests broke (`p2p_broke > 0`). These are usually an environment/setup
+ * problem (missing system deps, a pytest/plugin version mismatch) rather
+ * than a non-resolving gold patch — a chase-able evaluator-capacity blocker,
+ * the same shape as `ungradeable:pytest_missing`. See issue #806.
+ */
+export const GOLD_PATCH_NOT_RESOLVED_P2P_BROKE_REASON = 'gold-patch-not-resolved:p2p-broke';
+
+/**
  * Collapse a stored `reason` string into a histogram bucket. Diagnostic
  * detail (`(f2p X, p2p_broke Y)`, the verbatim HF 429 message) is kept on
  * the entry for debugging, but the bucket name is what matters for the
  * #493 reason-histogram CLI. Unknown reasons pass through unchanged.
+ *
+ * Per #806, `gold-patch-not-resolved` is split by PASS_TO_PASS breakage:
+ * entries with `p2p_broke > 0` map to a distinct
+ * `gold-patch-not-resolved:p2p-broke` bucket (environment broke — chase-able),
+ * while `p2p_broke == 0` keeps the base bucket (patch genuinely doesn't
+ * resolve — leave alone). The split is display-only; the per-entry `reason`
+ * string keeps the full `(f2p X, p2p_broke Y)` detail.
  */
 export function normalizeReason(reason: string): string {
-  if (reason.startsWith('gold-patch-not-resolved')) return 'gold-patch-not-resolved';
+  if (reason.startsWith('gold-patch-not-resolved')) {
+    const p2pBroke = reason.match(/p2p_broke (\d+)/);
+    if (p2pBroke && Number(p2pBroke[1]) > 0) return GOLD_PATCH_NOT_RESOLVED_P2P_BROKE_REASON;
+    return 'gold-patch-not-resolved';
+  }
   if (reason.startsWith('transient:HF-429:')) return 'transient:HF-429';
   // Pre-#578 legacy: 429s recorded as `error:HF datasets-server returned 429 for ...`.
   if (/^error:HF datasets-server returned 429\b/.test(reason)) return 'error:HF-429';
