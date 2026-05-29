@@ -1,5 +1,7 @@
 // client/src/harnesses/impls/hermes-agent/harness.ts
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
+import type { Task } from '../../../types/task.js';
+import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { HERMES_AGENT_HARNESS } from '../../names.js';
 import type { HermesHarnessAdapter } from './adapter.js';
 import { harvestOutput } from '../learner/harvest.js';
@@ -167,6 +169,19 @@ export class HermesHarness implements Harness {
     // Evaluation is not supported: Hermes has no evaluator-side plugins
     // (verdict signing, checker contracts).
     return spec.role !== 'evaluation' && spec.solverType === 'swe-rebench-v2.v1';
+  }
+
+  /**
+   * gh #300 — solver-side ghost-task admission (Tier 1, zero-fetch).
+   * Reject tasks whose on-chain `vettedPoolRef` announces an
+   * `evalSemanticsVersion` no local evaluator could grade. Fails open when the
+   * ref is absent (recency floor guards ref-less ghosts). See
+   * `spec/2026-05-29-ghost-task-admission-symmetric-gate.md`.
+   */
+  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const mismatch = vettedPoolRefSemanticsMismatch(task.eligibility);
+    if (mismatch) return { ok: false, reason: mismatch };
+    return { ok: true };
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {

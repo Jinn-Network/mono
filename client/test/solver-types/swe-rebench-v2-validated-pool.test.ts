@@ -15,6 +15,9 @@ import {
   sweRebenchV2VettedPoolArtifactMetadataKey,
   normalizeReason,
   summarizeValidatedPool,
+  vettedPoolRefSemanticsMismatch,
+  SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
+  SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
@@ -1128,5 +1131,44 @@ describe('validatePoolInstances — transient operator-environment infra handlin
     );
     expect(summary2.checked).toBe(0);
     expect(runner.runEval).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('vettedPoolRefSemanticsMismatch (gh #300 solver-side ghost-task gate)', () => {
+  function ref(evalSemanticsVersion: string): Record<string, unknown> {
+    return {
+      vettedPoolRef: {
+        schemaVersion: SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
+        artifactType: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+        manifestCid: 'bafyManifest',
+        artifactCid: 'bafyArtifact',
+        artifactHash: `sha256:${'a'.repeat(64)}`,
+        evalSemanticsVersion,
+        publishedAt: '2026-05-29T00:00:00.000Z',
+      },
+    };
+  }
+
+  it('returns null when the ref semantics version matches the local constant', () => {
+    expect(vettedPoolRefSemanticsMismatch(ref(EVAL_SEMANTICS_VERSION))).toBeNull();
+  });
+
+  it('returns a reason when the ref announces an older semantics version (the observed ghost class)', () => {
+    const reason = vettedPoolRefSemanticsMismatch(ref('3'));
+    expect(reason).not.toBeNull();
+    expect(reason).toContain('evalSemanticsVersion=3');
+    expect(reason).toContain(`EVAL_SEMANTICS_VERSION=${EVAL_SEMANTICS_VERSION}`);
+  });
+
+  it('fails open (returns null) when no vettedPoolRef is present', () => {
+    expect(vettedPoolRefSemanticsMismatch(undefined)).toBeNull();
+    expect(vettedPoolRefSemanticsMismatch({})).toBeNull();
+    expect(vettedPoolRefSemanticsMismatch({ otherKey: 'x' })).toBeNull();
+  });
+
+  it('surfaces a malformed ref as a reason rather than throwing', () => {
+    const reason = vettedPoolRefSemanticsMismatch({ vettedPoolRef: { schemaVersion: 'wrong' } });
+    expect(reason).not.toBeNull();
+    expect(reason).toContain('invalid');
   });
 });

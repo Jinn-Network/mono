@@ -424,6 +424,42 @@ export function vettedPoolArtifactRefFromEligibility(eligibility: Record<string,
   return parseVettedPoolArtifactRef(raw);
 }
 
+/**
+ * gh #300 — solver-side ghost-task admission, Tier 1 (zero-fetch).
+ *
+ * Returns a human-readable reason string when the task's on-chain
+ * `vettedPoolRef` announces an `evalSemanticsVersion` that no local evaluator
+ * could grade under the current {@link EVAL_SEMANTICS_VERSION}, otherwise
+ * `null`. This is the symmetric counterpart to the evaluator's hard gate in
+ * `loadPublishedPoolRow` (swe-rebench-v2-evaluator/harness.ts): the evaluator
+ * already rejects semantics-skewed tasks at verdict time; this lets the
+ * solver reject them at claim time instead of burning compute on a task its
+ * own evaluator will refuse to score.
+ *
+ * Deliberately **fails open when the ref is absent** (returns `null`): pre-
+ * `vettedPoolRef` and `python-floor` tasks carry no ref and are still guarded
+ * by the recency floor (`DEFAULT_TASK_DISCOVERY_FROM_BLOCK`). Closing those
+ * fail-closed is a network-wide behavioural change deferred to Tier 2 (see
+ * `spec/2026-05-29-ghost-task-admission-symmetric-gate.md`). A malformed ref
+ * surfaces as a mismatch reason rather than throwing, so the claim path never
+ * crashes on a bad ref.
+ */
+export function vettedPoolRefSemanticsMismatch(
+  eligibility: Record<string, unknown> | undefined,
+): string | null {
+  let ref: SolverNetArtifactRef | null;
+  try {
+    ref = vettedPoolArtifactRefFromEligibility(eligibility);
+  } catch (err) {
+    return `vettedPoolRef invalid: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  if (!ref) return null; // no ref → fail open (recency floor guards these)
+  if (ref.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+    return `vettedPoolRef evalSemanticsVersion=${ref.evalSemanticsVersion} cannot be graded under local EVAL_SEMANTICS_VERSION=${EVAL_SEMANTICS_VERSION} (ghost task, gh #300)`;
+  }
+  return null;
+}
+
 export class ValidatedPoolStore {
   private readonly file: string;
   private cache: ValidatedPoolFile | null = null;
