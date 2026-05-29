@@ -412,6 +412,7 @@ describe('gatherStatusForApi', () => {
         failed: 0,
         settledFailed: 0,
         localErrors: 0,
+        raceLost: 0,
       });
     });
   });

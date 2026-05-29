@@ -448,6 +448,7 @@ function predictionV1Unavailable(
       failed: 0,
       settledFailed: 0,
       localErrors: 0,
+      raceLost: 0,
     },
     latest: {
       taskAt: null,
