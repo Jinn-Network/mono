@@ -967,6 +967,8 @@ export interface DebugReportRedactionSummary {
   version: string;
   redacted: string[];
   kept: string[];
+  /** Items included but NOT redacted (e.g. the screenshot). Optional. */
+  notRedacted?: string[];
 }
 
 export interface DebugReportManifest {

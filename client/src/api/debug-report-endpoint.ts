@@ -17,7 +17,7 @@
 
 import type { Hono } from 'hono';
 import { basename } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { buildConfigProvenance } from '../config.js';
@@ -54,18 +54,25 @@ function decodeScreenshot(value: unknown): Buffer | undefined {
   }
 }
 
-/** Read the rotated log files for the bundle. Best-effort — never throws. */
-function readLogFiles(): Array<{ name: string; content: Buffer }> {
-  const out: Array<{ name: string; content: Buffer }> = [];
-  let paths: string[];
+/** The rotated log files' on-disk paths, in bundle order. Never throws. */
+function logFilePaths(): string[] {
   try {
-    paths = getFileLogger().listLogFiles();
+    return getFileLogger().listLogFiles();
   } catch {
-    return out;
+    return [];
   }
-  for (const path of paths) {
+}
+
+/**
+ * Read the rotated log files for the bundle. Best-effort — never throws.
+ * Async (`fs/promises.readFile`) so reading up to ~25 MiB of rotated logs
+ * does not block the daemon event loop on the request path.
+ */
+async function readLogFiles(): Promise<Array<{ name: string; content: Buffer }>> {
+  const out: Array<{ name: string; content: Buffer }> = [];
+  for (const path of logFilePaths()) {
     try {
-      out.push({ name: basename(path), content: readFileSync(path) });
+      out.push({ name: basename(path), content: await readFile(path) });
     } catch {
       // Skip an unreadable log file rather than failing the whole bundle.
     }
@@ -76,8 +83,9 @@ function readLogFiles(): Array<{ name: string; content: Buffer }> {
 export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig): void {
   // GET /v1/debug-report/manifest — describe the bundle before download.
   app.get('/v1/debug-report/manifest', (c) => {
+    const logNames = logFilePaths().map((p) => `logs/${basename(p)}`);
     return c.json({
-      files: [...DEBUG_REPORT_FILES, 'logs/daemon.log', 'dashboard-screenshot.png'],
+      files: [...DEBUG_REPORT_FILES, ...logNames, 'dashboard-screenshot.png'],
       redaction: {
         version: REDACTION_VERSION,
         redacted: [
@@ -92,6 +100,11 @@ export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig)
           'RPC hostnames and path shape (needed to reproduce network issues)',
           'contract and deployment addresses',
           'file paths',
+        ],
+        notRedacted: [
+          'dashboard-screenshot.png — a pixel capture of the screen; text '
+            + 'redaction does not apply, so anything visible at capture time '
+            + 'appears in it. Review before sharing.',
         ],
       },
     });
@@ -139,12 +152,12 @@ export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig)
     }
 
     const generatedAt = new Date().toISOString();
-    const bundle = assembleDebugReport({
+    const bundle = await assembleDebugReport({
       status,
       config: config.config,
       configProvenance,
       activityEvents,
-      logFiles: readLogFiles(),
+      logFiles: await readLogFiles(),
       daemonVersion: buildInfo.implVersion,
       screenshotPng,
       generatedAt,

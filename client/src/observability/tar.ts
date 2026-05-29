@@ -10,7 +10,10 @@
  * (the caller pipes the output through `zlib.gzipSync`).
  */
 
-import { gzipSync } from 'node:zlib';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gzipAsync = promisify(gzip);
 
 const BLOCK = 512;
 
@@ -73,9 +76,14 @@ export function writeTar(files: TarFile[]): Buffer {
   return Buffer.concat(parts);
 }
 
-/** Serialize files into a gzip-compressed tar (`.tar.gz`) buffer. */
-export function writeTarGz(files: TarFile[]): Buffer {
-  return gzipSync(writeTar(files));
+/**
+ * Serialize files into a gzip-compressed tar (`.tar.gz`) buffer. Async so the
+ * gzip pass runs off the main thread on the libuv pool — a worst-case bundle
+ * is tens of MiB of logs and `gzipSync` would stall every daemon loop while it
+ * compressed.
+ */
+export async function writeTarGz(files: TarFile[]): Promise<Buffer> {
+  return gzipAsync(writeTar(files));
 }
 
 /** Parse an octal numeric field, tolerating NUL/space padding. */

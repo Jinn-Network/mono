@@ -58,8 +58,9 @@ export function bundleStamp(generatedAt: string): string {
 
 /**
  * Assemble a redacted `.tar.gz` debug-report bundle. Returns the gzip buffer.
+ * Async because the gzip pass is offloaded to the libuv pool (see `writeTarGz`).
  */
-export function assembleDebugReport(input: DebugReportInput): Buffer {
+export async function assembleDebugReport(input: DebugReportInput): Promise<Buffer> {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const root = `jinn-debug-report-${bundleStamp(generatedAt)}`;
   const at = (rel: string): string => `${root}/${rel}`;
@@ -104,5 +105,5 @@ export function assembleDebugReport(input: DebugReportInput): Buffer {
     });
   }
 
-  return writeTarGz(files);
+  return await writeTarGz(files);
 }

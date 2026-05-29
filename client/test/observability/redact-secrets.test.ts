@@ -314,4 +314,61 @@ describe('redaction report', () => {
     expect(report).toMatch(/RPC/);
     expect(report).toMatch(/kept|retained/i);
   });
+
+  it('discloses that the dashboard screenshot is NOT redacted', () => {
+    const report = buildRedactionReport();
+    expect(report).toMatch(/not redacted/i);
+    expect(report).toMatch(/screenshot/i);
+  });
+});
+
+describe('redaction — #420 code-review hardening', () => {
+  it('does not stack-overflow on a malformed URL in free text (mutual-recursion guard)', () => {
+    // `http://[bad` matches URL_RE but `new URL()` throws — the catch path
+    // must not re-enter the URL scanner. A pre-fix build recurses to death.
+    const out = redactValue({ note: 'boom at http://[bad while connecting' });
+    expect((out as { note: string }).note).toContain('http://[bad');
+  });
+
+  it('strips credentials from a malformed-but-secret-bearing URL without recursing', () => {
+    const hex = '0x' + 'ab'.repeat(32);
+    const out = redactRpcUrl(`http://[bad/${hex}`);
+    expect(out).not.toContain(hex);
+  });
+
+  it('redacts credentials in plural rpcUrls array entries (incl. wss://)', () => {
+    const out = redactValue({
+      rpcUrls: [
+        'https://rpc.example.com/v3/PLANTEDhttpKey0001',
+        'wss://user:PLANTEDwssPass@ws.example.com/feed',
+      ],
+    }) as { rpcUrls: string[] };
+    expect(out.rpcUrls[0]).toContain('rpc.example.com');
+    expect(out.rpcUrls[0]).not.toContain('PLANTEDhttpKey0001');
+    expect(out.rpcUrls[1]).toContain('ws.example.com');
+    expect(out.rpcUrls[1]).not.toContain('PLANTEDwssPass');
+  });
+
+  it('strips a credential hidden in a URL fragment', () => {
+    const out = redactRpcUrl('https://rpc.example.com/#apikey=PLANTEDfragmentKey');
+    expect(out).toContain('rpc.example.com');
+    expect(out).not.toContain('PLANTEDfragmentKey');
+  });
+
+  it('redacts a 64-hex value under a *Hash key that is not a public identifier', () => {
+    // `passwordHash` must NOT be exempted by the public-identifier allowlist.
+    const secret = '0x' + 'de'.repeat(32);
+    const out = redactValue({ passwordHash: secret, keyHash: secret }) as Record<string, unknown>;
+    expect(out['passwordHash']).not.toBe(secret);
+    expect(String(out['passwordHash'])).toMatch(/redacted/i);
+    expect(out['keyHash']).not.toBe(secret);
+  });
+
+  it('still keeps prefixed public identifiers (txHash / blockHash) verbatim', () => {
+    const h = '0x' + 'ee'.repeat(32);
+    const out = redactValue({ txHash: h, blockHash: h, deliveryTxHash: h }) as Record<string, unknown>;
+    expect(out['txHash']).toBe(h);
+    expect(out['blockHash']).toBe(h);
+    expect(out['deliveryTxHash']).toBe(h);
+  });
 });

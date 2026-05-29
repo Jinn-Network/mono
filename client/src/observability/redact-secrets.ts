@@ -127,8 +127,11 @@ export function redactRpcUrl(url: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    // Not a parseable URL — fall back to the coarse error-message redactor.
-    return redactStringValue(url);
+    // Not a parseable URL. Apply only the non-URL string redactors here —
+    // calling redactStringValue would re-run URL_RE on the same unparseable
+    // string and recurse straight back into redactRpcUrl, overflowing the
+    // stack on a malformed URL (e.g. `http://[bad`) in an error message.
+    return url.replace(HEX64_RE, marker('hex64')).replace(JWT_RE, marker('jwt'));
   }
 
   // Drop userinfo (user:pass@host).
@@ -138,6 +141,10 @@ export function redactRpcUrl(url: string): string {
   // Drop every query parameter — RPC URLs do not need query state to
   // reproduce a connectivity issue, and keys hide there.
   parsed.search = '';
+
+  // Drop the fragment too — non-standard providers occasionally stash a
+  // `#key=...` credential there.
+  parsed.hash = '';
 
   // Strip opaque path segments that look like API keys: a long alphanumeric
   // run, or a segment following a version-style prefix (v2/v3/...).
@@ -157,9 +164,12 @@ export function redactRpcUrl(url: string): string {
   return parsed.toString();
 }
 
-/** True for keys whose values hold an RPC URL. */
+/** True for keys whose values hold an RPC URL (singular or plural array). */
 function isRpcUrlKey(key: string): boolean {
-  return /rpc[_-]?url$/i.test(key) || /(^|[._-])rpcurl$/i.test(key);
+  // Matches singular (`rpcUrl`) and plural (`rpcUrls`) forms — the resolved
+  // JinnConfig carries both, and the plural arrays hold the full fallback
+  // chain, which is exactly where operator API keys live.
+  return /rpc[_-]?urls?$/i.test(key) || /(^|[._-])rpcurls?$/i.test(key);
 }
 
 /**
@@ -171,8 +181,11 @@ function isRpcUrlKey(key: string): boolean {
  * on-chain state. A private key is never legitimately stored under one of
  * these names; `isSecretName` still catches `privateKey` / `mnemonic` / etc.
  */
+// Each arm is an explicitly-named public identifier. A bare `hash` arm is
+// deliberately NOT included: it would exempt keys like `passwordHash` /
+// `keyHash` from the hex64 redactor and leak a derived secret.
 const PUBLIC_IDENTIFIER_KEY_RE =
-  /(^|\.)(request\.id|tx\.hash|task\.id|block\.hash|manifest\.(digest|hash)|hash)$/;
+  /(^|\.)(request\.id|tx\.hash|task\.id|block\.hash|manifest\.(digest|hash))$/;
 
 function isPublicIdentifierKey(key: string): boolean {
   return PUBLIC_IDENTIFIER_KEY_RE.test(canonicalizeKey(key));
@@ -203,9 +216,19 @@ export function redactValue(value: unknown): unknown {
         out[k] = marker(k);
         continue;
       }
-      if (typeof v === 'string' && isRpcUrlKey(k)) {
-        out[k] = redactRpcUrl(v);
-        continue;
+      if (isRpcUrlKey(k)) {
+        if (typeof v === 'string') {
+          out[k] = redactRpcUrl(v);
+          continue;
+        }
+        if (Array.isArray(v)) {
+          // Plural RPC keys (`rpcUrls`, `archiveRpcUrls`, …) hold the full
+          // fallback chain — strip credentials from each entry directly
+          // rather than relying on the free-text URL_RE pass, which misses
+          // non-http(s) schemes like `wss://`.
+          out[k] = v.map((el) => (typeof el === 'string' ? redactRpcUrl(el) : redactValue(el)));
+          continue;
+        }
       }
       if (typeof v === 'string' && isPublicIdentifierKey(k)) {
         // Public on-chain identifier (request id / tx hash / ...). Kept
@@ -278,6 +301,16 @@ export function buildRedactionReport(): string {
     '  state on the operator host.',
     '- Lifecycle activity events, daemon status, and config provenance with',
     '  all secret values already replaced by `<redacted:...>` markers.',
+    '',
+    '## NOT redacted — review before sharing',
+    '',
+    '- `dashboard-screenshot.png` is a pixel capture of the dashboard DOM at',
+    '  the moment you clicked download. It is an image — none of the text',
+    '  redaction above applies to it. Anything visible on screen at capture',
+    '  time (a value typed into a field, an error toast showing a raw URL,',
+    '  a log line rendered in the UI) will appear in the screenshot. Look at',
+    '  it before sharing, and delete it from the bundle if it shows anything',
+    '  sensitive.',
     '',
     'If you spot anything sensitive that was not redacted, do not share the',
     'bundle — open an issue against the jinn client instead.',

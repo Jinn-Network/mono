@@ -8,13 +8,13 @@ import { writeTarGz, readTarEntries } from '../../src/observability/tar.js';
 import { assembleDebugReport } from '../../src/observability/debug-report-assemble.js';
 
 describe('writeTarGz / readTarEntries — minimal USTAR round-trip', () => {
-  it('round-trips a set of files', () => {
+  it('round-trips a set of files', async () => {
     const files = [
       { name: 'a.txt', content: Buffer.from('hello a') },
       { name: 'nested/b.json', content: Buffer.from('{"k":1}') },
       { name: 'c.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
     ];
-    const gz = writeTarGz(files);
+    const gz = await writeTarGz(files);
     const tar = gunzipSync(gz);
     // USTAR magic at offset 257 of the first header block.
     expect(tar.subarray(257, 262).toString('latin1')).toBe('ustar');
@@ -28,14 +28,14 @@ describe('writeTarGz / readTarEntries — minimal USTAR round-trip', () => {
     expect(Array.from(c?.content ?? [])).toEqual([0x89, 0x50, 0x4e, 0x47]);
   });
 
-  it('produces a tar whose total length is a multiple of 512', () => {
-    const gz = writeTarGz([{ name: 'x', content: Buffer.from('y') }]);
+  it('produces a tar whose total length is a multiple of 512', async () => {
+    const gz = await writeTarGz([{ name: 'x', content: Buffer.from('y') }]);
     const tar = gunzipSync(gz);
     expect(tar.length % 512).toBe(0);
   });
 
-  it('handles empty file content', () => {
-    const gz = writeTarGz([{ name: 'empty.txt', content: Buffer.alloc(0) }]);
+  it('handles empty file content', async () => {
+    const gz = await writeTarGz([{ name: 'empty.txt', content: Buffer.alloc(0) }]);
     const entries = readTarEntries(gunzipSync(gz));
     expect(entries).toHaveLength(1);
     expect(entries[0]?.content.length).toBe(0);
@@ -52,8 +52,8 @@ describe('assembleDebugReport — pure bundle assembly', () => {
     daemonVersion: '0.1.6',
   };
 
-  it('returns a gzip buffer that decompresses to a tar with the expected files', () => {
-    const gz = assembleDebugReport(baseInput);
+  it('returns a gzip buffer that decompresses to a tar with the expected files', async () => {
+    const gz = await assembleDebugReport(baseInput);
     const entries = readTarEntries(gunzipSync(gz));
     const names = entries.map((e) => e.name);
     expect(names.some((n) => n.endsWith('status.json'))).toBe(true);
@@ -64,9 +64,9 @@ describe('assembleDebugReport — pure bundle assembly', () => {
     expect(names.some((n) => n.endsWith('bundle-meta.json'))).toBe(true);
   });
 
-  it('includes a screenshot when supplied', () => {
+  it('includes a screenshot when supplied', async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
-    const gz = assembleDebugReport({ ...baseInput, screenshotPng: png });
+    const gz = await assembleDebugReport({ ...baseInput, screenshotPng: png });
     const entries = readTarEntries(gunzipSync(gz));
     const shot = entries.find((e) => e.name.endsWith('dashboard-screenshot.png'));
     expect(shot).toBeDefined();
@@ -74,15 +74,15 @@ describe('assembleDebugReport — pure bundle assembly', () => {
     expect(entries.some((e) => e.name.endsWith('screenshot-unavailable.txt'))).toBe(false);
   });
 
-  it('emits screenshot-unavailable.txt when no screenshot is supplied', () => {
-    const gz = assembleDebugReport(baseInput);
+  it('emits screenshot-unavailable.txt when no screenshot is supplied', async () => {
+    const gz = await assembleDebugReport(baseInput);
     const entries = readTarEntries(gunzipSync(gz));
     expect(entries.some((e) => e.name.endsWith('screenshot-unavailable.txt'))).toBe(true);
     expect(entries.some((e) => e.name.endsWith('dashboard-screenshot.png'))).toBe(false);
   });
 
-  it('redacts planted secrets across every bundled JSON file', () => {
-    const gz = assembleDebugReport({
+  it('redacts planted secrets across every bundled JSON file', async () => {
+    const gz = await assembleDebugReport({
       ...baseInput,
       status: { network: 'testnet', apiToken: 'PLANTED-status-secret' },
       config: {
@@ -99,8 +99,8 @@ describe('assembleDebugReport — pure bundle assembly', () => {
     expect(tar).not.toContain('0x' + 'aa'.repeat(32));
   });
 
-  it('places all files under a single timestamped directory', () => {
-    const gz = assembleDebugReport(baseInput);
+  it('places all files under a single timestamped directory', async () => {
+    const gz = await assembleDebugReport(baseInput);
     const entries = readTarEntries(gunzipSync(gz));
     const roots = new Set(entries.map((e) => e.name.split('/')[0]));
     expect(roots.size).toBe(1);

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { toPng } from 'html-to-image';
+import { api } from '../api/client.js';
+import type { DebugReportManifest } from '../api/types.js';
 
 /**
  * One-click operator debug report (issue #420 §6).
@@ -14,20 +16,12 @@ import { toPng } from 'html-to-image';
  *      (`html-to-image`), POST it with the request, receive the `.tar.gz`,
  *      and trigger a browser download.
  *
+ * Both daemon calls go through `api.debugReport` (the single source of truth
+ * for the route URLs and auth) — see `api/client.ts`.
+ *
  * Screenshot capture is best-effort: if it throws (content-security policy,
  * a very large DOM) the bundle is still requested without the screenshot.
  */
-
-interface RedactionSummary {
-  version: string;
-  redacted: string[];
-  kept: string[];
-}
-
-interface DebugReportManifest {
-  files: string[];
-  redaction: RedactionSummary;
-}
 
 /** Capture the dashboard DOM to a base64 PNG (no data-URI prefix). */
 async function captureScreenshot(): Promise<string | undefined> {
@@ -78,12 +72,7 @@ export function DebugReportButton(): JSX.Element {
     setPhase('loading-manifest');
     setError(null);
     try {
-      const res = await fetch('/v1/debug-report/manifest', {
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
-      if (!res.ok) throw new Error(`manifest failed: ${res.status}`);
-      const body = (await res.json()) as DebugReportManifest;
+      const body = await api.debugReport.manifest();
       setManifest(body);
       setPhase('reviewing');
     } catch (err) {
@@ -103,16 +92,7 @@ export function DebugReportButton(): JSX.Element {
     setError(null);
     try {
       const screenshotPngBase64 = await captureScreenshot();
-      const res = await fetch('/v1/debug-report', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(
-          screenshotPngBase64 ? { screenshotPngBase64 } : {},
-        ),
-      });
-      if (!res.ok) throw new Error(`debug report failed: ${res.status}`);
-      const blob = await res.blob();
+      const blob = await api.debugReport.download(screenshotPngBase64);
       const date = new Date().toISOString().slice(0, 10);
       triggerDownload(blob, `jinn-debug-report-${date}.tar.gz`);
       close();
@@ -171,8 +151,9 @@ export function DebugReportButton(): JSX.Element {
               Download debug report
             </h2>
             <p style={{ color: 'var(--fg-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-              A support bundle for debugging this daemon. Secrets are removed
-              before download. Review what it contains:
+              A support bundle for debugging this daemon. Secret values in the
+              config, logs, and events are redacted — but the screenshot is not
+              (see below). Review what it contains:
             </p>
 
             {manifest && (
@@ -197,6 +178,19 @@ export function DebugReportButton(): JSX.Element {
                     ))}
                   </ul>
                 </div>
+                {manifest.redaction.notRedacted &&
+                  manifest.redaction.notRedacted.length > 0 && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ color: 'var(--break-red)', marginBottom: '4px' }}>
+                        Not redacted — review before sharing
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--fg-muted)' }}>
+                        {manifest.redaction.notRedacted.map((r) => (
+                          <li key={r}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
               </>
             )}
 
