@@ -1045,6 +1045,21 @@ export async function postPredictionV1Task(
   creatorPrivKey: `0x${string}`,
   mockIpfs: MockIpfsServer,
   v3Env: TaskV3Env,
+  /**
+   * Optional on-chain policy overrides.
+   *
+   * - `disallowSolverSelfEvaluation` — when true, the TaskCoordinator reverts
+   *   `claimEvaluation` if the evaluator equals the solution attempt's operator
+   *   (TaskCoordinator.sol §432-433). Multi-operator scenarios (T2.2) set this
+   *   so the solver (op-a) cannot win the evaluation-claim race against the
+   *   dedicated evaluator (op-b): with `requiredVerdicts: 1`, whichever operator
+   *   claims first settles the single verdict, and if op-a wins, op-b can never
+   *   settle (TCMaxVerdictsReached) — making `waitForVerdict(evaluator=op-b)`
+   *   time out non-deterministically. Defaults to `false` to preserve the
+   *   single-operator consumer (`daemon-harness-cycle.ts`), which never waits
+   *   for a verdict and so is unaffected either way.
+   */
+  opts: { disallowSolverSelfEvaluation?: boolean } = {},
 ): Promise<PostedPredictionTask> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const routerAddress = v3Env.routerAddress;
@@ -1179,7 +1194,7 @@ export async function postPredictionV1Task(
       passThreshold: 1,
       evaluationDeadline: BigInt(chainNowSec + 1_200),
       maxVerdictsPerEvaluator: 1,
-      disallowSolverSelfEvaluation: false,
+      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
     },
   };
 
