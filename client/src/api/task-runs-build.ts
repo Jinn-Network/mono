@@ -56,6 +56,14 @@ export interface TaskRunsStatus {
      * the public explorer.
      */
     localErrors: number;
+    /**
+     * Task runs that terminated in RACE_LOST — the on-chain slot was pruned
+     * by another operator (TCMaxVerdictsReached, TCAttemptAlreadyFinalized,
+     * …) before this operator did any work. Deliberately excluded from
+     * `failed` so the dashboard's FAILED counter only reflects runs the
+     * operator actually attempted. See issue #896.
+     */
+    raceLost: number;
   };
   inFlight: TaskRunSummary[];
   recentTasks: TaskRunSummary[];
@@ -66,7 +74,10 @@ export function gatherTaskRunsStatus(store: Store): TaskRunsStatus {
   const inFlight = persistence.getInFlight();
   const complete = persistence.getByState('COMPLETE');
   const failed = persistence.getByState('FAILED');
-  const allRuns = [...inFlight, ...complete, ...failed];
+  const raceLost = persistence.getByState('RACE_LOST');
+  // race-loss rows belong in the recentTasks feed so operators can audit
+  // them, but they must NOT be folded into `failed` (#896).
+  const allRuns = [...inFlight, ...complete, ...failed, ...raceLost];
   const allRecent = [...allRuns].sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
   const solutions = complete.filter((run) => run.taskRole !== 'evaluation');
   const verdicts = complete.filter((run) => run.taskRole === 'evaluation');
@@ -83,6 +94,7 @@ export function gatherTaskRunsStatus(store: Store): TaskRunsStatus {
       failed: failed.length,
       settledFailed: settledFailed.length,
       localErrors: localErrors.length,
+      raceLost: raceLost.length,
     },
     inFlight: [...inFlight]
       .sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt)

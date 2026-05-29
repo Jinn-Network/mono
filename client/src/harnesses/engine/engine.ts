@@ -36,6 +36,12 @@ import {
   deliverAndClaim,
   type DeliveryDeps,
 } from './delivery.js';
+import {
+  SafeInnerRevertError,
+  isNonRecoverableInnerRevert,
+  formatDecodedRevert,
+} from '../../adapters/mech/safe-revert.js';
+import { emitEvent } from '../../observability/emit-event.js';
 import type { Harness, HarnessContext, RuntimePlugin, Solution } from '../types.js';
 import { SkippableError } from '../types.js';
 import type {
@@ -752,6 +758,7 @@ export class TaskEngine {
 
       case TaskRunState.COMPLETE:
       case TaskRunState.FAILED:
+      case TaskRunState.RACE_LOST:
         // Terminal — nothing to do.
         break;
     }
@@ -2146,8 +2153,52 @@ export class TaskEngine {
   }
 
   /**
+   * Classify a transition error and mark the task terminal accordingly.
+   *
+   * - `SafeInnerRevertError` with a non-recoverable inner name (the same
+   *   set the daemon's pre-claim catch in `emitTickErrorOrRaceLost` uses):
+   *   the on-chain slot is already pruned (TCMaxVerdictsReached,
+   *   TCAttemptAlreadyFinalized, …). We mark the row RACE_LOST and emit a
+   *   `kind=race_lost` activity event so operators can audit prunes
+   *   without inflating the FAILED counter (#896).
+   * - Everything else: existing markFailed behaviour. When invoked from
+   *   recovery, `contextLabel === 'recovery'` so the failure_reason
+   *   carries the `recovery:` prefix the original code path used.
+   *
+   * Returns the classification so callers can log appropriately.
+   */
+  private _classifyAndMarkTerminal(
+    task: PersistedTaskRun,
+    err: unknown,
+    contextLabel: 'transition' | 'recovery',
+  ): 'race_lost' | 'failed' {
+    if (
+      err instanceof SafeInnerRevertError &&
+      isNonRecoverableInnerRevert(err.decodedName)
+    ) {
+      // decodedName is non-null by virtue of isNonRecoverableInnerRevert.
+      const detail = formatDecodedRevert(err.decodedName!, err.decodedArgs);
+      this.persistence.markRaceLost(task.requestId, detail);
+      emitEvent(this.store, {
+        kind: 'race_lost',
+        requestId: task.requestId,
+        solverType: task.solverType ?? undefined,
+        outcome: 'ok',
+        detail,
+      }, 'harness-engine');
+      return 'race_lost';
+    }
+    const reason = err instanceof Error ? err.message : String(err);
+    const stamped = contextLabel === 'recovery' ? `recovery: ${reason}` : reason;
+    this.persistence.markFailed(task.requestId, stamped);
+    return 'failed';
+  }
+
+  /**
    * Wraps a transition method call with error handling: if the transition
-   * throws, the task is marked FAILED with the error message.
+   * throws, the task is marked terminal (FAILED or RACE_LOST per
+   * `_classifyAndMarkTerminal`) and the error is rethrown so the caller can
+   * surface it.
    */
   private async _runTransition(
     task: PersistedTaskRun,
@@ -2158,13 +2209,11 @@ export class TaskEngine {
     // deliveryTx, impl name). We deliberately don't emit a generic
     // `oldState → newState` line here: doing so produced duplicate
     // transition lines in the operator log (jinn-mono-kzan). On failure,
-    // the catch below marks the task FAILED and rethrows so the caller can
-    // surface the error.
+    // the catch below routes through the race-loss classifier and rethrows.
     try {
       await fn();
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      this.persistence.markFailed(task.requestId, reason);
+      this._classifyAndMarkTerminal(task, err, 'transition');
       throw err;
     }
   }
@@ -2177,15 +2226,20 @@ export class TaskEngine {
     try {
       await this._recoverDispatch(task);
     } catch (err) {
-      // If recovery itself throws (e.g. NotImplementedError stub), mark failed.
-      // NotImplementedError is expected during development; don't swallow it in prod.
-      const reason = err instanceof Error ? err.message : String(err);
-      // Only mark failed if the task is still in the same non-terminal state
+      // If recovery itself throws (e.g. NotImplementedError stub), classify
+      // the error and mark the row terminal. NotImplementedError is expected
+      // during development; don't swallow it in prod.
+      // Only act if the task is still in the same non-terminal state
       // (another concurrent recovery pass might have already advanced it).
       const current = this.persistence.getByRequestId(task.requestId);
       if (current && current.state === task.state) {
-        this.persistence.markFailed(task.requestId, `recovery: ${reason}`);
-        console.error(`[harness-engine] resume failed for ${task.requestId}: ${reason}`);
+        const classification = this._classifyAndMarkTerminal(task, err, 'recovery');
+        const reason = err instanceof Error ? err.message : String(err);
+        if (classification === 'race_lost') {
+          console.log(`[harness-engine] resume pruned for ${task.requestId}: ${reason}`);
+        } else {
+          console.error(`[harness-engine] resume failed for ${task.requestId}: ${reason}`);
+        }
       }
       throw err;
     }

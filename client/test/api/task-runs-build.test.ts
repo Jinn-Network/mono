@@ -48,7 +48,38 @@ describe('gatherTaskRunsStatus', () => {
         failed: 1,
         settledFailed: 0,
         localErrors: 1,
+        raceLost: 0,
       });
+    });
+  });
+
+  it('counts RACE_LOST runs separately from FAILED (#896)', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      insertTask(persistence, {
+        requestId: 'pruned',
+        taskId: 'task-pruned',
+        taskRole: 'evaluation',
+      });
+      insertTask(persistence, {
+        requestId: 'genuine-fail',
+        taskId: 'task-fail',
+        taskRole: 'evaluation',
+      });
+
+      store.db.prepare(`UPDATE task_runs SET state = 'RACE_LOST', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
+        .run(1_500, 'TCMaxVerdictsReached', 'pruned');
+      store.db.prepare(`UPDATE task_runs SET state = 'FAILED', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
+        .run(1_600, 'runner crashed', 'genuine-fail');
+
+      const status = gatherTaskRunsStatus(store);
+
+      expect(status.totals.failed).toBe(1);
+      expect(status.totals.raceLost).toBe(1);
+      // The pruned row is in recentTasks for operator audit.
+      const requestIds = status.recentTasks.map((r) => r.requestId);
+      expect(requestIds).toContain('pruned');
+      expect(requestIds).toContain('genuine-fail');
     });
   });
 
