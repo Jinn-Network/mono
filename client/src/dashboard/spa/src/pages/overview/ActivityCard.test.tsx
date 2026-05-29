@@ -111,6 +111,22 @@ describe('ActivityCard', () => {
     expect(history.at(-1)).toBe('/events?requestId=0xabc1234567890abcdef');
   });
 
+  it('renders RACE_LOST rows as a distinct neutral chip, not under "failed" (#896)', () => {
+    // Pruned-by-another-operator runs are terminal but not failures. The chip
+    // label must read "race-lost" (neutral tone), the row must appear, and the
+    // FAILED-only filter at line 221 must NOT drop the row even when
+    // runStartedAt is null (prunes happen before any work).
+    const tasks: ActivityTask[] = [
+      { ...baseTask, requestId: 'race-pruned', state: 'RACE_LOST', taskRole: 'restoration', runStartedAt: null },
+    ];
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
+    render(ui);
+    const row = screen.getByTestId('activity-task-row-race-pruned');
+    expect(row).toBeTruthy();
+    expect(row.textContent).toMatch(/race-lost/i);
+    expect(row.textContent).not.toMatch(/\bfailed\b/i);
+  });
+
   it('filters out FAILED rows we never engaged with (never started OR impl not ready) but keeps real failures', () => {
     const tasks: ActivityTask[] = [
       // Real solver failure: started, then failed mid-execution
