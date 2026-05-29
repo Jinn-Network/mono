@@ -1,0 +1,73 @@
+import { describe, it, expect } from 'vitest';
+import { GhPrSource } from '../../src/dispatcher/pr-source.js';
+import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
+
+const LABEL = 'engine:review';
+const BOT = 'jinn-bot';
+
+const PR_LIST = JSON.stringify([
+  { number: 10, title: 'feat: a', headRefName: 'feat/10-a', headRefOid: 'sha10', isDraft: true, author: { login: 'jinn-bot' } },
+  { number: 11, title: 'fix: b',  headRefName: 'fix/11-b',  headRefOid: 'sha11', isDraft: false, author: { login: 'alice' } },
+]);
+const PR10_VIEW = JSON.stringify({
+  reviews: [{ author: { login: 'jinn-bot' }, state: 'APPROVED', submittedAt: '2026-05-29T12:00:00Z' }],
+  commits: [{ committedDate: '2026-05-29T10:00:00Z' }],
+});
+const PR11_VIEW = JSON.stringify({
+  reviews: [],
+  commits: [{ committedDate: '2026-05-29T09:00:00Z' }],
+});
+
+function makeRunner() {
+  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const runner: CommandRunner = async (cmd, args) => {
+    calls.push({ cmd, args });
+    if (args[0] === 'pr' && args[1] === 'list') return PR_LIST;
+    if (args[0] === 'pr' && args[1] === 'view' && args[2] === '10') return PR10_VIEW;
+    if (args[0] === 'pr' && args[1] === 'view' && args[2] === '11') return PR11_VIEW;
+    throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
+  };
+  return { runner, calls };
+}
+
+describe('GhPrSource.poll', () => {
+  it('lists PRs by the opt-in label and computes needsReview from reviews vs latest commit', async () => {
+    const { runner, calls } = makeRunner();
+    const polled = await new GhPrSource(runner, LABEL, BOT).poll();
+    const list = calls.find((c) => c.args[0] === 'pr' && c.args[1] === 'list');
+    expect(list!.args).toContain('--label');
+    expect(list!.args[list!.args.indexOf('--label') + 1]).toBe(LABEL);
+    const pr10 = polled.find((p) => p.number === 10)!;
+    const pr11 = polled.find((p) => p.number === 11)!;
+    expect(pr10.hasReviewLabel).toBe(true);
+    expect(pr10.headRefName).toBe('feat/10-a');
+    expect(pr10.headRefOid).toBe('sha10');
+    expect(pr10.author).toBe('jinn-bot');
+    expect(pr10.needsReview).toBe(false);
+    expect(pr11.needsReview).toBe(true);
+    expect(pr11.author).toBe('alice');
+  });
+
+  it('treats a bot review OLDER than the latest commit as stale -> needsReview:true', async () => {
+    const STALE_VIEW = JSON.stringify({
+      reviews: [{ author: { login: BOT }, state: 'APPROVED', submittedAt: '2026-05-29T08:00:00Z' }],
+      commits: [{ committedDate: '2026-05-29T11:00:00Z' }],
+    });
+    const runner: CommandRunner = async (_cmd, args) => {
+      if (args[0] === 'pr' && args[1] === 'list')
+        return JSON.stringify([{ number: 12, title: 't', headRefName: 'x', headRefOid: 's', isDraft: false, author: { login: 'bob' } }]);
+      if (args[0] === 'pr' && args[1] === 'view') return STALE_VIEW;
+      throw new Error('unexpected');
+    };
+    const polled = await new GhPrSource(runner, LABEL, BOT).poll();
+    expect(polled[0].needsReview).toBe(true);
+  });
+
+  it('returns empty when reviewBotLogin is empty (fail-safe, no gh calls)', async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const runner: CommandRunner = async (cmd, args) => { calls.push({ cmd, args }); return '[]'; };
+    const polled = await new GhPrSource(runner, LABEL, '').poll();
+    expect(polled).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+});
