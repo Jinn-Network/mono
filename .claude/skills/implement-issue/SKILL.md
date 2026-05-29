@@ -209,11 +209,11 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 ---
 
-### Stage 4 — `/simplify`
+### Stage 4 — `/code-review`
 
-**Dispatcher:** dispatch a simplify subagent.
+**Dispatcher:** dispatch a code-review subagent.
 
-**Prompt the subagent to:** run the `/simplify` skill on the diff — tighten it for reuse, clarity, and minimal surface area. If simplifying reveals a structural problem (not just style), the subagent raises it as a finding (routes back through Stage 5 finding handling).
+**Prompt the subagent to:** run the `/code-review` skill on the diff — tighten it for reuse, clarity, and minimal surface area, and self-review the change. If the pass reveals a structural problem (not just style), the subagent raises it as a finding (routes back through Stage 5 finding handling).
 
 ---
 
@@ -257,6 +257,7 @@ If the log is empty, dispatch a fix subagent before continuing.
 gh pr create \
   --draft \
   --base next \
+  --label engine:review \
   --title "<shape>(scope): <title>" \
   --body "$(cat <<'EOF'
 ## Summary
@@ -271,6 +272,8 @@ Closes #<N>
 EOF
 )"
 ```
+
+The `--label engine:review` opt-in flag enrols this PR in the independent `review-pr` loop (Autopilot's PR-triggered review). See `docs/superpowers/specs/2026-05-29-pr-review-loop-design.md`.
 
 **PR title rule:** shape-prefixed Conventional Commit, e.g. `fix(dashboard): hero stats do not update after claim` or `feat(daemon): add balance topup loop`.
 
@@ -300,7 +303,7 @@ Never forward the coordinator's own conversation history to a subagent. Keep eac
 
 ### Computing the change's diff
 
-The `/simplify`, review, and security stages need *the change's diff*. Compute it from the merge-base — never from `origin/next..HEAD`:
+The `/code-review`, review, and security stages need *the change's diff*. Compute it from the merge-base — never from `origin/next..HEAD`:
 
 ```bash
 git diff $(git merge-base origin/next HEAD)..HEAD
@@ -413,7 +416,7 @@ The headless-override block also reminds subagents not to use `--mode plan` / `-
 
 ## Composition
 
-- Composes with: `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:test-driven-development`, `superpowers:executing-plans`, `/simplify`, `superpowers:requesting-code-review`, `/security-review`, `testing-jinn-app`, `superpowers:verification-before-completion`.
+- Composes with: `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:test-driven-development`, `superpowers:executing-plans`, `/code-review`, `superpowers:requesting-code-review`, `/security-review`, `testing-jinn-app`, `superpowers:verification-before-completion`.
 - Downstream of: `file-issue` (which produces the triaged issue this skill consumes).
 - Upstream of: the merge skill (which batch-integrates the draft PRs this skill produces into `next`).
 - Dispatcher integration: `eng-orchestrator` invokes this skill per issue; the headless-override block is injected by the dispatcher, not this skill.
