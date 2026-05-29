@@ -91,6 +91,18 @@ export interface DispatcherConfig {
    * Source of truth is `JINN_DISPATCHER_AUTHOR_ALLOWLIST` (runner-read).
    */
   authorAllowlist: string[];
+  /** Max simultaneous review-pr sessions. Separate from concurrencyCap so a PR
+   *  flood cannot starve new implementation work (or vice-versa). */
+  reviewCap: number;
+  /** The opt-in label that gates review-pr participation. */
+  engineReviewLabel: string;
+  /**
+   * GitHub login of the engine review bot. Used to detect whether a *current*
+   * review already exists (review by this login at/after the latest commit).
+   * Empty (the default) = skip all review dispatch — fail-safe, mirroring
+   * `authorAllowlist`. Source: `JINN_REVIEW_BOT_LOGIN` (runner-read).
+   */
+  reviewBotLogin: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -103,4 +115,43 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
   authorAllowlist: [],
+  reviewCap: 3,
+  engineReviewLabel: 'engine:review',
+  reviewBotLogin: '',
 };
+
+/** A PR as polled from the PR source, with the fields the review loop needs. */
+export interface PolledPr {
+  number: number;
+  title: string;
+  /** Head branch name, e.g. "feat/418-foo" — the branch the review worktree checks out. */
+  headRefName: string;
+  /** Head commit oid (full SHA). */
+  headRefOid: string;
+  isDraft: boolean;
+  /** GitHub login of the PR author. */
+  author: string;
+  /** True iff the PR carries the engine-review opt-in label. */
+  hasReviewLabel: boolean;
+  /**
+   * True iff the PR needs a (re)review: no review by `reviewBotLogin` has been
+   * submitted at or after the PR's latest commit. Once a current review exists
+   * this is false, so the dispatcher stops re-spawning for an unchanged PR.
+   */
+  needsReview: boolean;
+}
+
+/** A PR that passed the review-ready filter — safe to dispatch a review-pr session for. */
+export interface ReviewablePr extends PolledPr {
+  hasReviewLabel: true;
+  needsReview: true;
+}
+
+/** A review-pr session the dispatcher has spawned and is tracking (PR-keyed). */
+export interface InFlightReview {
+  prNumber: number;
+  branch: string;
+  worktreePath: string;
+  pid: number | null;
+  startedAt: number;
+}
