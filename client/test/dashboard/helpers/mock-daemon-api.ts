@@ -79,6 +79,26 @@ export const DEFAULT_EVENTS = {
   events: [],
 } as const;
 
+/** Minimal activity-events page — empty list, no cursor, no counts. */
+export const DEFAULT_ACTIVITY_EVENTS = {
+  events: [],
+  nextCursor: null,
+  counts: {},
+} as const;
+
+/** Single activity-event row for the /v1/activity-events/:id detail route. */
+export const MOCK_ACTIVITY_EVENT_ROW = {
+  id: 1,
+  ts: new Date().toISOString(),
+  kind: 'task_posted',
+  requestId: null,
+  serviceIndex: 1,
+  txHash: null,
+  solverType: 'prediction.v1',
+  outcome: 'ok',
+  detail: null,
+} as const;
+
 /** Minimal operator execution-data (artifacts) list — includes all required response fields. */
 export const DEFAULT_OPERATOR_ARTIFACTS = {
   schemaVersion: 1 as const,
@@ -364,5 +384,22 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
     (url) => url.pathname.startsWith('/v1/events/'),
     (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_EVENTS) }),
+  );
+
+  // ---- Activity events (persistent lifecycle stream — /v1/activity-events) ----
+  // The Events list + EventDetail pages call /v1/activity-events[ /:id ]. Without
+  // a mock these fall through to the real daemon and 401 (auth cookie not set in
+  // the mocked context) — same failure mode the /v1/events mock above guards.
+  // Register the per-id prefix BEFORE the exact list route so the exact match
+  // wins (Playwright checks last-registered first).
+  await page.route(
+    (url) => url.pathname.startsWith('/v1/activity-events/'),
+    (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify(MOCK_ACTIVITY_EVENT_ROW) }),
+  );
+  await page.route(
+    (url) => url.pathname === '/v1/activity-events',
+    (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_ACTIVITY_EVENTS) }),
   );
 }
