@@ -19,6 +19,15 @@ export const TaskRunState = {
   DELIVERING: 'DELIVERING',
   COMPLETE: 'COMPLETE',
   FAILED: 'FAILED',
+  /**
+   * Terminal: the on-chain task slot was already claimed/finalised by another
+   * operator (or otherwise pruned at engine time) — we did not run anything,
+   * we just observed a non-recoverable inner revert at the contract boundary
+   * (TCMaxVerdictsReached, TCAttemptAlreadyFinalized, …). Kept distinct from
+   * FAILED so the dashboard's failure counter only reflects runs the
+   * operator actually attempted and lost. See issue #896.
+   */
+  RACE_LOST: 'RACE_LOST',
 } as const;
 
 export type TaskRunState = (typeof TaskRunState)[keyof typeof TaskRunState];
@@ -26,6 +35,7 @@ export type TaskRunState = (typeof TaskRunState)[keyof typeof TaskRunState];
 export const TERMINAL_STATES: ReadonlySet<TaskRunState> = new Set([
   TaskRunState.COMPLETE,
   TaskRunState.FAILED,
+  TaskRunState.RACE_LOST,
 ]);
 
 export const IN_FLIGHT_STATES: ReadonlySet<TaskRunState> = new Set([
@@ -42,20 +52,23 @@ export const IN_FLIGHT_STATES: ReadonlySet<TaskRunState> = new Set([
 // ── Transition table ──────────────────────────────────────────────────────────
 
 /**
- * Allowed transitions. Any state can transition to FAILED (terminal error path).
- * The table below lists non-FAILED successors only.
+ * Allowed transitions. Any non-terminal state can transition to FAILED
+ * (terminal error path) or RACE_LOST (terminal "another operator pruned us"
+ * path; see issue #896). The table lists non-FAILED, non-RACE_LOST successors
+ * inline; FAILED + RACE_LOST are added uniformly to every in-flight state.
  */
 const TRANSITIONS: ReadonlyMap<TaskRunState, ReadonlySet<TaskRunState>> = new Map([
-  [TaskRunState.DISCOVERED,    new Set([TaskRunState.CLAIMED,       TaskRunState.FAILED])],
-  [TaskRunState.CLAIMED,       new Set([TaskRunState.WAITING,       TaskRunState.FAILED])],
-  [TaskRunState.WAITING,       new Set([TaskRunState.PRE_SNAPSHOT,  TaskRunState.FAILED])],
-  [TaskRunState.PRE_SNAPSHOT,  new Set([TaskRunState.RUNNING,       TaskRunState.FAILED])],
-  [TaskRunState.RUNNING,       new Set([TaskRunState.POST_SNAPSHOT, TaskRunState.FAILED])],
-  [TaskRunState.POST_SNAPSHOT, new Set([TaskRunState.PACKAGING,     TaskRunState.FAILED])],
-  [TaskRunState.PACKAGING,     new Set([TaskRunState.DELIVERING,    TaskRunState.FAILED])],
-  [TaskRunState.DELIVERING,    new Set([TaskRunState.COMPLETE,      TaskRunState.FAILED])],
+  [TaskRunState.DISCOVERED,    new Set([TaskRunState.CLAIMED,       TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.CLAIMED,       new Set([TaskRunState.WAITING,       TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.WAITING,       new Set([TaskRunState.PRE_SNAPSHOT,  TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.PRE_SNAPSHOT,  new Set([TaskRunState.RUNNING,       TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.RUNNING,       new Set([TaskRunState.POST_SNAPSHOT, TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.POST_SNAPSHOT, new Set([TaskRunState.PACKAGING,     TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.PACKAGING,     new Set([TaskRunState.DELIVERING,    TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.DELIVERING,    new Set([TaskRunState.COMPLETE,      TaskRunState.FAILED, TaskRunState.RACE_LOST])],
   [TaskRunState.COMPLETE,      new Set()],
   [TaskRunState.FAILED,        new Set()],
+  [TaskRunState.RACE_LOST,     new Set()],
 ]);
 
 /**

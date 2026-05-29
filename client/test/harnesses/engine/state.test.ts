@@ -33,6 +33,12 @@ describe('state machine', () => {
       }
     });
 
+    it('allows any non-terminal state to transition to RACE_LOST', () => {
+      for (const state of IN_FLIGHT_STATES) {
+        expect(isValidTransition(state, TaskRunState.RACE_LOST)).toBe(true);
+      }
+    });
+
     it('does not allow COMPLETE to transition to anything', () => {
       for (const target of ALL_STATES) {
         expect(isValidTransition(TaskRunState.COMPLETE, target)).toBe(false);
@@ -42,6 +48,12 @@ describe('state machine', () => {
     it('does not allow FAILED to transition to anything', () => {
       for (const target of ALL_STATES) {
         expect(isValidTransition(TaskRunState.FAILED, target)).toBe(false);
+      }
+    });
+
+    it('does not allow RACE_LOST to transition to anything', () => {
+      for (const target of ALL_STATES) {
+        expect(isValidTransition(TaskRunState.RACE_LOST, target)).toBe(false);
       }
     });
 
@@ -79,10 +91,11 @@ describe('state machine', () => {
   });
 
   describe('TERMINAL_STATES', () => {
-    it('contains COMPLETE and FAILED', () => {
+    it('contains COMPLETE, FAILED, and RACE_LOST', () => {
       expect(TERMINAL_STATES.has(TaskRunState.COMPLETE)).toBe(true);
       expect(TERMINAL_STATES.has(TaskRunState.FAILED)).toBe(true);
-      expect(TERMINAL_STATES.size).toBe(2);
+      expect(TERMINAL_STATES.has(TaskRunState.RACE_LOST)).toBe(true);
+      expect(TERMINAL_STATES.size).toBe(3);
     });
   });
 
@@ -92,13 +105,14 @@ describe('state machine', () => {
       expect(IN_FLIGHT_STATES.has(TaskRunState.DELIVERING)).toBe(true);
       expect(IN_FLIGHT_STATES.has(TaskRunState.COMPLETE)).toBe(false);
       expect(IN_FLIGHT_STATES.has(TaskRunState.FAILED)).toBe(false);
+      expect(IN_FLIGHT_STATES.has(TaskRunState.RACE_LOST)).toBe(false);
       expect(IN_FLIGHT_STATES.size).toBe(8);
     });
   });
 
   describe('ALL_STATES', () => {
-    it('has 10 states total', () => {
-      expect(ALL_STATES).toHaveLength(10);
+    it('has 11 states total', () => {
+      expect(ALL_STATES).toHaveLength(11);
     });
   });
 });
