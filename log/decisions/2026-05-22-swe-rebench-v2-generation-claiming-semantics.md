@@ -283,3 +283,28 @@ Ratified by Captain ritsukai on 2026-05-22 after review of issue #487, the
 proposed DR in PR #488, and the follow-up implementation plan. Drafted on
 `claude/issue-487-design` in a from-first-principles design session with the
 issue author.
+
+## Amendment 2026-05-29 (fix #850) — restore window-expiry as a repost trigger
+
+#802 (Option B) made claim-budget exhaustion the sole repost trigger and removed
+the time-window trigger (AC#5: "each posting keeps its normal on-chain
+claim-window deadline unchanged"), on the implicit assumption that a posting
+always leaves the claimable set by exhaustion. It does not. `TaskCoordinator`
+enforces a finite on-chain claim window, and once it closes (`block.timestamp >
+claimWindowEnd`), `claimTask` reverts `TCClaimWindowClosed`
+(`contracts/src/tasks/TaskCoordinator.sol:328`) — but window-expiry is **not** an
+on-chain event or state change: no event fires, no flag flips, `claimCount` is
+untouched, and `getInstanceClaimCounts` does not even fetch `claimWindowEnd`. So
+a posting whose window closes with slots still unconsumed becomes permanently
+unclaimable yet can never reach exhaustion, stranding `live` forever (observed on
+service 46: 96 stranded, `repostable: 0`, launcher silent, M1 blocked).
+
+`classifyPoolTask` now reposts on **exhaustion OR window-expiry**:
+`repostable ⟺ not saturated AND (consumed ≥ maxClaims OR now − last_posted_at ≥ posting_window_ms)`.
+Exhaustion keeps #802's fast event-driven path on a busy network; the expiry
+clause is a **local-time backstop** (the chain emits no expiry signal, so it must
+be computed from `last_posted_at + posting_window_ms`) that heals a thin or
+stalled network. This partially supersedes #802 AC#5 — the time trigger returns
+as a backstop, not the primary path. The escrow-reclaim / refund concern stays
+out of scope (`refundUnusedTaskBudget` remains dormant; the one-way claim budget
+is untouched). See issue #850.

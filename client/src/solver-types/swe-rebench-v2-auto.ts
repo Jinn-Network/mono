@@ -73,25 +73,37 @@ export function classifyPoolTask(
   counters: TaskCounters,
   config: GeneratorConfig,
   claim: InstanceClaimSnapshot | undefined,
+  now: number,
 ): SweRebenchV2PoolCountKind {
   // saturated is the first branch and is unchanged (AC#2).
   if (counters.successful >= config.N_target_successes) return 'saturated';
   // Never posted ⇒ unposted.
   if (counters.posted === 0 || !counters.last_task_id) return 'unposted';
+  // #826/#850 deadlock fix: the on-chain claim window (last_posted_at +
+  // posting_window_ms) closes independently of budget consumption. Once it
+  // passes, TaskCoordinator.claimTask reverts TCClaimWindowClosed
+  // (contracts/src/tasks/TaskCoordinator.sol:328) — the remaining slots are
+  // permanently unclaimable, so the exhaustion trigger below can never fire and
+  // the posting would strand `live` forever. Window expiry is NOT an on-chain
+  // event or state change (no event, no flag), so it must be computed locally.
+  // Repost on EITHER exhaustion OR expiry.
+  const windowExpired = now - counters.last_posted_at >= config.posting_window_ms;
   // Posted, but the claim snapshot has no entry for this last_task_id. The
   // indexer never deletes task rows (finalized/refunded are flags, and the
   // leg-1 query carries no lifecycle filter, so a finalized/refunded task is
   // still present with consumed >= maxClaims ⇒ classified repostable below).
-  // The ONLY cause of a missing entry for a known last_task_id is indexing lag
+  // The usual cause of a missing entry for a known last_task_id is indexing lag
   // (or a reorg): the task was posted on-chain but the indexer has not reflected
-  // it yet. Treat it as `live` (assume not-yet-indexed); it reconciles to
-  // live/repostable once the indexer catches up. Returning `repostable` here
-  // would re-post a just-posted task before the indexer sees it (double-post,
-  // #802 #3), and in onchain mode — where getInstanceClaimCounts is an
-  // empty-success floor — would storm every posting every tick (#802 #2).
-  if (!claim) return 'live';
-  // Live while the on-chain claim budget has slots left; exhausted ⇒ repostable.
-  return claim.consumed >= claim.maxClaims ? 'repostable' : 'live';
+  // it yet. Treat it as `live` (assume not-yet-indexed) — returning `repostable`
+  // here would re-post a just-posted task before the indexer sees it
+  // (double-post, #802 #3), and in onchain mode — where getInstanceClaimCounts
+  // is an empty-success floor — would storm every posting every tick (#802 #2).
+  // BUT if the posting window has already elapsed, the post is definitively dead
+  // (claims can no longer land) and must be reposted regardless of the snapshot.
+  if (!claim) return windowExpired ? 'repostable' : 'live';
+  // Live while the on-chain claim budget has slots left AND the window is open;
+  // exhausted OR window-expired ⇒ repostable.
+  return claim.consumed >= claim.maxClaims || windowExpired ? 'repostable' : 'live';
 }
 
 export function summarizePoolState(args: SelectArgs): SweRebenchV2PoolCounts {
@@ -110,7 +122,7 @@ export function summarizePoolState(args: SelectArgs): SweRebenchV2PoolCounts {
     const claim = counters.last_task_id
       ? args.claimCounts?.get(counters.last_task_id)
       : undefined;
-    counts[classifyPoolTask(counters, args.config, claim)] += 1;
+    counts[classifyPoolTask(counters, args.config, claim, args.now)] += 1;
   }
   return counts;
 }
@@ -137,7 +149,7 @@ export function selectNextPostingCandidates(args: SelectArgs): PoolTask[] {
     const c =
       args.counters.get(task.instance_id) ??
       { posted: 0, successful: 0, last_posted_at: 0 };
-    const kind = classifyPoolTask(c, args.config, claimFor(task.instance_id));
+    const kind = classifyPoolTask(c, args.config, claimFor(task.instance_id), args.now);
     return kind === 'unposted' || kind === 'repostable';
   });
   if (eligible.length === 0) return [];

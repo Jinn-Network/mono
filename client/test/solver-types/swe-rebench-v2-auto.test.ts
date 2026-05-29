@@ -351,7 +351,9 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — claim-exhaustion repost
 
   it('does NOT repost an instance with claim slots remaining (live)', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
-    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 0, last_posted_at: 0, last_task_id: '11' } });
+    // last_posted_at must be inside the 300s posting window: a posting only stays
+    // `live` when slots remain AND the on-chain claim window is still open (#850).
+    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 0, last_posted_at: Date.now(), last_task_id: '11' } });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
     const discovery = stubDiscovery({
       getInstanceClaimCounts: vi.fn(async () => new Map([['11', { taskId: '11', consumed: 2, maxClaims: 5 }]])),
@@ -525,5 +527,54 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
       delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
       fetchSpy.mockRestore();
     }
+  });
+});
+
+describe('classifyPoolTask window-expiry repost trigger (#826 deadlock fix, #850)', () => {
+  const pool = [
+    { instance_id: 'a', language: 'python' },
+    { instance_id: 'b', language: 'go' },
+  ];
+  const WINDOW = config.posting_window_ms;
+
+  it('reposts an unexhausted posting once its claim window has elapsed', () => {
+    const counters = new Map([
+      ['a', { posted: 1, successful: 0, last_posted_at: 1000, last_task_id: '10' }],
+    ]);
+    // consumed 1 < maxClaims 5 — never exhausted — but window has passed.
+    const claimCounts = new Map([['10', { consumed: 1, maxClaims: 5 }]]);
+    const now = 1000 + WINDOW + 1;
+    expect(summarizePoolState({ pool: [pool[0]], counters, claimCounts, config, now }))
+      .toMatchObject({ live: 0, repostable: 1 });
+    const batch = selectNextPostingCandidates({ pool: [pool[0]], counters, claimCounts, config, now });
+    expect(batch.map((t) => t.instance_id)).toContain('a');
+  });
+
+  it('keeps an unexhausted posting live while still inside its window (no premature repost)', () => {
+    const counters = new Map([
+      ['a', { posted: 1, successful: 0, last_posted_at: 1000, last_task_id: '10' }],
+    ]);
+    const claimCounts = new Map([['10', { consumed: 1, maxClaims: 5 }]]);
+    const now = 1000 + WINDOW - 1;
+    expect(summarizePoolState({ pool: [pool[0]], counters, claimCounts, config, now }))
+      .toMatchObject({ live: 1, repostable: 0 });
+  });
+
+  it('reposts an expired posting even when the indexer claim entry is missing', () => {
+    const counters = new Map([
+      ['a', { posted: 1, successful: 0, last_posted_at: 1000, last_task_id: '10' }],
+    ]);
+    const now = 1000 + WINDOW + 1; // no claimCounts at all
+    const batch = selectNextPostingCandidates({ pool: [pool[0]], counters, config, now });
+    expect(batch.map((t) => t.instance_id)).toContain('a');
+  });
+
+  it('keeps a fresh post with no claim entry live inside its window (no double-post, #802 #3)', () => {
+    const counters = new Map([
+      ['a', { posted: 1, successful: 0, last_posted_at: 1000, last_task_id: '10' }],
+    ]);
+    const now = 1000 + 5; // just posted, indexer lagging
+    expect(summarizePoolState({ pool: [pool[0]], counters, config, now }))
+      .toMatchObject({ live: 1, repostable: 0 });
   });
 });
