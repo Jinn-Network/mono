@@ -78,7 +78,11 @@ import type { LaunchedSolverNetRecord, SolverNetStore } from './store.js';
 
 // Import viem types lazily-named — keep the runtime import scoped so unit
 // tests don't pay viem startup cost when they pass mocked publishers.
-import type { PublicClient, WalletClient } from 'viem';
+import { encodeFunctionData, type PublicClient, type WalletClient } from 'viem';
+import {
+  viemSendTransactionWithRetry,
+  type TxRetryWalletClient,
+} from '../tx-retry.js';
 
 // Noop SubgraphClient used by launch/lifecycle state-machine recovery paths
 // (mempool-drop detection) until a real subgraph extension is wired (Task 25).
@@ -497,15 +501,31 @@ export function createMetadataPublisherFromViem(args: {
       if (!chain) {
         throw new Error('createMetadataPublisherFromViem: walletClient has no chain configured');
       }
-      const txHash = await args.walletClient.writeContract({
-        address: args.identityRegistryAddress,
+      // Route through viemSendTransactionWithRetry so this launch/lifecycle
+      // setMetadata shares the per-EOA broadcast lock + nonce ledger + retry
+      // with the Safe-mediated loops (creator / claim / deliver) and
+      // eviction-recovery that broadcast from the SAME agent EOA. A raw
+      // writeContract here let viem auto-fill the nonce from the pending count,
+      // which raced those loops and reverted "nonce too low" — the #525 launch
+      // stall. (Sibling to the IdentityPublisher fix in a4a52ca2;
+      // encodeFunctionData reproduces the exact calldata writeContract built.)
+      const data = encodeFunctionData({
         abi: IDENTITY_REGISTRY_SET_METADATA_ABI,
         functionName: 'setMetadata',
         // viem's bytes input accepts `0x`-prefixed hex; convert from Uint8Array.
         args: [BigInt(agentId), key, uint8ArrayToHex(value)],
-        account,
-        chain,
       });
+      const txHash = await viemSendTransactionWithRetry(
+        args.walletClient as unknown as TxRetryWalletClient,
+        args.publicClient,
+        {
+          account,
+          to: args.identityRegistryAddress,
+          data,
+          value: 0n,
+        },
+        { logicalTx: 'solvernet.setMetadata' },
+      );
       const receipt = await args.publicClient.waitForTransactionReceipt({ hash: txHash });
       return {
         txHash,

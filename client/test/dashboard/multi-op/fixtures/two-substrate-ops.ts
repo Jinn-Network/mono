@@ -25,6 +25,11 @@ export const test = base.extend<TwoSubstrateOpsFixtures>({
       // events from the IdentityRegistry directly over their (fork) RPC, so the
       // SolverNet op-a just launched is discoverable within one refresh cycle.
       extraEnv: { JINN_DISCOVERY_MODE: 'onchain' },
+      // Both daemons share one in-process mock IPFS so op-a's launch-time
+      // manifest pin is fetchable by op-b's catalog enrichment. Without this,
+      // op-a pins to its own registry and op-b can't read the body back, so the
+      // catalog row is skipped and "op-b sees op-a's SolverNet" times out.
+      sharedMockIpfs: true,
     });
     try {
       await use(handle);

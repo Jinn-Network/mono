@@ -607,6 +607,47 @@ function parseMultipartBody(body: Buffer, contentType: string): Buffer | null {
   return null;
 }
 
+// RFC4648 base32 (no padding), lowercase — the multibase 'b' alphabet IPFS
+// uses for CIDv1. Mirrors the inverse of `base32Decode` in
+// src/adapters/mech/ipfs.ts.
+const MOCK_BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
+
+function base32EncodeNoPad(bytes: Uint8Array): string {
+  let bits = 0;
+  let value = 0;
+  let out = '';
+  for (const b of bytes) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      out += MOCK_BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) {
+    out += MOCK_BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  }
+  return out;
+}
+
+/**
+ * Build a CIDv1-raw base32 string (`b…`, e.g. `bafkrei…`) from a sha256 hex
+ * digest — the same multibase form the real Autonolas registry returns and
+ * the form the daemon's production CID validation (`CID_SHAPE_REGEX` in
+ * api/solvernets-endpoints.ts) accepts. Bytes: version 0x01, codec 0x55 (raw),
+ * multihash 0x12 (sha2-256) 0x20 (32-byte length) + digest.
+ */
+function cidv1RawBase32FromSha256Hex(sha256hex: string): string {
+  const digest = new Uint8Array(sha256hex.match(/.{2}/g)!.map((h) => parseInt(h, 16)));
+  const cidBytes = new Uint8Array(4 + digest.length);
+  cidBytes[0] = 0x01; // CIDv1
+  cidBytes[1] = 0x55; // raw codec
+  cidBytes[2] = 0x12; // sha2-256
+  cidBytes[3] = 0x20; // 32 bytes
+  cidBytes.set(digest, 4);
+  return `b${base32EncodeNoPad(cidBytes)}`;
+}
+
 export async function startMockIpfsServer(): Promise<MockIpfsServer> {
   // Map from CID path (e.g. `f01551220{hex}`) → serialised JSON string.
   const store = new Map<string, string>();
@@ -645,14 +686,24 @@ export async function startMockIpfsServer(): Promise<MockIpfsServer> {
             fileBytes = body;
           }
           const sha256hex = createHash('sha256').update(fileBytes).digest('hex');
-          const cidPath = `f01551220${sha256hex}`;
+          // Return a base32 CIDv1 (`bafkrei…`) — the multibase form the real
+          // Autonolas registry returns and that the daemon's production CID
+          // validation accepts (CID_SHAPE_REGEX only admits `Qm…`/`b…`). The
+          // SolverNet launch persists this Hash as `manifestCid`; returning the
+          // legacy base16 (`f01551220…`) form made `GET /v1/solvernets/registry/:cid`
+          // 400 (invalid_cid) so the catalog could not enrich a fork-launched
+          // SolverNet (T2.3). Store under the base32 key (what the daemon will
+          // GET back) plus the legacy base16 raw/dag-pb keys so digest-derived
+          // gateway fetches (T2.2 / daemon-harness-cycle, which address content
+          // by on-chain digest as `f01551220{digest}`) keep resolving.
+          const cidB32 = cidv1RawBase32FromSha256Hex(sha256hex);
           const serialised = fileBytes.toString('utf8');
-          store.set(cidPath, serialised);
-          // Also store under dag-pb variant so gateway fetches succeed either way.
+          store.set(cidB32, serialised);
+          store.set(`f01551220${sha256hex}`, serialised);
           store.set(`f01701220${sha256hex}`, serialised);
-          console.log(`[mock-ipfs] uploaded cid=${cidPath} bytes=${fileBytes.length}`);
+          console.log(`[mock-ipfs] uploaded cid=${cidB32} bytes=${fileBytes.length}`);
           res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ Hash: cidPath, Size: fileBytes.length, Name: 'content.json' }));
+          res.end(JSON.stringify({ Hash: cidB32, Size: fileBytes.length, Name: 'content.json' }));
           return;
         }
 
