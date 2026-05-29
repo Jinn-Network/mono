@@ -37,7 +37,7 @@ export interface InFlightTaskSummary {
 
 export interface VerdictSummary {
   requestId: string;
-  state: 'COMPLETE' | 'FAILED';
+  state: 'COMPLETE' | 'FAILED' | 'RACE_LOST';
   implName: string | null;
   solverType: string | null;
   windowStartTs: number;
@@ -91,6 +91,12 @@ export interface PortfolioV0Status {
     settledFailed: number;
     /** FAILED runs that never reached the marketplace (local engine error). */
     localErrors: number;
+    /**
+     * RACE_LOST runs — the on-chain slot was pruned by another operator
+     * before this operator did any work. Excluded from `failed` so the
+     * dashboard's FAILED counter only reflects attempted runs (#896).
+     */
+    raceLost: number;
     active: number;
   };
   /** Tasks currently being processed (not in a terminal state). */
@@ -129,7 +135,7 @@ function toInFlightTask(task: PersistedTaskRun): InFlightTaskSummary {
 function toVerdict(task: PersistedTaskRun): VerdictSummary {
   return {
     requestId: task.requestId,
-    state: task.state as 'COMPLETE' | 'FAILED',
+    state: task.state as 'COMPLETE' | 'FAILED' | 'RACE_LOST',
     implName: task.implName,
     solverType: task.solverType,
     windowStartTs: task.windowStartTs,
@@ -162,11 +168,14 @@ export function gatherPortfolioV0Status(
   const inFlight = persistence.getInFlight().filter(isPortfolioV0Run);
   const complete = persistence.getByState('COMPLETE').filter(isPortfolioV0Run);
   const failed = persistence.getByState('FAILED').filter(isPortfolioV0Run);
+  const raceLost = persistence.getByState('RACE_LOST').filter(isPortfolioV0Run);
 
   const inFlightSummaries = inFlight.map(toInFlightTask);
 
-  // Recent verdicts: last N COMPLETE + FAILED task runs combined, newest first
-  const allTerminal = [...complete, ...failed].sort(
+  // Recent verdicts: last N COMPLETE + FAILED + RACE_LOST task runs combined,
+  // newest first. RACE_LOST belongs here so operators can audit prunes, but
+  // is counted separately from `failed` in `totals` (#896).
+  const allTerminal = [...complete, ...failed, ...raceLost].sort(
     (a, b) => b.stateUpdatedAt - a.stateUpdatedAt,
   );
   const recentVerdicts = allTerminal.slice(0, RECENT_VERDICTS_LIMIT).map(toVerdict);
@@ -177,6 +186,7 @@ export function gatherPortfolioV0Status(
     failed: failed.length,
     settledFailed: settledFailed.length,
     localErrors: localErrors.length,
+    raceLost: raceLost.length,
     active: inFlight.length,
   };
 

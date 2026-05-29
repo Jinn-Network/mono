@@ -75,6 +75,7 @@ describe('gatherPredictionV1Status', () => {
         failed: 0,
         settledFailed: 0,
         localErrors: 0,
+        raceLost: 0,
       });
       expect(result.recentTasks).toEqual([]);
     });
@@ -144,6 +145,7 @@ describe('gatherPredictionV1Status', () => {
         failed: 1,
         settledFailed: 0,
         localErrors: 1,
+        raceLost: 0,
       });
       expect(result.latest).toEqual({
         taskAt: 40,

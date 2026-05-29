@@ -108,6 +108,8 @@ interface OverviewStatusV1 {
       failed?: number;
       settledFailed?: number;
       localErrors?: number;
+      /** RACE_LOST runs (pruned by another operator before any work; #896). */
+      raceLost?: number;
     };
     /**
      * Full TaskRunSummary as served by the daemon ({@link
@@ -165,6 +167,8 @@ interface OverviewStatusV1 {
       failed?: number;
       settledFailed?: number;
       localErrors?: number;
+      /** RACE_LOST runs (pruned by another operator before any work; #896). */
+      raceLost?: number;
     };
     recentTasks?: TaskRunRow[];
   };

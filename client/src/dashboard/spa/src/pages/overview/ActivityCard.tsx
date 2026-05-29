@@ -132,6 +132,10 @@ function formatRunType(role: ActivityTask['taskRole']): string {
 function classifyState(state: string): { label: string; detail: string; tone: StateTone } {
   if (state === 'COMPLETE') return { label: 'succeeded', detail: 'COMPLETE', tone: 'good' };
   if (state === 'FAILED') return { label: 'failed', detail: 'FAILED', tone: 'bad' };
+  // RACE_LOST: another operator pruned the on-chain slot before we did any
+  // work. Neutral tone, distinct label so operators can tell prunes from
+  // genuine failures at a glance (#896).
+  if (state === 'RACE_LOST') return { label: 'race-lost', detail: 'RACE_LOST', tone: 'neutral' };
   if (ACTIVE_STATES.has(state)) {
     return { label: 'active', detail: state.toLowerCase().replace(/_/g, ' '), tone: 'active' };
   }

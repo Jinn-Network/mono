@@ -67,6 +67,12 @@ export interface PredictionV1Status {
     settledFailed: number;
     /** FAILED runs that never reached the marketplace (local engine error). */
     localErrors: number;
+    /**
+     * RACE_LOST runs — the on-chain slot was pruned by another operator
+     * before this operator did any work. Excluded from `failed` so the
+     * dashboard's FAILED counter only reflects attempted runs (#896).
+     */
+    raceLost: number;
   };
   latest: {
     taskAt: number | null;
@@ -91,7 +97,8 @@ export function gatherPredictionV1Status(
   const inFlight = persistence.getInFlight().filter(isPredictionV1Run);
   const complete = persistence.getByState('COMPLETE').filter(isPredictionV1Run);
   const failed = persistence.getByState('FAILED').filter(isPredictionV1Run);
-  const allRuns = [...inFlight, ...complete, ...failed];
+  const raceLost = persistence.getByState('RACE_LOST').filter(isPredictionV1Run);
+  const allRuns = [...inFlight, ...complete, ...failed, ...raceLost];
   const allRecent = [...allRuns].sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
   const solutions = complete
     .filter((run) => run.taskRole !== 'evaluation')
@@ -113,6 +120,7 @@ export function gatherPredictionV1Status(
       failed: failed.length,
       settledFailed: settledFailed.length,
       localErrors: localErrors.length,
+      raceLost: raceLost.length,
     },
     latest: {
       taskAt: latestAt(allRuns),
