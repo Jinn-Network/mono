@@ -15,6 +15,16 @@ export const test = base.extend<TwoSubstrateOpsFixtures>({
       // collisions under parallel runs: tier-2-helpers tests 7740-7743,
       // T2.1 7750-7751, T2.2 7760-7761, T2.3 7770-7771.
       portBase: 7770,
+      // Drive discovery off the Anvil fork, not the real testnet Ponder indexer.
+      // T2.3 launches a SolverNet on a *fresh fork* (setupTier2Scenario forks
+      // Base Sepolia) and then asserts op-b discovers it in the catalog. The
+      // default testnet discovery mode is `http` against the shared indexer,
+      // which indexes real Base Sepolia and will NEVER see a fork-only launch —
+      // so op-b's catalog stays empty and the "op-b sees catalog" wait times
+      // out. `onchain` makes both daemons' catalog refresh read MetadataSet
+      // events from the IdentityRegistry directly over their (fork) RPC, so the
+      // SolverNet op-a just launched is discoverable within one refresh cycle.
+      extraEnv: { JINN_DISCOVERY_MODE: 'onchain' },
     });
     try {
       await use(handle);

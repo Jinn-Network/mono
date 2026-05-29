@@ -7,9 +7,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { Hex, PublicClient, WalletClient } from 'viem';
+import { decodeFunctionData, type Hex, type PublicClient, type WalletClient } from 'viem';
 import {
   IdentityPublisher,
+  IDENTITY_REGISTRY_SET_METADATA_ABI,
   PayloadValidationError,
   buildMetadataKey,
   encodeExecutionPayload,
@@ -18,6 +19,31 @@ import {
   type ExecutionPayload,
   type ExecutionPayloadV2,
 } from '../../src/erc8004/identity.js';
+
+/**
+ * Decode the calldata of a `setMetadata` send-tx mock call back to the
+ * `{ address, functionName, args }` shape the assertions check.
+ *
+ * IdentityPublisher now routes setMetadata through
+ * `viemSendTransactionWithRetry` (per-EOA broadcast lock + nonce ledger, the
+ * #525 nonce-collision fix), so the calldata arrives ABI-encoded in `data`
+ * rather than as discrete `writeContract` args.
+ */
+function decodeSetMetadataCall(call: { to: Hex; data: Hex }): {
+  address: string;
+  functionName: string;
+  args: readonly [bigint, string, Hex];
+} {
+  const decoded = decodeFunctionData({
+    abi: IDENTITY_REGISTRY_SET_METADATA_ABI,
+    data: call.data,
+  });
+  return {
+    address: call.to,
+    functionName: decoded.functionName,
+    args: decoded.args as unknown as readonly [bigint, string, Hex],
+  };
+}
 
 // ── Spec test vectors (payload-schema §8) ─────────────────────────────────────
 
@@ -232,13 +258,13 @@ describe('buildMetadataKey', () => {
 // ── publishContent — calldata + lifecycle ─────────────────────────────────────
 
 function makeMocks(overrides?: {
-  writeContractImpl?: (...args: unknown[]) => Promise<Hex>;
+  sendTransactionImpl?: (...args: unknown[]) => Promise<Hex>;
   waitImpl?: (...args: unknown[]) => Promise<unknown>;
 }) {
-  const writeContract = vi
+  const sendTransaction = vi
     .fn<[unknown], Promise<Hex>>()
     .mockImplementation(
-      overrides?.writeContractImpl as (...args: unknown[]) => Promise<Hex> ??
+      overrides?.sendTransactionImpl as (...args: unknown[]) => Promise<Hex> ??
         (() => Promise.resolve('0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed' as Hex)),
     );
   const waitForTransactionReceipt = vi.fn().mockImplementation(
@@ -250,12 +276,23 @@ function makeMocks(overrides?: {
   const walletClient = {
     account,
     chain,
-    writeContract,
+    sendTransaction,
   } as unknown as WalletClient;
+  // The publicClient methods below back viemSendTransactionWithRetry's nonce
+  // ledger + fee estimation. getTransactionCount returns a stable value so the
+  // first attempt's pinned nonce is deterministic and stuck-nonce recovery is a
+  // no-op (pending === latest).
   const publicClient = {
     waitForTransactionReceipt,
+    getChainId: vi.fn().mockResolvedValue(8453),
+    getTransactionCount: vi.fn().mockResolvedValue(0),
+    estimateFeesPerGas: vi.fn().mockResolvedValue({
+      maxFeePerGas: 100n,
+      maxPriorityFeePerGas: 10n,
+    }),
+    getGasPrice: vi.fn().mockResolvedValue(50n),
   } as unknown as PublicClient;
-  return { walletClient, publicClient, writeContract, waitForTransactionReceipt };
+  return { walletClient, publicClient, sendTransaction, waitForTransactionReceipt };
 }
 
 describe('IdentityPublisher.publishContent', () => {
@@ -263,7 +300,7 @@ describe('IdentityPublisher.publishContent', () => {
   const AGENT_ID = 42n;
 
   it('calls setMetadata with correct address, args, and ABI-encoded value', async () => {
-    const { walletClient, publicClient, writeContract, waitForTransactionReceipt } = makeMocks();
+    const { walletClient, publicClient, sendTransaction, waitForTransactionReceipt } = makeMocks();
 
     const publisher = new IdentityPublisher({
       identityRegistryAddress: REGISTRY,
@@ -280,14 +317,10 @@ describe('IdentityPublisher.publishContent', () => {
     });
 
     expect(txHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(writeContract).toHaveBeenCalledTimes(1);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
     expect(waitForTransactionReceipt).toHaveBeenCalledTimes(1);
 
-    const call = writeContract.mock.calls[0]![0] as {
-      address: string;
-      functionName: string;
-      args: [bigint, string, Hex];
-    };
+    const call = decodeSetMetadataCall(sendTransaction.mock.calls[0]![0] as { to: Hex; data: Hex });
     expect(call.address).toBe(REGISTRY);
     expect(call.functionName).toBe('setMetadata');
     expect(call.args[0]).toBe(AGENT_ID);
@@ -296,7 +329,7 @@ describe('IdentityPublisher.publishContent', () => {
   });
 
   it('uses "evaluation:" prefix when kind=evaluation', async () => {
-    const { walletClient, publicClient, writeContract } = makeMocks();
+    const { walletClient, publicClient, sendTransaction } = makeMocks();
     const publisher = new IdentityPublisher({
       identityRegistryAddress: REGISTRY,
       agentId: AGENT_ID,
@@ -310,13 +343,13 @@ describe('IdentityPublisher.publishContent', () => {
       payload: VECTOR_A_INPUT,
     });
 
-    const call = writeContract.mock.calls[0]![0] as { args: [bigint, string, Hex] };
+    const call = decodeSetMetadataCall(sendTransaction.mock.calls[0]![0] as { to: Hex; data: Hex });
     expect(call.args[1]).toBe('evaluation:bafyverdict002');
     expect(call.args[2]).toBe(VECTOR_A_EXPECTED);
   });
 
   it('propagates PayloadValidationError on bad payload (no contract call)', async () => {
-    const { walletClient, publicClient, writeContract } = makeMocks();
+    const { walletClient, publicClient, sendTransaction } = makeMocks();
     const publisher = new IdentityPublisher({
       identityRegistryAddress: REGISTRY,
       agentId: AGENT_ID,
@@ -336,12 +369,14 @@ describe('IdentityPublisher.publishContent', () => {
       }),
     ).rejects.toBeInstanceOf(PayloadValidationError);
 
-    expect(writeContract).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  it('propagates writeContract errors to the caller', async () => {
+  it('propagates send-transaction errors to the caller', async () => {
     const { walletClient, publicClient } = makeMocks({
-      writeContractImpl: () => Promise.reject(new Error('rpc unreachable')),
+      // A non-recoverable error so the retry wrapper surfaces it immediately
+      // rather than burning the retry budget on a transient classification.
+      sendTransactionImpl: () => Promise.reject(new Error('insufficient funds: rpc unreachable')),
     });
     const publisher = new IdentityPublisher({
       identityRegistryAddress: REGISTRY,
@@ -378,7 +413,7 @@ describe('IdentityPublisher.publishContentV2', () => {
   const AGENT_ID = 42n;
 
   it('uses "evaluation:" prefix when kind=evaluation (jinn-mono-n93o)', async () => {
-    const { walletClient, publicClient, writeContract, waitForTransactionReceipt } = makeMocks();
+    const { walletClient, publicClient, sendTransaction, waitForTransactionReceipt } = makeMocks();
     const publisher = new IdentityPublisher({
       identityRegistryAddress: REGISTRY,
       agentId: AGENT_ID,
@@ -394,14 +429,10 @@ describe('IdentityPublisher.publishContentV2', () => {
     });
 
     expect(txHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(writeContract).toHaveBeenCalledTimes(1);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
     expect(waitForTransactionReceipt).toHaveBeenCalledTimes(1);
 
-    const call = writeContract.mock.calls[0]![0] as {
-      address: string;
-      functionName: string;
-      args: [bigint, string, Hex];
-    };
+    const call = decodeSetMetadataCall(sendTransaction.mock.calls[0]![0] as { to: Hex; data: Hex });
     expect(call.address).toBe(REGISTRY);
     expect(call.functionName).toBe('setMetadata');
     expect(call.args[0]).toBe(AGENT_ID);
@@ -410,7 +441,7 @@ describe('IdentityPublisher.publishContentV2', () => {
   });
 
   it('uses "envelope:" prefix when kind=envelope (back-compat regression)', async () => {
-    const { walletClient, publicClient, writeContract } = makeMocks();
+    const { walletClient, publicClient, sendTransaction } = makeMocks();
     const publisher = new IdentityPublisher({
       identityRegistryAddress: REGISTRY,
       agentId: AGENT_ID,
@@ -424,7 +455,7 @@ describe('IdentityPublisher.publishContentV2', () => {
       payload: V2_VECTOR_INPUT,
     });
 
-    const call = writeContract.mock.calls[0]![0] as { args: [bigint, string, Hex] };
+    const call = decodeSetMetadataCall(sendTransaction.mock.calls[0]![0] as { to: Hex; data: Hex });
     expect(call.args[1]).toBe('envelope:bafyenvelope004');
   });
 });

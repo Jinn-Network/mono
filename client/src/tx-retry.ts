@@ -367,6 +367,62 @@ export interface WithNonceLedgerArgs {
   staleAfterMs?: number;
 }
 
+// ── Per-EOA broadcast serialization (issue #525 nonce-collision) ─────────────
+//
+// Multiple daemon subsystems broadcast transactions from the SAME agent EOA:
+//   - executeSafeTransaction (creator / claim / deliver loops, Safe-mediated)
+//   - IdentityPublisher.setMetadata (launch + per-execution anchors)
+//   - eviction-recovery distributor.reStake
+//
+// Each independently reads the EOA's `pending` transaction count to choose a
+// nonce. When two run concurrently they read the SAME pending nonce, assign it
+// to two different transactions, and the second to land reverts "nonce too
+// low". The per-Safe lock in adapters/mech/safe.ts only serializes Safe txs
+// sharing one Safe — it does not cover the EOA shared across these distinct
+// broadcast mechanisms.
+//
+// This per-EOA mutex serializes the nonce-read → broadcast → record critical
+// section across ALL broadcasters that route through `withNonceLedger`
+// (executeSafeTransaction and viemSendTransactionWithRetry). It is keyed by the
+// lowercased `from` address so two different EOAs never block each other, and
+// it tolerates the `fn` rejecting (the lock is always released in `finally`).
+const eoaBroadcastLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Run `fn` while holding an exclusive per-EOA broadcast lock. Concurrent calls
+ * for the same `from` address are serialized; calls for different addresses
+ * proceed in parallel. The returned promise resolves/rejects with `fn`'s
+ * result, and the lock is released whether `fn` succeeds or throws.
+ *
+ * Exported for tests and for non-ledger broadcast paths that still need to
+ * share the EOA serialization (e.g. a raw `writeContract` that opts in).
+ */
+export async function withEoaBroadcastLock<T>(
+  from: Address,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = from.toLowerCase();
+  // Chain onto any in-flight broadcast for this EOA. We await the prior
+  // promise's settlement (success OR failure) before proceeding, so a failed
+  // predecessor never deadlocks its successors.
+  const prior = eoaBroadcastLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  // The stored promise resolves when THIS holder releases — successors await it.
+  eoaBroadcastLocks.set(key, gate);
+  await prior.catch(() => { /* predecessor failure must not block the queue */ });
+  try {
+    return await fn();
+  } finally {
+    release();
+    // Clean up the map entry if we are the tail of the queue, so the Map does
+    // not grow unbounded across many EOAs over a long-lived daemon.
+    if (eoaBroadcastLocks.get(key) === gate) {
+      eoaBroadcastLocks.delete(key);
+    }
+  }
+}
+
 export function createMemoryTxSubmissionLedger(): TxSubmissionLedger {
   const entries = new Map<string, TxSubmissionLedgerEntry>();
   const keyFor = (key: TxSubmissionKey) =>
@@ -674,6 +730,16 @@ function withoutFeeOverrides<T extends TxFeeSnapshot>(tx: T): Omit<T, keyof TxFe
 }
 
 export async function withNonceLedger<T>(
+  args: WithNonceLedgerArgs,
+  fn: (context: NonceLedgerContext) => Promise<T>,
+): Promise<T> {
+  // Serialize the whole nonce-read → send → record section per EOA so two
+  // concurrent broadcasters from the same `from` address cannot read the same
+  // `pending` nonce and collide ("nonce too low"). See `withEoaBroadcastLock`.
+  return withEoaBroadcastLock(args.from, () => withNonceLedgerInner(args, fn));
+}
+
+async function withNonceLedgerInner<T>(
   args: WithNonceLedgerArgs,
   fn: (context: NonceLedgerContext) => Promise<T>,
 ): Promise<T> {

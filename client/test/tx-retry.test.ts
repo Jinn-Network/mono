@@ -5,6 +5,7 @@ import {
   isRecoverableTransactionError,
   recoverStuckNonceIfNeeded,
   viemSendTransactionWithRetry,
+  withEoaBroadcastLock,
   withRecoverableRetry,
   withNonceLedger,
   viemFeeOverridesForAttempt,
@@ -555,6 +556,132 @@ describe('tx-retry', () => {
       });
       const resolved = await ledger.getTxSubmission({ chainId: 84532, from, nonce: 7 });
       expect(resolved?.resolvedAtMs).toBe(61_000);
+    });
+  });
+
+  describe('per-EOA broadcast serialization (issue #525 nonce-collision)', () => {
+    /**
+     * Build a simulated chain whose `pending` transaction count only advances
+     * when a previously-sent tx is "mined". `sendTransaction` is intentionally
+     * async (a microtask hop) so that, WITHOUT serialization, two concurrent
+     * broadcasters would both read the same pending nonce before either sends —
+     * exactly the race that reverted the #525 launch `setMetadata` with
+     * "nonce too low".
+     */
+    function makeSimulatedEoaChain(startNonce: number) {
+      let pending = startNonce;
+      const sentNonces: number[] = [];
+      let nonceTooLowThrows = 0;
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        // Same value for pending + latest so recoverStuckNonceIfNeeded is a no-op.
+        getTransactionCount: vi.fn(async () => pending),
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+      const sendTransaction = vi.fn(async (tx: { nonce?: number }) => {
+        // Yield so concurrent callers interleave their nonce reads if unguarded.
+        await Promise.resolve();
+        const nonce = tx.nonce ?? pending;
+        if (nonce < pending) {
+          // The RPC's "nonce too low" signal for a reused/stale nonce.
+          nonceTooLowThrows += 1;
+          throw new Error(`nonce too low: next nonce ${pending}, tx nonce ${nonce}`);
+        }
+        sentNonces.push(nonce);
+        pending = nonce + 1; // tx accepted into the pool; pending advances
+        return `0x${nonce.toString(16).padStart(64, '0')}` as `0x${string}`;
+      });
+      return {
+        publicClient,
+        sendTransaction,
+        sentNonces,
+        nonceTooLow: () => nonceTooLowThrows,
+      };
+    }
+
+    const account = { address: '0x9999999999999999999999999999999999999999' } as const;
+    const to = '0x2222222222222222222222222222222222222222' as const;
+
+    it('serializes concurrent same-EOA broadcasts so they get distinct nonces without colliding', async () => {
+      const { publicClient, sendTransaction, sentNonces, nonceTooLow } =
+        makeSimulatedEoaChain(42);
+      const ledger = createMemoryTxSubmissionLedger();
+
+      // Fire three broadcasts from the SAME EOA concurrently. With the per-EOA
+      // lock they queue strictly (42, 43, 44) and NO "nonce too low" collision
+      // is ever observed — so sendTransaction is called exactly 3 times. Without
+      // the lock all three read pending=42 and two collide; the #562 retry would
+      // eventually heal them, but the collision (the bug) would still occur. We
+      // assert the collision count is zero, which isolates the lock as the fix
+      // rather than masking it behind retry.
+      const results = await Promise.all([
+        viemSendTransactionWithRetry(
+          { sendTransaction }, publicClient as never,
+          { account, to, value: 1n }, { ledger, maxAttempts: 6, baseDelayMs: 1, maxDelayMs: 1 },
+        ),
+        viemSendTransactionWithRetry(
+          { sendTransaction }, publicClient as never,
+          { account, to, value: 1n }, { ledger, maxAttempts: 6, baseDelayMs: 1, maxDelayMs: 1 },
+        ),
+        viemSendTransactionWithRetry(
+          { sendTransaction }, publicClient as never,
+          { account, to, value: 1n }, { ledger, maxAttempts: 6, baseDelayMs: 1, maxDelayMs: 1 },
+        ),
+      ]);
+
+      // Three distinct nonces, all succeeded.
+      expect(results).toHaveLength(3);
+      expect([...sentNonces].sort((a, b) => a - b)).toEqual([42, 43, 44]);
+      expect(new Set(sentNonces).size).toBe(3);
+      // The core invariant: the per-EOA lock prevented the collision entirely —
+      // no "nonce too low" was ever thrown, and sendTransaction ran exactly once
+      // per broadcaster (no collision-induced retries).
+      expect(nonceTooLow()).toBe(0);
+      expect(sendTransaction).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not serialize broadcasts from different EOAs (no cross-EOA blocking)', async () => {
+      const order: string[] = [];
+      let releaseA!: () => void;
+      const aInside = new Promise<void>((resolve) => { releaseA = resolve; });
+
+      // Hold the lock for EOA A open; B (different EOA) must still proceed.
+      const aPromise = withEoaBroadcastLock(
+        '0xaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaA' as never,
+        async () => {
+          order.push('a-start');
+          await aInside; // block until we explicitly release
+          order.push('a-end');
+        },
+      );
+      const bPromise = withEoaBroadcastLock(
+        '0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb' as never,
+        async () => {
+          order.push('b-ran');
+        },
+      );
+
+      await bPromise;            // B completes without waiting for A
+      expect(order).toContain('b-ran');
+      expect(order).not.toContain('a-end'); // A still held open
+      releaseA();
+      await aPromise;
+      expect(order).toContain('a-end');
+    });
+
+    it('releases the per-EOA lock when the guarded fn rejects (no deadlock)', async () => {
+      const key = '0xcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcC' as never;
+      await expect(
+        withEoaBroadcastLock(key, async () => { throw new Error('boom'); }),
+      ).rejects.toThrow('boom');
+      // A subsequent acquisition must not hang — the lock was released.
+      await expect(
+        withEoaBroadcastLock(key, async () => 'ok'),
+      ).resolves.toBe('ok');
     });
   });
 });
