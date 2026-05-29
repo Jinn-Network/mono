@@ -41,6 +41,13 @@ export interface ClaudeCodeHarnessAdapterConfig {
    * node:child_process.spawn so tests can inject a fake child process.
    */
   _spawnFn?: typeof spawn;
+  /**
+   * Override the process-group kill for testing (#883). Called as
+   * `(childPid, signal)` and expected to signal the child's whole process
+   * group (`process.kill(-childPid, signal)`) so leaked grandchildren are
+   * reaped. Injected by tests so they never fire a real signal.
+   */
+  _killProcessGroup?: (childPid: number, signal: NodeJS.Signals) => void;
 }
 
 /**
@@ -150,6 +157,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   private readonly corpusEnv: ClaudeCodeHarnessAdapterConfig['corpusEnv'];
   private readonly pluginInstallDir: string;
   private readonly spawnFn: typeof spawn;
+  private readonly killProcessGroup: (childPid: number, signal: NodeJS.Signals) => void;
 
   constructor(config: ClaudeCodeHarnessAdapterConfig = {}) {
     this.claudePath = config.claudePath ?? 'claude';
@@ -160,6 +168,8 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     this.corpusEnv = config.corpusEnv;
     this.pluginInstallDir = config.pluginInstallDir ?? join(homedir(), '.claude', 'plugins');
     this.spawnFn = config._spawnFn ?? spawn;
+    this.killProcessGroup =
+      config._killProcessGroup ?? ((childPid, signal) => { process.kill(-childPid, signal); });
   }
 
   async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
@@ -218,6 +228,11 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
       cwd: inputs.workingDir,
+      // #883: run claude as its own process-group leader so we can reap the
+      // WHOLE group (claude + any tool subprocesses it leaks, e.g. a `while …;
+      // do sleep; done` shell). Killing just the claude pid would orphan
+      // those grandchildren.
+      detached: process.platform !== 'win32',
     };
 
     return new Promise<void>((resolve, reject) => {
@@ -236,28 +251,31 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       };
       const child: ChildProcess = this.spawnFn(this.claudePath, args, spawnOpts);
 
+      // #883: reap the child AND its process group, so a tool subprocess the
+      // model leaked (e.g. an unbounded `while …; do sleep; done` shell) dies
+      // too. Killing only the claude pid would orphan such a grandchild — and
+      // because that live grandchild keeps claude's event loop alive, claude
+      // itself would never exit (the observed hang). SIGKILL backstops SIGTERM.
+      const reap = (signal: NodeJS.Signals): void => {
+        if (typeof child.pid === 'number') {
+          try { this.killProcessGroup(child.pid, signal); } catch { /* group already gone */ }
+        }
+        try { if (!child.killed) child.kill(signal); } catch { /* already dead */ }
+      };
+
       // If the abort signal already fired before we got here (race), kill
       // the child immediately. Without this, addEventListener below would
       // never fire (signals only emit on transition to aborted, not when
       // already aborted).
       if (inputs.abort.aborted) {
-        if (!child.killed) child.kill('SIGTERM');
+        reap('SIGTERM');
       }
 
-      // Window-end abort: kill child, reject.
+      // Window-end abort: kill the child group; the exit/result path resolves.
       const onAbort = () => {
-        if (!child.killed) child.kill('SIGTERM');
+        reap('SIGTERM');
       };
       inputs.abort.addEventListener('abort', onAbort);
-
-      let stderr = '';
-      child.stdout?.on('data', (d: Buffer) => {
-        stdoutLog.write(d);
-      });
-      child.stderr?.on('data', (d: Buffer) => {
-        stderrLog.write(d);
-        stderr += d.toString();
-      });
 
       let settled = false;
       const settleAfterLogs = (
@@ -269,6 +287,52 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
         inputs.abort.removeEventListener('abort', onAbort);
         closeLogs().then(complete, onLogError);
       };
+
+      // #883: complete on claude's terminal `result` message, not solely on
+      // process exit. claude streams `{"type":"result","subtype":…}` when the
+      // session ends; it may then fail to exit (a leaked tool subprocess holds
+      // the event loop open). Settling on the result — and reaping the group —
+      // means the task never strands in RUNNING waiting for an exit that never
+      // comes. The `child.on('exit')` handler below still covers crashes that
+      // emit no result; the `settled` guard makes whichever fires first win.
+      let stdoutBuf = '';
+      const onResult = (subtype: unknown): void => {
+        if (settled) return;
+        reap('SIGTERM');
+        const killTimer = setTimeout(() => reap('SIGKILL'), 2000);
+        if (typeof killTimer.unref === 'function') killTimer.unref();
+        settleAfterLogs(() => {
+          if (subtype === undefined || subtype === 'success') {
+            resolve();
+          } else {
+            reject(new Error(`claude-code adapter: session ended with result subtype=${String(subtype)}`));
+          }
+        });
+      };
+
+      let stderr = '';
+      child.stdout?.on('data', (d: Buffer) => {
+        stdoutLog.write(d);
+        if (settled) return;
+        stdoutBuf += d.toString();
+        let nl: number;
+        while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
+          const line = stdoutBuf.slice(0, nl).trim();
+          stdoutBuf = stdoutBuf.slice(nl + 1);
+          if (!line.includes('"type":"result"')) continue;
+          try {
+            const obj = JSON.parse(line) as { type?: unknown; subtype?: unknown };
+            if (obj && obj.type === 'result') {
+              onResult(obj.subtype);
+              return;
+            }
+          } catch { /* partial or non-JSON line; keep scanning */ }
+        }
+      });
+      child.stderr?.on('data', (d: Buffer) => {
+        stderrLog.write(d);
+        stderr += d.toString();
+      });
 
       child.on('exit', (code, signal) => {
         settleAfterLogs(() => {
