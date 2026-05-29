@@ -13,7 +13,15 @@ test('T2.3 — op-a launches, op-b joins, both observe each other', async ({ bro
     // ===== op-a: Launcher Create wizard =====
     await opAPage.goto(opAUrl);
     await opAPage.getByRole('link', { name: /launcher/i }).click();
-    await opAPage.getByRole('button', { name: /create solvernet/i }).click();
+    // The "Create SolverNet" CTA on the Launcher list page is a shadcn
+    // `<Button asChild><Link>…</Link></Button>`, so it renders as an <a>
+    // (role="link"), not a <button> — in BOTH render paths (the EmptyState
+    // button and the populated-list header CTA). The prior
+    // `getByRole('button', { name: /create solvernet/i })` matched nothing and
+    // hung the full 300s Playwright budget (mis-filed as #525 "flake-timing";
+    // it was a deterministic selector mismatch, not a slow flow). Match the
+    // link role so the selector works regardless of which path renders.
+    await opAPage.getByRole('link', { name: /create solvernet/i }).click();
 
     const solverNetName = `t23-${Date.now()}`;
 
@@ -29,8 +37,13 @@ test('T2.3 — op-a launches, op-b joins, both observe each other', async ({ bro
     await opAPage.getByLabel(/cadence/i).fill('60000');
     await opAPage.getByRole('button', { name: /next/i }).click();
 
-    // Step 4: Configure Pricing
-    await opAPage.getByLabel(/price/i).fill('100');
+    // Step 4: Configure Pricing. The wizard now has two distinct price inputs
+    // (solution + verdict); `getByLabel(/price/i)` matched both and resolved to
+    // an ambiguous locator that never became actionable. Target each input by
+    // its stable test id. validatePricing requires at least one positive price,
+    // so set both.
+    await opAPage.getByTestId('launcher-create-solutionPriceWei').fill('100000000000000');
+    await opAPage.getByTestId('launcher-create-verdictPriceWei').fill('50000000000000');
     await opAPage.getByRole('button', { name: /next/i }).click();
 
     // Step 5: Review and Launch
