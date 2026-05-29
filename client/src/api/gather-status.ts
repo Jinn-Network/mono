@@ -13,6 +13,8 @@ import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../daemon/spend-cap-gate.js';
+import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
+import { blockResetsAtUtc, weekResetsAtUtc } from '../spend/ai-units.js';
 import { FleetStateStore } from '../earning/store.js';
 import {
   DEFAULT_TESTNET_ARTIFACTS,
@@ -272,6 +274,12 @@ export interface StatusGatherConfig {
   configPath?: string;
   /** Per-credential daily caps; when present, /v1/status carries a `spend` block. */
   spendCaps?: Record<CredentialId, number>;
+  /**
+   * AI-units gate config (issue #815). When present, /v1/status carries an
+   * `aiUnits` block keyed per credential — surfaces unitsThisBlock /
+   * unitsThisWeek vs caps + paused flag + reset instants.
+   */
+  aiUnits?: AiUnitsDaemonConfig;
   /**
    * Optional getter that returns the live HarnessReadinessRegistry snapshot
    * + joinedHarnessesByCid map. Threaded by `server.ts` for the `/v1/status`
@@ -1378,6 +1386,33 @@ export async function gatherStatusForApi(
       credentials: Object.entries(caps).map(([credentialId, capUsd]) => {
         const spentTodayUsd = store.spentTodayMicros(credentialId, now) / 1_000_000;
         return { credentialId, capUsd, spentTodayUsd, paused: isOverSpendCap(spentTodayUsd, capUsd), resetsAt };
+      }),
+    };
+  }
+  const aiUnitsCfg = status?.aiUnits;
+  if (aiUnitsCfg) {
+    const now = new Date();
+    const blockResetsAt = blockResetsAtUtc(now).toISOString();
+    const weekResetsAt = weekResetsAtUtc(now).toISOString();
+    // Dedupe credentials across manifests — multiple SolverNets on the same
+    // credential share one row.
+    const uniqueCredentials = new Set(Object.values(aiUnitsCfg.manifestCredentials));
+    body.aiUnits = {
+      credentials: [...uniqueCredentials].map((credentialId) => {
+        const unitsThisBlock = store.aiUnitsThisBlock(credentialId, now);
+        const unitsThisWeek = store.aiUnitsThisWeek(credentialId, now);
+        const paused =
+          unitsThisBlock >= aiUnitsCfg.capPerBlock || unitsThisWeek >= aiUnitsCfg.capPerWeek;
+        return {
+          credentialId,
+          unitsThisBlock,
+          unitsThisWeek,
+          capPerBlock: aiUnitsCfg.capPerBlock,
+          capPerWeek: aiUnitsCfg.capPerWeek,
+          paused,
+          blockResetsAt,
+          weekResetsAt,
+        };
       }),
     };
   }

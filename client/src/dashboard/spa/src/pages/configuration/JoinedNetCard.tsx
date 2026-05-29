@@ -26,6 +26,7 @@ import {
 import { PluginPicker } from './PluginPicker.js';
 import { decideCostSurface } from '../../../../../harnesses/cost-estimates.js';
 import { CostEstimatePanel } from './CostEstimatePanel.js';
+import { HarnessFootprintPanel } from './HarnessFootprintPanel.js';
 import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
 
 /**
@@ -506,6 +507,18 @@ export function JoinedNetCard({
               usesPaidApiKey={usesPaidApiKey}
               variant="inline"
               testIdPrefix="joined-net-card-cost"
+            />
+          )}
+
+          {/* Issue #815 — AI-units footprint shown alongside the
+              per-task USD surface when the operator changes
+              harness/model from Settings. */}
+          {isSolver && (
+            <HarnessFootprintPanel
+              harness={form.harness}
+              modelId={form.model}
+              variant="inline"
+              testIdPrefix="joined-net-card-footprint"
             />
           )}
 

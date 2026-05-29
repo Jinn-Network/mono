@@ -22,6 +22,14 @@ export interface ActivityEventInput {
   credentialId?: string | null;
   costUsdMicros?: number | null;
   model?: string | null;
+  /** Projected AI units debited at claim time (issue #815). Estimates are the gate input; never recomputed. */
+  aiUnits?: number | null;
+  /** Lifecycle stamp on the per-request row: 'claimed' | 'claim_failed' | 'delivered'. */
+  claimStatus?: string | null;
+  /** USD estimate captured at claim time (micros). Distinct from `actualCostUsdMicros` filled on completion. */
+  estimatedCostUsdMicros?: number | null;
+  /** USD actually billed (micros) — filled by the completion path; null until then. */
+  actualCostUsdMicros?: number | null;
 }
 
 export interface ActivityEventRow {
@@ -37,6 +45,10 @@ export interface ActivityEventRow {
   credentialId: string | null;
   costUsdMicros: number | null;
   model: string | null;
+  aiUnits: number | null;
+  claimStatus: string | null;
+  estimatedCostUsdMicros: number | null;
+  actualCostUsdMicros: number | null;
 }
 
 export interface RewardClaimInput {
@@ -640,8 +652,21 @@ export class Store {
     addActivityColumn('credential_id', 'credential_id TEXT');
     addActivityColumn('cost_usd_micros', 'cost_usd_micros INTEGER');
     addActivityColumn('model', 'model TEXT');
+    // Issue #815 — AI-units ceiling. ai_units is the gate-input projection
+    // captured at claim time; claim_status tracks the per-request lifecycle
+    // (claimed / claim_failed / delivered); the cost pair splits the
+    // estimated-at-claim-time vs actual-at-completion telemetry.
+    addActivityColumn('ai_units', 'ai_units REAL');
+    addActivityColumn('claim_status', 'claim_status TEXT');
+    addActivityColumn('estimated_cost_usd_micros', 'estimated_cost_usd_micros INTEGER');
+    addActivityColumn('actual_cost_usd_micros', 'actual_cost_usd_micros INTEGER');
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_activity_events_credential ON activity_events (credential_id, ts)`,
+    );
+    // Per-request lookup for the completion-time update path that fills
+    // actualCostUsdMicros / sets claim_status='delivered'.
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_activity_events_req_claim ON activity_events (request_id, claim_status)`,
     );
   }
 
@@ -713,6 +738,19 @@ export class Store {
     ).run(requestId, role);
     const ts = new Date().toISOString();
     this.recordActivityEvent({ ts, kind: role, requestId });
+  }
+
+  /**
+   * Membership-only variant of `recordOwnActivity`: writes the
+   * `own_activity` row but does NOT emit a generic `activity_events`
+   * row. Used by paths that emit their own enriched activity event
+   * (e.g. issue #815's claim path attaches credentialId / aiUnits /
+   * estimatedCostUsdMicros / claimStatus to the row).
+   */
+  markOwnActivity(requestId: string, role: 'created' | 'claimed' | 'delivered' | 'evaluated'): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO own_activity (request_id, role) VALUES (?, ?)`
+    ).run(requestId, role);
   }
 
   isOwnActivity(requestId: string): boolean {
@@ -1160,10 +1198,12 @@ export class Store {
     this.db.prepare(
       `INSERT INTO activity_events
          (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
-          credential_id, cost_usd_micros, model)
+          credential_id, cost_usd_micros, model,
+          ai_units, claim_status, estimated_cost_usd_micros, actual_cost_usd_micros)
        VALUES
          (@ts, @kind, @requestId, @serviceIndex, @txHash, @solverType, @outcome, @detail,
-          @credentialId, @costUsdMicros, @model)`,
+          @credentialId, @costUsdMicros, @model,
+          @aiUnits, @claimStatus, @estimatedCostUsdMicros, @actualCostUsdMicros)`,
     ).run({
       ts: event.ts ?? null,
       kind: event.kind,
@@ -1176,6 +1216,10 @@ export class Store {
       credentialId: event.credentialId ?? null,
       costUsdMicros: event.costUsdMicros ?? null,
       model: event.model ?? null,
+      aiUnits: event.aiUnits ?? null,
+      claimStatus: event.claimStatus ?? null,
+      estimatedCostUsdMicros: event.estimatedCostUsdMicros ?? null,
+      actualCostUsdMicros: event.actualCostUsdMicros ?? null,
     });
   }
 
@@ -1197,7 +1241,8 @@ export class Store {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
       `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
-              credential_id, cost_usd_micros, model
+              credential_id, cost_usd_micros, model,
+              ai_units, claim_status, estimated_cost_usd_micros, actual_cost_usd_micros
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -1215,6 +1260,10 @@ export class Store {
       credential_id: string | null;
       cost_usd_micros: number | null;
       model: string | null;
+      ai_units: number | null;
+      claim_status: string | null;
+      estimated_cost_usd_micros: number | null;
+      actual_cost_usd_micros: number | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -1229,6 +1278,10 @@ export class Store {
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
+      aiUnits: r.ai_units,
+      claimStatus: r.claim_status,
+      estimatedCostUsdMicros: r.estimated_cost_usd_micros,
+      actualCostUsdMicros: r.actual_cost_usd_micros,
     }));
   }
 
@@ -1248,13 +1301,103 @@ export class Store {
     return row.total;
   }
 
+  /**
+   * Sum of `ai_units` for a credential within the current 6h UTC-aligned
+   * block (00:00 / 06:00 / 12:00 / 18:00 boundaries). Reads only rows whose
+   * `claim_status = 'claimed'` or `'delivered'` so failed-claim rows
+   * (`ai_units = 0`, `claim_status = 'claim_failed'`) don't muddy the sum
+   * even though their contribution is already zero.
+   *
+   * Issue #815. Backs the per-block AI-units ceiling gate.
+   */
+  aiUnitsThisBlock(credentialId: string, now: Date = new Date()): number {
+    const startOfDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const sinceDayStart = now.getTime() - startOfDay;
+    const sixHoursMs = 6 * 60 * 60 * 1_000;
+    // Cap at 3 — there are 4 blocks per day (indices 0..3). Edge cases
+    // where sinceDayStart ≈ 24h (millisecond rounding) would otherwise
+    // overshoot into a non-existent 5th block in the *next* day.
+    const blocksIn = Math.min(Math.floor(sinceDayStart / sixHoursMs), 3);
+    const blockStart = new Date(startOfDay + blocksIn * sixHoursMs).toISOString();
+    const blockEnd = new Date(startOfDay + (blocksIn + 1) * sixHoursMs).toISOString();
+    const row = this.db.prepare(
+      `SELECT COALESCE(SUM(ai_units), 0) AS total
+       FROM activity_events
+       WHERE credential_id = @cid
+         AND ts IS NOT NULL AND ts >= @blockStart AND ts < @blockEnd
+         AND claim_status IN ('claimed', 'delivered')`,
+    ).get({ cid: credentialId, blockStart, blockEnd }) as { total: number };
+    return row.total ?? 0;
+  }
+
+  /**
+   * Sum of `ai_units` for a credential within the trailing 7-day rolling
+   * window from `now`. Backs the per-week AI-units safety-net ceiling.
+   * Issue #815.
+   */
+  aiUnitsThisWeek(credentialId: string, now: Date = new Date()): number {
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+    const row = this.db.prepare(
+      `SELECT COALESCE(SUM(ai_units), 0) AS total
+       FROM activity_events
+       WHERE credential_id = @cid
+         AND ts IS NOT NULL AND ts >= @weekStart
+         AND claim_status IN ('claimed', 'delivered')`,
+    ).get({ cid: credentialId, weekStart }) as { total: number };
+    return row.total ?? 0;
+  }
+
+  /**
+   * True iff an `ai_units_cap_reached` row exists for the given
+   * (credentialId, window, blockId). Used by the daemon to hydrate the
+   * AI-units gate's in-memory pause memo across restarts so the
+   * "exactly one event per (credential, window, block-id)" guarantee
+   * holds across process boundaries (issue #815, finding 1).
+   *
+   * Lookup is by `credential_id` + `kind` + the `[block=...][window=...]`
+   * markers that `daemon.ts` embeds in the row's `detail` string.
+   */
+  hasAiUnitsCapReachedFor(
+    credentialId: string,
+    window: 'block' | 'week',
+    blockId: string,
+  ): boolean {
+    const marker = `[block=${blockId}][window=${window}]`;
+    const row = this.db.prepare(
+      `SELECT 1 AS hit
+       FROM activity_events
+       WHERE kind = 'ai_units_cap_reached'
+         AND credential_id = @cid
+         AND detail LIKE @marker
+       LIMIT 1`,
+    ).get({ cid: credentialId, marker: `${marker}%` }) as { hit: number } | undefined;
+    return row !== undefined;
+  }
+
+  /**
+   * Mark the per-request `claimed` row as `delivered` and record
+   * `actual_cost_usd_micros`. The `ai_units` projection captured at
+   * claim time is intentionally NOT recomputed — the issue spec says
+   * "estimates are the gate input, never recomputed". Idempotent: a
+   * no-op when no `claimed` row exists.
+   */
+  finalizeClaimDelivered(requestId: string, actualCostUsdMicros: number): void {
+    this.db.prepare(
+      `UPDATE activity_events
+         SET claim_status = 'delivered',
+             actual_cost_usd_micros = @actual
+       WHERE request_id = @req AND claim_status = 'claimed'`,
+    ).run({ req: requestId, actual: actualCostUsdMicros });
+  }
+
   /** Newer events first, then ascending id for `jinn logs --follow` (oldest in batch printed first in caller). */
   getActivityEventsAfterId(afterId: number, limit: number): ActivityEventRow[] {
     const effectiveLimit = Math.max(0, Math.min(limit, 1000));
     const rows = this.db
       .prepare(
         `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
-                credential_id, cost_usd_micros, model
+                credential_id, cost_usd_micros, model,
+                ai_units, claim_status, estimated_cost_usd_micros, actual_cost_usd_micros
          FROM activity_events
          WHERE id > @afterId
          ORDER BY id ASC
@@ -1273,6 +1416,10 @@ export class Store {
         credential_id: string | null;
         cost_usd_micros: number | null;
         model: string | null;
+        ai_units: number | null;
+        claim_status: string | null;
+        estimated_cost_usd_micros: number | null;
+        actual_cost_usd_micros: number | null;
       }>;
     return rows.map((r) => ({
       id: r.id,
@@ -1287,6 +1434,10 @@ export class Store {
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
+      aiUnits: r.ai_units,
+      claimStatus: r.claim_status,
+      estimatedCostUsdMicros: r.estimated_cost_usd_micros,
+      actualCostUsdMicros: r.actual_cost_usd_micros,
     }));
   }
 
@@ -1329,7 +1480,8 @@ export class Store {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
       `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
-              credential_id, cost_usd_micros, model
+              credential_id, cost_usd_micros, model,
+              ai_units, claim_status, estimated_cost_usd_micros, actual_cost_usd_micros
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -1347,6 +1499,10 @@ export class Store {
       credential_id: string | null;
       cost_usd_micros: number | null;
       model: string | null;
+      ai_units: number | null;
+      claim_status: string | null;
+      estimated_cost_usd_micros: number | null;
+      actual_cost_usd_micros: number | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -1361,13 +1517,18 @@ export class Store {
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
+      aiUnits: r.ai_units,
+      claimStatus: r.claim_status,
+      estimatedCostUsdMicros: r.estimated_cost_usd_micros,
+      actualCostUsdMicros: r.actual_cost_usd_micros,
     }));
   }
 
   getActivityEventById(id: number): ActivityEventRow | null {
     const r = this.db.prepare(
       `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail,
-              credential_id, cost_usd_micros, model
+              credential_id, cost_usd_micros, model,
+              ai_units, claim_status, estimated_cost_usd_micros, actual_cost_usd_micros
        FROM activity_events
        WHERE id = ?`,
     ).get(id) as {
@@ -1383,6 +1544,10 @@ export class Store {
       credential_id: string | null;
       cost_usd_micros: number | null;
       model: string | null;
+      ai_units: number | null;
+      claim_status: string | null;
+      estimated_cost_usd_micros: number | null;
+      actual_cost_usd_micros: number | null;
     } | undefined;
     if (!r) return null;
     return {
@@ -1398,6 +1563,10 @@ export class Store {
       credentialId: r.credential_id,
       costUsdMicros: r.cost_usd_micros,
       model: r.model,
+      aiUnits: r.ai_units,
+      claimStatus: r.claim_status,
+      estimatedCostUsdMicros: r.estimated_cost_usd_micros,
+      actualCostUsdMicros: r.actual_cost_usd_micros,
     };
   }
 

@@ -82,6 +82,26 @@ export interface SpendStatus {
   credentials: SpendCredentialRow[];
 }
 
+/** Per-credential AI-units row exposed on /v1/status (issue #815). */
+export interface AiUnitsCredentialRow {
+  credentialId: string;
+  unitsThisBlock: number;
+  unitsThisWeek: number;
+  capPerBlock: number;
+  capPerWeek: number;
+  /** True when block or week sum has reached its cap and claims are paused. */
+  paused: boolean;
+  /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
+  blockResetsAt: string;
+  /** ISO timestamp of the next 7d window reset. */
+  weekResetsAt: string;
+}
+
+/** Per-credential AI-units block; present on /v1/status when AI-units gating is on. */
+export interface AiUnitsStatus {
+  credentials: AiUnitsCredentialRow[];
+}
+
 export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
@@ -284,6 +304,8 @@ export interface StatusV1Response {
   taskRuns?: TaskRunsStatus;
   /** Per-credential daily spend block — present when caps are configured. */
   spend?: SpendStatus;
+  /** Per-credential AI-units 6h-block + 7d-window block — issue #815. */
+  aiUnits?: AiUnitsStatus;
   /** Per-harness billing path for join/settings cost UI (#474). */
   costSurface: CostSurfaceStatus;
   /**

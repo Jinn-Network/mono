@@ -195,6 +195,15 @@ export interface ApiServer {
    *  SolverNet subsystem in main.ts) can mount their routes on the same instance.
    *  See jinn-mono-hqz0. */
   app: Hono;
+  /**
+   * Replace the `status` config the GET /v1/status handler reads. The
+   * setup-mode server starts before the running-mode config (spendCaps,
+   * aiUnits) is built; the daemon calls this on construction so the
+   * running-mode status block is served. Without this, the running-mode
+   * config — including the AI-units gate per-credential view and the
+   * spend-cap view — is silently dropped.
+   */
+  setStatusConfig(status: StatusGatherConfig | undefined): void;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -365,6 +374,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   const { store } = config;
   const app = new Hono();
 
+  // The /v1/status handler reads from this holder, not the closure-captured
+  // `config.status`, so the daemon can swap the running-mode config in after
+  // the server is already up. See `setStatusConfig` on the returned object.
+  let liveStatus: StatusGatherConfig | undefined = config.status;
+
   app.use(cors());
 
   // ── Bearer-token gate for cost-mutating routes ─────────────────────────────
@@ -428,9 +442,9 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const reg = config.harnessReadinessRegistry;
       const getRegistry = (): HarnessReadinessRegistry | null =>
         reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
-      const statusConfig: StatusGatherConfig | undefined = config.status
+      const statusConfig: StatusGatherConfig | undefined = liveStatus
         ? {
-            ...config.status,
+            ...liveStatus,
             harnessReadiness: () => {
               const live = getRegistry();
               if (!live) return null;
@@ -889,6 +903,9 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         // pass http2/https opts so it's always a node http.Server at runtime.
         server: httpServer,
         app,
+        setStatusConfig: (status) => {
+          liveStatus = status;
+        },
       });
     });
 

@@ -66,6 +66,8 @@ import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
+import { buildAiUnitsConfig } from './spend/ai-units-config.js';
+import { REFERENCE_CEILING } from './spend/ai-units.js';
 import {
   buildJinnClaimLoopConfig,
   shouldWireJinnClaimL1Signer,
@@ -2453,6 +2455,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   }
 
   const spendCap = buildSpendCapConfig(config, process.env);
+  const aiUnits = buildAiUnitsConfig(config, process.env);
+  if (aiUnits) {
+    // Surface the resolved AI-units cap so an operator inspecting logs can
+    // distinguish the baked-in default (100/2800) from a deliberate
+    // `JINN_AI_UNITS_CEILING_OVERRIDE` raise (e.g. 10000/280000 in CI).
+    // Source reflects the actual outcome: a malformed override falls back
+    // to default and emits its own warn from resolveReferenceCeiling.
+    const overrideSet =
+      typeof process.env['JINN_AI_UNITS_CEILING_OVERRIDE'] === 'string' &&
+      process.env['JINN_AI_UNITS_CEILING_OVERRIDE'].trim() !== '';
+    const matchesDefault =
+      aiUnits.capPerBlock === REFERENCE_CEILING.units_per_block &&
+      aiUnits.capPerWeek === REFERENCE_CEILING.units_per_week;
+    const source = overrideSet && !matchesDefault ? 'env' : 'default';
+    console.log(
+      `[ai-units] cap=${aiUnits.capPerBlock}/${aiUnits.capPerWeek} per (block, week) source=${source}`,
+    );
+  }
 
   const daemon = new Daemon({
     adapter,
@@ -2471,6 +2491,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     corpusFactory,
     harnessReadinessRegistry,
     spendCap,
+    aiUnits,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
@@ -2497,6 +2518,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       config,
       configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
       spendCaps: spendCap?.caps,
+      aiUnits,
     },
     rewardClaim:
       config.rewardClaimIntervalMs > 0

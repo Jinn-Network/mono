@@ -16,6 +16,7 @@ export const ALLOWED_LIFECYCLE_KINDS = [
   'tick_error',
   'race_lost',
   'spend_cap_reached',
+  'ai_units_cap_reached',
   'startup',
   'shutdown',
 ] as const;
@@ -30,6 +31,12 @@ export interface LifecycleEvent {
   solverType?: string;
   outcome?: 'ok' | 'failed' | 'warn' | 'paused';
   detail?: string;
+  /**
+   * Optional: when set, written to the row's `credential_id` column. The
+   * AI-units cap-reached event uses this so cross-restart memo hydration
+   * can query by credential (issue #815).
+   */
+  credentialId?: string;
 }
 
 export function emitEvent(
@@ -47,6 +54,7 @@ export function emitEvent(
     solverType: event.solverType ?? null,
     outcome: event.outcome ?? null,
     detail: event.detail ?? null,
+    credentialId: event.credentialId ?? null,
   });
 
   const payload = {

@@ -29,6 +29,9 @@ import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.j
 import { gateClaimByReadiness } from './readiness-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
 import type { SpendCapDaemonConfig } from '../spend/daemon-config.js';
+import { gateClaimByAiUnits } from './ai-units-gate.js';
+import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
+import { blockIdUtc, GPT_5_4_MINI_USD_PER_BLOCK } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 
 const DEFAULT_API_PORT = 7331;
@@ -220,6 +223,13 @@ export interface DaemonConfig {
 
   /** Per-credential daily spend caps. Omitted -> no spend gating. */
   spendCap?: SpendCapDaemonConfig;
+
+  /**
+   * AI-units ceiling — issue #815. When present, the engine-watcher loop
+   * gates each claim on a 6h-block + 7d-window AI-units cap per credential.
+   * Omitted only when no joined SolverNet resolves to a billed credential.
+   */
+  aiUnits?: AiUnitsDaemonConfig;
 }
 
 export class Daemon {
@@ -322,6 +332,11 @@ export class Daemon {
     if (this.config.apiServer) {
       this.apiServer = this.config.apiServer;
       this.ownsApiServer = false;
+      // The setup-mode server was built before the running-mode status block
+      // (spendCaps, aiUnits) existed. Swap it in now so GET /v1/status carries
+      // the running-mode view. Without this, the AI-units gate's per-credential
+      // pause data and the spend-cap row never reach the dashboard.
+      this.apiServer.setStatusConfig(this.config.status);
     } else {
       this.apiServer = await startApiServer({
         port: this.apiPort,
@@ -593,6 +608,62 @@ export class Daemon {
         }
       }
 
+      // AI-units gate (issue #815): skip claims for a credential whose
+      // 6h-block or 7d-window AI-units sum + projected debit would exceed
+      // the matching cap. Layered on TOP of the spend-cap gate below — the
+      // first guard to fire skips the claim.
+      let aiUnitsForRow: number | null = null;
+      let estimatedCostUsdMicrosForRow: number | null = null;
+      let modelForRow: string | null = null;
+      const aiUnitsCfg = this.config.aiUnits;
+      if (aiUnitsCfg && manifestCid) {
+        const credentialId = aiUnitsCfg.manifestCredentials[manifestCid];
+        if (credentialId) {
+          const projectedAiUnits = aiUnitsCfg.manifestProjectedAiUnits[manifestCid] ?? null;
+          aiUnitsForRow = projectedAiUnits;
+          modelForRow = aiUnitsCfg.manifestModels[manifestCid] ?? null;
+          // estimatedCostUsdMicros captured for the row (claimed/claim_failed) —
+          // computed from projectedAiUnits via the GPT-5.4-mini peg so the row's
+          // estimated_cost_usd_micros field stays meaningful even when the
+          // harness later emits no actuals.
+          if (projectedAiUnits != null) {
+            // peg-inverted: units / 100 * GPT_5_4_MINI_USD_PER_BLOCK = USD
+            // GPT_5_4_MINI_USD_PER_BLOCK is small enough to round to micros cleanly.
+            const usd = (projectedAiUnits / 100) * GPT_5_4_MINI_USD_PER_BLOCK;
+            estimatedCostUsdMicrosForRow = Math.round(usd * 1_000_000);
+          }
+          const now = new Date();
+          const aiGate = gateClaimByAiUnits({
+            credentialId,
+            projectedAiUnits,
+            unitsThisBlock: this.store.aiUnitsThisBlock(credentialId, now),
+            unitsThisWeek: this.store.aiUnitsThisWeek(credentialId, now),
+            capPerBlock: aiUnitsCfg.capPerBlock,
+            capPerWeek: aiUnitsCfg.capPerWeek,
+            blockId: blockIdUtc(now),
+            logger: gateLogger,
+            hasPersistedCapReached: (w, bid) =>
+              this.store.hasAiUnitsCapReachedFor(credentialId, w, bid),
+          });
+          if (!aiGate.proceed) {
+            if (aiGate.newlyPaused) {
+              // Embed `[block=...][window=...]` markers in `detail` so the
+              // gate can hydrate its memo from this row after a daemon
+              // restart inside the same 6h block (issue #815 finding 1).
+              const marker = `[block=${blockIdUtc(now)}][window=${aiGate.window}] `;
+              emitEvent(this.store, {
+                kind: 'ai_units_cap_reached',
+                requestId: taskAnnouncement.taskId,
+                outcome: 'paused',
+                detail: `${marker}${aiGate.reason}`,
+                credentialId,
+              }, 'daemon');
+            }
+            continue;
+          }
+        }
+      }
+
       // Spend-cap gate: skip claims for a credential that has hit its daily budget.
       if (this.config.spendCap) {
         // No manifest CID -> no credential to attribute -> task is not spend-gated.
@@ -622,11 +693,34 @@ export class Daemon {
         }
       }
 
+      // Resolve credentialId once more for the enriched claim row (issue #815).
+      // Prefer the AI-units mapping (which considers the harness's billed
+      // credential), fall back to the spend-cap mapping for symmetry.
+      const enrichedCredentialId =
+        (manifestCid && aiUnitsCfg?.manifestCredentials[manifestCid]) ||
+        (manifestCid && this.config.spendCap?.manifestCredentials[manifestCid]) ||
+        null;
+
       let request;
       let runStartedAt: number;
       try {
         request = await this.adapter.claimTask(taskAnnouncement.taskId);
-        this.store.recordOwnActivity(request.requestId, 'claimed');
+        // Enriched claim row per issue #815: exactly one row per request,
+        // claim_status='claimed', carrying ai_units + estimated_cost_usd_micros.
+        // markOwnActivity writes the membership row only; this call writes the
+        // single activity_events row with the spend metadata.
+        this.store.markOwnActivity(request.requestId, 'claimed');
+        this.store.recordActivityEvent({
+          ts: new Date().toISOString(),
+          kind: 'claimed',
+          requestId: request.requestId,
+          solverType: solverType ?? null,
+          credentialId: enrichedCredentialId,
+          aiUnits: aiUnitsForRow,
+          claimStatus: 'claimed',
+          estimatedCostUsdMicros: estimatedCostUsdMicrosForRow,
+          model: modelForRow,
+        });
         runStartedAt = Date.now();
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -634,6 +728,21 @@ export class Daemon {
           `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
           err instanceof Error ? err.message : err,
         );
+        // Issue #815: exactly one activity_events row per failed-claim
+        // request, claim_status='claim_failed', ai_units=0. emitTickErrorOrRaceLost
+        // below writes a separate row with the error classification (kept for
+        // the existing race-loss + tick-error notification taxonomy); this
+        // dedicated row is what the cap-bookkeeping read path filters on.
+        this.store.recordActivityEvent({
+          ts: new Date().toISOString(),
+          kind: 'claim_failed',
+          requestId: taskAnnouncement.taskId,
+          solverType: solverType ?? null,
+          credentialId: enrichedCredentialId,
+          aiUnits: 0,
+          claimStatus: 'claim_failed',
+          detail: errorMessage,
+        });
         const claimOutcome = emitTickErrorOrRaceLost(
           this.store,
           err,

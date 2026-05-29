@@ -30,6 +30,7 @@ import {
 import { PluginPicker } from '../configuration/PluginPicker.js';
 import { decideCostSurface } from '../../../../../harnesses/cost-estimates.js';
 import { CostEstimatePanel } from '../configuration/CostEstimatePanel.js';
+import { HarnessFootprintPanel } from '../configuration/HarnessFootprintPanel.js';
 import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 import { InlineHelp } from '../../components/InlineHelp.js';
@@ -724,6 +725,15 @@ export function JoinFlow({
             modelId={form.model}
             usesPaidApiKey={usesPaidApiKey}
             testIdPrefix="join-flow-cost"
+          />
+
+          {/* Issue #815 — AI-units ceiling footprint, layered under the
+              per-task USD surface so the operator commits to a 48h
+              burn-in knowing the node's per-block + per-week shape. */}
+          <HarnessFootprintPanel
+            harness={form.harness}
+            modelId={form.model}
+            testIdPrefix="join-flow-footprint"
           />
 
           {requiresCostConfirmation && (

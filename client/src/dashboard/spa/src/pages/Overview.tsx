@@ -7,6 +7,7 @@ import { IdentityCard } from './overview/IdentityCard.js';
 import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
+import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
 import type { SolverNetsCatalogResponse, TjinnStatus } from '../api/types.js';
 
@@ -117,6 +118,23 @@ interface OverviewStatusV1 {
      */
     inFlight?: TaskRunRow[];
     recentTasks?: TaskRunRow[];
+  };
+  /**
+   * Per-credential AI-units block — issue #815. Optional: only present
+   * when the daemon has at least one joined SolverNet on a billed
+   * credential, so older daemons / config shapes pass through cleanly.
+   */
+  aiUnits?: {
+    credentials: Array<{
+      credentialId: string;
+      unitsThisBlock: number;
+      unitsThisWeek: number;
+      capPerBlock: number;
+      capPerWeek: number;
+      paused: boolean;
+      blockResetsAt: string;
+      weekResetsAt: string;
+    }>;
   };
   predictionV1?: {
     /**
@@ -386,6 +404,11 @@ export function OverviewPage(): JSX.Element {
     >
       {/* ── MAIN COLUMN ──────────────────────────────────────────────── */}
       <div className="flex min-w-0 flex-col gap-6">
+        {/* Issue #815 — running-mode AI-units pause banner. Renders only
+            when at least one credential is paused; otherwise null. */}
+        <AiUnitsPauseAlert aiUnits={status?.aiUnits} />
+
+
         {/*
          * Identity — §2.2 surface promoted out of WalletCard in #427. Stable
          * address-of-record stats (master / agent / Safe / serviceId / agentId)
