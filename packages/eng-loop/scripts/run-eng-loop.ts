@@ -17,6 +17,12 @@ import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/is
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
+import { GhPrSource } from '../src/dispatcher/pr-source.js';
+import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
+import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
+import { runReviewCycle } from '../src/dispatcher/review-loop.js';
+import type { SpawnFn } from '../src/dispatcher/dispatch.js';
+import type { ReviewablePr } from '../src/dispatcher/types.js';
 import {
   fetchFieldIds,
   getFieldCache,
@@ -62,6 +68,7 @@ const REPO = 'Jinn-Network/mono';
  * Empty / unset means dispatch nothing — fail-safe per design.
  */
 const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
+const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
@@ -217,6 +224,35 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// runReviewPass — one pass of the review-pr loop
+// ---------------------------------------------------------------------------
+
+export async function runReviewPass(
+  cfg: DispatcherConfig,
+  runner: CommandRunner = realRunner,
+  spawnFn?: SpawnFn,
+): Promise<void> {
+  if (cfg.reviewBotLogin.length === 0) return; // disabled — fail-safe
+  const spawnImpl: SpawnFn =
+    spawnFn ??
+    ((cmd, args, opts) => {
+      const child = spawn(cmd, args, opts as SpawnOptions);
+      if (child.pid != null) child.unref();
+      return { pid: child.pid };
+    });
+  const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  const report = await runReviewCycle({
+    prSource,
+    cfg,
+    deriveReviewInFlight: () => deriveReviewInFlight(runner),
+    dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+  });
+  if (report.dispatched.length > 0) {
+    console.log(`[eng:loop] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -248,6 +284,7 @@ async function main(): Promise<void> {
     ...(capOk ? { concurrencyCap: capOverride } : {}),
     ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
     authorAllowlist,
+    reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
   };
 
   if (cfg.authorAllowlist.length === 0) {
@@ -262,6 +299,15 @@ async function main(): Promise<void> {
     console.log(
       `[eng:loop] authorAllowlist (${cfg.authorAllowlist.length}): ${cfg.authorAllowlist.join(', ')}`,
     );
+  }
+
+  if (cfg.reviewBotLogin.length === 0) {
+    console.warn(
+      `[eng:loop] WARNING: ${REVIEW_BOT_LOGIN_ENV} unset — the review-pr loop is disabled ` +
+        `(cannot detect a current review without the bot login). Set ${REVIEW_BOT_LOGIN_ENV}=<login> to enable.`,
+    );
+  } else {
+    console.log(`[eng:loop] review-pr enabled (bot=${cfg.reviewBotLogin}, label=${cfg.engineReviewLabel}, cap=${cfg.reviewCap})`);
   }
 
   const source = new GhIssueSource(realRunner);
@@ -380,6 +426,11 @@ async function main(): Promise<void> {
       }
 
       printReport(result, 'Cycle report');
+      try {
+        await runReviewPass(cfg, realRunner);
+      } catch (err) {
+        console.error('[eng:loop] review pass error (issue cycle unaffected):', err);
+      }
       return intervalMs;
     } catch (err) {
       console.error('[eng:loop] Cycle error:', err);
