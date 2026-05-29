@@ -753,8 +753,10 @@ export class TaskRunPersistence {
     if (!existing) {
       throw new Error(`Task run not found: ${requestId}`);
     }
-    if (existing.state === 'COMPLETE' || existing.state === 'FAILED') {
-      // Already terminal — no-op (idempotent)
+    if (TERMINAL_STATES.has(existing.state)) {
+      // Already terminal — no-op (idempotent). Includes COMPLETE / FAILED /
+      // RACE_LOST so a late markFailed after a race-loss classification
+      // doesn't downgrade a benign prune to an operator failure.
       return;
     }
     const now = Date.now();
@@ -768,6 +770,41 @@ export class TaskRunPersistence {
     `).run(now, reason, now, requestId, existing.state);
     if (result.changes === 0) {
       throw new ConcurrentTransitionError(requestId, existing.state, 'FAILED');
+    }
+  }
+
+  /**
+   * Mark a task RACE_LOST with a reason (valid from any non-terminal state).
+   * Peer to `markFailed`, semantically distinct: the run never produced
+   * operator-attributable work — another operator pruned the on-chain slot
+   * (TCMaxVerdictsReached, TCAttemptAlreadyFinalized, …) before we got
+   * anywhere. Dashboards must NOT count these as failures (#896).
+   *
+   * Reuses the existing `failure_reason` / `failure_at` columns to avoid a
+   * schema migration: the engine-level classifier is the source of truth
+   * for "is this a failure vs a race-loss", not the column name.
+   *
+   * Idempotent on any terminal state (COMPLETE / FAILED / RACE_LOST): a
+   * late race-loss classification after a successful run or an operator
+   * failure must not rewrite the row.
+   */
+  markRaceLost(requestId: string, reason: string): void {
+    const existing = this.getByRequestId(requestId);
+    if (!existing) {
+      throw new Error(`Task run not found: ${requestId}`);
+    }
+    if (TERMINAL_STATES.has(existing.state)) {
+      // Already terminal — no-op (idempotent).
+      return;
+    }
+    const now = Date.now();
+    const result = this.db.prepare(`
+      UPDATE task_runs
+      SET state = 'RACE_LOST', state_updated_at = ?, failure_reason = ?, failure_at = ?
+      WHERE request_id = ? AND state = ?
+    `).run(now, reason, now, requestId, existing.state);
+    if (result.changes === 0) {
+      throw new ConcurrentTransitionError(requestId, existing.state, 'RACE_LOST');
     }
   }
 }

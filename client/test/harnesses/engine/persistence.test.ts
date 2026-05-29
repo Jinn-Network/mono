@@ -340,6 +340,62 @@ describe('TaskRunPersistence', () => {
     it('throws for unknown requestId', () => {
       expect(() => p.markFailed('no-such', 'boom')).toThrow(/not found/);
     });
+
+    it('is idempotent on RACE_LOST intents (does not downgrade prune to failure)', () => {
+      p.insertDiscovered(makeInput());
+      p.markRaceLost('req-001', 'TCMaxVerdictsReached');
+      // Should not throw and should not rewrite the row
+      p.markFailed('req-001', 'late operator error');
+      const row = p.getByRequestId('req-001')!;
+      expect(row.state).toBe(TaskRunState.RACE_LOST);
+      expect(row.failureReason).toBe('TCMaxVerdictsReached');
+    });
+  });
+
+  describe('markRaceLost', () => {
+    it('transitions to RACE_LOST and records reason + timestamp', () => {
+      p.insertDiscovered(makeInput());
+      p.markRaceLost('req-001', 'TCMaxVerdictsReached');
+      const row = p.getByRequestId('req-001')!;
+      expect(row.state).toBe(TaskRunState.RACE_LOST);
+      expect(row.failureReason).toBe('TCMaxVerdictsReached');
+      expect(row.failureAt).toBeGreaterThan(0);
+    });
+
+    it('is idempotent on already-RACE_LOST intents', () => {
+      p.insertDiscovered(makeInput());
+      p.markRaceLost('req-001', 'first prune');
+      // Should not throw
+      p.markRaceLost('req-001', 'second prune');
+      expect(p.getByRequestId('req-001')!.failureReason).toBe('first prune');
+    });
+
+    it('is idempotent on FAILED intents (does not rewrite a genuine failure)', () => {
+      p.insertDiscovered(makeInput());
+      p.markFailed('req-001', 'runner crashed');
+      p.markRaceLost('req-001', 'late prune classification');
+      const row = p.getByRequestId('req-001')!;
+      expect(row.state).toBe(TaskRunState.FAILED);
+      expect(row.failureReason).toBe('runner crashed');
+    });
+
+    it('is idempotent on COMPLETE intents', () => {
+      p.insertDiscovered(makeInput());
+      p.transition('req-001', TaskRunState.CLAIMED);
+      p.transition('req-001', TaskRunState.WAITING);
+      p.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      p.transition('req-001', TaskRunState.RUNNING);
+      p.transition('req-001', TaskRunState.POST_SNAPSHOT);
+      p.transition('req-001', TaskRunState.PACKAGING);
+      p.transition('req-001', TaskRunState.DELIVERING);
+      p.transition('req-001', TaskRunState.COMPLETE);
+      p.markRaceLost('req-001', 'too late');
+      expect(p.getByRequestId('req-001')!.state).toBe(TaskRunState.COMPLETE);
+    });
+
+    it('throws for unknown requestId', () => {
+      expect(() => p.markRaceLost('no-such', 'TCMaxVerdictsReached')).toThrow(/not found/);
+    });
   });
 });
 
