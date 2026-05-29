@@ -51,6 +51,9 @@ const CFG: DispatcherConfig = {
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
   authorAllowlist: ['alice'],
+  reviewCap: 3,
+  engineReviewLabel: 'engine:review',
+  reviewBotLogin: '',
 };
 
 /**
