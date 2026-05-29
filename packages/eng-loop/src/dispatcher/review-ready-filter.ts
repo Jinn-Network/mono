@@ -9,6 +9,11 @@ export function selectReviewable(
   polled: PolledPr[],
   inFlight: ReadonlySet<number>,
 ): ReviewablePr[] {
+  // Draft PRs are intentionally NOT excluded: engine PRs are opened as drafts
+  // (implement-issue Stage 8 `gh pr create --draft --label engine:review`), and
+  // review-pr reviews them and un-drafts on approval — that un-draft IS the
+  // merge-ready signal (spec 2026-05-29-pr-review-loop-design.md §"The
+  // merge-ready signal"). Filtering on !isDraft would review zero engine PRs.
   return polled
     .filter((p): p is ReviewablePr => p.hasReviewLabel && p.needsReview && !inFlight.has(p.number))
     .sort((a, b) => a.number - b.number);
