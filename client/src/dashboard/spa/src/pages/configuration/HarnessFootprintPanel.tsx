@@ -1,5 +1,5 @@
 /**
- * HarnessFootprintPanel — issue #815.
+ * HarnessFootprintPanel — issue #815, corrected by #901.
  *
  * Sibling of `CostEstimatePanel`; renders the projected AI-units
  * footprint for the operator's chosen harness/model so they know,
@@ -10,11 +10,12 @@
  *   - per week:       `Y / 2800 units`
  *   - informational:  `~$N/day` (4 blocks/day × per-block USD)
  *
- * Subscription harnesses (claude-code, codex) render a "subscription
- * path" variant that says explicitly that the gate doesn't meter this
- * credential — the provider's own subscription quota is the cap. The
- * caps are still shown so the operator sees what the gate would do
- * on an api-key path. Unknown models render an "unavailable" state.
+ * The gate meters every paid-LLM harness by model cost regardless of
+ * auth path (subscription quota IS finite — see issue #901), so this
+ * panel always renders the metered grid for known paid-LLM harnesses.
+ * Non-paid-LLM harnesses (prediction baselines, evaluators) project to
+ * 0 and the panel suppresses. Unknown models render an "unavailable"
+ * state.
  *
  * Visual rules: no emoji, monospace numerics, softened-brutalist
  * corners (`--radius-2`) as the rest of the configuration surface.
@@ -52,38 +53,9 @@ export function HarnessFootprintPanel({
 }: HarnessFootprintPanelProps): JSX.Element | null {
   const projectedPerTask = projectAiUnits(harness, modelId);
 
-  if (projectedPerTask === 0) {
-    return (
-      <div
-        data-testid={`${testIdPrefix}-subscription`}
-        className={cn(
-          'flex flex-col gap-2 rounded-md border border-border bg-card',
-          variant === 'card' ? 'px-4 py-3.5' : 'gap-1 px-2.5 py-2',
-        )}
-      >
-        <div className="flex items-center gap-2">
-          <Diamond aria-hidden="true" className="size-3 shrink-0 text-primary" />
-          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            AI-units footprint
-          </span>
-        </div>
-        <div className="flex flex-col gap-1.5 font-mono text-[12px] text-foreground">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-muted-foreground">Per 6h block cap</span>
-            <span className="font-medium">{REFERENCE_CEILING.units_per_block} units</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-muted-foreground">Per week cap</span>
-            <span className="font-medium">{REFERENCE_CEILING.units_per_week} units</span>
-          </div>
-        </div>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          Subscription path — your provider's own quota is the cap. The Jinn gate
-          does not meter this credential.
-        </span>
-      </div>
-    );
-  }
+  // Non-paid-LLM harness (prediction baseline, evaluator, etc.) —
+  // nothing to project, panel suppresses.
+  if (projectedPerTask === 0) return null;
 
   // Paid harness whose model id is not in the cost table — surface
   // "unavailable" rather than a guess. Matches CostEstimatePanel's

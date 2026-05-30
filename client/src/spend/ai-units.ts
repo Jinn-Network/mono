@@ -59,27 +59,30 @@ const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
 /**
  * Project the AI-unit cost of one task for a harness/model combination.
  *
- * - Returns `0` when the credential resolves to a subscription path
- *   (`anthropic:subscription`, `openai:subscription`) — the provider's
- *   own quota is the cap; the AI-units gate stays out of the way.
+ * The AI-units cap meters every paid-LLM harness by model cost,
+ * regardless of whether the operator routes through a subscription
+ * (`*:subscription`) or a raw API key (`*:api-key`). Subscription
+ * quota is finite — the cap exists exactly to bound how much of it a
+ * node will burn on Jinn (the spec's "operators commit to a 48h
+ * burn-in knowing exactly what their node will consume" — issue #901
+ * corrected the #815 implementer's "subscription = 0 units" shortcut).
+ *
  * - Returns `0` for harnesses that make no marginal LLM call
  *   (prediction harnesses, evaluators, unknown harnesses).
- * - Returns `null` when the harness IS on a paid-API path but the model
- *   is unknown to the cost table — the caller treats that as "no
- *   projection available" and surfaces "unavailable" rather than
- *   gating on a guess.
+ * - Returns `null` when the harness IS a paid-LLM harness but the
+ *   model is unknown to the cost table — the caller treats that as
+ *   "no projection available" and the gate fails *open* with a warn.
  * - Otherwise returns `cost.usd / GPT_5_4_MINI_USD_PER_BLOCK * 100`.
  *
- * `credentialId` is the env-resolved auth path
- * (`anthropic:subscription`, `anthropic:api-key`, `openai:api-key`,
- * `hermes:api-key`, …). When omitted, defaults to "treat the harness as
- * subscription-only" so callers without env access (the SPA panel
- * pre-join) get the safer reading.
+ * `credentialId` is the env-resolved auth path. It does NOT change
+ * the projection (the model costs the same regardless of auth path);
+ * it only labels the accounting bucket. The parameter remains for
+ * call-site clarity and future-proofing.
  */
 export function projectAiUnits(
   harness: string | undefined,
   model: string | undefined,
-  credentialId?: string | null,
+  _credentialId?: string | null,
 ): number | null {
   if (!harness) return null;
   const canonical = canonicalHarnessName(harness);
@@ -88,15 +91,6 @@ export function projectAiUnits(
     canonical === CODEX_HARNESS ||
     canonical === HERMES_AGENT_HARNESS;
   if (!isPaidLlmHarness) return 0;
-  // Subscription credentials => the provider's quota is the cap.
-  if (credentialId && credentialId.endsWith(':subscription')) return 0;
-  // Paid-API credential (`*:api-key`) or no resolved credential (caller
-  // doesn't know): project the model cost. When no credential is
-  // resolved AND the harness is claude-code / codex, prefer 0 — that's
-  // the "no provider key set" state where no claims will actually run.
-  if (!credentialId && (canonical === CLAUDE_CODE_HARNESS || canonical === CODEX_HARNESS)) {
-    return 0;
-  }
   if (!model) return null;
   const cost = estimateModelCost(model);
   if (!cost) return null;

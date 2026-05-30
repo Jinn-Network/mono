@@ -24,10 +24,14 @@ export function credentialUsesPaidApiKey(credentialId: CredentialId | null): boo
   return credentialId !== null && credentialId.endsWith(':api-key');
 }
 
-export function buildCostSurfaceStatus(env: NodeJS.ProcessEnv): CostSurfaceStatus {
+export function buildCostSurfaceStatus(
+  env: NodeJS.ProcessEnv,
+  /** Optional home dir override for the disk-OAuth probe — tests only. */
+  homeDirOverride?: string,
+): CostSurfaceStatus {
   const harnesses: Record<string, CostSurfaceHarnessStatus> = {};
   for (const harness of COST_SURFACE_HARNESSES) {
-    const credentialId = resolveCredentialId(harness, env);
+    const credentialId = resolveCredentialId(harness, env, homeDirOverride);
     harnesses[harness] = {
       credentialId,
       usesPaidApiKey: credentialUsesPaidApiKey(credentialId),

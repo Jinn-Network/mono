@@ -40,6 +40,8 @@ export interface AiUnitsDaemonConfig {
 export function buildAiUnitsConfig(
   config: Pick<JinnConfig, 'joinedSolverNets'>,
   env: NodeJS.ProcessEnv,
+  /** Optional home dir override for resolveCredentialId's disk probe — tests only. */
+  homeDirOverride?: string,
 ): AiUnitsDaemonConfig | undefined {
   const { units_per_block, units_per_week } = resolveReferenceCeiling(env);
 
@@ -48,7 +50,7 @@ export function buildAiUnitsConfig(
   const manifestModels: Record<string, string | undefined> = {};
 
   for (const [manifestCid, entry] of Object.entries(config.joinedSolverNets ?? {})) {
-    const credentialId = resolveCredentialId(entry.harness, env);
+    const credentialId = resolveCredentialId(entry.harness, env, homeDirOverride);
     if (!credentialId) continue;
     manifestCredentials[manifestCid] = credentialId;
     manifestProjectedAiUnits[manifestCid] = projectAiUnits(entry.harness, entry.model, credentialId);

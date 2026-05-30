@@ -43,18 +43,21 @@ describe('HarnessFootprintPanel', () => {
     expect(screen.getByTestId('harness-footprint-unknown')).toBeTruthy();
   });
 
-  it('renders a subscription-path variant for claude-code + codex (not the metered grid)', () => {
-    const { container: c1 } = render(
-      <HarnessFootprintPanel harness="claude-code" modelId="claude-opus-4-7" />,
+  it('renders the metered grid for claude-code + Haiku (subscription is metered per #901)', () => {
+    const { container } = render(
+      <HarnessFootprintPanel harness="claude-code" modelId="claude-haiku-4-5-20251001" />,
     );
-    expect(c1.querySelector('[data-testid="harness-footprint-subscription"]')).not.toBeNull();
-    expect(c1.querySelector('[data-testid="harness-footprint-block"]')).toBeNull();
-    expect(c1.textContent).toContain('Subscription path');
-    cleanup();
-    const { container: c2 } = render(
-      <HarnessFootprintPanel harness="codex" modelId="gpt-5.3-codex" />,
+    expect(container.querySelector('[data-testid="harness-footprint-subscription"]')).toBeNull();
+    expect(container.querySelector('[data-testid="harness-footprint-panel"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="harness-footprint-block"]')?.textContent)
+      .toContain('/ 100');
+  });
+
+  it('suppresses entirely for non-paid-LLM harnesses (prediction baselines)', () => {
+    const { container } = render(
+      <HarnessFootprintPanel harness="prediction-v1-baseline" modelId={undefined} />,
     );
-    expect(c2.querySelector('[data-testid="harness-footprint-subscription"]')).not.toBeNull();
-    expect(c2.textContent).toContain('Subscription path');
+    expect(container.querySelector('[data-testid="harness-footprint-panel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="harness-footprint-subscription"]')).toBeNull();
   });
 });

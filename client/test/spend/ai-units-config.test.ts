@@ -5,7 +5,12 @@
  * nothing maps to a known credential at all; otherwise the gate always
  * runs (the ceiling is hard-coded, not opt-in).
  */
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { buildAiUnitsConfig } from '../../src/spend/ai-units-config.js';
 import { REFERENCE_CEILING } from '../../src/spend/ai-units.js';
 
@@ -36,21 +41,31 @@ const joined = {
 } as never;
 
 describe('buildAiUnitsConfig', () => {
+  let home: string;
+
+  beforeEach(() => {
+    // Empty home isolates tests from the dev machine's real `~/.claude`.
+    home = mkdtempSync(join(tmpdir(), 'aiunits-cfg-'));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
   it('returns undefined when no joined SolverNets resolve to a credential', () => {
     const noLlmJoined = {
       bafycid3: { manifestCid: 'bafycid3', name: 'net-3', roles: ['solver'], harness: 'prediction-v1-baseline', plugins: [] },
     } as never;
     expect(
-      buildAiUnitsConfig({ joinedSolverNets: noLlmJoined }, {}),
+      buildAiUnitsConfig({ joinedSolverNets: noLlmJoined }, {}, home),
     ).toBeUndefined();
   });
 
   it('maps each manifest CID to its credential + projected per-task AI units', () => {
-    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {});
+    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
     // bafycid1 — hermes-agent → "hermes:api-key" (default provider)
     expect(out?.manifestCredentials['bafycid1']).toBe('hermes:api-key');
-    // bafycid2 — claude-code subscription path → still resolves but null because no env
-    // Actually: resolveCredentialId('claude-code', {}) → null (no token, no key).
+    // bafycid2 — claude-code with no env var AND no ~/.claude/ on isolated home → null
     expect(out?.manifestCredentials['bafycid2']).toBeUndefined();
     expect(out?.manifestCredentials['bafycid3']).toBeUndefined();
     // Per-manifest projected units for the priced model
@@ -59,7 +74,7 @@ describe('buildAiUnitsConfig', () => {
   });
 
   it('applies the baked-in REFERENCE_CEILING by default', () => {
-    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {});
+    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
     expect(out?.capPerBlock).toBe(REFERENCE_CEILING.units_per_block);
     expect(out?.capPerWeek).toBe(REFERENCE_CEILING.units_per_week);
   });
@@ -68,8 +83,17 @@ describe('buildAiUnitsConfig', () => {
     const out = buildAiUnitsConfig(
       { joinedSolverNets: joined },
       { JINN_AI_UNITS_CEILING_OVERRIDE: '10' },
+      home,
     );
     expect(out?.capPerBlock).toBe(10);
     expect(out?.capPerWeek).toBe(280);
+  });
+
+  it('claude-code on a stock subscription install (~/.claude/ present, no env) projects model cost (#901)', () => {
+    mkdirSync(join(home, '.claude'));
+    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+    expect(out?.manifestCredentials['bafycid2']).toBe('anthropic:subscription');
+    // Opus 4.7 projects ~450 units/task at the GPT-5.4-mini peg.
+    expect(out?.manifestProjectedAiUnits['bafycid2']).toBeGreaterThan(100);
   });
 });

@@ -64,32 +64,25 @@ describe('projectAiUnits', () => {
     expect(units as number).toBeCloseTo(expected, 4);
   });
 
-  it('claude-code / codex project to 0 when the credential is subscription-typed', () => {
-    expect(projectAiUnits('claude-code', 'claude-opus-4-7', 'anthropic:subscription')).toBe(0);
-    expect(projectAiUnits('codex', 'gpt-5.3-codex', 'openai:subscription')).toBe(0);
-  });
-
-  it('claude-code / codex project to 0 when no credential is resolved (no provider key set)', () => {
-    expect(projectAiUnits('claude-code', 'claude-opus-4-7')).toBe(0);
-    expect(projectAiUnits('codex', 'gpt-5.3-codex')).toBe(0);
-  });
-
-  it('claude-code projects model cost when the credential is api-key (paid)', () => {
+  it('claude-code projects model cost on subscription (subscription quota IS finite — gate meters it)', () => {
     // claude-haiku-4-5-20251001 @ 50k input + 20k output = 0.05 + 0.10 = 0.15 USD.
-    const units = projectAiUnits(
-      'claude-code',
-      'claude-haiku-4-5-20251001',
-      'anthropic:api-key',
-    );
-    expect(units).not.toBeNull();
+    // Same projection whether the operator routes via OAuth subscription or
+    // raw ANTHROPIC_API_KEY — the model costs the same; credentialId is an
+    // accounting bucket, not a projection input. Issue #901 correction.
+    const sub = projectAiUnits('claude-code', 'claude-haiku-4-5-20251001', 'anthropic:subscription');
+    const apiKey = projectAiUnits('claude-code', 'claude-haiku-4-5-20251001', 'anthropic:api-key');
+    const noCred = projectAiUnits('claude-code', 'claude-haiku-4-5-20251001');
     const expected = (0.15 / GPT_5_4_MINI_USD_PER_BLOCK) * 100;
-    expect(units as number).toBeCloseTo(expected, 4);
+    expect(sub as number).toBeCloseTo(expected, 4);
+    expect(apiKey as number).toBeCloseTo(expected, 4);
+    expect(noCred as number).toBeCloseTo(expected, 4);
   });
 
-  it('codex projects model cost when the credential is api-key (paid)', () => {
-    const units = projectAiUnits('codex', 'gpt-5.4-mini', 'openai:api-key');
-    expect(units).not.toBeNull();
-    expect(units as number).toBeGreaterThan(0);
+  it('codex projects model cost regardless of credential path', () => {
+    const sub = projectAiUnits('codex', 'gpt-5.4-mini', 'openai:subscription');
+    const apiKey = projectAiUnits('codex', 'gpt-5.4-mini', 'openai:api-key');
+    expect(sub as number).toBeGreaterThan(0);
+    expect(apiKey as number).toBeCloseTo(sub as number, 4);
   });
 });
 
