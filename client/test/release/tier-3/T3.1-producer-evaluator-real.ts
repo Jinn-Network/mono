@@ -73,7 +73,7 @@ import {
   KNOWN_REPO,
   KNOWN_COMMIT,
   KNOWN_EXPECTED_VERDICT,
-  KNOWN_MANIFEST_CID,
+  KNOWN_T31_ISOLATED_MANIFEST_CID,
 } from '../tier-2/fixtures/known-instance.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -198,12 +198,19 @@ async function submitSweRebenchTask(args: {
     // a permanent task lock. With `--required-verdicts 3` and the protocol's
     // per-evaluator cap of 1, the griefer can take at most one slot — a
     // controlled evaluator (op-a) always lands one of the remaining slots.
-    // The isolated SolverNet's extra substrate-maintenance burden no longer
-    // earns its keep, so T3.1 runs against the real shared mainline. The
-    // KNOWN_T31_ISOLATED_MANIFEST_CID constant is preserved for any future
-    // scenarios that need an actual private substrate.
+    //
+    // T3.1 posts to the ISOLATED SolverNet (KNOWN_T31_ISOLATED_MANIFEST_CID),
+    // restoring `ca11be24` after `77e79635` moved it to the shared mainline.
+    // The mainline switch assumed maxClaims:5/requiredVerdicts:3 alone tamed
+    // the griefer; in practice the shared net is now both griefed (0x26e96ba6…)
+    // AND backlogged (~1300 tasks ahead of each fresh post), and discovery is
+    // lowest-taskId-first, so a freshly-posted task is buried behind the
+    // backlog and never reached inside the wall-clock budget (observed: task
+    // 1537 never solved in 25 min). The isolated net — op-a evaluator / op-b
+    // solver, griefer not joined, generatorEnabled:false so no noise tasks —
+    // closes the loop deterministically (proven green: task 209, 5m51s).
     '--manifest-cid',
-    KNOWN_MANIFEST_CID,
+    KNOWN_T31_ISOLATED_MANIFEST_CID,
     '--spec-file',
     args.specFilePath,
     // Post a 5-slot parallel task, not the default single-attempt task. A
