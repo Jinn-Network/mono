@@ -9,12 +9,65 @@
  */
 
 import { Link } from 'wouter';
-import { useOperators } from '../lib/api';
+import { useOperators, type ActiveWindow } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Kpi, KpiRow } from '../components/Kpi';
 import { InfoTooltip } from '../components/InfoTooltip';
-import { ActiveOperatorTooltipBody } from '../components/ActiveOperatorTooltip';
+import {
+  ActiveOperatorTooltipBody,
+  formatBlockWindow,
+} from '../components/ActiveOperatorTooltip';
 import { shortAddr, int, jinn } from '../lib/format';
+
+// Canonical encoding note for the RECENT RUNS column header tooltip (issue #905).
+// Mirrored verbatim from the acceptance criteria so the header tooltip stays in
+// sync if the criteria are tightened.
+const RECENT_RUNS_ENCODING_NOTE =
+  'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned ≥3 tJINN in that block; N = did not.';
+
+// ── Recent-runs cell ──────────────────────────────────────────────────────────
+
+/**
+ * Per-row "Recent runs" rendering — 8 Y/N glyphs joined by ` | `, each glyph
+ * carrying a native `title` describing the block's UTC window.
+ *
+ * `recentBlocks` may be absent when the server omits it (older response, or
+ * a code path that does not populate it); fall back to all-false so the row
+ * still renders 8 cells.
+ */
+function RecentRunsCell({
+  recentBlocks,
+  window,
+}: {
+  recentBlocks: boolean[] | undefined;
+  window: ActiveWindow;
+}) {
+  const blocks =
+    recentBlocks && recentBlocks.length === window.blockCount
+      ? recentBlocks
+      : new Array<boolean>(window.blockCount).fill(false);
+
+  return (
+    <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+      {blocks.map((qualified, i) => (
+        <span key={i}>
+          <span
+            data-testid={`recent-run-cell-${i}`}
+            title={formatBlockWindow(window, i)}
+            style={{
+              color: qualified ? 'var(--vow-green)' : 'var(--break-red)',
+            }}
+          >
+            {qualified ? 'Y' : 'N'}
+          </span>
+          {i < blocks.length - 1 && (
+            <span style={{ color: 'var(--fg-dim)' }}> | </span>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 // ── Inline table styling ──────────────────────────────────────────────────────
 
@@ -166,16 +219,15 @@ export function OperatorsView() {
       {data && (
         <KpiRow>
           <Kpi
-            label="Active operators"
-            value={
+            label={
               <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                {int(data.activeOperators)}
+                Active operators
                 <InfoTooltip label="Active operators definition">
                   <ActiveOperatorTooltipBody window={data.activeWindow} />
                 </InfoTooltip>
               </span>
             }
-            sub="last 8 × 6h, ≥3 tJINN each"
+            value={int(data.activeOperators)}
             accent
           />
         </KpiRow>
@@ -200,6 +252,14 @@ export function OperatorsView() {
                     Active?
                     <InfoTooltip label="Active column definition">
                       <ActiveOperatorTooltipBody window={data.activeWindow} />
+                    </InfoTooltip>
+                  </span>
+                </th>
+                <th style={th}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    Recent runs
+                    <InfoTooltip label="Recent runs definition">
+                      <div>{RECENT_RUNS_ENCODING_NOTE}</div>
                     </InfoTooltip>
                   </span>
                 </th>
@@ -231,6 +291,12 @@ export function OperatorsView() {
                     }}
                   >
                     {op.active ? 'Yes' : 'No'}
+                  </td>
+                  <td style={td}>
+                    <RecentRunsCell
+                      recentBlocks={op.recentBlocks}
+                      window={data.activeWindow}
+                    />
                   </td>
                   <td style={td}>{int(op.attempts)}</td>
                   <td style={td}>{jinn(op.jinnEarned)}</td>

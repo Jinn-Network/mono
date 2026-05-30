@@ -18,6 +18,19 @@ export function formatWindowTs(ts: number): string {
     .replace(/:\d\d\.\d+Z$/, ' UTC');
 }
 
+/**
+ * Native-`title` formatter for one Recent-runs cell (issue #905) —
+ * `2026-05-29 06:00 → 2026-05-29 12:00 UTC`. Only the close end carries
+ * the `UTC` suffix so the title doesn't read it twice.
+ *
+ * `i` is the cell's index into `recentBlocks` (0 = oldest, blockCount-1 = newest).
+ */
+export function formatBlockWindow(window: ActiveWindow, i: number): string {
+  const start = window.startTs + i * window.blockSeconds;
+  const end = start + window.blockSeconds;
+  return `${formatWindowTs(start).replace(/\s+UTC$/, '')} → ${formatWindowTs(end)}`;
+}
+
 export function ActiveOperatorTooltipBody({ window }: { window: ActiveWindow }) {
   return (
     <>

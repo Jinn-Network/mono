@@ -171,6 +171,17 @@ describe('NetworkView', () => {
     expect(triggers.length).toBeGreaterThan(0);
   });
 
+  it('does NOT render the `last 8 × 6h, ≥3 tJINN each` subtitle on the Active operators cell (issue #905)', async () => {
+    mockFetchNetwork(NETWORK_FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<NetworkView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/last 8/i)).toBeNull();
+    expect(screen.queryByText(/≥3 tJINN each/)).toBeNull();
+  });
+
   it('renders the Economy row with JINN distributed split', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();

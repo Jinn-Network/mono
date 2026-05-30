@@ -30,6 +30,7 @@ import {
   bucketResolvedRate,
   rollingResolvedRate,
   rankLeaderboard,
+  compareByJinnEarnedActive,
   freshness,
   composition,
   detectFreezeViolations,
@@ -1112,28 +1113,48 @@ app.get('/operators', async (c) => {
   // buildLeaderboardRows. If both, handle here.
   const hasFilter = modeParam !== undefined || harnessParam !== undefined;
 
-  let rows: LeaderboardRow[];
+  let rawRows: LeaderboardRow[];
   if (harnessParam !== undefined) {
     // Harness filter (optionally + mode): load attempts via an inner join on
     // attemptEnvelopeMeta filtered by implName (and optionally mode), then build
     // leaderboard rows in-process.
-    rows = await buildLeaderboardRowsWithHarnessFilter(
+    rawRows = await buildLeaderboardRowsWithHarnessFilter(
       modeParam,
       harnessParam,
       includeUnenriched,
     );
   } else if (modeParam !== undefined) {
-    rows = await buildLeaderboardRows({ mode: modeParam, includeUnenriched });
+    rawRows = await buildLeaderboardRows({ mode: modeParam, includeUnenriched });
   } else {
-    rows = await buildLeaderboardRows({ includeUnenriched });
+    rawRows = await buildLeaderboardRows({ includeUnenriched });
   }
 
   // Dominant mode/harness per operator — load enriched attempts for all operators
-  // and compute the modal mode/implName. Only needed for operators in `rows`.
-  const operatorAddrs = rows.map((r) => r.operator);
+  // and compute the modal mode/implName. Only needed for operators in `rawRows`.
+  const operatorAddrs = rawRows.map((r) => r.operator);
   const dominantMap = await getDominantModeAndHarness(operatorAddrs);
 
-  const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts);
+  // Active-operator overlay (issue #905) — load BEFORE rankLeaderboard so the
+  // comparator can use `active` as a tie-break on the (jinnEarned, active,
+  // operator) sort. `recentBlocks` is the per-bucket pass/fail flag the
+  // `/operators` view's RECENT RUNS column renders. The rolling window is a
+  // protocol-wide signal (multisig ↔ attempt.operator via the same raw
+  // `t.hex()` representation `jinnEarned` uses; no case normalisation).
+  const activeResult = await loadActiveOperators(Math.floor(Date.now() / 1000));
+  const isActive = (op: string) => activeResult.active.has(op);
+  const recentBlocksFor = (op: string): boolean[] =>
+    activeResult.perOperator.get(op)?.blocks ??
+    new Array(activeResult.window.blockCount).fill(false);
+
+  // Attach `active` + `recentBlocks` BEFORE ranking so the comparator's
+  // (jinnEarned, active, operator) tie-break sees the real values.
+  const rows: (LeaderboardRow & { recentBlocks: boolean[] })[] = rawRows.map((r) => ({
+    ...r,
+    active: isActive(r.operator),
+    recentBlocks: recentBlocksFor(r.operator),
+  }));
+
+  const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts, compareByJinnEarnedActive);
 
   const allJinnEarnedZero = rows.every((r) => r.jinnEarned === 0n);
 
@@ -1142,22 +1163,18 @@ app.get('/operators', async (c) => {
   if (modeParam !== undefined) appliedFilters['mode'] = modeParam;
   if (harnessParam !== undefined) appliedFilters['harness'] = harnessParam;
 
-  // Active-operator overlay — join multisig ↔ attempt.operator via the same
-  // raw `t.hex()` representation `jinnEarned` uses (no case normalisation).
-  // Always computed against the unfiltered roster: the rolling window is a
-  // protocol-wide signal, not a mode/harness-scoped one.
-  const activeResult = await loadActiveOperators(Math.floor(Date.now() / 1000));
-  const isActive = (op: string) => activeResult.active.has(op);
-
   // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
   const chainHead = c.get('chainHead');
   const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
-  const serializeRow = (r: LeaderboardRow & { rank?: number }) => ({
+  // `active` and `recentBlocks` are attached by the pre-rank map above;
+  // serializeRow only stringifies `jinnEarned` and adds dominant-mode/harness.
+  const serializeRow = (
+    r: LeaderboardRow & { rank?: number; recentBlocks: boolean[] },
+  ) => ({
     ...r,
     jinnEarned: r.jinnEarned.toString(),
-    active: isActive(r.operator),
     dominantMode: dominantMap.get(r.operator)?.mode ?? 'unknown',
     dominantHarness: dominantMap.get(r.operator)?.harness ?? '(unknown)',
   });

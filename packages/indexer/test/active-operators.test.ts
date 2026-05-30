@@ -86,6 +86,56 @@ describe('computeActiveOperators', () => {
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT);
   });
 
+  it('exposes per-block `blocks: boolean[]` ordered oldest-first (length BLOCK_COUNT)', () => {
+    const now = alignedNow(T0);
+    const w = computeActiveWindow(now);
+    const rewards = [];
+    for (let i = 0; i < BLOCK_COUNT; i++) {
+      const ts = Number(w.startTs) + i * SIX_H + HOUR;
+      rewards.push(mkReward(OP_A, 3n * 10n ** 18n, ts));
+    }
+    const r = computeActiveOperators(rewards, now);
+    const entry = r.perOperator.get(OP_A);
+    expect(entry?.blocks).toBeDefined();
+    expect(entry?.blocks.length).toBe(BLOCK_COUNT);
+    // All eight blocks qualified — every cell true. blocks[0] is OLDEST.
+    expect(entry?.blocks).toEqual(new Array(BLOCK_COUNT).fill(true));
+  });
+
+  it('blocks[] reflects a mixed qualifying / non-qualifying pattern (oldest-left)', () => {
+    const now = alignedNow(T0);
+    const w = computeActiveWindow(now);
+    // Pattern: qualify buckets 0, 2, 4, 6, 7 only.
+    const qualifying = new Set([0, 2, 4, 6, 7]);
+    const rewards = [];
+    for (let i = 0; i < BLOCK_COUNT; i++) {
+      if (!qualifying.has(i)) continue;
+      const ts = Number(w.startTs) + i * SIX_H + HOUR;
+      rewards.push(mkReward(OP_A, 3n * 10n ** 18n, ts));
+    }
+    const r = computeActiveOperators(rewards, now);
+    const blocks = r.perOperator.get(OP_A)?.blocks;
+    // Index 0 = OLDEST, index BLOCK_COUNT-1 = NEWEST completed.
+    expect(blocks).toEqual([true, false, true, false, true, false, true, true]);
+    expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(5);
+    expect(r.active.has(OP_A)).toBe(false);
+  });
+
+  it('an operator that has no qualifying buckets reports blocks as all-false (still tracked)', () => {
+    const now = alignedNow(T0);
+    const w = computeActiveWindow(now);
+    // Below the floor in every block.
+    const rewards = [];
+    for (let i = 0; i < BLOCK_COUNT; i++) {
+      const ts = Number(w.startTs) + i * SIX_H + HOUR;
+      rewards.push(mkReward(OP_A, 1n * 10n ** 18n, ts));
+    }
+    const r = computeActiveOperators(rewards, now);
+    expect(r.perOperator.get(OP_A)?.blocks).toEqual(new Array(BLOCK_COUNT).fill(false));
+    expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(0);
+    expect(r.active.has(OP_A)).toBe(false);
+  });
+
   it('exactly 3 tJINN qualifies (>=, not >)', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);

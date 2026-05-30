@@ -11,6 +11,8 @@ import {
   bucketResolvedRate,
   rollingResolvedRate,
   rankLeaderboard,
+  compareByJinnEarnedActive,
+  compareByResolvedRateAttempts,
   freshness,
   composition,
   detectFreezeViolations,
@@ -300,65 +302,113 @@ describe('rankLeaderboard', () => {
 
   it('assigns rank 1..N to the ranked group', () => {
     const rows = [
-      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.9 }),
-      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.7 }),
-      makeRow({ operator: '0xCCC' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.5 }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, jinnEarned: 9000n }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, jinnEarned: 7000n }),
+      makeRow({ operator: '0xCCC' as `0x${string}`, verdictsTotal: 10, jinnEarned: 5000n }),
     ];
-    const { ranked } = rankLeaderboard(rows, 5);
+    const { ranked } = rankLeaderboard(rows, 5, compareByJinnEarnedActive);
     expect(ranked.map((r) => r.rank)).toEqual([1, 2, 3]);
   });
 
-  it('sorts ranked by resolvedRate desc', () => {
+  it('sorts ranked by jinnEarned desc when given the /operators comparator (issue #905)', () => {
     const rows = [
-      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.5 }),
-      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.9 }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, jinnEarned: 100n }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, jinnEarned: 5000n }),
+      makeRow({ operator: '0xCCC' as `0x${string}`, verdictsTotal: 10, jinnEarned: 1000n }),
     ];
-    const { ranked } = rankLeaderboard(rows, 5);
+    const { ranked } = rankLeaderboard(rows, 5, compareByJinnEarnedActive);
+    expect(ranked.map((r) => r.operator)).toEqual(['0xBBB', '0xCCC', '0xAAA']);
+  });
+
+  it('jinnEarned comparator handles >2^53 bigints without precision loss', () => {
+    // Two values that are equal when coerced through Number(a - b) but distinct
+    // as bigints — a numeric subtraction-comparator would mis-order them.
+    const big = 10n ** 30n;
+    const rows = [
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, jinnEarned: big }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, jinnEarned: big + 1n }),
+    ];
+    const { ranked } = rankLeaderboard(rows, 5, compareByJinnEarnedActive);
     expect(ranked[0].operator).toBe('0xBBB');
     expect(ranked[1].operator).toBe('0xAAA');
   });
 
-  it('null resolvedRate sorts after any numeric rate', () => {
+  it('ties in jinnEarned are broken by active desc (active first)', () => {
     const rows = [
-      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: null }),
-      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.1 }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, jinnEarned: 100n, active: false }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, jinnEarned: 100n, active: true }),
     ];
-    const { ranked } = rankLeaderboard(rows, 5);
+    const { ranked } = rankLeaderboard(rows, 5, compareByJinnEarnedActive);
     expect(ranked[0].operator).toBe('0xBBB');
     expect(ranked[1].operator).toBe('0xAAA');
   });
 
-  it('ties in resolvedRate are broken by attempts desc', () => {
+  it('ties in jinnEarned + active are broken by operator asc (lexicographic)', () => {
     const rows = [
-      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.8, attempts: 5 }),
-      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.8, attempts: 10 }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, jinnEarned: 100n, active: true }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, jinnEarned: 100n, active: true }),
     ];
-    const { ranked } = rankLeaderboard(rows, 5);
-    expect(ranked[0].operator).toBe('0xBBB');
-    expect(ranked[1].operator).toBe('0xAAA');
-  });
-
-  it('ties in attempts are broken by operator asc (lexicographic)', () => {
-    const rows = [
-      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.8, attempts: 5 }),
-      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.8, attempts: 5 }),
-    ];
-    const { ranked } = rankLeaderboard(rows, 5);
+    const { ranked } = rankLeaderboard(rows, 5, compareByJinnEarnedActive);
     expect(ranked[0].operator).toBe('0xAAA');
     expect(ranked[1].operator).toBe('0xBBB');
   });
 
-  it('lowVolume group is also sorted by the same criteria (no rank field)', () => {
+  it('lowVolume group is sorted by the same (jinnEarned, active, operator) comparator (no rank field)', () => {
     const rows = [
-      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 1, resolvedRate: 0.9 }),
-      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 1, resolvedRate: 0.9, attempts: 20 }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 1, jinnEarned: 100n, active: false }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 1, jinnEarned: 500n, active: false }),
     ];
-    const { lowVolume } = rankLeaderboard(rows, 5);
-    // Both null/< min, sorted by attempts desc then operator asc
+    const { lowVolume } = rankLeaderboard(rows, 5, compareByJinnEarnedActive);
     expect(lowVolume[0].operator).toBe('0xAAA');
     expect(lowVolume[1].operator).toBe('0xBBB');
-    // No rank property on lowVolume entries
     expect((lowVolume[0] as unknown as Record<string, unknown>)['rank']).toBeUndefined();
+  });
+
+  // ── default comparator (per-SolverNet train/frozen boards) ───────────────────
+
+  it('DEFAULT comparator sorts by (resolvedRate desc, attempts desc, operator asc) — locks train/frozen call sites', () => {
+    // 0xAAA: rate 0.9, attempts 10
+    // 0xBBB: rate 0.9, attempts 20  → wins on attempts tie-break
+    // 0xCCC: rate 0.5, attempts 100 → loses on rate to both above
+    // 0xDDD: rate 0.9, attempts 10  → loses to 0xAAA on operator asc
+    const rows = [
+      makeRow({ operator: '0xCCC' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.5, attempts: 100 }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.9, attempts: 10 }),
+      makeRow({ operator: '0xDDD' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.9, attempts: 10 }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.9, attempts: 20 }),
+    ];
+    const { ranked } = rankLeaderboard(rows, 5);
+    expect(ranked.map((r) => r.operator)).toEqual(['0xBBB', '0xAAA', '0xDDD', '0xCCC']);
+  });
+
+  it('DEFAULT comparator sorts null resolvedRate last', () => {
+    const rows = [
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 0, resolvedRate: null, attempts: 5 }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 0, resolvedRate: 0.1, attempts: 1 }),
+    ];
+    // Use lowVolume so we don't depend on minVerdicts here; the same comparator
+    // sorts both groups.
+    const { lowVolume } = rankLeaderboard(rows, 5);
+    expect(lowVolume.map((r) => r.operator)).toEqual(['0xBBB', '0xAAA']);
+  });
+
+  it('DEFAULT comparator ignores jinnEarned (the /operators-only sort signal)', () => {
+    // Without this guard, the train/frozen boards would silently re-sort by
+    // jinnEarned — the leak this fix addresses.
+    const rows = [
+      makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.9, attempts: 10, jinnEarned: 0n }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 10, resolvedRate: 0.5, attempts: 10, jinnEarned: 10n ** 30n }),
+    ];
+    const { ranked } = rankLeaderboard(rows, 5);
+    // 0xAAA wins on resolvedRate even though 0xBBB has astronomically higher jinnEarned.
+    expect(ranked.map((r) => r.operator)).toEqual(['0xAAA', '0xBBB']);
+  });
+
+  // Reference compareByResolvedRateAttempts so unused-import lint stays quiet
+  // even if the exports drift; the import doubles as a smoke check that the
+  // symbol is exported.
+  it('exports compareByResolvedRateAttempts as a named symbol', () => {
+    expect(typeof compareByResolvedRateAttempts).toBe('function');
   });
 
   it('empty input returns empty ranked and lowVolume', () => {

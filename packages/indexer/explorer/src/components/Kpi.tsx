@@ -11,7 +11,7 @@
 import type { ReactNode, CSSProperties } from 'react';
 
 export interface KpiProps {
-  label: string;
+  label: ReactNode;
   value: ReactNode;
   sub?: ReactNode;
   /** When true, renders the value in var(--accent-gold) */

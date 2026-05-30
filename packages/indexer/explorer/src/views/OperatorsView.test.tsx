@@ -26,6 +26,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       resolvedRate: 7 / 8,
       jinnEarned: '1000000000000000000',
       active: true,
+      recentBlocks: [true, true, true, true, true, true, true, true],
       dominantMode: 'train',
       dominantHarness: 'swe-bench',
     },
@@ -40,6 +41,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       resolvedRate: 0.5,
       jinnEarned: '500000000000000000',
       active: false,
+      recentBlocks: [false, true, false, true, false, true, false, true],
     },
   ],
   minVerdicts: 5,
@@ -197,7 +199,7 @@ describe('OperatorsView', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
   });
 
-  it('renders an Active? column header between Operator and Attempts', async () => {
+  it('renders Operator | Active? | Recent runs | Attempts | JINN earned column order (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
@@ -211,15 +213,110 @@ describe('OperatorsView', () => {
       expect.arrayContaining([
         expect.stringMatching(/operator/i),
         expect.stringMatching(/active\?/i),
+        expect.stringMatching(/recent runs/i),
         expect.stringMatching(/attempts/i),
         expect.stringMatching(/jinn earned/i),
       ]),
     );
     const operatorIdx = headers.findIndex((h) => /operator/i.test(h));
     const activeIdx = headers.findIndex((h) => /active\?/i.test(h));
+    const recentIdx = headers.findIndex((h) => /recent runs/i.test(h));
     const attemptsIdx = headers.findIndex((h) => /attempts/i.test(h));
     expect(operatorIdx).toBeLessThan(activeIdx);
-    expect(activeIdx).toBeLessThan(attemptsIdx);
+    expect(activeIdx).toBeLessThan(recentIdx);
+    expect(recentIdx).toBeLessThan(attemptsIdx);
+  });
+
+  it('does NOT render the `last 8 × 6h, ≥3 tJINN each` subtitle on the Active operators KPI (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/last 8/i)).toBeNull();
+    expect(screen.queryByText(/≥3 tJINN each/)).toBeNull();
+  });
+
+  it('places the InfoTooltip `?` trigger in the KPI eyebrow next to the `Active operators` label (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+    // The trigger must be reachable next to the eyebrow label, not nested
+    // under the big numeric value (`.data` text). The DOM contract: the
+    // `Active operators definition` trigger and the label text share a
+    // common parent that does NOT contain the bare numeric value `1`.
+    const trigger = screen.getByRole('button', {
+      name: /active operators definition/i,
+    });
+    const labelNode = screen.getByText(/active operators/i);
+    // Trigger and label share an ancestor — the eyebrow row. The value
+    // `1` should not live inside that shared ancestor.
+    const sharedAncestor = labelNode.parentElement;
+    expect(sharedAncestor?.contains(trigger)).toBe(true);
+    // Value "1" lives in the sibling `.data` div, not in the eyebrow row.
+    expect(sharedAncestor?.textContent ?? '').not.toMatch(/^.*\b1\b.*$/s);
+  });
+
+  it('renders 8 Y/N symbols separated by ` | ` per row in the Recent runs column (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // Two rows, two body <tr> — read each row's Recent-runs cell text content
+    // (whitespace-collapsed) and compare to the ` | `-joined expected glyphs.
+    const rows = Array.from(document.querySelectorAll('tbody tr'));
+    expect(rows.length).toBe(2);
+    const cellTexts = rows.map((r) => {
+      const tds = r.querySelectorAll('td');
+      // Order: Operator | Active? | Recent runs | Attempts | JINN earned
+      return (tds[2]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    });
+    expect(cellTexts[0]).toBe('Y | Y | Y | Y | Y | Y | Y | Y');
+    expect(cellTexts[1]).toBe('N | Y | N | Y | N | Y | N | Y');
+  });
+
+  it('gives each Recent runs symbol a native `title` showing the block UTC window (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // Window: 1_700_000_000 → 1_700_000_000 + 48 * 3600, 8 buckets of 6h.
+    // Oldest block (index 0): 1_700_000_000 (2023-11-14 22:13:20 UTC) →
+    //   1_700_021_600 (2023-11-15 04:13:20 UTC).
+    // The title format mirrors the spec: `YYYY-MM-DD HH:MM → YYYY-MM-DD HH:MM UTC`.
+    const symbolCells = document.querySelectorAll('[data-testid^="recent-run-cell-"]');
+    expect(symbolCells.length).toBeGreaterThanOrEqual(8);
+    for (const cell of Array.from(symbolCells)) {
+      const t = cell.getAttribute('title') ?? '';
+      expect(t).toMatch(/→/);
+      expect(t).toMatch(/UTC/);
+    }
+  });
+
+  it('renders an InfoTooltip in the Recent runs column header with the encoding note (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    const trigger = screen.getByRole('button', {
+      name: /recent runs definition/i,
+    });
+    fireEvent.click(trigger);
+    expect(
+      screen.getByText(
+        /Each cell is one of the last 8 completed UTC 6-hour blocks \(oldest left\)\. Y = operator earned ≥3 tJINN in that block; N = did not\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('renders Yes/No per row driven by row.active', async () => {

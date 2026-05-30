@@ -63,4 +63,52 @@ describe('InfoTooltip', () => {
       screen.getByRole('button', { name: 'active definition' }),
     ).toBeInTheDocument();
   });
+
+  it('portals the open body to document.body so an overflow:hidden parent does not clip it (issue #905)', () => {
+    const { container } = render(
+      <div style={{ overflow: 'hidden', height: 20, width: 20 }}>
+        <InfoTooltip>tooltip body — portal</InfoTooltip>
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /more info/i }));
+    const body = screen.getByText('tooltip body — portal');
+    // Body should not be nested under the clipped container — it lives
+    // directly under document.body via createPortal.
+    expect(container.contains(body)).toBe(false);
+    expect(document.body.contains(body)).toBe(true);
+  });
+
+  it('positions the open body with position:fixed coordinates derived from the trigger', () => {
+    render(<InfoTooltip>tooltip body — fixed</InfoTooltip>);
+    const trigger = screen.getByRole('button', { name: /more info/i });
+    // jsdom returns zeros from getBoundingClientRect, but `position: fixed`
+    // must be set so the body anchors to the viewport rather than the
+    // closest positioned ancestor.
+    fireEvent.click(trigger);
+    const body = screen.getByText('tooltip body — fixed');
+    expect(body.getAttribute('style')).toMatch(/position:\s*fixed/);
+  });
+
+  it('outside mousedown still dismisses after the body portals out', () => {
+    render(
+      <div>
+        <span data-testid="outside">outside</span>
+        <InfoTooltip>tooltip body — portaled</InfoTooltip>
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /more info/i }));
+    expect(screen.getByText('tooltip body — portaled')).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByTestId('outside'));
+    expect(screen.queryByText('tooltip body — portaled')).toBeNull();
+  });
+
+  it('mousedown INSIDE the portaled body does not dismiss (the body is part of the open surface)', () => {
+    render(<InfoTooltip>tooltip body — clickable</InfoTooltip>);
+    fireEvent.click(screen.getByRole('button', { name: /more info/i }));
+    const body = screen.getByText('tooltip body — clickable');
+    fireEvent.mouseDown(body);
+    // Body should remain visible — outside-click check must treat the portal
+    // content as "inside".
+    expect(screen.getByText('tooltip body — clickable')).toBeInTheDocument();
+  });
 });

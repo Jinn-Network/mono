@@ -55,8 +55,15 @@ export interface ActiveOperatorResult {
   window: ActiveWindow;
   /** Multisigs that qualified in every one of the `BLOCK_COUNT` buckets. */
   active: Set<string>;
-  /** Per-operator block-qualification count over the window. */
-  perOperator: Map<string, { blocksQualified: number }>;
+  /**
+   * Per-operator qualification breakdown over the window.
+   *
+   * `blocks` is the per-bucket qualifying flag, length `BLOCK_COUNT`,
+   * **oldest-first** — `blocks[0]` is the oldest completed bucket and
+   * `blocks[BLOCK_COUNT - 1]` is the newest. `blocksQualified` is the count
+   * of `true` entries in `blocks`.
+   */
+  perOperator: Map<string, { blocks: boolean[]; blocksQualified: number }>;
 }
 
 /**
@@ -106,13 +113,15 @@ export function computeActiveOperators(
   }
 
   const active = new Set<string>();
-  const perOperator = new Map<string, { blocksQualified: number }>();
+  const perOperator = new Map<string, { blocks: boolean[]; blocksQualified: number }>();
   for (const [op, perBucket] of sums) {
+    // `perBucket` indexing already runs oldest-first because `bucket` is
+    // `floor((ts - startTs) / BLOCK_SECONDS)` — index 0 = startTs..startTs+6h
+    // = oldest completed block, index BLOCK_COUNT-1 = newest completed.
+    const blocks = perBucket.map((sum) => sum >= REQUIRED_TJINN_PER_BLOCK);
     let qualified = 0;
-    for (const sum of perBucket) {
-      if (sum >= REQUIRED_TJINN_PER_BLOCK) qualified += 1;
-    }
-    perOperator.set(op, { blocksQualified: qualified });
+    for (const b of blocks) if (b) qualified += 1;
+    perOperator.set(op, { blocks, blocksQualified: qualified });
     if (qualified === BLOCK_COUNT) active.add(op);
   }
 

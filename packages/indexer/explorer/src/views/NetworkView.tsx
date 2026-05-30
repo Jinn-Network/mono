@@ -75,7 +75,6 @@ function ActivityStrip({ data }: { data: NetworkResponse }) {
         <ActivityCell
           k="Active operators"
           v={int(data.activeOperators)}
-          sub="last 8 × 6h, ≥3 tJINN each"
           first
           info={<ActiveOperatorTooltipBody window={data.activeWindow} />}
         />

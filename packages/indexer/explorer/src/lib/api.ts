@@ -39,6 +39,18 @@ export interface LeaderboardRow {
    * UTC 6-hour blocks (per `activeWindow`). The in-progress block is excluded.
    */
   active: boolean;
+  /**
+   * Per-block qualification flags over `activeWindow` — length
+   * `activeWindow.blockCount` (8), oldest-first (`recentBlocks[0]` is the
+   * oldest completed bucket, `recentBlocks[7]` is the newest). `true` when the
+   * operator earned ≥ `activeWindow.requiredTjinnPerBlock` in that block.
+   *
+   * Server contract: present on every `ranked`/`lowVolume` entry returned by
+   * `/explorer/operators`. Optional on the wire type because the train/frozen
+   * leaderboards inside `/explorer/solvernet/:cid` reuse this shape and do
+   * not populate it.
+   */
+  recentBlocks?: boolean[];
 }
 
 /**

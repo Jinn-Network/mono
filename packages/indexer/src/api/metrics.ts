@@ -182,41 +182,77 @@ export function rollingResolvedRate(passes: boolean[], k: number): number[] {
 // ── rankLeaderboard ───────────────────────────────────────────────────────────
 
 /**
+ * Comparator used by the `/operators` leaderboard (issue #905).
+ *
+ * Sort key:
+ *   1. `jinnEarned` desc (bigint comparison — no Number coercion, no precision loss)
+ *   2. `active` desc (active first; the rolling-window active flag set by `/operators`)
+ *   3. `operator` asc (lexicographic)
+ *
+ * Only meaningful for callers that overlay the real `active` flag onto rows —
+ * `buildLeaderboardRows` defaults `active` to `false`, so without overlay this
+ * collapses to `(jinnEarned, false, operator)` which is not what train/frozen
+ * boards want. Use {@link compareByResolvedRateAttempts} there.
+ */
+export function compareByJinnEarnedActive(a: LeaderboardRow, b: LeaderboardRow): number {
+  // jinnEarned desc — bigint comparison so 10^30-scale values stay accurate.
+  if (a.jinnEarned !== b.jinnEarned) {
+    return a.jinnEarned < b.jinnEarned ? 1 : -1;
+  }
+  // active desc — active operators sort above inactive at the same earnings.
+  if (a.active !== b.active) return a.active ? -1 : 1;
+  // operator asc
+  return a.operator < b.operator ? -1 : a.operator > b.operator ? 1 : 0;
+}
+
+/**
+ * Default comparator used by per-SolverNet train/frozen leaderboards.
+ *
+ * Sort key:
+ *   1. `resolvedRate` desc (null rates sort last)
+ *   2. `attempts` desc
+ *   3. `operator` asc (lexicographic)
+ *
+ * This is the meaningful ordering for per-SolverNet evaluation surfaces, where
+ * `active` (a protocol-wide rolling-window flag) and `jinnEarned` (a portfolio-
+ * level signal) are not the relevant ranking signals.
+ */
+export function compareByResolvedRateAttempts(a: LeaderboardRow, b: LeaderboardRow): number {
+  // resolvedRate desc, nulls last.
+  const aRate = a.resolvedRate;
+  const bRate = b.resolvedRate;
+  if (aRate !== bRate) {
+    if (aRate === null) return 1;
+    if (bRate === null) return -1;
+    return bRate - aRate;
+  }
+  // attempts desc
+  if (a.attempts !== b.attempts) return b.attempts - a.attempts;
+  // operator asc
+  return a.operator < b.operator ? -1 : a.operator > b.operator ? 1 : 0;
+}
+
+/**
  * Partitions and ranks operator leaderboard rows.
  *
  * Rows whose `verdictsTotal >= minVerdicts` go into `ranked`; the rest go into
- * `lowVolume`. Both groups are sorted by:
- *   1. `resolvedRate` desc (null sorts last, after any numeric rate)
- *   2. `attempts` desc
- *   3. `operator` asc (lexicographic)
+ * `lowVolume`. Both groups are sorted by `comparator` — defaults to
+ * {@link compareByResolvedRateAttempts} (the per-SolverNet ordering). The
+ * `/operators` handler passes {@link compareByJinnEarnedActive} explicitly.
  *
  * The `ranked` group has sequential 1-based `rank` fields appended.
  * The `lowVolume` group keeps the same sort order but no `rank` field.
  */
-export function rankLeaderboard(
-  rows: LeaderboardRow[],
+export function rankLeaderboard<R extends LeaderboardRow>(
+  rows: R[],
   minVerdicts: number,
+  comparator: (a: LeaderboardRow, b: LeaderboardRow) => number = compareByResolvedRateAttempts,
 ): {
-  ranked: (LeaderboardRow & { rank: number })[];
-  lowVolume: LeaderboardRow[];
+  ranked: (R & { rank: number })[];
+  lowVolume: R[];
 } {
-  const comparator = (a: LeaderboardRow, b: LeaderboardRow): number => {
-    // resolvedRate desc — null sorts after any numeric rate
-    const aRate = a.resolvedRate;
-    const bRate = b.resolvedRate;
-    if (aRate !== bRate) {
-      if (aRate === null) return 1;
-      if (bRate === null) return -1;
-      return bRate - aRate;
-    }
-    // attempts desc
-    if (a.attempts !== b.attempts) return b.attempts - a.attempts;
-    // operator asc
-    return a.operator < b.operator ? -1 : a.operator > b.operator ? 1 : 0;
-  };
-
-  const ranked: LeaderboardRow[] = [];
-  const lowVolume: LeaderboardRow[] = [];
+  const ranked: R[] = [];
+  const lowVolume: R[] = [];
   for (const row of rows) {
     if (row.verdictsTotal >= minVerdicts) {
       ranked.push(row);
