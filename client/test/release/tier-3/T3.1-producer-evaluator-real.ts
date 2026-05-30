@@ -114,6 +114,17 @@ const REQUIRED_VERDICTS = 3;
  */
 const GETLOGS_CHUNK_BLOCKS = 1_999n;
 
+/**
+ * The orchestrator polls a SINGLE configured RPC (no fallback chain like the
+ * daemon), and the public Base Sepolia gateways intermittently return a
+ * spurious `eth_getLogs` "invalid params" / 429 / 5xx even for a well-formed
+ * request (reproduced: the exact failing call succeeds 6/6 on retry). A single
+ * such hiccup on the first observe poll otherwise aborts the entire 25-min
+ * gate. Retry transient getLogs failures a few times before surfacing.
+ */
+const GETLOGS_RETRY_ATTEMPTS = 4;
+const GETLOGS_RETRY_BASE_MS = 800;
+
 /** Default ports the two Tier-3 daemons bind (portBase, portBase+1). */
 const PORT_BASE = 7360;
 
@@ -332,11 +343,21 @@ async function scanRouterEvents<T>(args: {
       start + GETLOGS_CHUNK_BLOCKS > args.toBlock
         ? args.toBlock
         : start + GETLOGS_CHUNK_BLOCKS;
-    const logs = await args.client.getLogs({
-      address: args.routerAddress,
-      fromBlock: start,
-      toBlock: end,
-    });
+    let logs: Log[] = [];
+    for (let attempt = 1; ; attempt++) {
+      try {
+        logs = await args.client.getLogs({
+          address: args.routerAddress,
+          fromBlock: start,
+          toBlock: end,
+        });
+        break;
+      } catch (err) {
+        if (attempt >= GETLOGS_RETRY_ATTEMPTS) throw err;
+        // Transient RPC hiccup (invalid params / 429 / 5xx on a healthy query).
+        await new Promise((r) => setTimeout(r, GETLOGS_RETRY_BASE_MS * attempt));
+      }
+    }
     for (const log of logs) {
       try {
         const decoded = decodeEventLog({
