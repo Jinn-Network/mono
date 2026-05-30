@@ -37,14 +37,14 @@
  */
 
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
-import { getAddress } from 'viem';
+import { encodeFunctionData, getAddress } from 'viem';
 import { isOperationalServiceStep } from '../earning/types.js';
 import { base, baseSepolia } from 'viem/chains';
 import type { FleetStateStore } from '../earning/store.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
-import { waitForTransactionReceiptWithRetry } from '../tx-retry.js';
+import { viemSendTransactionWithRetry, waitForTransactionReceiptWithRetry } from '../tx-retry.js';
 import { CLAIM_TICKET_TOPIC0, JINN_CLAIM_EMITTER_ABI } from '../earning/contracts.js';
 import {
   fetchLatestClaimTicket,
@@ -261,14 +261,33 @@ export class JinnClaimLoop {
     const account = this.config.l2Wallet.account;
     if (!account) throw new Error('L2 wallet has no account configured');
 
-    const { request } = await this.config.l2Client.simulateContract({
+    // Pre-flight: surface a revert before we broadcast.
+    await this.config.l2Client.simulateContract({
       address: this.config.claimEmitterAddress,
       abi: JINN_CLAIM_EMITTER_ABI,
       functionName: 'emitClaim',
       args: [serviceId],
       account,
     });
-    const hash = await this.config.l2Wallet.writeContract(request);
+
+    // Broadcast through the shared per-EOA nonce ledger (issue #525). emitClaim
+    // is sent from the AGENT EOA — the same EOA the creator/claim/deliver Safe
+    // txs use. A raw `walletClient.writeContract` here auto-fills the nonce from
+    // `getTransactionCount(pending)` OUTSIDE the broadcast lock, so on testnet
+    // (where this loop is enabled by default and fires immediately at startup)
+    // it races the creator's first `createTask` and both pick the same nonce →
+    // "nonce too low". Routing via viemSendTransactionWithRetry serializes the
+    // nonce-read→broadcast against every other agent-EOA broadcaster.
+    const data = encodeFunctionData({
+      abi: JINN_CLAIM_EMITTER_ABI,
+      functionName: 'emitClaim',
+      args: [serviceId],
+    });
+    const hash = await viemSendTransactionWithRetry(this.config.l2Wallet, this.config.l2Client, {
+      account,
+      to: this.config.claimEmitterAddress,
+      data,
+    });
     await waitForTransactionReceiptWithRetry(this.config.l2Client, hash);
     return hash;
   }
