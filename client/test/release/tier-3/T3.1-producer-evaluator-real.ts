@@ -55,6 +55,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createPublicClient,
   decodeEventLog,
+  fallback,
   http,
   type Hex,
   type Log,
@@ -594,14 +595,34 @@ export async function runT31ProducerEvaluatorReal(
         'getChainConfig("base-sepolia") returned no jinnRouter address — cannot observe the on-chain loop',
       );
     }
-    const rpcUrl =
-      opts.rpcUrl ??
-      process.env['BASE_SEPOLIA_RPC_URL'] ??
-      process.env['JINN_RPC_URL'] ??
-      'https://sepolia.base.org';
+    // Multi-RPC fallback chain. The orchestrator polls a single RPC for up to
+    // ~23 minutes; a transient DNS/network blip on one provider (observed:
+    // `getaddrinfo ENOTFOUND base-sepolia.gateway.tenderly.co`, which aborted
+    // the gate with flake-infra mid-observe) must fall through to a healthy
+    // provider rather than kill the whole run. The daemon already runs a
+    // fallback chain (config.ts §RPC fallback chain); the gate observer was the
+    // last single-RPC consumer. `rank: false` preserves operator slot order so
+    // a configured paid key stays primary. The public no-auth endpoints are
+    // always appended as last-resort backups.
+    const PUBLIC_BACKUP_RPCS = [
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ];
+    const rpcUrls = [
+      ...(opts.rpcUrl ? [opts.rpcUrl] : []),
+      ...(process.env['BASE_SEPOLIA_RPC_URL']?.split(',') ?? []),
+      ...(process.env['JINN_RPC_URL']?.split(',') ?? []),
+      ...PUBLIC_BACKUP_RPCS,
+    ]
+      .map((u) => u.trim())
+      .filter(Boolean);
+    const uniqueRpcUrls = [...new Set(rpcUrls)];
     const client = createPublicClient({
       chain: baseSepolia,
-      transport: http(rpcUrl),
+      transport: fallback(
+        uniqueRpcUrls.map((u) => http(u)),
+        { rank: false },
+      ),
     });
     const chainId = await client.getChainId();
     if (chainId !== BASE_SEPOLIA_CHAIN_ID) {
