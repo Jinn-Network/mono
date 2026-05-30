@@ -69,6 +69,7 @@ export interface HandlerContext {
 
 export interface BlockShape {
   number: bigint;
+  timestamp: bigint;
 }
 export interface TransactionShape {
   hash: `0x${string}`;
@@ -1411,6 +1412,7 @@ export async function handleClaimed({
       totalEntitledOperator: event.args.totalEntitledOperator,
       totalEntitledDao: event.args.totalEntitledDao,
       claimedAtBlock: event.block.number,
+      claimedAtTimestamp: event.block.timestamp,
       logIndex,
       claimedAtTx: event.transaction.hash,
       chainId: context.chain.id,

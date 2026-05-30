@@ -28,6 +28,13 @@ export interface LeaderboardRow {
   resolvedRate: number | null;
   /** JINN tokens earned (raw bigint from chain). */
   jinnEarned: bigint;
+  /**
+   * True when the operator qualified on every bucket of the rolling
+   * active-operator window (see `src/api/active-operators.ts`). Defaulted
+   * to `false` by the row builder; the `/operators` handler overlays the
+   * real value.
+   */
+  active: boolean;
 }
 
 // ── verdictResolvedRate ───────────────────────────────────────────────────────

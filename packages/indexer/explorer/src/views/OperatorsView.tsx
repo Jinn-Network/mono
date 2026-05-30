@@ -11,6 +11,9 @@
 import { Link } from 'wouter';
 import { useOperators } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
+import { Kpi, KpiRow } from '../components/Kpi';
+import { InfoTooltip } from '../components/InfoTooltip';
+import { ActiveOperatorTooltipBody } from '../components/ActiveOperatorTooltip';
 import { shortAddr, int, jinn } from '../lib/format';
 
 // ── Inline table styling ──────────────────────────────────────────────────────
@@ -159,6 +162,25 @@ export function OperatorsView() {
         </div>
       )}
 
+      {/* ── Active-operator stat ── */}
+      {data && (
+        <KpiRow>
+          <Kpi
+            label="Active operators"
+            value={
+              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                {int(data.activeOperators)}
+                <InfoTooltip label="Active operators definition">
+                  <ActiveOperatorTooltipBody window={data.activeWindow} />
+                </InfoTooltip>
+              </span>
+            }
+            sub="last 8 × 6h, ≥3 tJINN each"
+            accent
+          />
+        </KpiRow>
+      )}
+
       {/* ── Roster table ── */}
       {data && (
         <div
@@ -173,6 +195,14 @@ export function OperatorsView() {
             <thead>
               <tr>
                 <th style={th}>Operator</th>
+                <th style={th}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    Active?
+                    <InfoTooltip label="Active column definition">
+                      <ActiveOperatorTooltipBody window={data.activeWindow} />
+                    </InfoTooltip>
+                  </span>
+                </th>
                 <th style={th}>Attempts</th>
                 <th style={th}>JINN earned</th>
               </tr>
@@ -193,6 +223,14 @@ export function OperatorsView() {
                     >
                       {shortAddr(op.operator)}
                     </Link>
+                  </td>
+                  <td
+                    style={{
+                      ...td,
+                      color: op.active ? 'var(--vow-green)' : 'var(--break-red)',
+                    }}
+                  >
+                    {op.active ? 'Yes' : 'No'}
                   </td>
                   <td style={td}>{int(op.attempts)}</td>
                   <td style={td}>{jinn(op.jinnEarned)}</td>

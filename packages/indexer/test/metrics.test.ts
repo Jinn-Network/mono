@@ -282,6 +282,7 @@ describe('rankLeaderboard', () => {
     verdictsPass: 4,
     resolvedRate: 0.8,
     jinnEarned: 1000n,
+    active: false,
     ...overrides,
   });
 

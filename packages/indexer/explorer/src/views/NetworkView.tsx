@@ -26,6 +26,8 @@ import type { NetworkResponse } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { HBars } from '../components/HBars';
+import { InfoTooltip } from '../components/InfoTooltip';
+import { ActiveOperatorTooltipBody } from '../components/ActiveOperatorTooltip';
 import { pct, int, block, jinn } from '../lib/format';
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -72,9 +74,10 @@ function ActivityStrip({ data }: { data: NetworkResponse }) {
       >
         <ActivityCell
           k="Active operators"
-          v={int(data.distinctOperators)}
-          sub="submitting attempts"
+          v={int(data.activeOperators)}
+          sub="last 8 × 6h, ≥3 tJINN each"
           first
+          info={<ActiveOperatorTooltipBody window={data.activeWindow} />}
         />
         <ActivityCell
           k="SolverNets running"
@@ -98,12 +101,14 @@ function ActivityCell({
   sub,
   first,
   smaller,
+  info,
 }: {
   k: string;
   v: ReactNode;
   sub?: string;
   first?: boolean;
   smaller?: boolean;
+  info?: ReactNode;
 }) {
   return (
     <div
@@ -123,9 +128,12 @@ function ActivityCell({
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
           color: 'var(--fg-muted)',
+          display: 'inline-flex',
+          alignItems: 'center',
         }}
       >
         {k}
+        {info && <InfoTooltip label={`${k} definition`}>{info}</InfoTooltip>}
       </div>
       <div
         className="data"

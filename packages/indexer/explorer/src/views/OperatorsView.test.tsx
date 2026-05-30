@@ -5,7 +5,7 @@
  * JINN earned. No rank, no top-level resolved-rate column, no filter UI.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -25,6 +25,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       verdictsPass: 7,
       resolvedRate: 7 / 8,
       jinnEarned: '1000000000000000000',
+      active: true,
       dominantMode: 'train',
       dominantHarness: 'swe-bench',
     },
@@ -38,9 +39,18 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       verdictsPass: 1,
       resolvedRate: 0.5,
       jinnEarned: '500000000000000000',
+      active: false,
     },
   ],
   minVerdicts: 5,
+  activeOperators: 1,
+  activeWindow: {
+    startTs: 1_700_000_000,
+    endTs: 1_700_000_000 + 48 * 3600,
+    blockSeconds: 6 * 3600,
+    blockCount: 8,
+    requiredTjinnPerBlock: '3000000000000000000',
+  },
   appliedFilters: {},
   meta: { jinnAttribution: 'ok' },
   lastIndexedBlock: '12000000',
@@ -174,6 +184,74 @@ describe('OperatorsView', () => {
     await waitFor(() => {
       expect(screen.getByText(/Failed to load operators/i)).toBeInTheDocument();
     });
+  });
+
+  it('renders the ACTIVE OPERATORS stat strip with the value from data.activeOperators', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+    // activeOperators === 1 in the fixture
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
+  it('renders an Active? column header between Operator and Attempts', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    const headers = Array.from(
+      document.querySelectorAll('thead th'),
+    ).map((th) => th.textContent ?? '');
+    expect(headers).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/operator/i),
+        expect.stringMatching(/active\?/i),
+        expect.stringMatching(/attempts/i),
+        expect.stringMatching(/jinn earned/i),
+      ]),
+    );
+    const operatorIdx = headers.findIndex((h) => /operator/i.test(h));
+    const activeIdx = headers.findIndex((h) => /active\?/i.test(h));
+    const attemptsIdx = headers.findIndex((h) => /attempts/i.test(h));
+    expect(operatorIdx).toBeLessThan(activeIdx);
+    expect(activeIdx).toBeLessThan(attemptsIdx);
+  });
+
+  it('renders Yes/No per row driven by row.active', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // ranked row active=true → "Yes"; lowVolume row active=false → "No"
+    expect(screen.getByText('Yes')).toBeInTheDocument();
+    expect(screen.getByText('No')).toBeInTheDocument();
+  });
+
+  it('opens the active-operator tooltip body when the trigger is clicked', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // At least one InfoTooltip trigger renders on the page (stat strip + column header).
+    const triggers = screen.getAllByRole('button', { name: /definition/i });
+    expect(triggers.length).toBeGreaterThan(0);
+    fireEvent.click(triggers[0]!);
+    // Canonical definition copy.
+    expect(
+      screen.getAllByText(/Earned ≥3 tJINN in each of the last 8 completed UTC 6-hour blocks/i)
+        .length,
+    ).toBeGreaterThan(0);
+    // The window dates render in the body — derived from activeWindow.startTs/endTs.
+    expect(screen.getAllByText(/UTC/).length).toBeGreaterThan(0);
   });
 
   it('does not pass mode/harness/minVerdicts to useOperators (no filter UI)', async () => {

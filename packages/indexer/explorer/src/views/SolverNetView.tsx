@@ -94,6 +94,10 @@ function toRankedRow(
     verdictsPass: r.verdictsPass,
     resolvedRate: r.resolvedRate,
     jinnEarned: r.jinnEarned,
+    // SliceResponseLeaderboardRow has no `active` flag (slice rows pre-date
+    // the active-operator surface). Default to false; the canonical surface
+    // lives on /operators and the network view.
+    active: false,
     dominantMode: r.dominantMode,
     dominantHarness: r.dominantHarness,
   };

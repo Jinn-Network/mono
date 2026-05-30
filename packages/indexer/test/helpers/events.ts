@@ -25,6 +25,8 @@ const SOME_ADDR = '0x1111111111111111111111111111111111111111' as const;
 
 interface EnvelopeOverrides {
   block?: bigint;
+  /** Block timestamp (UTC seconds). Defaults to 0n in fixtures that don't care. */
+  timestamp?: bigint;
   transactionIndex?: number;
   logIndex?: number;
   txHash?: `0x${string}`;
@@ -43,7 +45,7 @@ export function taskCreatedEvent(
       requiredVerdicts: 1,
       ...args,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + 'ab'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
@@ -62,7 +64,7 @@ export function taskAttemptCreatedEvent(
       deliveryRate: 0n,
       ...args,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + 'cd'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
@@ -79,7 +81,7 @@ export function solutionDeliveryClaimedEvent(
       attemptIndex: 0,
       ...args,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + 'ef'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
@@ -95,7 +97,7 @@ export function metadataSetEvent(
       metadataKey: args.metadataKey,
       metadataValue: args.metadataValue,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + '12'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
@@ -114,7 +116,7 @@ export function verdictDeliveryClaimedEvent(
       verdictCode: 1,
       ...args,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + 'fe'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
@@ -131,7 +133,7 @@ export function taskBudgetRefundedEvent(
       verdictAmount: 0n,
       ...args,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + 'a1'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
@@ -150,7 +152,7 @@ export function claimedEvent(
       totalEntitledDao: 0n,
       ...args,
     },
-    block: { number: o.block ?? 100n },
+    block: { number: o.block ?? 100n, timestamp: o.timestamp ?? 0n },
     transaction: { hash: o.txHash ?? ('0x' + 'b2'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };

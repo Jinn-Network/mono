@@ -12,7 +12,15 @@ const NETWORK_FIXTURE: NetworkResponse = {
   tasksSettled: 10,
   tasksRefunded: 1,
   attempts: 30,
-  distinctOperators: 7,
+  everAttemptedOperators: 7,
+  activeOperators: 3,
+  activeWindow: {
+    startTs: 1_700_000_000,
+    endTs: 1_700_000_000 + 48 * 3600,
+    blockSeconds: 6 * 3600,
+    blockCount: 8,
+    requiredTjinnPerBlock: '3000000000000000000',
+  },
   solverNetsRunning: 2,
   verdicts: 18,
   verdictsPass: 14,
@@ -132,10 +140,35 @@ describe('NetworkView', () => {
     });
     expect(screen.getByText(/solvernets running/i)).toBeInTheDocument();
     expect(screen.getByText(/last settlement/i)).toBeInTheDocument();
-    // distinctOperators = 7
-    expect(screen.getByText('7')).toBeInTheDocument();
+    // activeOperators = 3 (the headline switched from everAttemptedOperators)
+    expect(screen.getByText('3')).toBeInTheDocument();
     // solverNetsRunning = 2
     expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
+  it('reads the Active operators cell from data.activeOperators (not everAttemptedOperators)', async () => {
+    // Sanity: with activeOperators=3 and everAttemptedOperators=7, the headline
+    // is the active number — not the ever-attempted total.
+    mockFetchNetwork(NETWORK_FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<NetworkView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText('3')).toBeInTheDocument();
+    // We do NOT assert the absence of '7' globally — composition shares may
+    // legitimately render that string.
+  });
+
+  it('renders the active-operator tooltip trigger', async () => {
+    mockFetchNetwork(NETWORK_FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<NetworkView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+    const triggers = screen.getAllByRole('button', { name: /definition/i });
+    expect(triggers.length).toBeGreaterThan(0);
   });
 
   it('renders the Economy row with JINN distributed split', async () => {

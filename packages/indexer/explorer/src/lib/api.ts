@@ -34,6 +34,28 @@ export interface LeaderboardRow {
   resolvedRate: number | null;
   /** decimal string, e.g. "100500000000000000044" */
   jinnEarned: string;
+  /**
+   * True when the operator earned ≥3 tJINN in each of the last 8 completed
+   * UTC 6-hour blocks (per `activeWindow`). The in-progress block is excluded.
+   */
+  active: boolean;
+}
+
+/**
+ * Reference window for the "active operator" surface — the most recent
+ * `blockCount` × `blockSeconds`-second blocks, ending at the most-recent
+ * completed UTC boundary.
+ *
+ * `requiredTjinnPerBlock` is the wei floor an operator's per-block
+ * `operatorMinted` sum must clear to qualify a block. Serialised as a
+ * decimal string because bigints don't round-trip through JSON.
+ */
+export interface ActiveWindow {
+  startTs: number;
+  endTs: number;
+  blockSeconds: number;
+  blockCount: number;
+  requiredTjinnPerBlock: string;
 }
 
 export interface RankedLeaderboardRow extends LeaderboardRow {
@@ -49,7 +71,15 @@ export interface NetworkResponse extends FreshnessMeta {
   tasksSettled: number;
   tasksRefunded: number;
   attempts: number;
-  distinctOperators: number;
+  /**
+   * Count of operator multisigs that have ever submitted an attempt on
+   * `EXPLORER_CHAIN_ID`. Renamed from `distinctOperators` (2026-05-30) to
+   * disambiguate from the headline "active operators" surface.
+   */
+  everAttemptedOperators: number;
+  /** Operators that qualified on every bucket of `activeWindow` (see {@link ActiveWindow}). */
+  activeOperators: number;
+  activeWindow: ActiveWindow;
   solverNetsRunning: number;
   verdicts: number;
   /** Envelope-truth-preferring pass count. */
@@ -208,6 +238,9 @@ export interface OperatorsResponse extends FreshnessMeta {
   ranked: RankedLeaderboardRow[];
   lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
   minVerdicts: number;
+  /** Count of distinct multisigs marked `active` over `activeWindow`. */
+  activeOperators: number;
+  activeWindow: ActiveWindow;
   appliedFilters?: {
     mode?: string;
     harness?: string;

@@ -42,6 +42,57 @@ import {
   computeSlice,
   type SliceResponseLeaderboardRow,
 } from './slice.js';
+import {
+  computeActiveOperators,
+  computeActiveWindow,
+  type ActiveWindow as ActiveWindowDomain,
+} from './active-operators.js';
+
+/**
+ * Wire-shape projection of {@link ActiveWindowDomain} — `requiredTjinnPerBlock`
+ * is serialised as a decimal string because bigints don't round-trip through
+ * JSON.
+ */
+function serialiseActiveWindow(w: ActiveWindowDomain): {
+  startTs: number;
+  endTs: number;
+  blockSeconds: number;
+  blockCount: number;
+  requiredTjinnPerBlock: string;
+} {
+  return {
+    startTs: w.startTs,
+    endTs: w.endTs,
+    blockSeconds: w.blockSeconds,
+    blockCount: w.blockCount,
+    requiredTjinnPerBlock: w.requiredTjinnPerBlock.toString(),
+  };
+}
+
+/**
+ * Loads the (multisig, operatorMinted, claimedAtTimestamp) tuples that fall
+ * inside the rolling active-operator window and runs the per-bucket
+ * qualification check. The window is intentionally NOT chain-scoped:
+ * `rewardDistribution` is sourced from JinnDistributor on Sepolia L1 and
+ * settles rewards earned on every L2 execution chain.
+ */
+async function loadActiveOperators(nowSec: number) {
+  const window = computeActiveWindow(nowSec);
+  const rewardRows = await db
+    .select({
+      multisig: schema.rewardDistribution.multisig,
+      operatorMinted: schema.rewardDistribution.operatorMinted,
+      claimedAtTimestamp: schema.rewardDistribution.claimedAtTimestamp,
+    })
+    .from(schema.rewardDistribution)
+    .where(
+      and(
+        sql`${schema.rewardDistribution.claimedAtTimestamp} >= ${BigInt(window.startTs)}`,
+        sql`${schema.rewardDistribution.claimedAtTimestamp} < ${BigInt(window.endTs)}`,
+      ),
+    );
+  return computeActiveOperators(rewardRows, nowSec);
+}
 
 // ── Chain scope ───────────────────────────────────────────────────────────────
 
@@ -344,7 +395,9 @@ app.use('/network', explorerFreshness());
 app.get('/network', async (c) => {
   const includeUnenriched = c.req.query('include') === 'raw';
 
-  const [taskStats, attemptStats, verdictRows, rewardStats, snStats, enrichmentRows, totalAttemptCount] =
+  const activeResultPromise = loadActiveOperators(Math.floor(Date.now() / 1000));
+
+  const [taskStats, attemptStats, verdictRows, rewardStats, snStats, enrichmentRows, totalAttemptCount, activeResult] =
     await Promise.all([
       // Task counts — scoped to EXPLORER_CHAIN_ID
       db
@@ -446,6 +499,11 @@ app.get('/network', async (c) => {
         .select({ total: count() })
         .from(schema.attempt)
         .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID)),
+
+      // Active-operator window — rolling 8 × 6h qualification surface.
+      // NOT chain-scoped: rewardDistribution settles on Sepolia L1 but reports
+      // network-wide rewards (loadActiveOperators preserves this).
+      activeResultPromise,
     ]);
 
   const tRow = taskStats[0];
@@ -522,7 +580,12 @@ app.get('/network', async (c) => {
     tasksSettled: Number(tRow?.settled ?? 0),
     tasksRefunded: Number(tRow?.refunded ?? 0),
     attempts: Number(aRow?.total ?? 0),
-    distinctOperators: Number(aRow?.distinctOperators ?? 0),
+    // Renamed from `distinctOperators` (2026-05-30) to disambiguate from
+    // the headline "active operators" surface. Old key is gone — SPA
+    // consumers must read the new name.
+    everAttemptedOperators: Number(aRow?.distinctOperators ?? 0),
+    activeOperators: activeResult.active.size,
+    activeWindow: serialiseActiveWindow(activeResult.window),
     solverNetsRunning: Number(snRow?.running ?? 0),
     verdicts: verdictsTotal,
     verdictsPass,
@@ -1079,6 +1142,13 @@ app.get('/operators', async (c) => {
   if (modeParam !== undefined) appliedFilters['mode'] = modeParam;
   if (harnessParam !== undefined) appliedFilters['harness'] = harnessParam;
 
+  // Active-operator overlay — join multisig ↔ attempt.operator via the same
+  // raw `t.hex()` representation `jinnEarned` uses (no case normalisation).
+  // Always computed against the unfiltered roster: the rolling window is a
+  // protocol-wide signal, not a mode/harness-scoped one.
+  const activeResult = await loadActiveOperators(Math.floor(Date.now() / 1000));
+  const isActive = (op: string) => activeResult.active.has(op);
+
   // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
   const chainHead = c.get('chainHead');
@@ -1087,6 +1157,7 @@ app.get('/operators', async (c) => {
   const serializeRow = (r: LeaderboardRow & { rank?: number }) => ({
     ...r,
     jinnEarned: r.jinnEarned.toString(),
+    active: isActive(r.operator),
     dominantMode: dominantMap.get(r.operator)?.mode ?? 'unknown',
     dominantHarness: dominantMap.get(r.operator)?.harness ?? '(unknown)',
   });
@@ -1095,6 +1166,8 @@ app.get('/operators', async (c) => {
     ranked: ranked.map(serializeRow),
     lowVolume: lowVolume.map(serializeRow),
     minVerdicts,
+    activeOperators: activeResult.active.size,
+    activeWindow: serialiseActiveWindow(activeResult.window),
     ...(hasFilter ? { appliedFilters } : {}),
     meta: { jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok' },
     ...freshnessFields,
@@ -2027,6 +2100,9 @@ async function buildLeaderboardRows(
       verdictsPass,
       resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
       jinnEarned: rewardByOperator.get(op) ?? 0n,
+      // Default to inactive; the /operators handler overlays the real value
+      // from `computeActiveOperators(...)` against the rolling 8 × 6h window.
+      active: false,
     });
   }
 
@@ -2194,6 +2270,10 @@ async function buildLeaderboardRowsWithHarnessFilter(
       verdictsPass,
       resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
       jinnEarned: 0n, // fleet-wide; cannot be split by harness
+      // Mode/harness-filtered boards never expose `active` truthfully — the
+      // window applies to the unfiltered roster. Surfacing the canonical
+      // surface on a filtered view would be misleading; default to false.
+      active: false,
     });
   }
 

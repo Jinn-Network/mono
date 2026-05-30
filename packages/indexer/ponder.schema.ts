@@ -220,6 +220,11 @@ export const rewardDistribution = onchainTable(
     /** Cumulative DAO entitlement after this claim (wei). */
     totalEntitledDao: t.bigint().notNull(),
     claimedAtBlock: t.bigint().notNull(),
+    /**
+     * Block timestamp (UTC seconds) for `claimedAtBlock`. Used by the explorer's
+     * active-operator surface to bucket rewards into the rolling 8 × 6h window.
+     */
+    claimedAtTimestamp: t.bigint().notNull(),
     logIndex: t.integer().notNull(),
     claimedAtTx: t.hex().notNull(),
     chainId: t.integer().notNull(),
