@@ -49,9 +49,19 @@
  *      — claimDelivery is authoritative").
  */
 
-import { encodeAbiParameters, type Hex, type PublicClient, type WalletClient } from 'viem';
+import {
+  encodeAbiParameters,
+  encodeFunctionData,
+  type Hex,
+  type PublicClient,
+  type WalletClient,
+} from 'viem';
 import type { EnvelopeRef } from '../corpus/types.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
+import {
+  viemSendTransactionWithRetry,
+  type TxRetryWalletClient,
+} from '../tx-retry.js';
 import {
   IDENTITY_REGISTRY_SET_METADATA_ABI,
   PAYLOAD_TUPLE,
@@ -503,14 +513,30 @@ export class IdentityPublisher {
       throw new Error('IdentityPublisher: walletClient has no chain configured');
     }
 
-    const txHash = await this.walletClient.writeContract({
-      address: this.identityRegistryAddress,
+    // Route through viemSendTransactionWithRetry so this EOA-direct setMetadata
+    // tx shares the per-EOA broadcast lock + nonce ledger + recoverable-retry
+    // with the Safe-mediated loops (creator / claim / deliver) and
+    // eviction-recovery that broadcast from the SAME agent EOA. Sending a raw
+    // writeContract here let viem auto-fill the nonce from the pending count,
+    // which raced those loops and reverted "nonce too low" — the #525 launch
+    // stall. encodeFunctionData reproduces the exact calldata writeContract
+    // would have built.
+    const data = encodeFunctionData({
       abi: IDENTITY_REGISTRY_SET_METADATA_ABI,
       functionName: 'setMetadata',
       args: [this.agentId, metadataKey, metadataValue],
-      account,
-      chain,
     });
+    const txHash = await viemSendTransactionWithRetry(
+      this.walletClient as unknown as TxRetryWalletClient,
+      this.publicClient,
+      {
+        account,
+        to: this.identityRegistryAddress,
+        data,
+        value: 0n,
+      },
+      { logicalTx: 'erc8004.setMetadata' },
+    );
 
     // Best-effort confirmation. We surface the blockNumber so callers can
     // record a verifiable on-chain reference; if the receipt query fails

@@ -3,6 +3,32 @@ import { describe, expect, it, vi } from 'vitest';
 import { HermesHarness } from '../../../../src/harnesses/impls/hermes-agent/harness.js';
 import { HERMES_AGENT_HARNESS } from '../../../../src/harnesses/names.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
+import type { Task } from '../../../../src/types/task.js';
+import {
+  EVAL_SEMANTICS_VERSION,
+  SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
+  SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+} from '../../../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+
+function taskWithVettedRefVersion(evalSemanticsVersion: string): Task {
+  return {
+    id: 'task-ghost',
+    description: 'test',
+    solverType: 'swe-rebench-v2.v1',
+    role: 'restoration',
+    eligibility: {
+      vettedPoolRef: {
+        schemaVersion: SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
+        artifactType: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+        manifestCid: 'bafyManifest',
+        artifactCid: 'bafyArtifact',
+        artifactHash: `sha256:${'a'.repeat(64)}`,
+        evalSemanticsVersion,
+        publishedAt: '2026-05-29T00:00:00.000Z',
+      },
+    },
+  } as unknown as Task;
+}
 
 vi.mock('../../../../src/harnesses/impls/learner/harvest.js', () => ({
   harvestOutput: vi.fn(async () => ({
@@ -38,6 +64,24 @@ describe('HermesHarness', () => {
     expect(h.supports({ solverType: 'prediction.v1', role: 'restoration' })).toBe(false);
     expect(h.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
     expect(h.supports({ solverType: 'portfolio.v0', role: 'restoration' })).toBe(false);
+  });
+
+  it('canAttempt() rejects a ghost task whose vettedPoolRef announces a stale semantics version (gh #300)', async () => {
+    const h = new HermesHarness({ adapter: { name: 'hermes-agent', runTask: vi.fn() } as any });
+    const res = await h.canAttempt(taskWithVettedRefVersion('3'));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toContain('evalSemanticsVersion=3');
+  });
+
+  it('canAttempt() accepts a task whose vettedPoolRef matches the local semantics version', async () => {
+    const h = new HermesHarness({ adapter: { name: 'hermes-agent', runTask: vi.fn() } as any });
+    expect((await h.canAttempt(taskWithVettedRefVersion(EVAL_SEMANTICS_VERSION))).ok).toBe(true);
+  });
+
+  it('canAttempt() fails open for a task with no vettedPoolRef (recency floor guards these)', async () => {
+    const h = new HermesHarness({ adapter: { name: 'hermes-agent', runTask: vi.fn() } as any });
+    const task = { id: 't', description: 'd', solverType: 'swe-rebench-v2.v1', role: 'restoration' } as unknown as Task;
+    expect((await h.canAttempt(task)).ok).toBe(true);
   });
 
   it('run() delegates to adapter.runTask and overrides venueRef.name to hermes-agent', async () => {

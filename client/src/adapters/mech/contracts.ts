@@ -181,34 +181,34 @@ async function restakeEvictedService(
   });
 }
 
+/**
+ * Run a protocol-loop action (createTask / claim* / deliver). Staking is
+ * ORTHOGONAL to this loop: JinnRouterV3 has no staking gate on these calls, so
+ * an evicted service can still post, claim and deliver. The former
+ * eviction-recovery behaviour — on any action failure, read staking state and,
+ * if evicted, fire an inline `distributor.reStake()` then retry — was not just
+ * unnecessary, it was actively HARMFUL: when the reStake itself reverts (these
+ * services re-evict faster than `minStakingDuration`, so reStake routinely
+ * reverts on-chain), `restakeEvictedService` throws `reStake failed for service
+ * N`, which REPLACES the action's real error and propagates up as the failure.
+ * That broke the solve/deliver tick in T3.1 — op-b completed zero solves while
+ * its delivery path turned every transient hiccup into a fatal `reStake failed
+ * for service 56`. Reward-eligibility re-staking is handled out-of-band by the
+ * background EvictionLoop (daemon.ts); the protocol loop must never depend on
+ * it. (#773 — completes the eviction removal that dropped the UI/API surface
+ * but missed this hot-path coupling.)
+ *
+ * `_publicClient`/`_recovery`/`_label` are retained in the signature so the many
+ * call sites and their `evictionRecovery` plumbing stay unchanged; they are
+ * intentionally unused.
+ */
 export async function withEvictionRecovery<T>(
-  publicClient: PublicClient,
-  recovery: EvictionRecoveryConfig | undefined,
-  label: string,
+  _publicClient: PublicClient,
+  _recovery: EvictionRecoveryConfig | undefined,
+  _label: string,
   action: () => Promise<T>,
 ): Promise<T> {
-  try {
-    return await action();
-  } catch (err) {
-    if (!recovery) throw err;
-
-    let stakingState: number;
-    try {
-      stakingState = await readStakingState(publicClient, recovery);
-    } catch (stateErr) {
-      console.error(
-        `[staking-recovery] ${label}: could not check staking state after failed action; ` +
-        `preserving original error. state check error: ${flattenErrorMessage(stateErr)}`,
-      );
-      throw err;
-    }
-    if (stakingState !== EVICTED_STAKING_STATE) {
-      throw err;
-    }
-
-    await restakeEvictedService(publicClient, recovery, label);
-    return action();
-  }
+  return action();
 }
 
 export async function submitTask(

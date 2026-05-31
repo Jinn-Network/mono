@@ -2,6 +2,7 @@ import { baseSepolia } from 'viem/chains';
 import { copyWorkspace, type WorkspaceHandle } from '../../../scripts/release/substrate-copy.js';
 import { spawnAnvilFork, type AnvilHarness } from '../../_support/chain/anvil.js';
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon.js';
+import { startMockIpfsServer, type MockIpfsServer } from '../../e2e/_daemon-harness-helpers.js';
 
 export interface Tier2SetupOptions {
   scenarioId: string;                  // for run-id and debugging
@@ -19,6 +20,21 @@ export interface Tier2SetupOptions {
    *   evidenceDir: path.dirname(opts.evidencePath)
    */
   evidenceDir?: string;
+  /**
+   * Opt-in: start ONE in-process mock IPFS server and point BOTH daemons'
+   * `JINN_IPFS_REGISTRY_URL` + `JINN_IPFS_GATEWAY_URL` at it (default false so
+   * T2.1 is unaffected). The mock supports runtime pinning — `POST /api/v0/add`
+   * stores content under a deterministic CID, served back at `GET /ipfs/{cid}`
+   * — so a manifest one operator pins at launch time is fetchable by the other.
+   *
+   * T2.3 needs this: its catalog enriches each launched-SolverNet row by
+   * IPFS-fetching the manifest body. Without shared IPFS, op-a pins its
+   * launch-time manifest to its own (real Autonolas) registry and op-b cannot
+   * read it back, so the catalog row is skipped and "op-b sees op-a's
+   * SolverNet" times out. A single shared mock closes that gap deterministically
+   * and offline.
+   */
+  sharedMockIpfs?: boolean;
 }
 
 export interface Tier2Handle {
@@ -38,9 +54,11 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
   let workspace: WorkspaceHandle | null = null;
   let anvil: AnvilHarness | null = null;
   let daemons: MultiOpHandle | null = null;
+  let mockIpfs: MockIpfsServer | null = null;
 
   const cleanup = async () => {
     if (daemons) { try { await daemons.teardown(); } catch {} }
+    if (mockIpfs) { try { await mockIpfs.close(); } catch {} }
     if (anvil) { try { await anvil.teardown(); } catch {} }
     if (workspace) { try { await workspace.teardown(); } catch {} }
   };
@@ -59,6 +77,17 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
     }
     anvil = await spawnAnvilFork({ forkUrl, chain: baseSepolia, silent: true });
 
+    // 2b. Optional shared mock IPFS — one server both daemons read+write so a
+    // manifest one operator pins at launch is fetchable by the other (T2.3
+    // catalog enrichment). Point both registry (upload) and gateway (fetch)
+    // URLs at it via the daemon spawn env.
+    const sharedIpfsEnv: NodeJS.ProcessEnv = {};
+    if (opts.sharedMockIpfs) {
+      mockIpfs = await startMockIpfsServer();
+      sharedIpfsEnv['JINN_IPFS_REGISTRY_URL'] = mockIpfs.baseUrl;
+      sharedIpfsEnv['JINN_IPFS_GATEWAY_URL'] = mockIpfs.baseUrl;
+    }
+
     // 3. Spawn daemons against workspace homes with fork RPC override
     // When the caller supplied an evidenceDir, route per-daemon stdout/stderr
     // into ${evidenceDir}/${scenarioId}-daemons/${op.name}-daemon.log so a
@@ -73,7 +102,7 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
         home: workspace!.opPaths[name],
         apiPort: opts.portBase + i,
       })),
-      extraEnv: { ...opts.extraEnv, JINN_RPC_URL: anvil.rpcUrl },
+      extraEnv: { ...opts.extraEnv, ...sharedIpfsEnv, JINN_RPC_URL: anvil.rpcUrl },
       readyTimeoutMs: 45000,
       logDir,
     });

@@ -86,6 +86,49 @@ describe('solver-nets validate-pool-report', () => {
     expect(out).toMatch(/highest[- ]yield.*ungradeable:pytest_missing/i);
   });
 
+  it('--human surfaces the p2p-broke split and names it as a candidate capacity blocker (#806)', async () => {
+    const dir = tmpDir();
+    seedValidatedPool(dir, {
+      'a__1': { scorable: true, reason: 'gold-patch-resolves' },
+      // p2p intact — genuinely-hard / mislabeled, leave alone.
+      'a__2': { scorable: false, reason: 'gold-patch-not-resolved (f2p 1, p2p_broke 0)' },
+      // p2p broke — environment problem, chase-able capacity blocker.
+      'a__3': { scorable: false, reason: 'gold-patch-not-resolved (f2p 0, p2p_broke 53)' },
+      'a__4': { scorable: false, reason: 'gold-patch-not-resolved (f2p 0, p2p_broke 7)' },
+    });
+    const made = makeCommandCtx({
+      argv: ['validate-pool-report', 'swe-rebench-v2', '--human'],
+      env: { JINN_SWE_REBENCH_V2_STATE_DIR: dir },
+    });
+    await solverNetsCommand.run(made.ctx);
+    expect(made.exits).toEqual([]);
+    const out = made.writes.join('');
+    // The two shapes appear in distinct histogram buckets.
+    expect(out).toContain('gold-patch-not-resolved:p2p-broke');
+    expect(out).toContain('gold-patch-not-resolved');
+    // The p2p-broke count is called out as a candidate (recoverable) capacity blocker.
+    expect(out).toMatch(/capacity blocker/i);
+    expect(out).toMatch(/2\b/); // the 2 p2p-broke entries
+    expect(out).toMatch(/environment/i);
+  });
+
+  it('--human omits the p2p-broke capacity-blocker callout when no entries broke PASS_TO_PASS (#806)', async () => {
+    const dir = tmpDir();
+    seedValidatedPool(dir, {
+      'a__1': { scorable: true, reason: 'gold-patch-resolves' },
+      'a__2': { scorable: false, reason: 'gold-patch-not-resolved (f2p 1, p2p_broke 0)' },
+    });
+    const made = makeCommandCtx({
+      argv: ['validate-pool-report', 'swe-rebench-v2', '--human'],
+      env: { JINN_SWE_REBENCH_V2_STATE_DIR: dir },
+    });
+    await solverNetsCommand.run(made.ctx);
+    expect(made.exits).toEqual([]);
+    const out = made.writes.join('');
+    expect(out).not.toContain('gold-patch-not-resolved:p2p-broke');
+    expect(out).not.toMatch(/capacity blocker/i);
+  });
+
   it('fails cleanly with a "stale" / "absent" message when validated-pool.json is missing', async () => {
     const dir = tmpDir(); // empty
     const made = makeCommandCtx({

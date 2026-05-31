@@ -36,17 +36,19 @@ function makeMasterWalletClient(): WalletClient {
   } as unknown as WalletClient;
 }
 
-describe('eviction-triggered restake recovery', () => {
+describe('staking decoupled from the protocol loop (#773)', () => {
   beforeEach(() => {
     vi.mocked(executeSafeTransaction).mockReset();
   });
 
-  it('restakes an evicted service and retries the failed Safe action once', async () => {
+  it('does NOT inline-restake an evicted service — the claim proceeds, no distributor.reStake', async () => {
+    // Service is EVICTED (state 2). JinnRouterV3 has no staking gate, so the
+    // claim must still go through, and the protocol loop must NOT broadcast a
+    // distributor.reStake — that inline reStake (when it reverts) was masking
+    // the real action error and breaking solve/deliver ticks in T3.1.
     const publicClient = makePublicClient(2);
     const masterWalletClient = makeMasterWalletClient();
-    vi.mocked(executeSafeTransaction)
-      .mockRejectedValueOnce(new Error('execution reverted: GS013'))
-      .mockResolvedValueOnce('0xclaim' as Hex);
+    vi.mocked(executeSafeTransaction).mockResolvedValueOnce('0xclaim' as Hex);
 
     const txHash = await claimDelivery(
       publicClient,
@@ -64,17 +66,12 @@ describe('eviction-triggered restake recovery', () => {
     );
 
     expect(txHash).toBe('0xclaim');
-    expect(executeSafeTransaction).toHaveBeenCalledTimes(2);
-    expect(masterWalletClient.sendTransaction).toHaveBeenCalledTimes(1);
-    expect(masterWalletClient.sendTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: DISTRIBUTOR_ADDRESS,
-        gas: 1_500_000n,
-      }),
-    );
+    expect(executeSafeTransaction).toHaveBeenCalledTimes(1);
+    // The decisive regression assertion: no inline reStake, ever.
+    expect(masterWalletClient.sendTransaction).not.toHaveBeenCalled();
   });
 
-  it('preserves the original error when the service is not evicted', async () => {
+  it('propagates the original action error without restaking', async () => {
     const publicClient = makePublicClient(1);
     const masterWalletClient = makeMasterWalletClient();
     vi.mocked(executeSafeTransaction).mockRejectedValueOnce(new Error('RequestNotFound'));

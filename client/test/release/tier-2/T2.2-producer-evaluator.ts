@@ -248,6 +248,16 @@ async function runScenarioBody(
 
     // ── Step 4: Start both daemons ──────────────────────────────────────────
     log('Step 4: start producer + evaluator daemons (prediction-v1-baseline harness)');
+    // op-a gets the mock Gamma URL too (symmetric with op-b). The on-chain
+    // policy sets `disallowSolverSelfEvaluation: false`, so op-a's daemon is
+    // permitted to claim the evaluation request for the task it solved. Its
+    // prediction-v1-evaluator then calls `getResolution`, which — absent a
+    // gammaBaseUrl override — hits the live `gamma-api.polymarket.com` and
+    // returns 422 for the synthetic fixture market, hard-failing op-a's
+    // evaluation. If op-a wins the evaluation claim, no verdict settles and
+    // `waitForVerdict` times out. Pointing op-a's evaluator at the offline
+    // mock makes the verdict leg deterministic regardless of which operator
+    // claims the evaluation — matching the scenario's offline/hermetic intent.
     producerDaemon = await startDaemon(
       fixture,
       producer,
@@ -255,7 +265,7 @@ async function runScenarioBody(
       mockIpfs.baseUrl,
       producerV3,
       mockIpfs.baseUrl,
-      { instanceLabel: 'op-a' },
+      { instanceLabel: 'op-a', polymarketGammaBaseUrl: mockGamma.baseUrl },
     );
     log('  op-a daemon up (solver)');
 
@@ -289,12 +299,20 @@ async function runScenarioBody(
 
     // ── Step 6: Post the prediction.v1 task on-chain ────────────────────────
     log('Step 6: post prediction.v1 task on-chain via createTask');
+    // disallowSolverSelfEvaluation: true bars op-a (the solver) from claiming
+    // the evaluation request for its own solution. With requiredVerdicts: 1,
+    // whichever operator claims the evaluation first settles the single verdict;
+    // if op-a wins that race, op-b can never settle (TCMaxVerdictsReached) and
+    // `waitForVerdict`, which filters for op-b's Safe specifically, times out.
+    // Barring self-evaluation leaves op-b as the only eligible evaluator, so the
+    // verdict leg is deterministic instead of racy.
     const posted = await postPredictionV1Task(
       fixture,
       producer,
       CREATOR_PRIV_KEY,
       mockIpfs,
       producerV3,
+      { disallowSolverSelfEvaluation: true },
     );
     log(`  task posted: id=${posted.taskId} cidDigest=${posted.taskCidDigest}`);
 

@@ -125,6 +125,11 @@ function mockL2Client(opts: { emitTxHash?: `0x${string}`; emitBlock?: bigint } =
 function mockL2Wallet() {
   return {
     account: { address: AGENT },
+    // emitOnL2 routes through viemSendTransactionWithRetry → sendTransaction so
+    // its broadcast shares the per-EOA nonce ledger with the creator/claim Safe
+    // txs (issue #525). writeContract is retained but must NOT be used for the
+    // emit anymore — see the "routes the emit through the nonce ledger" test.
+    sendTransaction: vi.fn(async (_req: any) => '0xaabb'),
     writeContract: vi.fn(async (req: any) => req.hash ?? '0xaabb'),
   } as any;
 }
@@ -189,7 +194,8 @@ describe('JinnClaimLoop', () => {
 
       expect(result).toMatchObject({ ticks: 1, emits: 1, submits: 0, errors: 0 });
       expect(l2Client.simulateContract).toHaveBeenCalledTimes(1);
-      expect(l2Wallet.writeContract).toHaveBeenCalledTimes(1);
+      expect(l2Wallet.sendTransaction).toHaveBeenCalledTimes(1);
+      expect(l2Wallet.writeContract).not.toHaveBeenCalled();
       expect(l2Client.getLogs).toHaveBeenCalledTimes(1);
       expect((l2Client.getLogs as any).mock.calls[0][0]).toMatchObject({
         toBlock: 'latest',

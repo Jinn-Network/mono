@@ -424,6 +424,42 @@ export function vettedPoolArtifactRefFromEligibility(eligibility: Record<string,
   return parseVettedPoolArtifactRef(raw);
 }
 
+/**
+ * gh #300 — solver-side ghost-task admission, Tier 1 (zero-fetch).
+ *
+ * Returns a human-readable reason string when the task's on-chain
+ * `vettedPoolRef` announces an `evalSemanticsVersion` that no local evaluator
+ * could grade under the current {@link EVAL_SEMANTICS_VERSION}, otherwise
+ * `null`. This is the symmetric counterpart to the evaluator's hard gate in
+ * `loadPublishedPoolRow` (swe-rebench-v2-evaluator/harness.ts): the evaluator
+ * already rejects semantics-skewed tasks at verdict time; this lets the
+ * solver reject them at claim time instead of burning compute on a task its
+ * own evaluator will refuse to score.
+ *
+ * Deliberately **fails open when the ref is absent** (returns `null`): pre-
+ * `vettedPoolRef` and `python-floor` tasks carry no ref and are still guarded
+ * by the recency floor (`DEFAULT_TASK_DISCOVERY_FROM_BLOCK`). Closing those
+ * fail-closed is a network-wide behavioural change deferred to Tier 2 (see
+ * `spec/2026-05-29-ghost-task-admission-symmetric-gate.md`). A malformed ref
+ * surfaces as a mismatch reason rather than throwing, so the claim path never
+ * crashes on a bad ref.
+ */
+export function vettedPoolRefSemanticsMismatch(
+  eligibility: Record<string, unknown> | undefined,
+): string | null {
+  let ref: SolverNetArtifactRef | null;
+  try {
+    ref = vettedPoolArtifactRefFromEligibility(eligibility);
+  } catch (err) {
+    return `vettedPoolRef invalid: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  if (!ref) return null; // no ref → fail open (recency floor guards these)
+  if (ref.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+    return `vettedPoolRef evalSemanticsVersion=${ref.evalSemanticsVersion} cannot be graded under local EVAL_SEMANTICS_VERSION=${EVAL_SEMANTICS_VERSION} (ghost task, gh #300)`;
+  }
+  return null;
+}
+
 export class ValidatedPoolStore {
   private readonly file: string;
   private cache: ValidatedPoolFile | null = null;
@@ -512,13 +548,33 @@ export class ValidatedPoolStore {
 }
 
 /**
+ * Histogram bucket for gold-patch-not-resolved entries whose PASS_TO_PASS
+ * tests broke (`p2p_broke > 0`). These are usually an environment/setup
+ * problem (missing system deps, a pytest/plugin version mismatch) rather
+ * than a non-resolving gold patch — a chase-able evaluator-capacity blocker,
+ * the same shape as `ungradeable:pytest_missing`. See issue #806.
+ */
+export const GOLD_PATCH_NOT_RESOLVED_P2P_BROKE_REASON = 'gold-patch-not-resolved:p2p-broke';
+
+/**
  * Collapse a stored `reason` string into a histogram bucket. Diagnostic
  * detail (`(f2p X, p2p_broke Y)`, the verbatim HF 429 message) is kept on
  * the entry for debugging, but the bucket name is what matters for the
  * #493 reason-histogram CLI. Unknown reasons pass through unchanged.
+ *
+ * Per #806, `gold-patch-not-resolved` is split by PASS_TO_PASS breakage:
+ * entries with `p2p_broke > 0` map to a distinct
+ * `gold-patch-not-resolved:p2p-broke` bucket (environment broke — chase-able),
+ * while `p2p_broke == 0` keeps the base bucket (patch genuinely doesn't
+ * resolve — leave alone). The split is display-only; the per-entry `reason`
+ * string keeps the full `(f2p X, p2p_broke Y)` detail.
  */
 export function normalizeReason(reason: string): string {
-  if (reason.startsWith('gold-patch-not-resolved')) return 'gold-patch-not-resolved';
+  if (reason.startsWith('gold-patch-not-resolved')) {
+    const p2pBroke = reason.match(/p2p_broke (\d+)/);
+    if (p2pBroke && Number(p2pBroke[1]) > 0) return GOLD_PATCH_NOT_RESOLVED_P2P_BROKE_REASON;
+    return 'gold-patch-not-resolved';
+  }
   if (reason.startsWith('transient:HF-429:')) return 'transient:HF-429';
   // Pre-#578 legacy: 429s recorded as `error:HF datasets-server returned 429 for ...`.
   if (/^error:HF datasets-server returned 429\b/.test(reason)) return 'error:HF-429';

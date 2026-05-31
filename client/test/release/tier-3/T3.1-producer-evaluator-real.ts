@@ -55,6 +55,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createPublicClient,
   decodeEventLog,
+  fallback,
   http,
   type Hex,
   type Log,
@@ -73,7 +74,7 @@ import {
   KNOWN_REPO,
   KNOWN_COMMIT,
   KNOWN_EXPECTED_VERDICT,
-  KNOWN_MANIFEST_CID,
+  KNOWN_T31_ISOLATED_MANIFEST_CID,
 } from '../tier-2/fixtures/known-instance.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -113,6 +114,17 @@ const REQUIRED_VERDICTS = 3;
  * at a 2000-block range; 1999 keeps a single chunk inside that cap.
  */
 const GETLOGS_CHUNK_BLOCKS = 1_999n;
+
+/**
+ * The orchestrator polls a SINGLE configured RPC (no fallback chain like the
+ * daemon), and the public Base Sepolia gateways intermittently return a
+ * spurious `eth_getLogs` "invalid params" / 429 / 5xx even for a well-formed
+ * request (reproduced: the exact failing call succeeds 6/6 on retry). A single
+ * such hiccup on the first observe poll otherwise aborts the entire 25-min
+ * gate. Retry transient getLogs failures a few times before surfacing.
+ */
+const GETLOGS_RETRY_ATTEMPTS = 4;
+const GETLOGS_RETRY_BASE_MS = 800;
 
 /** Default ports the two Tier-3 daemons bind (portBase, portBase+1). */
 const PORT_BASE = 7360;
@@ -187,12 +199,19 @@ async function submitSweRebenchTask(args: {
     // a permanent task lock. With `--required-verdicts 3` and the protocol's
     // per-evaluator cap of 1, the griefer can take at most one slot — a
     // controlled evaluator (op-a) always lands one of the remaining slots.
-    // The isolated SolverNet's extra substrate-maintenance burden no longer
-    // earns its keep, so T3.1 runs against the real shared mainline. The
-    // KNOWN_T31_ISOLATED_MANIFEST_CID constant is preserved for any future
-    // scenarios that need an actual private substrate.
+    //
+    // T3.1 posts to the ISOLATED SolverNet (KNOWN_T31_ISOLATED_MANIFEST_CID),
+    // restoring `ca11be24` after `77e79635` moved it to the shared mainline.
+    // The mainline switch assumed maxClaims:5/requiredVerdicts:3 alone tamed
+    // the griefer; in practice the shared net is now both griefed (0x26e96ba6…)
+    // AND backlogged (~1300 tasks ahead of each fresh post), and discovery is
+    // lowest-taskId-first, so a freshly-posted task is buried behind the
+    // backlog and never reached inside the wall-clock budget (observed: task
+    // 1537 never solved in 25 min). The isolated net — op-a evaluator / op-b
+    // solver, griefer not joined, generatorEnabled:false so no noise tasks —
+    // closes the loop deterministically (proven green: task 209, 5m51s).
     '--manifest-cid',
-    KNOWN_MANIFEST_CID,
+    KNOWN_T31_ISOLATED_MANIFEST_CID,
     '--spec-file',
     args.specFilePath,
     // Post a 5-slot parallel task, not the default single-attempt task. A
@@ -332,11 +351,21 @@ async function scanRouterEvents<T>(args: {
       start + GETLOGS_CHUNK_BLOCKS > args.toBlock
         ? args.toBlock
         : start + GETLOGS_CHUNK_BLOCKS;
-    const logs = await args.client.getLogs({
-      address: args.routerAddress,
-      fromBlock: start,
-      toBlock: end,
-    });
+    let logs: Log[] = [];
+    for (let attempt = 1; ; attempt++) {
+      try {
+        logs = await args.client.getLogs({
+          address: args.routerAddress,
+          fromBlock: start,
+          toBlock: end,
+        });
+        break;
+      } catch (err) {
+        if (attempt >= GETLOGS_RETRY_ATTEMPTS) throw err;
+        // Transient RPC hiccup (invalid params / 429 / 5xx on a healthy query).
+        await new Promise((r) => setTimeout(r, GETLOGS_RETRY_BASE_MS * attempt));
+      }
+    }
     for (const log of logs) {
       try {
         const decoded = decodeEventLog({
@@ -566,14 +595,34 @@ export async function runT31ProducerEvaluatorReal(
         'getChainConfig("base-sepolia") returned no jinnRouter address — cannot observe the on-chain loop',
       );
     }
-    const rpcUrl =
-      opts.rpcUrl ??
-      process.env['BASE_SEPOLIA_RPC_URL'] ??
-      process.env['JINN_RPC_URL'] ??
-      'https://sepolia.base.org';
+    // Multi-RPC fallback chain. The orchestrator polls a single RPC for up to
+    // ~23 minutes; a transient DNS/network blip on one provider (observed:
+    // `getaddrinfo ENOTFOUND base-sepolia.gateway.tenderly.co`, which aborted
+    // the gate with flake-infra mid-observe) must fall through to a healthy
+    // provider rather than kill the whole run. The daemon already runs a
+    // fallback chain (config.ts §RPC fallback chain); the gate observer was the
+    // last single-RPC consumer. `rank: false` preserves operator slot order so
+    // a configured paid key stays primary. The public no-auth endpoints are
+    // always appended as last-resort backups.
+    const PUBLIC_BACKUP_RPCS = [
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ];
+    const rpcUrls = [
+      ...(opts.rpcUrl ? [opts.rpcUrl] : []),
+      ...(process.env['BASE_SEPOLIA_RPC_URL']?.split(',') ?? []),
+      ...(process.env['JINN_RPC_URL']?.split(',') ?? []),
+      ...PUBLIC_BACKUP_RPCS,
+    ]
+      .map((u) => u.trim())
+      .filter(Boolean);
+    const uniqueRpcUrls = [...new Set(rpcUrls)];
     const client = createPublicClient({
       chain: baseSepolia,
-      transport: http(rpcUrl),
+      transport: fallback(
+        uniqueRpcUrls.map((u) => http(u)),
+        { rank: false },
+      ),
     });
     const chainId = await client.getChainId();
     if (chainId !== BASE_SEPOLIA_CHAIN_ID) {

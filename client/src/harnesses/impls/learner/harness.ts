@@ -4,6 +4,8 @@ import type {
   ReadyStatus,
   Solution,
 } from '../../types.js';
+import type { Task } from '../../../types/task.js';
+import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
 import type {
   HarnessAdapter,
@@ -178,6 +180,20 @@ export class LearnerHarness implements Harness {
       return false;
     }
     return true;
+  }
+
+  /**
+   * gh #300 — solver-side ghost-task admission (Tier 1, zero-fetch).
+   * Reject tasks whose on-chain `vettedPoolRef` announces an
+   * `evalSemanticsVersion` no local evaluator could grade (the swe-rebench-v2
+   * ghost class). Fails open when the ref is absent, so non-swe-rebench-v2
+   * SolverTypes the learner also serves are unaffected. See
+   * `spec/2026-05-29-ghost-task-admission-symmetric-gate.md`.
+   */
+  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const mismatch = vettedPoolRefSemanticsMismatch(task.eligibility);
+    if (mismatch) return { ok: false, reason: mismatch };
+    return { ok: true };
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {

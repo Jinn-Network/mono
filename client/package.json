@@ -94,6 +94,7 @@
     "stolas": "tsx test/e2e/stolas.ts",
     "substrate:adopt": "tsx scripts/release/substrate-adopt.ts",
     "substrate:copy": "tsx scripts/release/substrate-copy.ts",
+    "substrate:provision": "tsx scripts/release/substrate-provision.ts",
     "substrate:reap": "tsx scripts/release/substrate-reap.ts",
     "substrate:topup": "tsx scripts/release/substrate-topup.ts",
     "substrate:verify": "tsx scripts/release/substrate-verify.ts",

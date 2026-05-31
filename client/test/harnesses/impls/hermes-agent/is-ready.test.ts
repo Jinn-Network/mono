@@ -251,6 +251,23 @@ describe('HermesHarness.isReady — credential-pool auth gate (regression)', () 
     expect(result.reason).toMatch(/openrouter/i);
     expect(result.nextStep?.description).toMatch(/openrouter|hermes login/i);
   });
+
+  // #532 explicit: a credential is *present* in the pool but the provider
+  // hard-rejected it (`auth failed (401) (re-auth may be required)`). This is
+  // the "invalid key" half of the acceptance criterion — distinct from the
+  // empty-pool case above. It must reach not-ready through the full isReady()
+  // stack, not just the unit-level probe, so the gate cannot be regressed by
+  // wiring changes upstream of the parse.
+  it('is not ready when the only OpenRouter credential is a hard auth failure (invalid key)', async () => {
+    authListState.stdout =
+      'openrouter (1 credentials):\n' +
+      '  #1  OPENROUTER_API_KEY   api_key env:OPENROUTER_API_KEY auth failed (401) (re-auth may be required) ←\n\n';
+    const h = new HermesHarness({ adapter: fakeAdapter as any });
+    const result = await h.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toMatch(/openrouter/i);
+    expect(result.nextStep?.description).toMatch(/openrouter|hermes login/i);
+  });
 });
 
 // Production bug, 2026-05-23: every Hermes solve attempt for the day
