@@ -19,23 +19,23 @@ import {
 } from '../components/ActiveOperatorTooltip';
 import { shortAddr, int, jinn } from '../lib/format';
 
-// Canonical encoding note for the RECENT RUNS column header tooltip (issue #905).
+// Canonical encoding note for the ACTIVITY BLOCKS column header tooltip.
 // Mirrored verbatim from the acceptance criteria so the header tooltip stays in
 // sync if the criteria are tightened.
-const RECENT_RUNS_ENCODING_NOTE =
+const ACTIVITY_BLOCKS_ENCODING_NOTE =
   'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned ≥3 tJINN in that block; N = did not.';
 
-// ── Recent-runs cell ──────────────────────────────────────────────────────────
+// ── Activity-blocks cell ──────────────────────────────────────────────────────
 
 /**
- * Per-row "Recent runs" rendering — 8 Y/N glyphs joined by ` | `, each glyph
+ * Per-row "Activity blocks" rendering — 8 Y/N glyphs joined by ` | `, each glyph
  * carrying a native `title` describing the block's UTC window.
  *
  * `recentBlocks` may be absent when the server omits it (older response, or
  * a code path that does not populate it); fall back to all-false so the row
  * still renders 8 cells.
  */
-function RecentRunsCell({
+function ActivityBlocksCell({
   recentBlocks,
   window,
 }: {
@@ -52,7 +52,7 @@ function RecentRunsCell({
       {blocks.map((qualified, i) => (
         <span key={i}>
           <span
-            data-testid={`recent-run-cell-${i}`}
+            data-testid={`activity-block-cell-${i}`}
             title={formatBlockWindow(window, i)}
             style={{
               color: qualified ? 'var(--vow-green)' : 'var(--break-red)',
@@ -257,9 +257,9 @@ export function OperatorsView() {
                 </th>
                 <th style={th}>
                   <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    Recent runs
-                    <InfoTooltip label="Recent runs definition">
-                      <div>{RECENT_RUNS_ENCODING_NOTE}</div>
+                    Activity blocks
+                    <InfoTooltip label="Activity blocks definition">
+                      <div>{ACTIVITY_BLOCKS_ENCODING_NOTE}</div>
                     </InfoTooltip>
                   </span>
                 </th>
@@ -293,7 +293,7 @@ export function OperatorsView() {
                     {op.active ? 'Yes' : 'No'}
                   </td>
                   <td style={td}>
-                    <RecentRunsCell
+                    <ActivityBlocksCell
                       recentBlocks={op.recentBlocks}
                       window={data.activeWindow}
                     />

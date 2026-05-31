@@ -1137,7 +1137,7 @@ app.get('/operators', async (c) => {
   // Active-operator overlay (issue #905) — load BEFORE rankLeaderboard so the
   // comparator can use `active` as a tie-break on the (jinnEarned, active,
   // operator) sort. `recentBlocks` is the per-bucket pass/fail flag the
-  // `/operators` view's RECENT RUNS column renders. The rolling window is a
+  // `/operators` view's ACTIVITY BLOCKS column renders. The rolling window is a
   // protocol-wide signal (multisig ↔ attempt.operator via the same raw
   // `t.hex()` representation `jinnEarned` uses; no case normalisation).
   const activeResult = await loadActiveOperators(Math.floor(Date.now() / 1000));

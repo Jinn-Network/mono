@@ -19,7 +19,7 @@ export function formatWindowTs(ts: number): string {
 }
 
 /**
- * Native-`title` formatter for one Recent-runs cell (issue #905) —
+ * Native-`title` formatter for one Activity-blocks cell —
  * `2026-05-29 06:00 → 2026-05-29 12:00 UTC`. Only the close end carries
  * the `UTC` suffix so the title doesn't read it twice.
  *

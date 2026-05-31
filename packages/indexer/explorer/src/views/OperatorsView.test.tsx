@@ -199,7 +199,7 @@ describe('OperatorsView', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
   });
 
-  it('renders Operator | Active? | Recent runs | Attempts | JINN earned column order (issue #905)', async () => {
+  it('renders Operator | Active? | Activity blocks | Attempts | JINN earned column order (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
@@ -213,14 +213,14 @@ describe('OperatorsView', () => {
       expect.arrayContaining([
         expect.stringMatching(/operator/i),
         expect.stringMatching(/active\?/i),
-        expect.stringMatching(/recent runs/i),
+        expect.stringMatching(/activity blocks/i),
         expect.stringMatching(/attempts/i),
         expect.stringMatching(/jinn earned/i),
       ]),
     );
     const operatorIdx = headers.findIndex((h) => /operator/i.test(h));
     const activeIdx = headers.findIndex((h) => /active\?/i.test(h));
-    const recentIdx = headers.findIndex((h) => /recent runs/i.test(h));
+    const recentIdx = headers.findIndex((h) => /activity blocks/i.test(h));
     const attemptsIdx = headers.findIndex((h) => /attempts/i.test(h));
     expect(operatorIdx).toBeLessThan(activeIdx);
     expect(activeIdx).toBeLessThan(recentIdx);
@@ -261,27 +261,27 @@ describe('OperatorsView', () => {
     expect(sharedAncestor?.textContent ?? '').not.toMatch(/^.*\b1\b.*$/s);
   });
 
-  it('renders 8 Y/N symbols separated by ` | ` per row in the Recent runs column (issue #905)', async () => {
+  it('renders 8 Y/N symbols separated by ` | ` per row in the Activity blocks column (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
     });
-    // Two rows, two body <tr> — read each row's Recent-runs cell text content
+    // Two rows, two body <tr> — read each row's Activity-blocks cell text content
     // (whitespace-collapsed) and compare to the ` | `-joined expected glyphs.
     const rows = Array.from(document.querySelectorAll('tbody tr'));
     expect(rows.length).toBe(2);
     const cellTexts = rows.map((r) => {
       const tds = r.querySelectorAll('td');
-      // Order: Operator | Active? | Recent runs | Attempts | JINN earned
+      // Order: Operator | Active? | Activity blocks | Attempts | JINN earned
       return (tds[2]?.textContent ?? '').replace(/\s+/g, ' ').trim();
     });
     expect(cellTexts[0]).toBe('Y | Y | Y | Y | Y | Y | Y | Y');
     expect(cellTexts[1]).toBe('N | Y | N | Y | N | Y | N | Y');
   });
 
-  it('gives each Recent runs symbol a native `title` showing the block UTC window (issue #905)', async () => {
+  it('gives each Activity blocks symbol a native `title` showing the block UTC window (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
@@ -292,7 +292,7 @@ describe('OperatorsView', () => {
     // Oldest block (index 0): 1_700_000_000 (2023-11-14 22:13:20 UTC) →
     //   1_700_021_600 (2023-11-15 04:13:20 UTC).
     // The title format mirrors the spec: `YYYY-MM-DD HH:MM → YYYY-MM-DD HH:MM UTC`.
-    const symbolCells = document.querySelectorAll('[data-testid^="recent-run-cell-"]');
+    const symbolCells = document.querySelectorAll('[data-testid^="activity-block-cell-"]');
     expect(symbolCells.length).toBeGreaterThanOrEqual(8);
     for (const cell of Array.from(symbolCells)) {
       const t = cell.getAttribute('title') ?? '';
@@ -301,7 +301,7 @@ describe('OperatorsView', () => {
     }
   });
 
-  it('renders an InfoTooltip in the Recent runs column header with the encoding note (issue #905)', async () => {
+  it('renders an InfoTooltip in the Activity blocks column header with the encoding note (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
@@ -309,7 +309,7 @@ describe('OperatorsView', () => {
       expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
     });
     const trigger = screen.getByRole('button', {
-      name: /recent runs definition/i,
+      name: /activity blocks definition/i,
     });
     fireEvent.click(trigger);
     expect(
