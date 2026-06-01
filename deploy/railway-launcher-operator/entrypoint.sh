@@ -4,6 +4,21 @@
 # restarts. See docs/superpowers/specs/2026-06-01-host-supervised-launcher-operator-daemon-design.md
 set -euo pipefail
 
+# --- Drop from root to the non-root `node` user -------------------------------
+# Railway starts the container as root and mounts /data as root. But Claude Code
+# refuses `--dangerously-skip-permissions` when running as root, so the
+# claude-code harness crashed on every task ("cannot be used with root/sudo
+# privileges"). Fix: as root, take ownership of the volume, then re-exec this
+# script as `node` (Claude permits the flag for non-root users). HOME is pinned
+# to the node user's home so claude / git / ~/.jinn-client resolve correctly.
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p /data
+  chown -R node:node /data 2>/dev/null || true
+  echo "[entrypoint] chowned /data; dropping root → node"
+  exec gosu node env HOME=/home/node "$0" "$@"
+fi
+echo "[entrypoint] running as uid=$(id -u) ($(id -un)) HOME=$HOME"
+
 EARNING_DIR="${JINN_EARNING_DIR:-/data/earning}"
 CONFIG_PATH="${JINN_CONFIG:-/data/config.json}"
 LAUNCHED_DIR="$EARNING_DIR/solvernets/launched"

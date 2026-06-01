@@ -50,19 +50,20 @@ ENV JINN_BUILD_COMMIT=$JINN_BUILD_COMMIT
 
 WORKDIR /app
 
+# gosu lets the entrypoint drop from root to a non-root user at boot (see below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 git curl ca-certificates \
+    libstdc++6 git curl ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude CLI for the claude-code harness. Pinned to the version verified in the
 # Task 0 spike (env-only CLAUDE_CODE_OAUTH_TOKEN auth confirmed at this version).
 RUN npm install -g @anthropic-ai/claude-code@2.1.159
 
-# Auth is env-only (CLAUDE_CODE_OAUTH_TOKEN, verified in the Task 0 spike) — no
-# claude.json persistence is needed. /root/.claude is created only so the
-# entrypoint's commented-out file-fallback path has a directory to write to if a
-# future CLI version ever stops honouring the env var.
-RUN mkdir -p /root/.claude
+# The daemon runs as the non-root `node` user: Claude Code refuses
+# --dangerously-skip-permissions when running as root, which crashed every
+# claude-code solve. Pre-create node's home + .claude dir so the CLI can write
+# its session/config state. The entrypoint chowns /data and drops root → node.
+RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
 
 COPY --from=build /app/client/dist dist/
 COPY --from=build /app/client/deployments deployments/
