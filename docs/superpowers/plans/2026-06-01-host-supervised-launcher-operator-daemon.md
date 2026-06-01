@@ -31,6 +31,8 @@ No `client/` source changes. The AI-units throttle is already shipped; this plan
 
 This is the one genuine unknown (spec §10 q4): can the `claude` CLI authenticate **non-interactively in a container** from `CLAUDE_CODE_OAUTH_TOKEN`, and does the credential resolve so the AI-units gate engages? If this fails, the hosted-Haiku approach needs rethinking before any artifact work.
 
+> **FINDING (2026-06-01): PASS — env-only.** Using the saved release-gate token (`client/.env.acceptance`), `claude -p` with a clean `HOME` (no `~/.claude` fallback) and only `CLAUDE_CODE_OAUTH_TOKEN` in env returned `4` non-interactively. Local CLI `@anthropic-ai/claude-code` **2.1.159**. Corroborated by the existing docker-acceptance infra (`client/docker-compose.acceptance.yml` runs claude-code headless via the same env var) and `client/src/runner/claude.ts:199` forwarding it. **Conclusion:** the entrypoint needs only to ensure `CLAUDE_CODE_OAUTH_TOKEN` is exported (Railway secret) — no `~/.claude.json` file write. The file-fallback block in Task 3 stays commented out. The credential resolves to `anthropic:subscription`, so the AI-units gate engages. The Dockerfile pins `@anthropic-ai/claude-code@2.1.159`. (Docker daemon was down in the authoring env; the in-image `claude --version` probe is verified at build time / on the operator machine.)
+
 **Files:** none (throwaway container experiment). Record findings in the task's commit message / a scratch note.
 
 - [ ] **Step 1: Obtain a CLAUDE_CODE_OAUTH_TOKEN.** On a machine with `claude` logged in, generate a long-lived token:
