@@ -52,6 +52,18 @@ fi
 
 mkdir -p "$EARNING_DIR" "$LAUNCHED_DIR" "$STATE_DIR"
 
+# Stale-pidfile guard. The daemon writes $EARNING_DIR/daemon.pid; on the
+# persistent volume that file outlives the container. In a container the daemon
+# is PID 1, which is *always* alive, so a leftover pidfile trips the "another
+# jinn daemon is already running" check (#805) and the container crash-loops on
+# exitCode 11. A fresh container never has a real prior daemon — remove it.
+rm -f "$EARNING_DIR/daemon.pid"
+
+# The migration tarball is built with macOS tar, which leaves AppleDouble `._*`
+# sidecar files. The solvernet store tries to parse `._<record>.json` as a
+# launched record and errors. Strip them from the volume.
+find /data -name '._*' -delete 2>/dev/null || true
+
 # Global git identity so plugin session-start hooks (which `git commit
 # --allow-empty` to init implStateDir before setting their own user.*) don't
 # fail with "Author identity unknown" on a fresh container.
