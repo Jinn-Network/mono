@@ -21,6 +21,7 @@ const NETWORK_FIXTURE: NetworkResponse = {
   attempts: 10,
   everAttemptedOperators: 1,
   activeOperators: 0,
+  sustainedOperators: 0,
   activeWindow: {
     startTs: 0,
     endTs: 48 * 3600,
@@ -83,6 +84,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
   lowVolume: [],
   minVerdicts: 5,
   activeOperators: 0,
+  sustainedOperators: 0,
   activeWindow: {
     startTs: 0,
     endTs: 48 * 3600,

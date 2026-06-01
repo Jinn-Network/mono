@@ -12,6 +12,7 @@ const NETWORK_FIXTURE = {
   attempts: 25,
   everAttemptedOperators: 3,
   activeOperators: 1,
+  sustainedOperators: 0,
   activeWindow: {
     startTs: 1_700_000_000,
     endTs: 1_700_000_000 + 48 * 3600,
@@ -38,6 +39,7 @@ const OPERATORS_FIXTURE = {
   lowVolume: [],
   minVerdicts: 5,
   activeOperators: 0,
+  sustainedOperators: 0,
   activeWindow: {
     startTs: 1_700_000_000,
     endTs: 1_700_000_000 + 48 * 3600,

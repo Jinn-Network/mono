@@ -35,8 +35,10 @@ export interface LeaderboardRow {
   /** decimal string, e.g. "100500000000000000044" */
   jinnEarned: string;
   /**
-   * True when the operator earned ≥3 tJINN in each of the last 8 completed
-   * UTC 6-hour blocks (per `activeWindow`). The in-progress block is excluded.
+   * Liveness (issue #926): true when the operator earned ≥ the per-block floor
+   * in the NEWEST completed block of `activeWindow` (the in-progress block is
+   * excluded). This is what the `Active?` column means — "earning now" — not
+   * the 48h-sustained gate. Derive sustained from `recentBlocks.every(Boolean)`.
    */
   active: boolean;
   /**
@@ -89,8 +91,13 @@ export interface NetworkResponse extends FreshnessMeta {
    * disambiguate from the headline "active operators" surface.
    */
   everAttemptedOperators: number;
-  /** Operators that qualified on every bucket of `activeWindow` (see {@link ActiveWindow}). */
+  /**
+   * Liveness count — operators that qualified in the newest completed bucket of
+   * `activeWindow` (issue #926). "Earning now," not the 48h gate.
+   */
   activeOperators: number;
+  /** Milestone-1 count — operators that qualified on EVERY bucket of `activeWindow`. */
+  sustainedOperators: number;
   activeWindow: ActiveWindow;
   solverNetsRunning: number;
   verdicts: number;
@@ -250,8 +257,10 @@ export interface OperatorsResponse extends FreshnessMeta {
   ranked: RankedLeaderboardRow[];
   lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
   minVerdicts: number;
-  /** Count of distinct multisigs marked `active` over `activeWindow`. */
+  /** Liveness count — multisigs active in the newest completed bucket (issue #926). */
   activeOperators: number;
+  /** Milestone-1 count — multisigs that qualified on EVERY bucket of `activeWindow`. */
+  sustainedOperators: number;
   activeWindow: ActiveWindow;
   appliedFilters?: {
     mode?: string;

@@ -15,6 +15,7 @@ import { Kpi, KpiRow } from '../components/Kpi';
 import { InfoTooltip } from '../components/InfoTooltip';
 import {
   ActiveOperatorTooltipBody,
+  SustainedOperatorTooltipBody,
   formatBlockWindow,
 } from '../components/ActiveOperatorTooltip';
 import { shortAddr, int, jinn } from '../lib/format';
@@ -229,6 +230,17 @@ export function OperatorsView() {
             }
             value={int(data.activeOperators)}
             accent
+          />
+          <Kpi
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                Sustained (48h)
+                <InfoTooltip label="Sustained operators definition">
+                  <SustainedOperatorTooltipBody window={data.activeWindow} />
+                </InfoTooltip>
+              </span>
+            }
+            value={int(data.sustainedOperators)}
           />
         </KpiRow>
       )}

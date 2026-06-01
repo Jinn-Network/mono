@@ -14,6 +14,7 @@ const NETWORK_FIXTURE: NetworkResponse = {
   attempts: 30,
   everAttemptedOperators: 7,
   activeOperators: 3,
+  sustainedOperators: 1,
   activeWindow: {
     startTs: 1_700_000_000,
     endTs: 1_700_000_000 + 48 * 3600,

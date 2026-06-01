@@ -2,8 +2,14 @@
  * Tests for the shared active-operator window / qualification util.
  *
  * Window convention: anchor `endTs` to the most-recent COMPLETED UTC 6h
- * boundary; `startTs = endTs - 8 × 6h`. An operator is "active" iff they
- * earned ≥ REQUIRED_TJINN_PER_BLOCK in every one of the 8 buckets.
+ * boundary; `startTs = endTs - 8 × 6h`.
+ *
+ * Two distinct signals (issue #926):
+ *   - `active` (liveness) — earned ≥ REQUIRED_TJINN_PER_BLOCK in the NEWEST
+ *     completed block (index BLOCK_COUNT-1). This is what the `Active?` column
+ *     means: "earning right now."
+ *   - `sustained` (Milestone-1) — earned ≥ REQUIRED_TJINN_PER_BLOCK in EVERY
+ *     one of the 8 buckets. The 48h-sustained gate.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -67,12 +73,13 @@ describe('computeActiveOperators', () => {
     const now = alignedNow(T0);
     const r = computeActiveOperators([], now);
     expect(r.active.size).toBe(0);
+    expect(r.sustained.size).toBe(0);
     expect(r.perOperator.size).toBe(0);
     expect(r.window.endTs).toBeGreaterThan(0);
     expect(r.window.startTs).toBe(r.window.endTs - SIX_H * BLOCK_COUNT);
   });
 
-  it('an operator with ≥3 tJINN in each of the 8 blocks is active', () => {
+  it('an operator with ≥3 tJINN in each of the 8 blocks is active AND sustained', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);
     const rewards = [];
@@ -83,6 +90,7 @@ describe('computeActiveOperators', () => {
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(true);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT);
   });
 
@@ -118,7 +126,10 @@ describe('computeActiveOperators', () => {
     // Index 0 = OLDEST, index BLOCK_COUNT-1 = NEWEST completed.
     expect(blocks).toEqual([true, false, true, false, true, false, true, true]);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(5);
-    expect(r.active.has(OP_A)).toBe(false);
+    // Newest completed block (index 7) qualifies → active (liveness); the gaps
+    // mean it is not sustained.
+    expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(false);
   });
 
   it('an operator that has no qualifying buckets reports blocks as all-false (still tracked)', () => {
@@ -134,6 +145,7 @@ describe('computeActiveOperators', () => {
     expect(r.perOperator.get(OP_A)?.blocks).toEqual(new Array(BLOCK_COUNT).fill(false));
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(0);
     expect(r.active.has(OP_A)).toBe(false);
+    expect(r.sustained.has(OP_A)).toBe(false);
   });
 
   it('exactly 3 tJINN qualifies (>=, not >)', () => {
@@ -163,7 +175,7 @@ describe('computeActiveOperators', () => {
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT);
   });
 
-  it('missing the oldest block → not active', () => {
+  it('missing only the oldest block → active (newest present) but not sustained', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);
     const rewards = [];
@@ -173,11 +185,12 @@ describe('computeActiveOperators', () => {
       rewards.push(mkReward(OP_A, 3n * 10n ** 18n, ts));
     }
     const r = computeActiveOperators(rewards, now);
-    expect(r.active.has(OP_A)).toBe(false);
+    expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(false);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT - 1);
   });
 
-  it('missing the newest completed block → not active', () => {
+  it('missing the newest completed block → neither active nor sustained', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);
     const rewards = [];
@@ -188,6 +201,7 @@ describe('computeActiveOperators', () => {
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(false);
+    expect(r.sustained.has(OP_A)).toBe(false);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT - 1);
   });
 
@@ -206,6 +220,7 @@ describe('computeActiveOperators', () => {
     // Still active off the 8 inside-window blocks; the in-progress ones don't
     // count toward a 9th block (no such block).
     expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(true);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT);
   });
 
@@ -213,7 +228,8 @@ describe('computeActiveOperators', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);
     const rewards = [];
-    // 7 in-window blocks + a fat pre-window claim → not active.
+    // Blocks 0..6 in-window + a fat pre-window claim. Newest block (7) empty →
+    // neither active nor sustained; the pre-window claim must not leak in.
     for (let i = 0; i < BLOCK_COUNT - 1; i++) {
       const ts = Number(w.startTs) + i * SIX_H + 100;
       rewards.push(mkReward(OP_A, 3n * 10n ** 18n, ts));
@@ -221,6 +237,7 @@ describe('computeActiveOperators', () => {
     rewards.push(mkReward(OP_A, 1000n * 10n ** 18n, Number(w.startTs) - 1));
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(false);
+    expect(r.sustained.has(OP_A)).toBe(false);
   });
 
   it('boundary case: nowSec exactly at a 6h boundary keeps the just-completed window', () => {
@@ -234,6 +251,7 @@ describe('computeActiveOperators', () => {
     expect(r.window.endTs).toBe(boundary);
     expect(r.window.startTs).toBe(boundary - SIX_H * BLOCK_COUNT);
     expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(true);
   });
 
   it('tracks distinct operators independently — only the qualifier is active', () => {
@@ -248,8 +266,41 @@ describe('computeActiveOperators', () => {
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(true);
     expect(r.active.has(OP_B)).toBe(false);
+    expect(r.sustained.has(OP_B)).toBe(false);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT);
     expect(r.perOperator.get(OP_B)?.blocksQualified).toBe(0);
+  });
+
+  // ── #926: `active` (liveness) vs `sustained` (M1) split ────────────────────
+
+  it('active (liveness) = "newest completed block qualifies" — a single block lights it up', () => {
+    const now = alignedNow(T0);
+    const w = computeActiveWindow(now);
+    // Only the newest completed block (index BLOCK_COUNT-1) clears the floor —
+    // the real-world "[. . . . . . . T]" case after a relayer backlog dump.
+    const ts = Number(w.startTs) + (BLOCK_COUNT - 1) * SIX_H + HOUR;
+    const r = computeActiveOperators([mkReward(OP_A, 50n * 10n ** 18n, ts)], now);
+    expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(false);
+    expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(1);
+    expect(r.perOperator.get(OP_A)?.blocks[BLOCK_COUNT - 1]).toBe(true);
+  });
+
+  it('sustained requires every block; active does not (one mid-window gap)', () => {
+    const now = alignedNow(T0);
+    const w = computeActiveWindow(now);
+    const rewards = [];
+    // Fill all but one middle block (index 3); the newest block is present.
+    for (let i = 0; i < BLOCK_COUNT; i++) {
+      if (i === 3) continue;
+      const ts = Number(w.startTs) + i * SIX_H + HOUR;
+      rewards.push(mkReward(OP_A, 3n * 10n ** 18n, ts));
+    }
+    const r = computeActiveOperators(rewards, now);
+    expect(r.active.has(OP_A)).toBe(true);
+    expect(r.sustained.has(OP_A)).toBe(false);
+    expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT - 1);
   });
 });

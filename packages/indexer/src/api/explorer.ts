@@ -585,7 +585,11 @@ app.get('/network', async (c) => {
     // the headline "active operators" surface. Old key is gone — SPA
     // consumers must read the new name.
     everAttemptedOperators: Number(aRow?.distinctOperators ?? 0),
+    // `activeOperators` is now liveness (qualified in the newest completed
+    // block); `sustainedOperators` is the 48h Milestone-1 gate (all 8 blocks).
+    // See issue #926 / active-operators.ts.
     activeOperators: activeResult.active.size,
+    sustainedOperators: activeResult.sustained.size,
     activeWindow: serialiseActiveWindow(activeResult.window),
     solverNetsRunning: Number(snRow?.running ?? 0),
     verdicts: verdictsTotal,
@@ -1183,7 +1187,11 @@ app.get('/operators', async (c) => {
     ranked: ranked.map(serializeRow),
     lowVolume: lowVolume.map(serializeRow),
     minVerdicts,
+    // Liveness count (newest completed block) vs the 48h Milestone-1 gate
+    // (all 8 blocks). Per-row `active` is liveness; `recentBlocks` carries the
+    // per-block history the SPA renders as the X/8 progress. See issue #926.
     activeOperators: activeResult.active.size,
+    sustainedOperators: activeResult.sustained.size,
     activeWindow: serialiseActiveWindow(activeResult.window),
     ...(hasFilter ? { appliedFilters } : {}),
     meta: { jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok' },

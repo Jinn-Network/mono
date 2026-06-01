@@ -53,8 +53,19 @@ export interface ActiveOperatorReward {
 
 export interface ActiveOperatorResult {
   window: ActiveWindow;
-  /** Multisigs that qualified in every one of the `BLOCK_COUNT` buckets. */
+  /**
+   * Liveness (issue #926): multisigs that qualified in the NEWEST completed
+   * block (`blocks[BLOCK_COUNT - 1]`). This is what the explorer's `Active?`
+   * column means — "earning right now" — decoupled from whether the operator
+   * has sustained the full 48h window.
+   */
   active: Set<string>;
+  /**
+   * Milestone 1: multisigs that qualified in EVERY one of the `BLOCK_COUNT`
+   * buckets — the 48h-sustained gate. Every sustained operator is also active,
+   * but not vice versa.
+   */
+  sustained: Set<string>;
   /**
    * Per-operator qualification breakdown over the window.
    *
@@ -88,8 +99,9 @@ export function computeActiveWindow(nowSec: number): ActiveWindow {
  * Pure: bucket rewards by `floor((claimedAtTimestamp − startTs) / BLOCK_SECONDS)`,
  * drop any bucket outside `[0, BLOCK_COUNT)`, sum `operatorMinted` per
  * `(multisig, bucket)`, count buckets whose sum is at least
- * `REQUIRED_TJINN_PER_BLOCK`, and mark a multisig "active" iff its qualifying
- * bucket count equals `BLOCK_COUNT`.
+ * `REQUIRED_TJINN_PER_BLOCK`, mark a multisig "active" iff its NEWEST completed
+ * block qualifies (liveness), and "sustained" iff its qualifying bucket count
+ * equals `BLOCK_COUNT` (the 48h Milestone-1 gate).
  */
 export function computeActiveOperators(
   rewards: ActiveOperatorReward[],
@@ -113,6 +125,7 @@ export function computeActiveOperators(
   }
 
   const active = new Set<string>();
+  const sustained = new Set<string>();
   const perOperator = new Map<string, { blocks: boolean[]; blocksQualified: number }>();
   for (const [op, perBucket] of sums) {
     // `perBucket` indexing already runs oldest-first because `bucket` is
@@ -122,8 +135,11 @@ export function computeActiveOperators(
     let qualified = 0;
     for (const b of blocks) if (b) qualified += 1;
     perOperator.set(op, { blocks, blocksQualified: qualified });
-    if (qualified === BLOCK_COUNT) active.add(op);
+    // Liveness: the newest completed block (index BLOCK_COUNT-1) clears the floor.
+    if (blocks[BLOCK_COUNT - 1]) active.add(op);
+    // Sustained (M1): every block clears the floor.
+    if (qualified === BLOCK_COUNT) sustained.add(op);
   }
 
-  return { window, active, perOperator };
+  return { window, active, sustained, perOperator };
 }

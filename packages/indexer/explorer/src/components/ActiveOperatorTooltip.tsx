@@ -31,12 +31,38 @@ export function formatBlockWindow(window: ActiveWindow, i: number): string {
   return `${formatWindowTs(start).replace(/\s+UTC$/, '')} → ${formatWindowTs(end)}`;
 }
 
+/**
+ * Liveness body (issue #926) — used wherever the word "Active" appears: the
+ * `/operators` stat strip, the `Active?` column header, and the `/network`
+ * activity strip. "Active" means earning in the newest completed block, NOT
+ * the 48h-sustained gate (see {@link SustainedOperatorTooltipBody}).
+ */
 export function ActiveOperatorTooltipBody({ window }: { window: ActiveWindow }) {
   return (
     <>
       <div>
-        Earned ≥3 tJINN in each of the last 8 completed UTC 6-hour blocks.
-        The in-progress block is excluded.
+        Earned ≥3 tJINN in the most recent completed UTC 6-hour block. The
+        in-progress block is excluded. "Active now" — not the 48h gate.
+      </div>
+      <div style={{ marginTop: 6 }}>
+        Latest completed block: {formatWindowTs(window.endTs - window.blockSeconds)} →{' '}
+        {formatWindowTs(window.endTs)} (UTC).
+      </div>
+    </>
+  );
+}
+
+/**
+ * Sustained body (issue #926) — the 48h Milestone-1 gate: qualified in EVERY
+ * one of the 8 completed blocks. Used by the `/operators` "Sustained (48h)"
+ * stat.
+ */
+export function SustainedOperatorTooltipBody({ window }: { window: ActiveWindow }) {
+  return (
+    <>
+      <div>
+        Earned ≥3 tJINN in each of the last 8 completed UTC 6-hour blocks (the
+        48h Milestone-1 gate). The in-progress block is excluded.
       </div>
       <div style={{ marginTop: 6 }}>
         Window: {formatWindowTs(window.startTs)} → {formatWindowTs(window.endTs)} (UTC).

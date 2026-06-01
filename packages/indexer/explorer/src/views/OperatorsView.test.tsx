@@ -46,6 +46,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
   ],
   minVerdicts: 5,
   activeOperators: 1,
+  sustainedOperators: 0,
   activeWindow: {
     startTs: 1_700_000_000,
     endTs: 1_700_000_000 + 48 * 3600,
@@ -342,13 +343,73 @@ describe('OperatorsView', () => {
     const triggers = screen.getAllByRole('button', { name: /definition/i });
     expect(triggers.length).toBeGreaterThan(0);
     fireEvent.click(triggers[0]!);
-    // Canonical definition copy.
+    // Liveness copy (issue #926): the `Active operators` tile + `Active?` column
+    // describe "most recent completed block," not the 48h-sustained gate.
     expect(
-      screen.getAllByText(/Earned ≥3 tJINN in each of the last 8 completed UTC 6-hour blocks/i)
+      screen.getAllByText(/Earned ≥3 tJINN in the most recent completed UTC 6-hour block/i)
         .length,
     ).toBeGreaterThan(0);
     // The window dates render in the body — derived from activeWindow.startTs/endTs.
     expect(screen.getAllByText(/UTC/).length).toBeGreaterThan(0);
+  });
+
+  it('renders a Sustained (48h) KPI from data.sustainedOperators (issue #926)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // Separate from "Active operators" — the 48h Milestone-1 count.
+    expect(screen.getByText(/sustained \(48h\)/i)).toBeInTheDocument();
+    // sustainedOperators === 0 in the fixture.
+    const sustainedTrigger = screen.getByRole('button', {
+      name: /sustained operators definition/i,
+    });
+    expect(sustainedTrigger).toBeInTheDocument();
+  });
+
+  it('Active? is Yes when only the newest block qualifies (liveness, not all-8) (issue #926)', async () => {
+    // The real-world post-backlog case: active in the newest completed block
+    // only. The server sets active=true (liveness); the row must render Yes.
+    const fixture: OperatorsResponse = {
+      ...OPERATORS_FIXTURE,
+      ranked: [
+        {
+          ...OPERATORS_FIXTURE.ranked[0]!,
+          active: true,
+          recentBlocks: [false, false, false, false, false, false, false, true],
+        },
+      ],
+      lowVolume: [],
+      activeOperators: 1,
+      sustainedOperators: 0,
+    };
+    mockFetchOperators(fixture);
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    const rows = Array.from(document.querySelectorAll('tbody tr'));
+    expect(rows.length).toBe(1);
+    const activeCell = rows[0]!.querySelectorAll('td')[1];
+    expect(activeCell?.textContent).toBe('Yes');
+  });
+
+  it('sustained tooltip describes the 48h all-8 gate (issue #926)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: /sustained operators definition/i }),
+    );
+    expect(
+      screen.getByText(/each of the last 8 completed UTC 6-hour blocks/i),
+    ).toBeInTheDocument();
   });
 
   it('does not pass mode/harness/minVerdicts to useOperators (no filter UI)', async () => {
