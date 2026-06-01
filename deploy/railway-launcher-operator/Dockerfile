@@ -58,9 +58,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Task 0 spike (env-only CLAUDE_CODE_OAUTH_TOKEN auth confirmed at this version).
 RUN npm install -g @anthropic-ai/claude-code@2.1.159
 
-# Claude Code writes config to $HOME/.claude.json; keep it on the volume so the
-# OAuth token / session survives container restarts (mirrors client/Dockerfile).
-RUN mkdir -p /root/.claude && ln -sf /root/.claude/claude.json /root/.claude.json
+# Auth is env-only (CLAUDE_CODE_OAUTH_TOKEN, verified in the Task 0 spike) — no
+# claude.json persistence is needed. /root/.claude is created only so the
+# entrypoint's commented-out file-fallback path has a directory to write to if a
+# future CLI version ever stops honouring the env var.
+RUN mkdir -p /root/.claude
 
 COPY --from=build /app/client/dist dist/
 COPY --from=build /app/client/deployments deployments/
@@ -73,6 +75,11 @@ ENV NODE_ENV=production
 ENV JINN_EARNING_DIR=/data/earning
 ENV JINN_DB_PATH=/data/jinn.db
 ENV JINN_CONFIG=/data/config.json
+# Generator state + validated-pool artifact MUST live on the volume. The default
+# is $HOME/.jinn-client/swe-rebench-v2 (= /root/...), which is off-volume and
+# wiped on every restart — and the validated pool has no IPFS fetch fallback, so
+# an unseeded/ephemeral state dir means the generator posts ZERO tasks.
+ENV JINN_SWE_REBENCH_V2_STATE_DIR=/data/swe-rebench-v2
 ENV JINN_NETWORK=testnet
 ENV JINN_AUTO_TESTNET_FAUCET=1
 

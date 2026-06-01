@@ -7,20 +7,35 @@ set -euo pipefail
 EARNING_DIR="${JINN_EARNING_DIR:-/data/earning}"
 CONFIG_PATH="${JINN_CONFIG:-/data/config.json}"
 LAUNCHED_DIR="$EARNING_DIR/solvernets/launched"
+# Generator state + validated-pool artifact dir. MUST be on the volume: the
+# generator has no IPFS fetch for the validated pool, so an unseeded/ephemeral
+# state dir means it posts ZERO tasks (see Dockerfile JINN_SWE_REBENCH_V2_STATE_DIR).
+STATE_DIR="${JINN_SWE_REBENCH_V2_STATE_DIR:-/data/swe-rebench-v2}"
 
 # --- One-shot state restore (cutover migration path) --------------------------
-# JINN_STATE_TARBALL_B64, if set, is a base64-encoded tar.gz of the operator's
-# local ~/.jinn-client/earning tree (keystore + earning/stake state + launched
-# records). Extracted ONCE, only when /data/earning does not yet exist, so a
-# redeploy never clobbers live state. This is how the same wallet/stake is
-# migrated off the laptop.
+# JINN_STATE_TARBALL_B64, if set, is a base64-encoded tar.gz built with:
+#     tar -czf - -C ~/.jinn-client earning swe-rebench-v2
+# so its top-level entries are `earning/` (keystore + stake state + launched
+# records) AND `swe-rebench-v2/` (generator state + validated-pool.json).
+# Extracted into /data ONCE, only when $EARNING_DIR is absent, so a redeploy
+# never clobbers live state. This migrates the same wallet/stake AND the
+# validated pool off the laptop. The top-level layout is a contract with the
+# README's tarball command — keep them in sync.
 if [ ! -d "$EARNING_DIR" ] && [ -n "${JINN_STATE_TARBALL_B64:-}" ]; then
   echo "[entrypoint] restoring state tarball into /data (first boot)"
   mkdir -p /data
-  printf '%s' "$JINN_STATE_TARBALL_B64" | base64 -d | tar -xzf - -C /data
+  if ! printf '%s' "$JINN_STATE_TARBALL_B64" | base64 -d | tar -xzf - -C /data; then
+    echo "[entrypoint] ERROR: state tarball restore failed (malformed JINN_STATE_TARBALL_B64?)" >&2
+    exit 1
+  fi
+  if [ ! -d "$EARNING_DIR" ]; then
+    echo "[entrypoint] ERROR: restore produced no $EARNING_DIR — the tarball must have a top-level 'earning/' entry" >&2
+    echo "[entrypoint] ERROR: build it with: tar -czf - -C ~/.jinn-client earning swe-rebench-v2" >&2
+    exit 1
+  fi
 fi
 
-mkdir -p "$EARNING_DIR" "$LAUNCHED_DIR"
+mkdir -p "$EARNING_DIR" "$LAUNCHED_DIR" "$STATE_DIR"
 
 # Global git identity so plugin session-start hooks (which `git commit
 # --allow-empty` to init implStateDir before setting their own user.*) don't

@@ -5,4 +5,6 @@ dockerfilePath = "deploy/railway-launcher-operator/Dockerfile"
 [deploy]
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+# Single replica is load-bearing: one wallet must run in one process, else the
+# launcher and solver race on the agent-EOA nonce (#792). Do not scale up.
 numReplicas = 1

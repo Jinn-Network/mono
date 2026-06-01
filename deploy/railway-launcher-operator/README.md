@@ -14,12 +14,37 @@ Run locally with `jinn run`; this directory is only for the headless hosted depl
 | `JINN_PASSWORD` | the operator's existing keystore password | Decrypts the migrated keystore. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude setup-token` on a logged-in machine | Authenticates Haiku headless **and** keeps the AI-units throttle engaged. **If unset, the throttle is silently OFF.** |
 | `CONFIG_TEMPLATE_JSON` | the operator config, minified | Seeded to `/data/config.json` on first boot. Must include the `joinedSolverNets[<cid>]` entry with `harness: "claude-code"`, `model: "claude-haiku-4-5-20251001"`, and the load-bearing `contract: { id, version }` field (#674). |
-| `JINN_STATE_TARBALL_B64` *(migration)* | `base64` of `tar -czf - -C ~/.jinn-client earning` | One-shot restore of keystore + stake state + launched record. Extracted only when `/data/earning` is absent. |
-| `LAUNCHED_RECORD_JSON` *(fresh, alt to tarball)* | the owned `…/launched/<id>.json` | Seeds the launched record so the generator spawns. Redundant if the tarball already carries it. |
+| `JINN_STATE_TARBALL_B64` *(migration)* | `base64` of `tar -czf - -C ~/.jinn-client earning swe-rebench-v2` | One-shot restore of keystore + stake state + launched record **and** the generator state + validated pool. Extracted only when `/data/earning` is absent. |
+| `LAUNCHED_RECORD_JSON` *(fresh, alt to tarball)* | the owned `…/solvernets/launched/<id>.json` | Seeds the launched record so the generator spawns. Redundant if the tarball already carries it. See "Launched record" below. |
 
 Baked-in defaults (override via Railway env): `JINN_NETWORK=testnet`,
 `JINN_AUTO_TESTNET_FAUCET=1`, `JINN_EARNING_DIR=/data/earning`,
-`JINN_DB_PATH=/data/jinn.db`, `JINN_CONFIG=/data/config.json`.
+`JINN_DB_PATH=/data/jinn.db`, `JINN_CONFIG=/data/config.json`,
+`JINN_SWE_REBENCH_V2_STATE_DIR=/data/swe-rebench-v2`.
+
+## Generator state + validated pool (required, or the generator posts 0 tasks)
+
+The generator reads its validated pool from `JINN_SWE_REBENCH_V2_STATE_DIR`
+(default `/data/swe-rebench-v2`) — there is **no IPFS fetch fallback**. If that
+dir has no `validated-pool.json` under `admissionMode: required`, the pool is
+empty and the generator posts nothing. Two ways to satisfy it:
+
+- **Migration (recommended):** include `swe-rebench-v2` in the state tarball (the
+  command above already does). It carries your local `validated-pool.json`.
+- **Fresh box:** run `jinn solver-nets validate-pool swe-rebench-v2` on the box
+  (writes into `JINN_SWE_REBENCH_V2_STATE_DIR`) before the generator can post.
+
+## Launched record
+
+The generator spawns only for an owned record with `status: "launched"` and
+`generatorEnabled: true` (it walks `${JINN_EARNING_DIR}/solvernets/launched/`).
+The record is schema-validated on load and **silently dropped** if it fails
+(`solvernet.launched.v1`: requires `solverNetId`, `manifestCid`, `manifestHash`
+(`0x…`), `launcherAgentId`, `launcherSafeAddress` (20-byte address), `launchedAt`,
+`status`, `statusUpdatedAt`, `generatorEnabled`, `registry`). Provide it via the
+migration tarball, or as `LAUNCHED_RECORD_JSON` — use your **real** local record
+verbatim (a placeholder with a malformed `manifestHash` parses but is dropped at
+load, and the generator never spawns).
 
 > Auth mechanism is **env-only** — the Task 0 spike confirmed the claude CLI
 > (verified at `@anthropic-ai/claude-code@2.1.159`, pinned in the Dockerfile)
@@ -44,7 +69,7 @@ The hosted box uses the **same wallet** as the laptop; running both at once caus
 nonce races and double-claims. Cut over:
 
 1. Stop the local daemon (`jinn kill` or Ctrl-C).
-2. Export local state: `tar -czf - -C ~/.jinn-client earning | base64 | tr -d '\n' > state.b64` → set as `JINN_STATE_TARBALL_B64`.
+2. Export local state (includes the validated pool): `tar -czf - -C ~/.jinn-client earning swe-rebench-v2 | base64 | tr -d '\n' > state.b64` → set as `JINN_STATE_TARBALL_B64`.
 3. Set the other secrets above; attach the volume; set the config-as-code path.
 4. Deploy: from the repo root, `railway up --service <name> --environment production --ci -m "launcher-operator cutover"`.
 5. Confirm the staked service re-appears in the staking contract's `getServiceIds()` and the generator resumes (see Verification).
@@ -58,9 +83,9 @@ the EOA manually past the Stage-1 minimum (~0.02 ETH) first.
 
 ## Verification
 
-- Boot log shows `[ai-units] cap=100/2800 per (block, week)` → throttle engaged. **If absent, the credential didn't resolve — check `CLAUDE_CODE_OAUTH_TOKEN`.**
+- Boot log shows `[ai-units] cap=100/2800 per (block, week) source=…` → throttle engaged. **If absent, the credential didn't resolve — check `CLAUDE_CODE_OAUTH_TOKEN`.**
 - `[entrypoint] claude CLI: <version>` and `[creator] …` task-posting lines appear.
-- Task-creation rate on the indexer is non-zero and continuous (no gap > a few minutes).
+- Task-creation rate on the indexer is non-zero and continuous (no gap > a few minutes). If creation is silent, check that `JINN_SWE_REBENCH_V2_STATE_DIR` holds a `validated-pool.json` (see "Generator state + validated pool" above).
 
 ## Caveats
 
@@ -69,3 +94,4 @@ the EOA manually past the Stage-1 minimum (~0.02 ETH) first.
   *second* distinct operator M1 needs comes from the fleet on independent infra.
 - True supply redundancy needs a **second** launcher with its own wallet + launch (future).
 - A Claude OAuth token lives in Railway secrets (same posture as the codex recipe's `CODEX_AUTH_JSON`).
+- **Launcher + solver only.** This image installs no Docker; swe-rebench v2 *evaluation* needs a Docker daemon, so do not add the `evaluator` role to this box's `joinedSolverNets` — evaluation tasks would fail at pickup.
