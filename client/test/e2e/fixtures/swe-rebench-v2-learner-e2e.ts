@@ -3,7 +3,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSolverNets, type JoinedSolverNetConfig } from '../../../src/solver-nets/registry.js';
 
-const E2E_SWE_JOINED: Record<string, JoinedSolverNetConfig> = {
+/**
+ * Joined-SolverNet config the e2e uses for plugin resolution. Exported so the
+ * eval seam can resolve the SAME `runtimePlugins` via the shared
+ * `resolveRuntimePluginsForSolverType` helper (one resolution path with the
+ * CLI), while the training cycles continue to consume the plugin `roots` below.
+ */
+export const E2E_SWE_JOINED: Record<string, JoinedSolverNetConfig> = {
   'bafy-e2e-swe-learner-full-cycle': {
     manifestCid: 'bafy-e2e-swe-learner-full-cycle',
     name: 'SWE-rebench v2',
