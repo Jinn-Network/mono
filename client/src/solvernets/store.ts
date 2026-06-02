@@ -212,7 +212,12 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
  *
  * Tmp files produced by `writeJsonAtomic` are named
  * `<name>.json.tmp-<pid>-<ts>-<rand>` and are excluded by the
- * `.endsWith('.json')` predicate alone — no separate `.tmp` filter needed.
+ * `.endsWith('.json')` check — no separate `.tmp` filter needed.
+ *
+ * Dot-prefixed names are also excluded: AppleDouble `._*.json` companion
+ * files land in the dir when operator state is seeded from a macOS-produced
+ * tarball, and an `._*` sidecar carrying valid-looking JSON would otherwise
+ * be listed and mis-validated (or spam an error log per load).
  */
 async function listJsonFiles(dir: string): Promise<string[]> {
   let entries: string[];
@@ -222,7 +227,7 @@ async function listJsonFiles(dir: string): Promise<string[]> {
     if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return [];
     throw err;
   }
-  return entries.filter(name => name.endsWith('.json'));
+  return entries.filter(name => name.endsWith('.json') && !name.startsWith('.'));
 }
 
 async function readAndParse<T>(

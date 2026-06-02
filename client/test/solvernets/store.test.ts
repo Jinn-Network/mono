@@ -150,6 +150,30 @@ describe('createSolverNetStore — launched records', () => {
     expect(errSpy).toHaveBeenCalled();
   });
 
+  it('loadOwnedRecords ignores AppleDouble dotfiles (._*.json) without logging', async () => {
+    const store = createSolverNetStore({ baseDir });
+    const valid = makeLaunched({ solverNetId: 'foo' });
+    await store.writeRecord(valid);
+
+    // macOS-tarball-seeded state drops an AppleDouble ._foo.json companion
+    // alongside foo.json. It carries valid-looking JSON, so it would parse
+    // and (worse) might mis-validate if listed. It must be excluded at the
+    // listing layer — no extra record, no error log.
+    const launchedDir = path.join(baseDir, 'solvernets', 'launched');
+    await writeFile(
+      path.join(launchedDir, '._foo.json'),
+      JSON.stringify(makeLaunched({ solverNetId: 'foo' })),
+      'utf8',
+    );
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const records = await store.loadOwnedRecords();
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.solverNetId).toBe('foo');
+    expect(errSpy).not.toHaveBeenCalled();
+  });
+
   it('loadOwnedRecords ignores non-.json files (e.g. crashed-write tmp files)', async () => {
     const store = createSolverNetStore({ baseDir });
     const valid = makeLaunched({ solverNetId: 'sn_valid' });
