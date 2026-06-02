@@ -42,6 +42,7 @@ import {
   formatDecodedRevert,
 } from '../../adapters/mech/safe-revert.js';
 import { emitEvent } from '../../observability/emit-event.js';
+import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { Harness, HarnessContext, RuntimePlugin, Solution } from '../types.js';
 import { SkippableError } from '../types.js';
 import type {
@@ -2161,6 +2162,15 @@ export class TaskEngine {
    *   TCAttemptAlreadyFinalized, …). We mark the row RACE_LOST and emit a
    *   `kind=race_lost` activity event so operators can audit prunes
    *   without inflating the FAILED counter (#896).
+   * - A transport-transient error (e.g. `AllRpcsFailedError` — every provider
+   *   in the L2 fallback chain failed at once) on a task whose delivery window
+   *   is still open: leave the row in its current in-flight state so the next
+   *   tick re-drives it once the RPCs recover, and emit a `tick_error` (warn)
+   *   event instead of inflating the FAILED counter. Without this the daemon
+   *   stamped the row FAILED, dropping it from `getInFlight()` permanently, so
+   *   L2 work went silent until a manual restart (#912). Past-window transient
+   *   errors still terminalize to avoid churning on work that can no longer
+   *   settle.
    * - Everything else: existing markFailed behaviour. When invoked from
    *   recovery, `contextLabel === 'recovery'` so the failure_reason
    *   carries the `recovery:` prefix the original code path used.
@@ -2171,7 +2181,7 @@ export class TaskEngine {
     task: PersistedTaskRun,
     err: unknown,
     contextLabel: 'transition' | 'recovery',
-  ): 'race_lost' | 'failed' {
+  ): 'race_lost' | 'failed' | 'transient' {
     if (
       err instanceof SafeInnerRevertError &&
       isNonRecoverableInnerRevert(err.decodedName)
@@ -2189,6 +2199,24 @@ export class TaskEngine {
       return 'race_lost';
     }
     const reason = err instanceof Error ? err.message : String(err);
+    // A transport-transient failure (all RPC providers in the fallback chain
+    // blipped at once, 429s, timeouts, …) is not the task's fault and is not
+    // permanent. Leave the row in its in-flight state — do NOT call
+    // markFailed, which would drop it from getInFlight() forever (#912) — so
+    // the engine-tick loop re-drives it once the RPCs recover. The tick loop
+    // IS the retry; there is no per-task attempt counter. Skip this only once
+    // the delivery window has closed, so we never churn on work that can no
+    // longer settle on-chain.
+    if (task.windowEndTs > Date.now() && isRecoverableTransactionError(err)) {
+      emitEvent(this.store, {
+        kind: 'tick_error',
+        requestId: task.requestId,
+        solverType: task.solverType ?? undefined,
+        outcome: 'warn',
+        detail: `transient RPC failure in ${contextLabel}; left ${task.state} for retry: ${reason}`,
+      }, 'harness-engine');
+      return 'transient';
+    }
     const stamped = contextLabel === 'recovery' ? `recovery: ${reason}` : reason;
     this.persistence.markFailed(task.requestId, stamped);
     return 'failed';
@@ -2235,8 +2263,15 @@ export class TaskEngine {
       if (current && current.state === task.state) {
         const classification = this._classifyAndMarkTerminal(task, err, 'recovery');
         const reason = err instanceof Error ? err.message : String(err);
-        const log = classification === 'race_lost' ? console.log : console.error;
-        const verb = classification === 'race_lost' ? 'pruned' : 'failed';
+        // 'transient' leaves the row in-flight (not terminal); the next tick
+        // re-drives it once the RPCs recover (#912). Log it at warn so the
+        // stall is visible without firing the error-level alerting that a
+        // genuine failure does.
+        const { log, verb } = {
+          race_lost: { log: console.log, verb: 'pruned' },
+          transient: { log: console.warn, verb: 'deferred (transient RPC)' },
+          failed: { log: console.error, verb: 'failed' },
+        }[classification];
         log(`[harness-engine] resume ${verb} for ${task.requestId}: ${reason}`);
       }
       throw err;
