@@ -30,7 +30,7 @@ The full design note, current-state map, and stacked-PR plan are in the companio
 - boot-time deployment-readiness preflight → extend `client/src/preflight/` + `doctor.ts`;
 - headless status surface (loop-completion + impl-state cadence) → extend `client/src/api/gather-status.ts` (`/v1/status`).
 
-**2. Consolidate the three Dockerfiles into one container-native base image + thin per-harness overlays** (differ only in *which agent CLI* + *which auth env*). The base: non-root (`USER node`) by default, env-based auth default, no hard-coded `VOLUME`, pinned agent CLI, `ENV JINN_STATE_DIR=/data`.
+**2. Consolidate the three Dockerfiles into one container-native base image + thin per-harness overlays** (differ only in *which agent CLI* + *which auth env*). The base: non-root (`USER node`) by default, env-based auth default, no hard-coded `VOLUME`, `ENV JINN_STATE_DIR=/data`, agent-agnostic (no agent CLI baked in). **The base already exists as a GHCR publish:** `.github/workflows/docker.yml` builds `client/Dockerfile` and pushes `ghcr.io/jinn-network/client` (multi-arch, smoke-tested) on every named release. So the consolidation makes `client/Dockerfile` *itself* container-native and reuses the existing publish — overlays become `FROM ghcr.io/jinn-network/client:<version>` — rather than standing up a new `deploy/Dockerfile.base`. The one operations gate: the package is currently **private** and must be flipped public (or overlay CI authenticates to GHCR).
 
 **3. Strangler-fig sequencing.** The daemon-internal fixes (spec slices S1–S6) ship first and **independently of #952**. The image consolidation (S7–S8) is **gated on #952 merging**, because `deploy/railway-launcher-operator/` is the regression reference the consolidated base must reproduce.
 
@@ -47,7 +47,7 @@ The full design note, current-state map, and stacked-PR plan are in the companio
 
 ## Open questions to ratify
 
-1. **GHCR base image vs. ARG-Dockerfile bridge.** Recommended: GHCR base as the target, single ARG-Dockerfile as the bridge if the GHCR publish is private/unreachable. (Decide at S7 start on reachability.)
+1. **GHCR package visibility (private→public?).** The GHCR base publish already exists (`ghcr.io/jinn-network/client`, from `client/Dockerfile`, multi-arch, smoke-tested, 71 versions) but the package is **private**. Recommended: flip it public so overlays `FROM` it without auth (reuses existing CI, no new Dockerfile); fall back to an `ARG AGENT_CLI` build-from-source bridge (or overlay-side GHCR auth) only if it must stay private. Secondary: whether to add a faster-than-release `:next`/`:canary` publish tag.
 2. **Non-root posture.** Recommended: image-default `USER node` + a minimal root→node gosu chown shim (Railway mounts `/data` as root). Confirm vs. requiring host-side chown.
 3. **`JINN_STATE_DIR` naming + derivation precedence.** Confirm derive-don't-collapse and `workingDirRoot`-stays-ephemeral.
 4. **A4 artifact-CID resolution path.** On-chain `IdentityRegistry.getMetadata` read by manifestCid, vs. extending the DiscoveryAPI `PublishedArtifact` read-shape (currently plugin-only). The latter is cleaner but widens the indexer contract.
