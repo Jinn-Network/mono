@@ -1426,6 +1426,97 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return { windowEndBlock: Number(head), windowEndTs, chain, byCid };
   }
 
+  // ── getMostRecentTaskCidDigest (#957) ──────────────────────────────────────
+  // Scan TaskCreated logs filtered by the SolverNet's manifestDigest and return
+  // the highest-block one's taskCidDigest + taskId. Pure chain read — no IPFS
+  // hop; the caller reconstructs the task CID from the returned digest. Capped at
+  // MAX_OPERATOR_COUNT_TASK_PAGES getLogs chunks like getSolverNetOperatorCount.
+  async function getMostRecentTaskCidDigest(manifestCid: string): Promise<{
+    taskCidDigest: `0x${string}`;
+    taskId: string;
+  } | undefined> {
+    if (!routerAddress) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI: no routerAddress configured for chainId=${opts.chainId}`,
+      );
+    }
+
+    const client = getClient();
+    let currentBlock: bigint;
+    try {
+      currentBlock = await (client as PublicClient).getBlockNumber();
+    } catch (err) {
+      throw discoveryUnavailableFromReadError(
+        `OnchainDiscoveryAPI.getMostRecentTaskCidDigest: failed to get block number`,
+        err,
+      );
+    }
+
+    // Complete-read call (no accumulator), so scan from the discovery floor
+    // ignoring the cursor cache — mirrors getSolverNetOperatorCount.
+    const fromBlock = resolveScanFromBlock(opts, currentBlock);
+    const targetDigest = manifestDigestForCid(manifestCid).toLowerCase() as Hex;
+
+    let matches: Array<{ taskId: string; taskCidDigest: Hex; block: number; txIndex: number; logIndex: number }>;
+    try {
+      matches = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: Array<{ taskId: string; taskCidDigest: Hex; block: number; txIndex: number; logIndex: number }> = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskCreated') continue;
+              const evArgs = event.args as { taskId: bigint; taskCidDigest: Hex; manifestDigest: Hex };
+              if ((evArgs.manifestDigest as string).toLowerCase() !== targetDigest) continue;
+              decoded.push({
+                taskId: String(evArgs.taskId),
+                taskCidDigest: evArgs.taskCidDigest,
+                block: log.blockNumber != null ? Number(log.blockNumber) : 0,
+                txIndex: log.transactionIndex ?? 0,
+                logIndex: log.logIndex ?? 0,
+              });
+            } catch {
+              // Not a TaskCreated event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
+      );
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw discoveryUnavailableFromReadError(
+        `OnchainDiscoveryAPI.getMostRecentTaskCidDigest: getLogs for TaskCreated failed`,
+        err,
+      );
+    }
+
+    if (matches.length === 0) return undefined;
+
+    // Most recent by (block, transactionIndex, logIndex).
+    const newest = matches.reduce((acc, cur) =>
+      cur.block > acc.block ||
+      (cur.block === acc.block && cur.txIndex > acc.txIndex) ||
+      (cur.block === acc.block && cur.txIndex === acc.txIndex && cur.logIndex > acc.logIndex)
+        ? cur
+        : acc,
+    );
+    return { taskCidDigest: newest.taskCidDigest, taskId: newest.taskId };
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1439,5 +1530,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getCodeDigestRewards,
     getInstanceClaimCounts,
     getTaskPostCounts,
+    getMostRecentTaskCidDigest,
   };
 }

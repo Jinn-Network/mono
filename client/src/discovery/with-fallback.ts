@@ -284,5 +284,16 @@ export function withFallback(
         () => floor.getTaskPostCounts(args),
       );
     },
+
+    getMostRecentTaskCidDigest(manifestCid) {
+      // Recovery signal (not a correctness gate): fall through to the floor on
+      // an indexer outage like getTaskPostCounts. The on-chain floor reads the
+      // newest TaskCreated log for the manifest directly, so a floor result is
+      // meaningful (#957).
+      return dispatch(
+        () => primary.getMostRecentTaskCidDigest(manifestCid),
+        () => floor.getMostRecentTaskCidDigest(manifestCid),
+      );
+    },
   };
 }

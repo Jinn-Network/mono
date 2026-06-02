@@ -437,6 +437,36 @@ describe('withFallback — all four methods', () => {
     expect(result).toBe(floorResult);
     expect(floor.getTaskPostCounts).toHaveBeenCalledOnce();
   });
+
+  it('getMostRecentTaskCidDigest delegates to the primary on success (#957)', async () => {
+    const primaryResult = { taskCidDigest: `0x${'ab'.repeat(32)}` as `0x${string}`, taskId: '7' };
+    const primary = {
+      getMostRecentTaskCidDigest: vi.fn(async () => primaryResult),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getMostRecentTaskCidDigest: vi.fn(async () => undefined),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getMostRecentTaskCidDigest('bafyManifest');
+    expect(result).toBe(primaryResult);
+    expect(floor.getMostRecentTaskCidDigest).not.toHaveBeenCalled();
+  });
+
+  it('getMostRecentTaskCidDigest routes to floor on DiscoveryUnavailableError (recovery signal, #957)', async () => {
+    const floorResult = { taskCidDigest: `0x${'cd'.repeat(32)}` as `0x${string}`, taskId: '9' };
+    const primary = {
+      getMostRecentTaskCidDigest: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getMostRecentTaskCidDigest: vi.fn(async () => floorResult),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getMostRecentTaskCidDigest('bafyManifest');
+    expect(result).toBe(floorResult);
+    expect(floor.getMostRecentTaskCidDigest).toHaveBeenCalledOnce();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {

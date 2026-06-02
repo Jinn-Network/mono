@@ -20,7 +20,8 @@ import type { TaskGenerator } from '../tasks/sources.js';
 import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
-import { uploadToIpfs } from '../adapters/mech/ipfs.js';
+import { uploadToIpfs, fetchFromIpfs } from '../adapters/mech/ipfs.js';
+import { recoverVettedPoolFromNetwork } from './_swe-rebench-v2-pool-recovery.js';
 import type { SolverTypeDefinition } from './solver-type.js';
 import {
   selectNextPostingCandidates,
@@ -67,6 +68,7 @@ const SLATE_VERSION = 'v1';
 const CONTRACT_ID = 'swe-rebench-v2';
 const CONTRACT_VERSION = 'v1';
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
+const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 
 /** How long the pool is cached before a full refresh (24 h). */
 const POOL_REFRESH_MS = 24 * 60 * 60 * 1000;
@@ -98,6 +100,8 @@ export interface SweRebenchV2AutoConfig {
 export interface SweRebenchV2GeneratorStaticConfig {
   stateDir?: string;
   ipfsRegistryUrl?: string;
+  /** IPFS gateway for the fresh-volume pool-recovery fetch (#957). */
+  ipfsGatewayUrl?: string;
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
@@ -139,6 +143,8 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
   getGeneratorConfig?: () => SweRebenchV2GeneratorRuntimeConfig | unknown;
   solverNetManifestCid?: string;
   ipfsRegistryUrl?: string;
+  /** IPFS gateway for the fresh-volume pool-recovery fetch (#957). */
+  ipfsGatewayUrl?: string;
   discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
   creator?: {
     agentEoa?: `0x${string}`;
@@ -422,6 +428,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let floorWarned = false;
   let publicationWarned = false;
   let slateWarned = false;
+  // #957: attempt fresh-volume pool recovery at most once per process. Recovery
+  // only matters when the disk is empty; once attempted (recovered or not) we
+  // don't re-hit the indexer/IPFS every tick.
+  let poolRecoveryAttempted = false;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
   let lastPollSummary: SweRebenchV2GeneratorStateSnapshot['lastPollSummary'];
@@ -488,6 +498,50 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       return null;
     }
     lastPollAt = new Date(now).toISOString();
+
+    // #957: fresh-volume vetted-pool recovery. A freshly-deployed operator has
+    // an empty disk (no validated-pool.json), so admissionMode='required' is
+    // fail-closed and the generator posts 0 tasks. Before settling into
+    // admission-required-no-data, try to recover the pool from the network: read
+    // a recent task's vettedPoolRef via the indexer and re-fetch the published
+    // artifact. Guarded on (1) local pool absent, (2) required admission, (3)
+    // manifestCid known, (4) discoveryApi present. Recovery never throws — on
+    // any failure the existing fail-closed path proceeds unchanged.
+    if (
+      !poolRecoveryAttempted &&
+      genConfig.admissionMode === 'required' &&
+      config.solverNetManifestCid &&
+      config.discoveryApi
+    ) {
+      const localPoolPresent = await stat(join(config.stateDir, 'validated-pool.json'))
+        .then(() => true)
+        .catch(() => false);
+      if (!localPoolPresent) {
+        poolRecoveryAttempted = true;
+        const recovery = await recoverVettedPoolFromNetwork({
+          stateDir: config.stateDir,
+          manifestCid: config.solverNetManifestCid,
+          discoveryApi: config.discoveryApi,
+          ipfsGatewayUrl:
+            config.ipfsGatewayUrl ??
+            process.env['JINN_IPFS_GATEWAY_URL'] ??
+            DEFAULT_IPFS_GATEWAY_URL,
+          store: validatedPoolStore,
+          fetchFromIpfs,
+        });
+        if (recovery.recovered) {
+          console.warn(
+            `[swe-rebench-v2-gen] recovered ${recovery.entriesRecovered} vetted-pool instance(s) ` +
+            `from the network on a fresh volume (#957); validated-pool.json written.`,
+          );
+        } else {
+          console.warn(
+            `[swe-rebench-v2-gen] fresh-volume pool recovery did not complete (${recovery.reason}); ` +
+            `falling through to the admission gate.`,
+          );
+        }
+      }
+    }
 
     const validatedPoolMtimeMs = await stat(join(config.stateDir, 'validated-pool.json'))
       .then((s) => s.mtimeMs)
@@ -850,6 +904,7 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
     getGeneratorConfig: () => configRef.current,
     solverNetManifestCid: recordRef.current.manifestCid,
     ipfsRegistryUrl: staticConfig.ipfsRegistryUrl,
+    ipfsGatewayUrl: staticConfig.ipfsGatewayUrl,
     discoveryApi: staticConfig.discoveryApi,
     creator: {
       agentEoa: staticConfig.agentEoa,

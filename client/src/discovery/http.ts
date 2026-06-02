@@ -325,6 +325,29 @@ query TaskPostCounts($limit: Int!, $after: String) {
 }
 `;
 
+/**
+ * Most-recent task for a SolverNet (#957). Filters the `task` table by
+ * `manifestDigest = keccak256(manifestCid)` (the same digest join the other
+ * task queries use), orders newest-first by `createdAtBlock`, limit 1. Returns
+ * the row's `taskCidDigest` + `id` so the caller can reconstruct the IPFS task
+ * CID and read its eligibility ref.
+ */
+const MOST_RECENT_TASK_QUERY = `
+query MostRecentTask($manifestDigest: String!) {
+  tasks(
+    where: { manifestDigest: $manifestDigest },
+    limit: 1,
+    orderBy: "createdAtBlock",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      taskCidDigest
+    }
+  }
+}
+`;
+
 const QUERY_ENVELOPES_QUERY = `
 query QueryEnvelopes($where: envelopeFilter, $limit: Int!) {
   envelopes(
@@ -445,6 +468,12 @@ interface TaskPostCountsPage {
   tasks: {
     items: Array<{ id: string; manifestDigest: string; createdAtBlock: string | number }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface MostRecentTaskPage {
+  tasks: {
+    items: Array<{ id: string; taskCidDigest: string }>;
   };
 }
 
@@ -1457,6 +1486,32 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return { windowEndBlock, windowEndTs, chain, byCid };
   }
 
+  // ── getMostRecentTaskCidDigest (#957) ──────────────────────────────────────
+  // Single newest task (createdAtBlock desc, limit 1) for the SolverNet's
+  // manifestDigest. Pure indexer read — no IPFS hop; the caller reconstructs the
+  // task CID from the returned digest.
+  async function getMostRecentTaskCidDigest(manifestCid: string): Promise<{
+    taskCidDigest: `0x${string}`;
+    taskId: string;
+  } | undefined> {
+    await ensureReady();
+
+    // The indexer keys tasks by `manifestDigest = keccak256(toBytes(cid))`, not
+    // by the cid string — same join the other task queries use.
+    const manifestDigest = manifestDigestForCid(manifestCid).toLowerCase();
+
+    const data = await postGql<MostRecentTaskPage>(
+      gqlUrl,
+      fetchImpl,
+      MOST_RECENT_TASK_QUERY,
+      { manifestDigest },
+    );
+
+    const row = data.tasks?.items?.[0];
+    if (!row || !isHex(row.taskCidDigest)) return undefined;
+    return { taskCidDigest: row.taskCidDigest, taskId: row.id };
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1470,5 +1525,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     getCodeDigestRewards,
     getInstanceClaimCounts,
     getTaskPostCounts,
+    getMostRecentTaskCidDigest,
   };
 }

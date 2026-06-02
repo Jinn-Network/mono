@@ -490,6 +490,34 @@ export interface DiscoveryAPI {
     /** Per-SolverNet totals keyed by manifest CID; empty `{}` when no manifestCids given. */
     byCid: Record<string, TaskPostCounts>;
   }>;
+
+  /**
+   * Returns the most-recently-created task on the SolverNet identified by
+   * `manifestCid` — its on-chain `taskCidDigest` and decimal `taskId` — or
+   * `undefined` when no task has ever been posted for the SolverNet.
+   *
+   * The join key is the same `manifestDigest === keccak256(manifestCid)` used by
+   * `findClaimableTasks` / `getInstanceClaimCounts` (computed via
+   * `manifestDigestForCid`). "Most recent" is by creation order: the HTTP
+   * backing orders the `task` table by `createdAtBlock` desc, limit 1; the
+   * on-chain floor takes the highest-block `TaskCreated` log for the digest.
+   *
+   * This is a PURE indexer/chain read — it returns only the on-chain digest, NOT
+   * any IPFS body. The caller reconstructs the IPFS task CID
+   * (`f01551220 + digestHexWithout0x`, see `adapters/mech/adapter.ts`) and fetches
+   * the body itself. It is the read primitive behind the swe-rebench-v2 fresh-
+   * volume pool recovery (#957): an operator with an empty disk reads a recent
+   * task's eligibility `vettedPoolRef` to re-fetch the published vetted pool.
+   *
+   * This is a *recovery signal*, not a correctness gate, so it is NOT
+   * abort-on-outage: like `getSolverNetOperatorCount` / `getTaskPostCounts`, the
+   * `withFallback` wrapper routes it to the on-chain floor when the indexer is
+   * unavailable rather than propagating `DiscoveryUnavailableError`.
+   */
+  getMostRecentTaskCidDigest(manifestCid: string): Promise<{
+    taskCidDigest: `0x${string}`;
+    taskId: string;
+  } | undefined>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────

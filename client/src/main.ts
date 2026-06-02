@@ -2396,6 +2396,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         agentEoa: agentEoaAddress,
         safeAddress,
         agentPrivateKey,
+        ipfsGatewayUrl: config.ipfsGatewayUrl,
         ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
       },
       logger: {

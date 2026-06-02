@@ -25,6 +25,9 @@ export interface LaunchedRecordGeneratorStaticConfig {
    *  can reconcile its local `successful` counter against network truth
    *  (#669). Omit on test paths where the generator's tick is not exercised. */
   discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
+  /** IPFS gateway, passed through to the swe-rebench-v2 generator for the
+   *  fresh-volume vetted-pool recovery fetch (#957). */
+  ipfsGatewayUrl?: string;
 }
 
 export interface LaunchedRecordGeneratorFactories {
