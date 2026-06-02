@@ -25,6 +25,7 @@ import type { LoadedHeldOutSlate } from '../solver-types/_swe-rebench-v2-held-ou
 import type { ResolvedSlateTask } from './resolve-slate-tasks.js';
 import type { EvalAggregate, EvalResultRecord } from '../store/store.js';
 import { compareRates, type RateComparison } from './wilson.js';
+import { comparePaired, type PairedComparison, type PairedInput } from './paired.js';
 
 /** Thrown when `runHarnessOnce` reports a freeze-fence violation (AC#3). */
 export class FreezeFenceViolationError extends Error {
@@ -135,6 +136,15 @@ export interface EvalOrchestratorDeps {
     getEvalAggregate(checkpointCid: string, slateVersion: string): EvalAggregate;
     /** Distinct slate_hash values the parent's results were recorded under (drift guard). */
     getEvalSlateHashes(checkpointCid: string, slateVersion: string): string[];
+    /**
+     * Optional: per-instance results for a (checkpoint, slate version). When
+     * present, the orchestrator also emits the paired (matched-design) McNemar
+     * verdict (DR-2026-06-02-b §2a) — the same slate is scored before & after, so
+     * the matched test is the statistically correct one and is far more powerful
+     * than the marginal disjoint-interval test. Reported ALONGSIDE `comparison`,
+     * never replacing it (the exam is strengthened, not weakened).
+     */
+    getEvalResults?(checkpointCid: string, slateVersion: string): PairedInput[];
   };
 }
 
@@ -164,6 +174,13 @@ export interface EvalProvenance {
 export interface EvalRunResult {
   perTask: PerTaskResult[];
   comparison: RateComparison;
+  /**
+   * Paired (matched-design) McNemar verdict vs the parent — present only when
+   * the store exposes `getEvalResults`. The marginal `comparison` above is
+   * conservative; this is the statistically correct test for the same-slate
+   * before/after design and is reported alongside it (DR-2026-06-02-b §2a).
+   */
+  paired?: PairedComparison;
   /** What was actually graded (local impl-state), not the checkpoint identity. */
   evaluated: EvalProvenance;
 }
@@ -318,9 +335,20 @@ export async function runEval(args: {
     { passed: parentAgg.passed, scorable: parentAgg.scorable },
   );
 
+  // Paired (matched-design) verdict — same slate scored before & after, so the
+  // matched McNemar test is the correct, higher-power one. Additive: only when
+  // the store exposes per-instance results (DR-2026-06-02-b §2a).
+  let paired: PairedComparison | undefined;
+  if (deps.store.getEvalResults) {
+    const parentResults = deps.store.getEvalResults(parentCheckpointCid, slate.version);
+    const childResults = deps.store.getEvalResults(checkpointCid, slate.version);
+    paired = comparePaired(parentResults, childResults);
+  }
+
   return {
     perTask,
     comparison,
+    ...(paired ? { paired } : {}),
     evaluated: { implStateDir: localImplStateDir, codeDigest: evaluatedDigest, matchedCheckpoint: true },
   };
 }

@@ -38,6 +38,16 @@ problems are now isolated.** Two are upstream of the exam:
    the `learn` skill — so on real tasks the loop's policy (`codeDigest`) advances
    only intermittently. Intermittent + weak policy change ⇒ little for the exam to
    measure. (The #930 persistence e2e hides this: it FORCES a trivial note.)
+   **ROOT CAUSE FOUND + FIX VERIFIED (§6):** the precise trigger is the learner's
+   `SessionStart` hook. On `next` it emits plain stdout (never injected into the
+   model context), so the learn loop runs ~0%. Commit `fbea4aad` rewrites it to
+   emit `additionalContext` that steers the model into the loop — but it is
+   stranded in OPEN **[PR #952](https://github.com/Jinn-Network/mono/pull/952)**,
+   NOT on `next`, so this session trained the PRE-FIX learner. Applying that hook
+   and re-running under the production prompt (no manual directive) made
+   cyclopts-701 run all 7 phases and persist genuine strategy/pattern/test
+   artifacts (`codeDigest` mutated) — **0/2 → persisted**. The unblocker is to
+   land that hook on `next`.
 
 2. **The exam is underpowered at the feasible operating point.** At slate N=10,
    R=1 a `trustworthy` (disjoint-interval) verdict needs **+60–70pp** and is
@@ -53,11 +63,28 @@ problems are now isolated.** Two are upstream of the exam:
    returned `within-noise` (overlapping intervals). It did not false-positive on
    noise. Re-validates PR #975.
 
-**Verdict: efficacy not demonstrated, and a trustworthy positive delta is not
-reachable in THIS environment** (laptop disk → small-repo slate at ceiling; N≤10,
-R=1 power floor) regardless of learner quality. The exam was NOT weakened. This is
-the goal's sanctioned end state ("an honest negative result with diagnosis +
-scoped follow-up") with the unblocker isolated (§6–§7).
+**Verdict: efficacy (a trustworthy positive held-out delta) not demonstrated this
+session — but the diagnose→fix→rerun cycle is closed and two of the three blockers
+are now fixed-and-verified, not just hypothesized:**
+
+- **Problem 1 FIXED + VERIFIED (§6).** The steer hook (`fbea4aad`, PR #952) makes
+  the learner reliably run the 7-phase loop and persist genuine lessons under the
+  production prompt: **0/2 → 2/2** locally + independent hosted verification. It
+  just needs landing on `next` (lift it out of the hosting PR).
+- **Problem 2 PARTLY FIXED (§8.2).** Shipped the paired (matched-design) McNemar
+  statistic — the correct, higher-power test for the same-slate before/after
+  design — additively (never weakening the marginal bar). Remaining: R>1 + larger
+  slate (2b/2c).
+- **Problem 3 remains hardware (§4).** The headroom (large-repo) instances need a
+  disk-adequate host (≥100 GB), not an operator laptop (which crashed). Mitigations
+  scoped in §7.
+
+A trustworthy positive delta is **reachable** once (1) lands on `next`, (2b/2c)
+raise exam power, and the run moves to a disk-adequate host — NOT in this laptop
+environment (small-repo slate at Haiku's ceiling; N≤10/R=1 power floor). The exam
+was NOT weakened. This is the goal's sanctioned end state ("an honest negative
+result with diagnosis + scoped follow-up"), with the primary unblocker fixed and
+verified.
 
 ## §1 — Audit (before spending inference), answered
 
@@ -157,34 +184,64 @@ before→after pass-count jump for a `trustworthy` (disjoint) verdict.
 
 (Reproduce: `yarn tsx scripts/power.ts`.)
 
-## §6 — Leading hypothesis (escalation)
+## §6 — Root cause of Problem 1: the steer hook exists, but is UNMERGED (PR #952)
 
-The learner's extract→promote→commit path is **capable but not reliably
-triggered** on real tasks under claude-code/Haiku:
+The "unreliable persistence" is not a deep learner defect — it is a **known,
+already-fixed, not-yet-merged** plumbing gap, identified mid-session:
 
-- The production handoff `buildInitialPrompt` says only "complete the task… use the
-  available skills" and relies on the model *selecting* the `learn` skill. On a
-  hard real task Haiku often goes straight to solving (via the swe-rebench runtime
-  skill) and never runs the full Improve/Memory pipeline to completion — so nothing
-  is promoted. An explicit pipeline+persist directive raised persistence from 0/2
-  to 1/2 in this session (small n — directional, not conclusive).
-- Even with the directive it is stochastic per task (cyclopts-633 ran all 7 phases
-  incl. `.improve` but committed nothing; cyclopts-701 committed a real lesson).
-- NOTE the earlier mis-read: tier-1–5 mutations (skill/hook/notes edits to
-  `implStateDir/**`) ARE allowed and preferred on claude-code; only tier-7
-  installed-package patches are gated by `allowsHarnessSelfModification=false`. The
-  blocker is *reliability of triggering + completing* the pipeline, not a missing
-  durable sink.
+- **Mechanism.** The learner plugin's `SessionStart` hook on `next` (= the version
+  the efficacy run + persist probes used) only `git init`s implStateDir and
+  `echo`s readiness to **stdout**, which Claude Code logs as a hook event but
+  **never injects into the model context**. So the `learn` skill is merely
+  *available*, not *selected*: under Haiku the model goes straight to the
+  direct-solve skill, the 7-phase loop runs ~0% of the time, and impl-state never
+  accumulates (init commit only). This exactly produces the observed `0/2`
+  persistence under the production prompt.
+- **The fix already exists and is verified — but is stranded.** Commit `fbea4aad`
+  ("feat(learner): steer skill-selection to the learn loop via SessionStart
+  additionalContext") rewrites the hook to emit the documented
+  `hookSpecificOutput.additionalContext` payload directing the session to invoke
+  `learn` and run the full loop. Its own message reports verification on the hosted
+  box (claude-haiku): first Skill call became `learn`, all 7 phases ran (was just
+  `["execute"]`), impl-state 1→3 commits with durable learned notes. **But
+  `git merge-base --is-ancestor fbea4aad origin/next` → NO**: it lives only on
+  branch `claude/jovial-chaplygin-9f28a5` = **OPEN [PR #952](https://github.com/Jinn-Network/mono/pull/952)**
+  ("host supervised launcher+operator daemon on Railway") — so a critical
+  learning-loop fix is bundled inside an unrelated hosting PR and has not reached
+  `next`. **The efficacy run and persist probes in §3 trained the PRE-FIX
+  learner.** My manual "explicit pipeline+persist directive" (which got 1/2) was a
+  hand-rolled substitute for what this hook does automatically.
+- **Hook-only re-verification (this session) — CONFIRMED.** Applied `fbea4aad`'s
+  `session-start` hook to the worktree and re-ran the persist probe under the
+  **production prompt** (`JINN_PERSIST_NO_DIRECTIVE=1`, hook-only — the steer is
+  the ONLY learn-loop trigger, no manual directive). **cyclopts-701: `codeDigest`
+  MUTATED** `e3b0c442…`→`e8b58bea…` (15.2 min); **all 7 phases ran**
+  (`.orient … .memory-consolidation`, vs direct-solve-only pre-fix); Memory
+  consolidation committed real, generalizable artifacts —
+  `strategies/swe-rebench-v2/code-path-alignment.md`,
+  `patterns/code-path-divergence-detection.md`, `tests/parity-test-pattern.md`.
+  **cyclopts-633** (the harder case that did NOT persist even WITH a manual
+  directive pre-fix): also **MUTATED** `e3b0c442…`→`c80d25aa…` (17.2 min), 3
+  `promote:` commits (union-type-dedup strategy, plan template, 5 learning
+  artifacts), all 7 phases. So the hook gives **2/2 persisted under the production
+  prompt** vs **0/2 without it** (+ `fbea4aad`'s independent hosted verification).
+  This is **0/2 → 2/2**: the steer hook is the unblocker, and the persisted lessons
+  are genuine (transferable SWE strategy/pattern/test artifacts), not forced
+  trivial notes. The diagnose→fix→rerun cycle for Problem 1 is closed.
+- NOTE: tier-1–5 mutations (skill/hook/notes edits to `implStateDir/**`) ARE
+  allowed and preferred on claude-code; only tier-7 installed-package patches are
+  gated by `allowsHarnessSelfModification=false`. The blocker was *triggering the
+  pipeline*, not a missing durable sink.
 
 ## §7 — Scoped follow-ups (the path to an actual efficacy proof)
 
-1. **`feat(learner)` — make persistence reliable on real tasks (the unblocker).**
-   Have the daemon handoff / plugin projection reliably invoke the learn pipeline
-   and require the Improve/Memory phases to run to completion + persist any genuine
-   lesson (NOT a forced trivial note). Demonstrated lever: an explicit directive
-   made cyclopts-701 persist. Acceptance: `codeDigest` advances in ≥k of N real
-   cycles with no forced write. (Design-sensitive — the daemon handoff deliberately
-   omits plugin operating details today; route via the projection.)
+1. **`feat(learner)` — land the steer hook on `next` (the unblocker, mostly done).**
+   The fix is `fbea4aad` (SessionStart `additionalContext` steer) — it just needs
+   to reach `next`. It is currently stranded in the unrelated Railway-hosting
+   **[PR #952](https://github.com/Jinn-Network/mono/pull/952)**; **lift it into a
+   standalone learner PR** so the learn loop triggers for everyone, decoupled from
+   the hosting work. Acceptance: `codeDigest` advances in ≥k of N real cycles under
+   the production prompt with no forced write (the §6 hook-only probe is the test).
 2. **`test(learner)` — persistence e2e must test genuine promotion**, not the
    forced trivial note that masks §3 (#930). Assert codeDigest advances on a real
    task without the forced write.
@@ -192,13 +249,16 @@ triggered** on real tasks under claude-code/Haiku:
    profile** (N≈20–30 → certifiable at ~+25–45pp; DR-2026-05-28 §3.3) AND a
    small-repo-only profile that grades without the disk crash (§4).
 4. **`feat(eval)` — R>1 multi-run averaging** (gated on the `eval_results`
-   append-vs-overwrite schema the train-arm header flags).
+   append-vs-overwrite schema the train-arm header flags). Pairs with the §2a
+   paired statistic: per-instance rates from R runs feed a Wilcoxon/paired
+   bootstrap, further raising power.
 5. **Re-run `e2e:train-arm-efficacy`** at the higher-power config and/or a model
    tier with headroom on hard instances, once (1)/(3) land — the actual efficacy
    proof.
 
-## §8 — Shipped this session (closes the trivial-training gap)
+## §8 — Shipped this session
 
+**1. Closes the trivial-training gap.**
 `client/test/e2e/train-arm-efficacy-swe-rebench-v2.ts` (`yarn e2e:train-arm-efficacy`):
 trains the learner on REAL swe-rebench tasks disjoint from the slate (AC#2
 `buildTrainSequence`/`assertNoOverlap` guard holds), both arms through the
@@ -206,8 +266,23 @@ daemon-faithful path (`runHarnessWithFreezeFence(train)` + `runEval`/frozen).
 Env-parametrized for budget + explicit instance selection
 (`JINN_EFFICACY_SLATE_IDS`, `_TRAIN_IDS`, `_N_TRAIN`, `_K`, `_SLATE_COUNT`,
 `_TRAIN_WIN_MIN`); skips clean. Plus reproducers: `scripts/efficacy-probe.ts`
-(baseline), `scripts/train-persist-probe.ts` (instrumented persistence probe),
-`scripts/power.ts` (power table).
+(baseline), `scripts/train-persist-probe.ts` (instrumented persistence probe,
+`JINN_PERSIST_NO_DIRECTIVE=1` for hook-only), `scripts/power.ts` (power table).
+
+**2. Problem 2a power fix — the paired (matched-design) statistic.**
+`client/src/eval/paired.ts` (`mcnemarExact` + `comparePaired`) + tests
+(`test/eval/paired.test.ts`, 12). The exam scores the SAME slate before & after,
+so the matched McNemar test is the statistically correct one — and far more
+powerful than the marginal disjoint-Wilson test (which carries between-instance
+difficulty variance in both arms). Wired additively into `runEval`
+(`EvalRunResult.paired`, computed when the store exposes `getEvalResults`),
+surfaced in `jinn eval --human` and the efficacy harness (per-interval +
+baseline↔final). **It is reported ALONGSIDE the marginal verdict, never replacing
+it** — a strengthening, gated on significance (p<α) AND improvement direction, so
+the exam is never weakened. typecheck / 54 eval tests / `e2e:freeze-mode` green.
+
+**3. Pulled the steer hook into the worktree** (`fbea4aad`'s `session-start`) to
+re-verify Problem 1 under the production prompt (§6).
 
 ## §9 — Reproduction
 

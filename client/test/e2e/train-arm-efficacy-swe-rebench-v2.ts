@@ -68,6 +68,7 @@ import { resolveRuntimePluginsForSolverType, runHarnessForEval } from '../../src
 import { leastSquaresSlope, type RatePoint } from '../../src/eval/slope.js';
 import { buildTrainSequence, assertNoOverlap } from '../../src/eval/train-sequence.js';
 import { wilsonInterval } from '../../src/eval/wilson.js';
+import { comparePaired } from '../../src/eval/paired.js';
 import { SweRebenchV2Evaluator } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { HttpHfFetcher } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
@@ -322,7 +323,9 @@ async function main(): Promise<void> {
       const agg = store.getEvalAggregate(checkpointCid, slate.version);
       const w = wilsonInterval(agg.passed, agg.scorable);
       rows.push({ cycleIndex, resolved: agg.passed, scorable: agg.scorable, unscorable: agg.unscorable, wilson: w, checkpointCid });
-      console.log(`  [cycle ${cycleIndex}] codeDigest=${checkpointCid.slice(0, 20)}… resolved ${agg.passed}/${agg.scorable} = ${(w.p * 100).toFixed(1)}% [${(w.lo * 100).toFixed(1)}, ${(w.hi * 100).toFixed(1)}] (${agg.unscorable} unscorable) verdict-vs-parent=${result.comparison.verdict}`);
+      const pd = result.paired;
+      const pairedStr = pd ? `${pd.improved}↑/${pd.regressed}↓ p=${pd.pValue.toFixed(3)} ${pd.verdict}` : 'n/a';
+      console.log(`  [cycle ${cycleIndex}] codeDigest=${checkpointCid.slice(0, 20)}… resolved ${agg.passed}/${agg.scorable} = ${(w.p * 100).toFixed(1)}% [${(w.lo * 100).toFixed(1)}, ${(w.hi * 100).toFixed(1)}] (${agg.unscorable} unscorable) · marginal-vs-parent=${result.comparison.verdict} · paired-vs-parent=${pairedStr}`);
       return checkpointCid;
     };
 
@@ -359,6 +362,13 @@ async function main(): Promise<void> {
     const first = rows[0];
     const last = rows[rows.length - 1];
     const disjoint = last.wilson.lo > first.wilson.hi || first.wilson.lo > last.wilson.hi;
+    // Baseline↔final PAIRED (matched-design) verdict — the correct, higher-power
+    // test (DR-2026-06-02-b §2a). Same slate scored at baseline and final, so
+    // compare the two checkpoints' per-instance results directly.
+    const baselinePaired = comparePaired(
+      store.getEvalResults(first.checkpointCid, slate.version),
+      store.getEvalResults(last.checkpointCid, slate.version),
+    );
 
     const summary = {
       issue: 822,
@@ -371,6 +381,7 @@ async function main(): Promise<void> {
       intervals: rows,
       resolvedRateSlopePerCycle: slope,
       baselineVsFinalDisjoint: disjoint,
+      baselineVsFinalPaired: baselinePaired,
       caveat: HONESTY_CAVEAT,
     };
     console.log('\n=== JSON ===');
@@ -380,7 +391,11 @@ async function main(): Promise<void> {
       console.log(`  cycle ${r.cycleIndex}: ${r.resolved}/${r.scorable} = ${(r.wilson.p * 100).toFixed(1)}% [${(r.wilson.lo * 100).toFixed(1)}, ${(r.wilson.hi * 100).toFixed(1)}]${r.unscorable ? ` (${r.unscorable} unscorable)` : ''}`);
     }
     console.log(`  resolved-rate slope: ${slope >= 0 ? '+' : ''}${slope.toFixed(4)} / cycle`);
-    console.log(`  baseline↔final Wilson intervals disjoint (trustworthy)? ${disjoint}`);
+    console.log(`  baseline↔final marginal (Wilson disjoint) trustworthy? ${disjoint}`);
+    console.log(
+      `  baseline↔final PAIRED (McNemar): ${baselinePaired.improved}↑ ${baselinePaired.regressed}↓ of ` +
+        `${baselinePaired.pairs} pairs · p=${baselinePaired.pValue.toFixed(3)} → ${baselinePaired.verdict}`,
+    );
     console.log(`\n  ${HONESTY_CAVEAT}`);
     if (rows.length < 2) throw new Error('need >=2 eval intervals; collected ' + rows.length);
     console.log('\n=== e2e PASSED (ran to completion; see disjoint flag for efficacy verdict) ===');

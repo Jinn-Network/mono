@@ -199,9 +199,19 @@ function renderHuman(result: EvalRunResult): string {
   // Provenance (Legibility): the graded artifact is the operator's LOCAL frozen
   // impl-state, verified == the named checkpoint — not a re-fetched checkpoint state.
   const provenance = `evaluated local impl-state at ${result.evaluated.codeDigest}, verified == checkpoint`;
+  // Paired (matched-design) verdict — the correct, higher-power test for the
+  // same-slate before/after design; reported alongside the conservative marginal
+  // verdict above (DR-2026-06-02-b §2a).
+  const p = result.paired;
+  const pairedLine = p
+    ? `\npaired (McNemar): ${p.improved}↑ ${p.regressed}↓ of ${p.pairs} matched pairs · ` +
+      `p=${p.pValue.toFixed(3)} (${p.verdict === 'trustworthy' ? 'trustworthy' : 'within noise'})`
+    : '';
   return (
     `resolved ${passed}/${scorable} = ${pct(c.child.p)} ${ci(c.child)} ` +
-    `vs parent ${pct(c.parent.p)} ${ci(c.parent)} · Δ ${sign}${deltaPp}pp (${verdict})${tail}\n` +
+    `vs parent ${pct(c.parent.p)} ${ci(c.parent)} · Δ ${sign}${deltaPp}pp (${verdict})${tail}` +
+    pairedLine +
+    '\n' +
     provenance
   );
 }

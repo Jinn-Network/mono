@@ -62,9 +62,15 @@ async function main(): Promise<void> {
   console.log(`\ninstance: ${instanceId}\nimplStateDir before: ${before}`);
 
   const windowEndTs = Date.now() + 30 * 60_000;
+  // JINN_PERSIST_NO_DIRECTIVE=1 → production-prompt ONLY (no manual pipeline
+  // directive), so the ONLY thing that can trigger the learn loop is the
+  // plugin's SessionStart steer hook. Used to test whether fbea4aad's hook
+  // makes persistence reliable on its own.
+  const noDirective = process.env['JINN_PERSIST_NO_DIRECTIVE'] === '1';
+  console.log(`prompt mode: ${noDirective ? 'PRODUCTION (no manual directive — hook-only)' : 'EXPLICIT pipeline directive'}`);
   const task = {
     id: instanceId,
-    description: `${resolved.task.problem_statement}\n\n${PIPELINE_DIRECTIVE}`,
+    description: noDirective ? resolved.task.problem_statement : `${resolved.task.problem_statement}\n\n${PIPELINE_DIRECTIVE}`,
     role: 'restoration',
     solverType: 'swe-rebench-v2.v1',
     spec: resolved.task as unknown as Record<string, unknown>,
