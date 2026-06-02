@@ -68,3 +68,44 @@ describe('eval_results store', () => {
     }
   });
 });
+
+describe('getEvalSlateHashes (slate-content drift detection)', () => {
+  it('returns the distinct slate_hash values recorded for a (checkpoint, version)', () => {
+    const store = newStore();
+    try {
+      store.recordEvalResult({ ...base, slate_hash: 'sha256:content-A', instance_id: 'a-1', passed: true, unscorable: false });
+      store.recordEvalResult({ ...base, slate_hash: 'sha256:content-A', instance_id: 'b-2', passed: false, unscorable: false });
+      expect(store.getEvalSlateHashes('cid-child', 'v1')).toEqual(['sha256:content-A']);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('surfaces MULTIPLE distinct hashes when the slate content drifted under one version label', () => {
+    const store = newStore();
+    try {
+      // Two instances recorded under the SAME version 'v1' but DIFFERENT content
+      // hashes — exactly the version-bump-skipped drift the schema comment says
+      // slate_hash exists to make detectable.
+      // Insert B before A to prove the query returns them sorted (ORDER BY slate_hash),
+      // not in insertion order.
+      store.recordEvalResult({ ...base, slate_hash: 'sha256:content-B', instance_id: 'b-2', passed: false, unscorable: false });
+      store.recordEvalResult({ ...base, slate_hash: 'sha256:content-A', instance_id: 'a-1', passed: true, unscorable: false });
+      expect(store.getEvalSlateHashes('cid-child', 'v1')).toEqual([
+        'sha256:content-A',
+        'sha256:content-B',
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('returns an empty array when the checkpoint has no rows for the version', () => {
+    const store = newStore();
+    try {
+      expect(store.getEvalSlateHashes('cid-parent', 'v1')).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+});

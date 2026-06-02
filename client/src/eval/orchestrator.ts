@@ -70,6 +70,44 @@ export class ParentNotEvaluatedError extends Error {
   }
 }
 
+/** A checkpoint whose recorded results carry slate hashes other than the current one. */
+export interface SlateHashDrift {
+  checkpointCid: string;
+  /** The drifted hashes (each != the current slate hash). */
+  hashes: string[];
+}
+
+/**
+ * Thrown when EITHER compared checkpoint was scored on a DIFFERENT slate
+ * *content* under the same version label (DR-2026-05-28 §2 — confounder control).
+ * A slate is content-addressed and scores are comparable ONLY within identical
+ * content; the store keys aggregates by version, so a content edit that skipped
+ * the version bump (or re-derived the declared hash — which the slate loader
+ * admits passes), or stale rows surviving `recordEvalResult`'s by-instance
+ * upsert, would let the comparison silently compare two checkpoints scored on
+ * different task sets. That is confounder #1 (task-selection) — exactly what the
+ * held-out exam exists to defeat — so we refuse the comparison loudly instead.
+ */
+export class SlateHashMismatchError extends Error {
+  constructor(
+    public readonly slateVersion: string,
+    public readonly currentSlateHash: string,
+    public readonly drifted: ReadonlyArray<SlateHashDrift>,
+  ) {
+    const detail = drifted
+      .map((d) => `${d.checkpointCid} carries [${d.hashes.join(', ')}]`)
+      .join('; ');
+    super(
+      `a checkpoint was evaluated against a different slate content under the same version label ` +
+        `${slateVersion}: current slate hash is ${currentSlateHash} but ${detail}. Same version must ` +
+        `mean the same exam — a slate content change is a measurement discontinuity that must bump the ` +
+        `version. Bump the slate version and re-evaluate; refusing to report a delta across two ` +
+        `different task sets (confounder #1, task-selection)`,
+    );
+    this.name = 'SlateHashMismatchError';
+  }
+}
+
 /**
  * Injected `runHarnessOnce`-shaped boundary. Mirrors the production
  * `runHarnessOnce` (freeze-fence + mode propagation) but also surfaces the
@@ -95,6 +133,8 @@ export interface EvalOrchestratorDeps {
   store: {
     recordEvalResult(args: EvalResultRecord): void;
     getEvalAggregate(checkpointCid: string, slateVersion: string): EvalAggregate;
+    /** Distinct slate_hash values the parent's results were recorded under (drift guard). */
+    getEvalSlateHashes(checkpointCid: string, slateVersion: string): string[];
   };
 }
 
@@ -139,6 +179,24 @@ export async function runEval(args: {
   implStateDir?: string;
 }): Promise<EvalRunResult> {
   const { deps, slate, checkpointCid, parentCheckpointCid } = args;
+
+  // Confounder guard (DR-2026-05-28 §2). The store keys aggregates by slate
+  // VERSION; if EITHER checkpoint has results recorded under a different slate
+  // CONTENT for that version — a content edit that skipped the version bump, or
+  // stale rows surviving recordEvalResult's by-instance upsert — comparing
+  // child-vs-parent reintroduces confounder #1 (task-selection: two scores over
+  // different task sets). Both arms' hashes are known up front, so detect drift
+  // in EITHER before the loop and refuse — never burn N× real spend producing a
+  // number we'd have to throw away.
+  const drifted = [parentCheckpointCid, checkpointCid]
+    .map((cid) => ({
+      checkpointCid: cid,
+      hashes: deps.store.getEvalSlateHashes(cid, slate.version).filter((hash) => hash !== slate.hash),
+    }))
+    .filter((arm) => arm.hashes.length > 0);
+  if (drifted.length > 0) {
+    throw new SlateHashMismatchError(slate.version, slate.hash, drifted);
+  }
 
   // Hoist the impl-state-dir fetch outside the loop: every slate instance runs
   // against the SAME checkpoint state.

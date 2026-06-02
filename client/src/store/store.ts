@@ -2688,6 +2688,25 @@ export class Store {
     return { passed: row.passed, scorable: row.scorable, unscorable: row.unscorable };
   }
 
+  /**
+   * Distinct `slate_hash` values recorded for a (checkpoint, slate version).
+   * The eval orchestrator reads this to detect slate-content drift under a
+   * stable version label — the held-out exam is only an honest before/after
+   * when the parent and child were scored on the SAME slate content (defeating
+   * confounder #1, task-selection). Empty when the checkpoint has no rows.
+   */
+  getEvalSlateHashes(checkpoint_cid: string, slate_version: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT slate_hash
+         FROM eval_results
+         WHERE checkpoint_cid = ? AND slate_version = ?
+         ORDER BY slate_hash`,
+      )
+      .all(checkpoint_cid, slate_version) as { slate_hash: string }[];
+    return rows.map((r) => r.slate_hash);
+  }
+
   /** Per-task eval results for a (checkpoint, slate version), ordered by instance_id. */
   getEvalResults(checkpoint_cid: string, slate_version: string): EvalResultRow[] {
     const rows = this.db

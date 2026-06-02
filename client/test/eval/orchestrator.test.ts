@@ -4,6 +4,7 @@ import {
   ParentNotEvaluatedError,
   FreezeFenceViolationError,
   CheckpointStateMismatchError,
+  SlateHashMismatchError,
   type EvalOrchestratorDeps,
 } from '@/eval/orchestrator.js';
 import type { ResolvedSlateTask } from '@/eval/resolve-slate-tasks.js';
@@ -11,6 +12,7 @@ import type { LoadedHeldOutSlate } from '@/solver-types/_swe-rebench-v2-held-out
 import type { HarnessCheckpointManifest } from '@jinn-network/sdk/checkpoint';
 import type { HfRow } from '@/harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { EvalCouldNotGradeError, InsufficientDiskError } from '@/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
+import { Store } from '@/store/store.js';
 
 function stubRow(instance_id: string): HfRow {
   return {
@@ -55,6 +57,31 @@ const manifest = {
   codeDigest: 'sha256:' + 'd'.repeat(64),
 } as unknown as HarnessCheckpointManifest;
 
+/**
+ * A frozen-mode `runHarnessOnce` mock that emits the manifest codeDigest (so the
+ * C1 guard passes) and a per-task patch. Shared by every deps factory below; the
+ * mismatch / violation cases override it.
+ */
+function frozenRunOnce(): EvalOrchestratorDeps['runHarnessOnce'] {
+  return vi.fn(async ({ task }) => ({
+    envelope: { executor: { mode: 'frozen' as const, codeDigest: manifest.codeDigest } },
+    solution: { patch: `patch-${task?.id ?? 'x'}` },
+  }));
+}
+
+/** A mocked evaluator whose "policy" grades exactly `passIds` as passed. */
+function passIdEvaluator(passIds: Set<string>): EvalOrchestratorDeps['evaluator'] {
+  return {
+    grade: vi.fn(async ({ task }: { task: { instance_id: string } }) => ({
+      schemaVersion: 'swe-rebench-v2-verdict.v1' as const,
+      score: passIds.has(task.instance_id) ? (1 as const) : (0 as const),
+      passed_match: passIds.has(task.instance_id),
+      evaluator_cost_usd: 0,
+      test_log: 'log',
+    })),
+  } as unknown as EvalOrchestratorDeps['evaluator'];
+}
+
 function baseDeps(over: Partial<EvalOrchestratorDeps> = {}): EvalOrchestratorDeps {
   const recorded: Record<string, { passed: boolean | null; unscorable: boolean }> = {};
   const store: EvalOrchestratorDeps['store'] = {
@@ -72,25 +99,14 @@ function baseDeps(over: Partial<EvalOrchestratorDeps> = {}): EvalOrchestratorDep
         unscorable: rows.filter((r) => r.unscorable).length,
       };
     }),
+    // Both arms were evaluated against the current slate content → no drift.
+    getEvalSlateHashes: vi.fn(() => [slate.hash]),
   };
   return {
     harness: {} as EvalOrchestratorDeps['harness'],
     fetchImplStateDirToLocal: vi.fn(async () => '/tmp/impl'),
-    evaluator: {
-      grade: vi.fn(async ({ task }) => ({
-        schemaVersion: 'swe-rebench-v2-verdict.v1' as const,
-        score: task.instance_id === 'a-1' ? (1 as const) : (0 as const),
-        passed_match: task.instance_id === 'a-1',
-        evaluator_cost_usd: 0,
-        test_log: 'log',
-      })),
-    } as unknown as EvalOrchestratorDeps['evaluator'],
-    runHarnessOnce: vi.fn(async ({ task }) => ({
-      // Match the manifest codeDigest by default so the C1 guard passes; the
-      // mismatch case overrides this.
-      envelope: { executor: { mode: 'frozen' as const, codeDigest: manifest.codeDigest } },
-      solution: { patch: `patch-${task?.id ?? 'x'}` },
-    })),
+    evaluator: passIdEvaluator(new Set(['a-1'])),
+    runHarnessOnce: frozenRunOnce(),
     store,
     ...over,
   };
@@ -152,6 +168,9 @@ describe('runEval orchestrator', () => {
             ? { passed: 0, scorable: 0, unscorable: 0 }
             : { passed: 1, scorable: 2, unscorable: 0 },
         ),
+        // Parent has no recorded rows → no hashes → no drift (the end-of-run
+        // ParentNotEvaluatedError is what fires for an unevaluated parent).
+        getEvalSlateHashes: vi.fn(() => []),
       },
     });
     await expect(
@@ -348,5 +367,274 @@ describe('runEval orchestrator', () => {
       deps,
     });
     expect(deps.fetchImplStateDirToLocal).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Instrument-level discrimination + confounder control ────────────────────────
+//
+// These drive the FULL `runEval` instrument (run → grade → record → aggregate →
+// compare) through a REAL in-memory Store, so the comparison is computed from
+// rows the orchestrator actually persisted and aggregated — not hand-fed counts
+// (wilson.test.ts already covers the math primitive in isolation). Only the
+// harness run and the evaluator are mocked, per the "no Docker / no inference"
+// constraint. A "policy" is expressed as the set of instance_ids its evaluator
+// grades as passed. Confounder control is the discipline that the SAME slate and
+// the SAME parent baseline are used across policies — only the policy varies.
+
+const N10 = Array.from({ length: 10 }, (_, i) => `inst-${String(i).padStart(2, '0')}`);
+
+function slateOf(ids: string[], hash: `sha256:${string}` = 'sha256:fixed-slate'): LoadedHeldOutSlate {
+  return { version: 'v1', hash, instanceIds: new Set(ids) };
+}
+
+function tasksFor(ids: string[]): ResolvedSlateTask[] {
+  return ids.map(stubTask);
+}
+
+/**
+ * Deps wired to a REAL store whose evaluator grades exactly `passIds` as passed —
+ * the "policy" under test. Reuses the same frozen harness + pass-set evaluator
+ * factories as baseDeps; only the store (real vs mock) differs.
+ */
+function policyDeps(store: Store, passIds: Set<string>): EvalOrchestratorDeps {
+  return {
+    harness: {} as EvalOrchestratorDeps['harness'],
+    fetchImplStateDirToLocal: vi.fn(async () => '/tmp/impl'),
+    evaluator: passIdEvaluator(passIds),
+    runHarnessOnce: frozenRunOnce(),
+    store,
+  };
+}
+
+/** Seed a parent checkpoint as if it had already been evaluated on `slate`. */
+function seedParentBaseline(
+  store: Store,
+  parentCid: string,
+  slate: LoadedHeldOutSlate,
+  passIds: Set<string>,
+): void {
+  for (const id of slate.instanceIds) {
+    store.recordEvalResult({
+      checkpoint_cid: parentCid,
+      slate_hash: slate.hash,
+      slate_version: slate.version,
+      instance_id: id,
+      passed: passIds.has(id),
+      unscorable: false,
+      code_digest: 'sha256:parent-digest',
+      run_at_ms: 0,
+    });
+  }
+}
+
+describe('runEval — confounder control: slate-content drift guard', () => {
+  it('refuses to compare when the parent was scored on a DIFFERENT slate content under the same version (fail fast, records nothing)', async () => {
+    const store = new Store(':memory:');
+    try {
+      const childSlate = slateOf(N10, 'sha256:content-NEW');
+      // Parent was evaluated against the OLD slate content under the SAME 'v1'
+      // label — a version-bump-skipped edit. Comparing child-vs-parent now would
+      // silently reintroduce confounder #1 (two checkpoints on different task sets).
+      seedParentBaseline(store, 'cid-parent', slateOf(N10, 'sha256:content-OLD'), new Set(N10.slice(0, 5)));
+
+      const deps = policyDeps(store, new Set(N10.slice(0, 9)));
+      let threw: unknown;
+      try {
+        await runEval({
+          checkpointManifest: manifest,
+          checkpointCid: 'cid-child',
+          slate: childSlate,
+          tasksWithRows: tasksFor(N10),
+          parentCheckpointCid: 'cid-parent',
+          deps,
+        });
+      } catch (err) {
+        threw = err;
+      }
+
+      expect(threw).toBeInstanceOf(SlateHashMismatchError);
+      expect((threw as SlateHashMismatchError).message).toMatch(/different slate content|slate.*drift|same version/i);
+      expect((threw as SlateHashMismatchError).message).toContain('cid-parent');
+      // Fail fast BEFORE burning N× spend: the slate never ran, nothing recorded.
+      expect(deps.runHarnessOnce).not.toHaveBeenCalled();
+      expect(store.getEvalResults('cid-child', 'v1')).toHaveLength(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('refuses when the CHILD carries stale rows from a prior different-content eval (guard is symmetric)', async () => {
+    const store = new Store(':memory:');
+    try {
+      const currentSlate = slateOf(N10, 'sha256:content-NEW');
+      // Parent is clean — already evaluated against the CURRENT content.
+      seedParentBaseline(store, 'cid-parent', currentSlate, new Set(N10.slice(0, 5)));
+      // The CHILD carries stale rows for instances NO LONGER in the slate, from a
+      // prior eval against the OLD content under the same 'v1' label. recordEvalResult
+      // upserts by instance_id and never deletes, so these survive the new run and
+      // would silently mix two contents into getEvalAggregate(child). A parent-only
+      // guard misses this; the symmetric guard must catch it.
+      seedParentBaseline(store, 'cid-child', slateOf(['gone-1', 'gone-2'], 'sha256:content-OLD'), new Set(['gone-1']));
+
+      const deps = policyDeps(store, new Set(N10.slice(0, 9)));
+      let threw: unknown;
+      try {
+        await runEval({
+          checkpointManifest: manifest,
+          checkpointCid: 'cid-child',
+          slate: currentSlate,
+          tasksWithRows: tasksFor(N10),
+          parentCheckpointCid: 'cid-parent',
+          deps,
+        });
+      } catch (err) {
+        threw = err;
+      }
+
+      expect(threw).toBeInstanceOf(SlateHashMismatchError);
+      // The error names the offending checkpoint — here it is the CHILD.
+      expect((threw as SlateHashMismatchError).message).toContain('cid-child');
+      // Fail fast: never ran the harness, never compounded the stale rows.
+      expect(deps.runHarnessOnce).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+  });
+
+  it('compares normally when the parent was scored on the SAME slate content', async () => {
+    const store = new Store(':memory:');
+    try {
+      const slate = slateOf(N10, 'sha256:same-content');
+      seedParentBaseline(store, 'cid-parent', slate, new Set(N10.slice(0, 5)));
+
+      const deps = policyDeps(store, new Set(N10.slice(0, 6)));
+      const result = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child',
+        slate,
+        tasksWithRows: tasksFor(N10),
+        parentCheckpointCid: 'cid-parent',
+        deps,
+      });
+      // Same content → no drift → the instrument runs and compares.
+      expect(deps.runHarnessOnce).toHaveBeenCalledTimes(10);
+      expect(result.comparison.child.p).toBeCloseTo(0.6, 5);
+      expect(result.comparison.parent.p).toBeCloseTo(0.5, 5);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe('runEval — discrimination: a better policy scores higher than a worse one', () => {
+  it('ranks a better policy above a worse one on the SAME slate and SAME parent baseline', async () => {
+    const store = new Store(':memory:');
+    try {
+      const slate = slateOf(N10);
+      // One fixed parent baseline (5/10) — the held-fixed reference.
+      seedParentBaseline(store, 'cid-parent', slate, new Set(N10.slice(0, 5)));
+
+      const better = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child-better',
+        slate,
+        tasksWithRows: tasksFor(N10),
+        parentCheckpointCid: 'cid-parent',
+        deps: policyDeps(store, new Set(N10.slice(0, 9))), // 9/10
+      });
+      const worse = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child-worse',
+        slate,
+        tasksWithRows: tasksFor(N10),
+        parentCheckpointCid: 'cid-parent',
+        deps: policyDeps(store, new Set(N10.slice(0, 2))), // 2/10
+      });
+
+      // The instrument ranks the better policy above the worse one…
+      expect(better.comparison.child.p).toBeGreaterThan(worse.comparison.child.p);
+      expect(better.comparison.child.p).toBeCloseTo(0.9, 5);
+      expect(worse.comparison.child.p).toBeCloseTo(0.2, 5);
+      // …and the delta sign points the right way against the shared baseline.
+      expect(better.comparison.delta).toBeGreaterThan(0); // 0.9 − 0.5
+      expect(worse.comparison.delta).toBeLessThan(0); // 0.2 − 0.5
+      expect(better.comparison.delta).toBeGreaterThan(worse.comparison.delta);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('reports a large improvement as trustworthy with a positive delta (CI moves the right way)', async () => {
+    const store = new Store(':memory:');
+    try {
+      const slate = slateOf(N10);
+      seedParentBaseline(store, 'cid-parent', slate, new Set(N10.slice(0, 2))); // weak baseline 2/10
+
+      const result = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child',
+        slate,
+        tasksWithRows: tasksFor(N10),
+        parentCheckpointCid: 'cid-parent',
+        deps: policyDeps(store, new Set(N10.slice(0, 9))), // strong child 9/10
+      });
+
+      expect(result.comparison.child.p).toBeCloseTo(0.9, 5);
+      expect(result.comparison.parent.p).toBeCloseTo(0.2, 5);
+      expect(result.comparison.delta).toBeCloseTo(0.7, 5);
+      // 9/10 vs 2/10 → disjoint Wilson intervals → trustworthy.
+      expect(result.comparison.verdict).toBe('trustworthy');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('reports a regression as trustworthy with a NEGATIVE delta (sign flips the right way)', async () => {
+    const store = new Store(':memory:');
+    try {
+      const slate = slateOf(N10);
+      seedParentBaseline(store, 'cid-parent', slate, new Set(N10.slice(0, 9))); // strong baseline 9/10
+
+      const result = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child',
+        slate,
+        tasksWithRows: tasksFor(N10),
+        parentCheckpointCid: 'cid-parent',
+        deps: policyDeps(store, new Set(N10.slice(0, 2))), // regressed child 2/10
+      });
+
+      expect(result.comparison.child.p).toBeCloseTo(0.2, 5);
+      expect(result.comparison.parent.p).toBeCloseTo(0.9, 5);
+      expect(result.comparison.delta).toBeCloseTo(-0.7, 5);
+      expect(result.comparison.verdict).toBe('trustworthy');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('withholds the trustworthy claim for a small improvement (only large deltas are trustworthy — never weaken the exam)', async () => {
+    const store = new Store(':memory:');
+    try {
+      const slate = slateOf(N10);
+      seedParentBaseline(store, 'cid-parent', slate, new Set(N10.slice(0, 5))); // 5/10
+
+      const result = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child',
+        slate,
+        tasksWithRows: tasksFor(N10),
+        parentCheckpointCid: 'cid-parent',
+        deps: policyDeps(store, new Set(N10.slice(0, 6))), // +1 instance: 6/10
+      });
+
+      // A real but tiny gain: the delta is positive…
+      expect(result.comparison.delta).toBeGreaterThan(0);
+      expect(result.comparison.delta).toBeCloseTo(0.1, 5);
+      // …but at N=10 the Wilson intervals overlap, so the exam refuses to over-claim.
+      expect(result.comparison.verdict).toBe('within-noise');
+    } finally {
+      store.close();
+    }
   });
 });
