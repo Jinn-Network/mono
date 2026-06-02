@@ -273,5 +273,16 @@ export function withFallback(
       // its tick rather than treating absent data as truth.
       return primary.getInstanceClaimCounts(args);
     },
+
+    getTaskPostCounts(args) {
+      // Supply signal (not a correctness gate): fall through to the floor on an
+      // indexer outage like getSolverNetOperatorCount. The on-chain floor
+      // reconstructs the windowed counts directly from TaskCreated logs, so a
+      // floor result is meaningful (unlike the abort-on-outage methods above).
+      return dispatch(
+        () => primary.getTaskPostCounts(args),
+        () => floor.getTaskPostCounts(args),
+      );
+    },
   };
 }

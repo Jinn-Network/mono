@@ -919,6 +919,31 @@ export interface DiscoverySolverNetOperatorCountResponse {
   operatorCount: number;
 }
 
+/**
+ * Windowed on-chain task-post counts (last 1h / 6h / 24h) for one scope. Source
+ * is `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter,
+ * computed as a block-window approximation backend-side. Issue #918.
+ */
+export interface TaskPostCountsDto {
+  h1: number;
+  h6: number;
+  h24: number;
+  windowEndBlock: number;
+  windowEndTs: number;
+}
+
+/**
+ * Response from `GET /v1/discovery/task-post-counts`. `chain` is always present
+ * (chain-wide totals); `byCid` is keyed by manifest CID and only populated when
+ * `cid` params were supplied. Issue #918.
+ */
+export interface DiscoveryTaskPostCountsResponse {
+  windowEndBlock: number;
+  windowEndTs: number;
+  chain: TaskPostCountsDto;
+  byCid: Record<string, TaskPostCountsDto>;
+}
+
 // ── Per-harness readiness (vh74.2 Stage A — #248 / #332) ─────────────────────
 // Mirrors the daemon's `HarnessReadinessSnapshot` entry shape exposed at
 // `GET /v1/harnesses/:name/readiness`. The join form consults this to disable

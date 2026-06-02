@@ -22,8 +22,20 @@ vi.mock('../api/client.js', () => ({
     solvernets: {
       listLaunched: vi.fn(),
     },
+    discovery: {
+      getTaskPostCounts: vi.fn(),
+    },
   },
 }));
+
+function emptyPostCounts() {
+  return {
+    windowEndBlock: 0,
+    windowEndTs: 0,
+    chain: { h1: 0, h6: 0, h24: 0, windowEndBlock: 0, windowEndTs: 0 },
+    byCid: {} as Record<string, { h1: number; h6: number; h24: number; windowEndBlock: number; windowEndTs: number }>,
+  };
+}
 
 function buildRecord(
   overrides: Partial<LaunchedSolverNetRecord> = {},
@@ -87,6 +99,8 @@ function wrap(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: no posts. Tests that care override this.
+  vi.mocked(api.discovery.getTaskPostCounts).mockResolvedValue(emptyPostCounts());
 });
 
 afterEach(() => {
@@ -272,6 +286,66 @@ describe('LauncherPage', () => {
     expect(screen.getByTestId('launcher-create-cta').getAttribute('href')).toBe(
       '/launcher/create',
     );
+  });
+
+  it('shows per-row recent-post counts and a zero-state for rows without counts (#918)', async () => {
+    vi.mocked(api.solvernets.listLaunched).mockResolvedValue({
+      records: [
+        buildRecord({ solverNetId: 'net-a', manifestCid: 'cid-a' }),
+        buildRecord({ solverNetId: 'net-b', manifestCid: 'cid-b' }),
+      ],
+    });
+    vi.mocked(api.discovery.getTaskPostCounts).mockResolvedValue({
+      ...emptyPostCounts(),
+      windowEndBlock: 1000,
+      byCid: {
+        'cid-a': { h1: 2, h6: 5, h24: 9, windowEndBlock: 1000, windowEndTs: 0 },
+      },
+    });
+    wrap(<LauncherPage />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId('launcher-owned-row').length).toBe(2),
+    );
+    await waitFor(() => {
+      const cells = screen.getAllByTestId('launcher-owned-row-postcounts');
+      expect(cells.length).toBe(2);
+      // Row A has counts; row B falls back to the zero-state message.
+      expect(cells[0]!.textContent).toMatch(/2/);
+      expect(cells[0]!.textContent).toMatch(/9/);
+      expect(cells[1]!.textContent).toMatch(/No recent posts/i);
+    });
+  });
+
+  it('batches the recent-post query into ONE call with every cid (#918)', async () => {
+    vi.mocked(api.solvernets.listLaunched).mockResolvedValue({
+      records: [
+        buildRecord({ solverNetId: 'net-a', manifestCid: 'cid-a' }),
+        buildRecord({ solverNetId: 'net-b', manifestCid: 'cid-b' }),
+      ],
+    });
+    wrap(<LauncherPage />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId('launcher-owned-row').length).toBe(2),
+    );
+    await waitFor(() =>
+      expect(api.discovery.getTaskPostCounts).toHaveBeenCalledWith(['cid-a', 'cid-b']),
+    );
+    // One batched call (initial render); never one-per-row.
+    expect(api.discovery.getTaskPostCounts).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders an unavailable message per row on a recent-post query error (#918)', async () => {
+    vi.mocked(api.solvernets.listLaunched).mockResolvedValue({
+      records: [buildRecord({ solverNetId: 'net-a', manifestCid: 'cid-a' })],
+    });
+    const err = new Error('discovery_unavailable') as Error & { code?: string };
+    err.code = 'discovery_unavailable';
+    vi.mocked(api.discovery.getTaskPostCounts).mockRejectedValue(err);
+    wrap(<LauncherPage />);
+    await waitFor(() => {
+      const cell = screen.getByTestId('launcher-owned-row-postcounts');
+      expect(cell.textContent).toMatch(/posts unavailable/i);
+    });
   });
 
   it('navigates to /launcher/launched/:id on row click', async () => {

@@ -25,8 +25,9 @@ import type {
   PluginScoreHistoryRow,
   PublishedArtifact,
   CodeDigestRewardRow,
+  TaskPostCounts,
 } from './types.js';
-import { DiscoveryUnavailableError } from './types.js';
+import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
@@ -100,6 +101,9 @@ const ATTEMPTS_PAGE_LIMIT = 1000;
  * the resulting count is a lower bound; see `getSolverNetOperatorCount`.
  */
 const MAX_OPERATOR_COUNT_TASK_PAGES = 50;
+
+/** Page cap for the task-post-rate scan (1000 rows/page → 50k recent tasks). */
+const MAX_TASK_POST_PAGES = 50;
 
 const ATTEMPTS_FOR_TASKS_QUERY = `
 query AttemptsForTasks($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $after: String) {
@@ -287,6 +291,40 @@ query ClaimCountTasks($manifestDigest: String!, $limit: Int!, $after: String) {
 }
 `;
 
+/**
+ * Task-post-rate query (#918). Pages the most-recent tasks ordered by
+ * createdAtBlock desc; the daemon reads the top row's block as the window head
+ * and buckets the three windows (1h / 6h / 24h) AND the per-cid totals
+ * client-side from createdAtBlock + manifestDigest.
+ *
+ * We do NOT push a `manifestDigest_in` / `createdAtBlock_gte` filter into the
+ * query: `manifestDigest_in` is not a stable Ponder filter operator across all
+ * deploys, and the chain-wide total needs every recent task anyway. A
+ * client-side scan-then-bucket over the most-recent N pages is the portable
+ * shape. `windowEndBlock` for the HTTP backing is the indexer's latest indexed
+ * task block (the top row), not the chain head.
+ */
+const TASK_POST_COUNTS_QUERY = `
+query TaskPostCounts($limit: Int!, $after: String) {
+  tasks(
+    limit: $limit,
+    after: $after,
+    orderBy: "createdAtBlock",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      manifestDigest
+      createdAtBlock
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
 const QUERY_ENVELOPES_QUERY = `
 query QueryEnvelopes($where: envelopeFilter, $limit: Int!) {
   envelopes(
@@ -399,6 +437,13 @@ interface OperatorCountAttemptsPage {
 interface ClaimCountTasksPage {
   tasks: {
     items: Array<{ id: string; maxClaims: number; chainId: number }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface TaskPostCountsPage {
+  tasks: {
+    items: Array<{ id: string; manifestDigest: string; createdAtBlock: string | number }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -1354,6 +1399,64 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return out;
   }
 
+  // ── getTaskPostCounts (#918) ───────────────────────────────────────────────
+  // Page the most-recent tasks (createdAtBlock desc); the top row's block is the
+  // window head. Bucket the three windows AND the per-cid totals client-side.
+  // windowEndBlock here is the indexer's latest indexed task block, not the
+  // chain head (the indexer is the source of truth on the HTTP path).
+  async function getTaskPostCounts(args?: { manifestCids?: string[] }): Promise<{
+    windowEndBlock: number;
+    windowEndTs: number;
+    chain: TaskPostCounts;
+    byCid: Record<string, TaskPostCounts>;
+  }> {
+    await ensureReady();
+
+    const windowEndTs = Math.floor(Date.now() / 1000);
+
+    const cids = Array.from(new Set((args?.manifestCids ?? []).filter(Boolean)));
+    const cidByDigest = new Map<string, string>();
+    for (const cid of cids) {
+      cidByDigest.set(manifestDigestForCid(cid).toLowerCase(), cid);
+    }
+
+    // Page createdAtBlock desc. The first row sets the window head; we stop
+    // paging once a page's oldest row falls before the 24h cut (everything
+    // beyond is outside every window).
+    const rows: Array<{ digest: string; block: number }> = [];
+    let head: number | undefined;
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_TASK_POST_PAGES; page++) {
+      const data: TaskPostCountsPage = await postGql<TaskPostCountsPage>(
+        gqlUrl,
+        fetchImpl,
+        TASK_POST_COUNTS_QUERY,
+        { limit: 1000, after: cursor },
+      );
+      const items = data.tasks?.items ?? [];
+      for (const row of items) {
+        const block = Number(row.createdAtBlock);
+        if (!Number.isFinite(block)) continue;
+        if (head === undefined) head = block;
+        rows.push({ digest: (row.manifestDigest ?? '').toLowerCase(), block });
+      }
+      const pageInfo = data.tasks?.pageInfo;
+      // Once the oldest row this page is past the 24h cut, no further page can
+      // contribute (desc order) — stop early.
+      if (head !== undefined && items.length > 0) {
+        const oldest = Number(items[items.length - 1]!.createdAtBlock);
+        if (Number.isFinite(oldest) && oldest < head - TASK_POST_WINDOW_BLOCKS.h24) break;
+      }
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      cursor = pageInfo.endCursor;
+    }
+
+    const windowEndBlock = head ?? 0;
+    const { chain, byCid } = bucketTaskPostCounts(windowEndBlock, windowEndTs, rows, cidByDigest);
+
+    return { windowEndBlock, windowEndTs, chain, byCid };
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1366,5 +1469,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     getInstanceSuccessCounts,
     getCodeDigestRewards,
     getInstanceClaimCounts,
+    getTaskPostCounts,
   };
 }

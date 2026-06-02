@@ -1,7 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import { api } from '../api/client.js';
-import type { LaunchedSolverNetRecord, LaunchedStatus } from '../api/types.js';
+import type {
+  LaunchedSolverNetRecord,
+  LaunchedStatus,
+  TaskPostCountsDto,
+} from '../api/types.js';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { Badge } from '../components/ui/badge.js';
 import { Button } from '../components/ui/button.js';
@@ -67,6 +71,54 @@ function StatusBadge({ status }: { status: LaunchedStatus }): JSX.Element {
 
 interface RecordRowProps {
   record: LaunchedSolverNetRecord;
+  /** Windowed task-post counts for this row's manifest CID, when available. */
+  postCounts?: TaskPostCountsDto;
+  /** True while the batched task-post-counts query is in flight. */
+  postCountsLoading: boolean;
+  /** True when the batched task-post-counts query errored. */
+  postCountsError: boolean;
+}
+
+/**
+ * "Recent posts" cell (#918) — compact `1h · 6h · 24h` windowed on-chain
+ * task-post counts for the row's SolverNet. AC#3: when the counts are absent or
+ * `h24 === 0`, render a visible "No recent posts" message (never blank); on a
+ * query error, render terse "posts unavailable". Block-window approximation.
+ */
+function RecentPostsCell({
+  postCounts,
+  loading,
+  error,
+}: {
+  postCounts?: TaskPostCountsDto;
+  loading: boolean;
+  error: boolean;
+}): JSX.Element {
+  let inner: JSX.Element;
+  if (error) {
+    inner = <span className="text-[var(--wane)]">posts unavailable</span>;
+  } else if (loading && !postCounts) {
+    inner = <span className="text-[var(--fg-dim)]">…</span>;
+  } else if (!postCounts || postCounts.h24 === 0) {
+    inner = <span className="text-[var(--fg-dim)]">No recent posts</span>;
+  } else {
+    inner = (
+      <span className="text-[var(--fg-muted)]">
+        {postCounts.h1} · {postCounts.h6} · {postCounts.h24}
+      </span>
+    );
+  }
+  return (
+    <div
+      data-testid="launcher-owned-row-postcounts"
+      className="flex flex-col items-end gap-0.5 font-mono text-[12px]"
+    >
+      <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--fg-dim)]">
+        recent posts (1h · 6h · 24h)
+      </span>
+      {inner}
+    </div>
+  );
 }
 
 function RoleChip({ label }: { label: string }): JSX.Element {
@@ -81,7 +133,12 @@ function RoleChip({ label }: { label: string }): JSX.Element {
   );
 }
 
-function RecordRow({ record }: RecordRowProps): JSX.Element {
+function RecordRow({
+  record,
+  postCounts,
+  postCountsLoading,
+  postCountsError,
+}: RecordRowProps): JSX.Element {
   const [, navigate] = useLocation();
   const href = `/launcher/launched/${encodeURIComponent(record.solverNetId)}`;
   const summary = record.summary;
@@ -160,7 +217,14 @@ function RecordRow({ record }: RecordRowProps): JSX.Element {
             <span>launched {formatTimestamp(record.launchedAt)}</span>
           </div>
         </div>
-        <StatusBadge status={record.status} />
+        <div className="flex flex-col items-end gap-2">
+          <StatusBadge status={record.status} />
+          <RecentPostsCell
+            postCounts={postCounts}
+            loading={postCountsLoading}
+            error={postCountsError}
+          />
+        </div>
       </Card>
     </a>
   );
@@ -194,6 +258,18 @@ export function LauncherPage(): JSX.Element {
     queryFn: () => api.solvernets.listLaunched(),
     refetchInterval: 30_000,
   });
+
+  // Batch the per-row recent-post counts into ONE query keyed by every owned
+  // SolverNet's manifest CID (#918). One query, not one-per-row, so a long
+  // owned-list doesn't fan out into N daemon round-trips.
+  const cids = (data?.records ?? []).map((r) => r.manifestCid);
+  const postCountsQuery = useQuery({
+    queryKey: ['discovery', 'task-post-counts', 'launcher', cids],
+    queryFn: () => api.discovery.getTaskPostCounts(cids),
+    enabled: cids.length > 0,
+    refetchInterval: 30_000,
+  });
+  const byCid = postCountsQuery.data?.byCid;
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -249,7 +325,13 @@ export function LauncherPage(): JSX.Element {
       {!isLoading && !isError && data && data.records.length > 0 && (
         <div className="flex flex-col gap-2">
           {data.records.map((record) => (
-            <RecordRow key={record.solverNetId} record={record} />
+            <RecordRow
+              key={record.solverNetId}
+              record={record}
+              postCounts={byCid?.[record.manifestCid]}
+              postCountsLoading={postCountsQuery.isLoading}
+              postCountsError={postCountsQuery.isError}
+            />
           ))}
         </div>
       )}

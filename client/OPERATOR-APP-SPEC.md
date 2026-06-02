@@ -265,6 +265,8 @@ Components raise state messages locally. The Notifications component is the unio
 
 Operator-tunable configuration.
 
+- **State** (read-only)
+  - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.
 - **Static**
   - RPC URL — single URL OR an ordered list of URLs (the fallback chain). On testnet the default is a two-provider chain (publicnode + sepolia.base.org). When a list is configured, the daemon builds a viem fallback transport: primary → secondary on network error / HTTP 429 / 5xx; capped at 4 providers. Surface format: provider count + primary host (e.g. `fallback chain (3 providers) — primary=my-alchemy-key.example`). The full chain stays masked in any operator-visible artifact (paths and api-key query strings never appear); only hostnames do. See `CLAUDE.md` "RPC fallback chain" for the full contract.
   - peer list
@@ -280,6 +282,8 @@ Operator-tunable configuration.
   - RPC fallback chain (N providers) — informational; no action required when every slot is healthy.
   - RPC primary degraded — the boot-time probe (or steady-state traffic) saw HTTP 429 or 5xx from slot 0 but a secondary slot served. Informational; no action required, but operators with a paid primary may want to inspect their key's quota.
   - All RPCs failed — `AllRpcsFailedError` raised on a recent call. Action: check internet, then either confirm the chain hosts are up or update the `rpcUrl` chain in Settings. The masked host list is included for diagnostics.
+  - No task posts in the last 24h — informational; the task-post-rate panel renders this zero-state copy (never a blank panel) when the 24h count is zero. No action required.
+  - Task-post rate unavailable — the indexer is unreachable (`discovery_unavailable` / `subsystem_not_ready`); the panel shows an explicit "unavailable while the indexer catches up" line. When the underlying cause is `rpc_rate_limited`, it reuses the shared-RPC degraded message (add your own key) rather than the generic outage copy — same taxonomy as the other discovery-backed surfaces (§2.4, registry catalog).
 
 Every Settings field declares whether changes hot-apply or require a daemon restart. See §3.2. The RPC chain is **restart-required** (transport construction happens once at boot).
 
@@ -305,7 +309,7 @@ Daemon version and update lifecycle.
 
 These appear only when the operator opts into a corresponding mode. Each follows the same four-axis shape; each is fully specified in its own follow-up when activated.
 
-- **Launcher** — when the operator has launched at least one SolverNet. Drafts, launched records, lifecycle transitions.
+- **Launcher** — when the operator has launched at least one SolverNet. Drafts, launched records, lifecycle transitions. The owned-SolverNets list (Collection: one row per launched record) exposes a per-row **recent posts (1h / 6h / 24h)** state — the windowed count of on-chain `TaskCreated` events filtered to that row's manifest CID (digest join via `manifestDigestForCid`), sourced through `DiscoveryAPI.getTaskPostCounts` (#918). Scope is per-SolverNet; the same **block-window approximation** as the §2.11 Network task-post panel applies (Base ~2s blocktime; counts approximate). All rows are served by **one batched query** keyed by every owned row's CID (never one query per row), polled every 30s. Zero / unavailable handling matches §2.11: a row with no counts or a 24h count of zero renders "No recent posts" (never blank), and a query error renders a terse "posts unavailable".
 - **Artifact Serving** — when the operator serves paid artifacts. Inventory, pricing, access events.
 - **Peers** — when the operator connects to a peer network. Peer list, sync status.
 

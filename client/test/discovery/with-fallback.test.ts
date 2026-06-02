@@ -416,6 +416,27 @@ describe('withFallback — all four methods', () => {
     ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
     expect(floor.getInstanceClaimCounts).not.toHaveBeenCalled();
   });
+
+  it('getTaskPostCounts routes to floor on DiscoveryUnavailableError (supply signal, #918)', async () => {
+    const floorResult = {
+      windowEndBlock: 100,
+      windowEndTs: 1_000,
+      chain: { h1: 1, h6: 2, h24: 3, windowEndBlock: 100, windowEndTs: 1_000 },
+      byCid: {},
+    };
+    const primary = {
+      getTaskPostCounts: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getTaskPostCounts: vi.fn(async () => floorResult),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getTaskPostCounts();
+    expect(result).toBe(floorResult);
+    expect(floor.getTaskPostCounts).toHaveBeenCalledOnce();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {

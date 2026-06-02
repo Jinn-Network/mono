@@ -14,6 +14,12 @@ function stubDiscovery(partial: Partial<DiscoveryAPI>): DiscoveryAPI {
     listPluginPublications: vi.fn().mockResolvedValue([]),
     getPluginScores: vi.fn().mockResolvedValue([]),
     listBuilderArtifacts: vi.fn().mockResolvedValue([]),
+    getTaskPostCounts: vi.fn().mockResolvedValue({
+      windowEndBlock: 0,
+      windowEndTs: 0,
+      chain: { h1: 0, h6: 0, h24: 0, windowEndBlock: 0, windowEndTs: 0 },
+      byCid: {},
+    }),
     ...partial,
   } as DiscoveryAPI;
 }
@@ -118,6 +124,70 @@ describe('discovery-endpoint (hfmf)', () => {
     expect(discovery.getSolverNetOperatorCount).toHaveBeenCalledWith('bafkreitest');
   });
 
+  it('GET /v1/discovery/task-post-counts with no cid returns chain counts (#918)', async () => {
+    const chainCounts = {
+      windowEndBlock: 1000,
+      windowEndTs: 1715600000,
+      chain: { h1: 1, h6: 4, h24: 9, windowEndBlock: 1000, windowEndTs: 1715600000 },
+      byCid: {},
+    };
+    const getTaskPostCounts = vi.fn().mockResolvedValue(chainCounts);
+    const discovery = stubDiscovery({ getTaskPostCounts });
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    const res = await app.request('/v1/discovery/task-post-counts');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.chain).toEqual(chainCounts.chain);
+    expect(body.byCid).toEqual({});
+    // No cid params → called with no manifestCids filter.
+    expect(getTaskPostCounts).toHaveBeenCalledWith(undefined);
+  });
+
+  it('GET /v1/discovery/task-post-counts?cid=a&cid=b returns byCid map (#918)', async () => {
+    const result = {
+      windowEndBlock: 1000,
+      windowEndTs: 1715600000,
+      chain: { h1: 2, h6: 5, h24: 12, windowEndBlock: 1000, windowEndTs: 1715600000 },
+      byCid: {
+        a: { h1: 1, h6: 2, h24: 3, windowEndBlock: 1000, windowEndTs: 1715600000 },
+        b: { h1: 0, h6: 1, h24: 4, windowEndBlock: 1000, windowEndTs: 1715600000 },
+      },
+    };
+    const getTaskPostCounts = vi.fn().mockResolvedValue(result);
+    const discovery = stubDiscovery({ getTaskPostCounts });
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    const res = await app.request('/v1/discovery/task-post-counts?cid=a&cid=b');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.byCid.a.h24).toBe(3);
+    expect(body.byCid.b.h24).toBe(4);
+    expect(getTaskPostCounts).toHaveBeenCalledWith({ manifestCids: ['a', 'b'] });
+  });
+
+  it('GET /v1/discovery/task-post-counts 503s on a discovery outage (#918)', async () => {
+    const { DiscoveryUnavailableError } = await import('../../src/discovery/types.js');
+    const discovery = stubDiscovery({
+      getTaskPostCounts: vi.fn().mockRejectedValue(new DiscoveryUnavailableError('indexer down')),
+    });
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    const res = await app.request('/v1/discovery/task-post-counts');
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe('discovery_unavailable');
+  });
+
+  it('GET /v1/discovery/task-post-counts 503s subsystem_not_ready when discovery is null (#918)', async () => {
+    const app = new Hono();
+    addDiscoveryRoutes(app, { getDiscovery: () => null });
+    const res = await app.request('/v1/discovery/task-post-counts');
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe('subsystem_not_ready');
+  });
+
   it('GET /v1/discovery/solvernet-operator-count without cid returns 400', async () => {
     const discovery = stubDiscovery({});
     const app = new Hono();
@@ -174,6 +244,7 @@ describe('discovery-endpoint — auth gating (jinn-mono-0nih)', () => {
       '/v1/discovery/builder-artifacts?builderAgentId=1',
       '/v1/discovery/plugin-scores?cid=bafy',
       '/v1/discovery/solvernet-operator-count?cid=bafytest',
+      '/v1/discovery/task-post-counts?cid=bafytest',
     ]) {
       const res = await app.request(path);
       expect(res.status, `${path} should require auth`).toBe(401);

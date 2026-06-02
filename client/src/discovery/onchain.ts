@@ -40,8 +40,8 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow } from './types.js';
-import { DiscoveryUnavailableError } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
+import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
 import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
@@ -98,7 +98,18 @@ const CLAIM_CHECK_CONCURRENCY = 8;
  */
 const MAX_OPERATOR_COUNT_TASK_PAGES = 50;
 
+/**
+ * Hard cap on getLogs chunks `getTaskPostCounts` scans per pass. 50 × ~1999
+ * blocks ≫ the 43,200-block 24h window, so the cap never truncates the window.
+ * The HTTP backing's sibling cap is `MAX_TASK_POST_PAGES` in `http.ts`.
+ */
+const MAX_TASK_POST_COUNT_SCAN_PAGES = 50;
+
 const SOLVERNET_MANIFEST_KEY_PREFIX = 'solvernet-manifest:';
+
+/** The 24h window as a bigint, for the on-chain scan-range floor (the shared
+ * numeric `TASK_POST_WINDOW_BLOCKS` drives the bucketing). */
+const TASK_POST_24H_BLOCKS = BigInt(TASK_POST_WINDOW_BLOCKS.h24);
 
 // ── ABI fragments ─────────────────────────────────────────────────────────────
 
@@ -1322,6 +1333,99 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return new Map();
   }
 
+  // ── getTaskPostCounts (#918) ───────────────────────────────────────────────
+  // Windowed count of TaskCreated events (last 1h / 6h / 24h) sourced directly
+  // from the JinnRouter logs. Block-window approximation; capped at
+  // MAX_TASK_POST_COUNT_SCAN_PAGES getLogs chunks like getSolverNetOperatorCount
+  // so the recurring dashboard poll cannot walk unbounded history. This is the
+  // runtime path when discovery.mode is 'onchain' AND the fallback floor for
+  // the http backing (withFallback routes here — supply-signal, not abort).
+  async function getTaskPostCounts(args?: { manifestCids?: string[] }): Promise<{
+    windowEndBlock: number;
+    windowEndTs: number;
+    chain: TaskPostCounts;
+    byCid: Record<string, TaskPostCounts>;
+  }> {
+    if (!routerAddress) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI: no routerAddress configured for chainId=${opts.chainId}`,
+      );
+    }
+
+    const client = getClient();
+    let head: bigint;
+    try {
+      head = await (client as PublicClient).getBlockNumber();
+    } catch (err) {
+      throw discoveryUnavailableFromReadError(
+        `OnchainDiscoveryAPI.getTaskPostCounts: failed to get block number`,
+        err,
+      );
+    }
+
+    const windowEndTs = Math.floor(Date.now() / 1000);
+    const h24Cut = head > TASK_POST_24H_BLOCKS ? head - TASK_POST_24H_BLOCKS : 0n;
+
+    // Scan from max(configured floor, head-24h) so we never re-walk the whole
+    // chain — the 24h window is the only data we bucket.
+    const floor = resolveScanFromBlock(opts, head);
+    const scanFrom = floor > h24Cut ? floor : h24Cut;
+
+    // digest → cid lookup for the per-cid buckets (only when requested).
+    const cids = Array.from(new Set((args?.manifestCids ?? []).filter(Boolean)));
+    const cidByDigest = new Map<string, string>();
+    for (const cid of cids) {
+      cidByDigest.set(manifestDigestForCid(cid).toLowerCase(), cid);
+    }
+
+    let events: Array<{ block: number; digest: string }>;
+    try {
+      events = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: Array<{ block: number; digest: string }> = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskCreated') continue;
+              const evArgs = event.args as { manifestDigest: Hex };
+              decoded.push({
+                block: Number(log.blockNumber ?? 0n),
+                digest: (evArgs.manifestDigest as string).toLowerCase(),
+              });
+            } catch {
+              // Not a TaskCreated event — skip.
+            }
+          }
+          return decoded;
+        },
+        scanFrom,
+        head,
+        chunk,
+        undefined,
+        MAX_TASK_POST_COUNT_SCAN_PAGES,
+      );
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw discoveryUnavailableFromReadError(
+        `OnchainDiscoveryAPI.getTaskPostCounts: getLogs for TaskCreated failed`,
+        err,
+      );
+    }
+
+    const { chain, byCid } = bucketTaskPostCounts(Number(head), windowEndTs, events, cidByDigest);
+
+    return { windowEndBlock: Number(head), windowEndTs, chain, byCid };
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1334,5 +1438,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getInstanceSuccessCounts,
     getCodeDigestRewards,
     getInstanceClaimCounts,
+    getTaskPostCounts,
   };
 }

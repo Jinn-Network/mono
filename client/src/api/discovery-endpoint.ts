@@ -7,6 +7,7 @@
  *   GET /v1/discovery/builder-artifacts?builderAgentId&limit
  *   GET /v1/discovery/plugin-scores?cid&limit
  *   GET /v1/discovery/solvernet-operator-count?cid
+ *   GET /v1/discovery/task-post-counts?cid (repeatable)
  *
  * Used by the /build SPA route (hfmf) to render published plug-ins, the
  * local operator's published plug-ins, and per-plug-in score history.
@@ -109,6 +110,35 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
     try {
       const operatorCount = await discovery.getSolverNetOperatorCount(cid);
       return c.json({ manifestCid: cid, operatorCount });
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) {
+        return c.json({ error: 'discovery_unavailable' }, 503);
+      }
+      return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
+    }
+  });
+
+  // GET /v1/discovery/task-post-counts?cid=<manifestCid>&cid=<...>
+  //
+  // Windowed on-chain task-post counts (last 1h / 6h / 24h) from TaskCreated
+  // events on the active chain. Always returns chain-wide `chain` totals; when
+  // one or more `cid` params are present, also returns per-SolverNet totals in
+  // `byCid`. Backs the Network "Task posts" panel and the SolverNets index
+  // "Recent posts" column (issue #918). See `DiscoveryAPI.getTaskPostCounts`.
+  app.get('/v1/discovery/task-post-counts', async (c) => {
+    const discovery = getDiscovery();
+    if (!discovery) {
+      return c.json(
+        { error: 'subsystem_not_ready', message: 'DiscoveryAPI still initialising' },
+        503,
+      );
+    }
+    const cids = c.req.queries('cid')?.filter((v) => v.length > 0) ?? [];
+    try {
+      const result = await discovery.getTaskPostCounts(
+        cids.length > 0 ? { manifestCids: cids } : undefined,
+      );
+      return c.json(result);
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) {
         return c.json({ error: 'discovery_unavailable' }, 503);

@@ -30,6 +30,7 @@ import type {
   DiscoveryBuilderArtifactsResponse,
   DiscoveryPluginScoresResponse,
   DiscoverySolverNetOperatorCountResponse,
+  DiscoveryTaskPostCountsResponse,
   HarnessReadinessEntry,
   CodexDoctorResponse,
   DebugReportManifest,
@@ -543,6 +544,16 @@ export const api = {
       const q = new URLSearchParams({ cid });
       return jfetch<DiscoverySolverNetOperatorCountResponse>(
         `/v1/discovery/solvernet-operator-count?${q.toString()}`,
+      );
+    },
+    // Windowed on-chain task-post counts (1h / 6h / 24h). No cids → chain-wide
+    // totals only; cids → per-SolverNet `byCid` map too. Issue #918.
+    getTaskPostCounts: (cids?: string[]) => {
+      const q = new URLSearchParams();
+      (cids ?? []).forEach((c) => q.append('cid', c));
+      const qs = q.toString();
+      return jfetch<DiscoveryTaskPostCountsResponse>(
+        `/v1/discovery/task-post-counts${qs ? `?${qs}` : ''}`,
       );
     },
   },

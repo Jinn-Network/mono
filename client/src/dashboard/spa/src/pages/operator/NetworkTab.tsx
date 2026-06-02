@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Network, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Network, AlertTriangle, ExternalLink, Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client.js';
 import {
@@ -51,7 +51,7 @@ export function NetworkTab({
       : 'https://base-sepolia-rpc.publicnode.com');
 
   return (
-    <div data-testid="network-tab">
+    <div data-testid="network-tab" className="flex flex-col gap-4">
       <NetworkSectionContent
         chain={chain}
         rpcUrl={rpcUrl}
@@ -59,7 +59,97 @@ export function NetworkTab({
         rpcHealthy={true}
         onRestartPending={onRestartPending}
       />
+      <TaskPostsCard />
     </div>
+  );
+}
+
+/** Read `error.code` set by jfetch from the daemon's 503 payload `error` field. */
+function errorCode(error: unknown): string | undefined {
+  if (error instanceof Error) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    if (error.message.includes('rpc_rate_limited')) return 'rpc_rate_limited';
+    if (error.message.includes('discovery_unavailable')) return 'discovery_unavailable';
+    if (error.message.includes('subsystem_not_ready')) return 'subsystem_not_ready';
+  }
+  return undefined;
+}
+
+/**
+ * §2.11 Network — "Task posts" panel (#918). Chain-wide windowed count of
+ * on-chain `TaskCreated` events (last 1h / 6h / 24h) on the active chain's
+ * TaskCoordinator. Block-window approximation; counts are approximate.
+ */
+function TaskPostsCard(): JSX.Element {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['discovery', 'task-post-counts', 'chain'],
+    queryFn: () => api.discovery.getTaskPostCounts(),
+    refetchInterval: 30_000,
+  });
+
+  let body: JSX.Element;
+  if (isError) {
+    const code = errorCode(error);
+    body =
+      code === 'rpc_rate_limited' ? (
+        <Alert variant="warning" data-error-code="rpc_rate_limited">
+          <AlertTriangle className="h-4 w-4 text-[var(--wane)]" />
+          <AlertTitle className="text-[var(--wane)]">RPC rate-limited</AlertTitle>
+          <AlertDescription>
+            Your RPC endpoint is rate-limited — add your own free key above to
+            keep the task-post rate live.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <p className="font-mono text-[12px] text-[var(--fg-muted)]">
+          Task-post rate is unavailable while the indexer catches up.
+        </p>
+      );
+  } else if (isLoading || !data) {
+    body = (
+      <p className="font-mono text-[12px] text-[var(--fg-muted)]">Loading…</p>
+    );
+  } else if (data.chain.h24 === 0) {
+    body = (
+      <p className="font-mono text-[12px] text-[var(--fg-muted)]">
+        No task posts in the last 24h.
+      </p>
+    );
+  } else {
+    body = (
+      <div className="grid grid-cols-3 gap-4">
+        {(
+          [
+            ['Last 1h', data.chain.h1],
+            ['Last 6h', data.chain.h6],
+            ['Last 24h', data.chain.h24],
+          ] as const
+        ).map(([label, count]) => (
+          <div key={label} className="flex flex-col gap-1">
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--fg-dim)]">
+              {label}
+            </span>
+            <span className="font-mono text-[20px] text-foreground">{count}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <Card data-testid="network-task-posts">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+          Task posts
+        </CardTitle>
+        <CardDescription>
+          On-chain task posts on this network (approximate, block-windowed).
+        </CardDescription>
+      </CardHeader>
+      <CardContent>{body}</CardContent>
+    </Card>
   );
 }
 
