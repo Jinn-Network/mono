@@ -1,0 +1,307 @@
+# Scheduled monitor for the Jinn Ponder indexer (jinn-indexer-production).
+#
+# Provenance: root-cause of the 2026-05-20→23 substrate cascade — the indexer
+# crashed at boot when its Tenderly gateway key hit a Free-plan quota
+# (eth_chainId → -32004) and stayed down three days with NO alert. The
+# discovery-layer fallbackToOnchain-default-off fix surfaces outages to
+# operators; this workflow closes the infrastructure-side blind spot.
+# See docs/release/v2026.05.25/handoff.md §Substrate / §Discovery fallback,
+# docs/superpowers/specs/2026-06-01-548-indexer-monitoring-design.md, and
+# docs/superpowers/plans/2026-06-01-548-indexer-monitoring-plan.md. Tracks #548.
+#
+# Issue-as-alert pattern mirrors .github/workflows/main-next-ancestor-check.yml.
+# No new secrets: GITHUB_TOKEN (built-in) drives the alert Issue;
+# BASE_SEPOLIA_RPC_URL (already provisioned) drives chain-head + rpc-health,
+# falling back to public https://sepolia.base.org if unset.
+
+name: indexer monitor
+
+on:
+  workflow_dispatch:
+  # schedule crons are COMMENTED OUT until a manual workflow_dispatch run
+  # validates the probe + alert path end-to-end (mirrors broadcast-bot.yml's
+  # "enable after a manual run validates" discipline). Uncomment after a clean
+  # dispatch run.
+  # schedule:
+  #   - cron: '*/5 * * * *'   # indexer freshness — every ~5 min
+  #   - cron: '0 9 * * *'     # tenderly key-health — daily 09:00 UTC
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  indexer-freshness:
+    name: Indexer liveness + freshness probe
+    # Runs on the */5 freshness cadence, or any manual dispatch (smoke both modes).
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Run indexer probe
+        id: probe
+        shell: bash
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          INDEXER_BASE_URL: https://jinn-indexer-production.up.railway.app
+        run: |
+          set +e
+          REASON="$(node .github/scripts/indexer-probe.mjs --mode=indexer)"
+          CODE=$?
+          set -e
+          echo "$REASON"
+          if [ "$CODE" -eq 0 ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "reason<<REASON_EOF"
+            echo "$REASON"
+            echo "REASON_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure label exists
+        if: steps.probe.outputs.result == 'fail'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "automated:indexer-outage" \
+            --color "D93F0B" \
+            --description "Surfaced by the indexer monitor workflow" \
+            --force \
+            --repo "${{ github.repository }}" || true
+
+      - name: Find open alert issue
+        id: find-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          NUMBER="$(gh issue list \
+            --repo "${REPO}" \
+            --search "[indexer-outage] in:title is:open" \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+          echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update outage alert issue
+        if: steps.probe.outputs.result == 'fail'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REASON: ${{ steps.probe.outputs.reason }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
+        shell: bash
+        run: |
+          TITLE="[indexer-outage] jinn-indexer-production probe failing"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          BODY_FILE="$(mktemp)"
+          cat > "$BODY_FILE" <<BODY_EOF
+          ## jinn-indexer-production probe is failing
+
+          The scheduled indexer monitor (\`--mode=indexer\`) failed its liveness/freshness check.
+
+          **Probe reason:**
+
+          \`\`\`
+          ${REASON}
+          \`\`\`
+
+          ### How to fix
+
+          The most common cause is the Tenderly gateway key hitting its quota (the
+          2026-05-20→23 cascade). Rotate \`PONDER_RPC_URL_84532\` on Railway for the
+          \`jinn-indexer-production\` service, then redeploy. See
+          [docs/release/v2026.05.25/handoff.md](https://github.com/${REPO}/blob/main/docs/release/v2026.05.25/handoff.md) §Substrate.
+
+          ### Run URL
+
+          ${RUN_URL}
+          BODY_EOF
+
+          if [ -n "$EXISTING" ]; then
+            COMMENT_FILE="$(mktemp)"
+            cat > "$COMMENT_FILE" <<COMMENT_EOF
+          Still failing as of run ${RUN_URL}.
+
+          \`\`\`
+          ${REASON}
+          \`\`\`
+          COMMENT_EOF
+            gh issue comment "$EXISTING" \
+              --repo "${REPO}" \
+              --body-file "$COMMENT_FILE"
+            echo "::warning::Commented on existing indexer-outage issue #${EXISTING}"
+          else
+            gh issue create \
+              --repo "${REPO}" \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --label "automated:indexer-outage"
+            echo "::error::indexer probe failing — outage alert issue opened. See ${RUN_URL}"
+          fi
+
+          exit 1
+
+      - name: Auto-close outage alert if passing
+        if: steps.probe.outputs.result == 'pass'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
+        shell: bash
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" \
+              --repo "${REPO}" \
+              --comment "indexer healthy as of run ${RUN_URL}. Closing."
+            echo "::notice::Auto-closed indexer-outage issue #${EXISTING} — indexer healthy."
+          else
+            echo "::notice::indexer healthy — no open alert issue to close."
+          fi
+
+  tenderly-keyhealth:
+    name: Tenderly gateway key-health probe
+    # Runs on the daily cadence, or any manual dispatch (smoke both modes).
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 9 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Run rpc key-health probe
+        id: probe
+        shell: bash
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: |
+          set +e
+          REASON="$(node .github/scripts/indexer-probe.mjs --mode=rpc)"
+          CODE=$?
+          set -e
+          echo "$REASON"
+          if [ "$CODE" -eq 0 ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "reason<<REASON_EOF"
+            echo "$REASON"
+            echo "REASON_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure label exists
+        if: steps.probe.outputs.result == 'fail'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "automated:indexer-outage" \
+            --color "D93F0B" \
+            --description "Surfaced by the indexer monitor workflow" \
+            --force \
+            --repo "${{ github.repository }}" || true
+
+      - name: Find open quota alert issue
+        id: find-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          NUMBER="$(gh issue list \
+            --repo "${REPO}" \
+            --search "[indexer-rpc-quota] in:title is:open" \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+          echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update quota alert issue
+        if: steps.probe.outputs.result == 'fail'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REASON: ${{ steps.probe.outputs.reason }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
+        shell: bash
+        run: |
+          TITLE="[indexer-rpc-quota] Base Sepolia gateway key-health failing"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          BODY_FILE="$(mktemp)"
+          cat > "$BODY_FILE" <<BODY_EOF
+          ## Base Sepolia gateway key-health probe is failing
+
+          The daily key-health probe (\`--mode=rpc\`) flagged the \`BASE_SEPOLIA_RPC_URL\`
+          gateway. This is the early-warning for the quota-exhaustion signature
+          (\`eth_chainId\` → \`-32004\`) that triggered the 2026-05-20→23 indexer boot-crash.
+
+          **Probe reason:**
+
+          \`\`\`
+          ${REASON}
+          \`\`\`
+
+          ### How to fix
+
+          Rotate the Tenderly gateway key. On Railway, update \`PONDER_RPC_URL_84532\`
+          for the \`jinn-indexer-production\` service (and the CI \`BASE_SEPOLIA_RPC_URL\`
+          secret to keep this probe in sync), then redeploy. See
+          [docs/release/v2026.05.25/handoff.md](https://github.com/${REPO}/blob/main/docs/release/v2026.05.25/handoff.md) §Substrate.
+
+          ### Run URL
+
+          ${RUN_URL}
+          BODY_EOF
+
+          if [ -n "$EXISTING" ]; then
+            COMMENT_FILE="$(mktemp)"
+            cat > "$COMMENT_FILE" <<COMMENT_EOF
+          Still failing as of run ${RUN_URL}.
+
+          \`\`\`
+          ${REASON}
+          \`\`\`
+          COMMENT_EOF
+            gh issue comment "$EXISTING" \
+              --repo "${REPO}" \
+              --body-file "$COMMENT_FILE"
+            echo "::warning::Commented on existing indexer-rpc-quota issue #${EXISTING}"
+          else
+            gh issue create \
+              --repo "${REPO}" \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --label "automated:indexer-outage"
+            echo "::error::rpc key-health probe failing — quota alert issue opened. See ${RUN_URL}"
+          fi
+
+          exit 1
+
+      - name: Auto-close quota alert if passing
+        if: steps.probe.outputs.result == 'pass'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
+        shell: bash
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" \
+              --repo "${REPO}" \
+              --comment "gateway key-health restored as of run ${RUN_URL}. Closing."
+            echo "::notice::Auto-closed indexer-rpc-quota issue #${EXISTING} — gateway healthy."
+          else
+            echo "::notice::gateway healthy — no open alert issue to close."
+          fi
