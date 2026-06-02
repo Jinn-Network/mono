@@ -20,6 +20,17 @@ export const LEARNER_SEVEN_PHASE_LINES = [
   'Orient -> Strategize -> Plan -> Execute -> Debrief -> Improve -> Memory consolidation.',
 ].join('\n');
 
+/**
+ * Per-cycle wall-clock cap; the harness aborts the cycle at this deadline.
+ * Bumped from 10→20 min (#930): on claude-code/Haiku the full seven-phase loop —
+ * especially cycle 2, which reads cycle 1's accumulated implStateDir and runs
+ * slower — overruns a 10-min cap and is aborted before Memory consolidation,
+ * failing the "all 7 phase artifacts" check. This is headroom, NOT a target: a
+ * cycle returns as soon as its loop completes (typically ~5-12 min), so the cap
+ * only bites on a slow run.
+ */
+export const CYCLE_WINDOW_MS = 20 * 60_000;
+
 export interface CycleParams {
   cycleLabel: string;
   goalId: string;
@@ -50,6 +61,10 @@ interface CycleResult {
   phasesPresent: string[];
   bootJson: BootJson | null;
   outputJson: unknown | null;
+  /** `.improve/summary.json` exists — the Improve phase ran to completion. */
+  improveSummaryPresent: boolean;
+  /** `.memory-consolidation/consolidation_record.json` exists — Memory consolidation ran to completion. */
+  consolidationRecordPresent: boolean;
   implStateDirHeadAfter: string;
   errorMessage?: string;
 }
@@ -65,6 +80,20 @@ interface AssertOptions {
   label: string;
   requireBootJson: boolean;
   requireOutputJson?: Record<string, string>;
+  /**
+   * Require the Improve + Memory-consolidation phase records (their workingDir
+   * artifacts) to be present — i.e. both write-phases ran to COMPLETION, not just
+   * created their marker dir. Opt-in so the portfolio variant's contract is
+   * unchanged; the swe-rebench-v2 variant sets it (#930). Catches a cycle that
+   * was aborted mid-loop (e.g. window-end) before consolidation finished.
+   *
+   * This asserts the phases *ran*, not that Improve *promoted* anything durable —
+   * that guarantee is cross-cycle, via assertImplStateDirHeadAdvanced (HEAD must
+   * advance + ≥1 commit between cycles). Assumes mode='train' (what runCycle uses):
+   * in frozen mode Improve/Memory are skipped and write no records, so do not set
+   * this for a frozen cycle.
+   */
+  requirePhaseRecords?: boolean;
 }
 
 export interface FullCycleWorkDirs {
@@ -89,7 +118,7 @@ export function cleanupFullCycleWorkDirs(dirs: FullCycleWorkDirs, exitCode: numb
 export async function runCycle(params: CycleParams): Promise<CycleResult> {
   const startedAt = Date.now();
   const startTs = startedAt;
-  const endTs = startedAt + 600_000; // 10-minute window per cycle
+  const endTs = startedAt + CYCLE_WINDOW_MS;
 
   let beforeRunSpec: Record<string, unknown> = {};
   if (params.beforeHarnessRun) {
@@ -118,7 +147,10 @@ export async function runCycle(params: CycleParams): Promise<CycleResult> {
   let exitCode = 0;
   let errorMessage: string | undefined;
 
-  console.log(`  running ${params.config.harnessName} via ${params.config.cliPath} (cycle window 10min)...`);
+  console.log(
+    `  running ${params.config.harnessName} via ${params.config.cliPath} ` +
+      `(cycle window ${Math.round(CYCLE_WINDOW_MS / 60_000)}min)...`,
+  );
   try {
     await params.harness.run({
       task,
@@ -159,13 +191,29 @@ export async function runCycle(params: CycleParams): Promise<CycleResult> {
   const outputJson: unknown | null = existsSync(outputJsonPath)
     ? JSON.parse(readFileSync(outputJsonPath, 'utf8'))
     : null;
+  // Existence only — the record JSON is model-authored free-form (its schema
+  // varies run-to-run), so we assert it was WRITTEN, never on its field values.
+  const improveSummaryPresent = existsSync(join(params.workingDir, '.improve', 'summary.json'));
+  const consolidationRecordPresent = existsSync(
+    join(params.workingDir, '.memory-consolidation', 'consolidation_record.json'),
+  );
   const implStateDirHeadAfter = existsSync(join(params.implStateDir, '.git'))
     ? execFileSync('git', ['-C', params.implStateDir, 'rev-parse', 'HEAD'], {
         encoding: 'utf8',
       }).trim()
     : '';
 
-  return { exitCode, durationMs, phasesPresent, bootJson, outputJson, implStateDirHeadAfter, errorMessage };
+  return {
+    exitCode,
+    durationMs,
+    phasesPresent,
+    bootJson,
+    outputJson,
+    improveSummaryPresent,
+    consolidationRecordPresent,
+    implStateDirHeadAfter,
+    errorMessage,
+  };
 }
 
 export function assertCycle(result: CycleResult, opts: AssertOptions): void {
@@ -189,6 +237,19 @@ export function assertCycle(result: CycleResult, opts: AssertOptions): void {
     console.log(
       `  ✓ ${opts.label} boot.json captures implStateDirShaAtStart=${result.bootJson.implStateDirShaAtStart.slice(0, 8)}`,
     );
+  }
+
+  if (opts.requirePhaseRecords) {
+    if (!result.improveSummaryPresent) {
+      throw new Error(`${opts.label}: .improve/summary.json missing — Improve phase did not run to completion`);
+    }
+    if (!result.consolidationRecordPresent) {
+      throw new Error(
+        `${opts.label}: .memory-consolidation/consolidation_record.json missing — ` +
+          `Memory consolidation did not run to completion (cycle likely aborted mid-loop, e.g. at window-end)`,
+      );
+    }
+    console.log(`  ✓ ${opts.label} Improve + Memory-consolidation phase records present`);
   }
 
   if (opts.requireOutputJson) {
@@ -243,13 +304,33 @@ export function assertImplStateDirLearnerCommitSubjects(implStateDir: string): v
   if (nonInit.length === 0) {
     throw new Error('implStateDir has no commits beyond init implStateDir');
   }
-  if (!subjects.some((s) => /^improve:/.test(s))) {
-    throw new Error(`implStateDir log missing improve: commit; subjects=${JSON.stringify(subjects)}`);
-  }
-  if (!subjects.some((s) => /^consolidate:/.test(s))) {
-    throw new Error(`implStateDir log missing consolidate: commit; subjects=${JSON.stringify(subjects)}`);
-  }
-  console.log(`  ✓ implStateDir has improve: and consolidate: commits`);
+
+  // We deliberately do NOT gate on commit-subject prefixes (`improve:` /
+  // `consolidate:`). Those prefixes are model-authored free text, and a small
+  // model (Haiku) does not reliably emit them — observed subjects across runs
+  // include `Learn: ...` and `Promote HIGH recommendation: ...` for what is
+  // mechanically an Improve promotion (#930). Gating on that prose tests the
+  // model's formatting, not the learner's mechanism. The mechanism is asserted
+  // robustly elsewhere: durable commits landed (≥1 non-init commit here + HEAD
+  // advanced in assertImplStateDirHeadAdvanced), both write-phases ran to
+  // completion (their workingDir records, via assertCycle's requirePhaseRecords),
+  // and cycle 2 booted from cycle 1's HEAD (assertCycle2BootReadsCycle1Head).
+  // Subjects (and whether the canonical prefixes appeared) are logged for
+  // visibility only.
+  //
+  // Separately, Memory consolidation commits ONLY when it has durable curation
+  // work; on a trivial task it legitimately makes no commit. See the consolidator
+  // prompt ("If there's nothing to consolidate ... no commit is made") and the
+  // design spec §9 ("If no commit was made (empty curation set), implStateDirShaAfter
+  // must equal implStateDirShaBefore"):
+  //   client/plugins/learner/skills/learn/consolidator-prompt.md
+  //   docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md §9
+  const sawImprove = subjects.some((s) => /^improve:/i.test(s));
+  const sawConsolidate = subjects.some((s) => /^consolidate:/i.test(s));
+  console.log(
+    `  ✓ implStateDir has ${nonInit.length} durable learning commit(s) beyond init ` +
+      `(canonical prefixes seen: improve:=${sawImprove} consolidate:=${sawConsolidate} — informational, not gated)`,
+  );
 }
 
 export function assertCycle2BootReadsCycle1Head(

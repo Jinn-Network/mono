@@ -16,9 +16,11 @@
  * Gates on configured CLI availability — skips cleanly with a clear message
  * when the CLI isn't in PATH (e.g. CI without Claude Code / Codex installed).
  *
- * Runtime budget: each cycle takes ~5-10 min as the agent walks through
+ * Runtime budget: each cycle typically takes ~5-12 min as the agent walks through
  * Orient → Strategize → Plan → Execute → Debrief → Improve → Memory
- * consolidation, spawning specialized subagents per phase. Total: ~15-20 min.
+ * consolidation, spawning specialized subagents per phase. The per-cycle
+ * wall-clock cap is CYCLE_WINDOW_MS (20 min; see learner-full-cycle-core.ts) —
+ * a headroom cap, not a target; cycles return when their loop completes.
  *
  * Usage:
  *   yarn e2e:full-cycle

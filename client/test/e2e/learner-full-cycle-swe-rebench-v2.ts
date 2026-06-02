@@ -13,7 +13,10 @@
  * Gates on configured CLI availability — skips cleanly when the CLI is missing
  * (same as portfolio `e2e:full-cycle`). Does not assert solution delivery or eval.
  *
- * Runtime budget: ~15-20 min (two ~10 min cycle windows).
+ * Runtime budget: typically ~12-25 min. The per-cycle wall-clock cap is
+ * CYCLE_WINDOW_MS (20 min; see learner-full-cycle-core.ts) — headroom for
+ * claude-code/Haiku's slower cycle 2, not a target; cycles return when their
+ * loop completes.
  *
  * Usage:
  *   yarn e2e:full-cycle-swe-rebench-v2
@@ -125,7 +128,7 @@ async function main(): Promise<void> {
       buildTask: buildSweTaskForCycle,
     });
 
-    assertCycle(cycle1, { label: 'cycle-1', requireBootJson: true });
+    assertCycle(cycle1, { label: 'cycle-1', requireBootJson: true, requirePhaseRecords: true });
 
     const sha1 = cycle1.implStateDirHeadAfter;
     console.log(`  cycle 1 ended; implStateDir HEAD = ${sha1.slice(0, 8)}\n`);
@@ -146,7 +149,7 @@ async function main(): Promise<void> {
       buildTask: buildSweTaskForCycle,
     });
 
-    assertCycle(cycle2, { label: 'cycle-2', requireBootJson: true });
+    assertCycle(cycle2, { label: 'cycle-2', requireBootJson: true, requirePhaseRecords: true });
 
     const sha2 = cycle2.implStateDirHeadAfter;
     console.log(`  cycle 2 ended; implStateDir HEAD = ${sha2.slice(0, 8)}\n`);
