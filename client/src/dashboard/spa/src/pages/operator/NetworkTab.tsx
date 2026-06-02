@@ -110,6 +110,14 @@ function TaskPostsCard(): JSX.Element {
     body = (
       <p className="font-mono text-[12px] text-[var(--fg-muted)]">Loading…</p>
     );
+  } else if (!data.chain) {
+    // Defensive: a non-error response missing `chain` (malformed/partial)
+    // must degrade gracefully, not throw on `data.chain.h24` (#962-smoke).
+    body = (
+      <p className="font-mono text-[12px] text-[var(--fg-muted)]">
+        Task-post rate is unavailable while the indexer catches up.
+      </p>
+    );
   } else if (data.chain.h24 === 0) {
     body = (
       <p className="font-mono text-[12px] text-[var(--fg-muted)]">

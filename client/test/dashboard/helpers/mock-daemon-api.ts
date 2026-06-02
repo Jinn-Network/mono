@@ -140,6 +140,12 @@ export const DEFAULT_OPERATOR_ARTIFACTS = {
   artifacts: [],
 };
 
+/** Minimal task-post-counts (#918/#942) — chain windows + empty byCid map. */
+export const DEFAULT_TASK_POST_COUNTS = {
+  chain: { h1: 0, h6: 0, h24: 0 },
+  byCid: {},
+};
+
 export const DEFAULT_RUNNING_BOOTSTRAP = {
   schemaVersion: 1,
   mode: 'running',
@@ -319,6 +325,16 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
     (url) => url.pathname.startsWith('/api/captures/'),
     (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) }),
+  );
+
+  // ---- Discovery (task-post-counts, #918/#942) ----
+  // NetworkTab polls this every 30s; without the mock the request falls through
+  // to the real daemon and NetworkTab crashes on the chain-less response.
+  // (matches with/without the ?cid query — match by pathname).
+  await page.route(
+    (url) => url.pathname === '/v1/discovery/task-post-counts',
+    (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_TASK_POST_COUNTS) }),
   );
 
   // ---- Misc setup + auth ----
