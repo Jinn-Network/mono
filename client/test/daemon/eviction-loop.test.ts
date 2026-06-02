@@ -115,6 +115,71 @@ describe('EvictionLoop', () => {
     expect(recoverEvicted).not.toHaveBeenCalled();
   });
 
+  it('does not re-fire reStake for the same service within the throttle window (#917)', async () => {
+    const readContract = vi.fn().mockResolvedValue(2n); // 2 = Evicted
+    const recoverEvicted = vi.fn().mockResolvedValue(undefined);
+    let nowMs = 1_000_000;
+    const loop = new EvictionLoop({
+      intervalMs: 60_000,
+      store: mockStore([makeService()]),
+      chain: 'base-sepolia',
+      readContract,
+      recoverEvictedService: recoverEvicted,
+      reStakeThrottleMs: 300_000,
+      now: () => nowMs,
+    });
+
+    await loop.runOnce(); // first tick: attempt fires
+    nowMs += 100; // 100ms later
+    await loop.runOnce(); // second tick: still evicted, throttle active
+    expect(recoverEvicted).toHaveBeenCalledTimes(1);
+
+    // Boundary: after the full window the throttle expires and a third tick fires again.
+    nowMs += 300_000;
+    await loop.runOnce();
+    expect(recoverEvicted).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a reverted reStake attempt throttled within the window (#917)', async () => {
+    const readContract = vi.fn().mockResolvedValue(2n); // 2 = Evicted
+    const recoverEvicted = vi.fn().mockRejectedValue(new Error('reStake reverted'));
+    let nowMs = 1_000_000;
+    const loop = new EvictionLoop({
+      intervalMs: 60_000,
+      store: mockStore([makeService()]),
+      chain: 'base-sepolia',
+      readContract,
+      recoverEvictedService: recoverEvicted,
+      reStakeThrottleMs: 300_000,
+      now: () => nowMs,
+    });
+
+    await loop.runOnce(); // first tick: attempt fires (and reverts, caught non-fatally)
+    nowMs += 100; // 100ms later
+    await loop.runOnce(); // second tick: still throttled despite the revert
+    expect(recoverEvicted).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats reStakeThrottleMs: 0 as the default window, not disabled (#917)', async () => {
+    const readContract = vi.fn().mockResolvedValue(2n); // 2 = Evicted
+    const recoverEvicted = vi.fn().mockResolvedValue(undefined);
+    let nowMs = 1_000_000;
+    const loop = new EvictionLoop({
+      intervalMs: 60_000,
+      store: mockStore([makeService()]),
+      chain: 'base-sepolia',
+      readContract,
+      recoverEvictedService: recoverEvicted,
+      reStakeThrottleMs: 0, // 0 must fall back to the positive default, not disable the throttle
+      now: () => nowMs,
+    });
+
+    await loop.runOnce(); // first tick: attempt fires
+    nowMs += 100; // 100ms later — well inside the default window
+    await loop.runOnce(); // second tick: still evicted, throttle active
+    expect(recoverEvicted).toHaveBeenCalledTimes(1);
+  });
+
   it('exits immediately when intervalMs is 0', async () => {
     const readContract = vi.fn().mockResolvedValue(1n);
     const recoverEvicted = vi.fn();

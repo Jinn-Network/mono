@@ -2601,6 +2601,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       CHAIN_CONFIG.distributorAddress
         ? {
             intervalMs: config.evictionCheckIntervalMs,
+            reStakeThrottleMs: config.checkpointIntervalMs,
             store: earningStore,
             chain: NETWORK_CHAIN,
             readContract: (opts) => publicClient.readContract(opts as Parameters<typeof publicClient.readContract>[0]) as Promise<bigint>,

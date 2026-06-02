@@ -38,6 +38,10 @@ export interface EvictionLoopConfig {
    * Accepts a ServiceState and kicks off the reStake call.
    */
   recoverEvictedService: (svc: ServiceState) => Promise<void>;
+  /** Min ms between reStake attempts for the same service. Default 300_000. */
+  reStakeThrottleMs?: number;
+  /** Injectable clock for tests. Default () => Date.now(). */
+  now?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,8 +50,17 @@ export interface EvictionLoopConfig {
 
 export class EvictionLoop {
   private stopped = false;
+  private readonly lastReStakeAttemptMs = new Map<string, number>();
+  private readonly reStakeThrottleMs: number;
+  private readonly now: () => number;
 
-  constructor(private readonly config: EvictionLoopConfig) {}
+  constructor(private readonly config: EvictionLoopConfig) {
+    this.reStakeThrottleMs =
+      config.reStakeThrottleMs != null && config.reStakeThrottleMs > 0
+        ? config.reStakeThrottleMs
+        : 300_000;
+    this.now = config.now ?? (() => Date.now());
+  }
 
   stop(): void {
     this.stopped = true;
@@ -71,9 +84,19 @@ export class EvictionLoop {
         });
 
         if (Number(stakingState) === 2) {
+          const id = String(svc.service_id);
+          const last = this.lastReStakeAttemptMs.get(id);
+          const ts = this.now();
+          if (last !== undefined && ts - last < this.reStakeThrottleMs) {
+            console.error(
+              `[eviction-loop] Service ${displayIndex} (service_id ${svc.service_id}) still evicted; reStake throttled (last attempt ${ts - last}ms ago, window ${this.reStakeThrottleMs}ms)`,
+            );
+            continue;
+          }
           console.error(
             `[eviction-loop] Service ${displayIndex} (service_id ${svc.service_id}) is evicted; triggering auto-restake`,
           );
+          this.lastReStakeAttemptMs.set(id, ts); // mark BEFORE awaiting so a revert is throttled like a success
           await this.config.recoverEvictedService(svc);
         }
       } catch (err) {
