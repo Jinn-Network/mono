@@ -27,6 +27,10 @@ import {
   checkRpcNetwork as defaultCheckRpcNetwork,
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
 } from '../../preflight/rpc-network.js';
+import {
+  runDeploymentReadinessChecks as defaultRunDeploymentReadinessChecks,
+  type DeploymentReadinessReport,
+} from '../../preflight/deployment-readiness.js';
 import { SOLVER_TYPES } from '../../solver-types/index.js';
 import {
   resolveTaskNativeReadiness as defaultResolveTaskNativeReadiness,
@@ -46,6 +50,8 @@ export interface DoctorDeps extends BaseCommandDeps {
   probeClaudeAuth: typeof defaultProbeClaudeAuth;
   /** Local-only Task-native deployment/config readiness check. */
   resolveTaskNativeReadiness?: (config: JinnConfig) => TaskNativeReadiness;
+  /** Deployment-readiness aggregate (#958); tests inject a fake to avoid fs/network probes. */
+  runDeploymentReadinessChecks?: typeof defaultRunDeploymentReadinessChecks;
 }
 
 const PRODUCTION_DEPS: DoctorDeps = {
@@ -58,6 +64,7 @@ const PRODUCTION_DEPS: DoctorDeps = {
   checkDistributorReachable,
   detectAuthContext: defaultDetectAuthContext,
   probeClaudeAuth: defaultProbeClaudeAuth,
+  runDeploymentReadinessChecks: defaultRunDeploymentReadinessChecks,
 };
 
 interface CheckResult {
@@ -170,6 +177,21 @@ function taskNativeCheckForDoctor(readiness: TaskNativeReadiness): CheckResult {
       ...(readiness.operatorState ? { operatorState: readiness.operatorState } : {}),
     },
   };
+}
+
+/**
+ * Map the deployment-readiness aggregate (#958) into doctor `CheckResult`s.
+ * These always appear in `doctor` output regardless of context; the report's
+ * `deployment` flag is reflected in the volume check's detail so the operator
+ * can see whether the boot gate would be armed.
+ */
+function deploymentReadinessChecksForDoctor(report: DeploymentReadinessReport): CheckResult[] {
+  return report.checks.map((c) => ({
+    name: c.name,
+    ok: c.ok,
+    detail: c.detail,
+    ...(c.remedy ? { remedy: c.remedy } : {}),
+  }));
 }
 
 function claudeBinaryCheckForDoctor(claudePath: string, result: ClaudeBinaryCheckResult): CheckResult {
@@ -337,6 +359,11 @@ configuration:
   - keystore_present            mnemonic keystore in configured earning directory (optional)
   - deployment_loaded           testnet/mainnet contract addresses resolved
   - task_native_deployment      TaskCoordinator/JinnRouterV3/TaskActivityCheckerV3 local readiness
+  - writable_volume             state directory is writable (write+fsync+unlink probe)
+  - state_on_volume             state resolves under JINN_STATE_DIR in a deployment context
+  - credentials_resolvable      agent-CLI credentials resolvable (presence-only; no secret echo)
+  - relayer_reachable           claim-relayer endpoint reachable (skipped when unconfigured)
+  - agent_cli_non_root          daemon not running as root (uid 0)
   - portfolio_impl_state_dir    HL impl state directory present and readable
   - hl_api_wallet               HL API wallet generated and approved by operator
 
@@ -384,6 +411,19 @@ Examples:
       checks.push(await checkDeploymentLoaded(config));
       checks.push(taskNativeCheckForDoctor((deps.resolveTaskNativeReadiness ?? defaultResolveTaskNativeReadiness)(config)));
       checks.push(checkDaemonRuntimeReady());
+
+      // Deployment-readiness aggregate (#958). Always reported here; the boot
+      // gate in main.ts only fails loud on hard checks in a deployment context.
+      const deploymentReport = await (deps.runDeploymentReadinessChecks ?? defaultRunDeploymentReadinessChecks)(
+        { stateDir: config.stateDir, earningDir: config.earningDir, relayerUrl: undefined },
+        {
+          env: ctx.env,
+          getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
+          detectAuthContext: deps.detectAuthContext,
+          fetch,
+        },
+      );
+      checks.push(...deploymentReadinessChecksForDoctor(deploymentReport));
 
       const distributorCheck = await deps.checkDistributorReachable(config);
       if (distributorCheck) checks.push(distributorCheck);

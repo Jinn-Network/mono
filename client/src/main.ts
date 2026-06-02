@@ -51,6 +51,8 @@ import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { applyPidfileLivenessGate } from './preflight/pidfile-liveness.js';
+import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.js';
+import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
@@ -2659,6 +2661,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // proceed); the writeFileSync below MUST stay outside the helper so the
   // "// DO NOT add store mutations above this line — see #649" invariant is
   // visible right here at the call site.
+  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
+  // set or a container/compose auth context) this fails loud and exits when a
+  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
+  // Outside a deployment context it only logs advisories — a plain local
+  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
+  // unfit environment refuses before we touch the pidfile.
+  await applyDeploymentReadinessGate(
+    { stateDir: config.stateDir, earningDir: config.earningDir, relayerUrl: undefined },
+    {
+      env: process.env,
+      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
+      detectAuthContext,
+      fetch,
+    },
+  );
+
   const pidPath = join(config.earningDir, 'daemon.pid');
   applyPidfileLivenessGate(pidPath);
 
