@@ -30,7 +30,20 @@ import { mkdtemp, writeFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runHarnessOnce } from '../../src/harnesses/engine/engine.js';
-import type { Harness, Solution } from '../../src/harnesses/types.js';
+import { runHarnessWithFreezeFence } from '../../src/daemon/freeze-fence.js';
+import { hashImplStateDir } from '../../src/harnesses/freeze.js';
+import {
+  runEval,
+  FreezeFenceViolationError,
+  type EvalOrchestratorDeps,
+  type RunHarnessOnceForEval,
+} from '../../src/eval/orchestrator.js';
+import type { ResolvedSlateTask } from '../../src/eval/resolve-slate-tasks.js';
+import type { LoadedHeldOutSlate } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
+import type { HarnessCheckpointManifest } from '@jinn-network/sdk/checkpoint';
+import type { HfRow } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import { Store } from '../../src/store/store.js';
+import type { Harness, HarnessContext, Solution } from '../../src/harnesses/types.js';
 import { runPhase, summarize, assert } from './task-first-helpers.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -209,6 +222,255 @@ async function runFrozenModeViolationRejectedAndRolledBack(): Promise<void> {
   });
 }
 
+// ── Tier-1 eval-orchestrator CI smoke (issue #819) ──────────────────────────────
+//
+// DR-2026-05-28 §4 Tier 1: drive `runEval` end-to-end against a tiny mocked
+// slate (1–2 tasks) through the REAL freeze machinery
+// (`runHarnessWithFreezeFence` + a real temp implStateDir) with a MOCKED harness
+// + MOCKED evaluator. No Docker, no IPFS, no network. This protects the exam
+// machinery from silently rotting — it does NOT measure learning. Distinct from
+// the unit tests in test/eval/orchestrator.test.ts, which mock the fence itself;
+// here the fence is real.
+
+const SLATE: LoadedHeldOutSlate = {
+  version: 'v1',
+  hash: 'sha256:slate',
+  instanceIds: new Set(['smoke-1', 'smoke-2']),
+};
+
+function smokeRow(instance_id: string): HfRow {
+  return {
+    instance_id,
+    repo: 'org/repo',
+    image_name: `img-${instance_id}`,
+    FAIL_TO_PASS: ['t1'],
+    PASS_TO_PASS: ['t2'],
+    test_patch: 'diff',
+    install_config: { test_cmd: 'pytest', log_parser: 'pytest' },
+  };
+}
+
+function smokeTask(instance_id: string): ResolvedSlateTask {
+  return {
+    task: {
+      schemaVersion: 'swe-rebench-v2.v1',
+      instance_id,
+      repo: 'org/repo',
+      base_commit: '0'.repeat(40),
+      language: 'python',
+      problem_statement: '',
+      interface: '',
+      hf_dataset: 'nebius/SWE-rebench',
+      hf_split: '2026_02',
+      deadline_unix: 1,
+      round_month: '2026-02',
+    },
+    row: smokeRow(instance_id),
+  };
+}
+
+/**
+ * Adapter that wires the orchestrator's injected `runHarnessOnce` seam to the
+ * REAL `runHarnessWithFreezeFence`, surfacing the harness `solution` (the
+ * production engine `runHarnessOnce` does not). This is the real frozen-mode
+ * snapshot/hash/rollback path the orchestrator depends on.
+ */
+function realFenceRunHarnessOnce(): RunHarnessOnceForEval {
+  return async ({ harness, implStateDir, mode, task }) => {
+    const ctx: HarnessContext = {
+      task: task ?? { id: 'smoke', description: '', role: 'restoration', window: { startTs: 0, endTs: Date.now() + 3_600_000 } },
+      implStateDir,
+      workingDir: implStateDir,
+      log: () => {},
+      abort: new AbortController().signal,
+      msUntilEndTs: () => 3_600_000,
+      mode,
+    } as unknown as HarnessContext;
+
+    const fence = await runHarnessWithFreezeFence(harness, ctx);
+    if (!fence.ok) {
+      return { violation: { taskId: fence.violation.taskId } };
+    }
+    const patch = (fence.output as { solutionPayload?: { patch?: string } }).solutionPayload?.patch ?? '';
+    return {
+      envelope: { executor: { mode, codeDigest: `sha256:${fence.codeDigest}` } },
+      solution: { patch },
+    };
+  };
+}
+
+/** Deterministic mocked evaluator: 'smoke-1' passes, everything else fails. No Docker. */
+function smokeEvaluator(): EvalOrchestratorDeps['evaluator'] {
+  return {
+    grade: async ({ task }: { task: { instance_id: string } }) => ({
+      schemaVersion: 'swe-rebench-v2-verdict.v1' as const,
+      score: task.instance_id === 'smoke-1' ? (1 as const) : (0 as const),
+      passed_match: task.instance_id === 'smoke-1',
+      evaluator_cost_usd: 0,
+      test_log: `deterministic-log-${task.instance_id}`,
+    }),
+  } as unknown as EvalOrchestratorDeps['evaluator'];
+}
+
+/**
+ * AC#1: drive the orchestrator deterministically over a 2-task slate through
+ * the real freeze-fence with a read-only mocked harness; assert per-task
+ * results are recorded in a real in-memory store.
+ */
+async function runOrchestratorSmokeRecordsResults(): Promise<void> {
+  await withTempDir(async (implStateDir) => {
+    // Pre-populate so the frozen hash is over real content, and pin the
+    // checkpoint manifest's codeDigest to the real hash so the C1 guard passes.
+    await writeFile(join(implStateDir, 'knowledge.json'), JSON.stringify({ version: 1 }));
+    const codeDigest = `sha256:${await hashImplStateDir(implStateDir)}`;
+
+    const harness: Harness = {
+      name: 'smoke-readonly-harness',
+      version: '0.1.0',
+      supports: () => true,
+      async run() {
+        // Frozen-compliant: no writes. Emits a fixed patch to grade.
+        return { venueRef: { name: 'smoke' }, gating: {}, solutionPayload: { patch: 'fixed-patch' } } as Solution;
+      },
+    };
+
+    const store = new Store(':memory:');
+    try {
+      // Seed the parent checkpoint so the AC#2 comparison has a denominator.
+      for (const id of ['smoke-1', 'smoke-2']) {
+        store.recordEvalResult({
+          checkpoint_cid: 'cid-parent', slate_hash: SLATE.hash, slate_version: SLATE.version,
+          instance_id: id, passed: id === 'smoke-1', unscorable: false, code_digest: codeDigest, run_at_ms: 0,
+        });
+      }
+
+      const manifest = {
+        parentCheckpointCid: 'cid-parent',
+        implStateDirCid: 'impl-cid',
+        codeDigest,
+      } as unknown as HarnessCheckpointManifest;
+
+      const result = await runEval({
+        checkpointManifest: manifest,
+        checkpointCid: 'cid-child',
+        slate: SLATE,
+        tasksWithRows: [smokeTask('smoke-1'), smokeTask('smoke-2')],
+        parentCheckpointCid: 'cid-parent',
+        implStateDir,
+        deps: {
+          harness,
+          // Impl-state is already on disk at `implStateDir`; fetch is a no-op.
+          fetchImplStateDirToLocal: async (_cid, dir) => dir,
+          evaluator: smokeEvaluator(),
+          runHarnessOnce: realFenceRunHarnessOnce(),
+          store,
+        },
+      });
+
+      assert(result.perTask.length === 2, `expected 2 per-task results, got ${result.perTask.length}`);
+      assert(
+        result.perTask[0].instance_id === 'smoke-1' && result.perTask[0].passed === true,
+        'smoke-1 must be recorded as passed',
+      );
+      assert(
+        result.perTask[1].instance_id === 'smoke-2' && result.perTask[1].passed === false,
+        'smoke-2 must be recorded as failed',
+      );
+
+      // Per-task results are durably recorded in the real store (AC#1).
+      const persisted = store.getEvalResults('cid-child', SLATE.version);
+      assert(persisted.length === 2, `store must hold 2 per-task rows, got ${persisted.length}`);
+      assert(
+        persisted.every((r) => r.code_digest === codeDigest),
+        'persisted rows must carry the checkpoint codeDigest',
+      );
+
+      process.stdout.write(
+        `  recorded ${persisted.length} per-task results: ` +
+        persisted.map((r) => `${r.instance_id}=${r.passed}`).join(', ') + '\n',
+      );
+    } finally {
+      store.close();
+    }
+  });
+}
+
+/**
+ * AC#2: a mocked harness that MUTATES implStateDir during a frozen-mode run is
+ * caught by the real freeze-fence; the orchestrator throws
+ * FreezeFenceViolationError and records nothing.
+ */
+async function runOrchestratorSmokeFreezeFenceCatchesMutation(): Promise<void> {
+  await withTempDir(async (implStateDir) => {
+    await writeFile(join(implStateDir, 'baseline.json'), JSON.stringify({ stable: true }));
+    const codeDigest = `sha256:${await hashImplStateDir(implStateDir)}`;
+
+    const mutatingHarness: Harness = {
+      name: 'smoke-bad-actor-harness',
+      version: '0.1.0',
+      supports: () => true,
+      async run(ctx) {
+        // Deliberate frozen-mode violation: write a forbidden file.
+        await writeFile(join(ctx.implStateDir, 'forbidden.txt'), 'should not persist');
+        return { venueRef: { name: 'smoke' }, gating: {}, solutionPayload: { patch: 'tainted' } } as Solution;
+      },
+    };
+
+    const store = new Store(':memory:');
+    try {
+      const manifest = {
+        parentCheckpointCid: 'cid-parent',
+        implStateDirCid: 'impl-cid',
+        codeDigest,
+      } as unknown as HarnessCheckpointManifest;
+
+      let threw: unknown;
+      try {
+        await runEval({
+          checkpointManifest: manifest,
+          checkpointCid: 'cid-child',
+          slate: SLATE,
+          tasksWithRows: [smokeTask('smoke-1')],
+          parentCheckpointCid: 'cid-parent',
+          implStateDir,
+          deps: {
+            harness: mutatingHarness,
+            fetchImplStateDirToLocal: async (_cid, dir) => dir,
+            evaluator: smokeEvaluator(),
+            runHarnessOnce: realFenceRunHarnessOnce(),
+            store,
+          },
+        });
+      } catch (err) {
+        threw = err;
+      }
+
+      assert(
+        threw instanceof FreezeFenceViolationError,
+        `expected FreezeFenceViolationError, got ${threw instanceof Error ? threw.constructor.name : String(threw)}`,
+      );
+
+      // Nothing recorded: the tainted instance never reaches the store (AC#2).
+      const persisted = store.getEvalResults('cid-child', SLATE.version);
+      assert(persisted.length === 0, `freeze violation must record nothing, found ${persisted.length} rows`);
+
+      // The real fence rolled implStateDir back: only baseline.json survives.
+      const remaining = await readdir(implStateDir);
+      assert(
+        remaining.length === 1 && remaining[0] === 'baseline.json',
+        `fence must roll back implStateDir; found [${remaining.join(', ')}]`,
+      );
+
+      process.stdout.write(
+        `  freeze-fence caught frozen-mode mutation: FreezeFenceViolationError thrown, ` +
+        `0 rows recorded, implStateDir rolled back to [${remaining.join(', ')}]\n`,
+      );
+    } finally {
+      store.close();
+    }
+  });
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -227,6 +489,17 @@ async function main(): Promise<void> {
   results.push(await runPhase(
     'freeze-mode / frozen mode: violation harness rejected + implStateDir rolled back',
     runFrozenModeViolationRejectedAndRolledBack,
+  ));
+
+  // Tier-1 eval-orchestrator CI smoke (issue #819).
+  results.push(await runPhase(
+    'eval-orchestrator smoke / records per-task results over a tiny mocked slate (real fence)',
+    runOrchestratorSmokeRecordsResults,
+  ));
+
+  results.push(await runPhase(
+    'eval-orchestrator smoke / freeze-fence catches a frozen-mode mutation, records nothing',
+    runOrchestratorSmokeFreezeFenceCatchesMutation,
   ));
 
   summarize(results);
