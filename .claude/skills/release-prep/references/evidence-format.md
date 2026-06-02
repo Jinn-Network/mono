@@ -1,5 +1,17 @@
 # Evidence format
 
+> **Superseded gate, retained diagnostic.** Per the two-gate redesign
+> (`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md` §7),
+> the **publish gate is two SHA-bound check-runs** — `hermetic-gate` and
+> `environment-suite`, posted via `client/scripts/release/post-check-run-verdict.mjs`
+> — **not** the `marker.txt` documented below. The `jinn-release-evidence:v1`
+> marker is **no longer parsed by `npm-publish.yml`** and no longer gates a
+> release; if release-prep is run at all (its mechanical run-role is retired —
+> see `.claude/skills/release-prep/SKILL.md`), treat `marker.txt` as a
+> human-readable **diagnostic artifact** only. The authoritative verdict shape is
+> the check-run verdict JSON
+> (`{ context, headSha, conclusion, scenarios[], summary }`).
+
 Each release-prep run produces three artifact types under `<outputDir>/`:
 
 1. **`summary.json`** — structured verdict list, parseable by release-readiness.
@@ -23,7 +35,7 @@ Each release-prep run produces three artifact types under `<outputDir>/`:
    }
    ```
 
-2. **`marker.txt`** — pasteable marker for the GitHub Release body.
+2. **`marker.txt`** — historical pasteable marker (diagnostic only; no longer the publish gate — see the banner above).
 
    ```
    <!-- jinn-release-evidence:v1
@@ -42,7 +54,7 @@ Each release-prep run produces three artifact types under `<outputDir>/`:
 
 ## Consumption
 
-`release-readiness` reads `summary.json` directly (structured). The marker block in `marker.txt` is what gets pasted into the GH Release body so the existing marker check in `.github/workflows/npm-publish.yml` validates it. The `.log` files are for humans investigating failures.
+`release-readiness` reads `summary.json` directly (structured). Historically the `marker.txt` block was pasted into the GH Release body so a marker check in `.github/workflows/npm-publish.yml` could validate it — **that marker check is retired** (the publish guard now queries the `hermetic-gate` + `environment-suite` check-runs on the release SHA, spec §7). The `.log` files are for humans investigating failures.
 
 ## Output directory layout
 

@@ -68,13 +68,21 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 **Why:** u34i lesson — module-isolated unit tests miss cross-module invariant drift.
 
-## C9 — release-evidence marker schema
+## C9 — publish-guard check-run contract
 
-**Triggers when:** diff touches `.github/workflows/npm-publish.yml` marker check.
+**Triggers when:** diff touches `.github/workflows/npm-publish.yml` publish guard, `.github/workflows/hermetic-gate.yml`, `.github/workflows/environment-suite.yml`, or `client/scripts/release/post-check-run-verdict.mjs`.
 
 **Where:** main (grep).
 
-**Action:** validate any new marker keys against `client/scripts/release/release-readiness.ts` schema. If the schema isn't updated to match, flag.
+**Why:** Per the two-gate redesign (`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md` §7), the publish guard no longer parses a hand-typed `jinn-release-evidence:v1` marker — it queries two **SHA-bound check-runs**, `hermetic-gate` and `environment-suite`, and re-runs nothing. The marker is at most a human-readable diagnostic artifact, not the gate.
+
+**Action:** verify the contract holds end-to-end —
+
+- The publish guard queries exactly the two contexts `hermetic-gate` **and** `environment-suite` (no other names), bound to the release SHA, and requires both `success`. It must NOT re-run any test or parse a marker.
+- The `environment-suite` requirement may be waived ONLY via the transitional repo variable `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'`, and the waiver must be logged loudly. `hermetic-gate` is never waivable.
+- The two workflows post their verdicts through the single shared poster `client/scripts/release/post-check-run-verdict.mjs` with the locked verdict-JSON shape (`{ context, headSha, conclusion, scenarios[], summary }`) and the exact context names above.
+
+Any drift — a third context name, a re-introduced marker parse, a re-run step, a waiver that isn't gated on the repo variable, or a poster bypass — is a finding.
 
 ## C10 — spec freshness
 

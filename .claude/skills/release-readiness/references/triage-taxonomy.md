@@ -10,8 +10,9 @@ Close before recommend SHIP. Includes:
 - Canon doc moved without ratification path (Discussion + CODEOWNERS approval).
 - Bootstrap / auth / eval substrate regression.
 - Wiring-seam drift introduced (multiple modules computing same value, no helper).
-- Tier 3 scenario regression vs last release.
-- Any Tier 1/2/3 gate failure not proven a flake (see §Gate failures).
+- `environment-suite` scenario regression vs last release.
+- Any `hermetic-gate` / `environment-suite` verdict that is **product-red** and
+  not proven a flake (see §Gate failures).
 - Skill makes false claims about changed surface (operator hits a wall).
 
 ## DEFERRABLE
@@ -20,7 +21,8 @@ File GH issue with milestone, ship anyway, note in release notes. Includes:
 - Spec-drift in unreferenced area.
 - Pre-existing open issue.
 - Quality-of-life concerns that don't break a documented invariant.
-- Tier 1/2/3 gate failures **proven** a flake by isolated retry (see §Gate failures).
+- `hermetic-gate` / `environment-suite` failures classed `infra-blocked`, or
+  **proven** a flake by isolated retry (see §Gate failures).
 - Skill doesn't yet cover new surface but existing surface is still accurate.
 - Anything previously triaged as "next release" pattern.
 
@@ -31,22 +33,42 @@ Concern is addressed; link to evidence. Includes:
 - Open-ended concern that's covered by an existing test.
 - Concern explicitly resolved by a commit in this window.
 
-## Gate failures (Tier 1 / Tier 2 / Tier 3)
+## Gate failures (hermetic-gate / environment-suite)
 
-A failing release gate is **BLOCKING by default** — drive it to a fix, do not file it.
+The two gates (spec/2026-05-31 §3, #923) post SHA-bound check-runs. Their verdicts
+classify into the three §10 outcomes — triage each differently:
 
-- A `flake-timing` / `flake-infra` classification is a **hypothesis**, not a verdict:
-  `classifyFailure` only regex-matches the error string. It must be **proven** — re-run
-  the scenario isolated. Passes on an isolated retry → genuine flake. Fails again → it
-  is real; dispatch a gate-failure debug subagent.
-- A gate failure may be classified **DEFERRABLE only with a debug-subagent root-cause
-  report** that proves the cause is genuinely external / non-code (an upstream outage, a
-  competing testnet actor the gate must tolerate, etc.). No root-cause report → it cannot
-  be deferred.
-- 3 failed fix attempts on a real gate failure → BLOCKING-ESCALATED.
-- Precedent (v2026.05.25 run): every auto-classified "flake" — T2.1/T2.3 `daemon not
-  reachable`, T3.1 `flake-timing` — was a real bug (a `JINN_PASSWORD` leak, then three
-  task-posting/discovery defects including a latent production bug). None were flakes.
+- **product-red** — a real code regression. **BLOCKING by default** — drive it to a
+  fix on the `release/<v>` branch, do not file it. A `hermetic-gate` red is *always*
+  product-red (the gate is deterministic, zero external deps — it cannot flake for
+  infra reasons).
+- **infra-blocked** — the warm operator is unhealthy / under-funded, the
+  `CLAUDE_CODE_OAUTH_TOKEN` expired, RPC 429 after retry, or an agent-transport error
+  (env suite only). This is **NOT a product regression**: it is reported distinctly
+  (a `neutral` env-suite verdict), retried once, and if persistent blocks the cut as
+  an **infra** problem to fix in the harness/operator — never silently a pass or a
+  product fail. "The dashboard says infra → go fix the operator," not "blocked for
+  days, was it the product?"
+- **agent-answer-quality** — a flaky/wrong LLM answer. Hard-asserted **only** where the
+  task has known ground truth; otherwise a **soft** signal that lives in the verdict
+  notes and **never blocks** the cut.
+
+Discipline that survives the redesign:
+- An `infra-blocked` / flake classification is a **hypothesis**, not a verdict — a
+  proven cause, not an assumption. Prove it: re-run the scenario isolated. Passes on
+  an isolated retry → genuine flake/infra. Fails again → it is real; dispatch a
+  gate-failure debug subagent. (`environment-suite`'s `classifyFailure` only regex-
+  matches the error string; the `hermetic-gate` has no infra to blame.)
+- A failure may be classified **DEFERRABLE only with a debug-subagent root-cause
+  report** proving the cause is genuinely external / non-code. No root-cause → it
+  cannot be deferred.
+- 3 failed fix attempts on a real (product-red) failure → BLOCKING-ESCALATED.
+- Precedent (v2026.05.25 run, under the retired Tier ladder): every auto-classified
+  "flake" — the then-T2.1/T2.3 `daemon not reachable`, T3.1 `flake-timing` — was a
+  real bug (a `JINN_PASSWORD` leak, then three task-posting/discovery defects
+  including a latent production bug). None were flakes. The two-gate split exists
+  precisely to make this misclassification impossible: deterministic reds (hermetic)
+  cannot be infra, and real-world infra (env suite) is a distinct, named outcome.
 
 ## Edge cases
 

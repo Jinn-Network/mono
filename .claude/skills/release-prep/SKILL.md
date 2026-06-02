@@ -1,10 +1,39 @@
 # release-prep
 
+> **SUPERSEDED — historical / reference only.** Per the two-gate redesign
+> (`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md` §12),
+> release-prep's mechanical run-role is **retired** — release validation now runs
+> in CI, not on a laptop. Do not invoke this skill to gate a release. Use:
+>
+> - **`.github/workflows/hermetic-gate.yml`** — deterministic, per-PR; posts the
+>   `hermetic-gate` check-run (was Tier 1 + parts of Tier 2/3).
+> - **`.github/workflows/environment-suite.yml`** — real testnet, gates the cut;
+>   posts the `environment-suite` check-run (was the real `yarn e2e` phases +
+>   Tier 2 cross-op + Tier 3).
+>
+> `release-readiness` orchestrates: it dispatches `environment-suite.yml` on the
+> candidate SHA and reads the two SHA-bound check-runs — it no longer invokes
+> release-prep. The Tier 1/2/3 ladder and the hand-typed marker are retired
+> (the publish guard verifies the two check-runs instead, spec §7).
+>
+> **Where the substrate helpers went:** the only living value here is the
+> substrate/operator-provisioning tooling this skill once drove. Per spec §12 it
+> is repurposed into **warm-operator lifecycle tooling** that serves
+> `environment-suite.yml` — keeping the dedicated, pre-staked testnet warm
+> operator (spec §11) healthy, funded, and its `CLAUDE_CODE_OAUTH_TOKEN` fresh.
+
+---
+
+The text below documents the retired mechanical run-role for historical reference.
+
 Mechanical gate-runner skill. Runs Tier 1 (and eventually Tier 2) scenarios against a candidate branch, classifies failures, emits a marker block ready to paste into a GitHub Release body.
 
 This skill is *not* the audit layer — that's `release-readiness`. release-prep runs gates and reports; it doesn't decide blocking vs deferrable. release-readiness invokes release-prep as a subagent.
 
 ## When to use
+
+> Retired — see the superseded banner above. The two CI workflows replace every
+> bullet below.
 
 - Invoked by `release-readiness` during its Phase 5 validation.
 - Invoked manually when an operator wants gate evidence for a candidate SHA.
