@@ -12,6 +12,7 @@ import type { EarningMigrationArchive } from '../earning/store.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
+import type { LoopCompletionStatus, ImplStateCadenceStatus } from './loop-completion-build.js';
 import { DEFAULT_HARNESS_ROLLUP, type HarnessRollup } from './status-harness-rollup.js';
 import {
   buildCostSurfaceStatus,
@@ -302,6 +303,17 @@ export interface StatusV1Response {
   predictionV1?: PredictionV1Status;
   /** Generic task-run lifecycle data across all SolverNets. */
   taskRuns?: TaskRunsStatus;
+  /**
+   * Loop-completion rollup over task_runs.solution_outputs_json gating phases
+   * (#959). Always present — defaults to all-zero when there are no rows.
+   */
+  loopCompletion?: LoopCompletionStatus;
+  /**
+   * Per-repo impl-state commit cadence under the impl-state root (#959).
+   * Present only when an impl-state root was threaded through the gather
+   * config; `repos` is empty when the root is absent / has no git repos.
+   */
+  implStateCadence?: ImplStateCadenceStatus;
   /** Per-credential daily spend block — present when caps are configured. */
   spend?: SpendStatus;
   /** Per-credential AI-units 6h-block + 7d-window block — issue #815. */

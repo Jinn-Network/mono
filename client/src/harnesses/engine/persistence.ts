@@ -667,6 +667,22 @@ export class TaskRunPersistence {
   }
 
   /**
+   * Read-only projection for the /v1/status loop-completion rollup (#959):
+   * every task_run's `solution_outputs_json` (carries the engine's
+   * `gating.phasesCompleted` array) plus its `delivery_tx_hash`. Selects only
+   * the two columns the rollup needs, across all rows regardless of state.
+   */
+  getGatingRows(): Array<{ solutionOutputsJson: string | null; deliveryTxHash: string | null }> {
+    const rows = this.db
+      .prepare('SELECT solution_outputs_json, delivery_tx_hash FROM task_runs')
+      .all() as Array<{ solution_outputs_json: string | null; delivery_tx_hash: string | null }>;
+    return rows.map((r) => ({
+      solutionOutputsJson: r.solution_outputs_json,
+      deliveryTxHash: r.delivery_tx_hash,
+    }));
+  }
+
+  /**
    * Single-flight gate: is there a non-terminal task_run for the given
    * routing key + role, in the same SolverNet?
    *

@@ -1,4 +1,5 @@
-import { mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -790,6 +791,179 @@ describe('gatherStatusForApi', () => {
 
       expect(apiStatus.predictionV1?.operator?.ok).toBe(false);
       expect(apiStatus.predictionV1?.operator?.solverNet?.roles).toEqual(['solving']);
+    });
+  });
+
+  // ── #959: loop-completion + impl-state commit cadence on /v1/status ──────────
+
+  /** Seed a task_runs row with explicit solution_outputs_json + delivery_tx_hash. */
+  function seedGatingRow(
+    store: { db: import('better-sqlite3').Database },
+    args: {
+      requestId: string;
+      solutionOutputsJson: string | null;
+      deliveryTxHash?: string | null;
+    },
+  ): void {
+    const persistence = new TaskRunPersistence(store.db);
+    persistence.insertDiscovered({
+      requestId: args.requestId,
+      taskId: args.requestId,
+      taskCid: `bafy-${args.requestId}`,
+      onchainCreationTx: `0x${args.requestId}`,
+      onchainCreationBlock: 1,
+      solverType: 'swe-rebench-v2.v1',
+      taskRole: 'restoration',
+      windowStartTs: 1_000,
+      windowEndTs: 2_000,
+    });
+    store.db
+      .prepare(
+        `UPDATE task_runs
+         SET solution_outputs_json = ?, delivery_tx_hash = ?
+         WHERE request_id = ?`,
+      )
+      .run(args.solutionOutputsJson, args.deliveryTxHash ?? null, args.requestId);
+  }
+
+  it('rolls up loop-completion phases across task_runs.solution_outputs_json', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      // Reached execute only.
+      seedGatingRow(store, {
+        requestId: 'row-execute',
+        solutionOutputsJson: JSON.stringify({
+          gating: { phasesCompleted: ['plan', 'execute'] },
+        }),
+      });
+      // Full self-improvement loop (improve + memory-consolidation), delivered.
+      seedGatingRow(store, {
+        requestId: 'row-fullloop',
+        solutionOutputsJson: JSON.stringify({
+          gating: {
+            phasesCompleted: ['plan', 'execute', 'improve', 'memory-consolidation'],
+          },
+        }),
+        deliveryTxHash: '0xdelivered',
+      });
+      // No gating block at all.
+      seedGatingRow(store, {
+        requestId: 'row-nogating',
+        solutionOutputsJson: JSON.stringify({ something: 'else' }),
+      });
+      // Malformed JSON.
+      seedGatingRow(store, {
+        requestId: 'row-malformed',
+        solutionOutputsJson: '{not json',
+      });
+
+      const status = await gatherStatusForApi(store, undefined);
+
+      expect(status.loopCompletion).toEqual({
+        total: 4,
+        delivered: 1,
+        withGating: 2,
+        reachedExecute: 2,
+        reachedImprove: 1,
+        reachedMemoryConsolidation: 1,
+        fullLoop: 1,
+        phaseCounts: {
+          plan: 2,
+          execute: 2,
+          improve: 1,
+          'memory-consolidation': 1,
+        },
+      });
+    });
+  });
+
+  it('reports per-repo impl-state commit cadence under the impl-state root', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    const implStateDirRoot = mkdtempSync(join(tmpdir(), 'jinn-impl-state-'));
+    const repoDir = join(implStateDirRoot, 'swe-impl');
+    mkdirSync(repoDir, { recursive: true });
+    // Deterministic git repo with three commits + fixed author/committer/date.
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Test Author',
+      GIT_AUTHOR_EMAIL: 'author@example.com',
+      GIT_COMMITTER_NAME: 'Test Committer',
+      GIT_COMMITTER_EMAIL: 'committer@example.com',
+    } as NodeJS.ProcessEnv;
+    execFileSync('git', ['-C', repoDir, 'init', '-q'], { env: gitEnv, stdio: 'pipe' });
+    for (const [n, date] of [
+      ['first commit', '2026-01-01T00:00:00Z'],
+      ['second commit', '2026-01-02T00:00:00Z'],
+      ['third commit', '2026-01-03T00:00:00Z'],
+    ] as const) {
+      execFileSync('git', ['-C', repoDir, 'commit', '--allow-empty', '-q', '-m', n], {
+        env: { ...gitEnv, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        stdio: 'pipe',
+      });
+    }
+    const expectedHash = execFileSync(
+      'git',
+      ['-C', repoDir, 'rev-parse', 'HEAD'],
+      { env: gitEnv, encoding: 'utf8' },
+    ).trim();
+    // A sibling dir that is NOT a git repo — must be ignored.
+    mkdirSync(join(implStateDirRoot, 'not-a-repo'), { recursive: true });
+
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        engine: {
+          workingDirRoot: join(implStateDirRoot, 'work'),
+          implStateDirRoot,
+        },
+      });
+
+      expect(status.implStateCadence).toBeDefined();
+      expect(status.implStateCadence!.repos).toHaveLength(1);
+      const repo = status.implStateCadence!.repos[0];
+      expect(repo.name).toBe('swe-impl');
+      expect(repo.commits).toBe(3);
+      expect(repo.lastCommit).toMatchObject({
+        hash: expectedHash,
+        subject: 'third commit',
+        date: '2026-01-03T00:00:00Z',
+      });
+    });
+  });
+
+  it('degrades loop-completion + impl-state cadence to zeroes/empty with no throw', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    const emptyRoot = mkdtempSync(join(tmpdir(), 'jinn-impl-state-empty-'));
+
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        engine: { workingDirRoot: join(emptyRoot, 'work'), implStateDirRoot: emptyRoot },
+      });
+
+      expect(status.loopCompletion).toEqual({
+        total: 0,
+        delivered: 0,
+        withGating: 0,
+        reachedExecute: 0,
+        reachedImprove: 0,
+        reachedMemoryConsolidation: 0,
+        fullLoop: 0,
+        phaseCounts: {},
+      });
+      expect(status.implStateCadence).toBeDefined();
+      expect(status.implStateCadence!.repos).toEqual([]);
     });
   });
 });

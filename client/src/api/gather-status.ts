@@ -50,6 +50,7 @@ import {
   type PredictionV1Status,
 } from './prediction-v1-build.js';
 import { gatherTaskRunsStatus } from './task-runs-build.js';
+import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -1377,6 +1378,12 @@ export async function gatherStatusForApi(
 ): Promise<StatusV1Response> {
   const raw = await gatherGatheredStatusRaw(store, status);
   const body = assembleStatusV1(raw);
+  // Loop-completion + impl-state commit cadence (#959). Both are read-only and
+  // degrade to zeroes / an empty list — they never throw the status endpoint.
+  body.loopCompletion = gatherLoopCompletion(store);
+  if (status?.engine?.implStateDirRoot) {
+    body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
+  }
   const caps = status?.spendCaps;
   if (caps && Object.keys(caps).length > 0) {
     const now = new Date();
