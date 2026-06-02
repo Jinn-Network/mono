@@ -6,10 +6,16 @@
  * Branches (load-bearing — see #649 acceptance criteria):
  *   - File missing               → { decision: 'proceed' }
  *   - File malformed (NaN/empty) → { decision: 'unlink-stale', reason: 'malformed' }
+ *   - PID 1 or our own pid       → { decision: 'unlink-stale', reason: 'self-or-pid1-container' }
  *   - process.kill(pid, 0) ESRCH → { decision: 'unlink-stale', reason: 'esrch' }
  *   - process.kill(pid, 0) ok    → { decision: 'refuse', reason: 'alive' }
  *   - process.kill(pid, 0) EPERM → { decision: 'refuse', reason: 'eperm' }
  *   - any other errno            → { decision: 'refuse', reason: 'unknown' }
+ *
+ * The PID-1/self branch classifies *before* the `process.kill` probe (#805): in
+ * a container the daemon is PID 1, whose pidfile outlives the container on the
+ * persistent volume; `process.kill(1, 0)` always succeeds, so a probe-first
+ * order would mis-classify the stale record as a live sibling and crash-loop.
  *
  * `.trim()` before `parseInt` is required: `main.ts` writes the PID with a
  * trailing `\n` (see `client/src/main.ts` writeFileSync near the pidfile site).
@@ -26,7 +32,7 @@ export type PidfileLivenessDecision =
       decision: 'unlink-stale';
       pid: number | null;
       pidfilePath: string;
-      reason: 'malformed' | 'esrch';
+      reason: 'malformed' | 'esrch' | 'self-or-pid1-container';
     }
   | {
       decision: 'refuse';
@@ -59,6 +65,15 @@ export function checkPidfileLiveness(
   const parsed = parseInt(raw.trim(), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return { decision: 'unlink-stale', pid: null, pidfilePath: pidPath, reason: 'malformed' };
+  }
+
+  // #805: in a container the daemon is PID 1; the pidfile on the persistent
+  // volume outlives the container, and `process.kill(1, 0)` always succeeds, so
+  // we must classify the self/PID-1 record as stale *before* the liveness probe
+  // below — otherwise the probe reports it alive and the daemon crash-loops. A
+  // record of our own pid is likewise self, never a live sibling.
+  if (parsed === 1 || parsed === process.pid) {
+    return { decision: 'unlink-stale', pid: parsed, pidfilePath: pidPath, reason: 'self-or-pid1-container' };
   }
 
   try {

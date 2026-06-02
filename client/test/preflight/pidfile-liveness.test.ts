@@ -54,6 +54,38 @@ describe('pidfile-liveness preflight', () => {
     }
   });
 
+  it('reclaims a pidfile recording PID 1 (container PID-1 / #805) instead of refusing', () => {
+    // In a container the daemon is PID 1; on restart the pidfile on the
+    // persistent volume outlives the container and `process.kill(1, 0)`
+    // always succeeds, so the old probe-first classifier returned
+    // refuse/'alive' and the daemon crash-looped. The self/PID-1 branch must
+    // classify *before* the liveness probe.
+    writeFileSync(pidPath, '1\n', 'utf-8');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      expect(decision).toMatchObject({
+        decision: 'unlink-stale',
+        pid: 1,
+        reason: 'self-or-pid1-container',
+        pidfilePath: pidPath,
+      });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('reclaims a pidfile recording our own process.pid (stale self record)', () => {
+    writeFileSync(pidPath, `${process.pid}\n`, 'utf-8');
+    const decision = checkPidfileLiveness({ pidPath });
+    expect(decision).toMatchObject({
+      decision: 'unlink-stale',
+      pid: process.pid,
+      reason: 'self-or-pid1-container',
+      pidfilePath: pidPath,
+    });
+  });
+
   it('returns refuse on EPERM (process exists but owned by another user)', () => {
     writeFileSync(pidPath, '987654\n', 'utf-8');
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {

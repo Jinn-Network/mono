@@ -50,6 +50,12 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
   let pidPath: string;
   let store: Store;
   let daemon: Daemon;
+  // A genuinely-live *sibling* daemon's PID — distinct from our own and from
+  // PID 1, so it stays on the refuse path after #805 reclaims self/PID-1. We
+  // spy `process.kill` to report it alive (the unit-test idiom), since writing
+  // `process.pid` here would now self-reclaim rather than refuse.
+  const siblingPid = 987654;
+  let killSpy: ReturnType<typeof vi.spyOn> | undefined;
 
   beforeEach(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'jinn-649-'));
@@ -66,12 +72,23 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
       restorationEngine: minimalEngineConfig(tmp),
     });
     await daemon.start();
-    // First daemon writes its own pidfile, exactly like main.ts does at
-    // client/src/main.ts:2578.
-    writeFileSync(pidPath, `${process.pid}\n`, 'utf-8');
+    // First (sibling) daemon writes its own pidfile, exactly like main.ts does
+    // at client/src/main.ts:2578. We record a distinct sibling PID and spy
+    // `process.kill` to report it alive, so the gate sees a live *other* daemon.
+    writeFileSync(pidPath, `${siblingPid}\n`, 'utf-8');
+    killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, sig) => {
+      if (pid === siblingPid && sig === 0) {
+        return true as never;
+      }
+      const err = new Error('ESRCH') as NodeJS.ErrnoException;
+      err.code = 'ESRCH';
+      throw err;
+    });
   });
 
   afterEach(async () => {
+    killSpy?.mockRestore();
+    killSpy = undefined;
     await daemon.stop().catch(() => undefined);
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -85,7 +102,7 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
 
     expect(decision.decision).toBe('refuse');
     if (decision.decision === 'refuse') {
-      expect(decision.pid).toBe(process.pid);
+      expect(decision.pid).toBe(siblingPid);
       expect(decision.reason).toBe('alive');
     }
 
