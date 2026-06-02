@@ -22,9 +22,11 @@
  * Used for manifest signing: produce a deterministic byte string that two
  * independent parties can reproduce from the same object graph.
  */
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const canonicalize = require('canonicalize') as (value: unknown) => string | undefined;
+// canonicalize v3 is ESM-only (no CJS entry); the client is `"type": "module"`
+// so a native ESM default import is the correct interop (replaces the v2-era
+// createRequire shim). v3 is packaging-only vs v2 — its RFC 8785 output is
+// byte-identical, so existing content hashes / manifest signatures are stable.
+import canonicalize from 'canonicalize';
 
 /**
  * Recursively replace NaN / ±Infinity with null so that canonicalize does not
