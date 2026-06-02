@@ -7,7 +7,7 @@ This package is published from the monorepo, but operators consume it as a stand
 - legacy no-install form (still supported): `npx -p @jinn-network/client@latest jinn <verb>`
 - container: `ghcr.io/jinn-network/client:<version>`
 
-The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook (`cargo/docs/engineering/handbook.md`) is the canonical reference for the cadence.
+The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook ([`docs/engineering/handbook.md`](../docs/engineering/handbook.md)) is the canonical reference for the cadence.
 
 The release flow has six layers:
 

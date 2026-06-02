@@ -132,8 +132,18 @@ If Step 1.5 returned `clear`, proceed. Per handbook workflow rule 1, all impleme
 **When invoked by a human (interactive mode):** create the worktree yourself. First check whether one already exists for this issue number — if it does, use it:
 
 ```bash
-# Check whether a worktree already exists for cargo/.tasks/<issue-number>
-git worktree list --porcelain | grep "worktree.*cargo/.tasks/<issue-number>"
+# Canonical worktree base (matches packages/eng-loop dispatcher + CLAUDE.md rule #1)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PARENT="$(dirname "$REPO_ROOT")"
+if [[ "$(basename "$PARENT")" == "jinn-mono_worktrees" ]]; then
+  WORKTREES_BASE="$PARENT"
+else
+  WORKTREES_BASE="${PARENT}/jinn-mono_worktrees"
+fi
+WORKTREE_PATH="${WORKTREES_BASE}/<issue-number>"
+
+# Check whether a worktree already exists for this issue
+git worktree list --porcelain | grep -F "worktree ${WORKTREE_PATH}"
 ```
 
 If the grep finds an entry, use that worktree path and branch (read them from the porcelain output). If not, create it:
@@ -142,9 +152,7 @@ If the grep finds an entry, use that worktree path and branch (read them from th
 # Derive a branch name from the issue number and title slug
 BRANCH="<shape>/<issue-number>-<title-slug>"
 
-# Create the worktree from next (absolute path avoids cwd ambiguity)
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-git worktree add "${REPO_ROOT}/cargo/.tasks/<issue-number>" -b "$BRANCH" origin/next
+git worktree add "$WORKTREE_PATH" -b "$BRANCH" origin/next
 ```
 
 All subagents dispatched in subsequent stages work in this worktree. Pass the worktree path and branch name in each subagent prompt.
@@ -199,10 +207,10 @@ Stages scale to **Issue Type + Effort**:
 
 **Prompt the subagent to:** run `superpowers:test-driven-development` then `superpowers:executing-plans`. For a `fix` shape: write the regression test first, watch it fail, then implement the fix. For all shapes: tests must be written before or alongside implementation.
 
-**Zero-commit guard:** after this stage, verify that commits exist before proceeding:
+**Zero-commit guard:** after this stage, verify that commits exist before proceeding (use `WORKTREE_PATH` from Step 2, or the absolute path from the dispatcher prompt if the worktree was pre-created):
 
 ```bash
-git -C "cargo/.tasks/<issue-number>" log origin/next..HEAD --oneline
+git -C "${WORKTREE_PATH}" log origin/next..HEAD --oneline
 ```
 
 If the log is empty, dispatch a fix subagent before continuing.
