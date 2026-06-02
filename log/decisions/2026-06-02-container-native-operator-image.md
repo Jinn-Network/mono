@@ -50,7 +50,7 @@ The full design note, current-state map, and stacked-PR plan are in the companio
 1. **GHCR package visibility (private→public?).** The GHCR base publish already exists (`ghcr.io/jinn-network/client`, from `client/Dockerfile`, multi-arch, smoke-tested, 71 versions) but the package is **private**. Recommended: flip it public so overlays `FROM` it without auth (reuses existing CI, no new Dockerfile); fall back to an `ARG AGENT_CLI` build-from-source bridge (or overlay-side GHCR auth) only if it must stay private. Secondary: whether to add a faster-than-release `:next`/`:canary` publish tag.
 2. **Non-root posture.** Recommended: image-default `USER node` + a minimal root→node gosu chown shim (Railway mounts `/data` as root). Confirm vs. requiring host-side chown.
 3. **`JINN_STATE_DIR` naming + derivation precedence.** Confirm derive-don't-collapse and `workingDirRoot`-stays-ephemeral.
-4. **A4 artifact-CID resolution path.** On-chain `IdentityRegistry.getMetadata` read by manifestCid, vs. extending the DiscoveryAPI `PublishedArtifact` read-shape (currently plugin-only). The latter is cleaner but widens the indexer contract.
+4. **A4 artifact-CID resolution path.** ~~On-chain `IdentityRegistry.getMetadata` read by manifestCid, vs. extending the DiscoveryAPI read-shape.~~ **Resolved 2026-06-02 → Option B (indexer/DiscoveryAPI).** Investigation found no on-chain `getMetadata` read exists, and the vetted-pool ref is not written via `setMetadata` — it travels in each posted task's `eligibility` (`vettedPoolRef`). Resolution reuses the indexer: a new `DiscoveryAPI.getMostRecentTaskCidDigest(manifestCid)` (pure indexer/chain read) returns a recent task's digest; the generator reconstructs the IPFS task CID, reads the ref from the task's eligibility, and fetches + hash-verifies the pool. Shipped in [#982](https://github.com/Jinn-Network/mono/pull/982) (S4 / child #957).
 5. **`CLAUDE_CODE_OAUTH_TOKEN` headless lifecycle.** Does the token survive container restarts / need periodic refresh? Highest-risk unknown for headless operation; A5's credential check asserts presence but cannot fix expiry. (Carried from the #952 reference spec §10 #4.)
 6. **Codex recipe fate.** Recommended: keep `deploy/railway-operator-codex/` as a second reference overlay (proves the base is agent-agnostic) rather than deprecate.
 7. **#951 scope vs. child issues.** Decided in §5 above; this DR ratifies it.
@@ -63,7 +63,22 @@ The full design note, current-state map, and stacked-PR plan are in the companio
 
 ## Status / next steps
 
-`proposed`. This design pass produced the spec + this DR only — **no slice is implemented**. Next human steps:
-1. Ratify (or amend) this DR and the §9 open questions in the spec.
-2. Land PR #952 (the regression reference) before S7/S8.
-3. Approve the child-issue carve-up (§6 of the spec) and file C1–C8.
+`proposed`. Design ratified by the maintainer 2026-06-02; the six `#952`-independent daemon slices were carved into child issues and implemented (see Implementation status). Remaining human steps:
+1. Ratify (or amend) the residual §9 open questions — notably #1 (GHCR package private→public) and #5 (`CLAUDE_CODE_OAUTH_TOKEN` headless lifecycle).
+2. Land PR #952 (the regression reference) before S7/S8 (image consolidation).
+3. Review/merge the six daemon-slice PRs below (#978 and #982 are stacked on #970 — merge #970 first).
+
+## Implementation status (2026-06-02)
+
+Child issues C1–C6 filed as sub-issues of #951; all six daemon slices implemented as reviewed draft PRs (TDD + independent review, several mutation-verified):
+
+| Slice | Child | PR | Base |
+|---|---|---|---|
+| S1 dotfile-skip | #954 `fix` | [#961](https://github.com/Jinn-Network/mono/pull/961) | `next` |
+| S2 stale-pidfile reclaim (#805) | #955 `fix` | [#965](https://github.com/Jinn-Network/mono/pull/965) | `next` |
+| S3 `JINN_STATE_DIR` (foundation) | #956 `feat` | [#970](https://github.com/Jinn-Network/mono/pull/970) | `next` |
+| S4 IPFS pool fetch (Option B) | #957 `feat` | [#982](https://github.com/Jinn-Network/mono/pull/982) | `feat/956` (stacked on S3) |
+| S5 deployment-readiness preflight | #958 `feat` | [#978](https://github.com/Jinn-Network/mono/pull/978) | `feat/956` (stacked on S3) |
+| S6 `/v1/status` loop+impl-state | #959 `feat` | [#976](https://github.com/Jinn-Network/mono/pull/976) | `next` |
+
+Open question #4 resolved (Option B). S7/S8 (C7/C8, image consolidation + thin overlays) remain **gated on PR #952** merging. Deferred follow-up: fully thread the swe-rebench state dir through `JinnConfig` (remove the 7 `process.env` reads) — noted in S3's PR (#970).
