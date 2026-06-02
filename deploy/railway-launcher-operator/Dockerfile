@@ -81,6 +81,13 @@ ENV JINN_CONFIG=/data/config.json
 # wiped on every restart — and the validated pool has no IPFS fetch fallback, so
 # an unseeded/ephemeral state dir means the generator posts ZERO tasks.
 ENV JINN_SWE_REBENCH_V2_STATE_DIR=/data/swe-rebench-v2
+# The learner's persistent self-state (impl-state git repo: strategies/templates/
+# consolidations). Defaults to $HOME/.jinn-client/engine/impl-state (= /home/node/...)
+# which is an ephemeral overlay wiped on every container restart — so a completed
+# learn-loop's gains vanish and the codeDigest lineage resets each boot. Pinning it
+# to the volume keeps self-improvement durable and the codeDigest chain continuous.
+# (Working dirs stay ephemeral on purpose — they're per-task and reaped.)
+ENV JINN_ENGINE_IMPL_STATE_DIR_ROOT=/data/engine/impl-state
 ENV JINN_NETWORK=testnet
 ENV JINN_AUTO_TESTNET_FAUCET=1
 

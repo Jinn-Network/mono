@@ -26,6 +26,11 @@ LAUNCHED_DIR="$EARNING_DIR/solvernets/launched"
 # generator has no IPFS fetch for the validated pool, so an unseeded/ephemeral
 # state dir means it posts ZERO tasks (see Dockerfile JINN_SWE_REBENCH_V2_STATE_DIR).
 STATE_DIR="${JINN_SWE_REBENCH_V2_STATE_DIR:-/data/swe-rebench-v2}"
+# The learner's durable self-state (impl-state). Must be on the volume so a
+# completed learn-loop's gains + the codeDigest lineage survive restarts (see
+# Dockerfile JINN_ENGINE_IMPL_STATE_DIR_ROOT). The chown -R node:node /data above
+# already makes it node-writable; the daemon creates per-impl subdirs under it.
+IMPL_STATE_DIR_ROOT="${JINN_ENGINE_IMPL_STATE_DIR_ROOT:-/data/engine/impl-state}"
 
 # --- One-shot state restore (cutover migration path) --------------------------
 # JINN_STATE_TARBALL_B64, if set, is a base64-encoded tar.gz built with:
@@ -50,7 +55,7 @@ if [ ! -d "$EARNING_DIR" ] && [ -n "${JINN_STATE_TARBALL_B64:-}" ]; then
   fi
 fi
 
-mkdir -p "$EARNING_DIR" "$LAUNCHED_DIR" "$STATE_DIR"
+mkdir -p "$EARNING_DIR" "$LAUNCHED_DIR" "$STATE_DIR" "$IMPL_STATE_DIR_ROOT"
 
 # Stale-pidfile guard. The daemon writes $EARNING_DIR/daemon.pid; on the
 # persistent volume that file outlives the container. In a container the daemon
