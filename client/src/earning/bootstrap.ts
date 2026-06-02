@@ -86,6 +86,7 @@ import {
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
+import { formatKnownRevert } from '../adapters/mech/safe-revert.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
@@ -2597,6 +2598,32 @@ export interface RecoverEvictedServiceOptions {
 }
 
 /**
+ * Inspect a mined reStake receipt and log the correct outcome (#916).
+ *
+ * Pure + I/O-free so it can be unit-tested without a chain client. On a
+ * `success` receipt it logs `reStake confirmed`. On a `reverted` receipt it
+ * logs `reStake reverted` at error level (with the decoded reason if the
+ * caller could obtain one) and throws so the recovery attempt re-queues.
+ */
+export function handleReStakeReceipt(args: {
+  receipt: { status: 'success' | 'reverted' };
+  serviceDisplayIndex: number;
+  reStakeHash: Hex;
+  revertReason?: string;
+}): void {
+  const { receipt, serviceDisplayIndex, reStakeHash, revertReason } = args;
+  if (receipt.status === 'success') {
+    console.error(
+      `[eviction-recovery] Service ${serviceDisplayIndex}: reStake confirmed (tx: ${reStakeHash})`,
+    );
+    return;
+  }
+  const msg = `[eviction-recovery] Service ${serviceDisplayIndex}: reStake reverted (tx: ${reStakeHash}, reason: ${revertReason ?? 'unavailable'})`;
+  console.error(msg);
+  throw new Error(msg);
+}
+
+/**
  * Re-stake an evicted service by calling `distributor.reStake(stakingProxy, serviceId)`.
  *
  * Extracted from `FleetBootstrapper.recoverEvictedService` so it can be called
@@ -2653,10 +2680,19 @@ export async function recoverEvictedService(
     throw err;
   }
   const receipt = await waitForTransactionReceiptWithRetry(publicClient, reStakeHash);
+  let revertReason: string | undefined;
   if (receipt.status !== 'success') {
-    throw new Error(`reStake failed for service ${serviceDisplayIndex}: ${reStakeHash}`);
+    // Best-effort: replay the call at the mined block to decode the revert.
+    try {
+      await publicClient.call({
+        account: masterAccount,
+        to: addr(distributorAddress),
+        data: reStakeData,
+        blockNumber: receipt.blockNumber,
+      });
+    } catch (err) {
+      revertReason = formatKnownRevert(err) ?? flattenErrorMessage(err);
+    }
   }
-  console.error(
-    `[eviction-recovery] Service ${serviceDisplayIndex}: reStake confirmed (tx: ${reStakeHash})`,
-  );
+  handleReStakeReceipt({ receipt, serviceDisplayIndex, reStakeHash, revertReason });
 }
