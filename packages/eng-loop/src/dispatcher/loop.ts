@@ -10,10 +10,23 @@ import { concurrencyOk, backpressureOk } from './throttles.js';
 // Public types
 // ---------------------------------------------------------------------------
 
+/**
+ * One session dispatched this cycle — the issue number plus the live-process
+ * coordinates (#533) so the cycle report can surface the per-session log path
+ * alongside the spawned PID.
+ */
+export interface DispatchedSession {
+  issueNumber: number;
+  /** Spawned process PID, or null when unknown (e.g. dry-run / recovery). */
+  pid: number | null;
+  /** Absolute path to the session's stdout/stderr log file. */
+  logPath: string;
+}
+
 /** What one cycle of the dispatcher did (or didn't do). */
 export interface CycleReport {
-  /** Issue numbers dispatched this cycle (in dispatch order). */
-  dispatched: number[];
+  /** Sessions dispatched this cycle (in dispatch order), with pid + log path. */
+  dispatched: DispatchedSession[];
   /** Issues that were ready but skipped because the budget was exhausted. */
   skippedForThrottle: number;
   /** Drift strings from `deriveInFlight` — for operator visibility. */
@@ -197,10 +210,14 @@ export async function runCycle(
   const skippedForThrottle = ready.length - toDispatch.length;
 
   // 7. Dispatch
-  const dispatched: number[] = [];
+  const dispatched: DispatchedSession[] = [];
   for (const issue of toDispatch) {
-    await dispatchIssue(issue);
-    dispatched.push(issue.number);
+    const session = await dispatchIssue(issue);
+    dispatched.push({
+      issueNumber: session.issueNumber,
+      pid: session.pid,
+      logPath: session.logPath,
+    });
   }
 
   return {

@@ -1,6 +1,7 @@
 import { statSync } from 'node:fs';
 import type { CommandRunner, ProjectSnapshot } from './project-snapshot.js';
 import type { InFlightSession } from './types.js';
+import { sessionLogPath } from './session-log.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -189,6 +190,9 @@ export async function deriveInFlight(
         worktreePath: wt.worktreePath,
         pid: null,
         startedAt: recoverStartedAt(wt.worktreePath),
+        // #533: deterministic per-session log path, so a recovered session is
+        // still tailable by the same `sessions/<N>.log` scheme.
+        logPath: sessionLogPath(issueNumber),
       });
     } else {
       drift.push(

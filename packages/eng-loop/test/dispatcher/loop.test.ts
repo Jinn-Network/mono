@@ -55,6 +55,7 @@ function makeInFlight(issueNumber: number, startedAt?: number): InFlightSession 
     worktreePath: `/tmp/fixture/jinn-mono_worktrees/${issueNumber}`,
     pid: 1234,
     startedAt: startedAt ?? Date.now(),
+    logPath: `/tmp/fixture/sessions/${issueNumber}.log`,
   };
 }
 
@@ -110,7 +111,14 @@ describe('runCycle', () => {
       collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
-    expect(report.dispatched).toEqual([101, 102, 103]);
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([101, 102, 103]);
+    // #533 AC#2: each dispatched session carries its spawned pid + log path so
+    // the cycle report can surface them. makeInFlight stubs both fields.
+    expect(report.dispatched).toEqual([
+      { issueNumber: 101, pid: 1234, logPath: '/tmp/fixture/sessions/101.log' },
+      { issueNumber: 102, pid: 1234, logPath: '/tmp/fixture/sessions/102.log' },
+      { issueNumber: 103, pid: 1234, logPath: '/tmp/fixture/sessions/103.log' },
+    ]);
     expect(report.skippedForThrottle).toBe(0);
     expect(report.drift).toEqual([]);
     expect(report.backpressureTripped).toBe(false);
@@ -149,7 +157,7 @@ describe('runCycle', () => {
     });
 
     // Budget = 3 - 2 = 1; only top-priority (101) is dispatched
-    expect(report.dispatched).toEqual([101]);
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([101]);
     expect(report.skippedForThrottle).toBe(2); // 102, 103 skipped
     expect(report.backpressureTripped).toBe(false);
     expect(report.paused).toEqual([]);
@@ -270,7 +278,7 @@ describe('runCycle', () => {
     });
 
     // Only 102 should be dispatched; 101 is in-flight (budget = 3-1 = 2, but only 1 ready)
-    expect(report.dispatched).toEqual([102]);
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([102]);
     expect(dispatchIssue).toHaveBeenCalledTimes(1);
     expect(dispatchIssue.mock.calls[0][0].number).toBe(102);
   });

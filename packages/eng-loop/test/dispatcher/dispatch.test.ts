@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
+import { SESSIONS_LOG_DIR, sessionLogPath } from '../../src/dispatcher/session-log.js';
 import {
   fetchFieldIds,
   resetFieldCache,
@@ -441,6 +442,7 @@ describe('dispatchIssue', () => {
     expect(session.worktreePath).toMatch(/^\//);
     expect(session.worktreePath).toMatch(/jinn-mono_worktrees\/418$/);
     expect(session.pid).toBe(77777);
+    expect(session.logPath).toBe(sessionLogPath(418));
     expect(session.startedAt).toBeGreaterThanOrEqual(before);
     expect(session.startedAt).toBeLessThanOrEqual(after);
 
@@ -450,6 +452,60 @@ describe('dispatchIssue', () => {
     );
     const bFlagIdx = worktreeCall!.args.indexOf('-b');
     expect(session.branch).toBe(worktreeCall!.args[bFlagIdx + 1]);
+  });
+
+  // -------------------------------------------------------------------------
+  // #533 — per-session log file
+  // -------------------------------------------------------------------------
+
+  it('passes the per-session logPath (sessions/<N>.log) through the spawn opts (#533 AC#1)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const [spawnCall] = calls;
+    expect(spawnCall.opts.logPath).toBe(sessionLogPath(418));
+    expect(spawnCall.opts.logPath).toBe(`${SESSIONS_LOG_DIR}/418.log`);
+  });
+
+  it('requests captured (non-ignore) stdio so the lambda can attach fds (#533 AC#1)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const [spawnCall] = calls;
+    // dispatch.ts must NOT hard-code stdio:'ignore' anymore — it hands the log
+    // path to the lambda, which opens the fds. The contract here is just that
+    // stdio is no longer the string 'ignore'.
+    expect(spawnCall.opts.stdio).not.toBe('ignore');
+  });
+
+  it('returns an InFlightSession whose logPath is deterministic from the issue number (#533 AC#2)', async () => {
+    const { runner } = makeRunner();
+    const { spawn } = makeSpawn();
+
+    const session = await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    expect(session.logPath).toBe(sessionLogPath(418));
+    expect(session.logPath).toMatch(/\/418\.log$/);
+  });
+
+  it('logs a [dispatch] line with the pid and log path (#533 AC#2)', async () => {
+    const { runner } = makeRunner();
+    const { spawn } = makeSpawn(54321);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
+    expect(line).toBeDefined();
+    expect(line).toContain('#418');
+    expect(line).toContain('pid=54321');
+    expect(line).toContain(sessionLogPath(418));
+
+    logSpy.mockRestore();
   });
 
   // -------------------------------------------------------------------------

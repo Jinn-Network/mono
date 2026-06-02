@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { deriveInFlight } from '../../src/dispatcher/state.js';
+import { sessionLogPath } from '../../src/dispatcher/session-log.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type {
   ProjectSnapshot,
@@ -151,6 +152,8 @@ describe('deriveInFlight', () => {
     expect(session.worktreePath).toBe(`${WORKTREES_BASE}/${ISSUE_IN_PROGRESS_WITH_WORKTREE}`);
     expect(session.branch).toBe('feat/418-something-useful');
     expect(session.pid).toBeNull();
+    // #533: recovered sessions are stamped with their canonical per-session log path.
+    expect(session.logPath).toBe(sessionLogPath(ISSUE_IN_PROGRESS_WITH_WORKTREE));
     // startedAt is either a real timestamp recovered from the worktree directory (> 0)
     // or the unknown-age sentinel (0) when the fixture path does not exist on disk.
     // Both are valid — the WallClock guards against startedAt <= 0.

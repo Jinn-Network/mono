@@ -17,6 +17,7 @@ import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/is
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
+import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
@@ -42,6 +43,7 @@ import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
+import { mkdirSync, openSync, closeSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { argv } from 'node:process';
@@ -115,7 +117,7 @@ async function countOpenReadyPrs(): Promise<number> {
 // Print cycle report
 // ---------------------------------------------------------------------------
 
-function printReport(report: CycleReport, label: string): void {
+export function printReport(report: CycleReport, label: string): void {
   console.log(`\n[${ new Date().toISOString() }] ${label}`);
   console.log('─'.repeat(60));
 
@@ -123,10 +125,15 @@ function printReport(report: CycleReport, label: string): void {
     console.log('⚠  BACKPRESSURE TRIPPED — too many open ready PRs; no new dispatches.');
   }
 
-  if (report.dispatched.length === 0 && !report.backpressureTripped) {
-    console.log('   dispatched: (none)');
+  if (report.dispatched.length === 0) {
+    if (!report.backpressureTripped) console.log('   dispatched: (none)');
   } else {
-    console.log(`   dispatched: #${report.dispatched.join(', #') || '(none)'}`);
+    // One line per dispatched session, carrying pid + log path (#533 AC#2).
+    console.log('   dispatched:');
+    for (const s of report.dispatched) {
+      const pid = s.pid === null ? 'unknown' : String(s.pid);
+      console.log(`     #${s.issueNumber} pid=${pid} log=${s.logPath}`);
+    }
   }
 
   console.log(`   skipped (throttle): ${report.skippedForThrottle}`);
@@ -200,6 +207,7 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
         worktreePath: `(dry-run)`,
         pid: null,
         startedAt: Date.now(),
+        logPath: `(dry-run)`,
       };
     };
 
@@ -533,9 +541,38 @@ async function main(): Promise<void> {
           dispatchIssue(issue, cfg, {
             runner: realRunner,
             spawn: (cmd, args, opts) => {
-              const child = spawn(cmd, args, opts as SpawnOptions);
+              // #533: open the per-session log in append mode and wire it to
+              // BOTH stdout(1) and stderr(2) so the two streams interleave in
+              // one tailable file. Append (not truncate, not timestamp) keeps
+              // the path stable for `tail -f` while never clobbering a prior
+              // run's output. `dispatchIssue` supplied opts.logPath; if it is
+              // somehow absent we fall back to the opts.stdio it set.
+              const logPath = opts.logPath;
+              let fd: number | undefined;
+              let stdio = opts.stdio;
+              if (typeof logPath === 'string') {
+                mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
+                // Owner-only (0o600) on create: session logs may contain
+                // secrets surfaced by the spawned session (tokens in gh/git
+                // error output, env echoes, prompt material). The mode only
+                // applies when the file is created; an existing log (re-dispatch)
+                // is not chmod'd — that's fine, the append target is unchanged.
+                fd = openSync(logPath, 'a', 0o600);
+                // Visual delimiter so successive append runs are separable.
+                const delimiter =
+                  `\n===== dispatch ${new Date().toISOString()} ` +
+                  `pid=pending cwd=${opts.cwd} =====\n`;
+                writeSync(fd, delimiter);
+                stdio = ['ignore', fd, fd];
+              }
+              const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
               if (child.pid != null) {
                 child.unref();
+              }
+              // Close the parent's copy of the fd: the detached child inherited
+              // its own dup, so closing here avoids leaking an fd per dispatch.
+              if (fd != null) {
+                closeSync(fd);
               }
               return { pid: child.pid };
             },

@@ -9,6 +9,7 @@ const session: InFlightSession = {
   worktreePath: '/tmp/worktree',
   pid: 12345,
   startedAt: 1,
+  logPath: '/tmp/sessions/1.log',
 };
 
 /** A re-derived session whose start time is unknown (sentinel value 0). */
@@ -18,6 +19,7 @@ const unknownAgeSession: InFlightSession = {
   worktreePath: '/tmp/rederived-worktree',
   pid: null,
   startedAt: 0,
+  logPath: '/tmp/sessions/2.log',
 };
 
 describe('WallClock', () => {

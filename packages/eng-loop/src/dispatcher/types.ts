@@ -65,6 +65,12 @@ export interface InFlightSession {
   worktreePath: string;
   pid: number | null;
   startedAt: number;     // epoch ms
+  /**
+   * Absolute path to the per-session stdout+stderr log
+   * (`~/.jinn-client/eng-loop/sessions/<N>.log`, jinn-mono#533). Deterministic
+   * from the issue number; `tail -f` this to watch a running session.
+   */
+  logPath: string;
 }
 
 /** The outcome of a finished implement-issue session. */

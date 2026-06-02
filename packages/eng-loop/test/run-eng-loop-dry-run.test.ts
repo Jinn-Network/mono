@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { runDryRun } from '../scripts/run-eng-loop.js';
+import { runDryRun, printReport } from '../scripts/run-eng-loop.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { DispatcherConfig } from '../src/dispatcher/types.js';
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
+import type { CycleReport } from '../src/dispatcher/loop.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 
 // Regression test for #598 — before the fix, a `gh` rejection inside the
@@ -44,5 +45,69 @@ describe('runDryRun (regression for #598)', () => {
     expect(errMsg).toEqual(expect.stringContaining('dry-run aborted'));
     expect(errMsg).toEqual(expect.stringContaining('budget exhausted'));
     expect(errMsg).toEqual(expect.stringContaining('gh api rate_limit'));
+  });
+});
+
+// #533 AC#2: the dispatcher's cycle report includes each session's log-file
+// path alongside its PID. printReport is the render of CycleReport.
+describe('printReport — dispatched session log path + pid (#533 AC#2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function baseReport(): CycleReport {
+    return {
+      dispatched: [],
+      skippedForThrottle: 0,
+      drift: [],
+      backpressureTripped: false,
+      paused: [],
+      skippedForAuthor: [],
+    };
+  }
+
+  it('renders each dispatched session as "#N pid=<pid> log=<path>"', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    printReport(
+      {
+        ...baseReport(),
+        dispatched: [
+          { issueNumber: 418, pid: 9876, logPath: '/home/op/.jinn-client/eng-loop/sessions/418.log' },
+        ],
+      },
+      'Cycle report',
+    );
+
+    const lines = logSpy.mock.calls.map((c) => String(c[0]));
+    const line = lines.find((l) => l.includes('#418'));
+    expect(line).toBeDefined();
+    expect(line).toContain('pid=9876');
+    expect(line).toContain('log=/home/op/.jinn-client/eng-loop/sessions/418.log');
+  });
+
+  it('renders pid=unknown when the spawned pid is null', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    printReport(
+      {
+        ...baseReport(),
+        dispatched: [{ issueNumber: 501, pid: null, logPath: '/x/501.log' }],
+      },
+      'Cycle report',
+    );
+
+    const line = logSpy.mock.calls.map((c) => String(c[0])).find((l) => l.includes('#501'));
+    expect(line).toContain('pid=unknown');
+    expect(line).toContain('log=/x/501.log');
+  });
+
+  it('renders "(none)" when nothing was dispatched', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    printReport(baseReport(), 'Cycle report');
+
+    const lines = logSpy.mock.calls.map((c) => String(c[0]));
+    expect(lines.some((l) => l.includes('dispatched: (none)'))).toBe(true);
   });
 });

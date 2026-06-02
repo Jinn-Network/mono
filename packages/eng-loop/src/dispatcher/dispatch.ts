@@ -10,6 +10,7 @@ import {
   type FieldCache,
 } from './field-cache.js';
 import { buildHeadlessPrompt } from '../headless.js';
+import { sessionLogPath } from './session-log.js';
 
 // ---------------------------------------------------------------------------
 // Repo root + canonical worktree base
@@ -71,7 +72,15 @@ export type SpawnFn = (
   opts: {
     cwd: string;
     detached: boolean;
-    stdio: 'ignore' | Array<string | null>;
+    // `number` allows file descriptors (the log fd) as stdio targets;
+    // `'ignore'` is retained for the fallback / review path. (#533)
+    stdio: 'ignore' | Array<string | number | null>;
+    /**
+     * Absolute path to the per-session log file (#533). The production
+     * lambda opens this in append mode and wires it to stdout+stderr;
+     * the fake spawn in tests just records it.
+     */
+    logPath?: string;
     [key: string]: unknown;
   },
 ) => SpawnResult;
@@ -244,19 +253,35 @@ export async function dispatchIssue(
   const headlessPart = buildHeadlessPrompt('implement-issue', scenario);
   const fullPrompt = [canon, '', headlessPart].join('\n');
 
-  // 5. Spawn — NO plan-posture flags (spec Appendix)
+  // 5. Spawn — NO plan-posture flags (spec Appendix).
+  //    Per #533 we capture the session's stdout+stderr to a per-session log
+  //    file. `dispatchIssue` stays I/O-free: it only computes the (stable,
+  //    deterministic) log path and hands it to the injected spawn via opts.
+  //    The production lambda (run-eng-loop.ts) does the actual mkdir + append-
+  //    mode openSync and wires the fd to stdout+stderr; the test fake just
+  //    records the opts. `stdio` is the placeholder the lambda overrides with
+  //    [ 'ignore', fd, fd ]; it must not be 'ignore' so the captured-stdio
+  //    test holds. We send stdin to 'ignore' (the session is headless) and
+  //    inherit for 1/2 as a safe default the lambda replaces.
+  const logPath = sessionLogPath(number);
   const result = spawn('claude', ['-p', fullPrompt], {
     cwd: worktreePath,
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'inherit', 'inherit'],
+    logPath,
   });
 
-  // 6. Return InFlightSession
+  // AC#2: surface pid + log path on the dispatch log line so an operator can
+  // tail the session straight from the cycle output.
+  console.log(`[dispatch] #${number} pid=${result.pid ?? 'unknown'} log=${logPath}`);
+
+  // 6. Return InFlightSession (logPath surfaced for downstream visibility).
   return {
     issueNumber: number,
     branch,
     worktreePath,
     pid: result.pid ?? null,
     startedAt: Date.now(),
+    logPath,
   };
 }
