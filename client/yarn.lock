@@ -820,10 +820,10 @@ __metadata:
     "@types/node": "npm:^25.9.1"
     "@types/semver": "npm:^7.7.1"
     "@types/ws": "npm:^8.18.1"
-    "@x402/core": "npm:^2.9.0"
-    "@x402/evm": "npm:^2.9.0"
-    "@x402/fetch": "npm:^2.9.0"
-    "@x402/hono": "npm:^2.9.0"
+    "@x402/core": "npm:^2.14.0"
+    "@x402/evm": "npm:^2.14.0"
+    "@x402/fetch": "npm:^2.14.0"
+    "@x402/hono": "npm:^2.14.0"
     ajv: "npm:^8.20.0"
     ajv-formats: "npm:^3.0.1"
     better-sqlite3: "npm:^12.10.0"
@@ -3771,76 +3771,65 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@x402/core@npm:^2.9.0, @x402/core@npm:~2.10.0":
-  version: 2.10.0
-  resolution: "@x402/core@npm:2.10.0"
+"@x402/core@npm:^2.14.0, @x402/core@npm:~2.14.0":
+  version: 2.14.0
+  resolution: "@x402/core@npm:2.14.0"
   dependencies:
     zod: "npm:^3.24.2"
-  checksum: 10c0/9d75f31bccfe9ba076ca925433d20f4a2398c81fd649362f1cc68aa1169233e44451b1ee6dfb671a4f080a040125e9824bccee5a7926855d73e08d42eed2890d
+  checksum: 10c0/2afedaba5b4df4ffa64e24d3b1d6565f1006a3a6c9b67c02fcca20288ae3834e5f1abf02ad33857f84330f0116d2c7141a6e653dff06f83aee4c7961bcb9bee3
   languageName: node
   linkType: hard
 
-"@x402/core@npm:~2.13.0":
-  version: 2.13.0
-  resolution: "@x402/core@npm:2.13.0"
+"@x402/evm@npm:^2.14.0":
+  version: 2.14.0
+  resolution: "@x402/evm@npm:2.14.0"
   dependencies:
+    "@x402/core": "npm:~2.14.0"
+    viem: "npm:^2.48.11"
     zod: "npm:^3.24.2"
-  checksum: 10c0/7b48c0a786e0dec75f002ad01d64447bf4cb0b0cf24563af30855fbff7b093031c72a1bc8ab2831f08805de0e0c33fd9a59386477a1215fd62e51a62286c907d
+  checksum: 10c0/bb5d154f18a81b13c6e0fb23dd8b3f766e3b9cd80664c69f1242b088165a65311e493007b137d2d5e1f109f10510fed350439733228b8294bfe5a993ebc8c30e
   languageName: node
   linkType: hard
 
-"@x402/evm@npm:^2.9.0":
-  version: 2.10.0
-  resolution: "@x402/evm@npm:2.10.0"
-  dependencies:
-    "@x402/core": "npm:~2.10.0"
-    viem: "npm:^2.39.3"
-    zod: "npm:^3.24.2"
-  checksum: 10c0/f861fe18dfb8b5f88f798f162ab0d6e16dbc2405385fd189384a81e9b5111e45a91edae19f2f73349e2666b4df242cb0c21e3c4faa2cdc7446e950a3adb6064c
-  languageName: node
-  linkType: hard
-
-"@x402/extensions@npm:~2.13.0":
-  version: 2.13.0
-  resolution: "@x402/extensions@npm:2.13.0"
+"@x402/extensions@npm:~2.14.0":
+  version: 2.14.0
+  resolution: "@x402/extensions@npm:2.14.0"
   dependencies:
     "@noble/curves": "npm:^1.9.0"
     "@scure/base": "npm:^1.2.6"
     "@signinwithethereum/siwe": "npm:^4.1.0"
-    "@x402/core": "npm:~2.13.0"
+    "@x402/core": "npm:~2.14.0"
     ajv: "npm:^8.17.1"
     jose: "npm:^5.9.6"
     tweetnacl: "npm:^1.0.3"
     viem: "npm:^2.48.11"
     zod: "npm:^3.24.2"
-  checksum: 10c0/0099ec3ce3ed4717fe474ce5814daadf476b031e5920534f89b78563f4c693dd676e39581b7a110d3bce45ab461ed6ef55b7621900d4617c65f4c1f4aa1d176c
+  checksum: 10c0/27eb9f61a80c03ea5798bc1c9d37e205295d7fa5527712721831a2221df47d3785235c77b8b9f8f3f92fb2f3e420ee3a68bf74a682340783685dbc3fd65caed1
   languageName: node
   linkType: hard
 
-"@x402/fetch@npm:^2.9.0":
-  version: 2.10.0
-  resolution: "@x402/fetch@npm:2.10.0"
+"@x402/fetch@npm:^2.14.0":
+  version: 2.14.0
+  resolution: "@x402/fetch@npm:2.14.0"
   dependencies:
-    "@x402/core": "npm:~2.10.0"
-    viem: "npm:^2.39.3"
-    zod: "npm:^3.24.2"
-  checksum: 10c0/15dab972a95a4ba85e8652f5072c9fe3307230fdd9bd238f2edcff2fdc40d825854a364042114733bfcb63271f1cc8429b248e19149352145cc7cc2fc77d9b5e
+    "@x402/core": "npm:~2.14.0"
+  checksum: 10c0/053af42fb96f80dc00dbaeebc43095a31e95008196be35c6d95019fe625bc100fddd53e9b672a9924f1a160c1d302f2144200577503143890353720343270ae8
   languageName: node
   linkType: hard
 
-"@x402/hono@npm:^2.9.0":
-  version: 2.13.0
-  resolution: "@x402/hono@npm:2.13.0"
+"@x402/hono@npm:^2.14.0":
+  version: 2.14.0
+  resolution: "@x402/hono@npm:2.14.0"
   dependencies:
-    "@x402/core": "npm:~2.13.0"
-    "@x402/extensions": "npm:~2.13.0"
+    "@x402/core": "npm:~2.14.0"
+    "@x402/extensions": "npm:~2.14.0"
   peerDependencies:
-    "@x402/paywall": ^2.13.0
+    "@x402/paywall": ^2.14.0
     hono: ^4.0.0
   peerDependenciesMeta:
     "@x402/paywall":
       optional: true
-  checksum: 10c0/78f81f5da574942208d9e850427391a0c70b141b555344c1f64d401f19b207642eb30a0076dc4272d25d2b542adc3742bd4335e353189caea339a90c94576570
+  checksum: 10c0/893006d1a465cad2ce8864959d4df0abbb17666606bf17c31bb1808a2eef93dc7a66eb5bbfc6154f61966ce51c924fd9d491bf21b77cf6e7f948cf0ee3748f54
   languageName: node
   linkType: hard
 
@@ -7768,7 +7757,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.0.0, viem@npm:^2.21.8, viem@npm:^2.39.3":
+"viem@npm:^2.0.0, viem@npm:^2.21.8":
   version: 2.47.18
   resolution: "viem@npm:2.47.18"
   dependencies:
