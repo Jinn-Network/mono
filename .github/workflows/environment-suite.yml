@@ -1,0 +1,427 @@
+# Environment suite — the real-world gate (spec
+# docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md §3.2,
+# §8, §9 Option B, §10, §11; #923).
+#
+# This is the load-bearing, high-fidelity half of the two-gate split: the actual
+# production code against the real world (real `claude-code` harness via
+# subscription auth, real Base Sepolia, real Ponder round-trip) run against a
+# warm, pre-staked testnet operator that is NEVER re-bootstrapped (bootstrap
+# correctness lives in the hermetic gate). It posts an `environment-suite`
+# check-run bound to the candidate SHA — the native primitive branch protection
+# and the publish guard (npm-publish.yml §7) reason about. It runs in CI, NOT on
+# a laptop (Option B, §9), which is what makes the verdict trustworthy and kills
+# the laptop-state failure class (JINN_PASSWORD-poisoning, exit 50).
+#
+# Cadence (§8): the AUTHORITATIVE run is a workflow_dispatch on the EXACT
+# candidate SHA (triggered by release-readiness for the Monday cut). A single
+# Thursday 07:00 UTC pre-flight run on `next` HEAD is the early-warning signal,
+# skip-if-unchanged, with a fix runway before the cut. There is NO daily run and
+# NO per-push run — subscription rate limits + warm-operator wear bound it.
+#
+# Security posture (§9, ENFORCED — not assumed):
+#   - testnet-gate is a HUMAN-CREATED protected GitHub Actions Environment; its
+#     secrets (warm-operator keystore, password, funder key, OAuth token) are
+#     scoped to it, not repo-wide. A human provisions it (spec §9/§11) — this
+#     workflow only CONSUMES them.
+#   - This workflow NEVER runs on pull_request from forks. Triggers are
+#     schedule / workflow_dispatch only, and the dispatch run is checked out on a
+#     candidate SHA that must be an ancestor of `next` or a `release/*` branch
+#     (enforced in the resolve step). An untrusted PR must never execute a job
+#     that can read the keystore. This is non-negotiable.
+name: environment-suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Exact release-candidate commit SHA to validate (the authoritative gate run). Defaults to next HEAD if blank.'
+        required: false
+        type: string
+  schedule:
+    # Thursday 07:00 UTC — pre-flight on `next` HEAD, skip-if-unchanged. Thursday
+    # (not Saturday) so it never collides with the Friday/Saturday readiness run.
+    - cron: '0 7 * * 4'
+
+# GITHUB_TOKEN scope for the check-run + commit-status posting. Not a stored
+# secret; the env-suite verdict is written via these permissions (§9).
+permissions:
+  checks: write
+  statuses: write
+  contents: read
+
+# The warm operator is a SINGLETON (§9, §11). Serialize every run — two suites
+# hitting the same keystore / nonce / staking checkpoint would corrupt each
+# other. cancel-in-progress: false so an in-flight authoritative run is never
+# pre-empted by the Thursday pre-flight.
+concurrency:
+  group: environment-suite-warm-operator
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: client
+
+jobs:
+  environment-suite:
+    name: environment-suite
+    runs-on: ubuntu-latest
+    # The protected, HUMAN-CREATED Environment that holds the testnet-gate
+    # secrets (§9). If it does not exist yet, the run fails fast at secret
+    # resolution — that is the intended "provision the environment first" signal.
+    environment: testnet-gate
+    # Real solve (~6 min) + Docker/real-chain settlement + indexer round-trip,
+    # times two warm operators for the cross-op donation handshake. Generous
+    # ceiling; the suite aborts its own scenarios on their wall-clock budgets.
+    timeout-minutes: 75
+    steps:
+      # Initial full-history checkout of the triggering ref so the resolve step
+      # below has a git repo + branch history to validate the candidate SHA
+      # against. (The default checkout ref is `next` for the schedule and the
+      # branch the dispatch was launched from for workflow_dispatch.)
+      - name: Checkout (for SHA resolution)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # ── Resolve + guard the candidate SHA ────────────────────────────────
+      # Dispatch carries an explicit SHA (the authoritative gate run); the
+      # Thursday schedule resolves `next` HEAD. We REFUSE any SHA that is not an
+      # ancestor of `next` or a `release/*` branch (§9 — the suite only ever runs
+      # on integration / release lines, never on an arbitrary fork SHA).
+      - name: Resolve candidate SHA
+        id: resolve
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_SHA: ${{ github.event.inputs.candidate_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # Fetch next + every release/* head so the ancestry guard can see them.
+          git fetch origin 'next:refs/remotes/origin/next' '+refs/heads/release/*:refs/remotes/origin/release/*' --no-tags || git fetch origin --no-tags
+          if [ -n "${INPUT_SHA}" ]; then
+            CANDIDATE_SHA="${INPUT_SHA}"
+          else
+            CANDIDATE_SHA="$(git rev-parse origin/next)"
+          fi
+          echo "Resolved candidate SHA: ${CANDIDATE_SHA}"
+
+          # Guard: the SHA must be reachable from next OR a release/* branch.
+          ALLOWED=0
+          if git merge-base --is-ancestor "${CANDIDATE_SHA}" origin/next 2>/dev/null; then
+            ALLOWED=1
+          fi
+          for ref in $(git for-each-ref --format='%(refname)' 'refs/remotes/origin/release/*'); do
+            if git merge-base --is-ancestor "${CANDIDATE_SHA}" "${ref}" 2>/dev/null; then
+              ALLOWED=1
+            fi
+          done
+          if [ "${ALLOWED}" -ne 1 ]; then
+            echo "::error::candidate SHA ${CANDIDATE_SHA} is not an ancestor of 'next' or any 'release/*' branch — refusing to run the keystore-bearing env suite on it (spec §9)."
+            exit 1
+          fi
+          echo "candidate_sha=${CANDIDATE_SHA}" >> "${GITHUB_OUTPUT}"
+
+          # Skip-if-unchanged (§8): the Thursday SCHEDULE run is a pre-flight, not
+          # the gate — if an `environment-suite` check-run already exists on this
+          # SHA (from a prior schedule run or the readiness dispatch), `next` HEAD
+          # hasn't moved since we last validated it, so skip and don't burn warm-
+          # operator / subscription budget. A workflow_dispatch is the
+          # authoritative run and NEVER skips (it re-validates the exact SHA on
+          # demand). Check-runs are SHA-bound, so this is the natural primitive.
+          SKIP=false
+          if [ "${EVENT_NAME}" = "schedule" ]; then
+            EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "environment-suite" and .status == "completed")] | length' 2>/dev/null || echo 0)"
+            if [ "${EXISTING}" != "0" ]; then
+              echo "::notice::environment-suite already completed on ${CANDIDATE_SHA}; next HEAD unchanged — skipping the Thursday pre-flight (spec §8)."
+              SKIP=true
+            fi
+          fi
+          echo "skip=${SKIP}" >> "${GITHUB_OUTPUT}"
+
+      # Re-checkout the working tree at the exact candidate SHA — this is the code
+      # the suite actually validates and binds its verdict to.
+      - name: Checkout candidate SHA
+        if: steps.resolve.outputs.skip != 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve.outputs.candidate_sha }}
+          fetch-depth: 0
+
+      # NOTE: every step below carries `if: steps.resolve.outputs.skip != 'true'`
+      # so the Thursday skip-if-unchanged short-circuit (§8) cleanly no-ops the
+      # whole run when next HEAD already has an environment-suite verdict.
+      - if: steps.resolve.outputs.skip != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - if: steps.resolve.outputs.skip != 'true'
+        run: corepack enable
+      - if: steps.resolve.outputs.skip != 'true'
+        run: yarn install --immutable
+
+      # Foundry: the real-harness loop spawns a local Anvil for the deterministic
+      # settlement scaffolding inside the consolidated suite, and `cast` is used
+      # by the top-up path. Required just like CI / npm-publish.
+      - if: steps.resolve.outputs.skip != 'true'
+        uses: foundry-rs/foundry-toolchain@v1
+
+      # The `claude-code` harness spawns the `claude` CLI as a subprocess (§8) —
+      # install it globally so the daemon can find it on PATH.
+      - name: Install Claude Code CLI
+        if: steps.resolve.outputs.skip != 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      # ── Restore the warm operator state from the testnet-gate secrets (§9, §11)
+      # The keystore (encrypted) + earning_state.json + Safe/service/staking IDs
+      # are a base64 blob of the operator's `~/.jinn-client/` tree. Decode it into
+      # place; the daemon and the preflight both read from ~/.jinn-client.
+      - name: Restore warm operator state
+        if: steps.resolve.outputs.skip != 'true'
+        env:
+          JINN_WARM_OPERATOR_STATE: ${{ secrets.JINN_WARM_OPERATOR_STATE }}
+          JINN_WARM_OPERATOR_B_STATE: ${{ secrets.JINN_WARM_OPERATOR_B_STATE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JINN_WARM_OPERATOR_STATE:-}" ]; then
+            echo "::error::JINN_WARM_OPERATOR_STATE is not set in the testnet-gate Environment. A human must provision the warm operator (spec §11) before the env suite can run."
+            exit 1
+          fi
+          # Primary warm operator → ~/.jinn-client (a .tar.gz, base64-encoded).
+          # --no-same-owner: don't honor archived uid/gid on the runner. GNU tar
+          # (ubuntu-latest, >=1.34) already strips a leading '/' and refuses '..'
+          # members; --no-same-owner is belt-and-suspenders for the trusted,
+          # human-generated state blob. chmod failures are NOT swallowed — a
+          # world-readable keystore dir is an infra problem worth failing on.
+          mkdir -p "${HOME}/.jinn-client"
+          echo "${JINN_WARM_OPERATOR_STATE}" | base64 -d | tar -xzf - --no-same-owner -C "${HOME}/.jinn-client"
+          chmod -R go-rwx "${HOME}/.jinn-client"
+          echo "restored primary warm operator into ~/.jinn-client"
+          # Optional second warm operator (cross-op donation handshake, §3.2).
+          if [ -n "${JINN_WARM_OPERATOR_B_STATE:-}" ]; then
+            mkdir -p "${HOME}/.jinn-client-b"
+            echo "${JINN_WARM_OPERATOR_B_STATE}" | base64 -d | tar -xzf - --no-same-owner -C "${HOME}/.jinn-client-b"
+            chmod -R go-rwx "${HOME}/.jinn-client-b"
+            echo "restored secondary warm operator into ~/.jinn-client-b"
+          else
+            echo "::notice::JINN_WARM_OPERATOR_B_STATE unset — cross-op donation scenario will skip (single warm operator)."
+          fi
+
+      # ── Pre-flight: health-check + funding-gap report (§9 step 1, §11) ──────
+      # Adopts the restored home, runs the #531 substrate doctor + verify + top-up
+      # check, and exits with EXIT_INFRA_BLOCKED (75) if the operator is
+      # unhealthy / under-funded. An infra-blocked preflight is NOT a product red
+      # (§10) — we post a distinct `neutral` `environment-suite` verdict with a
+      # single `preflight` scenario classed `infra-blocked` and STOP. The cut is
+      # blocked, but on the dashboard it reads "go fix the operator", never a
+      # mystery regression.
+      - name: Warm operator preflight
+        id: preflight
+        if: steps.resolve.outputs.skip != 'true'
+        env:
+          JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          JINN_DISCOVERY_URL: ${{ secrets.JINN_DISCOVERY_URL }}
+          JINN_FUNDER_PRIVATE_KEY: ${{ secrets.JINN_FUNDER_PRIVATE_KEY }}
+        run: |
+          set +e
+          # --repair makes the doctor idempotently reconcile the recurring drift
+          # (RPC fallback chain, fleet_safe consistency, harness config). The
+          # top-up tx itself is funded from JINN_FUNDER_PRIVATE_KEY by the
+          # operator tooling; the preflight reports the gap loudly either way.
+          tsx scripts/release/warm-operator-preflight.ts \
+            --op-name warm-operator \
+            --jinn-client-dir "${HOME}/.jinn-client" \
+            --repair \
+            | tee "${RUNNER_TEMP}/preflight.json"
+          CODE=${PIPESTATUS[0]}
+          set -e
+          echo "preflight_exit=${CODE}" >> "${GITHUB_OUTPUT}"
+          if [ "${CODE}" -eq 75 ]; then
+            echo "infra_blocked=true" >> "${GITHUB_OUTPUT}"
+          elif [ "${CODE}" -ne 0 ]; then
+            echo "::error::warm-operator-preflight crashed (exit ${CODE}) — the preflight itself is broken, not the operator."
+            exit "${CODE}"
+          fi
+
+      # Short-circuit verdict for an infra-blocked operator: post a NEUTRAL
+      # `environment-suite` check-run (not failure — §10 keeps infra distinct
+      # from product) and stop. The publish guard treats anything other than
+      # success as "not green for this SHA", so a neutral correctly blocks the
+      # cut while naming the cause as infra.
+      - name: Post infra-blocked verdict
+        if: steps.preflight.outputs.infra_blocked == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_SHA: ${{ steps.resolve.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const sha = process.env.CANDIDATE_SHA;
+            const verdict = {
+              context: 'environment-suite',
+              headSha: sha,
+              conclusion: 'neutral',
+              scenarios: [
+                { id: 'preflight', verdict: 'fail', failClass: 'infra-blocked', notes: 'warm operator unhealthy/under-funded — see preflight.json. Not a product regression (spec §10/§11).' },
+              ],
+              summary: 'environment-suite did not run: warm operator is infra-blocked. Fix funding / substrate / OAuth token and re-dispatch on this SHA.',
+            };
+            fs.writeFileSync(process.env.RUNNER_TEMP + '/environment-suite-verdict.json', JSON.stringify(verdict, null, 2));
+          "
+          node scripts/release/post-check-run-verdict.mjs "${RUNNER_TEMP}/environment-suite-verdict.json"
+          echo "::error::environment-suite stopped: warm operator infra-blocked (spec §10). The cut is blocked on infrastructure, not the product."
+          exit 1
+
+      # ── Run the consolidated real-harness suite (§3.2) ──────────────────────
+      # CRITICAL (§8): unset ANTHROPIC_API_KEY so the OAuth subscription token is
+      # the ONLY Claude credential. An API key can take precedence and silently
+      # fall back to per-token billing; the env suite must run on the flat-rate
+      # subscription the way operators do. We deliberately do NOT pass
+      # ANTHROPIC_API_KEY to this step's env (unlike broadcast-bot.yml), and we
+      # `unset` it defensively in case the runner image injects one.
+      #
+      # The suite is the REAL-WORLD half of the determinism split (§6 Home 2): the
+      # real `claude-code` harness against real Base Sepolia + real Ponder, on the
+      # warm pre-staked operator — never an Anvil fork (that Anvil-fork loop,
+      # `yarn e2e:daemon-harness`, is the HERMETIC gate's job, §6 Home 1). It
+      # consolidates two existing real-testnet entries into one verdict:
+      #   - run-tier-2 — cross-operator donation handshake (T2.1) + producer/
+      #     evaluator (T2.2) on real testnet, two warm operators.
+      #   - run-tier-3 — the real-harness producer/evaluator loop (T3.1) on real
+      #     testnet (claim → real solve → deliver → verdict → settlement).
+      # These run-tier scripts are REFERENCED, not rewritten (#923 ownership).
+      # Agent answer-quality is a SOFT signal here (§3.2, §10) — only loop
+      # completion + protocol-valid envelope + settlement + activity-counter are
+      # hard-asserted; a flaky LLM never blocks. classifyFailure() inside the
+      # run-tier scripts separates real-bug from flake-infra/timing, and only a
+      # `real-bug` exits non-zero.
+      - name: Run environment suite
+        if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
+        id: suite
+        env:
+          JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          JINN_DISCOVERY_URL: ${{ secrets.JINN_DISCOVERY_URL }}
+          JINN_FUNDER_PRIVATE_KEY: ${{ secrets.JINN_FUNDER_PRIVATE_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          JINN_E2E_HARNESS: claude-code
+          CANDIDATE_SHA: ${{ steps.resolve.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          # §8 discipline: the subscription OAuth token is the only Claude cred.
+          unset ANTHROPIC_API_KEY
+          export RESULT_DIR="${RUNNER_TEMP}/env-suite"
+          mkdir -p "${RESULT_DIR}"
+          # The run-tier scripts call `node dist/scripts/...` paths for some
+          # phases; build once so the dist tree exists. Output is NOT suppressed —
+          # a build failure here must be immediately visible in the step log.
+          yarn build
+
+          set +e
+          # 1. Cross-op donation + producer/evaluator (real testnet, two warm ops).
+          tsx scripts/release/run-tier-2.ts "${CANDIDATE_SHA}" 2>&1 | tee "${RESULT_DIR}/tier-2.log"
+          T2_CODE=${PIPESTATUS[0]}
+
+          # 2. Real-harness producer/evaluator loop (autonomous — no human prompt).
+          tsx scripts/release/run-tier-3.ts "${CANDIDATE_SHA}" autonomous 2>&1 | tee "${RESULT_DIR}/tier-3.log"
+          T3_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "t2_code=${T2_CODE}" >> "${GITHUB_OUTPUT}"
+          echo "t3_code=${T3_CODE}" >> "${GITHUB_OUTPUT}"
+
+      # ── Assemble + post the environment-suite verdict (§7, §9 step 3) ───────
+      # The run-tier scripts exit non-zero ONLY on a `real-bug` (product-red);
+      # flake-infra / flake-timing / agent-crash exit 0 so the classification —
+      # not a raw process code — decides ship. We map the two tier exit codes to
+      # the shared verdict JSON and post it on the candidate SHA. agent-answer-
+      # quality is never a hard gate (§10) — it lives in the scenario notes, not
+      # the conclusion. always() so a crashed suite step still posts a (failure)
+      # verdict rather than leaving the SHA with no environment-suite check-run.
+      - name: Post environment-suite verdict
+        if: always() && steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_SHA: ${{ steps.resolve.outputs.candidate_sha }}
+          T2_CODE: ${{ steps.suite.outputs.t2_code }}
+          T3_CODE: ${{ steps.suite.outputs.t3_code }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const sha = process.env.CANDIDATE_SHA;
+            // A blank code means the suite step itself crashed before exporting
+            // it — treat as product-red (conservative), classed agent-crash.
+            const code = (v) => (v === undefined || v === '' ? 2 : Number(v));
+            const t2 = code(process.env.T2_CODE);
+            const t3 = code(process.env.T3_CODE);
+            // run-tier exit-code → verdict mapping (spec §10, three outcomes):
+            //   0 = pass / flake-infra / flake-timing / skip (classification already
+            //       decided inside the script; flakes exit 0, never block).
+            //   1 = classified real-bug → product-red (hard gate, blocks the cut).
+            //   3 = agent-answer-quality SOFT signal: the loop completed and the
+            //       envelope/settlement/activity-counter were protocol-valid, but the
+            //       agent's answer was suspect on a task WITHOUT known ground truth.
+            //       §10 is explicit: a flaky LLM must NEVER hard-gate. So exit 3 maps
+            //       to a soft PASS carrying a note — visible, but it does not drive
+            //       the conclusion. (run-tier-3 emitting exit 3 for answer-quality-only
+            //       failures is the paired follow-up; until then it exits 0/1 and this
+            //       arm is simply unused — never a false block.)
+            //   else = unexpected crash → agent-crash (conservative hard fail).
+            const toScenario = (id, c) => {
+              if (c === 0) return { id, verdict: 'pass', failClass: null, notes: null };
+              if (c === 3) return { id, verdict: 'pass', failClass: null, notes: 'agent-answer-quality soft signal (§10) — loop + settlement valid, answer suspect; see ' + id + ' log. NOT a product red.' };
+              if (c === 1) return { id, verdict: 'fail', failClass: 'product-red', notes: 'classified real-bug — see ' + id + ' log' };
+              return { id, verdict: 'fail', failClass: 'agent-crash', notes: 'suite step crashed (exit ' + c + ')' };
+            };
+            const scenarios = [
+              toScenario('cross-op-donation', t2),
+              toScenario('real-harness-loop', t3),
+            ];
+            const anyRed = scenarios.some((s) => s.verdict === 'fail');
+            const verdict = {
+              context: 'environment-suite',
+              headSha: sha,
+              conclusion: anyRed ? 'failure' : 'success',
+              scenarios,
+              summary: anyRed
+                ? 'environment-suite: one or more real-world scenarios are product-red on this SHA. Drive to fix on release/<v> (spec §10).'
+                : 'environment-suite: cross-op donation + real-harness loop both green on this SHA.',
+            };
+            fs.writeFileSync(process.env.RUNNER_TEMP + '/environment-suite-verdict.json', JSON.stringify(verdict, null, 2));
+          "
+          node scripts/release/post-check-run-verdict.mjs "${RUNNER_TEMP}/environment-suite-verdict.json"
+
+      # Scrub embedded URLs from the evidence logs BEFORE upload. The testnet-gate
+      # secrets BASE_SEPOLIA_RPC_URL / JINN_DISCOVERY_URL may carry API keys (#642).
+      # GitHub masks REGISTERED secrets in the live job log, but files tee'd to
+      # disk and uploaded as artifacts are NOT masked — a tier script that prints
+      # an RPC URL would leak the key into a 14-day artifact. Redact any http(s)
+      # URL in the scenario logs + preflight report (the verdict JSON carries no
+      # URLs). Absolute RUNNER_TEMP paths, so working-directory is irrelevant.
+      - name: Scrub URLs from evidence logs
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          for f in "${RUNNER_TEMP}"/env-suite/*.log "${RUNNER_TEMP}"/preflight.json; do
+            [ -f "$f" ] || continue
+            sed -i -E 's#https?://[^[:space:]"'"'"']+#<redacted-url>#g' "$f"
+          done
+          echo "scrubbed URLs from env-suite evidence logs"
+
+      # Surface the raw (URL-scrubbed) scenario logs so a reviewer can step through a red.
+      - name: Upload env-suite evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: environment-suite-evidence
+          path: |
+            ${{ runner.temp }}/env-suite/
+            ${{ runner.temp }}/preflight.json
+            ${{ runner.temp }}/environment-suite-verdict.json
+          retention-days: 14
+          if-no-files-found: ignore
