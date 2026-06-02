@@ -1,0 +1,184 @@
+name: hermetic-gate
+
+# The deterministic, zero-external-dependency release gate (spec §3.1).
+#
+# docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md:
+#   "CI proves the code is correct. ... Deterministic, zero external
+#    dependencies → it *cannot* flake for infra reasons → a red is always a
+#    real code regression."
+#
+# It runs the real daemon code against REAL contracts (JinnRouterV3 +
+# TaskCoordinator + activity checker + the real OLAS Mech Marketplace) on a
+# pinned Anvil `--dump-state` snapshot (spec §4 — snapshot, not fork: a fork
+# reintroduces the network flakiness we are removing, needs a secret in PR CI,
+# and rots silently). The snapshot is a committed fixture; the only network
+# access in the whole pipeline lives in the offline builder
+# `contracts/scripts/build-anvil-snapshot.ts`.
+#
+# This gate needs NO secrets, so it is safe to run on PRs from forks. It posts a
+# single `hermetic-gate` check-run bound to github.sha via the shared poster
+# (client/scripts/release/post-check-run-verdict.mjs, owned by step 3).
+#
+# NOTE: this workflow is intentionally NOT a required check yet. Marking it
+# required is a separate, human-applied branch-protection step (see the spec's
+# migration plan §13 step 1 + the enable script). Until then it runs and posts
+# its verdict advisorily so the publish guard can begin reading it.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - next
+      - 'release/*'
+
+# Serialize per-ref so a force-push supersedes an in-flight run rather than
+# racing two verdicts onto overlapping SHAs.
+concurrency:
+  group: hermetic-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  statuses: write
+
+jobs:
+  hermetic-gate:
+    name: Hermetic gate (deterministic, snapshot)
+    runs-on: ubuntu-latest
+    env:
+      # The deterministic loop tests the *loop*, not the *agent* (spec §3.1):
+      # the prediction-v1-baseline harness needs no API key, so this gate has
+      # zero credential dependencies.
+      JINN_E2E_HARNESS: prediction-v1-baseline
+      # The check-run binds to the commit under test. On pull_request,
+      # github.sha is the ephemeral merge commit; github.event.pull_request.head.sha
+      # is the actual PR HEAD the branch-protection / publish guard reasons about.
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - run: corepack enable
+
+      # Foundry provides `anvil` — the snapshot is loaded via `anvil --load-state`
+      # (deterministic, local disk I/O, no live RPC on the gate path).
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install client deps
+        working-directory: client
+        run: yarn install --immutable
+
+      # Build the indexer (Ponder codegen) so the hermetic indexer round-trip
+      # (T1.3, the local-Ponder-vs-snapshot test that closes the #341 stub) can
+      # spawn a real indexer against the snapshot chain.
+      - name: Install indexer deps
+        working-directory: packages/indexer
+        run: yarn install --immutable
+
+      - name: Indexer codegen
+        working-directory: packages/indexer
+        run: yarn codegen
+
+      # FAIL LOUD if the committed snapshot fixture is absent. It is large and
+      # human/heavy-step generated (spec §4) — never fabricated by CI. Without it
+      # the whole gate is meaningless, so this is a hard stop with a precise
+      # remediation pointer, NOT a skip.
+      - name: Assert snapshot fixture present
+        run: |
+          STATE_DIR="client/test/_support/fixtures/anvil-base-v3-state"
+          # Hard fail if the dir is absent OR state.json is missing/empty. One OR
+          # covers both "directory never created" and "directory exists but the
+          # dumped state.json is missing or zero-length" (-s is false for both).
+          if [ ! -d "$STATE_DIR" ] || [ ! -s "$STATE_DIR/state.json" ]; then
+            echo "::error::Hermetic snapshot fixture missing/empty at $STATE_DIR/state.json"
+            echo "Run \`tsx contracts/scripts/build-anvil-snapshot.ts\` (needs BASE_RPC_URL) and commit the fixture."
+            echo "See docs/snapshots/base-v3-snapshot.md for the rollout order."
+            exit 1
+          fi
+          echo "✓ snapshot fixture present at $STATE_DIR/state.json"
+
+      # Compile the V3 contracts so the hermetic adversarial test can load the
+      # full artifact ABIs (including the Router* error fragments) that drive the
+      # snapshot's real bytecode into each adversarial state (spec §5).
+      - name: Compile contracts
+        working-directory: contracts
+        run: |
+          yarn install --immutable
+          yarn compile
+
+      # Run the hermetic suite. The new test/hermetic/** tests load the snapshot
+      # via spawnAnvilFromState (adversarial claim/delivery on real bytecode) and
+      # exercise the deterministic RPC fallback chain (#592) with a mock
+      # transport. The positional path scopes vitest to just this home (the same
+      # filename-filter form `release:tier-1:T1.3` uses) so the gate's verdict
+      # maps 1:1 to the hermetic surface.
+      - name: Run hermetic suite
+        id: hermetic
+        working-directory: client
+        run: yarn vitest run test/hermetic/
+
+      # The existing T1.3 indexer round-trip — local Ponder vs the snapshot chain
+      # (closes the #341 permanent-skip stub). It self-skips cleanly when its
+      # prerequisites (anvil / Ponder / RPC fork) are unavailable, classifying any
+      # infra failure as flake-infra, never a product red.
+      - name: Indexer round-trip (T1.3)
+        id: indexer
+        working-directory: client
+        run: yarn release:tier-1:T1.3
+
+      # Write the verdict JSON. Reaching this step means every prior step
+      # succeeded (the snapshot suite + T1.3 both passed; a failure of either
+      # short-circuits the job before here). `if: success()` is explicit so the
+      # green verdict is only ever written on a genuinely green run.
+      - name: Write verdict (success)
+        if: success()
+        run: |
+          cat > "$RUNNER_TEMP/hermetic-verdict.json" <<EOF
+          {
+            "context": "hermetic-gate",
+            "headSha": "${HEAD_SHA}",
+            "conclusion": "success",
+            "scenarios": [
+              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery on snapshot bytecode + deterministic RPC fallback) green" },
+              { "id": "indexer-round-trip-T1.3", "verdict": "pass", "failClass": null, "notes": "local Ponder vs snapshot chain (closes #341 stub)" }
+            ],
+            "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip."
+          }
+          EOF
+
+      # On any failure, write a failure verdict so the publish guard refuses
+      # rather than silently missing the check. A hermetic red is always a real
+      # code regression (zero external deps), so failClass is product-red.
+      - name: Write verdict (failure)
+        if: failure()
+        run: |
+          cat > "$RUNNER_TEMP/hermetic-verdict.json" <<EOF
+          {
+            "context": "hermetic-gate",
+            "headSha": "${HEAD_SHA}",
+            "conclusion": "failure",
+            "scenarios": [
+              { "id": "hermetic-gate", "verdict": "fail", "failClass": "product-red", "notes": "A hermetic step failed; with zero external dependencies a red is a real code regression. See the job log." }
+            ],
+            "summary": "Hermetic gate FAILED on ${HEAD_SHA} — a deterministic step regressed (product-red)."
+          }
+          EOF
+
+      # Post the verdict as a check-run bound to HEAD_SHA via the shared poster
+      # (owned by step 3). Always runs so both the green and red verdicts land —
+      # EXCEPT on fork PRs, where the GITHUB_TOKEN is read-only regardless of the
+      # declared `checks: write` permission, so the POST would 403 and falsely
+      # redden the job. Forks still get the test results in the job log; the gate
+      # only posts a check-run for same-repo refs (push / same-repo PR). On push
+      # events `github.event.pull_request` is null, so the fork check is skipped.
+      - name: Post hermetic-gate check-run
+        if: always() && github.event.pull_request.head.repo.fork != true
+        working-directory: client
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/post-check-run-verdict.mjs "$RUNNER_TEMP/hermetic-verdict.json"

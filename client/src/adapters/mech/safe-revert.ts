@@ -28,7 +28,11 @@ export class SafeInnerRevertError extends Error {
   }
 }
 
-const KNOWN_INNER_ERRORS: Record<string, { name: string; params: string }> = {
+// Exported so the hermetic ABI/selector-conformance test (spec §5 — consumer-
+// contract pairing) can assert each hardcoded selector still matches the
+// keccak256 of its canonical error signature. A drifted entry silently
+// mis-decodes (or fails to decode) a real on-chain revert.
+export const KNOWN_INNER_ERRORS: Record<string, { name: string; params: string }> = {
   // JinnRouterV2
   '0x1a387062': { name: 'RequestNotFound', params: 'bytes32 requestId' },
   '0xa6f3b939': { name: 'DeliveryAlreadyClaimed', params: 'bytes32 requestId' },

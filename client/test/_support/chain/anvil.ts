@@ -18,6 +18,21 @@ export interface SpawnAnvilOpts {
   chain?: Chain;
 }
 
+export interface SpawnAnvilFromStateOpts {
+  /**
+   * Path to the committed `anvil --dump-state` snapshot to load. May be the
+   * state.json file itself or the directory containing it — anvil accepts
+   * either via `--load-state`.
+   */
+  statePath: string;
+  /** Suppress anvil stdout. Default: true. */
+  silent?: boolean;
+  /** How long to wait for anvil readiness, ms. Default: 15_000. */
+  readyTimeoutMs?: number;
+  /** Chain definition for the spawned wallet client (default: viem `base`). */
+  chain?: Chain;
+}
+
 export interface AnvilHarness extends ChainTestHarness {
   port: number;
   pid: number;
@@ -32,12 +47,50 @@ export async function spawnAnvilFork(opts: SpawnAnvilOpts = {}): Promise<AnvilHa
   const silent = opts.silent ?? true;
   const readyTimeoutMs = opts.readyTimeoutMs ?? 15_000;
   const chain = opts.chain ?? base;
+
+  const args = ['--fork-url', forkUrl];
+  if (silent) args.push('--silent');
+  if (opts.forkBlock !== undefined) args.push('--fork-block-number', String(opts.forkBlock));
+
+  return startAnvil({ extraArgs: args, silent, readyTimeoutMs, chain });
+}
+
+/**
+ * Spawn anvil from a committed `--dump-state` snapshot (deterministic, no live
+ * RPC). This is the hermetic-gate path (spec §4): the snapshot is built offline
+ * by `contracts/scripts/build-anvil-snapshot.ts` and loaded here off local disk
+ * so the per-PR gate cannot flake for infra reasons.
+ *
+ * Returns the same `AnvilHarness` shape as `spawnAnvilFork` (same port
+ * allocation, readiness polling, and teardown) so callers are interchangeable.
+ */
+export async function spawnAnvilFromState(opts: SpawnAnvilFromStateOpts): Promise<AnvilHarness> {
+  const silent = opts.silent ?? true;
+  const readyTimeoutMs = opts.readyTimeoutMs ?? 15_000;
+  const chain = opts.chain ?? base;
+
+  const args = ['--load-state', opts.statePath];
+  if (silent) args.push('--silent');
+
+  return startAnvil({ extraArgs: args, silent, readyTimeoutMs, chain });
+}
+
+/**
+ * Internal: allocate a port, spawn anvil with `--port <port> <extraArgs>`, race
+ * readiness against early exit, and assemble the AnvilHarness. Shared by
+ * `spawnAnvilFork` (fork mode) and `spawnAnvilFromState` (load-state mode).
+ */
+async function startAnvil(params: {
+  extraArgs: string[];
+  silent: boolean;
+  readyTimeoutMs: number;
+  chain: Chain;
+}): Promise<AnvilHarness> {
+  const { extraArgs, silent, readyTimeoutMs, chain } = params;
   const port = await allocateAnvilPort();
   const rpcUrl = `http://127.0.0.1:${port}`;
 
-  const args = ['--fork-url', forkUrl, '--port', String(port)];
-  if (silent) args.push('--silent');
-  if (opts.forkBlock !== undefined) args.push('--fork-block-number', String(opts.forkBlock));
+  const args = [...extraArgs, '--port', String(port)];
 
   const child: ChildProcess = spawn('anvil', args, {
     stdio: silent ? 'ignore' : 'inherit',
@@ -45,7 +98,8 @@ export async function spawnAnvilFork(opts: SpawnAnvilOpts = {}): Promise<AnvilHa
   });
 
   // Race readiness against early process exit. Without the exit watcher, a
-  // crashing anvil (missing binary, bad fork url) burns the full timeout.
+  // crashing anvil (missing binary, bad fork url, missing snapshot) burns the
+  // full timeout.
   const exitPromise = new Promise<never>((_, reject) => {
     child.once('error', (err) => reject(new Error(`anvil failed to spawn: ${err.message}`)));
     child.once('exit', (code, signal) =>
