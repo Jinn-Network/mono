@@ -57,6 +57,19 @@ export const JinnConfigSchema = z.object({
    */
   l2ProofRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
 
+  /**
+   * Single volume-aware durable-state root. When set (env JINN_STATE_DIR or
+   * this file field), `earningDir`, `dbPath`, `engine.implStateDirRoot`, and
+   * the swe-rebench-v2 pool dir derive from it as `<stateDir>/<subdir>` —
+   * UNLESS each is individually overridden, in which case the per-key value
+   * wins (derive-don't-collapse). With `stateDir` unset, every default is
+   * byte-identical to the legacy `~/.jinn-client/<subdir>` paths. Hosted
+   * deploys collapse four ENV lines to one `JINN_STATE_DIR=/data`.
+   * `engine.workingDirRoot` is deliberately NOT derived — it stays ephemeral
+   * (reaped per-task).
+   */
+  stateDir: z.string().optional(),
+
   /** Earning state directory */
   earningDir: z.string().default(join(homedir(), '.jinn-client', 'earning')),
 
@@ -1054,6 +1067,27 @@ export function loadConfig(configPath?: string): JinnConfig {
     };
   }
 
+  // JINN_STATE_DIR: single volume-aware root. Runs AFTER all per-key env
+  // overrides above are applied into `merged` and BEFORE safeParse — so a
+  // still-`undefined` per-key value means neither file nor env set it. Per-key
+  // precedence: explicit (file or env, already in `merged`) > <stateDir>/<subdir>
+  // > legacy default (filled by the schema / engine assembly when still absent).
+  // workingDirRoot is deliberately NOT derived — it stays ephemeral.
+  const stateDir = env['JINN_STATE_DIR']
+    ?? (typeof merged['stateDir'] === 'string' ? (merged['stateDir'] as string) : undefined);
+  if (stateDir) {
+    merged['stateDir'] = stateDir;
+    if (merged['earningDir'] === undefined) merged['earningDir'] = join(stateDir, 'earning');
+    if (merged['dbPath'] === undefined) merged['dbPath'] = join(stateDir, 'jinn.db');
+    const engineObj = (typeof merged['engine'] === 'object' && merged['engine'] !== null)
+      ? (merged['engine'] as Record<string, unknown>)
+      : {};
+    if (engineObj['implStateDirRoot'] === undefined) {
+      engineObj['implStateDirRoot'] = join(stateDir, 'engine', 'impl-state');
+      merged['engine'] = engineObj;
+    }
+  }
+
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
 
   // Testnet default: point discovery at the privately-operated Ponder indexer
@@ -1273,6 +1307,7 @@ export function persistTopLevelConfigValue(
  */
 const TRACKED_ENV_VARS = [
   'JINN_NETWORK',
+  'JINN_STATE_DIR',
   'JINN_EARNING_DIR',
   'JINN_DB_PATH',
   'JINN_POLL_INTERVAL_MS',
@@ -1328,6 +1363,7 @@ const TRACKED_ENV_VARS = [
   'JINN_TASKS',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_SWE_REBENCH_V2_STATE_DIR',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',
   'JINN_OPERATOR_DONATION_ENABLED',
