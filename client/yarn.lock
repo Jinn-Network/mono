@@ -8027,15 +8027,15 @@ __metadata:
   linkType: hard
 
 "wouter@npm:^3":
-  version: 3.9.0
-  resolution: "wouter@npm:3.9.0"
+  version: 3.10.0
+  resolution: "wouter@npm:3.10.0"
   dependencies:
     mitt: "npm:^3.0.1"
     regexparam: "npm:^3.0.0"
     use-sync-external-store: "npm:^1.0.0"
   peerDependencies:
     react: ">=16.8.0"
-  checksum: 10c0/461622cd39366112fb4398acd457202fced00021f02351d1a6f99d17b8a7eea631883bf4346aa69710ea9738f8415e8f22b25689bb5930d1f4d96493ad39f8f4
+  checksum: 10c0/3ddfea0d87a94b97cc5e3baf9021c7ba984b1021d7a359b71853c54d9ca5e854fd3ebfe74a7b8ede46b6a216f981034a130616031cadc06369f67581887af536
   languageName: node
   linkType: hard
 
