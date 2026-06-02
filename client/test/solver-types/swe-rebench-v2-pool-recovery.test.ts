@@ -17,7 +17,10 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recoverVettedPoolFromNetwork } from '../../src/solver-types/_swe-rebench-v2-pool-recovery.js';
+import {
+  recoverVettedPoolFromNetwork,
+  isTerminalRecoveryOutcome,
+} from '../../src/solver-types/_swe-rebench-v2-pool-recovery.js';
 import {
   ValidatedPoolStore,
   EVAL_SEMANTICS_VERSION,
@@ -250,5 +253,29 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     expect(result.reason).toBe('no-ref');
     expect(existsSync(join(stateDir, 'validated-pool.json'))).toBe(false);
     cleanup();
+  });
+});
+
+describe('isTerminalRecoveryOutcome (#957 latch decision)', () => {
+  // TERMINAL — latch permanently, never retry: retrying cannot change the result.
+  it('treats a successful recovery as terminal', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: true, entriesRecovered: 3 })).toBe(true);
+  });
+  it('treats local-pool-present as terminal', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'local-pool-present' })).toBe(true);
+  });
+  it('treats hash-mismatch as terminal (poisoned ref — must not loop)', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'hash-mismatch' })).toBe(true);
+  });
+
+  // TRANSIENT — do NOT latch; the caller retries under a bounded cap.
+  it('treats no-task as transient (fresh SolverNet may post its first task later)', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'no-task' })).toBe(false);
+  });
+  it('treats no-ref as transient', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'no-ref' })).toBe(false);
+  });
+  it('treats error:* as transient (indexer / IPFS blip)', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'error:gateway timeout' })).toBe(false);
   });
 });

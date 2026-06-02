@@ -646,3 +646,135 @@ describe('classifyPoolTask window-expiry repost trigger (#826 deadlock fix, #850
       .toMatchObject({ live: 1, repostable: 0 });
   });
 });
+
+// ── #957 review: fresh-volume pool recovery must RETRY transient failures and
+// latch only on TERMINAL outcomes. Proven at the generator-tick level: a no-task
+// (transient) result does NOT permanently disable recovery — a later tick (after
+// the throttle interval) retries — while a local-pool-present (terminal) result
+// settles immediately and no further recovery attempt is made.
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recovery latch (#957 review)', () => {
+  async function seedPoolCache(stateDir: string): Promise<void> {
+    await mkdir(stateDir, { recursive: true });
+    // Non-empty pool cache as a backstop so the tick always gets past the
+    // `pool.length === 0` guard and reaches the recovery hook.
+    await writeFile(
+      join(stateDir, 'pool-cache.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-pool-cache.v1',
+        savedAt: new Date().toISOString(),
+        tasks: [{
+          instance_id: 'org__repo-1', language: 'python',
+          hf_dataset: 'nebius/SWE-rebench-leaderboard', hf_split: '2024_12',
+          base_commit: '0000000000000000000000000000000000000000',
+        }],
+      }),
+    );
+  }
+
+  // Mock the HF datasets-server so the pool LOAD SUCCEEDS on the first attempt
+  // (one /splits + one /rows call, both 2xx). This avoids the ~15 s 429-backoff
+  // schedule the loader pays when HF rejects — keeping these multi-tick tests
+  // fast and, crucially, independent of the process-wide HF request limiter that
+  // serialises requests across all tests in the file.
+  function mockHfSuccess(): import('vitest').MockInstance {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.includes('/splits')
+        ? { splits: [{ split: '2024_12' }] }
+        : { rows: [{ row: { instance_id: 'org__repo-1', language: 'python', base_commit: '0'.repeat(40) } }] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+  }
+
+  function recoveryDiscovery(getMostRecent: DiscoveryAPI['getMostRecentTaskCidDigest']): DiscoveryAPI {
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
+    return {
+      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
+      getMostRecentTaskCidDigest: getMostRecent,
+      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed, listPluginPublications: notUsed,
+      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
+    } as DiscoveryAPI;
+  }
+
+  function recoveryGen(stateDir: string, discoveryApi: DiscoveryAPI) {
+    return makeSweRebenchV2GeneratorForLaunchedRecord({
+      recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy957recovery' }) },
+      // admissionMode 'required' is the only mode that triggers the recovery hook.
+      configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'required' as const } },
+      staticConfig: { stateDir, discoveryApi },
+    });
+  }
+
+  // NOTE on the clock: we spy Date.now to drive ONLY the recovery throttle
+  // window. We anchor the fake clock at the REAL current time (not a hardcoded
+  // past date) so the process-wide HfRequestLimiter — which computes
+  // `Date.now() - lastStartedAt` against its real-clock last-request stamp —
+  // never sees a negative elapsed (which would make it sleep for ~forever).
+  it('TRANSIENT no-task does NOT permanently latch: throttled within the interval, retried after it', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-957-transient-'));
+    await seedPoolCache(stateDir);
+    const fetchSpy = mockHfSuccess();
+    // Recovery returns no-task (transient) — a fresh SolverNet whose first task
+    // hasn't been posted yet. fetchFromIpfs is never reached on this path.
+    const getMostRecent = vi.fn(async () => undefined);
+    const gen = recoveryGen(stateDir, recoveryDiscovery(getMostRecent));
+
+    const base = Date.now();
+    let clock = base;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      clock = base;
+      await gen();
+      expect(getMostRecent).toHaveBeenCalledTimes(1); // first attempt
+
+      // A second tick within the 5-min throttle window must NOT re-hit the indexer.
+      clock = base + 60_000; // +1 min
+      await gen();
+      expect(getMostRecent).toHaveBeenCalledTimes(1); // still 1 — throttled, NOT latched
+
+      // After the throttle interval elapses, recovery is RETRIED (not latched).
+      clock = base + 6 * 60_000 + 30_000; // +6.5 min from first
+      await gen();
+      expect(getMostRecent).toHaveBeenCalledTimes(2); // retried — proves no permanent latch
+    } finally {
+      nowSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  }, 120_000);
+
+  // The TERMINAL branch (recovered / local-pool-present / hash-mismatch → latch
+  // permanently, never retry) is exhaustively covered by the pure-function unit
+  // test `isTerminalRecoveryOutcome (#957 latch decision)` in
+  // swe-rebench-v2-pool-recovery.test.ts. Here we additionally show the
+  // tick-level wiring of the terminal short-circuit: when a validated-pool.json
+  // is already present the hook settles WITHOUT querying the indexer. (A single
+  // tick suffices — once a validated pool exists the tick proceeds into the
+  // expensive publication path, so we don't loop it; persistence of the latch
+  // is proven by the shared settled-flag wiring exercised in the TRANSIENT test
+  // above plus the decision-logic unit test.)
+  it('TERMINAL local-pool-present: a present validated-pool short-circuits recovery, no indexer call', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-957-terminal-'));
+    await seedPoolCache(stateDir);
+    // A validated-pool.json already on disk → terminal: nothing to recover.
+    await writeFile(
+      join(stateDir, 'validated-pool.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-validated-pool.v1',
+        entries: {},
+      }),
+    );
+    const fetchSpy = mockHfSuccess();
+    const getMostRecent = vi.fn(async () => undefined);
+    const gen = recoveryGen(stateDir, recoveryDiscovery(getMostRecent));
+
+    try {
+      await gen();
+      expect(getMostRecent).not.toHaveBeenCalled(); // local pool present → never queried the indexer
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }, 120_000);
+});

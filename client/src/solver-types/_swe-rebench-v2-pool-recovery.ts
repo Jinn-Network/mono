@@ -57,6 +57,26 @@ export interface RecoverVettedPoolResult {
   entriesRecovered?: number;
 }
 
+/**
+ * Whether a recovery outcome is TERMINAL — i.e. retrying cannot help, so the
+ * caller should latch permanently and never attempt recovery again:
+ *
+ *   - `recovered === true`        — done; the pool was written.
+ *   - `local-pool-present`        — a local pool already exists; nothing to recover.
+ *   - `hash-mismatch`             — the published artifact is bad/untrusted; retrying
+ *                                   loops on a poisoned ref, so we must stop.
+ *
+ * All other outcomes (`no-task`, `no-ref`, `error:*`) are TRANSIENT/retryable: a
+ * fresh SolverNet may not have posted its first task yet, the task's eligibility
+ * may not yet carry a vettedPoolRef, or the indexer / IPFS gateway may be having
+ * a transient blip. Those can become recoverable on a later tick, so the caller
+ * must NOT latch on them (it retries under a bounded cap instead).
+ */
+export function isTerminalRecoveryOutcome(result: RecoverVettedPoolResult): boolean {
+  if (result.recovered) return true;
+  return result.reason === 'local-pool-present' || result.reason === 'hash-mismatch';
+}
+
 export interface RecoverVettedPoolDeps {
   stateDir: string;
   manifestCid: string;
@@ -85,8 +105,10 @@ export async function recoverVettedPoolFromNetwork(
     const recent = await discoveryApi.getMostRecentTaskCidDigest(manifestCid);
     if (!recent) return { recovered: false, reason: 'no-task' };
 
-    // 2) Reconstruct the IPFS task CID and fetch the task body.
-    const taskCid = `f01551220${recent.taskCidDigest.replace(/^0x/, '')}`;
+    // 2) Reconstruct the IPFS task CID and fetch the task body. Lowercase the
+    // digest defensively (NIT #7): the on-chain bytes32 is lowercase, but a
+    // future uppercase-emitting indexer must not produce a wrong CID.
+    const taskCid = `f01551220${recent.taskCidDigest.replace(/^0x/, '').toLowerCase()}`;
     const taskDoc = await fetchFromIpfs(ipfsGatewayUrl, taskCid);
 
     // 3) Read the vetted-pool ref from the task's eligibility.

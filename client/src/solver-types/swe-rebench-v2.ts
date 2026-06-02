@@ -21,7 +21,7 @@ import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import { uploadToIpfs, fetchFromIpfs } from '../adapters/mech/ipfs.js';
-import { recoverVettedPoolFromNetwork } from './_swe-rebench-v2-pool-recovery.js';
+import { recoverVettedPoolFromNetwork, isTerminalRecoveryOutcome } from './_swe-rebench-v2-pool-recovery.js';
 import type { SolverTypeDefinition } from './solver-type.js';
 import {
   selectNextPostingCandidates,
@@ -72,6 +72,16 @@ const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 
 /** How long the pool is cached before a full refresh (24 h). */
 const POOL_REFRESH_MS = 24 * 60 * 60 * 1000;
+
+// #957 review: fresh-volume pool recovery is RETRIED on transient failures
+// (no-task / no-ref / error:*) rather than latched on the first attempt, because
+// a freshly-launched SolverNet's first task may not exist yet and indexer/IPFS
+// blips are transient. To avoid hammering the indexer/IPFS on every ~5 s tick we
+// throttle to one attempt per MIN_INTERVAL and give up after MAX_ATTEMPTS.
+/** Minimum gap between two transient recovery attempts (5 min). */
+const POOL_RECOVERY_MIN_INTERVAL_MS = 5 * 60 * 1000;
+/** Cap on transient recovery attempts before latching and warning once. */
+const POOL_RECOVERY_MAX_ATTEMPTS = 12;
 
 export interface SweRebenchV2ClaimPolicyRuntimeConfig {
   /** @deprecated maxClaims is derived per posting from remaining target successes. */
@@ -428,10 +438,15 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let floorWarned = false;
   let publicationWarned = false;
   let slateWarned = false;
-  // #957: attempt fresh-volume pool recovery at most once per process. Recovery
-  // only matters when the disk is empty; once attempted (recovered or not) we
-  // don't re-hit the indexer/IPFS every tick.
-  let poolRecoveryAttempted = false;
+  // #957: fresh-volume pool recovery (process-local). Recovery only matters when
+  // the disk is empty. We latch permanently only on TERMINAL outcomes (recovered
+  // / local-pool-present / hash-mismatch). Transient outcomes (no-task / no-ref /
+  // error:*) are RETRIED — throttled to one attempt per POOL_RECOVERY_MIN_INTERVAL_MS
+  // and capped at POOL_RECOVERY_MAX_ATTEMPTS so a never-posted SolverNet (or a
+  // persistent outage) doesn't hammer the indexer/IPFS every tick forever.
+  let poolRecoverySettled = false;
+  let poolRecoveryAttempts = 0;
+  let lastPoolRecoveryAttemptAt = 0;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
   let lastPollSummary: SweRebenchV2GeneratorStateSnapshot['lastPollSummary'];
@@ -504,20 +519,32 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     // fail-closed and the generator posts 0 tasks. Before settling into
     // admission-required-no-data, try to recover the pool from the network: read
     // a recent task's vettedPoolRef via the indexer and re-fetch the published
-    // artifact. Guarded on (1) local pool absent, (2) required admission, (3)
-    // manifestCid known, (4) discoveryApi present. Recovery never throws — on
+    // artifact. Guarded on (1) recovery not yet settled, (2) required admission,
+    // (3) manifestCid known, (4) discoveryApi present. Recovery never throws — on
     // any failure the existing fail-closed path proceeds unchanged.
+    //
+    // #957 review: TRANSIENT failures (no-task on a fresh SolverNet whose first
+    // task isn't posted yet, indexer/IPFS blips) are RETRIED on later ticks —
+    // throttled to one attempt per POOL_RECOVERY_MIN_INTERVAL_MS and capped at
+    // POOL_RECOVERY_MAX_ATTEMPTS. We latch (`poolRecoverySettled`) only on a
+    // TERMINAL outcome, or once the cap is exhausted.
     if (
-      !poolRecoveryAttempted &&
+      !poolRecoverySettled &&
       genConfig.admissionMode === 'required' &&
       config.solverNetManifestCid &&
-      config.discoveryApi
+      config.discoveryApi &&
+      now - lastPoolRecoveryAttemptAt >= POOL_RECOVERY_MIN_INTERVAL_MS
     ) {
       const localPoolPresent = await stat(join(config.stateDir, 'validated-pool.json'))
         .then(() => true)
         .catch(() => false);
-      if (!localPoolPresent) {
-        poolRecoveryAttempted = true;
+      if (localPoolPresent) {
+        // Local pool already on disk (validated locally or recovered earlier) —
+        // terminal, nothing to recover.
+        poolRecoverySettled = true;
+      } else {
+        lastPoolRecoveryAttemptAt = now;
+        poolRecoveryAttempts += 1;
         const recovery = await recoverVettedPoolFromNetwork({
           stateDir: config.stateDir,
           manifestCid: config.solverNetManifestCid,
@@ -538,6 +565,19 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
           console.warn(
             `[swe-rebench-v2-gen] fresh-volume pool recovery did not complete (${recovery.reason}); ` +
             `falling through to the admission gate.`,
+          );
+        }
+        if (isTerminalRecoveryOutcome(recovery)) {
+          // recovered / local-pool-present / hash-mismatch — retrying can't help.
+          poolRecoverySettled = true;
+        } else if (poolRecoveryAttempts >= POOL_RECOVERY_MAX_ATTEMPTS) {
+          // Transient outcome but the bounded cap is exhausted: stop retrying.
+          poolRecoverySettled = true;
+          console.warn(
+            `[swe-rebench-v2-gen] fresh-volume pool recovery gave up after ${poolRecoveryAttempts} ` +
+            `attempts (last reason: ${recovery.reason}); auto-recovery is now disabled for this ` +
+            `process. Check the indexer, the IPFS gateway, and the SolverNet manifest, then restart ` +
+            `the daemon to retry.`,
           );
         }
       }
