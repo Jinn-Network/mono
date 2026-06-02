@@ -24,7 +24,7 @@
  * surface; the gate adds the fail-loud envelope on top.
  */
 
-import { promises as fs, constants as fsConstants } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -62,6 +62,17 @@ export interface DeploymentReadinessInputs {
    * a future relayer-URL config can wire straight in.
    */
   relayerUrl: string | undefined;
+  /**
+   * `config.runtimeMode` — a persisted runtime mode (`'docker-compose'` /
+   * `'container'`) declared by the operator (via `jinn auth --mode` or the app
+   * setup) rather than via env / `/.dockerenv`. Threaded into
+   * `detectAuthContext` as `configuredMode` so a config-declared compose /
+   * container operator is detected as a deployment context (and the boot gate
+   * arms) even with no `JINN_RUNTIME_MODE` env var and no `/.dockerenv`.
+   * `undefined` leaves detection on env / filesystem signals only — preserving
+   * the bare-local regression guarantee.
+   */
+  runtimeMode: AuthContext | undefined;
 }
 
 /** Injectable dependencies — tests pass doubles; production uses the defaults. */
@@ -380,7 +391,11 @@ export async function runDeploymentReadinessChecks(
 ): Promise<DeploymentReadinessReport> {
   const authContext = (() => {
     try {
-      return deps.detectAuthContext({ cwd: process.cwd(), env: deps.env });
+      return deps.detectAuthContext({
+        cwd: process.cwd(),
+        env: deps.env,
+        configuredMode: inputs.runtimeMode,
+      });
     } catch {
       return 'bare' as AuthContext;
     }

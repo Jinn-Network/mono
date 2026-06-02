@@ -415,7 +415,12 @@ Examples:
       // Deployment-readiness aggregate (#958). Always reported here; the boot
       // gate in main.ts only fails loud on hard checks in a deployment context.
       const deploymentReport = await (deps.runDeploymentReadinessChecks ?? defaultRunDeploymentReadinessChecks)(
-        { stateDir: config.stateDir, earningDir: config.earningDir, relayerUrl: undefined },
+        {
+          stateDir: config.stateDir,
+          earningDir: config.earningDir,
+          relayerUrl: undefined,
+          runtimeMode: config.runtimeMode,
+        },
         {
           env: ctx.env,
           getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,

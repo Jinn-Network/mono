@@ -2668,7 +2668,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
   // unfit environment refuses before we touch the pidfile.
   await applyDeploymentReadinessGate(
-    { stateDir: config.stateDir, earningDir: config.earningDir, relayerUrl: undefined },
+    {
+      stateDir: config.stateDir,
+      earningDir: config.earningDir,
+      relayerUrl: undefined,
+      runtimeMode: config.runtimeMode,
+    },
     {
       env: process.env,
       getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,

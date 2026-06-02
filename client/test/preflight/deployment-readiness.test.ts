@@ -14,6 +14,7 @@ import {
   applyDeploymentReadinessGate,
   type DeploymentReadinessDeps,
 } from '../../src/preflight/deployment-readiness.js';
+import { detectAuthContext as realDetectAuthContext } from '../../src/preflight/claude-auth.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -271,7 +272,7 @@ describe('runDeploymentReadinessChecks', () => {
 
   it('returns one result per check and is not boot-fatal for a healthy local operator', async () => {
     const report = await runDeploymentReadinessChecks(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined },
+      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
       baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
     );
     expect(report.deployment).toBe(false);
@@ -293,7 +294,7 @@ describe('runDeploymentReadinessChecks', () => {
     chmodSync(tmp, 0o500);
     try {
       const report = await runDeploymentReadinessChecks(
-        { stateDir: undefined, earningDir: tmp, relayerUrl: undefined },
+        { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
         baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
       );
       const vol = report.checks.find((c) => c.name === 'writable_volume');
@@ -310,7 +311,7 @@ describe('runDeploymentReadinessChecks', () => {
     chmodSync(tmp, 0o500);
     try {
       const report = await runDeploymentReadinessChecks(
-        { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined },
+        { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined, runtimeMode: undefined },
         baseDeps({ env: { JINN_STATE_DIR: tmp }, getuid: () => 1000, detectAuthContext: () => 'container' }),
       );
       expect(report.deployment).toBe(true);
@@ -324,7 +325,7 @@ describe('runDeploymentReadinessChecks', () => {
 
   it('deployment context running as root IS boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
-      { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined },
+      { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined, runtimeMode: undefined },
       baseDeps({ env: { JINN_STATE_DIR: tmp }, getuid: () => 0, detectAuthContext: () => 'container' }),
     );
     expect(report.deployment).toBe(true);
@@ -335,7 +336,7 @@ describe('runDeploymentReadinessChecks', () => {
   it('deployment context with state NOT on the volume IS boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
       // env says deployment, but earningDir resolves to the ephemeral default — not under stateDir
-      { stateDir: undefined, earningDir: '/root/.jinn-client/earning', relayerUrl: undefined },
+      { stateDir: undefined, earningDir: '/root/.jinn-client/earning', relayerUrl: undefined, runtimeMode: undefined },
       baseDeps({ env: { JINN_STATE_DIR: '/data' }, getuid: () => 1000, detectAuthContext: () => 'container' }),
     );
     expect(report.deployment).toBe(true);
@@ -343,9 +344,42 @@ describe('runDeploymentReadinessChecks', () => {
     expect(report.checks.find((c) => c.name === 'state_on_volume')?.ok).toBe(false);
   });
 
+  it('config.runtimeMode docker-compose ARMS the gate with no env var / no /.dockerenv (threaded as configuredMode)', async () => {
+    // No JINN_STATE_DIR, no JINN_RUNTIME_MODE, no stateDir, /.dockerenv absent —
+    // the ONLY deployment signal is the persisted config.runtimeMode. Use the
+    // real detectAuthContext so the configuredMode threading is exercised
+    // end-to-end (with dockerenvExists pinned false for hermeticity).
+    const report = await runDeploymentReadinessChecks(
+      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: 'docker-compose' },
+      baseDeps({
+        env: {},
+        getuid: () => 1000,
+        detectAuthContext: (opts) => realDetectAuthContext({ ...opts, dockerenvExists: false }),
+      }),
+    );
+    expect(report.authContext).toBe('docker-compose');
+    expect(report.deployment).toBe(true); // gate armed via config.runtimeMode alone
+  });
+
+  it('REGRESSION GUARD: bare local operator with NO runtimeMode / no env / no stateDir stays deployment:false', async () => {
+    // Same detection path as above (real detectAuthContext, /.dockerenv absent),
+    // but runtimeMode is undefined — the gate must stay disarmed.
+    const report = await runDeploymentReadinessChecks(
+      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
+      baseDeps({
+        env: {},
+        getuid: () => 1000,
+        detectAuthContext: (opts) => realDetectAuthContext({ ...opts, dockerenvExists: false }),
+      }),
+    );
+    expect(report.authContext).toBe('bare');
+    expect(report.deployment).toBe(false);
+    expect(report.bootFatal).toBe(false);
+  });
+
   it('does not throw even if a dependency throws — aggregate degrades to structured results', async () => {
     const report = await runDeploymentReadinessChecks(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: 'http://relayer.example' },
+      { stateDir: undefined, earningDir: tmp, relayerUrl: 'http://relayer.example', runtimeMode: undefined },
       baseDeps({
         env: {},
         getuid: (() => {
@@ -382,7 +416,7 @@ describe('applyDeploymentReadinessGate', () => {
     const writes: string[] = [];
     const exits: number[] = [];
     await applyDeploymentReadinessGate(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined },
+      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
       baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
       { writer: { write: (s: string) => (writes.push(s), true) }, exit: (c: number) => void exits.push(c) },
     );
@@ -396,7 +430,7 @@ describe('applyDeploymentReadinessGate', () => {
     const exits: number[] = [];
     try {
       await applyDeploymentReadinessGate(
-        { stateDir: undefined, earningDir: tmp, relayerUrl: undefined },
+        { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
         baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
         { writer: { write: () => true }, exit: (c: number) => void exits.push(c) },
       );
@@ -410,7 +444,7 @@ describe('applyDeploymentReadinessGate', () => {
     const writes: string[] = [];
     const exits: number[] = [];
     await applyDeploymentReadinessGate(
-      { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined },
+      { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined, runtimeMode: undefined },
       baseDeps({ env: { JINN_STATE_DIR: tmp }, getuid: () => 0, detectAuthContext: () => 'container' }),
       { writer: { write: (s: string) => (writes.push(s), true) }, exit: (c: number) => void exits.push(c) },
     );
