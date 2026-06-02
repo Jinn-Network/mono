@@ -668,17 +668,32 @@ export class TaskRunPersistence {
 
   /**
    * Read-only projection for the /v1/status loop-completion rollup (#959):
-   * every task_run's `solution_outputs_json` (carries the engine's
-   * `gating.phasesCompleted` array) plus its `delivery_tx_hash`. Selects only
-   * the two columns the rollup needs, across all rows regardless of state.
+   * for every task_run, the engine's `gating.phasesCompleted` array extracted
+   * in SQL via `json_extract` (so the fat `solution_outputs_json` blob never
+   * leaves SQLite — this endpoint is hard-polled ~1.5s by the SPA) plus its
+   * `delivery_tx_hash`. `phasesJson` is the JSON text of the array, or NULL
+   * when the row's `solution_outputs_json` is NULL, malformed, or lacks the
+   * gating path. The `json_valid` guard is load-bearing: `json_extract` throws
+   * `SQLITE_ERROR: malformed JSON` on invalid text, which would abort the whole
+   * query — guarding to NULL keeps the per-row never-throw semantics (NULL ⇒
+   * `[]` in the caller). Across all rows regardless of state. SQLite ships with
+   * the JSON1 extension, so `json_extract`/`json_valid` are always available.
    */
-  getGatingRows(): Array<{ solutionOutputsJson: string | null; deliveryTxHash: string | null }> {
+  getGatingRows(): Array<{ phasesJson: string | null; deliveredTxHash: string | null }> {
     const rows = this.db
-      .prepare('SELECT solution_outputs_json, delivery_tx_hash FROM task_runs')
-      .all() as Array<{ solution_outputs_json: string | null; delivery_tx_hash: string | null }>;
+      .prepare(
+        `SELECT CASE
+                  WHEN json_valid(solution_outputs_json)
+                  THEN json_extract(solution_outputs_json, '$.gating.phasesCompleted')
+                  ELSE NULL
+                END AS phases_json,
+                delivery_tx_hash
+         FROM task_runs`,
+      )
+      .all() as Array<{ phases_json: string | null; delivery_tx_hash: string | null }>;
     return rows.map((r) => ({
-      solutionOutputsJson: r.solution_outputs_json,
-      deliveryTxHash: r.delivery_tx_hash,
+      phasesJson: r.phases_json,
+      deliveredTxHash: r.delivery_tx_hash,
     }));
   }
 

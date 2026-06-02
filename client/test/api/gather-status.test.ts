@@ -829,6 +829,10 @@ describe('gatherStatusForApi', () => {
   it('rolls up loop-completion phases across task_runs.solution_outputs_json', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
+    // Exercises the SQL `json_extract` path in getGatingRows: each seeded
+    // `solution_outputs_json` is read through `json_valid`-guarded extraction,
+    // so the no-gating, malformed-JSON, and present-array cases all resolve in
+    // SQLite (malformed ⇒ NULL ⇒ [], never a query-aborting throw).
     await withTempStore(async (store) => {
       // Reached execute only.
       seedGatingRow(store, {
@@ -903,11 +907,13 @@ describe('gatherStatusForApi', () => {
         stdio: 'pipe',
       });
     }
-    const expectedHash = execFileSync(
+    const expectedShortHash = execFileSync(
       'git',
-      ['-C', repoDir, 'rev-parse', 'HEAD'],
+      ['-C', repoDir, 'rev-parse', '--short', 'HEAD'],
       { env: gitEnv, encoding: 'utf8' },
     ).trim();
+    // The committer unix timestamp for the third commit (2026-01-03T00:00:00Z).
+    const expectedTimestamp = Math.floor(Date.parse('2026-01-03T00:00:00Z') / 1000);
     // A sibling dir that is NOT a git repo — must be ignored.
     mkdirSync(join(implStateDirRoot, 'not-a-repo'), { recursive: true });
 
@@ -929,11 +935,15 @@ describe('gatherStatusForApi', () => {
       const repo = status.implStateCadence!.repos[0];
       expect(repo.name).toBe('swe-impl');
       expect(repo.commits).toBe(3);
-      expect(repo.lastCommit).toMatchObject({
-        hash: expectedHash,
-        subject: 'third commit',
+      // The commit subject is deliberately NOT surfaced on the un-authed
+      // /v1/status endpoint (LLM-authored, may carry task content). Assert the
+      // count + short hash + timestamp the AC asked for, and that no subject leaks.
+      expect(repo.lastCommit).toEqual({
+        shortHash: expectedShortHash,
+        timestamp: expectedTimestamp,
         date: '2026-01-03T00:00:00Z',
       });
+      expect(repo.lastCommit).not.toHaveProperty('subject');
     });
   });
 

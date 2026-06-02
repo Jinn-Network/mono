@@ -5,10 +5,13 @@
  * SQLite script (`measure-learning.sh`):
  *
  *  - `gatherLoopCompletion` aggregates `gating.phasesCompleted` across every
- *    `task_runs.solution_outputs_json` — how far the engine loop got, and how
- *    many runs completed the full self-improvement loop.
- *  - `gatherImplStateCadence` reports per-repo commit count + last commit under
- *    the impl-state root.
+ *    `task_runs` row (extracted in SQL, not by parsing the full solution blob) —
+ *    how far the engine loop got, and how many runs completed the full
+ *    self-improvement loop.
+ *  - `gatherImplStateCadence` reports per-repo commit count + last-commit
+ *    cadence (count + short hash + timestamp) under the impl-state root. The
+ *    LLM-authored commit subject is deliberately not surfaced on this un-authed
+ *    endpoint.
  *
  * Both degrade to zeroes / an empty list on malformed / missing inputs — the
  * status endpoint must never throw because of these additions.
@@ -47,8 +50,14 @@ export interface ImplStateRepoCadence {
   name: string;
   /** `git rev-list --count HEAD`. */
   commits: number;
-  /** Last commit metadata, or null when the repo has no commits / git failed. */
-  lastCommit: { hash: string; subject: string; timestamp: number; date: string } | null;
+  /**
+   * Last commit cadence, or null when the repo has no commits / git failed.
+   * Deliberately excludes the commit subject: the impl-state commits are
+   * LLM-authored (learner promoter/consolidator messages) and can carry task
+   * content / file paths / cross-operator material, and `/v1/status` is
+   * un-authed. Count + short hash + timestamp is all the AC asked for.
+   */
+  lastCommit: { shortHash: string; timestamp: number; date: string } | null;
 }
 
 export interface ImplStateCadenceStatus {
@@ -59,10 +68,13 @@ export interface ImplStateCadenceStatus {
 }
 
 /**
- * Aggregate loop-completion across all task_runs. A row's phases come from
- * `JSON.parse(solution_outputs_json).gating.phasesCompleted` (an array;
- * absent/malformed ⇒ `[]`). Never throws — malformed JSON yields `[]` for that
- * row, a store read failure yields an all-zero rollup.
+ * Aggregate loop-completion across all task_runs. A row's phases come from the
+ * `gating.phasesCompleted` array, which `getGatingRows` extracts in SQL via
+ * `json_extract` so the fat `solution_outputs_json` blob never leaves SQLite
+ * (this endpoint is hard-polled ~1.5s by the SPA). `phasesJson` is the JSON
+ * text of that array (absent path / malformed ⇒ `[]`). Never throws — a
+ * malformed array yields `[]` for that row, a store read failure yields an
+ * all-zero rollup.
  */
 export function gatherLoopCompletion(store: Store): LoopCompletionStatus {
   const empty: LoopCompletionStatus = {
@@ -76,7 +88,7 @@ export function gatherLoopCompletion(store: Store): LoopCompletionStatus {
     phaseCounts: {},
   };
 
-  let rows: Array<{ solutionOutputsJson: string | null; deliveryTxHash: string | null }>;
+  let rows: Array<{ phasesJson: string | null; deliveredTxHash: string | null }>;
   try {
     rows = new TaskRunPersistence(store.db).getGatingRows();
   } catch {
@@ -87,9 +99,9 @@ export function gatherLoopCompletion(store: Store): LoopCompletionStatus {
   const acc = { ...empty, phaseCounts };
   for (const row of rows) {
     acc.total += 1;
-    if (row.deliveryTxHash) acc.delivered += 1;
+    if (row.deliveredTxHash) acc.delivered += 1;
 
-    const phases = parsePhases(row.solutionOutputsJson);
+    const phases = parsePhases(row.phasesJson);
     if (phases.length > 0) acc.withGating += 1;
     for (const phase of new Set(phases)) {
       phaseCounts[phase] = (phaseCounts[phase] ?? 0) + 1;
@@ -102,11 +114,11 @@ export function gatherLoopCompletion(store: Store): LoopCompletionStatus {
   return acc;
 }
 
-function parsePhases(solutionOutputsJson: string | null): string[] {
-  if (!solutionOutputsJson) return [];
+/** Parse the JSON text of `gating.phasesCompleted` (null/malformed ⇒ `[]`). */
+function parsePhases(phasesJson: string | null): string[] {
+  if (!phasesJson) return [];
   try {
-    const s = JSON.parse(solutionOutputsJson) as { gating?: { phasesCompleted?: unknown } };
-    const phases = s.gating?.phasesCompleted;
+    const phases = JSON.parse(phasesJson) as unknown;
     return Array.isArray(phases) ? phases.filter((p): p is string => typeof p === 'string') : [];
   } catch {
     return [];
@@ -155,16 +167,15 @@ function readRepoCadence(repoDir: string): Omit<ImplStateRepoCadence, 'name'> {
     return { commits: 0, lastCommit: null };
   }
   try {
-    // %H hash, %ct committer unix timestamp, %cI committer ISO date, %s subject.
-    // Subject is last so it can contain the separator without ambiguity.
-    const raw = git(repoDir, ['log', '-1', '--format=%H%x1f%ct%x1f%cI%x1f%s', 'HEAD']);
-    const [hash, ts, iso, ...subjectParts] = raw.split('\x1f');
-    if (hash) {
+    // %h short hash, %ct committer unix timestamp, %cI committer ISO date.
+    // Subject (%s) is deliberately NOT fetched — see ImplStateRepoCadence.lastCommit.
+    const raw = git(repoDir, ['log', '-1', '--format=%h%x1f%ct%x1f%cI', 'HEAD']);
+    const [shortHash, ts, iso] = raw.trim().split('\x1f');
+    if (shortHash) {
       lastCommit = {
-        hash: hash.trim(),
+        shortHash: shortHash.trim(),
         timestamp: Number.parseInt(ts ?? '', 10) || 0,
         date: (iso ?? '').trim(),
-        subject: subjectParts.join('\x1f').replace(/\n$/, ''),
       };
     }
   } catch {
