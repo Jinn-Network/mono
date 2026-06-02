@@ -35,4 +35,21 @@ fi
 git config user.name "claude-code-learner"
 git config user.email "claude-code-learner@local"
 
-echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))"
+# Operational readiness goes to STDERR. Claude Code parses a SessionStart hook's
+# STDOUT as JSON for `hookSpecificOutput`; any stray stdout would break that parse,
+# so stdout below carries nothing but the additionalContext payload.
+echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))" >&2
+
+# Steer skill-selection toward this plugin's OWN learn loop. This is the agnostic,
+# plugin-owned mechanism: the learner plugin asserts its own behaviour from its own
+# SessionStart hook, without any other plugin or the harness prompt knowing it exists.
+#
+# It is delivered via the documented `hookSpecificOutput.additionalContext` contract,
+# which is injected into the model's context at session start. The previous plain
+# `echo` was logged as a hook event (visible to the harness via --include-hook-events)
+# but NEVER entered the model context — which is why, despite the learn skill being
+# projected and available, the model kept selecting a direct-solve skill and the loop
+# ran 0% of the time. (Verified: additionalContext reaches the model in headless
+# `-p` / stream-json mode on claude 2.1.x.)
+STEER="A seven-phase self-improvement loop is available as the learn skill (claude-code-learner:learn): Orient, Strategize, Plan, Execute, Debrief, Improve, then Memory consolidation. For this session your FIRST action MUST be to invoke the learn skill (via the Skill tool) and run the full loop end-to-end, instead of solving the task directly or selecting another skill first. The Execute phase still performs the actual task work and still calls submit_typed_payload; the surrounding phases capture reusable strategy and persist it to implStateDir so future runs improve. Do not skip the loop."
+printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$STEER"
