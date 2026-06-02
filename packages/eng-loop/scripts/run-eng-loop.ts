@@ -253,6 +253,36 @@ export async function runReviewPass(
 }
 
 // ---------------------------------------------------------------------------
+// Graceful shutdown (fix jinn-mono#490)
+// ---------------------------------------------------------------------------
+
+// runLoop — the recursive scheduler, extracted from main() so the shutdown
+// behaviour is testable in-process (fix jinn-mono#490). The first cycle always
+// runs to completion; thereafter `scheduleNext` gates on `isShuttingDown()` at
+// the re-arm seam — once a signal has flipped the latch it logs and returns
+// without arming another timer, so the in-flight cycle finishes and the event
+// loop drains to a clean exit 0 (detached child sessions stay alive via
+// child.unref()). The `schedule` seam is injectable purely for tests; in
+// production it is the setTimeout default below.
+export interface RunLoopOpts {
+  runOnce: () => Promise<number>;
+  isShuttingDown: () => boolean;
+  schedule?: (cb: () => void, delayMs: number) => void;
+}
+export async function runLoop(opts: RunLoopOpts): Promise<void> {
+  const { runOnce, isShuttingDown, schedule = (cb, ms) => void setTimeout(cb, ms) } = opts;
+  const scheduleNext = (delay: number): void => {
+    if (isShuttingDown()) {
+      console.log('[eng:loop] shutdown requested — finishing current cycle, not scheduling new ones');
+      return;
+    }
+    schedule(() => { void runOnce().then(scheduleNext); }, delay);
+  };
+  const firstDelay = await runOnce();
+  scheduleNext(firstDelay);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -438,22 +468,29 @@ async function main(): Promise<void> {
     }
   };
 
-  // Run immediately; then either exit (--once) or recursively schedule via
-  // setTimeout with the next-attempt delay returned by runOneCycle. Using
-  // setTimeout (rather than setInterval) lets the gate's sleepMs drive the
-  // next tick when budget is low — and as a side-benefit prevents cycle
-  // overlap if a snapshot fetch hangs.
-  const firstDelay = await runOneCycle();
+  // --once: one cycle then exit. No signal handlers, no scheduling.
   if (isOnce) {
+    await runOneCycle();
     console.log('[eng:loop] --once: first cycle complete, exiting (any spawned sessions continue detached).');
     return;
   }
-  const scheduleNext = (delay: number): void => {
-    setTimeout(() => {
-      void runOneCycle().then(scheduleNext);
-    }, delay);
-  };
-  scheduleNext(firstDelay);
+
+  // NORMAL mode only: graceful-shutdown handlers (fix jinn-mono#490). On
+  // SIGINT/SIGTERM we flip the flag; runLoop finishes the in-flight cycle and
+  // declines to schedule the next, so the process exits 0 as the event loop
+  // drains (detached child sessions stay alive via child.unref()). runLoop
+  // recursively schedules via setTimeout with the next-attempt delay returned
+  // by runOneCycle — setTimeout (rather than setInterval) lets the gate's
+  // sleepMs drive the next tick when budget is low, and prevents cycle overlap
+  // if a snapshot fetch hangs.
+  // A one-way latch: the signal handler flips it; runLoop's re-arm seam reads
+  // it via isShuttingDown before scheduling the next cycle.
+  let shuttingDown = false;
+  const onSignal = (): void => { shuttingDown = true; };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+
+  await runLoop({ runOnce: runOneCycle, isShuttingDown: () => shuttingDown });
 }
 
 // Gate `main()` to direct invocation only — importing this module (e.g. from
