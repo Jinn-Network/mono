@@ -31,6 +31,19 @@ interface TooltipState {
   entry: CheckpointTimelineEntry;
 }
 
+/** Signed percentage for a held-out delta, e.g. +12.0% / -20.0% / 0.0%. */
+function signedPct(delta: number): string {
+  const sign = delta > 0 ? '+' : '';
+  return `${sign}${pct(delta)}`;
+}
+
+/** Improvement → success, regression → danger, no change → muted. */
+function deltaColor(delta: number): string {
+  if (delta > 0) return 'var(--success)';
+  if (delta < 0) return 'var(--danger)';
+  return 'var(--fg-dim)';
+}
+
 export function CheckpointTimeline({ data }: CheckpointTimelineProps) {
   const { checkpoints, note } = data;
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -222,6 +235,13 @@ export function CheckpointTimeline({ data }: CheckpointTimelineProps) {
               {tooltip.entry.frozenResolvedRate !== null && (
                 <div style={{ marginTop: 4, color: 'var(--fg-muted)' }}>
                   frozen eval: {pct(tooltip.entry.frozenResolvedRate)}
+                </div>
+              )}
+
+              {/* held-out delta vs parent (#820 AC#2) — slate-scoped both sides */}
+              {tooltip.entry.heldOutDelta !== null && (
+                <div style={{ marginTop: 2, color: deltaColor(tooltip.entry.heldOutDelta) }}>
+                  held-out vs parent: {signedPct(tooltip.entry.heldOutDelta)}
                 </div>
               )}
 

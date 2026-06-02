@@ -1,0 +1,30 @@
+# Build context for indexer/deploy/Dockerfile is packages/ (so the indexer's
+# `portal:../sdk` sibling is in scope). Docker reads .dockerignore from the
+# context root, so packages/indexer/.dockerignore is NOT honored here — these
+# rules re-scope those exclusions and add the SDK's build artifacts.
+
+# Indexer
+indexer/node_modules
+indexer/.yarn
+indexer/.pnp.*
+indexer/.ponder
+indexer/generated
+indexer/public
+indexer/ponder-env.d.ts
+indexer/dist
+indexer/.env
+indexer/.env.local
+indexer/.env.*.local
+indexer/*.log
+indexer/explorer/node_modules
+indexer/explorer/.yarn
+indexer/explorer/.pnp.*
+indexer/explorer/dist
+indexer/explorer/*.tsbuildinfo
+
+# SDK (built inside the image; never ship local artifacts)
+sdk/node_modules
+sdk/.yarn
+sdk/.pnp.*
+sdk/dist
+sdk/*.log

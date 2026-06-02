@@ -48,6 +48,10 @@ import {
   computeActiveWindow,
   type ActiveWindow as ActiveWindowDomain,
 } from './active-operators.js';
+import {
+  loadHeldOutSlate,
+  type LoadedHeldOutSlate,
+} from '@jinn-network/sdk/solvernets/swe-rebench-v2-held-out-slate';
 
 /**
  * Wire-shape projection of {@link ActiveWindowDomain} — `requiredTjinnPerBlock`
@@ -304,6 +308,59 @@ export function verdictTruth(
   }
   if (strict) return null;
   return v.verdictCode === 1;
+}
+
+// ── Held-out slate scoping (#820) ──────────────────────────────────────────────
+
+/**
+ * Default held-out slate version surfaced on the SolverNet response. Scores are
+ * only comparable within a named version (#817); a slate change is a distinct
+ * version, never an in-place edit.
+ */
+export const HELD_OUT_SLATE_VERSION = 'v1' as const;
+
+/**
+ * True for any swe-rebench-v2 solverType (e.g. 'swe-rebench-v2.v1'). Only this
+ * solverType family has an `instance_id` / held-out-slate concept.
+ */
+function isSweRebenchV2(solverType: string): boolean {
+  return solverType.startsWith('swe-rebench-v2');
+}
+
+/**
+ * #820 AC#1 — scope frozen verdicts to a NAMED slate before counting.
+ *
+ * Today `frozenResolvedRate` scores a checkpoint on whatever frozen attempts
+ * matched its codeDigest, so two checkpoints can be compared on different task
+ * subsets (task-selection confounded). For swe-rebench-v2, restrict to verdicts
+ * whose `instanceId` is in the held-out slate, so every checkpoint is scored on
+ * the same fixed set. For other solverTypes (no instance_id / slate concept)
+ * this is a pass-through: the input array is returned unchanged.
+ *
+ * Pure + exported so the api.explorer test suite can lock it against synthetic
+ * fixtures without booting Ponder.
+ */
+export function filterFrozenVerdictsToSlate<T extends { instanceId: string }>(
+  verdicts: T[],
+  slate: Pick<LoadedHeldOutSlate, 'instanceIds'>,
+  solverType: string,
+): T[] {
+  if (!isSweRebenchV2(solverType)) return verdicts;
+  return verdicts.filter((v) => v.instanceId !== '' && slate.instanceIds.has(v.instanceId));
+}
+
+/**
+ * #820 AC#2 — held-out resolved-rate delta between a checkpoint and its parent.
+ * Returns `self − parent` when both frozen rates are present, else null (no
+ * parent, or either rate unmeasured). Pure + exported for unit testing.
+ */
+export function computeHeldOutDelta(
+  self: { frozenResolvedRate: number | null },
+  parent: { frozenResolvedRate: number | null } | undefined,
+): number | null {
+  if (self.frozenResolvedRate == null) return null;
+  if (parent == null || parent.frozenResolvedRate == null) return null;
+  return self.frozenResolvedRate - parent.frozenResolvedRate;
 }
 
 function verdictTruthPassCountSql() {
@@ -895,6 +952,14 @@ app.get('/solvernet/:cid', async (c) => {
     ),
   ];
 
+  // #820 AC#1 — load the named held-out slate once. Frozen verdicts for a
+  // swe-rebench-v2 SolverNet are scoped to this slate before counting, so every
+  // checkpoint's frozenResolvedRate is measured on the SAME fixed task set
+  // (not "whatever frozen attempts matched its codeDigest"). The loader keeps
+  // #817's fail-loud content-hash drift guard. Pass-through for other
+  // solverTypes (no instance_id / slate concept) — see filterFrozenVerdictsToSlate.
+  const heldOutSlate = loadHeldOutSlate(HELD_OUT_SLATE_VERSION);
+
   // For each distinct codeDigest, compute pass/total from frozen attemptEnvelopeMeta
   // rows in this SolverNet (by joining attempt → task → manifestDigest). We iterate
   // in a loop here; TODO(perf): batch into a single GROUP BY query when row counts grow.
@@ -952,10 +1017,15 @@ app.get('/solvernet/:cid', async (c) => {
         attemptIndex: a.attemptIndex,
       }));
       const frozenVerdicts = await getVerdictsForAttempts(pairs, { includeUnenriched });
-      const total = frozenVerdicts.filter(
+      // #820 AC#1 — scope to the named slate (per-verdict solverType gates the
+      // swe-rebench-v2 family; pass-through otherwise). The slate-scoped subset
+      // is what frozenResolvedRate counts, so checkpoints are comparable.
+      const solverType = frozenVerdicts.find((v) => v.solverType !== '')?.solverType ?? '';
+      const slateScoped = filterFrozenVerdictsToSlate(frozenVerdicts, heldOutSlate, solverType);
+      const total = slateScoped.filter(
         (v) => verdictTruth(v, strict) !== null,
       ).length;
-      const pass = frozenVerdicts.filter(
+      const pass = slateScoped.filter(
         (v) => verdictTruth(v, strict) === true,
       ).length;
       frozenRateByDigest.set(digest, resolvedRateFromCounts(pass, total));
@@ -971,14 +1041,35 @@ app.get('/solvernet/:cid', async (c) => {
       ? `${pendingCount} checkpoint(s) pending IPFS enrichment — frozen-eval scores may be incomplete`
       : '';
 
+  // First pass: resolve each checkpoint's slate-scoped frozenResolvedRate, keyed
+  // by cid so the held-out delta (#820 AC#2) can look up its parent's rate.
+  const frozenRateByCid = new Map<string, number | null>();
+  for (const r of checkpointRows) {
+    const codeDigest = r.codeDigest ?? '';
+    frozenRateByCid.set(
+      r.cid,
+      r.enrichmentStatus === 'ok' && codeDigest
+        ? (frozenRateByDigest.get(codeDigest) ?? null)
+        : null,
+    );
+  }
+
   const checkpointTimeline = {
     checkpoints: checkpointRows.map((r) => {
       const codeDigest = r.codeDigest ?? '';
-      const frozenResolvedRate =
-        r.enrichmentStatus === 'ok' && codeDigest
-          ? (frozenRateByDigest.get(codeDigest) ?? null)
-          : null;
+      const frozenResolvedRate = frozenRateByCid.get(r.cid) ?? null;
       const verifiedFrozen = r.sourceBundleCid != null && r.sourceBundleCid !== '';
+      // #820 AC#2 — held-out resolved-rate delta vs the parent checkpoint
+      // (slate-scoped both sides). null when there's no parent or either rate
+      // is unmeasured. A null parentRate (no parent, or parent unmeasured)
+      // already yields a null delta, so no special-casing of "no parent".
+      const parentCheckpointCid = r.parentCheckpointCid ?? null;
+      const parentRate =
+        parentCheckpointCid != null ? (frozenRateByCid.get(parentCheckpointCid) ?? null) : null;
+      const heldOutDelta = computeHeldOutDelta(
+        { frozenResolvedRate },
+        { frozenResolvedRate: parentRate },
+      );
       return {
         cid: r.cid,
         agentId: r.agentId,
@@ -986,12 +1077,13 @@ app.get('/solvernet/:cid', async (c) => {
         name: r.name ?? '',
         version: r.version ?? '',
         codeDigest,
-        parentCheckpointCid: r.parentCheckpointCid ?? null,
+        parentCheckpointCid,
         implName: r.implName ?? '',
         implVersion: r.implVersion ?? '',
         sourceBundleCid: r.sourceBundleCid ?? '',
         enrichmentStatus: r.enrichmentStatus ?? 'pending',
         frozenResolvedRate,
+        heldOutDelta,
         verifiedFrozen,
       };
     }),
@@ -1054,6 +1146,8 @@ app.get('/solvernet/:cid', async (c) => {
       lowVolume: frozenBoard.lowVolume.map((r) => ({ ...r, jinnEarned: r.jinnEarned.toString() })),
     },
     checkpointTimeline,
+    // #820 AC#1 — the named slate version frozenResolvedRate is scored against.
+    heldOutSlateVersion: HELD_OUT_SLATE_VERSION,
     freezeIntegrity,
     ...freshnessFields,
   });
@@ -1923,7 +2017,14 @@ async function getSolverNetStatsBatch(
 async function getVerdictsForAttempts(
   pairs: { taskId: string; attemptIndex: number }[],
   opts?: { includeUnenriched?: boolean },
-): Promise<(VerdictTruthRow & { taskId: string; attemptIndex: number })[]> {
+): Promise<
+  (VerdictTruthRow & {
+    taskId: string;
+    attemptIndex: number;
+    instanceId: string;
+    solverType: string;
+  })[]
+> {
   if (pairs.length === 0) return [];
 
   const includeUnenriched = opts?.includeUnenriched ?? false;
@@ -1935,6 +2036,11 @@ async function getVerdictsForAttempts(
       verdictCode: schema.verdict.verdictCode,
       actualPassed: schema.verdictEnvelopeMeta.actualPassed,
       enrichmentStatus: schema.verdictEnvelopeMeta.enrichmentStatus,
+      // #820 AC#1 — instanceId scopes frozen verdicts to the held-out slate;
+      // solverType gates the scope to the swe-rebench-v2 family. Both come from
+      // the LEFT-JOINed verdictEnvelopeMeta (null when no envelope row).
+      instanceId: schema.verdictEnvelopeMeta.instanceId,
+      solverType: schema.verdictEnvelopeMeta.solverType,
     })
     .from(schema.verdict)
     .leftJoin(schema.verdictEnvelopeMeta, verdictEnvelopeJoinCondition())
@@ -1946,9 +2052,17 @@ async function getVerdictsForAttempts(
       ),
     );
 
-  // Filter to only the exact (taskId, attemptIndex) pairs
+  // Filter to only the exact (taskId, attemptIndex) pairs. Coerce the
+  // LEFT-JOINed instanceId/solverType nulls to '' so downstream slate scoping
+  // (filterFrozenVerdictsToSlate) sees a plain string.
   const pairSet = new Set(pairs.map((p) => `${p.taskId}:${p.attemptIndex}`));
-  return rows.filter((r) => pairSet.has(`${r.taskId}:${r.attemptIndex}`));
+  return rows
+    .filter((r) => pairSet.has(`${r.taskId}:${r.attemptIndex}`))
+    .map((r) => ({
+      ...r,
+      instanceId: r.instanceId ?? '',
+      solverType: r.solverType ?? '',
+    }));
 }
 
 /**

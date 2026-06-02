@@ -32,6 +32,10 @@
       "import": "./dist/solvernets/swe-rebench-v2.js",
       "types": "./dist/solvernets/swe-rebench-v2.d.ts"
     },
+    "./solvernets/swe-rebench-v2-held-out-slate": {
+      "import": "./dist/solvernets/swe-rebench-v2-held-out-slate.js",
+      "types": "./dist/solvernets/swe-rebench-v2-held-out-slate.d.ts"
+    },
     "./checkpoint": {
       "import": "./dist/checkpoint.js",
       "types": "./dist/checkpoint.d.ts"
@@ -57,6 +61,7 @@
     "zod-to-json-schema": "^3.23.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.9"
   }

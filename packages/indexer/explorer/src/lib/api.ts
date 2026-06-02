@@ -200,10 +200,17 @@ export interface CheckpointTimelineEntry {
   /** 'pending' | 'ok' | 'failed' */
   enrichmentStatus: string;
   /**
-   * Pass rate of mode='frozen' attempts in this SolverNet whose codeDigest matches.
-   * null when enrichment is not 'ok', codeDigest is empty, or no frozen attempts.
+   * Pass rate of mode='frozen' attempts in this SolverNet whose codeDigest matches,
+   * scoped to the named held-out slate (see SolverNetResponse.heldOutSlateVersion).
+   * null when enrichment is not 'ok', codeDigest is empty, or no slate-scoped frozen attempts.
    */
   frozenResolvedRate: number | null;
+  /**
+   * Held-out resolved-rate delta vs the parent checkpoint (self − parent,
+   * slate-scoped both sides). null when there is no parent or either rate is
+   * unmeasured. #820 AC#2.
+   */
+  heldOutDelta: number | null;
   /** True when sourceBundleCid is non-empty (checkpoint published its source bundle). */
   verifiedFrozen: boolean;
 }
@@ -244,6 +251,8 @@ export interface SolverNetResponse extends FreshnessMeta {
     checkpoints: CheckpointTimelineEntry[];
     note: string;
   };
+  /** Named held-out slate version that frozenResolvedRate is scored against. #820 AC#1. */
+  heldOutSlateVersion: string;
   freezeIntegrity: {
     violations: FreezeViolation[];
     verifiedFrozenShare: number;

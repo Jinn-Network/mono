@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { CheckpointTimeline } from './CheckpointTimeline';
 import type { CheckpointTimelineData } from './CheckpointTimeline';
 
@@ -19,6 +19,7 @@ const FIXTURE: CheckpointTimelineData = {
       sourceBundleCid: 'bafyreidummysourcebundle',
       enrichmentStatus: 'ok',
       frozenResolvedRate: 0.85,
+      heldOutDelta: null,
       verifiedFrozen: true,
     },
     {
@@ -34,6 +35,7 @@ const FIXTURE: CheckpointTimelineData = {
       sourceBundleCid: '',
       enrichmentStatus: 'pending',
       frozenResolvedRate: null,
+      heldOutDelta: null,
       verifiedFrozen: false,
     },
   ],
@@ -97,5 +99,54 @@ describe('CheckpointTimeline', () => {
     render(<CheckpointTimeline data={{ checkpoints: FIXTURE.checkpoints, note: '' }} />);
     // The note container should not be rendered when note is empty
     expect(screen.queryByText(/pending/i)).not.toBeInTheDocument();
+  });
+});
+
+// ── #820 AC#2 — held-out delta tooltip line ────────────────────────────────────
+//
+// The tooltip renders on focus/hover only. We focus the relevant tick, then
+// assert the "held-out vs parent" line is present (with the right sign + color)
+// when heldOutDelta is set, and absent when it is null.
+
+function withDelta(delta: number | null): CheckpointTimelineData {
+  return {
+    checkpoints: [
+      { ...FIXTURE.checkpoints[0], heldOutDelta: delta },
+    ],
+    note: '',
+  };
+}
+
+describe('CheckpointTimeline held-out delta (#820 AC#2)', () => {
+  it('renders the held-out line with a signed pct when delta is positive', () => {
+    render(<CheckpointTimeline data={withDelta(0.12)} />);
+    fireEvent.focus(screen.getByRole('button'));
+    const line = screen.getByText(/held-out vs parent/i);
+    expect(line).toBeInTheDocument();
+    expect(line.textContent).toMatch(/\+12\.0%/);
+    // improvement → success token
+    expect(line.getAttribute('style')).toContain('var(--success)');
+  });
+
+  it('renders a negative signed pct in the regression color', () => {
+    render(<CheckpointTimeline data={withDelta(-0.2)} />);
+    fireEvent.focus(screen.getByRole('button'));
+    const line = screen.getByText(/held-out vs parent/i);
+    expect(line.textContent).toMatch(/-20\.0%/);
+    expect(line.getAttribute('style')).toContain('var(--danger)');
+  });
+
+  it('renders zero delta in a muted color', () => {
+    render(<CheckpointTimeline data={withDelta(0)} />);
+    fireEvent.focus(screen.getByRole('button'));
+    const line = screen.getByText(/held-out vs parent/i);
+    expect(line.textContent).toMatch(/0\.0%/);
+    expect(line.getAttribute('style')).toContain('var(--fg-dim)');
+  });
+
+  it('does not render the held-out line when delta is null', () => {
+    render(<CheckpointTimeline data={withDelta(null)} />);
+    fireEvent.focus(screen.getByRole('button'));
+    expect(screen.queryByText(/held-out vs parent/i)).not.toBeInTheDocument();
   });
 });

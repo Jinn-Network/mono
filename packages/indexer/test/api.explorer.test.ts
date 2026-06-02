@@ -14,7 +14,11 @@
  *     `!== null`, so unenriched rows drop from both numerator and denominator.
  */
 import { describe, it, expect } from 'vitest';
-import { verdictTruth } from '../src/api/explorer.js';
+import {
+  verdictTruth,
+  filterFrozenVerdictsToSlate,
+  computeHeldOutDelta,
+} from '../src/api/explorer.js';
 import { resolvedRateFromCounts } from '../src/api/metrics.js';
 
 type Row = {
@@ -71,5 +75,72 @@ describe('verdict rate-math invariant', () => {
     expect(total).toBe(0);
     expect(pass).toBe(0);
     expect(resolvedRateFromCounts(pass, total)).toBeNull();
+  });
+});
+
+// ── #820 AC#1 — slate-scoped frozen verdicts ───────────────────────────────────
+//
+// frozenResolvedRate must score a checkpoint against a NAMED slate version, not
+// "whatever frozen attempts matched its codeDigest" (task-selection confounded).
+// filterFrozenVerdictsToSlate is the pure chokepoint: for swe-rebench-v2 it keeps
+// only verdicts whose instanceId is in the slate; for other solverTypes it is a
+// pass-through (they have no instance_id / slate concept).
+
+describe('filterFrozenVerdictsToSlate (#820 AC#1)', () => {
+  const slate = { instanceIds: new Set(['pandas-dev__pandas-60736', 'lmfit__lmfit-py-989']) };
+
+  const verdicts = [
+    { instanceId: 'pandas-dev__pandas-60736', verdictCode: 1, actualPassed: true, enrichmentStatus: 'ok' },
+    { instanceId: 'not-in-slate__foo-1', verdictCode: 1, actualPassed: true, enrichmentStatus: 'ok' },
+    { instanceId: 'lmfit__lmfit-py-989', verdictCode: 0, actualPassed: false, enrichmentStatus: 'ok' },
+  ];
+
+  it('keeps only slate instanceIds for swe-rebench-v2 (excludes non-slate)', () => {
+    const kept = filterFrozenVerdictsToSlate(verdicts, slate, 'swe-rebench-v2.v1');
+    const ids = kept.map((v) => v.instanceId);
+    expect(ids).toContain('pandas-dev__pandas-60736');
+    expect(ids).toContain('lmfit__lmfit-py-989');
+    expect(ids).not.toContain('not-in-slate__foo-1');
+    expect(kept).toHaveLength(2);
+  });
+
+  it('drops verdicts with an empty/missing instanceId for swe-rebench-v2', () => {
+    const withEmpty = [...verdicts, { instanceId: '', verdictCode: 1, actualPassed: true, enrichmentStatus: 'ok' }];
+    const kept = filterFrozenVerdictsToSlate(withEmpty, slate, 'swe-rebench-v2.v1');
+    expect(kept).toHaveLength(2);
+  });
+
+  it('passes through unchanged for a non-swe-rebench solverType', () => {
+    const kept = filterFrozenVerdictsToSlate(verdicts, slate, 'prediction.v1');
+    expect(kept).toBe(verdicts);
+    expect(kept).toHaveLength(3);
+  });
+
+  it('passes through unchanged when solverType is unknown/empty', () => {
+    expect(filterFrozenVerdictsToSlate(verdicts, slate, '')).toBe(verdicts);
+  });
+});
+
+// ── #820 AC#2 — held-out delta vs parent ────────────────────────────────────────
+
+describe('computeHeldOutDelta (#820 AC#2)', () => {
+  it('positive delta when self improves on parent', () => {
+    expect(computeHeldOutDelta({ frozenResolvedRate: 0.8 }, { frozenResolvedRate: 0.5 })).toBeCloseTo(0.3);
+  });
+
+  it('negative delta when self regresses from parent', () => {
+    expect(computeHeldOutDelta({ frozenResolvedRate: 0.4 }, { frozenResolvedRate: 0.6 })).toBeCloseTo(-0.2);
+  });
+
+  it('null when self has no frozen rate', () => {
+    expect(computeHeldOutDelta({ frozenResolvedRate: null }, { frozenResolvedRate: 0.6 })).toBeNull();
+  });
+
+  it('null when parent has no frozen rate', () => {
+    expect(computeHeldOutDelta({ frozenResolvedRate: 0.6 }, { frozenResolvedRate: null })).toBeNull();
+  });
+
+  it('null when there is no parent', () => {
+    expect(computeHeldOutDelta({ frozenResolvedRate: 0.6 }, undefined)).toBeNull();
   });
 });

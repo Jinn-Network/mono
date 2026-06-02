@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.10",
+    "@jinn-network/sdk": "portal:../sdk",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.23",
     "ponder": "^0.16.6",

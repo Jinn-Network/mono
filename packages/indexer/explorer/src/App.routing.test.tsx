@@ -73,6 +73,7 @@ const SOLVERNET_FIXTURE: SolverNetResponse = {
   trainBoard: { ranked: [], lowVolume: [] },
   frozenBoard: { ranked: [], lowVolume: [] },
   checkpointTimeline: { checkpoints: [], note: '' },
+  heldOutSlateVersion: 'v1',
   freezeIntegrity: { violations: [], verifiedFrozenShare: 1.0, frozenAttempts: 0 },
   lastIndexedBlock: '100',
   lastIndexedAt: new Date().toISOString(),

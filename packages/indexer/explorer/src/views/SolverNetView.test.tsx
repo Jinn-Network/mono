@@ -102,11 +102,13 @@ const SOLVERNET_META = {
         sourceBundleCid: 'bafyreidummysourcebundle',
         enrichmentStatus: 'ok',
         frozenResolvedRate: 0.9,
+        heldOutDelta: null,
         verifiedFrozen: true,
       },
     ],
     note: 'Last published checkpoint.',
   },
+  heldOutSlateVersion: 'v1',
   freezeIntegrity: {
     violations: [],
     verifiedFrozenShare: 1.0,

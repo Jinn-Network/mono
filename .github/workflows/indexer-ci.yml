@@ -30,6 +30,16 @@ jobs:
           node-version: 22
 
       - run: corepack enable
+
+      # The indexer depends on @jinn-network/sdk via `portal:../sdk`, whose
+      # exports map points at compiled dist/*.js. dist/ is gitignored, so the
+      # SDK must be built before any indexer step resolves it.
+      - name: Build @jinn-network/sdk
+        working-directory: packages/sdk
+        run: |
+          yarn install --immutable
+          yarn build
+
       - run: yarn install --immutable
       - run: yarn codegen
       - run: yarn typecheck
@@ -61,11 +71,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Build context is packages/ (not packages/indexer/) so the Dockerfile can
+      # COPY and build @jinn-network/sdk, the indexer's `portal:../sdk` sibling.
       - name: Build indexer image
-        working-directory: packages/indexer
+        working-directory: packages
         run: |
           docker build \
             --build-arg JINN_INDEXER_COMMIT=${{ github.sha }} \
-            -f deploy/Dockerfile \
+            -f indexer/deploy/Dockerfile \
             -t jinn-indexer:ci \
             .
