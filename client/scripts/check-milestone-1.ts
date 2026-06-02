@@ -6,10 +6,14 @@
  *   Original proposal (closed): https://github.com/Jinn-Network/mono/discussions/604
  *   This rewrite: https://github.com/Jinn-Network/mono/issues/691
  *
- * Criterion (per milestone description as of 2026-05-27):
- *   Across 48 consecutive wall-clock hours divided into 8 UTC-aligned 6-hour
- *   blocks (00:00, 06:00, 12:00, 18:00), every block has at least 2 distinct
- *   operators that each earned ≥ 3 tJINN within that block.
+ * Criterion (recalibrated per issue #927 — AND of two gates over 48 consecutive
+ * wall-clock hours divided into 8 UTC-aligned 6-hour blocks: 00:00, 06:00,
+ * 12:00, 18:00):
+ *   Gate 1 — per-block floor: every block has ≥ 2 distinct operators that each
+ *            earned ≥ 2 tJINN within that block.
+ *   Gate 2 — 48h aggregate: ≥ 2 distinct operators each earned ≥ 30 tJINN
+ *            summed across the full window.
+ *   MILESTONE HIT = Gate 1 AND Gate 2.
  *
  * Source: `JinnDistributor.Claimed` events on Ethereum Sepolia L1
  * (chainId 11155111). The indexer aggregates these as `rewardDistributions`.
@@ -42,15 +46,19 @@ const TARGET_HOURS = 48;
 const BLOCK_HOURS = 6;
 const NUM_BLOCKS = TARGET_HOURS / BLOCK_HOURS; // 8
 const BLOCK_SECONDS = BLOCK_HOURS * 3600;
-const REQUIRED_OPERATORS_PER_BLOCK = 2;
-const REQUIRED_TJINN_PER_OPERATOR = 3n * 10n ** 18n; // 3 tJINN in wei
+// Gate 1 — per-block floor (every one of the 8 blocks must clear this)
+export const PER_BLOCK_FLOOR_TJINN = 2n * 10n ** 18n; // ≥2 tJINN per operator per block
+export const PER_BLOCK_MIN_OPERATORS = 2; // ≥2 distinct operators per block
+// Gate 2 — 48h aggregate (across the full window)
+export const AGGREGATE_TJINN = 30n * 10n ** 18n; // ≥30 tJINN summed across the 48h window
+export const AGGREGATE_MIN_OPERATORS = 2; // ≥2 distinct operators must clear AGGREGATE_TJINN
 
 const L1_CHAIN_ID = 11155111;
 const L2_CHAIN_ID = 84532;
 const SEPOLIA_AVG_BLOCK_SEC = 12; // used to bound L1 lookback window
 const BASE_SEPOLIA_AVG_BLOCK_SEC = 2; // used to bound L2 lookback window
 
-interface Distribution {
+export interface Distribution {
   serviceId: string;
   multisig: string;
   operatorMinted: bigint;
@@ -239,16 +247,16 @@ function floorTo6hBlock(tsSec: number): number {
   return Math.floor(tsSec / BLOCK_SECONDS) * BLOCK_SECONDS;
 }
 
-interface BlockReport {
+export interface BlockReport {
   startTs: number;
   endTs: number;
   earnings: Map<string, bigint>; // multisig → operatorMinted sum (wei)
-  qualifiedOperators: string[]; // multisigs that earned ≥ 3 tJINN in this block
+  qualifiedOperators: string[]; // multisigs that earned ≥ PER_BLOCK_FLOOR_TJINN in this block
   tasksCreated: number; // tasks posted to the SolverNet during the block
   passed: boolean;
 }
 
-function buildBlocks(
+export function buildBlocks(
   nowSec: number,
   distributions: Array<Distribution & { tsSec: number }>,
 ): BlockReport[] {
@@ -278,12 +286,45 @@ function buildBlocks(
   }
   for (const b of blocks) {
     b.qualifiedOperators = [...b.earnings.entries()]
-      .filter(([, amt]) => amt >= REQUIRED_TJINN_PER_OPERATOR)
+      .filter(([, amt]) => amt >= PER_BLOCK_FLOOR_TJINN)
       .map(([m]) => m)
       .sort();
-    b.passed = b.qualifiedOperators.length >= REQUIRED_OPERATORS_PER_BLOCK;
+    b.passed = b.qualifiedOperators.length >= PER_BLOCK_MIN_OPERATORS;
   }
   return blocks;
+}
+
+/**
+ * Gate 1 — per-block floor. Holds iff every one of the 8 blocks has at least
+ * PER_BLOCK_MIN_OPERATORS distinct operators that each earned ≥
+ * PER_BLOCK_FLOOR_TJINN in that block. (The qualifying operators may differ
+ * between blocks — that is intentional.)
+ */
+export function evaluatePerBlockFloor(blocks: BlockReport[]): {
+  passed: boolean;
+  failingBlocks: BlockReport[];
+} {
+  const failingBlocks = blocks.filter((b) => !b.passed);
+  return { passed: failingBlocks.length === 0, failingBlocks };
+}
+
+/**
+ * Gate 2 — 48h aggregate. Holds iff at least AGGREGATE_MIN_OPERATORS distinct
+ * operators each earned ≥ AGGREGATE_TJINN summed across the full window.
+ * Accepts the minimal shape of the per-operator aggregation map that main()
+ * already builds.
+ */
+export function evaluateAggregate(perOp: Map<string, { total: bigint }>): {
+  passed: boolean;
+  qualifyingOperators: Array<[string, bigint]>;
+} {
+  const qualifyingOperators = [...perOp.entries()]
+    .filter(([, s]) => s.total >= AGGREGATE_TJINN)
+    .map(([m, s]) => [m, s.total] as [string, bigint]);
+  return {
+    passed: qualifyingOperators.length >= AGGREGATE_MIN_OPERATORS,
+    qualifyingOperators,
+  };
 }
 
 /** Count tasks created in each block's UTC window. Mutates `blocks` in place. */
@@ -330,7 +371,11 @@ async function main(): Promise<void> {
   out(`Staking program: \`${STAKING_PROGRAM}\` (Base Sepolia)`);
   out(`JinnDistributor: \`${distributor}\` (Ethereum Sepolia, chainId ${L1_CHAIN_ID})`);
   out(`Indexer: ${INDEXER_URL}`);
-  out(`Criterion: 8 UTC-aligned 6h blocks, each with ≥${REQUIRED_OPERATORS_PER_BLOCK} distinct operators that each earned ≥${formatTjinn(REQUIRED_TJINN_PER_OPERATOR)} tJINN.`);
+  out(
+    `Criterion: BOTH gates over 48h / 8 UTC-aligned 6h blocks — ` +
+      `(1) every block ≥${PER_BLOCK_MIN_OPERATORS} distinct operators each earning ≥${formatTjinn(PER_BLOCK_FLOOR_TJINN)} tJINN; ` +
+      `(2) ≥${AGGREGATE_MIN_OPERATORS} distinct operators each earning ≥${formatTjinn(AGGREGATE_TJINN)} tJINN across the full window.`,
+  );
   out('');
 
   // Define the window: most recently completed 6h boundary minus 48h, with a
@@ -401,7 +446,7 @@ async function main(): Promise<void> {
 
   out('## Per-6h-block results (most recent 48h)');
   out('');
-  out('| Block (UTC) | Tasks created | Operators qualifying (≥3 tJINN) | Verdict |');
+  out('| Block (UTC) | Tasks created | Operators qualifying (≥2 tJINN) | Verdict |');
   out('|---|---:|---:|:---:|');
   for (const b of blocks) {
     const opCount = b.qualifiedOperators.length;
@@ -427,39 +472,60 @@ async function main(): Promise<void> {
   // Per-operator breakdown
   out('## Per-operator breakdown');
   out('');
-  out('| Operator | Total tJINN in window | Blocks with ≥3 tJINN | Blocks active |');
-  out('|---|---:|---:|---:|');
+  out('| Operator | Total tJINN in window | Blocks with ≥2 tJINN | Blocks active | ≥30 tJINN (48h) |');
+  out('|---|---:|---:|---:|:---:|');
   const perOp = new Map<string, { total: bigint; qualifyingBlocks: number; activeBlocks: number }>();
   for (const b of blocks) {
     for (const [m, amt] of b.earnings) {
       const cur = perOp.get(m) ?? { total: 0n, qualifyingBlocks: 0, activeBlocks: 0 };
       cur.total += amt;
       cur.activeBlocks += 1;
-      if (amt >= REQUIRED_TJINN_PER_OPERATOR) cur.qualifyingBlocks += 1;
+      if (amt >= PER_BLOCK_FLOOR_TJINN) cur.qualifyingBlocks += 1;
       perOp.set(m, cur);
     }
   }
   const opRows = [...perOp.entries()].sort((a, b) => Number(b[1].total - a[1].total));
   for (const [m, s] of opRows) {
     const short = `${m.slice(0, 6)}…${m.slice(-4)}`;
-    out(`| \`${short}\` | ${formatTjinn(s.total)} | ${s.qualifyingBlocks} / ${NUM_BLOCKS} | ${s.activeBlocks} / ${NUM_BLOCKS} |`);
+    const clearsAggregate = s.total >= AGGREGATE_TJINN ? 'YES' : '—';
+    out(`| \`${short}\` | ${formatTjinn(s.total)} | ${s.qualifyingBlocks} / ${NUM_BLOCKS} | ${s.activeBlocks} / ${NUM_BLOCKS} | ${clearsAggregate} |`);
   }
   out('');
 
-  // Trailing streak from the most recent block backwards
+  // Two-gate verdict: MILESTONE HIT = Gate 1 (per-block floor) AND Gate 2 (48h aggregate).
+  const gate1 = evaluatePerBlockFloor(blocks);
+  const gate2 = evaluateAggregate(perOp);
+  const milestoneHit = gate1.passed && gate2.passed;
+
+  // Trailing streak from the most recent block backwards (informational context).
   let trailing = 0;
   for (let i = blocks.length - 1; i >= 0; i--) {
     if (blocks[i].passed) trailing += 1;
     else break;
   }
-  const allPass = blocks.every((b) => b.passed);
+  const passingBlocks = blocks.filter((b) => b.passed).length;
 
   out('## Verdict');
   out('');
   out(`- Most recent completed block: ${formatTs(blocks[blocks.length - 1].startTs)} → ${formatTs(blocks[blocks.length - 1].endTs)}`);
-  out(`- Trailing consecutive passing blocks: **${trailing} / ${NUM_BLOCKS}**`);
-  out(`- Progress: **${((trailing / NUM_BLOCKS) * 100).toFixed(1)}%** of the ${NUM_BLOCKS}-block target.`);
-  out(`- **${allPass ? 'MILESTONE HIT.' : 'NOT HIT.'}**`);
+  if (gate1.passed) {
+    out(`- Gate 1 — per-block floor: **PASS** (${passingBlocks}/${NUM_BLOCKS} blocks have ≥${PER_BLOCK_MIN_OPERATORS} operators ≥${formatTjinn(PER_BLOCK_FLOOR_TJINN)} tJINN)`);
+  } else {
+    const failing = gate1.failingBlocks
+      .map((b) => `${formatTs(b.startTs)} → ${formatTs(b.endTs)}`)
+      .join(', ');
+    out(`- Gate 1 — per-block floor: **FAIL** (${passingBlocks}/${NUM_BLOCKS} blocks passed; failing: ${failing})`);
+  }
+  if (gate2.passed) {
+    const addrs = gate2.qualifyingOperators
+      .map(([m]) => `\`${m.slice(0, 6)}…${m.slice(-4)}\``)
+      .join(', ');
+    out(`- Gate 2 — 48h aggregate: **PASS** (${gate2.qualifyingOperators.length} operators cleared ≥${formatTjinn(AGGREGATE_TJINN)} tJINN: ${addrs})`);
+  } else {
+    out(`- Gate 2 — 48h aggregate: **FAIL** (${gate2.qualifyingOperators.length} operators cleared ≥${formatTjinn(AGGREGATE_TJINN)} tJINN; need ≥${AGGREGATE_MIN_OPERATORS})`);
+  }
+  out(`- Trailing consecutive passing blocks: **${trailing} / ${NUM_BLOCKS}** _(informational)_`);
+  out(`- **${milestoneHit ? 'MILESTONE HIT.' : 'NOT HIT.'}**`);
 
   process.stderr.write(`\nDone in ${((Date.now() - t0) / 1000).toFixed(1)}s.\n`);
 
@@ -469,7 +535,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only auto-run when invoked as the entrypoint; importing the module (e.g. from
+// the unit test) must not trigger main()'s network I/O.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
