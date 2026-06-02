@@ -1,0 +1,268 @@
+/**
+ * `jinn eval` held-out checkpoint orchestrator (issue #818).
+ *
+ * Runs a held-out slate against a checkpoint in FROZEN mode, persists per-task
+ * pass/fail, and emits a Wilson-CI resolved-rate comparison vs the parent
+ * checkpoint. Every external boundary is constructor-injected — this is the
+ * thin slice #819 drives a deterministic slate against with NO Docker/IPFS.
+ *
+ * Acceptance criteria:
+ *   AC#1 — run the slate frozen, write per-task pass/fail.
+ *   AC#2 — emit a resolved-rate comparison vs the parent with a CI.
+ *   AC#3 — the freeze-fence holds: a `runHarnessOnce` `{ violation }` throws
+ *          LOUD and the instance is NOT recorded (no implStateDir mutation
+ *          slips through; enforcement lives in `runHarnessWithFreezeFence`).
+ *
+ * Per log/decisions/2026-05-28-rl-eval-measurement.md §4: v1-simple. Only large
+ * deltas are trustworthy (disjoint Wilson intervals). No seed control, no
+ * multi-run averaging.
+ */
+
+import type { Harness, HarnessContext } from '../harnesses/types.js';
+import type { SweRebenchV2Evaluator } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import type { HarnessCheckpointManifest } from '@jinn-network/sdk/checkpoint';
+import type { LoadedHeldOutSlate } from '../solver-types/_swe-rebench-v2-held-out-slate.js';
+import type { ResolvedSlateTask } from './resolve-slate-tasks.js';
+import type { EvalAggregate, EvalResultRecord } from '../store/store.js';
+import { compareRates, type RateComparison } from './wilson.js';
+
+/** Thrown when `runHarnessOnce` reports a freeze-fence violation (AC#3). */
+export class FreezeFenceViolationError extends Error {
+  constructor(public readonly instanceId: string) {
+    super(
+      `freeze-fence violation on instance ${instanceId}: the harness mutated implStateDir ` +
+        `during a frozen-mode eval run — refusing to record a tainted result`,
+    );
+    this.name = 'FreezeFenceViolationError';
+  }
+}
+
+/**
+ * Thrown when the locally-evaluated impl-state's codeDigest does not match the
+ * named checkpoint's manifest (C1). Guards against persisting + comparing
+ * results under a checkpoint name while the operator's local impl-state has
+ * drifted from that checkpoint.
+ */
+export class CheckpointStateMismatchError extends Error {
+  constructor(
+    public readonly checkpointCid: string,
+    public readonly manifestCodeDigest: string,
+    public readonly evaluatedCodeDigest: string,
+  ) {
+    super(
+      `local impl-state does not match checkpoint ${checkpointCid}: ` +
+        `manifest codeDigest=${manifestCodeDigest} but the evaluated impl-state hashes to ` +
+        `${evaluatedCodeDigest}. Check out the impl-state for this checkpoint or pass the ` +
+        `correct --impl-state-dir; refusing to record results under a codeDigest that is a lie`,
+    );
+    this.name = 'CheckpointStateMismatchError';
+  }
+}
+
+/** Thrown when the parent checkpoint has no aggregate for this slate version (AC#2). */
+export class ParentNotEvaluatedError extends Error {
+  constructor(public readonly parentCheckpointCid: string, public readonly slateVersion: string) {
+    super(
+      `parent checkpoint ${parentCheckpointCid} has no eval results for slate ${slateVersion} — ` +
+        `eval the parent checkpoint first (scores are only comparable within a slate version)`,
+    );
+    this.name = 'ParentNotEvaluatedError';
+  }
+}
+
+/**
+ * Injected `runHarnessOnce`-shaped boundary. Mirrors the production
+ * `runHarnessOnce` (freeze-fence + mode propagation) but also surfaces the
+ * harness `solution` so the orchestrator can extract the patch to grade. On a
+ * freeze violation it returns `{ violation }` and no solution.
+ */
+export type RunHarnessOnceForEval = (params: {
+  harness: Harness;
+  implStateDir: string;
+  mode: 'train' | 'frozen';
+  task?: HarnessContext['task'];
+}) => Promise<{
+  envelope?: { executor: { mode: 'train' | 'frozen'; codeDigest: string } };
+  violation?: { taskId: string };
+  solution?: { patch: string };
+}>;
+
+export interface EvalOrchestratorDeps {
+  harness: Harness;
+  fetchImplStateDirToLocal(implStateDirCid: string, targetDir: string): Promise<string>;
+  evaluator: SweRebenchV2Evaluator;
+  runHarnessOnce: RunHarnessOnceForEval;
+  store: {
+    recordEvalResult(args: EvalResultRecord): void;
+    getEvalAggregate(checkpointCid: string, slateVersion: string): EvalAggregate;
+  };
+}
+
+export interface PerTaskResult {
+  instance_id: string;
+  /** null when unscorable. */
+  passed: boolean | null;
+  unscorable: boolean;
+}
+
+/**
+ * Provenance of the graded artifact (Legibility). The CLI grades the operator's
+ * LOCAL frozen impl-state — verified == the named checkpoint via the C1
+ * codeDigest guard (CheckpointStateMismatchError) — NOT a state re-fetched from
+ * the checkpoint CID. Surfacing this stops a reader from assuming the tool
+ * fetched and graded the published checkpoint's state.
+ */
+export interface EvalProvenance {
+  /** Local impl-state directory that was actually run. */
+  implStateDir: string;
+  /** Real codeDigest of the evaluated impl-state (verified == manifest.codeDigest). */
+  codeDigest: string;
+  /** Always true on a returned result — a mismatch throws CheckpointStateMismatchError. */
+  matchedCheckpoint: true;
+}
+
+export interface EvalRunResult {
+  perTask: PerTaskResult[];
+  comparison: RateComparison;
+  /** What was actually graded (local impl-state), not the checkpoint identity. */
+  evaluated: EvalProvenance;
+}
+
+export async function runEval(args: {
+  checkpointManifest: HarnessCheckpointManifest;
+  checkpointCid: string;
+  slate: LoadedHeldOutSlate;
+  tasksWithRows: ResolvedSlateTask[];
+  parentCheckpointCid: string;
+  deps: EvalOrchestratorDeps;
+  /** Working dir for the fetched impl-state-dir (defaults to a checkpoint-scoped tmp path). */
+  implStateDir?: string;
+}): Promise<EvalRunResult> {
+  const { deps, slate, checkpointCid, parentCheckpointCid } = args;
+
+  // Hoist the impl-state-dir fetch outside the loop: every slate instance runs
+  // against the SAME checkpoint state.
+  const implStateDir = args.implStateDir ?? `/tmp/jinn-eval-${checkpointCid}`;
+  const localImplStateDir = await deps.fetchImplStateDirToLocal(
+    args.checkpointManifest.implStateDirCid,
+    implStateDir,
+  );
+
+  const perTask: PerTaskResult[] = [];
+  const runAtMs = Date.now();
+  let digestChecked = false;
+  // Real digest of the evaluated impl-state (from the freeze-fence), captured on
+  // the first run for provenance. Falls back to the manifest digest, which the
+  // C1 guard proves equal.
+  let evaluatedDigest = args.checkpointManifest.codeDigest;
+
+  for (const { task, row } of args.tasksWithRows) {
+    let passed: boolean | null;
+    let unscorable = false;
+    let logExcerpt = '';
+    try {
+      const run = await deps.runHarnessOnce({
+        harness: deps.harness,
+        implStateDir: localImplStateDir,
+        mode: 'frozen',
+        // Carry the full SweRebenchV2Task in `spec` + the `solverType` dispatch
+        // key so the harness can restore the repo (clone/checkout from
+        // spec.repo/base_commit). The harness emits a swe-rebench-v2 patch from
+        // spec; id/description/role alone are insufficient for a real run.
+        task: {
+          id: task.instance_id,
+          description: task.problem_statement,
+          role: 'restoration',
+          solverType: 'swe-rebench-v2.v1',
+          spec: task as unknown as Record<string, unknown>,
+          window: { startTs: 0, endTs: Date.now() + 3_600_000 },
+        },
+      });
+
+      // AC#3: a freeze violation is loud and terminal — do NOT record this
+      // instance (its implStateDir mutation taints the run). Thrown OUTSIDE the
+      // unscorable catch below so it propagates and aborts the whole eval.
+      if (run.violation) {
+        throw new FreezeFenceViolationError(task.instance_id);
+      }
+      if (!run.solution) {
+        throw new Error(`harness produced no solution for instance ${task.instance_id}`);
+      }
+
+      // C1: on the FIRST successful run, verify the real digest of the evaluated
+      // impl-state (computed by the freeze-fence) matches the named checkpoint's
+      // manifest. Fail fast — before grading any instance — to avoid Docker spend
+      // and to never persist a result under a codeDigest that is a lie.
+      if (!digestChecked) {
+        digestChecked = true;
+        const runDigest = run.envelope?.executor.codeDigest;
+        if (runDigest && runDigest !== args.checkpointManifest.codeDigest) {
+          throw new CheckpointStateMismatchError(
+            checkpointCid,
+            args.checkpointManifest.codeDigest,
+            runDigest,
+          );
+        }
+        if (runDigest) evaluatedDigest = runDigest;
+      }
+
+      const verdict = await deps.evaluator.grade({
+        task,
+        solutionPayload: { schemaVersion: 'swe-rebench-v2-solution.v1', patch: run.solution.patch },
+        row,
+      });
+      passed = verdict.passed_match;
+      logExcerpt = verdict.test_log.slice(0, 1000);
+    } catch (err) {
+      // A freeze-fence violation taints the run and must stay a LOUD terminal
+      // abort (AC#3). Likewise the C1 digest mismatch — never record results
+      // under a codeDigest that is a lie. Both re-throw and abort the eval.
+      if (err instanceof FreezeFenceViolationError || err instanceof CheckpointStateMismatchError) {
+        throw err;
+      }
+      // Everything else is unscorable: excluded from the denominator, NEVER
+      // coerced to a fail (#476). This covers both grade-side failures
+      // (EvalCouldNotGradeError / InsufficientDiskError) and harness-run
+      // failures (Defect A — harvest missing-artifact, "produced no patch",
+      // clone/timeout, etc.); a harness/infra failure to produce a gradeable
+      // solution is environment-side, not an agent capability fail. The slate
+      // continues to the next instance.
+      passed = null;
+      unscorable = true;
+      logExcerpt = (err instanceof Error ? err.message : String(err)).slice(0, 1000);
+    }
+
+    deps.store.recordEvalResult({
+      checkpoint_cid: checkpointCid,
+      slate_hash: slate.hash,
+      slate_version: slate.version,
+      instance_id: task.instance_id,
+      passed,
+      unscorable,
+      code_digest: args.checkpointManifest.codeDigest,
+      run_at_ms: runAtMs,
+      test_log_excerpt: logExcerpt,
+    });
+
+    perTask.push({ instance_id: task.instance_id, passed, unscorable });
+  }
+
+  // AC#2: compare child vs parent at the SAME slate version. A parent with no
+  // rows is a hard error — no cross-version compare, eval the parent first.
+  const parentAgg = deps.store.getEvalAggregate(parentCheckpointCid, slate.version);
+  if (parentAgg.scorable === 0 && parentAgg.unscorable === 0) {
+    throw new ParentNotEvaluatedError(parentCheckpointCid, slate.version);
+  }
+  const childAgg = deps.store.getEvalAggregate(checkpointCid, slate.version);
+
+  const comparison = compareRates(
+    { passed: childAgg.passed, scorable: childAgg.scorable },
+    { passed: parentAgg.passed, scorable: parentAgg.scorable },
+  );
+
+  return {
+    perTask,
+    comparison,
+    evaluated: { implStateDir: localImplStateDir, codeDigest: evaluatedDigest, matchedCheckpoint: true },
+  };
+}

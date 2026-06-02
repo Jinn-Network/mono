@@ -218,7 +218,12 @@ export class LearnerHarness implements Harness {
 
     await this.adapter.runTask(inputs, this.pluginRoot);
 
-    const solution = await harvestOutput(ctx.workingDir, undefined, ctx.task);
+    // Frozen mode skips the learning phases (improve, memory-consolidation), so
+    // harvest must not require their artifacts — solve-only requires none. Train
+    // mode (undefined → 'full') is unchanged, so the daemon's normal restoration
+    // runs are unaffected.
+    const phaseRange = ctx.mode === 'frozen' ? 'solve-only' : undefined;
+    const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task);
     return {
       ...solution,
       venueRef: { ...solution.venueRef, name: this.name },

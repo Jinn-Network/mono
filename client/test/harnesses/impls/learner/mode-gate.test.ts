@@ -60,4 +60,36 @@ describe('claude-code-learner mode gate', () => {
       harvestSpy.mockRestore();
     }
   });
+
+  it('passes phaseRange = "solve-only" to harvestOutput in frozen mode', async () => {
+    // Defect B: frozen runs skip the learning phases, so harvest must not require
+    // their artifacts — solve-only requires none.
+    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockResolvedValue({
+      venueRef: { name: 'claude-code-learner' },
+      gating: {},
+    } as Awaited<ReturnType<typeof harvestModule.harvestOutput>>);
+    try {
+      const adapter = new CapturingAdapter();
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
+      await harness.run(makeMinimalCtx('frozen'));
+      expect(harvestSpy).toHaveBeenCalledWith('/tmp/work', 'solve-only', expect.anything());
+    } finally {
+      harvestSpy.mockRestore();
+    }
+  });
+
+  it('passes phaseRange = undefined (→ full) to harvestOutput in train mode', async () => {
+    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockResolvedValue({
+      venueRef: { name: 'claude-code-learner' },
+      gating: {},
+    } as Awaited<ReturnType<typeof harvestModule.harvestOutput>>);
+    try {
+      const adapter = new CapturingAdapter();
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
+      await harness.run(makeMinimalCtx('train'));
+      expect(harvestSpy).toHaveBeenCalledWith('/tmp/work', undefined, expect.anything());
+    } finally {
+      harvestSpy.mockRestore();
+    }
+  });
 });

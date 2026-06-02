@@ -136,6 +136,36 @@ describe('harvestOutput', () => {
     await expect(harvestOutput(workingDir, 'post-execute')).resolves.toBeDefined();
   });
 
+  // ── solve-only range (frozen mode — no learning-phase artifacts) ────────────
+
+  it('solve-only: requires NO phase artifacts (empty workingDir does not throw)', async () => {
+    // Frozen mode skips the learning phases (improve, memory-consolidation), so
+    // requiring any phase artifacts is wrong. solve-only requires none.
+    await expect(harvestOutput(workingDir, 'solve-only')).resolves.toBeDefined();
+  });
+
+  it('solve-only: still returns the swe-rebench patch when a repo diff is present', async () => {
+    const repoDir = join(workingDir, 'repo');
+    mkdirSync(repoDir, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repoDir });
+    writeFileSync(join(repoDir, 'example.py'), 'old = True\n');
+    execFileSync('git', ['add', 'example.py'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: repoDir });
+    writeFileSync(join(repoDir, 'example.py'), 'old = False\n');
+
+    const out = await harvestOutput(workingDir, 'solve-only', {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toMatchObject({ schemaVersion: 'swe-rebench-v2-solution.v1' });
+    expect((out.solutionPayload as Record<string, unknown>).patch).toContain('old = False');
+  });
+
   // ── Optional artifact handling (warn, don't throw) ──────────────────────────
 
   it('does not throw when optional artifact is absent; logs a warning', async () => {

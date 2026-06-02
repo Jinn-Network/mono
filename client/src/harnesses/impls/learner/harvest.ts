@@ -43,12 +43,16 @@ const PHASE_PRIMARY_ARTIFACT: Record<Phase, string> = {
   'memory-consolidation': 'consolidation_record.json',
 };
 
-type PhaseRange = 'full' | 'pre-execute' | 'post-execute';
+type PhaseRange = 'full' | 'pre-execute' | 'post-execute' | 'solve-only';
 
 const REQUIRED_PHASES: Record<PhaseRange, Phase[]> = {
   full: [...PHASE_ORDER],
   'pre-execute': ['orient', 'strategize', 'plan'],
   'post-execute': ['debrief', 'improve', 'memory-consolidation'],
+  // Frozen-mode solve: the learning phases (improve, memory-consolidation) are
+  // intentionally skipped, so NO phase artifact is required. The swe-rebench
+  // patch is still harvested via the typed-payload / repo-diff path.
+  'solve-only': [],
 };
 
 const OPTIONAL_LEARNER_ARTIFACTS = [
@@ -396,7 +400,7 @@ function detectCompletedPhases(workingDir: string): string[] {
 
 function resolvePhaseRange(override?: string): PhaseRange {
   const raw = override ?? process.env.LEARNER_PHASE_RANGE ?? 'full';
-  if (raw === 'pre-execute' || raw === 'post-execute') return raw;
+  if (raw === 'pre-execute' || raw === 'post-execute' || raw === 'solve-only') return raw;
   return 'full';
 }
 
@@ -479,6 +483,8 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
  *   full         — all 7 phases required
  *   pre-execute  — orient, strategize, plan required (phases 1–3)
  *   post-execute — debrief, improve, memory-consolidation required (phases 5–7)
+ *   solve-only   — no phase artifacts required (frozen mode skips the learning
+ *                  phases; the patch still harvests via the typed-payload path)
  *
  * Required phase artifacts: hard-fail (throw) if missing or corrupt JSON.
  * Optional phase artifacts (outside the required range): safeReadJson + warn on null.
