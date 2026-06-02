@@ -159,11 +159,12 @@ Work through the ordered merge list one PR at a time. For each PR, follow the re
 **3a. Rebase onto current `next`.**
 
 Dispatch a **rebase subagent** with the PR's branch name and the current `next` HEAD. The subagent:
-1. Fetches `origin/next`.
-2. Rebases the PR branch onto `origin/next`.
-3. Handles any conflicts (see Step 4 — Conflict handling).
-4. Force-pushes the rebased branch (`--force-with-lease`).
-5. Reports: branch rebased to SHA `<sha>`, conflict status, and the updated CI rollup URL.
+1. Runs `git worktree list` first to locate any existing worktree for the branch — a PR authored by `implement-issue` already has one. A branch checked out elsewhere cannot be re-checked-out in the primary tree, and a worktree carrying uncommitted changes must not be rebased in place (it would clobber the contributor's WIP); in that case rebase via a detached worktree pinned at `origin/<branch>`. See `references/merge-mechanics.md` §Step 2 for the locate and detached-worktree mechanics.
+2. Fetches `origin/next`.
+3. Rebases the PR branch onto `origin/next`.
+4. Handles any conflicts (see Step 4 — Conflict handling).
+5. Force-pushes the rebased branch (`--force-with-lease`).
+6. Reports: branch rebased to SHA `<sha>`, conflict status, and the updated CI rollup URL.
 
 **The coordinator verifies — it never trusts a "rebased fine" claim:**
 
@@ -234,18 +235,24 @@ A conflict is **semantic** when a correct resolution requires re-implementing th
 
 **Do NOT guess.** On a semantic conflict:
 
-1. **Route the PR's issue to `Blocked on: Human`.** Update the issue's Project field:
+1. **Ensure the issue is on the Project board.** An escalated PR's linked issue may not yet be on the "Jinn engineering" Project — `gh project item-edit` requires an existing board item, so add it first (idempotent — skip if already present):
+   ```bash
+   gh project item-add 1 --owner Jinn-Network \
+     --url https://github.com/Jinn-Network/mono/issues/<issue-number>
+   ```
+
+2. **Route the PR's issue to `Blocked on: Human`.** Update the issue's Project field:
    ```bash
    gh project item-edit --id <item-id> --project-id <project-id> \
      --field-id <blocked-on-field-id> --single-select-option-id <human-option-id>
    ```
 
-2. **Leave a one-paragraph note** as a comment on the issue explaining where you stopped and why:
+3. **Leave a one-paragraph note** as a comment on the issue explaining where you stopped and why:
    > "Stopped during merge-batch: this PR's branch conflicted semantically with PR #N (`<title>`). The conflict is in `<file>` — both PRs modified `<function/section>` in ways that interact. A correct resolution requires deciding `<the trade-off or re-implementation needed>`. Branch left at `<sha>` on `<branch>`. Resume with: `git checkout <branch>`."
 
-3. **Skip this PR** — remove it from the active merge sequence.
+4. **Skip this PR** — remove it from the active merge sequence.
 
-4. **Continue the batch** with the remaining PRs. One bad PR never blocks the others.
+5. **Continue the batch** with the remaining PRs. One bad PR never blocks the others.
 
 ### The two-queue property
 
@@ -312,6 +319,7 @@ jinn run
 | Rebase subagent reports "rebased fine" but log is empty | Zero-commit guard: dispatch a fix subagent; re-verify git log. |
 | Merge does not appear on `origin/next` after `gh pr merge` | Investigate and re-run before touching next PR. |
 | CI stays pending on a rebased branch beyond a reasonable wait | Run local gates (typecheck + tests + build); if local is green, flag CI as the problem, surface to human, and pause. |
+| A CI check fails on infrastructure grounds unrelated to the diff (runner timeout, network/registry flake, transient action error) | Re-run the failed check (`gh run rerun <run-id> --failed`) and re-read the rollup. Do **not** route the issue to `Blocked on: Human` — an infra flake is not a semantic conflict. Escalate only if it fails again on the same infra grounds after the re-run. |
 | Semantic conflict cannot be cleanly described in one paragraph | Route to `Blocked on: Human` with whatever partial context you have; do not let classification difficulty block the batch. |
 | All PRs in the batch route to `Blocked on: Human` | Report this outcome — the batch is empty-merged. The human needs to jump into the paused sessions. |
 | PR drops to "awaiting code-owner review" (or "awaiting maintainer review") | Report the PR in the Step 5 skipped-PRs surface with the missing owner-set or `no CODEOWNERS coverage` note. Do **not** approve the PR on the operator's behalf and do **not** route the linked issue to `Blocked on: Human` — the gate is a queue signal, not an escalation. |

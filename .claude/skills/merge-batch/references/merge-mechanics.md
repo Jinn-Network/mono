@@ -243,6 +243,46 @@ coverage was required) or the no-coverage flag.
 
 ## Step 2 — Rebase a PR onto `next`
 
+### Locate the PR's worktree first
+
+Before rebasing, find any existing checkout of the PR's branch:
+
+```bash
+git worktree list
+```
+
+A PR opened by `implement-issue` was authored in its own worktree, which
+usually lives at `../jinn-mono_worktrees/<issue-number>/` (the current
+handbook convention) or the legacy `cargo/.tasks/<issue>/` path. The location
+is not fixed — treat the `git worktree list` output as authoritative rather
+than guessing the path.
+
+This matters because a branch already checked out in another worktree **cannot
+be checked out again** in the primary tree: `git checkout <branch>` fails with
+`fatal: '<branch>' is already checked out at '<path>'`. If the branch is listed
+against a foreign worktree, do not `git checkout` it here — rebase inside that
+worktree, or use the detached-worktree recipe below.
+
+### When the existing worktree has uncommitted changes
+
+If `git worktree list` shows the branch in a foreign worktree and that tree has
+uncommitted changes (a dirty working tree carrying a contributor's WIP), do
+**not** rebase in place — that would either fail on the dirty index or clobber
+unsaved work. Instead, create a throwaway detached worktree pinned at the
+remote ref and rebase there:
+
+```bash
+git fetch origin
+git worktree add --detach /tmp/merge-batch-<N> origin/<branch>
+cd /tmp/merge-batch-<N> && git rebase origin/next
+git push origin HEAD:<branch> --force-with-lease
+git worktree remove /tmp/merge-batch-<N>
+```
+
+This rebases from the canonical `origin/<branch>` ref and leaves the
+contributor's WIP in their worktree untouched. The `--force-with-lease` push
+updates the remote branch; the contributor re-syncs their worktree afterward.
+
 ### Fetch latest remote state
 
 ```bash
