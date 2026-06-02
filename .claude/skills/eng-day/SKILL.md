@@ -1,87 +1,101 @@
 ---
 name: eng-day
-description: Daily aggregator + guidance surface for Jinn engineering work — reads the open GitHub Issue queue, open PRs, and the "Jinn engineering" GitHub Project (v2) board state for the current sprint. Surfaces sprint progress against the upcoming Monday cut, yesterday's shipped, today's top-3 *guidance* actions tagged by work shape (read from the GitHub Issue Type — feat / fix / refactor / spike / chore / docs / test / incident / design), drift flags (canary status, sprint age > 7 days, PRs > 3 days stale, latest vs canary mismatch). Not a dispatcher — does not invoke action skills (brainstorming / writing-plans / executing-plans / systematic-debugging / etc.); Captain invokes those from the brief. Triggers on "eng day", "morning engineering standup", "what should I do today", "daily eng check", "what's pending", "start of day engineering", "let's plan today's work", "engineering check-in", "what's next". Reads Issue state via `gh issue list`, open PRs via `gh pr list`, and the GitHub Project board state via `gh project item-list`. Refuses to produce a top-3 if no active sprint exists in the Project board (fail-loud, references docs/engineering/handbook.md §The shipping machine for the daily-loop shape). Per DR-2026-05-18 the prior `bd ready` / `bd list` reads are retired — historical `jinn-mono-<id>` lookups still resolve via `bd show <id>` against the in-tree `.beads/` archive.
+description: Daily aggregator + human-attention router for Jinn engineering work — reads open GitHub Issues, open PRs, and the "Jinn engineering" GitHub Project (v2) board, and (in the autopilot era) splits work into what the autonomous dispatcher can handle vs what needs the operator's personal attention. Surfaces sprint progress against the upcoming Monday cut, a "Needs you" track (decisions / design / spikes / reviews / Discussion-anchored docs), an engine-queue summary (autonomous-ready count + dispatcher status), yesterday's shipped, and drift flags (canary status, done-but-open issues, non-buildable items in the ready queue, sprint age/bloat, stale PRs). Not a dispatcher — does not run eng:loop or invoke action skills; the operator picks from the brief. Triggers on "eng day", "morning engineering standup", "what should I do today", "what needs my attention", "daily eng check", "what's pending", "start of day engineering", "let's plan today's work", "plan my week", "engineering check-in", "what's next". Reads Issue Type via GraphQL (not `gh issue list --json issueType`, which fails), open PRs via `gh pr list`, and the board via `gh project item-list --limit 800`. Refuses to produce a plan if no active sprint exists (fail-loud). Per DR-2026-05-18 the prior `bd ready` / `bd list` reads are retired.
 ---
 
 # Engineering day
 
-The daily aggregator + guidance surface for Jinn engineering work. Run by Captain at the start of an engineering block. Reads operational state (open GitHub Issues, open PRs, the "Jinn engineering" Project board); surfaces sprint progress, today's top-3 actions tagged by work shape, drift flags. Not a dispatcher — Captain picks and invokes from the brief.
+The daily aggregator + **human-attention router** for Jinn engineering work. Run by the operator at the start of an engineering block. Reads operational state (open GitHub Issues, open PRs, the "Jinn engineering" Project board) and routes it: **what the autonomous dispatcher handles vs what needs the operator personally.** Not a dispatcher — surfaces the brief; the operator picks and invokes (or launches `eng:loop`) from it.
+
+**Autopilot-era reframe.** With the autonomous engine (`packages/eng-loop`, the Autopilot dispatcher) able to take a clean `feat`/`fix` from Todo → green draft PR unattended, the operator's daily question is no longer "what should I implement" — it's **"what needs *me*, that the engine can't do?"** So this brief leads with the **Needs-you** track (decisions, design, spikes, reviews, Discussion-anchored docs) and demotes autonomous work to an **engine-queue summary** the operator just keeps fed and running. That split is the point of the skill — it's how the operator plans the day *and the week* around their own attention.
 
 Modeled on the `growth-day` skill — same Tier-A discipline, same drift-flag pattern, same fail-loud sprint precondition.
 
-**Substrate note (2026-05-18):** Per DR-2026-05-18, the issue-tracking substrate is GitHub Issues + native sub-issues + the "Jinn engineering" Project (v2). `bd` is retired; the `.beads/` checkout stays in-tree as a read-only archive of historical `jinn-mono-<id>` references but is not part of the live daily-loop state read.
+**Substrate note (2026-05-18):** Per DR-2026-05-18, the issue-tracking substrate is GitHub Issues + native sub-issues + the "Jinn engineering" Project (v2). `bd` is retired; the `.beads/` checkout stays in-tree as a read-only archive.
 
 ## Read first
 
-- [`docs/engineering/handbook.md`](../../../docs/engineering/handbook.md) §The shipping machine (daily loop + weekly retrace), §The shapes of work (which shapes exist + their flows), §Sprint surface (GH Project shape).
+- [`docs/engineering/handbook.md`](../../../docs/engineering/handbook.md) §The shipping machine, §The shapes of work, §Sprint surface.
 - [`CLAUDE.md`](../../../CLAUDE.md) — agent-canonical project guide.
-- Open Issues (ready queue): `gh issue list --repo Jinn-Network/mono --state open --json number,title,issueType,labels,assignees,createdAt,updatedAt,milestone --limit 200`. Filter to items where the "Jinn engineering" Project (v2) "Blocked on" field equals `Nothing` (the `blocked:*` label is retired per DR-2026-05-20-b). The Issue Type field is the shape source; `## Run-mode` body sections are read only as a fallback for pre-cutover Issues that haven't been backfilled.
-- Open PRs: `gh pr list --search 'is:open draft:false' --json number,title,author,createdAt,updatedAt,reviewDecision,mergeable`.
-- GitHub Project board: `gh project item-list <project-number> --owner Jinn-Network --format json`, filtered to the current `Sprint` Iteration value. (Project number: 1 — the "Jinn engineering" board on `Jinn-Network`.)
+- **Open Issues:** `gh issue list --repo Jinn-Network/mono --state open --json number,title,labels,assignees,createdAt,updatedAt --limit 300`. NOTE: **`gh issue list`/`gh issue view` cannot return `issueType`** (`Unknown JSON field: "issueType"`). Read the Issue Type — the shape source — via **GraphQL**: the search qualifier (`gh api graphql -f query='{ search(query:"repo:Jinn-Network/mono is:issue is:open type:design", type:ISSUE, first:60){ nodes{ ... on Issue{ number issueType{name} } } } }'`) or an aliased `issue(number:N){ issueType{name} }` query. The `## Run-mode` body section is a fallback only for pre-cutover issues.
+- **Open PRs:** `gh pr list --search 'is:open draft:false' --json number,title,author,createdAt,updatedAt,reviewDecision,mergeable,isDraft`.
+- **GitHub Project board:** `gh project item-list 1 --owner Jinn-Network --format json --limit 800`. **Use a limit above the item count** — the board exceeds 300 items, and a low `--limit` silently truncates and produces wrong sprint counts. Filter to the current `Sprint` iteration.
 
 ## Sprint precondition (fail-loud)
 
-This skill refuses to produce a top-3 unless an active sprint exists. **Active sprint** = at least one item on the "Jinn engineering" GitHub Project (v2) board with `Sprint = <upcoming-monday-date>`.
+Refuses to produce a plan unless an **active sprint** exists = ≥1 board item with `Sprint = <upcoming-monday-date>`. No active sprint = declare one or take an explicit rest day.
 
-No active sprint = no daily plan. Either declare a sprint (add at least one Issue to the Project board with `Sprint = upcoming-Monday`) or explicitly take a rest day. The fail-loud message quotes `docs/engineering/handbook.md` §Sprint surface for the sprint shape.
+**Declaring a sprint safely (read before touching iterations).** To *create* the Sprint iteration, use the Project **UI → Sprint field → "+ Add iteration"** button. **Never** create or edit iterations via `updateProjectV2Field` with `iterationConfiguration` — that mutation **full-replaces** the field config and **irreversibly clears every item's sprint assignment board-wide** (incident 2026-06-01; there is no undo). It also regenerates iteration IDs, orphaning all existing assignments. Assign issues to a sprint *only* with item-level `updateProjectV2ItemFieldValue` (`value:{iterationId:"<id>"}`, var typed `String!` not `ID!`). **Recommendation:** pre-create a quarter of future iterations once via the UI — then this fail-loud stops recurring weekly, the current-sprint pointer advances by date automatically, and you get planning runway.
+
+## Autonomy triage (classify every ready item)
+
+For each open/ready item, assign one lane. This is what makes the brief route attention rather than list tasks.
+
+- 🤖 **Autonomous** — the dispatcher can take it unattended. Issue Type ∈ {`feat`, `fix`, `refactor`, `test`, `chore`}, **not** an epic/tracker, single-session-sized (Effort `Low`/`Medium`), `Status = Todo`, `Blocked-on = Nothing`, acceptance criteria present. Operator's only job: keep `eng:loop` running and unblocked.
+- 👤 **Needs you** — requires the operator's judgment/input. Any of:
+  - Issue Type ∈ {`design`, `spike`, `incident`} (decision / research / judgment);
+  - **epic** (title `EPIC:` or has sub-issues) — needs decomposition, not implementation;
+  - **tracker** (title `Tracker:`/`Tracking:`) — human-curated snapshots;
+  - `docs` touching **canonical / Discussion-anchored** content (SPEC / PRINCIPLES / BRAND / GLOSSARY / a milestone / a Discussion #) — needs sign-off;
+  - `Blocked-on = Human`;
+  - `Effort = High` on a feat/refactor — usually needs decomposition into stacked sub-issues *before* it's dispatchable (else the shape-blind dispatcher produces a mega-PR);
+  - **under-specified** — no acceptance criteria, or a "decision / open-question" marker — needs scoping before it can be dispatched.
+- 🔍 **Review** (a Needs-you sub-lane, usually the biggest demand on operator time) — open PRs awaiting review. Per AI-workflow rule #4 **no agent self-merges**, so review is always human. The engine produces PRs faster than they're reviewed, so this queue grows — surface it prominently.
 
 ## Output shape
 
-A four-section brief:
+A five-section brief, **Needs-you first**:
 
-1. **Sprint context** — current sprint window (Monday cut date), days elapsed, % closed vs queued, any work in-progress.
-2. **Yesterday shipped** — PRs merged in the last 24h (with shape prefix and author), Issues closed.
-3. **Today's top-3 guidance** — tagged by work shape, with Issue number + one-line context. Order by: blockers first, then by sprint-fit (sprint-target items rank above unrelated ready Issues), then by priority. Always include the next stale PR (> 3 days idle) if there is one.
-4. **Drift flags** — surface only the flags that are active:
-   - Canary publish broken on most recent merge.
-   - npm `latest` mismatched against expected weekly cut (no Monday Release in the last 8+ days).
-   - PR open > 3 days without review activity.
-   - Sprint age > 7 days (Monday cut should reset weekly).
-   - Issues marked in-progress (assigned, Project Status = In Progress) with no commits / no PR activity in 5+ days.
+1. **Sprint context** — window (Monday cut), days elapsed, % closed vs queued, and the **autonomy split**: `N 🤖 autonomous-ready · M 👤 needs-you · K 🔍 PRs in review`.
+2. **Needs you today** (the operator's actual plan) — the top 👤/🔍 items, ranked: blockers → decisions/design/spikes → Discussion-anchored docs → under-specified-needs-scoping → the review queue (flag **engine-produced** PRs). This replaces the old "top-3 to implement" — those don't need the operator's per-item attention any more.
+3. **Engine queue** (🤖, runs in parallel to you) — count of dispatcher-eligible issues + **dispatcher status**: is `eng:loop` running? is backpressure tripped (open ready PRs > cap)? what would it pick at the current `--cap`? The operator action here is *keep it fed/running*, not implement item-by-item.
+4. **Yesterday shipped** — PRs merged in the last 24h (shape prefix + author; flag engine-produced), Issues closed.
+5. **Drift flags** — surface only the active ones (below).
 
 ## How to assemble
 
-1. Read state in parallel:
-   - `gh issue list --repo Jinn-Network/mono --state open --json number,title,labels,assignees,createdAt,updatedAt`
-   - `gh pr list --search 'is:open draft:false' --repo Jinn-Network/mono --json number,title,author,createdAt,updatedAt,reviewDecision,mergeable`
-   - `gh project item-list <project-number> --owner Jinn-Network --format json` (project-number: 1)
-   - Last Release: `gh release list --repo Jinn-Network/mono --limit 1 --json publishedAt,tagName` (drift baseline for the canary/latest mismatch flag).
-2. Compute drift flags from the joined state.
-3. Build the top-3 by:
-   - Filter open Issues to those on the Project board with `Sprint = <upcoming-monday>` (sprint-target); else fall back to recent P0/P1-labelled Issues for an "off-sprint preview."
-   - Rank by: stale-PR-review-needed > sprint-blocker > sprint-target ready > non-sprint P0 > non-sprint P1.
-   - Tag each with shape from the GitHub Issue Type (`feat` / `fix` / `refactor` / `spike` / `chore` / `docs` / `test` / `incident` / `design`); fall back to the Issue body's `## Run-mode` section only for issues created before the cutover that haven't been backfilled yet. The `shape:*` label is retired and is not consulted.
-4. Format the brief; output to terminal; do not dispatch.
+1. Read state in parallel (commands in §Read first — Issue Type via **GraphQL**, board via `--limit 800`, + `gh release list --repo Jinn-Network/mono --limit 1 --json publishedAt,tagName` for the canary baseline).
+2. **Classify** every ready item into 🤖 / 👤 / 🔍 (per §Autonomy triage). Join Project fields (Status, Priority, Effort, Blocked-on) by issue number.
+3. Build **Needs you today** from the 👤/🔍 lanes, ranked: stale-PR-review-needed → sprint-blocker → decision/design/spike → Discussion-anchored docs → under-specified → other 👤. Tag each with shape + Effort. Cap ~3–5.
+4. Build the **Engine queue** summary from the 🤖 lane (count by priority) + dispatcher status (probe `eng:loop --dry-run` reasoning: ready-Todo-unblocked-allowlisted count, backpressure vs open-PR count).
+5. Compute drift flags. Format; output to terminal; **do not dispatch or run `eng:loop`.**
 
 ## Routing signals
 
-Two Project (v2) single-select fields enter ranking alongside the sprint-fit tier:
+- **Priority** — `P0`>`P1`>…; within a lane, ranks order. An off-sprint `P0` overrides the non-sprint cap.
+- **Effort** — surfaced inline; also feeds autonomy triage (`High` feat/refactor → 👤 decompose-first).
+- **Blocked on** — `Nothing` / `Human` / `Another issue`. Only `Nothing` is dispatch-eligible (🤖); `Human` is the explicit park-it-for-the-operator signal (and the safe way to keep non-buildables out of the dispatcher's reach); `Another issue` surfaces as a dependency. `Human`/`Another issue` blocked > 3 days → drift flag.
 
-- **Priority** — `P0` / `P1` / `P2` / `P3` / `P4`. Within the same sprint-fit tier, `P0` ranks above `P1`, and so on. `P0` also overrides the non-sprint cap (an off-sprint `P0` outranks an on-sprint `P3`).
-- **Effort** — `Low` / `Medium` / `High`. Effort does not affect rank order; it is surfaced inline next to the shape tag in the top-3 so the operator can pick a top-3 item whose effort fits the block of time they have available.
+## Drift flags
 
-The "Blocked on" field has three values — `Nothing`, `Human`, `Another issue`. Only items with `Blocked on = Nothing` are eligible for the top-3 ready queue; `Human` and `Another issue` items surface under "Drift flags" if they have been blocked for > 3 days.
+Surface only the active ones:
+
+- **Canary** publish broken on the most recent merge.
+- **npm `latest` mismatch** — no Monday Release in 8+ days.
+- **Stale PR** — open > 3 days without review activity.
+- **Sprint age** > 7 days (Monday cut should reset weekly).
+- **Sprint bloat** — sprint carries more than ~15 items (over-committed; the operator can't review that much engine output in a week — bias to fewer, higher-priority items).
+- **In-Progress with no movement** — Project Status = In Progress, no commits / PR activity in 5+ days (cross-check the dispatcher's worktree drift).
+- **Done-but-open** — an issue with a **merged** PR referencing it that is still `OPEN` (a `Closes #N` keyword was omitted — recurring trap that left #789/#809/#828/#827/#766 falsely open). Close it.
+- **Designed-but-unimplemented** — a closed `design` issue with no merged implementation and no open implementation issue (e.g. #921→#923).
+- **Non-buildable in the ready queue** — an epic / tracker / spike that is `Todo` + `Blocked-on = Nothing`. It reads as "ready" but the shape-blind dispatcher would waste a session on it — park it (`Blocked-on = Human`) or it'll be mis-picked.
+- **Top item already in PR** — the highest-priority ready item already has an open PR (e.g. #912 had #933); flag so it isn't re-picked, and route it to the review lane instead.
 
 ## Failure modes
 
-- **No active sprint.** Print the fail-loud message:
-  > No active sprint declared. Per docs/engineering/handbook.md §Sprint surface, the canonical sprint board is the "Jinn engineering" GitHub Project (v2) on Jinn-Network/mono. Add at least one GitHub Issue to the Project board with `Sprint = <upcoming-monday-date>` to declare a sprint, or take an explicit rest day.
-- **Project number mismatch.** This skill assumes project-number `1` for "Jinn engineering" on `Jinn-Network`. If `gh project item-list 1 --owner Jinn-Network` returns "project not found" or an unrelated board, run `gh project list --owner Jinn-Network --format json | jq '.projects[] | {number,title}'` to discover the actual number and surface it in the brief alongside the "no active sprint" failure — do not silently emit a misleading "no sprint" message when the project number is wrong.
-- **`gh` CLI unauthenticated.** Print the auth instruction (`gh auth login`, with the `project` scope: `gh auth refresh -s project`); do not block on the brief.
-- **Project board not reachable** (network / token issue). Print a one-line note and fall back to the open-Issue queue alone. Continue.
+- **No active sprint.** Print: *No active sprint declared. Per docs/engineering/handbook.md §Sprint surface, add at least one Issue to the "Jinn engineering" Project (v2) with `Sprint = <upcoming-monday>` (create the iteration via the UI "+ Add iteration" button — never via the `iterationConfiguration` API), or take an explicit rest day.*
+- **Project number mismatch.** Assumes project `1` on `Jinn-Network`. If `gh project item-list 1` errors or returns an unrelated board, run `gh project list --owner Jinn-Network --format json` to find the real number and surface it — don't emit a misleading "no sprint."
+- **`gh` unauthenticated.** Print `gh auth login` + `gh auth refresh -s project`; don't block.
+- **Board unreachable.** One-line note; fall back to the open-Issue queue alone.
 
 ## v0 vs v1
 
-This is the v0 skill. v1 will:
-
-- Auto-detect Project board number from `gh project list` (currently hardcoded to 1 for the "Jinn engineering" board on `Jinn-Network`).
-- Compute the suggested-semver-bump heuristic surface (always-patch; Captain overrides to minor on epic close) and flag if an epic-major Issue closed in the window.
-- Surface shape-flow refinement candidates (per handbook §Iterative refinement) if friction signals emerge in repeated brief runs.
-
-These v1 improvements come from iterative refinement (handbook §Iterative refinement) — file a GitHub Issue under the engineering handbook umbrella if friction observed.
+This is the v0 skill. v1 will: auto-detect the Project number; compute the suggested-semver bump (always-patch; minor on epic close); fully automate the autonomy classifier (currently heuristic — verify epics / canonical-docs by hand). Friction → file a GitHub Issue under the engineering-handbook umbrella.
 
 ## Composition
 
-- Composes with `growth-day` only at the Captain's invocation level (Captain reads both each morning). The two skills do not share state; engineering and growth loops have different rhythms (engineering weekly cut vs growth daily loop).
-- Composes downstream with the action skills it lists but does not invoke (`brainstorming`, `writing-plans`, `executing-plans`, `systematic-debugging`, `dispatching-parallel-agents`, `subagent-driven-development`, `verification-before-completion`, `receiving-code-review`).
-- Composes with the Project board's Friday triage flow (handbook §Weekly retrace) — `eng-day` reads what triage produced; the prior `bd-mirror`-coupled Friday cron is retired per DR-2026-05-18.
+- Composes with `growth-day` at the operator's invocation level only (no shared state).
+- Composes downstream with the action skills it lists but does not invoke (`brainstorming`, `writing-plans`, `executing-plans`, `systematic-debugging`, `requesting-code-review`, …).
+- **Autopilot dispatcher (`packages/eng-loop`, `eng:loop`)** reads the *same* ready definition this skill uses (`Status = Todo` + `Blocked-on = Nothing` + author-allowlist). So eng-day's drift flags double as dispatcher hygiene, and the 🤖/👤 split mirrors what the dispatcher will/won't pick. eng-day only *surfaces* the engine queue + status — the operator runs `eng:loop` separately. Keep non-buildables out of the dispatcher's reach by setting `Blocked-on = Human`.
+- **PR-vs-issue caution.** When triaging or before closing anything as a duplicate, verify the object's `__typename` via GraphQL — an implementation **PR** can look like an issue by title; closing it as a "duplicate issue" discards real work (incident 2026-06-01).
+- Composes with the Friday triage flow (handbook §Weekly retrace).
