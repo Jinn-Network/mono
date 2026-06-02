@@ -373,7 +373,7 @@ __metadata:
     better-sqlite3: "npm:^11.0.0"
     tsx: "npm:^4.0.0"
     typescript: "npm:^5.5.0"
-    viem: "npm:^2.51.2"
+    viem: "npm:^2.51.3"
     vitest: "npm:^2.0.0"
   bin:
     jinn-claim-relayer: ./dist/index.js
@@ -1816,9 +1816,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.51.2":
-  version: 2.51.2
-  resolution: "viem@npm:2.51.2"
+"viem@npm:^2.51.3":
+  version: 2.51.3
+  resolution: "viem@npm:2.51.3"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1833,7 +1833,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/1245c95bbecf41caf555516670e5c9720ff3562ae1eae706ecfbf53f42616f52a6cd78f92e0b0cac0c75f2952bd52a73ba6d807eefcd6b0c27a3157f18e9bed0
+  checksum: 10c0/df7947adf57fe812a8937e420f6ba799f1ed09eccf6a3595c7139f4376bb91f5863d358e9d0252503158a08fd420e0ea1cc61fd9bf66e5a03909ac1bea43de05
   languageName: node
   linkType: hard
 
