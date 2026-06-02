@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, type JSX } from 'react';
 import { api } from '../../api/client.js';
 import { Card } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';

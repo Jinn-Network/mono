@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { api } from '../api/client.js';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert.js';

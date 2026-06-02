@@ -10,6 +10,8 @@ import { Router, Route } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+import type { JSX } from 'react';
+
 /**
  * Tests for the operator-side join flow keyed by manifestCid (Task 21).
  * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.

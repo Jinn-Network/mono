@@ -11,7 +11,7 @@
  * the card's color tokens cleanly.
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, JSX } from 'react';
 
 export interface SolverNetSigilProps {
   name: string;

@@ -4,6 +4,8 @@ import { api } from '../api/client.js';
 import { getFeatures } from '../lib/features.js';
 import { cn } from '../lib/utils.js';
 
+import type { JSX } from 'react';
+
 // The Build tab is gated behind the `pluginBuilderUi` feature flag (issue
 // #327) — appended to the base tabs only when the daemon was started with
 // JINN_ENABLE_PLUGIN_BUILDER_UI=1.

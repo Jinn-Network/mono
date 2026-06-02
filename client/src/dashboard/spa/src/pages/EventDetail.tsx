@@ -16,6 +16,8 @@ import { Badge } from '../components/ui/badge.js';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { Separator } from '../components/ui/separator.js';
 
+import type { JSX } from 'react';
+
 function formatTimestamp(ts: string | null): string {
   if (!ts) return '-';
   const d = new Date(ts);

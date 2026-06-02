@@ -10,6 +10,8 @@ import {
 import { Skeleton } from '../../components/ui/skeleton.js';
 import { VerifiedBadge } from './VerifiedBadge.js';
 
+import type { JSX } from 'react';
+
 interface FrozenRollup {
   implName: string;
   codeDigest: string;

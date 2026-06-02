@@ -4,6 +4,8 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './ActivityCard.js';
 
+import type { JSX } from 'react';
+
 function wrap(ui: JSX.Element, initial = '/overview'): {
   hook: ReturnType<typeof memoryLocation>['hook'];
   history: string[];

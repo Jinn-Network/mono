@@ -20,6 +20,8 @@ import {
   truncateCid,
 } from './helpers.js';
 
+import type { JSX } from 'react';
+
 /**
  * Top-of-page header for the post-launch dashboard.
  *

@@ -9,6 +9,8 @@ import {
 } from '../../components/ui/dropdown-menu.js';
 import { Button } from '../../components/ui/button.js';
 
+import type { JSX } from 'react';
+
 const TABS = [
   { to: '/operator/memberships', label: 'Memberships' },
   { to: '/operator/registry', label: 'Registry' },

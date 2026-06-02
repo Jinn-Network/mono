@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 import { Button } from '../../components/ui/button.js';
 import { Alert, AlertDescription } from '../../components/ui/alert.js';
 import { Label } from '../../components/ui/label.js';

@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LeaderboardPage } from './Leaderboard.js';
 
+import type { JSX } from 'react';
+
 // Prevent real fetch calls from the useQuery hooks during tests.
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
   ok: true,

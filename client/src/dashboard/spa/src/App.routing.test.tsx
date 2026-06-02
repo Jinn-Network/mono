@@ -19,6 +19,8 @@ import { RegistryTab } from './pages/operator/RegistryTab.js';
 import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
 
+import type { JSX } from 'react';
+
 // ActivitySections now uses SSE — mock so routing tests don't open EventSource.
 vi.mock('./api/events.js', () => ({
   useEventStream: vi.fn(() => ({ events: [], connected: false })),

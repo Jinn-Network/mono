@@ -4,6 +4,8 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { IdentityCard, type IdentityCardProps } from './IdentityCard.js';
 
+import type { JSX } from 'react';
+
 const retryAgentBindingMock = vi.fn();
 
 vi.mock('../../api/client.js', () => ({

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { toPng } from 'html-to-image';
 import { api } from '../api/client.js';
 import type { DebugReportManifest } from '../api/types.js';

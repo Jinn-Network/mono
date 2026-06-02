@@ -14,6 +14,8 @@ import {
 } from '../../components/ui/tooltip.js';
 import { formatWeiAmount, projectRunwayTasks, truncateAddress } from './helpers.js';
 
+import type { JSX } from 'react';
+
 /**
  * Safe-funded budget overview for the launched SolverNet.
  *

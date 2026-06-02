@@ -1,6 +1,8 @@
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Badge } from '../../components/ui/badge.js';
 
+import type { JSX } from 'react';
+
 export type PhaseStatus = 'done' | 'active' | 'queued' | 'error';
 
 /**

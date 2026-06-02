@@ -1,5 +1,7 @@
 import type { CaptureSpan } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 /**
  * RedactionDiff — flat list of `{ spanName, redactedAttributeKey }` pairs.
  *

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useLocation } from 'wouter';
 import { Card } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';

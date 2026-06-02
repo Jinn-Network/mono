@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Link } from 'wouter';
 import { api } from '../../api/client.js';
 import { JoinedNetCard, type JoinedNetEntry } from '../configuration/JoinedNetCard.js';

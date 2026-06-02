@@ -1,6 +1,8 @@
 import { Compass } from 'lucide-react';
 import { RegistryCatalog } from '../operator-catalog/RegistryCatalog.js';
 
+import type { JSX } from 'react';
+
 /**
  * /operator/registry — SolverNet registry browse + join (§2.5).
  */

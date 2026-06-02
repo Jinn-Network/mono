@@ -1,5 +1,7 @@
 import { Agent } from '../regions/Agent.js';
 
+import type { JSX } from 'react';
+
 /**
  * Persistent right-rail Agent panel. Wraps the existing Agent region in a
  * column that flows naturally inside AppShell. The agent stays visible on

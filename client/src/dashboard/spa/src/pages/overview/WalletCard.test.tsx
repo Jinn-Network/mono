@@ -4,6 +4,8 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { WalletCard, type WalletCardProps } from './WalletCard.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../../api/client.js', () => ({
   api: {},
 }));

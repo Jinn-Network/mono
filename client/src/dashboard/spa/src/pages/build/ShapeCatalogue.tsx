@@ -15,6 +15,8 @@ import { Badge } from '../../components/ui/badge.js';
 import { Separator } from '../../components/ui/separator.js';
 import { PLUGIN_SHAPE_FIELDS, PLUGIN_MODES } from './shape-fields.js';
 
+import type { JSX } from 'react';
+
 const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
 
 /**

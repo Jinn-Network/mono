@@ -6,6 +6,8 @@ import {
   TooltipTrigger,
 } from '../../components/ui/tooltip.js';
 
+import type { JSX } from 'react';
+
 /**
  * Verified-status indicator for the frozen-mode leaderboard.
  *

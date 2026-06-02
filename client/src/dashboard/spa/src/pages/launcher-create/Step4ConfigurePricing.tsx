@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,

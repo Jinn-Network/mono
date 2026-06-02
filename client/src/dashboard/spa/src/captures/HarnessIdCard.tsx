@@ -1,5 +1,7 @@
 import type { CaptureSummary } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 /**
  * HarnessIdCard — the "Executor" panel shown inside the capture drill-in.
  *

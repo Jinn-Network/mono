@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Network, AlertTriangle, ExternalLink, Activity } from 'lucide-react';
 import { toast } from 'sonner';

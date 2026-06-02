@@ -2,6 +2,8 @@ import { Link } from 'wouter';
 import { Badge } from '../components/ui/badge.js';
 import { DebugReportButton } from '../components/DebugReportButton.js';
 
+import type { JSX } from 'react';
+
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
 }

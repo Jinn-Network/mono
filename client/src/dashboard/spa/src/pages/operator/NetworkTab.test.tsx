@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NetworkTab } from './NetworkTab.js';
 import { api } from '../../api/client.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../../api/client.js', () => ({
   api: {
     getBootstrap: vi.fn(async () => ({

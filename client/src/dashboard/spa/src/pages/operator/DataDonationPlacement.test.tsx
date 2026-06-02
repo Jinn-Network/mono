@@ -14,6 +14,8 @@ import { CapturesTab } from '../../captures/CapturesTab.js';
 import { OperatorShell } from './OperatorShell.js';
 import { MembershipsTab } from './MembershipsTab.js';
 
+import type { JSX } from 'react';
+
 const listArtifactsMock = vi.fn();
 
 vi.mock('../../api/client.js', () => ({

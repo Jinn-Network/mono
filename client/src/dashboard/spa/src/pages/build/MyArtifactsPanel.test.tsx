@@ -3,6 +3,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MyArtifactsPanel } from './MyArtifactsPanel.js';
 
+import type { JSX } from 'react';
+
 function withQuery(node: JSX.Element): JSX.Element {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={qc}>{node}</QueryClientProvider>;

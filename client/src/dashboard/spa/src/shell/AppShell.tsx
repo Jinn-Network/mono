@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 import { NotificationsList } from '../notifications/components/NotificationsList.js';
 import { useNotifications } from '../notifications/useNotifications.js';
 import { cn } from '../lib/utils.js';

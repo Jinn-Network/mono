@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { useLocation } from 'wouter';
 import { Activity as ActivityIcon, ListTree, Pencil, Plus } from 'lucide-react';
 import {

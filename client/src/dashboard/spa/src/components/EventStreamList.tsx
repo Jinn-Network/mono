@@ -1,5 +1,7 @@
 import type { StructuredEvent } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 export interface EventStreamListProps {
   events: StructuredEvent[];
   /** Optional: render only events whose kind matches this value */

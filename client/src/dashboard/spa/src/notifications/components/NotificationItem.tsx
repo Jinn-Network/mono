@@ -2,6 +2,8 @@ import { Link } from 'wouter';
 import type { OperatorNotification } from '../taxonomy.js';
 import { cn } from '../../lib/utils.js';
 
+import type { JSX } from 'react';
+
 /**
  * One notice row inside `<NotificationsList>`. Severity drives the
  * left-border tint and the severity-word color. The row reads severity

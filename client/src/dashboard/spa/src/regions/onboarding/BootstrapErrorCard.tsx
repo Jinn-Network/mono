@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useState } from 'react';
+import { type ReactNode, useCallback, useState, type JSX } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { api } from '../../api/client.js';
 import type { BootstrapErrorEnvelope } from '../../api/types.js';

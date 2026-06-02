@@ -8,6 +8,8 @@ import { EventsPage } from './Events.js';
 import { api } from '../api/client.js';
 import type { ActivityEventRow, ActivityEventsResponse } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../api/client.js', () => ({
   api: {
     getActivityEvents: vi.fn(),

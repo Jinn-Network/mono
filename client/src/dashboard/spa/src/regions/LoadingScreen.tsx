@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useEventStream } from '../api/events.js';
 import type { StructuredEvent } from '../api/types.js';

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type JSX } from 'react';
 import { api } from '../../api/client.js';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
 import { Button } from '../../components/ui/button.js';

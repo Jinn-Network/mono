@@ -2,6 +2,8 @@ import type { CaptureSummary } from '../api/types.js';
 import { Button } from '../components/ui/button.js';
 import { cn } from '../lib/utils.js';
 
+import type { JSX } from 'react';
+
 export interface CapturesListProps {
   captures: CaptureSummary[];
   selectedSessionId?: string;

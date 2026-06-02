@@ -7,6 +7,8 @@ import { Toaster } from '../../components/ui/sonner.js';
 import { HarnessStatusPanel } from './HarnessStatusPanel.js';
 import type { HarnessReadinessEntry } from '../../api/types.js';
 
+import type { JSX } from 'react';
+
 const harnessReadinessMock = vi.fn();
 const codexDoctorMock = vi.fn();
 

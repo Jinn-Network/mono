@@ -21,6 +21,8 @@ vi.mock('../../api/client.js', () => ({
 
 import { api } from '../../api/client.js';
 
+import type { JSX } from 'react';
+
 function withProviders(node: JSX.Element): JSX.Element {
   const { hook } = memoryLocation({ path: '/operator/memberships' });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

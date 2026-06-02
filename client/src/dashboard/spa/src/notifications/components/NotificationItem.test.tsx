@@ -5,6 +5,8 @@ import { memoryLocation } from 'wouter/memory-location';
 import { NotificationItem } from './NotificationItem.js';
 import type { OperatorNotification } from '../taxonomy.js';
 
+import type { JSX } from 'react';
+
 function wrap(ui: JSX.Element): JSX.Element {
   const { hook } = memoryLocation({ path: '/' });
   // wouter <Link> requires Router context.

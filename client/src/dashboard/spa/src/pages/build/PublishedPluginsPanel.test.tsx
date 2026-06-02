@@ -3,6 +3,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PublishedPluginsPanel } from './PublishedPluginsPanel.js';
 
+import type { JSX } from 'react';
+
 const fixture = {
   publications: [
     {

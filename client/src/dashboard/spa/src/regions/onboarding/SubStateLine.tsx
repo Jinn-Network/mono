@@ -1,5 +1,7 @@
 import { cn } from '../../lib/utils.js';
 
+import type { JSX } from 'react';
+
 /**
  * Status line shown beneath the active Phase 3 row while the bootstrapper
  * is working through its remaining sub-steps (service deploy, agent

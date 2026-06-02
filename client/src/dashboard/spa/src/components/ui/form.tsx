@@ -12,6 +12,8 @@ import {
 import { cn } from '../../lib/utils.js';
 import { Label } from './label.js';
 
+import type { JSX } from 'react';
+
 const Form = FormProvider;
 
 type FormFieldContextValue<

@@ -7,6 +7,8 @@ import { JoinedNetCard, type JoinedNetEntry } from './JoinedNetCard.js';
 import type { SolverNetCatalogEntry } from '../../api/types.js';
 import { api } from '../../api/client.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../../api/client.js', () => ({
   api: {
     getStatus: vi.fn(),

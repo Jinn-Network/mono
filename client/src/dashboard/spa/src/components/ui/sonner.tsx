@@ -1,5 +1,7 @@
 import { Toaster as Sonner, type ToasterProps } from 'sonner';
 
+import type { JSX } from 'react';
+
 const Toaster = ({ ...props }: ToasterProps): JSX.Element => {
   return (
     <Sonner

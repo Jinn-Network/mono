@@ -17,6 +17,8 @@ import type {
   SolverNetManifestSummary,
 } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../api/client.js', () => ({
   api: {
     solvernets: {

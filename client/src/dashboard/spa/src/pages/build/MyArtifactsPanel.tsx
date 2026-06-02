@@ -18,6 +18,8 @@ import { Badge } from '../../components/ui/badge.js';
 import { Skeleton } from '../../components/ui/skeleton.js';
 import { Alert, AlertDescription } from '../../components/ui/alert.js';
 
+import type { JSX } from 'react';
+
 const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
 const inlineCode =
   'rounded-sm border border-border bg-background px-1.5 py-px font-mono text-[12px] text-primary';

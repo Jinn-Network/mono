@@ -14,6 +14,8 @@ import type {
   LauncherTasksResponse,
 } from '../../api/types.js';
 
+import type { JSX } from 'react';
+
 function buildRecord(): LaunchedSolverNetRecord {
   return {
     schemaVersion: 'solvernet.launched.v1',

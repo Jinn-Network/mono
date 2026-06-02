@@ -1,6 +1,8 @@
 import type { OperatorNotification } from '../taxonomy.js';
 import { NotificationItem } from './NotificationItem.js';
 
+import type { JSX } from 'react';
+
 export function NotificationsList({
   notices,
 }: {

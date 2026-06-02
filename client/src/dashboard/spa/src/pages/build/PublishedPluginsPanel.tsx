@@ -18,6 +18,8 @@ import { Badge } from '../../components/ui/badge.js';
 import { Skeleton } from '../../components/ui/skeleton.js';
 import { Alert, AlertDescription } from '../../components/ui/alert.js';
 
+import type { JSX } from 'react';
+
 const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]';
 
 function truncate(cid: string): string {

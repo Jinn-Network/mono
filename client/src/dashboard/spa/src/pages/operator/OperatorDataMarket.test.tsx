@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+import type { JSX } from 'react';
+
 const listArtifactsMock = vi.fn();
 const updatePricingMock = vi.fn();
 

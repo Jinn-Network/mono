@@ -4,6 +4,8 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { NodeHealthCard } from './NodeHealthCard.js';
 
+import type { JSX } from 'react';
+
 function wrap(ui: JSX.Element, initial = '/overview'): JSX.Element {
   const { hook } = memoryLocation({ path: initial });
   return <Router hook={hook}>{ui}</Router>;

@@ -12,6 +12,8 @@ import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
+import type { JSX } from 'react';
+
 /**
  * Operator-side catalog of all launched SolverNets discoverable via the
  * registry endpoint (`/v1/solvernets/registry`).

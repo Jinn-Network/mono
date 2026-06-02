@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Onboarding, statusFor } from './Onboarding.js';
 import type { BootstrapState } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 // Mock the API client so we control what bootstrap + status data returns.
 // `bootstrapOverride` lets individual tests tweak the returned bootstrap state
 // without re-mocking the module.

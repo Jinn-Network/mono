@@ -6,6 +6,8 @@ import { renderMarkdownSubset } from './markdown.js';
 // In tests Vitest also honours `?raw` via its Vite integration.
 import quickstartMd from '../../../../../../docs/build/quickstart.md?raw';
 
+import type { JSX } from 'react';
+
 const QUICKSTART_URL =
   'https://github.com/Jinn-Network/mono/blob/next/client/docs/build/quickstart.md';
 

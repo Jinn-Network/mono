@@ -5,6 +5,8 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { Toaster } from '../components/ui/sonner.js';
 
+import type { JSX } from 'react';
+
 /**
  * Overview integration tests. With the IA reshuffle, the per-card behaviour
  * (Activity / Wallet / Node Health) is covered by each card's own test file

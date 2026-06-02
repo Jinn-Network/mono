@@ -19,6 +19,8 @@ import type {
   SolverNetManifestV1,
 } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../api/client.js', () => ({
   api: {
     fetchLauncherStatus: vi.fn(),

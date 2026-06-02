@@ -19,6 +19,8 @@ import type {
   LaunchedSolverNetRecord,
 } from '../api/types.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../api/client.js', () => ({
   api: {
     getBootstrap: vi.fn(),

@@ -8,6 +8,8 @@ import type {
   SolverNetManifestV1,
 } from '../../api/types.js';
 
+import type { JSX } from 'react';
+
 function buildRecord(
   overrides: Partial<LaunchedSolverNetRecord> = {},
 ): LaunchedSolverNetRecord {

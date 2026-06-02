@@ -5,6 +5,8 @@ import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RegistryTab } from './RegistryTab.js';
 
+import type { JSX } from 'react';
+
 vi.mock('../../api/client.js', () => ({
   api: {
     operator: {

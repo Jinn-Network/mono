@@ -38,6 +38,8 @@ import { PhaseRow, type Phase } from './onboarding/PhaseRow.js';
 import { type PhaseStatus } from './onboarding/PhaseStatusTag.js';
 import { SubStateLine } from './onboarding/SubStateLine.js';
 
+import type { JSX } from 'react';
+
 interface BootstrapPhaseDescriptor {
   /** The bootstrap-specific phase (1, 2, or 3). */
   phase: Phase;

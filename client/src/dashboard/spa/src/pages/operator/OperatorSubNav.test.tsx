@@ -4,6 +4,8 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { OperatorSubNav } from './OperatorSubNav.js';
 
+import type { JSX } from 'react';
+
 function withRouter(path: string, node: JSX.Element): JSX.Element {
   const { hook } = memoryLocation({ path });
   return <Router hook={hook}>{node}</Router>;

@@ -13,6 +13,8 @@ import { Card } from '../components/ui/card.js';
 import { cn } from '../lib/utils.js';
 import { formatEthFromWei } from './launcher-create/draft-helpers.js';
 
+import type { JSX } from 'react';
+
 /**
  * Launcher mode > `/launcher`. Owned-SolverNets list page.
  *

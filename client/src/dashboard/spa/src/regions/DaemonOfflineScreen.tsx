@@ -11,7 +11,7 @@
  * class tokens; ghost Button for the disclosure toggle; Card for the details
  * panel.
  */
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { ConnectionState } from '../api/connection-state.js';
 import { Button } from '../components/ui/button.js';

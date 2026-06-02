@@ -5,6 +5,8 @@ import { Separator } from '../components/ui/separator.js';
 import { HarnessIdCard } from './HarnessIdCard.js';
 import { RedactionDiff } from './RedactionDiff.js';
 
+import type { JSX } from 'react';
+
 export interface CaptureDrillInProps {
   detail: CaptureDetailResponse;
   approving?: boolean;

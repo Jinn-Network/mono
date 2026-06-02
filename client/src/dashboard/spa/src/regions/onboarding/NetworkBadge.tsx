@@ -6,6 +6,8 @@ import {
   TooltipTrigger,
 } from '../../components/ui/tooltip.js';
 
+import type { JSX } from 'react';
+
 /**
  * Two-pill network indicator shown in the Onboarding header. The first pill
  * surfaces the active chain ("Testnet"), the second is a dimmed "Mainnet ·

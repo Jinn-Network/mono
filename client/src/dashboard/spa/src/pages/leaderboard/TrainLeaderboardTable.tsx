@@ -9,6 +9,8 @@ import {
 } from '../../components/ui/table.js';
 import { Skeleton } from '../../components/ui/skeleton.js';
 
+import type { JSX } from 'react';
+
 interface TrainRollup {
   implName: string;
   codeDigest: string;

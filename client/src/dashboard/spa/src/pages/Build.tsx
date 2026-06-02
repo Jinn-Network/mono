@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { api } from '../api/client.js';
 import type { BootstrapState } from '../api/types.js';
 import { Separator } from '../components/ui/separator.js';

@@ -5,6 +5,8 @@ import { Separator } from '../../components/ui/separator.js';
 import { TooltipProvider } from '../../components/ui/tooltip.js';
 import type { TjinnStatusState } from '../../api/types.js';
 
+import type { JSX } from 'react';
+
 /**
  * Wallet — three hairline-separated sections — Rewards, Gas, Password —
  * now that Identity lives in its own card per OPERATOR-APP-SPEC §2.2. The

@@ -1,5 +1,7 @@
 import { Button } from '../../components/ui/button.js';
 
+import type { JSX } from 'react';
+
 export type ArtifactTypeFilter = 'plugin';
 
 export interface ArtifactTypeFilterChipProps {

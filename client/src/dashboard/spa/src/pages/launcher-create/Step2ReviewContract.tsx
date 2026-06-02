@@ -10,6 +10,8 @@ import { ensureCompletedStep } from './draft-helpers.js';
 import { StepNav, StepShell } from './StepShell.js';
 import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.js';
 
+import type { JSX } from 'react';
+
 /**
  * Step 2 — Review the contract template the SolverNet will pin.
  *
