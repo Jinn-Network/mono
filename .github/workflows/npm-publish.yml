@@ -18,6 +18,11 @@ permissions:
   # remains for npm trusted publishing OIDC.
   contents: write
   id-token: write
+  # checks: read lets the "Verify two-gate check-runs" guard query the
+  # hermetic-gate / environment-suite check-runs bound to the release SHA
+  # (spec §7, #923). An explicit permissions block defaults every unlisted
+  # scope to none, so this must be named for github.rest.checks.listForRef.
+  checks: read
 
 defaults:
   run:
@@ -131,100 +136,134 @@ jobs:
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
 
-      - name: Verify stable release evidence marker
+      # Two-gate publish guard — verify, don't re-run (spec
+      # docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md §7; #923).
+      #
+      # The release SHA already carries its evidence as two SHA-bound check-runs:
+      #   - hermetic-gate      (deterministic CI gate, produced per-PR/push)
+      #   - environment-suite  (real-testnet gate, produced by environment-suite.yml)
+      # This step executes NO tests — it queries the check-runs on github.sha and
+      # refuses publish unless the required verdicts are success-for-this-SHA. It
+      # REPLACES the hand-typed jinn-release-evidence:v1 marker parse and the Tier-1
+      # re-run that used to live here. A check-run on a different head_sha is stale
+      # and does not count (a rebase changes the SHA, so a stale verdict is
+      # automatically invalidated — §7).
+      #
+      # Steady state: BOTH gates are required, verified (never re-run). Each gate
+      # has a transitional waiver (repo variable) so this guard can land BEFORE its
+      # producers are fully provisioned, without bricking the cut — set the waiver
+      # while a gate is being wired, then UNSET it the moment that gate is live:
+      #   - JINN_HERMETIC_GATE_WAIVED == 'true'  → waive hermetic-gate. Use only
+      #     until the committed Anvil snapshot fixture lands and hermetic-gate is
+      #     observed green on a release SHA (spec §4; rollout note in
+      #     docs/snapshots/base-v3-snapshot.md). hermetic-gate is deterministic and
+      #     should be un-waived as soon as the fixture is committed.
+      #   - JINN_ENVIRONMENT_SUITE_WAIVED == 'true'  → waive environment-suite.
+      #     Use only until the step-4 testnet-gate secrets + warm operator are
+      #     provisioned (spec §9/§11).
+      # Each waiver emits a loud ::warning:: so the relaxed gate is visible in the
+      # publish log; waiving BOTH emits an extra warning (publishing with no
+      # two-gate evidence — valid only during the very first transition).
+      - name: Verify two-gate check-runs
         if: steps.meta.outputs.dist_tag == 'latest'
+        uses: actions/github-script@v7
         env:
-          RELEASE_BODY: ${{ github.event.release.body }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_SHA: ${{ github.sha }}
-        run: |
-          node <<'NODE'
-          const body = process.env.RELEASE_BODY ?? '';
-          // Fixed substrings — must match exactly.
-          const requiredExact = [
-            ['schema marker', '<!-- jinn-release-evidence:v1'],
-            ['release tag', `release-tag=${process.env.RELEASE_TAG}`],
-            ['release commit', `release-commit=${process.env.RELEASE_SHA}`],
-            ['marker close', '-->'],
-          ];
-          // Gate entries — accept either `=passed` (clean) OR
-          // `=skipped:#<issue-num>` (documented exception with audit trail).
-          // The skipped form is intentionally explicit: it requires a paired
-          // GitHub issue describing why the gate couldn't be satisfied for
-          // this release. Captain owns each individual skip; the issue link
-          // is the audit record. See #312 for the relaxation rationale.
-          const gateEntries = [
-            ['release client prepare', 'release-client-prepare'],
-            ['donation consumption', 'donation-consumption'],
-            ['app-first testnet acceptance', 'app-first-testnet-acceptance'],
-          ];
-
-          const missing = [];
-          for (const [label, needle] of requiredExact) {
-            if (!body.includes(needle)) missing.push(`${label}: ${needle}`);
-          }
-          for (const [label, key] of gateEntries) {
-            const passedRe = new RegExp(`${key}=passed\\b`);
-            const skippedRe = new RegExp(`${key}=skipped:#\\d+\\b`);
-            if (!passedRe.test(body) && !skippedRe.test(body)) {
-              missing.push(`${label}: ${key}=passed (or =skipped:#<issue-num>)`);
-            }
-          }
-
-          if (missing.length > 0) {
-            console.error('Stable publish requires a jinn-release-evidence:v1 marker in the GitHub Release body.');
-            console.error('Missing required evidence entries:');
-            for (const item of missing) console.error(`- ${item}`);
-            process.exit(1);
-          }
-
-          // Surface any skips so they're visible in the workflow log even on success.
-          for (const [label, key] of gateEntries) {
-            const m = body.match(new RegExp(`${key}=(skipped:#\\d+)`));
-            if (m) console.warn(`::warning::Gate '${label}' marked as ${m[1]} for this release.`);
-          }
-          NODE
-
-      # CI-safe release gate (jinn-mono-2cl.7, per the engineering handbook §Cadence).
-      # The package's `prepublishOnly` script stays cheap; this workflow reruns the
-      # deterministic Anvil gate before stable npm publish. The live donation and
-      # app-first acceptance gates are release-prep evidence, not GitHub Actions
-      # steps, because they need an operator daemon and local credentials.
-      - name: Install contracts dependencies for release gate
-        if: steps.meta.outputs.dist_tag == 'latest'
-        working-directory: contracts
-        run: yarn install --immutable
-
-      # T1.4 (SPA route smoke) runs Playwright against Chromium. The yarn install
-      # above pulls @playwright/test (the JS package) but not the actual browser
-      # binaries, which live under ~/.cache/ms-playwright/. Without this step
-      # T1.4 fails with `browserType.launch: Executable doesn't exist` and the
-      # Tier 1 gate blocks the stable publish. `--with-deps` pulls the system
-      # libraries Chromium needs on ubuntu-latest.
-      - name: Install Playwright Chromium for Tier 1 T1.4
-        if: steps.meta.outputs.dist_tag == 'latest'
-        run: yarn playwright install --with-deps chromium
-
-      # Tier 1 — mechanical floor (per spec/2026-05-19 §3 of release-readiness design).
-      # Replaces the legacy operator-gate that saturated the Tenderly RPC under
-      # multi-bootstrap load (see jinn-mono-lrey). Tier 1 runs four scenarios
-      # (T1.1-T1.4) in parallel against a single Anvil fork; per-scenario budgets
-      # cap wall-clock; verdicts feed the release-evidence marker.
-      - name: Release gate — Tier 1 mechanical floor
-        if: steps.meta.outputs.dist_tag == 'latest'
-        run: yarn release:tier-1 "${{ steps.meta.outputs.publish_version }}"
-
-      # Upload tier-1-evidence so the Captain can inspect per-scenario logs on
-      # CI failures without re-running locally. `if: always()` ensures the
-      # artifact is captured even when the Tier 1 gate exits non-zero.
-      - name: Upload Tier 1 evidence
-        if: always() && steps.meta.outputs.dist_tag == 'latest'
-        uses: actions/upload-artifact@v7
+          HERMETIC_GATE_WAIVED: ${{ vars.JINN_HERMETIC_GATE_WAIVED }}
+          ENVIRONMENT_SUITE_WAIVED: ${{ vars.JINN_ENVIRONMENT_SUITE_WAIVED }}
         with:
-          name: tier-1-evidence-${{ github.event.release.tag_name || github.sha }}
-          path: client/tier-1-evidence/
-          if-no-files-found: warn
-          retention-days: 14
+          script: |
+            const sha = context.sha;
+            const hermeticWaived = process.env.HERMETIC_GATE_WAIVED === 'true';
+            const envSuiteWaived = process.env.ENVIRONMENT_SUITE_WAIVED === 'true';
+
+            // Build the required-context list; each gate is transitionally waivable.
+            const required = [];
+            if (!hermeticWaived) {
+              required.push('hermetic-gate');
+            } else {
+              core.warning(
+                'hermetic-gate is WAIVED (JINN_HERMETIC_GATE_WAIVED=true) — transitional, ' +
+                  'until the committed Anvil snapshot fixture lands and hermetic-gate is ' +
+                  'observed green on a release SHA (spec §4). It is deterministic; unset ' +
+                  'the repo variable to re-arm as soon as the fixture is committed.',
+              );
+            }
+            if (!envSuiteWaived) {
+              required.push('environment-suite');
+            } else {
+              core.warning(
+                'environment-suite is WAIVED (JINN_ENVIRONMENT_SUITE_WAIVED=true) — ' +
+                  'transitional until the testnet-gate secrets + warm operator land ' +
+                  '(spec §9/§11). Unset the repo variable to re-arm the full two-gate guard.',
+              );
+            }
+            if (required.length === 0) {
+              core.warning(
+                'BOTH gates are waived — publishing with NO two-gate evidence on this SHA. ' +
+                  'This is valid only during the initial transition; re-arm at least ' +
+                  'hermetic-gate as soon as the snapshot fixture is committed.',
+              );
+            }
+
+            // List ALL check-runs for the release SHA (paginated). A check-run is
+            // only evidence for THIS publish if its head_sha matches github.sha —
+            // GitHub scopes check-runs to a SHA, so this is implicitly true here,
+            // but we keep the contexts list bound to context.sha to be explicit
+            // about what "stale" means: a run on any other SHA is invisible to us.
+            const runs = await github.paginate(github.rest.checks.listForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+              per_page: 100,
+            });
+
+            // For each required context, find its most recent completed run.
+            const failures = [];
+            for (const name of required) {
+              // Sort by completed_at so the most recently *completed* verdict wins
+              // (a still-running re-run has completed_at=null → sorts last, and the
+              // status!=='completed' guard below rejects it anyway).
+              const matching = runs
+                .filter((r) => r.name === name)
+                .sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
+              if (matching.length === 0) {
+                failures.push(`missing verdict: no '${name}' check-run found on release SHA ${sha}`);
+                continue;
+              }
+              const latest = matching[0];
+              if (latest.status !== 'completed') {
+                failures.push(
+                  `incomplete verdict: '${name}' is status=${latest.status} (not completed) on ${sha}`,
+                );
+                continue;
+              }
+              if (latest.conclusion !== 'success') {
+                failures.push(
+                  `non-success verdict: '${name}' concluded ${latest.conclusion} on ${sha}`,
+                );
+              }
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(
+                'Stable publish refused — the two-gate check-runs are not green for the release SHA ' +
+                  `${sha}:\n` +
+                  failures.map((f) => `  - ${f}`).join('\n') +
+                  '\n\nRe-run the missing/stale gate against this exact SHA, or fix the ' +
+                  'product regression, before publishing @latest.',
+              );
+              return;
+            }
+
+            const waivedNote = [
+              hermeticWaived ? 'hermetic-gate waived' : null,
+              envSuiteWaived ? 'environment-suite waived' : null,
+            ].filter(Boolean).join(', ');
+            core.info(
+              `Two-gate guard passed for ${sha}: ` +
+                (required.length ? required.map((r) => `${r}=success`).join(', ') : 'no gates required') +
+                (waivedNote ? ` (${waivedNote})` : ''),
+            );
 
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'
