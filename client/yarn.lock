@@ -811,7 +811,7 @@ __metadata:
     "@opentelemetry/sdk-node": "npm:^0.217.0"
     "@opentelemetry/sdk-trace-base": "npm:^2.7.1"
     "@playwright/test": "npm:^1.59.1"
-    "@safe-global/protocol-kit": "npm:^6.1.2"
+    "@safe-global/protocol-kit": "npm:^7.2.0"
     "@safe-global/types-kit": "npm:^3.0.0"
     "@scure/bip32": "npm:^1.7.0"
     "@scure/bip39": "npm:^1.4.0"
@@ -2592,15 +2592,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@safe-global/protocol-kit@npm:^6.1.2":
-  version: 6.1.2
-  resolution: "@safe-global/protocol-kit@npm:6.1.2"
+"@safe-global/protocol-kit@npm:^7.2.0":
+  version: 7.2.0
+  resolution: "@safe-global/protocol-kit@npm:7.2.0"
   dependencies:
     "@noble/curves": "npm:^1.6.0"
     "@peculiar/asn1-schema": "npm:^2.3.13"
-    "@safe-global/safe-deployments": "npm:^1.37.49"
-    "@safe-global/safe-modules-deployments": "npm:^2.2.21"
-    "@safe-global/types-kit": "npm:^3.0.0"
+    "@safe-global/safe-deployments": "npm:^1.37.56"
+    "@safe-global/safe-modules-deployments": "npm:^3.0.4"
+    "@safe-global/types-kit": "npm:^3.1.0"
     abitype: "npm:^1.0.2"
     semver: "npm:^7.7.2"
     viem: "npm:^2.21.8"
@@ -2609,27 +2609,27 @@ __metadata:
       optional: true
     "@peculiar/asn1-schema":
       optional: true
-  checksum: 10c0/0d775878c4f19be7c3cec5c112630209a455488a300de067b97b07ca7f25633b946bb25078e48b92ce9307b31a4e487f0be53a49d3e3dd154fb30feda760435b
+  checksum: 10c0/4641daebfd12b48c0315b9301039eccefbe2d356bef26faccd252133c3a0bb34ab4bec33563c3664e7f27f5bb240289bd92890a8084b2524dca77f9ff7e5c85a
   languageName: node
   linkType: hard
 
-"@safe-global/safe-deployments@npm:^1.37.49":
-  version: 1.37.54
-  resolution: "@safe-global/safe-deployments@npm:1.37.54"
+"@safe-global/safe-deployments@npm:^1.37.56":
+  version: 1.37.56
+  resolution: "@safe-global/safe-deployments@npm:1.37.56"
   dependencies:
     semver: "npm:^7.6.2"
-  checksum: 10c0/4a580caf8a86a902e07fb4767f0481e5adfd372651a6c2a8b507a5dc50cccf90a26bff2909f732eed74f253bde7a92ce79eb4ab42d9f2051abd6a69bb7f217c4
+  checksum: 10c0/f4cc628816a858416f91c2b47d6a13c3f8a833f4c377feb5d26e0884600fb72377983bae0321df2dc82fa318c0bd70a166d31f85f53b66c3f92f8477d5073a9d
   languageName: node
   linkType: hard
 
-"@safe-global/safe-modules-deployments@npm:^2.2.21":
-  version: 2.2.25
-  resolution: "@safe-global/safe-modules-deployments@npm:2.2.25"
-  checksum: 10c0/9b060af337473e585eebb3f55f8e56b37987272a896637c0713892a7cd7882f94ec709073028c419e130a6681d294cd99c21f3345f136d1b06e47b7908d169af
+"@safe-global/safe-modules-deployments@npm:^3.0.4":
+  version: 3.0.4
+  resolution: "@safe-global/safe-modules-deployments@npm:3.0.4"
+  checksum: 10c0/fc5439165b8e56445d0cc1027ce3db9177895f4df1868ab9e948c2467e7e0161aafce73b0e5c34cd909c56a8d82e587aa712df6e92b54f4a623060e0c6331e08
   languageName: node
   linkType: hard
 
-"@safe-global/types-kit@npm:^3.0.0":
+"@safe-global/types-kit@npm:^3.0.0, @safe-global/types-kit@npm:^3.1.0":
   version: 3.1.0
   resolution: "@safe-global/types-kit@npm:3.1.0"
   dependencies:

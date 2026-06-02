@@ -188,6 +188,17 @@ export async function initPredictedSafe(opts: {
         owners: opts.owners,
         threshold: opts.threshold,
       },
+      // Pin Safe 1.3.0 explicitly. protocol-kit v7 changed the DEFAULT Safe
+      // contract version 1.3.0 -> 1.4.1; the operator Safe is registered as the
+      // OLAS service multisig, and OLAS GnosisSafeSameAddressMultisig enforces
+      // keccak256(proxy.code) == an immutable proxyHash set for the 1.3.0
+      // GnosisSafeProxy. A 1.4.1 SafeProxy has different runtime bytecode, so an
+      // unpinned v7 default would deploy 1.4.1 and revert `service_deployed`
+      // with UnauthorizedMultisig. Pinning preserves the proven Phase-0/1a path.
+      // (jinn-mono#963; tx-retry.ts also assumes 1.3.0 GS013 revert wrapping.)
+      safeDeploymentConfig: {
+        safeVersion: '1.3.0',
+      },
     },
   });
 
