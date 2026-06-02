@@ -32,9 +32,12 @@ import { makePauseSession } from '../src/dispatcher/pause-session.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
+import type { ProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
 import { gateOrRun, isSkipped } from '../src/dispatcher/rate-limit-guard.js';
+import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
+import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
-import type { DispatcherConfig, ReadyIssue } from '../src/dispatcher/types.js';
+import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult } from '../src/dispatcher/types.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
@@ -148,6 +151,17 @@ function printReport(report: CycleReport, label: string): void {
     console.log('   drift: (none)');
   }
 
+  if (report.collected.length > 0) {
+    const rendered = report.collected
+      .map((c) =>
+        c.outcome === 'pr-opened'
+          ? `#${c.issueNumber}→PR#${c.prNumber ?? '?'}`
+          : `#${c.issueNumber}→escalated`,
+      )
+      .join(', ');
+    console.log(`   collected: ${rendered}`);
+  }
+
   console.log('─'.repeat(60));
 }
 
@@ -207,6 +221,10 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       countOpenReadyPrs,
       wallClock,
       pauseSession: dryPauseSession,
+      // Dry-run: no cross-cycle memory and no sink calls (mutation-free,
+      // consistent with dryDispatch / dryPauseSession). (#489)
+      prevInFlight: [],
+      collectCompletions: async () => [],
     });
 
     printReport(report, 'Cycle report (DRY RUN — no mutations)');
@@ -280,6 +298,76 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
   };
   const firstDelay = await runOnce();
   scheduleNext(firstDelay);
+// makeCollectCompletions — the concrete finished-session classifier (#489)
+//
+// `loop.ts` stays gh/git-free: it hands the previous + current in-flight sets
+// to this dep, which diffs them, classifies each finished session from
+// authoritative external state (the per-cycle ProjectSnapshot), recovers the
+// PR number for In-Review issues via `gh pr list --head <branch>`, and hands
+// each SessionResult to the DeliverySink. Exported for unit testing (mirrors
+// `runDryRun` / `runReviewPass`).
+//
+// A session "finished" iff it was in `prev` but not in `current`. It leaves
+// the in-flight set either by transitioning to "In Review" (⇒ pr-opened) or by
+// any other off-"In Progress" move, e.g. "Blocked on: Human" (⇒ escalated).
+// Each session's body is wrapped so one classifier failure cannot stop the
+// rest from being collected (mirrors the review-pass error isolation).
+// ---------------------------------------------------------------------------
+
+export function makeCollectCompletions(
+  snapshot: ProjectSnapshot,
+  runner: CommandRunner,
+  sink: DeliverySink,
+): (prev: InFlightSession[], current: InFlightSession[]) => Promise<SessionResult[]> {
+  return async (prev, current) => {
+    const currentNumbers = new Set(current.map((s) => s.issueNumber));
+    const finished = prev.filter((s) => !currentNumbers.has(s.issueNumber));
+
+    const results: SessionResult[] = [];
+    for (const session of finished) {
+      try {
+        const item = snapshot.items.find(
+          (i) => i.contentType === 'Issue' && i.number === session.issueNumber,
+        );
+
+        let result: SessionResult;
+        if (item?.status === 'In Review') {
+          // PR-opened: recover the PR number from the head branch. `gh pr list`
+          // is REST — it does not consume the GraphQL budget the gate guards.
+          let prNumber: number | undefined;
+          try {
+            const raw = await runner('gh', [
+              'pr', 'list',
+              '--repo', REPO,
+              '--head', session.branch,
+              '--state', 'open',
+              '--json', 'number',
+            ]);
+            const prs = JSON.parse(raw) as Array<{ number: number }>;
+            prNumber = prs[0]?.number;
+          } catch (err) {
+            console.error(
+              `[eng:loop] could not look up PR for #${session.issueNumber} (${session.branch}):`,
+              err,
+            );
+          }
+          result = { issueNumber: session.issueNumber, outcome: 'pr-opened', prNumber };
+        } else {
+          // Left "In Progress" without reaching "In Review" — treat as escalated.
+          result = { issueNumber: session.issueNumber, outcome: 'escalated' };
+        }
+
+        await sink.collect(result);
+        results.push(result);
+      } catch (err) {
+        console.error(
+          `[eng:loop] collectCompletions error for #${session.issueNumber} (continuing):`,
+          err,
+        );
+      }
+    }
+    return results;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +430,11 @@ async function main(): Promise<void> {
 
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
-  // TODO: wire GhPrSink.collect once session-completion detection exists
+
+  // Cross-cycle memory of the in-flight set (#489). The orchestrator owns this
+  // so `loop.ts` stays pure. Empty on the first cycle; losing it on restart
+  // costs at most one un-collected log line, not a correctness bug.
+  let previousInFlight: InFlightSession[] = [];
 
   if (isDryRun) {
     // Dry-run intentionally skips the field-id cache + makePauseSession + any
@@ -419,6 +511,12 @@ async function main(): Promise<void> {
       // `gh project item-list` call per pause.
       const pauseSessionForCycle = makePauseSession(snapshot, cycleFieldCache, realRunner);
 
+      // Derive the in-flight set once and reuse it (a) inside the cycle via the
+      // injected closure and (b) as next cycle's `previousInFlight` for the
+      // finished-session diff (#489). Computing it here avoids a second
+      // board+worktree walk.
+      const { inFlight, drift } = await deriveInFlight(snapshot, realRunner);
+
       // Allow operators to override the rate-limit floor via env (mainly for
       // testing the gate). ENG_LOOP_RATELIMIT_FLOOR=4999 forces the gate to
       // trip on the next cycle for verification.
@@ -430,7 +528,7 @@ async function main(): Promise<void> {
       const result = await gateOrRun(snapshot, {
         source,
         cfg,
-        deriveInFlight: () => deriveInFlight(snapshot, realRunner),
+        deriveInFlight: () => Promise.resolve({ inFlight, drift }),
         dispatchIssue: (issue) =>
           dispatchIssue(issue, cfg, {
             runner: realRunner,
@@ -446,16 +544,28 @@ async function main(): Promise<void> {
         countOpenReadyPrs,
         wallClock,
         pauseSession: pauseSessionForCycle,
+        prevInFlight: previousInFlight,
+        collectCompletions: makeCollectCompletions(
+          snapshot,
+          realRunner,
+          new GhPrSink(realRunner),
+        ),
       }, floorOverride != null ? { floor: floorOverride } : undefined);
 
       if (isSkipped(result)) {
         console.log(
           `[eng:loop] gh budget low (${result.remaining}); skipping until reset (+${result.sleepMs}ms)`,
         );
+        // Gate skipped — no cycle ran, so the in-flight set was not acted on.
+        // Leave `previousInFlight` unchanged so the next live cycle still sees
+        // the correct baseline for its finished-session diff. (#489)
         return result.sleepMs;
       }
 
       printReport(result, 'Cycle report');
+      // Live cycle ran: this cycle's in-flight set becomes next cycle's
+      // baseline for the finished-session diff. (#489)
+      previousInFlight = inFlight;
       try {
         await runReviewPass(cfg, realRunner);
       } catch (err) {

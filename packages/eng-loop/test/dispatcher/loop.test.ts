@@ -8,6 +8,7 @@ import type {
   ReadyIssue,
   InFlightSession,
   DispatcherConfig,
+  SessionResult,
 } from '../../src/dispatcher/types.js';
 import type { IssueSource } from '../../src/dispatcher/issue-source.js';
 import type { ProjectSnapshot } from '../../src/dispatcher/project-snapshot.js';
@@ -105,6 +106,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     expect(report.dispatched).toEqual([101, 102, 103]);
@@ -141,6 +144,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     // Budget = 3 - 2 = 1; only top-priority (101) is dispatched
@@ -173,6 +178,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     expect(report.dispatched).toEqual([]);
@@ -202,6 +209,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(6), // over threshold
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     expect(report.dispatched).toEqual([]);
@@ -225,6 +234,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     expect(report.drift).toHaveLength(1);
@@ -254,6 +265,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     // Only 102 should be dispatched; 101 is in-flight (budget = 3-1 = 2, but only 1 ready)
@@ -286,6 +299,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock,
       pauseSession,
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     // pauseSession must be called for the expired session
@@ -317,6 +332,8 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock: makeNeverExpiredClock(),
       pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     expect(report.dispatched).toEqual([]);
@@ -343,9 +360,118 @@ describe('runCycle', () => {
       countOpenReadyPrs: vi.fn().mockResolvedValue(0),
       wallClock,
       pauseSession,
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
     });
 
     expect(pauseSession).not.toHaveBeenCalled();
     expect(report.paused).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finished-session detection (#489): the previous-vs-current in-flight diff is
+// classified by the injected `collectCompletions` dep; `runCycle` hands it the
+// full prev + current sets and surfaces the result in `report.collected`.
+// ---------------------------------------------------------------------------
+
+describe('runCycle — collectCompletions / report.collected', () => {
+  it('calls collectCompletions with (prev, current) and surfaces its result', async () => {
+    const source = makeSource([]);
+    const cfg = makeCfg();
+
+    // 102 still running; 101 finished (in prev, not in current).
+    const current = [makeInFlight(102)];
+    const prev = [makeInFlight(101), makeInFlight(102)];
+    const collected: SessionResult[] = [
+      { issueNumber: 101, outcome: 'pr-opened', prNumber: 900 },
+    ];
+    const collectCompletions = vi.fn().mockResolvedValue(collected);
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: current, drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: prev,
+      collectCompletions,
+    });
+
+    expect(collectCompletions).toHaveBeenCalledOnce();
+    const [prevArg, currentArg] = collectCompletions.mock.calls[0];
+    expect(prevArg.map((s: InFlightSession) => s.issueNumber).sort()).toEqual([101, 102]);
+    expect(currentArg.map((s: InFlightSession) => s.issueNumber)).toEqual([102]);
+    expect(report.collected).toEqual(collected);
+  });
+
+  it('reports collected:[] when the in-flight set is unchanged', async () => {
+    const source = makeSource([]);
+    const cfg = makeCfg();
+    const same = [makeInFlight(102)];
+    const collectCompletions = vi.fn().mockResolvedValue([]);
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: same, drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [makeInFlight(102)],
+      collectCompletions,
+    });
+
+    expect(collectCompletions).toHaveBeenCalledOnce();
+    expect(report.collected).toEqual([]);
+  });
+
+  it('reports collected:[] on the first cycle (prevInFlight empty)', async () => {
+    const source = makeSource([]);
+    const cfg = makeCfg();
+    const collectCompletions = vi.fn().mockResolvedValue([]);
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [makeInFlight(102)], drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions,
+    });
+
+    expect(report.collected).toEqual([]);
+  });
+
+  it('still collects completions even when backpressure is tripped', async () => {
+    const source = makeSource([makePolled({ number: 101 })]);
+    const cfg = makeCfg({ openPrBackpressure: 5 });
+
+    const collected: SessionResult[] = [
+      { issueNumber: 101, outcome: 'escalated' },
+    ];
+    const collectCompletions = vi.fn().mockResolvedValue(collected);
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source,
+      cfg,
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(6), // over threshold → backpressure
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [makeInFlight(101)],
+      collectCompletions,
+    });
+
+    expect(report.backpressureTripped).toBe(true);
+    expect(collectCompletions).toHaveBeenCalledOnce();
+    expect(report.collected).toEqual(collected);
   });
 });

@@ -1,7 +1,7 @@
 import type { IssueSource } from './issue-source.js';
 import type { ProjectSnapshot } from './project-snapshot.js';
 import { toIssueBoardState } from './project-snapshot.js';
-import type { DispatcherConfig, InFlightSession, ReadyIssue } from './types.js';
+import type { DispatcherConfig, InFlightSession, ReadyIssue, SessionResult } from './types.js';
 import type { WallClock } from './wall-clock.js';
 import { selectReady, type SkippedForAuthor } from './ready-filter.js';
 import { concurrencyOk, backpressureOk } from './throttles.js';
@@ -32,6 +32,13 @@ export interface CycleReport {
    * diagnose misconfigurations from the log alone.
    */
   skippedForAuthor: SkippedForAuthor[];
+  /**
+   * Sessions that finished this cycle (left the in-flight set), classified
+   * into `pr-opened` / `escalated` and already handed to the DeliverySink by
+   * the injected `collectCompletions` dep (#489). Surfaced here for the
+   * operator log only — the sink has already recorded each result.
+   */
+  collected: SessionResult[];
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +76,25 @@ export interface CycleDeps {
    * Injected so loop.ts stays gh-free.
    */
   pauseSession(issueNumber: number): Promise<void>;
+  /**
+   * The in-flight set as derived on the *previous* cycle. The orchestrator
+   * (`scripts/run-eng-loop.ts`) owns this cross-cycle memory so `loop.ts`
+   * stays pure (no gh/git, no mutable module state). Empty on the first
+   * cycle. Losing it on restart costs at most one un-collected log line, not
+   * a correctness bug — dispatch stays crash-safe. (#489)
+   */
+  prevInFlight: InFlightSession[];
+  /**
+   * Classify the sessions that finished this cycle and hand each to the
+   * DeliverySink. Receives the FULL previous and current in-flight sets;
+   * the concrete dep computes the difference itself (it needs each finished
+   * session's retained `branch` to recover the PR). Injected so loop.ts
+   * stays gh/git-free. (#489)
+   */
+  collectCompletions(
+    prev: InFlightSession[],
+    current: InFlightSession[],
+  ): Promise<SessionResult[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +121,17 @@ export async function runCycle(
   snapshot: ProjectSnapshot,
   deps: CycleDeps,
 ): Promise<CycleReport> {
-  const { source, cfg, deriveInFlight, dispatchIssue, countOpenReadyPrs, wallClock, pauseSession } = deps;
+  const {
+    source,
+    cfg,
+    deriveInFlight,
+    dispatchIssue,
+    countOpenReadyPrs,
+    wallClock,
+    pauseSession,
+    prevInFlight,
+    collectCompletions,
+  } = deps;
 
   // 1. Poll + derive in-flight in parallel. The IssueSource sees only the
   //    abstract IssueBoardState (#600); the full snapshot stays here for
@@ -105,6 +141,13 @@ export async function runCycle(
     deriveInFlight(),
     countOpenReadyPrs(),
   ]);
+
+  // 1b. Detect finished sessions (#489): hand the previous + current in-flight
+  //     sets to the injected classifier, which diffs them, classifies each
+  //     finished session, and hands the result to the DeliverySink. We pass
+  //     both full sets — the concrete dep needs each finished session's
+  //     retained `branch` to recover the PR, so the diff lives there, not here.
+  const collected = await collectCompletions(prevInFlight, inFlight);
 
   // 2. Wall-clock circuit-breaker (spec §4): pause any in-flight session that
   //    has exceeded its ceiling. Paused sessions keep their concurrency slot —
@@ -139,6 +182,9 @@ export async function runCycle(
       paused,
       // Author-skips happen regardless of backpressure; surface them either way.
       skippedForAuthor,
+      // Completions are detected before the backpressure gate — surface them
+      // even when no new work is dispatched this cycle. (#489)
+      collected,
     };
   }
 
@@ -164,5 +210,6 @@ export async function runCycle(
     backpressureTripped: false,
     paused,
     skippedForAuthor,
+    collected,
   };
 }

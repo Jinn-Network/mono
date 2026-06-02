@@ -1,6 +1,9 @@
 import type { SessionResult } from './types.js';
 import { type CommandRunner, defaultRunner } from './issue-source.js';
 
+// Pin the repo so `gh` never infers it from cwd (mirrors pr-source.ts).
+const REPO = 'Jinn-Network/mono';
+
 /**
  * SEAM: what happens to finished work.
  * Local implementation records the GitHub PR / escalation; the future
@@ -37,6 +40,7 @@ export class GhPrSink implements DeliverySink {
       try {
         const raw = await this.run('gh', [
           'pr', 'view', String(result.prNumber),
+          '--repo', REPO,
           '--json', 'number,state,title',
         ]);
         const pr = JSON.parse(raw) as { number: number; state: string; title: string };

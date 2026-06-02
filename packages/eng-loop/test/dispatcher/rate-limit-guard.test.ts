@@ -30,6 +30,7 @@ function buildReport(): CycleReport {
     backpressureTripped: false,
     paused: [],
     skippedForAuthor: [],
+    collected: [],
   };
 }
 
@@ -43,6 +44,8 @@ function buildDeps(): CycleDeps {
     countOpenReadyPrs: vi.fn(),
     wallClock: new WallClock(DEFAULT_CONFIG.wallClockMs, () => 0),
     pauseSession: vi.fn(),
+    prevInFlight: [],
+    collectCompletions: vi.fn(),
   };
 }
 
