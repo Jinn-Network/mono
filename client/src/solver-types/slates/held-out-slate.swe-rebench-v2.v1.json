@@ -1,0 +1,20 @@
+{
+  "comment": "HELD-OUT EVAL SLATE (issue #817). These swe-rebench-v2 instance_ids are RESERVED out of the training pool: the generator excludes them so they never enter the train stream, and the eval orchestrator scores solvers against them out-of-sample. Each id is gold-patch-VALIDATED (scorable=true / gold-patch-resolves) at evalSemanticsVersion 3, per the validation gate `validatePoolInstances` / `filterToScorablePool` in _swe-rebench-v2-validated-pool.ts — the same standard the train-stream generator enforces. They are NOT raw-sampled from a candidate seed pool: a raw sample admits ungradeable instances (gold patch does not resolve in the eval env), making the exam denominator measure noise. The slate's gradeability is bound to evalSemanticsVersion 3; an eval-semantics bump invalidates these validations and requires re-validating against the new semantics and cutting a distinct slate version (v2, ...). Content-addressed: `hash` is sha256 over the canonical, instanceIds-sorted artifact (see _swe-rebench-v2-held-out-slate.ts). Scores are only comparable WITHIN this version; a slate change is a distinct version, never an in-place edit.",
+  "schemaVersion": "held-out-slate.v1",
+  "solverType": "swe-rebench-v2.v1",
+  "version": "v1",
+  "generatedAt": "2026-05-29T00:00:00.000Z",
+  "hash": "sha256:2b029de15e271d5d2de35fe6477af98aef9fdc46f357e59139179edab1a42b15",
+  "instanceIds": [
+    "ASPP__pelita-863",
+    "ASPP__pelita-875",
+    "AbsaOSS__generate-release-notes-207",
+    "All-Hands-AI__OpenHands-11914",
+    "BQSKit__bqskit-337",
+    "BerriAI__litellm-14715",
+    "BerriAI__litellm-15753",
+    "BrianPugh__cyclopts-609",
+    "carsdotcom__skelebot-280",
+    "pandas-dev__pandas-60736"
+  ]
+}

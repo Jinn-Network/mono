@@ -46,6 +46,10 @@ import {
   type SolverNetArtifactRef,
 } from './_swe-rebench-v2-validated-pool.js';
 import {
+  loadHeldOutSlate,
+  excludeHeldOutSlate,
+} from './_swe-rebench-v2-held-out-slate.js';
+import {
   buildHistoricalPool,
   fetchHfSplit,
   listMonthlyPartitions,
@@ -56,6 +60,10 @@ import { PoolCacheStore, loadPoolWithCacheFallback } from './_swe-rebench-v2-poo
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
+// Held-out eval slate version excluded from the train stream (issue #817).
+// Bump this one line when a new slate is reserved; scores are only compared
+// within a version, so the bump records a distinct version.
+const SLATE_VERSION = 'v1';
 const CONTRACT_ID = 'swe-rebench-v2';
 const CONTRACT_VERSION = 'v1';
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
@@ -408,6 +416,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let poolFromCache = false;
   let floorWarned = false;
   let publicationWarned = false;
+  let slateWarned = false;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
   let lastPollSummary: SweRebenchV2GeneratorStateSnapshot['lastPollSummary'];
@@ -542,11 +551,26 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       : genConfig.admissionMode === 'python-floor'
         ? await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION)
         : null;
-    const { pool: eligiblePool, mode: poolMode } = filterToScorablePool(
+    const { pool: scorablePool, mode: poolMode } = filterToScorablePool(
       pool,
       scorableIds,
       genConfig.admissionMode,
     );
+    // Held-out eval slate exclusion (issue #817 AC#2). The generator is the
+    // single train-stream chokepoint, so dropping slate instances here means
+    // they are never posted, never claimable, and never train. The slate is
+    // content-addressed and fails loud on hash mismatch at load.
+    const slateExcludedBefore = scorablePool.length;
+    const eligiblePool = excludeHeldOutSlate(
+      scorablePool,
+      loadHeldOutSlate(SOLVER_TYPE, SLATE_VERSION).instanceIds,
+    );
+    if (eligiblePool.length < slateExcludedBefore && !slateWarned) {
+      slateWarned = true;
+      console.warn(
+        `[swe-rebench-v2-gen] held-out slate ${SLATE_VERSION}: excluded ${slateExcludedBefore - eligiblePool.length} reserved instance(s) from the train stream.`,
+      );
+    }
     if (poolMode === 'admission-required-no-data' && !floorWarned) {
       floorWarned = true;
       console.warn(
@@ -791,6 +815,7 @@ export const sweRebenchV2: SolverTypeDefinition<SweRebenchV2AutoConfig> = {
     };
   },
   buildGenerator: (config) => makeSweRebenchV2Generator(config),
+  loadHeldOutSlate: (version) => loadHeldOutSlate(SOLVER_TYPE, version),
   getTestnetAutoConfig: (ctx) => {
     if (ctx.network !== 'testnet') return undefined;
     // Only activate when explicitly opted in via env flag

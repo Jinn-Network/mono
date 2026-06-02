@@ -12,6 +12,7 @@ import {
   makeSweRebenchV2GeneratorForLaunchedRecord,
   getSweRebenchV2StateStore,
 } from '../../src/solver-types/swe-rebench-v2.js';
+import { loadHeldOutSlate } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { DiscoveryAPI } from '../../src/discovery/types.js';
 import type { Task } from '../../src/types/task.js';
@@ -382,6 +383,73 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — claim-exhaustion repost
     expect(result).toBeNull(); // aborted, nothing posted
     expect(g.getState().lastError?.message).toContain('claim-budget reconciliation failed');
     expect(g.getState().lastPollSummary).toMatchObject({ posted: 0 });
+    fetchSpy.mockRestore();
+  });
+});
+
+// Generator-level guard for the held-out slate exclusion (#817 AC#2). The unit
+// test for excludeHeldOutSlate proves the helper; this proves it is WIRED into
+// the generator tick — seed a pool with a real slate instance_id plus a
+// non-slate id, run the tick, and assert only the non-slate id is ever posted.
+// Deleting the exclusion call in swe-rebench-v2.ts fails this test.
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — held-out slate exclusion (#817 AC#2)', () => {
+  function stubDiscovery(): DiscoveryAPI {
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
+    return {
+      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
+      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed, listPluginPublications: notUsed,
+      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
+    } as DiscoveryAPI;
+  }
+
+  it('never posts a slate instance_id while a non-slate id is eligible', async () => {
+    // A genuine reserved id from the shipped v1 slate — production SOLVER_TYPE /
+    // SLATE_VERSION resolve to this same slate inside the generator.
+    const slate = loadHeldOutSlate('swe-rebench-v2.v1', 'v1');
+    const slateId = [...slate.instanceIds][0]!;
+    const eligibleId = 'not-in__slate-1';
+
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-817-'));
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, 'pool-cache.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-pool-cache.v1',
+        savedAt: new Date().toISOString(),
+        tasks: [
+          {
+            instance_id: slateId, language: 'python',
+            hf_dataset: 'nebius/SWE-rebench-leaderboard', hf_split: '2024_12',
+            base_commit: '0000000000000000000000000000000000000000',
+          },
+          {
+            instance_id: eligibleId, language: 'python',
+            hf_dataset: 'nebius/SWE-rebench-leaderboard', hf_split: '2024_12',
+            base_commit: '0000000000000000000000000000000000000000',
+          },
+        ],
+      }),
+    );
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('HF unreachable in test sandbox'));
+
+    const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
+      recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy817' }) },
+      configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
+      staticConfig: { stateDir, discoveryApi: stubDiscovery() },
+    });
+
+    const result = await gen();
+
+    const postedIds = (result as Task[] | null)?.map((t) => (t.spec as { instance_id: string }).instance_id) ?? [];
+    expect(postedIds).not.toContain(slateId);
+    expect(postedIds).toContain(eligibleId);
+
     fetchSpy.mockRestore();
   });
 });

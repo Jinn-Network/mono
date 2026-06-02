@@ -4,6 +4,7 @@
  */
 
 import type { TaskGenerator } from '../tasks/sources.js';
+import type { LoadedHeldOutSlate } from './_swe-rebench-v2-held-out-slate.js';
 
 /** Overlay fields merged into Task when posting from --spec-file. */
 export type ParsedSpecOverlay = {
@@ -51,5 +52,12 @@ export interface SolverTypeDefinition<GenConfig = unknown> {
    * Return `undefined` to skip (default for kinds without auto-gen or not enabled on testnet).
    */
   getTestnetAutoConfig?: (ctx: TestnetAutoContext) => GenConfig | undefined;
+  /**
+   * Load this SolverType's held-out eval slate at `version` (issue #817).
+   * Optional so a future eval orchestrator can compose over SolverTypes that
+   * define a slate; SolverTypes without one omit it. The slate is
+   * content-addressed and throws on hash mismatch or unknown version.
+   */
+  loadHeldOutSlate?: (version: string) => LoadedHeldOutSlate;
   ui?: { description: string; category: string };
 }
