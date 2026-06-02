@@ -236,6 +236,11 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
     const env = buildAgentEnv({
       IMPL_STATE_DIR: inputs.implStateDir,
+      // Mode reaches the SessionStart hook so its steer is mode-aware: in `train`
+      // it steers the full learn loop (persist lessons); in `frozen` it must NOT
+      // (any implStateDir write trips the freeze-fence → the held-out eval aborts).
+      // Default 'train' (the daemon's normal restoration path).
+      JINN_HARNESS_MODE: inputs.mode ?? 'train',
       WORKING_DIR: inputs.workingDir,
       JINN_WORKING_DIR: inputs.workingDir,
       JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT: pluginRoot,

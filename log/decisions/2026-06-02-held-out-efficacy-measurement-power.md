@@ -155,6 +155,43 @@ slope +0.2500/cycle · disjoint(trustworthy)? FALSE
 Same codeDigest at both intervals (no persistence under the production prompt) ⇒
 the "improvement" is stochastic noise; the exam correctly called it within-noise.
 
+### §3b — POST-FIX rerun (mode-aware steer hook applied) — the cycle closed
+
+Re-ran `e2e:train-arm-efficacy` WITH the steer hook applied (slate `v1-sub2` =
+{cyclopts-609 ceiling, generate-release-notes-207 headroom}; train = {cyclopts-633,
+cyclopts-701}; K=2; `JINN_EVAL_DISK_FLOOR_GB=40`, small-repos-only). This required
+a **mode-aware** hook (§6a) — the train-only steer would otherwise drive the learn
+loop during the FROZEN eval and trip the freeze-fence.
+
+```
+cycle 0 (baseline): codeDigest e3b0c442…(empty)  1/2 = 50.0% [9.5, 90.5] (0 unscorable)
+train cyclopts-633: codeDigest MUTATED e3b0c442→687bcbdc   train cyclopts-701: UNCHANGED
+cycle 2 (after):    codeDigest 687bcbdc…(ADVANCED)  1/2 = 50.0% [9.5, 90.5] (0 unscorable)
+slope 0.0/cycle · marginal disjoint? FALSE · PAIRED McNemar 0↑/0↓ p=1.000 within-noise
+  (concordantPass=1 cyclopts-609, concordantFail=1 generate-release-notes-207, 0 excluded)
+```
+
+What changed vs §3-efficacy, and why it matters:
+- **The policy genuinely advanced** (`codeDigest` e3b0c442→687bcbdc; cycle-633
+  persisted real learning in the FULL harness, not just the standalone probe). The
+  after-eval ran on a DIFFERENT, learned policy — no longer the pre-fix confound of
+  an identical empty codeDigest. (Persistence is still per-cycle stochastic: 633
+  persisted, 701 did not — net advance, but not 2/2 this run.)
+- **The frozen evals ran clean: 0 violations** across baseline + after — the
+  mode-aware hook (§6a) is validated end-to-end on the held-out exam.
+- **Still within-noise, now for legitimate reasons**, not a measurement artifact:
+  N=2 is statistically powerless (power table §5: N≤3 can never be disjoint), the
+  ceiling instance stayed pass and the single headroom instance stayed fail (the
+  cyclopts code-path/union-dedup lesson did not transfer to a different repo's bug
+  — cross-task transfer from one disjoint lesson is a high bar). The exam correctly
+  returned within-noise on a REAL policy change.
+- **Safe:** real inference + Docker, disk flat 60–64 GB, no crash — validating the
+  small-repo + disk-floor mitigation (§4/§7).
+
+This closes the diagnose→fix→rerun cycle: the fix works (policy advances, frozen
+eval clean, leverages learned state), and efficacy is still not demonstrable in
+this environment for the §5/§4 power+hardware reasons — not a learner failure.
+
 ## §4 — Operational finding: full slate is infeasible on an operator laptop (and crashed it)
 
 Real baseline attempt, one instance at a time (before the crash): cyclopts-609 ✓
@@ -233,6 +270,25 @@ already-fixed, not-yet-merged** plumbing gap, identified mid-session:
   gated by `allowsHarnessSelfModification=false`. The blocker was *triggering the
   pipeline*, not a missing durable sink.
 
+## §6a — New finding: the steer hook (fbea4aad) breaks the FROZEN exam; needs mode-awareness
+
+`fbea4aad` was built for the production daemon (TRAIN mode); it is **mode-blind**
+and would break the held-out exam (FROZEN). The hook fires on every SessionStart
+and steers "your FIRST action MUST be to run the full 7-phase learn loop … persist
+to implStateDir." In frozen mode the harness freeze-fences implStateDir, so the
+Improve/Memory writes trip the fence → `FreezeFenceViolationError` → the eval
+aborts. Confirmed root: the adapter passes `IMPL_STATE_DIR` to the hook env but
+NOT the mode (mode reaches only `buildInitialPrompt`).
+
+**Fix shipped (this session):** the adapter now passes `JINN_HARNESS_MODE` to the
+hook env, and the hook branches — TRAIN keeps the learn-loop steer; FROZEN emits a
+read-only steer ("CONSULT accumulated implStateDir knowledge, solve, submit; do NOT
+run the loop or modify implStateDir"), which both avoids the violation AND is how
+prior learning should raise the frozen score. Verified: the §3b post-fix rerun ran
+baseline + after frozen evals with **0 violations**. (If lifting fbea4aad onto
+`next` per §7.1, carry this mode-awareness — the bare fbea4aad hook is unsafe for
+the exam.)
+
 ## §7 — Scoped follow-ups (the path to an actual efficacy proof)
 
 1. **`feat(learner)` — land the steer hook on `next` (the unblocker, mostly done).**
@@ -281,8 +337,19 @@ baseline↔final). **It is reported ALONGSIDE the marginal verdict, never replac
 it** — a strengthening, gated on significance (p<α) AND improvement direction, so
 the exam is never weakened. typecheck / 54 eval tests / `e2e:freeze-mode` green.
 
-**3. Pulled the steer hook into the worktree** (`fbea4aad`'s `session-start`) to
-re-verify Problem 1 under the production prompt (§6).
+**3. Pulled + mode-hardened the steer hook** (`fbea4aad`'s `session-start`) to
+re-verify Problem 1 under the production prompt (§6) AND made it **mode-aware**
+(§6a): the adapter now passes `JINN_HARNESS_MODE` and the hook steers the learn
+loop only in TRAIN; in FROZEN it steers read-only (consult, don't write) so the
+held-out exam doesn't trip the freeze-fence. Without this, the bare train-only hook
+breaks the frozen eval.
+
+**4. Closed the diagnose→fix→rerun loop (§3b).** Re-ran `e2e:train-arm-efficacy`
+with the (mode-aware) hook on a small-repo slate: `codeDigest` genuinely advanced
+across training (e3b0c442→687bcbdc), frozen evals ran with 0 violations, and the
+exam returned within-noise on the REAL advanced policy (N=2 powerless + no transfer
+to the lone headroom instance) — not the pre-fix zero-policy-change confound. Real
+inference + Docker, disk flat 60–64 GB, no crash.
 
 ## §9 — Reproduction
 

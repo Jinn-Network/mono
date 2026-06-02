@@ -51,5 +51,17 @@ echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))" 
 # projected and available, the model kept selecting a direct-solve skill and the loop
 # ran 0% of the time. (Verified: additionalContext reaches the model in headless
 # `-p` / stream-json mode on claude 2.1.x.)
-STEER="A seven-phase self-improvement loop is available as the learn skill (claude-code-learner:learn): Orient, Strategize, Plan, Execute, Debrief, Improve, then Memory consolidation. For this session your FIRST action MUST be to invoke the learn skill (via the Skill tool) and run the full loop end-to-end, instead of solving the task directly or selecting another skill first. The Execute phase still performs the actual task work and still calls submit_typed_payload; the surrounding phases capture reusable strategy and persist it to implStateDir so future runs improve. Do not skip the loop."
+#
+# MODE-AWARE (extends the original train-only steer for the held-out exam): in
+# `frozen` mode the harness freeze-fences implStateDir, so running the learn loop's
+# Improve/Memory phases would WRITE implStateDir and trip the fence → the eval
+# aborts with a violation. The frozen steer therefore tells the model to CONSULT
+# the accumulated knowledge (read-only) and solve directly — which is exactly how
+# prior learning should raise the frozen score — and to NOT run the loop or modify
+# implStateDir. `JINN_HARNESS_MODE` is set by the harness adapter (default train).
+if [[ "${JINN_HARNESS_MODE:-train}" == "frozen" ]]; then
+  STEER="This is a FROZEN evaluation run. Before solving, CONSULT the accumulated learner knowledge under implStateDir (notes/, skills/, strategies/, patterns/, tests/) and apply any relevant strategy or pattern to this task. Then solve the task and call submit_typed_payload. Do NOT run the learn loop (no Orient/Improve/Memory phases) and do NOT create, edit, or commit anything under implStateDir — the harness verifies implStateDir is unchanged and will discard this run if it is modified."
+else
+  STEER="A seven-phase self-improvement loop is available as the learn skill (claude-code-learner:learn): Orient, Strategize, Plan, Execute, Debrief, Improve, then Memory consolidation. For this session your FIRST action MUST be to invoke the learn skill (via the Skill tool) and run the full loop end-to-end, instead of solving the task directly or selecting another skill first. The Execute phase still performs the actual task work and still calls submit_typed_payload; the surrounding phases capture reusable strategy and persist it to implStateDir so future runs improve. Do not skip the loop."
+fi
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$STEER"
