@@ -27,6 +27,7 @@
  */
 
 import type { CommandRunner } from '../dispatcher/issue-source.js';
+import { REPO } from '../dispatcher/constants.js';
 import { REVERT_SUBJECT_RE } from './reality-check.js';
 import type {
   CommitSignal,
@@ -39,8 +40,6 @@ import type {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const REPO = 'Jinn-Network/mono';
 
 /** Conventional-Commits closure keywords. Case-insensitive. */
 const CLOSE_KEYWORD_RE = (issueNumber: number): RegExp =>

@@ -1,8 +1,7 @@
 import type { CommandRunner } from './issue-source.js';
 import { defaultRunner } from './issue-source.js';
 import type { PolledPr } from './types.js';
-
-const REPO = 'Jinn-Network/mono';
+import { REPO } from './constants.js';
 
 /** SEAM: where reviewable PRs come from. Local impl polls `gh`. */
 export interface PrSource {

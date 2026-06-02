@@ -47,8 +47,6 @@ export const WORKTREES_BASE = computeWorktreesBase(REPO_ROOT);
 // `deps.fieldCache.projectId`, the same source pause-session.ts reads from —
 // keeping both call sites symmetric so a future project-id migration only
 // has to touch field-cache.ts. (Stage 5 Finding 5 on jinn-mono#599.)
-// Cross-module constant consolidation (project-snapshot.ts also has copies)
-// is a separate `chore`.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

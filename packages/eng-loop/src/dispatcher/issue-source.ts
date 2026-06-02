@@ -8,6 +8,7 @@ import type {
   Priority,
   ProjectStatus,
 } from './types.js';
+import { REPO } from './constants.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -77,12 +78,6 @@ interface GhIssue {
    */
   author?: { login?: string };
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const REPO = 'Jinn-Network/mono';
 
 // ---------------------------------------------------------------------------
 // Default real CommandRunner

@@ -16,23 +16,20 @@
  * (the full enums in `./types.ts`, not just the subset in use today).
  * `getFieldCache()` and `resetFieldCache()` are the read/clear primitives.
  *
- * The project id, owner, and number literals here duplicate the constants in
- * `dispatch.ts:39–41`. Duplication is deliberate — consolidating them is a
- * separate `chore` issue (plan §"Out of scope: constants extraction"); doing
- * it as part of #599 would expand the diff without unblocking AC.
+ * The owner and number come from `./constants.ts`; only `PROJECT_ID` remains
+ * a local literal here.
  *
  * Tracking: jinn-mono#599.
  */
 
 import type { CommandRunner } from './issue-source.js';
 import type { BlockedOn, ProjectStatus } from './types.js';
+import { ORG, PROJECT_NUMBER } from './constants.js';
 
 // ---------------------------------------------------------------------------
-// Constants — duplicated from dispatch.ts:39–41 (see header comment)
+// Constants
 // ---------------------------------------------------------------------------
 
-const PROJECT_OWNER = 'Jinn-Network';
-const PROJECT_NUMBER = '1';
 const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
 
 /** Every ProjectStatus value — used for fail-loud option validation. */
@@ -117,8 +114,8 @@ let cached: FieldCache | null = null;
  */
 export async function fetchFieldIds(runner: CommandRunner): Promise<FieldCache> {
   const raw = await runner('gh', [
-    'project', 'field-list', PROJECT_NUMBER,
-    '--owner', PROJECT_OWNER,
+    'project', 'field-list', String(PROJECT_NUMBER),
+    '--owner', ORG,
     '--format', 'json',
   ]);
   const data = JSON.parse(raw) as GhFieldListResponse;

@@ -27,6 +27,7 @@ import type {
 // the seam's abstract view. `import type` keeps this out of the emitted JS,
 // avoiding a runtime cycle between the two modules.
 import type { IssueBoardEntry, IssueBoardState } from './issue-source.js';
+import { ORG, PROJECT_NUMBER } from './constants.js';
 
 // ---------------------------------------------------------------------------
 // Helper types
@@ -231,13 +232,6 @@ export class ProjectFieldSchemaError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Internal constants
-// ---------------------------------------------------------------------------
-
-const PROJECT_OWNER = 'Jinn-Network';
-const PROJECT_NUMBER = 1;
-
 /**
  * The one lean query. Selects ONLY the fields the dispatcher actually reads,
  * plus a top-level `rateLimit` block. GitHub's complexity billing formula
@@ -259,7 +253,7 @@ const MAX_PAGES = 100;
 
 const SNAPSHOT_QUERY = `query($cursor: String) {
   rateLimit { cost remaining used resetAt }
-  organization(login: "${PROJECT_OWNER}") {
+  organization(login: "${ORG}") {
     projectV2(number: ${PROJECT_NUMBER}) {
       sprintField: field(name: "Sprint") {
         ... on ProjectV2IterationField {
