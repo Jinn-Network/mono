@@ -44,6 +44,7 @@
     "e2e:full-cycle": "yarn build:sdk && tsx test/e2e/learner-full-cycle.ts",
     "e2e:full-cycle-swe-rebench-v2": "yarn build:sdk && tsx test/e2e/learner-full-cycle-swe-rebench-v2.ts",
     "e2e:train-arm-slope": "tsx test/e2e/train-arm-slope-swe-rebench-v2.ts",
+    "e2e:train-arm-efficacy": "tsx test/e2e/train-arm-efficacy-swe-rebench-v2.ts",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",
