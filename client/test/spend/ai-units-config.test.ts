@@ -96,4 +96,25 @@ describe('buildAiUnitsConfig', () => {
     // Opus 4.7 projects ~450 units/task at the GPT-5.4-mini peg.
     expect(out?.manifestProjectedAiUnits['bafycid2']).toBeGreaterThan(100);
   });
+
+  describe('buildAiUnitsConfig — USD fields (issue #1004)', () => {
+    it('carries peg-derived USD caps and per-manifest USD projections alongside the unit fields', () => {
+      // bafycid2 (claude-code) only resolves to a credential when ~/.claude/
+      // is present on the isolated home — mirror the #901 test's setup.
+      mkdirSync(join(home, '.claude'));
+      const cfg = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+      expect(cfg).toBeDefined();
+      // Unit caps retained for the legacy (SPA-facing) surface.
+      expect(cfg!.capPerBlock).toBe(REFERENCE_CEILING.units_per_block);
+      // USD caps derived from the same peg: 100 units => $0.50 => 500_000 micros.
+      expect(cfg!.capPerBlockUsdMicros).toBe(500_000);
+      expect(cfg!.capPerWeekUsdMicros).toBe(14_000_000);
+      // Each priced paid-harness manifest gets a USD projection in micros.
+      // bafycid2 = claude-code + claude-opus-4-7 (priced) => > 0.
+      expect(cfg!.manifestProjectedUsdMicros['bafycid2']).toBeGreaterThan(0);
+      // bafycid3 = prediction-v1-baseline (no LLM) => not resolved to a
+      // credential, so it carries no projection entry at all.
+      expect(cfg!.manifestProjectedUsdMicros['bafycid3']).toBeUndefined();
+    });
+  });
 });
