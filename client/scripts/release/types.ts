@@ -24,7 +24,10 @@ const OperatorSchema = z.object({
 
 const ConfigSchema = z.object({
   apiPort: z.number().int().positive(),
-  rpcUrl: z.string().url(),
+  // string OR multi-provider fallback chain (#592). The substrate doctor
+  // (substrate-provision.ts) expects/produces the array form, so the manifest
+  // schema + downstream RPC construction must accept it too.
+  rpcUrl: z.union([z.string().url(), z.array(z.string().url()).min(1)]),
   joinedSolverNets: z.array(z.string()),
 });
 

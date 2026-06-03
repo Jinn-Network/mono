@@ -1,4 +1,5 @@
-import { createPublicClient, http, parseAbi, type Address, type Chain } from 'viem';
+import { createPublicClient, parseAbi, type Address, type Chain } from 'viem';
+import { buildFallbackTransport } from '../../src/rpc/transport.js';
 import { base, baseSepolia } from 'viem/chains';
 import { loadManifestSafe, serializeVerifyResult, type Manifest, type VerifyResult } from './types';
 import { goldPath } from './substrate-paths';
@@ -53,9 +54,12 @@ export async function verifySubstrate(opName: string, opts: VerifyOptions = {}):
     return { opName, ok: failures.length === 0, failures, warnings, onChain: null };
   }
 
+  // config.rpcUrl is string OR a multi-provider chain (#592) — build a fallback
+  // transport either way (matches the daemon; http() alone rejects an array).
+  const rpcUrls = Array.isArray(manifest.config.rpcUrl) ? manifest.config.rpcUrl : [manifest.config.rpcUrl];
   const client = createPublicClient({
     chain: chainForNetwork(manifest.network),
-    transport: http(manifest.config.rpcUrl),
+    transport: buildFallbackTransport(rpcUrls),
   });
   const onChain = {
     boundSafeAddress: null as string | null,

@@ -76,6 +76,7 @@ export function computeFaucetDripCap(input: ComputeFaucetDripCapInput): number {
 export async function requestTestnetFunding(
   address: string,
   network: 'base-sepolia',
+  token: 'eth' | 'usdc' = 'eth',
 ): Promise<FaucetResult> {
   const envApiKeyId = process.env['CDP_API_KEY_ID'];
   const envApiKeySecret = process.env['CDP_API_KEY_SECRET'];
@@ -108,7 +109,7 @@ export async function requestTestnetFunding(
     const result = await cdp.evm.requestFaucet({
       address,
       network,
-      token: 'eth',
+      token,
     });
     return { ok: true, txHash: result.transactionHash ?? String(result) };
   } catch (err) {

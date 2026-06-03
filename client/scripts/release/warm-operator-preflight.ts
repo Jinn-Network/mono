@@ -56,22 +56,30 @@ import { requestTestnetFunding } from '../../src/earning/faucet.js';
  * check below is the real funding gate.
  */
 async function faucetTopUp(jinnClientDir: string): Promise<void> {
-  let state: { master_address?: string; agent_address?: string } = {};
+  let state: { master_address?: string; agent_address?: string; safe_address?: string } = {};
   try {
     state = JSON.parse(readFileSync(path.join(jinnClientDir, 'earning', 'earning_state.json'), 'utf8'));
   } catch {
     return;
   }
-  const addrs = [state.master_address, state.agent_address].filter((a): a is string => Boolean(a));
-  for (const addr of addrs) {
+  const drip = async (addr: string, token: 'eth' | 'usdc'): Promise<void> => {
     try {
-      const r = await requestTestnetFunding(addr, 'base-sepolia');
+      const r = await requestTestnetFunding(addr, 'base-sepolia', token);
       console.error(
-        `[faucet] ${addr}: ${r.ok ? 'dripped ' + r.txHash : r.rateLimited ? 'rate-limited (24h cap)' : 'skip — ' + r.reason}`,
+        `[faucet] ${token} ${addr}: ${r.ok ? 'dripped ' + r.txHash : r.rateLimited ? 'rate-limited (24h cap)' : 'skip — ' + r.reason}`,
       );
     } catch (e) {
-      console.error(`[faucet] ${addr}: error ${e instanceof Error ? e.message : String(e)}`);
+      console.error(`[faucet] ${token} ${addr}: error ${e instanceof Error ? e.message : String(e)}`);
     }
+  };
+  // ETH gas for the master + agent EOAs.
+  for (const addr of [state.master_address, state.agent_address].filter((a): a is string => Boolean(a))) {
+    await drip(addr, 'eth');
+  }
+  // USDC on the Safe (x402 / cross-op donation scenarios — checkSubstrateTopup's
+  // USDC target is on operator.safeAddress).
+  if (state.safe_address) {
+    await drip(state.safe_address, 'usdc');
   }
 }
 

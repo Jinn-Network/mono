@@ -1,7 +1,8 @@
-import { createPublicClient, http, parseAbi, type Address } from 'viem';
+import { createPublicClient, parseAbi, type Address } from 'viem';
 import { loadManifest, type TopupResult } from './types';
 import { goldPath } from './substrate-paths';
 import { chainForNetwork } from './substrate-verify';
+import { buildFallbackTransport } from '../../src/rpc/transport.js';
 
 const TARGET_ETH_WEI = 5_000_000_000_000_000n;       // 0.005 ETH
 const TARGET_USDC_UNITS = 1_000_000n;                // 1.00 USDC (6 decimals)
@@ -15,9 +16,12 @@ export interface TopupOptions {
 export async function checkSubstrateTopup(opName: string, opts: TopupOptions = {}): Promise<TopupResult> {
   const manifest = await loadManifest(goldPath(opName, opts.substrateRoot));
 
+  // config.rpcUrl is string OR a multi-provider chain (#592) — build a fallback
+  // transport either way (http() alone rejects an array).
+  const rpcUrls = Array.isArray(manifest.config.rpcUrl) ? manifest.config.rpcUrl : [manifest.config.rpcUrl];
   const client = createPublicClient({
     chain: chainForNetwork(manifest.network),
-    transport: http(manifest.config.rpcUrl),
+    transport: buildFallbackTransport(rpcUrls),
   });
   const needs: TopupResult['needs'] = [];
 
