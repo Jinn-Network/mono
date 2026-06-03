@@ -163,6 +163,17 @@ jobs:
       - if: steps.resolve.outputs.skip != 'true'
         run: yarn install --immutable
 
+      # The tier-2 daemon-harness deploys the JinnRouterV3 stack onto its Anvil
+      # fork by compiling contracts at runtime (`yarn compile` in `contracts/` —
+      # see test/e2e/task-first-helpers.ts). `contracts/` is a SEPARATE Yarn
+      # project (its own yarn.lock), so the client install above does NOT cover
+      # it; without this the harness fails with "Couldn't find the node_modules
+      # state file" and T2.2 false-reds the gate (#1018).
+      - name: Install contracts workspace deps (for the tier-2 harness compile)
+        if: steps.resolve.outputs.skip != 'true'
+        working-directory: ${{ github.workspace }}/contracts
+        run: yarn install --immutable
+
       # Foundry: the real-harness loop spawns a local Anvil for the deterministic
       # settlement scaffolding inside the consolidated suite, and `cast` is used
       # by the top-up path. Required just like CI / npm-publish.
