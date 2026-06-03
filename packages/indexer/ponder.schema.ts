@@ -294,6 +294,20 @@ export const solverNetManifest = onchainTable(
     name: t.text().notNull().default(''),
     description: t.text().notNull().default(''),
     solverNetId: t.text().notNull().default(''),
+    // ── Full launched-SolverNet summary fields (issue #985, criterion 1) ────
+    // Additive, non-breaking. Populated by the same IPFS enrichment pass that
+    // fills name/description/solverNetId (see handlers.ts). Empty-string /
+    // empty-array defaults when enrichment hasn't landed. Per the schema-
+    // version policy above (lines 22-25), pure-additive columns do NOT bump
+    // the schema version or force a re-sync. `openRoles` mirrors the
+    // pluginPublication.supports text[] column (line 416).
+    network: t.text().notNull().default(''),
+    solutionPriceWei: t.text().notNull().default(''),
+    verdictPriceWei: t.text().notNull().default(''),
+    openRoles: t.text().array().notNull().default([]),
+    launcherSafeAddress: t.text().notNull().default(''),
+    contractId: t.text().notNull().default(''),
+    contractVersion: t.text().notNull().default(''),
     /** 'pending' | 'ok' | 'failed' — enrichment lifecycle. */
     manifestEnrichmentStatus: t.text().notNull().default('pending'),
   }),
