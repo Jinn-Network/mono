@@ -31,7 +31,7 @@ import { gateClaimBySpendCap } from './spend-cap-gate.js';
 import type { SpendCapDaemonConfig } from '../spend/daemon-config.js';
 import { gateClaimByAiUnits } from './ai-units-gate.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
-import { blockIdUtc, GPT_5_4_MINI_USD_PER_BLOCK } from '../spend/ai-units.js';
+import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 
 const DEFAULT_API_PORT = 7331;
@@ -608,10 +608,14 @@ export class Daemon {
         }
       }
 
-      // AI-units gate (issue #815): skip claims for a credential whose
-      // 6h-block or 7d-window AI-units sum + projected debit would exceed
-      // the matching cap. Layered on TOP of the spend-cap gate below — the
-      // first guard to fire skips the claim.
+      // Spend gate (issues #815, #1004): skip claims for a credential whose
+      // 6h-block or 7d-window ACTUAL USD spend + this claim's projected debit
+      // would exceed the matching USD cap. The accumulator reads
+      // actual_cost_usd_micros (delivered rows) / estimated_cost_usd_micros
+      // (in-flight), so the gate bounds real token spend, not a flat
+      // projection. For subscription credentials the USD ceiling is a *proxy*
+      // budget, not an exact bound on the provider's plan quota. Layered on
+      // top of the spend-cap gate below — the first guard to fire skips.
       let aiUnitsForRow: number | null = null;
       let estimatedCostUsdMicrosForRow: number | null = null;
       let modelForRow: string | null = null;
@@ -619,27 +623,25 @@ export class Daemon {
       if (aiUnitsCfg && manifestCid) {
         const credentialId = aiUnitsCfg.manifestCredentials[manifestCid];
         if (credentialId) {
-          const projectedAiUnits = aiUnitsCfg.manifestProjectedAiUnits[manifestCid] ?? null;
-          aiUnitsForRow = projectedAiUnits;
+          // #1006: ai_units stays on the row for the legacy unit-denominated
+          // /v1/status surface the SPA still reads. Remove when #1006 migrates.
+          aiUnitsForRow = aiUnitsCfg.manifestProjectedAiUnits[manifestCid] ?? null;
           modelForRow = aiUnitsCfg.manifestModels[manifestCid] ?? null;
-          // estimatedCostUsdMicros captured for the row (claimed/claim_failed) —
-          // computed from projectedAiUnits via the GPT-5.4-mini peg so the row's
-          // estimated_cost_usd_micros field stays meaningful even when the
-          // harness later emits no actuals.
-          if (projectedAiUnits != null) {
-            // peg-inverted: units / 100 * GPT_5_4_MINI_USD_PER_BLOCK = USD
-            // GPT_5_4_MINI_USD_PER_BLOCK is small enough to round to micros cleanly.
-            const usd = (projectedAiUnits / 100) * GPT_5_4_MINI_USD_PER_BLOCK;
-            estimatedCostUsdMicrosForRow = Math.round(usd * 1_000_000);
-          }
+          const projectedUsdMicros = aiUnitsCfg.manifestProjectedUsdMicros[manifestCid] ?? null;
+          // Capture the claim-time USD estimate on the row so the accumulator
+          // has a value to read while the claim is in flight (before the
+          // delivered actual replaces it via finalizeClaimDelivered).
+          estimatedCostUsdMicrosForRow = projectedUsdMicros;
           const now = new Date();
+          const block = this.store.usdMicrosThisBlock(credentialId, now);
+          const week = this.store.usdMicrosThisWeek(credentialId, now);
           const aiGate = gateClaimByAiUnits({
             credentialId,
-            projectedAiUnits,
-            unitsThisBlock: this.store.aiUnitsThisBlock(credentialId, now),
-            unitsThisWeek: this.store.aiUnitsThisWeek(credentialId, now),
-            capPerBlock: aiUnitsCfg.capPerBlock,
-            capPerWeek: aiUnitsCfg.capPerWeek,
+            projectedUsdMicros,
+            usdMicrosThisBlock: block.usdMicros,
+            usdMicrosThisWeek: week.usdMicros,
+            capPerBlockUsdMicros: aiUnitsCfg.capPerBlockUsdMicros,
+            capPerWeekUsdMicros: aiUnitsCfg.capPerWeekUsdMicros,
             blockId: blockIdUtc(now),
             logger: gateLogger,
             hasPersistedCapReached: (w, bid) =>

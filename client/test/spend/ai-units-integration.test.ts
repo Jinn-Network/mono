@@ -1,20 +1,21 @@
 /**
- * Integration coverage for the AI-units ceiling (issue #815):
+ * Integration coverage for the spend ceiling (issues #815, #1004):
  *
- * 1. **48h claim-trace within cap** — simulate 48h of claim rows landing
- *    against one credential, with the gate respected (no row exceeds the
- *    per-block cap). Assert both the per-block sum and the per-week sum
- *    stay within cap across the entire trace.
+ * 1. **48h claim-trace within cap** — simulate 48h of delivered claim rows
+ *    landing against one credential, with the gate respected (no row pushes
+ *    the per-block USD spend over the cap). Assert both the per-block USD sum
+ *    and the per-week USD sum stay within cap across the entire trace.
  *
- * 2. **Per-credential isolation** — when credential A's 6h block is
- *    exhausted, the gate must still proceed for credential B and for
- *    free harnesses (null credential never even hits the gate).
+ * 2. **Actual cost crosses the ceiling** — the #1004 regression: one
+ *    delivered run whose *actual* harvested cost exceeds the block cap pauses
+ *    the next claim, even though a flat projection would have read well under.
  *
- * These are not "daemon-spinning-up" tests; they exercise the pure
- * decision function (`gateClaimByAiUnits`) against real store
- * aggregations (`aiUnitsThisBlock` / `aiUnitsThisWeek`) — the same
- * code paths the daemon runs. The integration is across modules, not
- * across processes.
+ * 3. **Per-credential isolation** — when credential A's 6h block is
+ *    exhausted, the gate must still proceed for credential B.
+ *
+ * These exercise the pure decision function (`gateClaimByAiUnits`) against
+ * real store aggregations (`usdMicrosThisBlock` / `usdMicrosThisWeek`) — the
+ * same code paths the daemon runs. The integration is across modules.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,7 +26,7 @@ import {
   gateClaimByAiUnits,
   _resetAiUnitsGateMemoForTests,
 } from '../../src/daemon/ai-units-gate.js';
-import { blockIdUtc, REFERENCE_CEILING } from '../../src/spend/ai-units.js';
+import { blockIdUtc, REFERENCE_CEILING_USD_MICROS } from '../../src/spend/ai-units.js';
 
 function freshStore(): Store {
   return new Store(join(mkdtempSync(join(tmpdir(), 'ai-units-int-')), 'jinn.db'));
@@ -33,35 +34,32 @@ function freshStore(): Store {
 
 beforeEach(() => _resetAiUnitsGateMemoForTests());
 
-describe('AI-units ceiling integration', () => {
+describe('spend ceiling integration', () => {
   let store: Store;
   afterEach(() => store?.close());
 
-  it('48h claim trace stays within both per-block and per-week caps for one credential', () => {
+  it('48h trace: actual delivered USD spend stays within both USD caps for one credential', () => {
     store = freshStore();
     const credentialId = 'anthropic:api-key';
     const start = new Date('2026-05-25T00:00:00.000Z');
-    const projectedPerTask = 10; // 10 AI units per claim
+    const projectedUsdMicros = 50_000; // $0.05 projected per claim
+    const actualUsdMicros = 50_000;    // delivered actual matches projection here
     const logger = { warn: vi.fn(), info: vi.fn() };
-
-    // Walk 48 hours in 30-minute steps. At each tick, attempt a claim. If
-    // the gate skips, advance time. If the gate proceeds, persist the row
-    // with claimStatus='claimed', ai_units=projectedPerTask.
     const stepMs = 30 * 60 * 1_000;
     const totalSteps = (48 * 60) / 30;
     let claimsLanded = 0;
     let skips = 0;
     for (let i = 0; i < totalSteps; i++) {
       const now = new Date(start.getTime() + i * stepMs);
-      const unitsThisBlock = store.aiUnitsThisBlock(credentialId, now);
-      const unitsThisWeek = store.aiUnitsThisWeek(credentialId, now);
+      const block = store.usdMicrosThisBlock(credentialId, now);
+      const week = store.usdMicrosThisWeek(credentialId, now);
       const decision = gateClaimByAiUnits({
         credentialId,
-        projectedAiUnits: projectedPerTask,
-        unitsThisBlock,
-        unitsThisWeek,
-        capPerBlock: REFERENCE_CEILING.units_per_block,
-        capPerWeek: REFERENCE_CEILING.units_per_week,
+        projectedUsdMicros,
+        usdMicrosThisBlock: block.usdMicros,
+        usdMicrosThisWeek: week.usdMicros,
+        capPerBlockUsdMicros: REFERENCE_CEILING_USD_MICROS.usd_micros_per_block,
+        capPerWeekUsdMicros: REFERENCE_CEILING_USD_MICROS.usd_micros_per_week,
         blockId: blockIdUtc(now),
         logger,
       });
@@ -71,62 +69,82 @@ describe('AI-units ceiling integration', () => {
           kind: 'claimed',
           requestId: `req-${i}`,
           credentialId,
-          aiUnits: projectedPerTask,
-          claimStatus: 'claimed',
+          claimStatus: 'delivered',
+          actualCostUsdMicros: actualUsdMicros,
         });
         claimsLanded++;
       } else {
         skips++;
       }
     }
-
-    // We MUST have both landed *and* skipped — otherwise the trace did not
-    // exercise the gate at all. 10 units/claim with a 100/block cap means
-    // 10 claims per block fits; the 11th in any block must skip.
     expect(claimsLanded).toBeGreaterThan(0);
     expect(skips).toBeGreaterThan(0);
-
-    // Across the entire trace, the cumulative ai_units sum within each
-    // 6h block must never have exceeded capPerBlock. Walk each block;
-    // probe at a point inside the block (mid-block) so aiUnitsThisBlock
-    // reads the block-aligned window correctly.
     for (let b = 0; b < 8; b++) {
-      // 48h = 8 blocks. Probe at mid-block (block-start + 3h).
       const midBlock = new Date(start.getTime() + b * 6 * 60 * 60 * 1_000 + 3 * 60 * 60 * 1_000);
-      const sumInBlock = store.aiUnitsThisBlock(credentialId, midBlock);
-      expect(sumInBlock).toBeLessThanOrEqual(REFERENCE_CEILING.units_per_block);
+      expect(store.usdMicrosThisBlock(credentialId, midBlock).usdMicros).toBeLessThanOrEqual(
+        REFERENCE_CEILING_USD_MICROS.usd_micros_per_block,
+      );
     }
-
-    // Weekly cap must hold for the whole 48h trace.
     const endOfTrace = new Date(start.getTime() + 48 * 60 * 60 * 1_000);
-    expect(store.aiUnitsThisWeek(credentialId, endOfTrace)).toBeLessThanOrEqual(
-      REFERENCE_CEILING.units_per_week,
+    expect(store.usdMicrosThisWeek(credentialId, endOfTrace).usdMicros).toBeLessThanOrEqual(
+      REFERENCE_CEILING_USD_MICROS.usd_micros_per_week,
     );
   });
 
-  it('per-credential isolation: A exhausted, B and null still proceed', () => {
+  it('a high-actual-cost delivered run pushes the block over the USD ceiling and pauses the next claim', () => {
+    store = freshStore();
+    const credentialId = 'anthropic:api-key';
+    const now = new Date('2026-05-28T13:00:00.000Z');
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    // One delivered run whose ACTUAL cost ($0.60) exceeds the $0.50 block cap —
+    // a flat projection would have read well under. This is the #1004 bug.
+    store.recordActivityEvent({
+      ts: now.toISOString(),
+      kind: 'claimed',
+      requestId: 'big',
+      credentialId,
+      claimStatus: 'delivered',
+      estimatedCostUsdMicros: 50_000,
+      actualCostUsdMicros: 600_000,
+    });
+    const block = store.usdMicrosThisBlock(credentialId, now);
+    expect(block.usdMicros).toBe(600_000); // actual, not the 50_000 estimate
+    const decision = gateClaimByAiUnits({
+      credentialId,
+      projectedUsdMicros: 50_000,
+      usdMicrosThisBlock: block.usdMicros,
+      usdMicrosThisWeek: store.usdMicrosThisWeek(credentialId, now).usdMicros,
+      capPerBlockUsdMicros: REFERENCE_CEILING_USD_MICROS.usd_micros_per_block,
+      capPerWeekUsdMicros: REFERENCE_CEILING_USD_MICROS.usd_micros_per_week,
+      blockId: blockIdUtc(now),
+      logger,
+    });
+    expect(decision.proceed).toBe(false);
+  });
+
+  it('per-credential isolation: A exhausted, B still proceeds', () => {
     store = freshStore();
     const now = new Date('2026-05-28T13:00:00.000Z');
     const blockId = blockIdUtc(now);
     const logger = { warn: vi.fn(), info: vi.fn() };
 
-    // Exhaust credential A in this block (seed 100 units already booked).
+    // Exhaust credential A in this block ($0.50 already booked as actual).
     store.recordActivityEvent({
       ts: now.toISOString(),
       kind: 'claimed',
       requestId: 'A-seed',
       credentialId: 'anthropic:api-key',
-      aiUnits: 100,
-      claimStatus: 'claimed',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 500_000,
     });
 
     const decisionA = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 5,
-      unitsThisBlock: store.aiUnitsThisBlock('anthropic:api-key', now),
-      unitsThisWeek: store.aiUnitsThisWeek('anthropic:api-key', now),
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50_000,
+      usdMicrosThisBlock: store.usdMicrosThisBlock('anthropic:api-key', now).usdMicros,
+      usdMicrosThisWeek: store.usdMicrosThisWeek('anthropic:api-key', now).usdMicros,
+      capPerBlockUsdMicros: 500_000,
+      capPerWeekUsdMicros: 14_000_000,
       blockId,
       logger,
     });
@@ -134,23 +152,18 @@ describe('AI-units ceiling integration', () => {
 
     const decisionB = gateClaimByAiUnits({
       credentialId: 'openai:api-key',
-      projectedAiUnits: 5,
-      unitsThisBlock: store.aiUnitsThisBlock('openai:api-key', now),
-      unitsThisWeek: store.aiUnitsThisWeek('openai:api-key', now),
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50_000,
+      usdMicrosThisBlock: store.usdMicrosThisBlock('openai:api-key', now).usdMicros,
+      usdMicrosThisWeek: store.usdMicrosThisWeek('openai:api-key', now).usdMicros,
+      capPerBlockUsdMicros: 500_000,
+      capPerWeekUsdMicros: 14_000_000,
       blockId,
       logger,
     });
     expect(decisionB.proceed).toBe(true);
-
-    // Free harnesses (null credential) bypass the gate entirely in the
-    // daemon's loop — the gate is only invoked when manifestCid maps to
-    // a credential. We assert that path here by not calling the gate.
-    // The daemon test below covers that wiring.
   });
 
-  it('restart-safety: sum on first query after a fresh Store instance reflects on-disk rows', () => {
+  it('restart-safety: USD sum on first query after a fresh Store reflects on-disk delivered rows', () => {
     const dbPath = join(mkdtempSync(join(tmpdir(), 'ai-units-restart-')), 'jinn.db');
     {
       const s1 = new Store(dbPath);
@@ -160,15 +173,15 @@ describe('AI-units ceiling integration', () => {
         kind: 'claimed',
         requestId: 'req-1',
         credentialId: 'anthropic:api-key',
-        aiUnits: 42,
-        claimStatus: 'claimed',
+        claimStatus: 'delivered',
+        actualCostUsdMicros: 420_000,
       });
       s1.close();
     }
     // Fresh instance — no in-memory state to rebuild.
     const s2 = new Store(dbPath);
     const now = new Date('2026-05-28T13:30:00.000Z'); // same 6h block
-    expect(s2.aiUnitsThisBlock('anthropic:api-key', now)).toBe(42);
+    expect(s2.usdMicrosThisBlock('anthropic:api-key', now).usdMicros).toBe(420_000);
     s2.close();
   });
 });
