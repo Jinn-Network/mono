@@ -224,8 +224,14 @@ function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element 
       <article className="flex flex-col gap-3">
         <header className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="truncate font-mono text-[15px] font-medium text-foreground">
-              {summary.name}
+            <span
+              className={
+                summary.name
+                  ? 'truncate font-mono text-[15px] font-medium text-foreground'
+                  : 'truncate font-mono text-[15px] font-medium italic text-[var(--fg-muted)]'
+              }
+            >
+              {summary.name || 'Metadata pending'}
             </span>
             <span className="font-mono text-[12px] text-[var(--fg-muted)]">
               Launcher: {truncateAddress(summary.launcherSafeAddress)} · agentId{' '}

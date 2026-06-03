@@ -205,8 +205,13 @@ describe('RegistryCatalog', () => {
     expect(enrichedCard).toBeTruthy();
     expect(pendingCard).toBeTruthy();
 
-    // The enriched row is unaffected.
+    // The enriched row is unaffected — real name shown, not the placeholder.
     expect(enrichedCard.textContent).toContain('Prediction Markets');
+    expect(enrichedCard.textContent).not.toContain('Metadata pending');
+
+    // Degraded row: the empty name renders the operator-plain placeholder
+    // instead of a blank title span.
+    expect(pendingCard.textContent).toContain('Metadata pending');
 
     // Degraded row: '0' wei prices format as a clean "0 ETH" — never NaN /
     // undefined / scientific notation.
