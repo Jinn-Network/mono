@@ -182,7 +182,7 @@ export const DEFAULT_STATUS_PAYLOAD = {
     },
     totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
   },
-  rewards: { pendingStakingRewardsWei: '0' },
+  rewards: {},
   masterGas: { balanceWei: '0', runwayDaysExcess: '4' },
 } as const;
 

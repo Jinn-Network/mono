@@ -62,13 +62,13 @@ test('/v1/status carries no OLAS staking fields (#992)', async () => {
   expect(res.ok).toBe(true);
   const body = (await res.json()) as {
     rewards: Record<string, unknown>;
-    fleet: { services: Array<Record<string, unknown>> };
   };
   expect(body.rewards).not.toHaveProperty('pendingStakingRewardsWei');
   expect(body.rewards).not.toHaveProperty('totalStakingRewardsWei');
   expect(body.rewards).not.toHaveProperty('pendingRewardsError');
-  for (const svc of body.fleet.services) {
-    expect(svc).not.toHaveProperty('evicted');
-    expect(svc).not.toHaveProperty('evictedSince');
-  }
+  // Per-service staking-field absence (evicted / evictedSince) is not asserted
+  // here: this daemon boots with a dead RPC and no funding, so `fleet.services`
+  // is empty and the loop would be vacuous. It is covered against a populated
+  // fleet by the assembleFleetV1 / assembleStatusV1 unit tests
+  // (test/api/fleet-build.test.ts, test/api/status-build.test.ts).
 });

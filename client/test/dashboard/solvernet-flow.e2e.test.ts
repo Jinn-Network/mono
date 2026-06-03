@@ -97,7 +97,7 @@ const STATUS_PAYLOAD = {
     ],
   },
   master_address: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
-  rewards: { pendingStakingRewardsWei: '0' },
+  rewards: {},
   masterGas: { balanceWei: '5000000000000000', runwayDaysExcess: '4' },
 };
 

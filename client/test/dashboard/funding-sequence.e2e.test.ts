@@ -107,7 +107,7 @@ const STATUS_PAYLOAD = {
     },
     totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
   },
-  rewards: { pendingStakingRewardsWei: '0' },
+  rewards: {},
   masterGas: { balanceWei: '9000000000000000', runwayDaysExcess: '1' },
 };
 
