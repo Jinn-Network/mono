@@ -49,6 +49,8 @@ import {
 import {
   loadHeldOutSlate,
   excludeHeldOutSlate,
+  ACTIVE_HELD_OUT_SLATE_VERSIONS,
+  loadActiveHeldOutSlateIds,
 } from './_swe-rebench-v2-held-out-slate.js';
 import {
   buildHistoricalPool,
@@ -61,10 +63,6 @@ import { PoolCacheStore, loadPoolWithCacheFallback } from './_swe-rebench-v2-poo
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
-// Held-out eval slate version excluded from the train stream (issue #817).
-// Bump this one line when a new slate is reserved; scores are only compared
-// within a version, so the bump records a distinct version.
-const SLATE_VERSION = 'v1';
 const CONTRACT_ID = 'swe-rebench-v2';
 const CONTRACT_VERSION = 'v1';
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
@@ -657,19 +655,19 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       scorableIds,
       genConfig.admissionMode,
     );
-    // Held-out eval slate exclusion (issue #817 AC#2). The generator is the
-    // single train-stream chokepoint, so dropping slate instances here means
-    // they are never posted, never claimable, and never train. The slate is
-    // content-addressed and fails loud on hash mismatch at load.
+    // Held-out eval slate exclusion (issue #817 AC#2, #986). Exclude the UNION
+    // of active slate versions so every held-out exam stays out of the train
+    // stream while non-slate instances of every repo remain trainable.
     const slateExcludedBefore = scorablePool.length;
     const eligiblePool = excludeHeldOutSlate(
       scorablePool,
-      loadHeldOutSlate(SOLVER_TYPE, SLATE_VERSION).instanceIds,
+      loadActiveHeldOutSlateIds(SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS),
     );
     if (eligiblePool.length < slateExcludedBefore && !slateWarned) {
       slateWarned = true;
       console.warn(
-        `[swe-rebench-v2-gen] held-out slate ${SLATE_VERSION}: excluded ${slateExcludedBefore - eligiblePool.length} reserved instance(s) from the train stream.`,
+        `[swe-rebench-v2-gen] held-out slates [${ACTIVE_HELD_OUT_SLATE_VERSIONS.join(', ')}]: excluded ` +
+        `${slateExcludedBefore - eligiblePool.length} reserved instance(s) from the train stream.`,
       );
     }
     if (poolMode === 'admission-required-no-data' && !floorWarned) {

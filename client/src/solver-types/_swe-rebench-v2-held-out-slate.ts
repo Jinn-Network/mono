@@ -174,3 +174,25 @@ export function excludeHeldOutSlate(pool: PoolTask[], slateIds: Set<string>): Po
   if (slateIds.size === 0) return pool;
   return pool.filter((task) => !slateIds.has(task.instance_id));
 }
+
+/**
+ * Slate versions currently used as held-out exams. The generator excludes the
+ * UNION of these from the train stream, so every active exam stays out of
+ * training while non-slate instances of every repo remain trainable. Add a
+ * version here ONLY when its slate file exists (loadHeldOutSlate fails loud on
+ * a missing file).
+ */
+export const ACTIVE_HELD_OUT_SLATE_VERSIONS = ['v1'] as const;
+
+/** Union of instance ids across the given active slate versions. */
+export function loadActiveHeldOutSlateIds(
+  solverType: string,
+  versions: readonly string[],
+  opts: { dir?: string } = {},
+): Set<string> {
+  const ids = new Set<string>();
+  for (const version of versions) {
+    for (const id of loadHeldOutSlate(solverType, version, opts).instanceIds) ids.add(id);
+  }
+  return ids;
+}
