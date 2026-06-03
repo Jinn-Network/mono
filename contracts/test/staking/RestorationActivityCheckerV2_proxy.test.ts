@@ -1,9 +1,11 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
 
 describe("RestorationActivityCheckerV2 — proxy upgrade pattern", function () {
   this.timeout(60_000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
 
   const LIVENESS_RATIO = 10n ** 15n;
   const SIM_THRESHOLD = 64n;
@@ -14,6 +16,7 @@ describe("RestorationActivityCheckerV2 — proxy upgrade pattern", function () {
   let deployerAddress: string;
 
   before(async function () {
+    ({ ethers } = await network.connect());
     [deployer] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
   });

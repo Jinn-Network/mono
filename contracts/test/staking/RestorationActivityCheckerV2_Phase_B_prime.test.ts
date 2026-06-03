@@ -12,10 +12,14 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
 
-const DEFAULT_LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
+// One HH3 connection shared across the module-scope helpers below. Assigned
+// in the top-level describe's `before` hook before any `it`/helper runs.
+let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+
+let DEFAULT_LIVENESS_RATIO: bigint; // 1e15 (assigned in before)
 const DEFAULT_SIMILARITY_THRESHOLD = 64n;
 const DEFAULT_DECAY_MULTIPLIER = 0n;
 const DEFAULT_COMPARISON_WINDOW = 20n;
@@ -64,6 +68,8 @@ describe("Phase B' — RestorationActivityCheckerV2 audit fixes & ε gating", fu
   let delivererAddress: string;
 
   before(async function () {
+    ({ ethers } = await network.connect());
+    DEFAULT_LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
     [deployer, routerEoa, attacker, creatorSigner, delivererSigner] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
     routerEoaAddress = await routerEoa.getAddress();
@@ -332,7 +338,7 @@ describe("Phase B' — RestorationActivityCheckerV2 audit fixes & ε gating", fu
         multisig, ethers.ZeroAddress, ethers.id("only"),
       )).wait();
       // length is 1, asking for index 1 should revert.
-      await expect(checker.getEvidenceHash(multisig, 1)).to.be.reverted;
+      await expect(checker.getEvidenceHash(multisig, 1)).to.revert(ethers);
     });
   });
 
