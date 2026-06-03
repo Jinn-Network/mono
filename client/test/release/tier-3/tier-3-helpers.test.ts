@@ -1,5 +1,31 @@
-import { describe, it, expect } from 'vitest';
-import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning } from './tier-3-helpers.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning, tierOpNames } from './tier-3-helpers.js';
+
+describe('tierOpNames', () => {
+  const saved = { p: process.env['JINN_TIER_PRODUCER_OP'], s: process.env['JINN_TIER_SOLVER_OP'] };
+  afterEach(() => {
+    if (saved.p === undefined) delete process.env['JINN_TIER_PRODUCER_OP']; else process.env['JINN_TIER_PRODUCER_OP'] = saved.p;
+    if (saved.s === undefined) delete process.env['JINN_TIER_SOLVER_OP']; else process.env['JINN_TIER_SOLVER_OP'] = saved.s;
+  });
+
+  it('defaults to op-a (producer) / op-b (solver)', () => {
+    delete process.env['JINN_TIER_PRODUCER_OP'];
+    delete process.env['JINN_TIER_SOLVER_OP'];
+    expect(tierOpNames()).toEqual({ producer: 'op-a', solver: 'op-b' });
+  });
+
+  it('honors env overrides (env suite runs op-c, never the live op-a)', () => {
+    process.env['JINN_TIER_PRODUCER_OP'] = 'op-c';
+    process.env['JINN_TIER_SOLVER_OP'] = 'op-b';
+    expect(tierOpNames()).toEqual({ producer: 'op-c', solver: 'op-b' });
+  });
+
+  it('treats blank/whitespace env as unset (falls back to defaults)', () => {
+    process.env['JINN_TIER_PRODUCER_OP'] = '   ';
+    process.env['JINN_TIER_SOLVER_OP'] = '';
+    expect(tierOpNames()).toEqual({ producer: 'op-a', solver: 'op-b' });
+  });
+});
 
 describe('isDailyDriverRunning', () => {
   it('returns false when nothing is on the daily-driver ports', async () => {

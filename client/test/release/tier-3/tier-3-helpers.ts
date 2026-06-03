@@ -8,6 +8,22 @@ export function resolveGoldDaemonHome(opName: string): string {
   return goldPath(opName);
 }
 
+/**
+ * The two substrate ops the producer/evaluator loop runs as, resolved from the
+ * environment so the gate can run against ops that are NOT the live daily-driver
+ * identity. Defaults preserve the historical `op-a` (creator + evaluator) /
+ * `op-b` (solver) pairing; the env suite overrides them (e.g. producer=op-c) so
+ * it never spawns a second copy of the Railway-live op-a and never has to
+ * clobber its gold home. The names must match gold homes under
+ * `~/jinn-dev/operators/<name>` (env suite restores them there).
+ */
+export function tierOpNames(): { producer: string; solver: string } {
+  return {
+    producer: process.env['JINN_TIER_PRODUCER_OP']?.trim() || 'op-a',
+    solver: process.env['JINN_TIER_SOLVER_OP']?.trim() || 'op-b',
+  };
+}
+
 export interface IsDailyDriverOptions {
   ports?: number[];
 }
@@ -93,12 +109,13 @@ export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3
   const logDir = opts.evidenceDir
     ? `${opts.evidenceDir.replace(/\/+$/, '')}/${opts.scenarioId}-daemons`
     : undefined;
+  const { producer, solver } = tierOpNames();
   let daemons: MultiOpHandle;
   try {
     daemons = await spawnMultiOpDaemons({
       ops: [
-        { name: 'op-a', home: resolveGoldDaemonHome('op-a'), apiPort: portBase },
-        { name: 'op-b', home: resolveGoldDaemonHome('op-b'), apiPort: portBase + 1 },
+        { name: producer, home: resolveGoldDaemonHome(producer), apiPort: portBase },
+        { name: solver, home: resolveGoldDaemonHome(solver), apiPort: portBase + 1 },
       ],
       extraEnv: opts.extraEnv,
       readyTimeoutMs: 60000,           // real chain warm-up may be slower than fork

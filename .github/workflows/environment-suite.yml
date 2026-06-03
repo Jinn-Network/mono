@@ -210,6 +210,60 @@ jobs:
             echo "::notice::JINN_WARM_OPERATOR_B_STATE unset — cross-op donation scenario will skip (single warm operator)."
           fi
 
+      # ── Bridge the restored homes into the substrate gold paths ─────────────
+      # The tier scenarios (run-tier-2 copyWorkspace + run-tier-3
+      # resolveGoldDaemonHome) read operators from ~/jinn-dev/operators/<name>,
+      # NOT from ~/.jinn-client. Without this bridge, T2.1/T3.1 fail to find their
+      # operators (the gate would be structurally red regardless of the product).
+      #
+      # Mapping (canonical tier names, see tier-3-helpers.tierOpNames defaults):
+      #   ~/.jinn-client   (primary  = solver op)            -> gold op-b
+      #   ~/.jinn-client-b (secondary = creator/evaluator op) -> gold op-a
+      # The secondary deliberately takes the `op-a` slot because T3.1 posts the
+      # task from + evaluates as `op-a`; it must be a DISTINCT identity from the
+      # live daily-driver op-a (which is why a dedicated op-c is provisioned as
+      # JINN_WARM_OPERATOR_B_STATE — see spec §9). On a fresh CI runner there is
+      # no real op-a gold home to clobber.
+      #
+      # spawnMultiOpDaemons strips JINN_PASSWORD and decrypts each keystore with
+      # that home's own .jinn-client/keystore-password file — so every bridged
+      # gold home MUST carry one. The primary's password falls back to the
+      # JINN_PASSWORD secret if its tar omitted the file; the secondary's tar is
+      # expected to embed its own (its password is not a separate secret). A gold
+      # home with no readable keystore-password is fail-loud infra.
+      - name: Bridge warm operators into substrate gold paths
+        if: steps.resolve.outputs.skip != 'true'
+        env:
+          JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          bridge() {  # $1=source home, $2=gold op name, $3=password fallback (may be empty)
+            local src="$1" name="$2" pw="${3:-}"
+            local dst="${HOME}/jinn-dev/operators/${name}/.jinn-client"
+            if [ ! -d "$src" ]; then echo "::error::bridge source $src missing"; return 1; fi
+            mkdir -p "$dst"
+            cp -a "$src/." "$dst/"
+            if [ ! -s "$dst/keystore-password" ] && [ -n "$pw" ]; then
+              printf '%s' "$pw" > "$dst/keystore-password"
+            fi
+            if [ ! -s "$dst/keystore-password" ]; then
+              echo "::error::gold op ${name} has no keystore-password — spawned daemon would crash (exit 50). The state tar must embed it, or supply the password fallback."
+              return 1
+            fi
+            chmod 600 "$dst/keystore-password"
+            chmod -R go-rwx "${HOME}/jinn-dev/operators/${name}"
+            echo "bridged ${src} -> ${dst}"
+          }
+          # Primary (solver) -> op-b; password falls back to the JINN_PASSWORD secret.
+          bridge "${HOME}/.jinn-client" op-b "${JINN_PASSWORD:-}"
+          # Secondary (creator/evaluator) -> op-a; relies on its own embedded password.
+          if [ -d "${HOME}/.jinn-client-b" ]; then
+            bridge "${HOME}/.jinn-client-b" op-a ""
+          else
+            echo "::error::JINN_WARM_OPERATOR_B_STATE was not restored — the producer/evaluator op-a is required for the cross-op + real-harness scenarios. Provision the second warm operator (spec §9)."
+            exit 1
+          fi
+
       # ── Pre-flight: health-check + funding-gap report (§9 step 1, §11) ──────
       # Adopts the restored home, runs the #531 substrate doctor + verify + top-up
       # check, and exits with EXIT_INFRA_BLOCKED (75) if the operator is
@@ -233,19 +287,38 @@ jobs:
           # (shipped creds, no stored key) — so NO JINN_FUNDER_PRIVATE_KEY secret
           # is needed; a gap the faucet can't keep up with is reported as
           # infra-blocked.
-          tsx scripts/release/warm-operator-preflight.ts \
-            --op-name warm-operator \
-            --jinn-client-dir "${HOME}/.jinn-client" \
-            --repair \
-            | tee "${RUNNER_TEMP}/preflight.json"
-          CODE=${PIPESTATUS[0]}
+          #
+          # BOTH ops must be healthy+funded: op-b (solver) AND op-c (creator/
+          # evaluator). op-c posts the task + settles the verdict, so a dry op-c
+          # would stall the loop and misreport as a product-red. Preflight each;
+          # if EITHER is infra-blocked (exit 75) the whole suite is infra-blocked
+          # (not product) — the publish guard still blocks the cut, honestly.
+          INFRA=false
+          preflight_one() {  # $1=client dir, $2=op name, $3=preflight json path
+            tsx scripts/release/warm-operator-preflight.ts \
+              --op-name "$2" \
+              --jinn-client-dir "$1" \
+              --repair \
+              | tee "$3"
+            return "${PIPESTATUS[0]}"
+          }
+          preflight_one "${HOME}/.jinn-client" warm-operator "${RUNNER_TEMP}/preflight.json"
+          CODE_A=$?
+          preflight_one "${HOME}/.jinn-client-b" warm-operator-b "${RUNNER_TEMP}/preflight-b.json"
+          CODE_B=$?
           set -e
-          echo "preflight_exit=${CODE}" >> "${GITHUB_OUTPUT}"
-          if [ "${CODE}" -eq 75 ]; then
+          echo "preflight_exit_a=${CODE_A}" >> "${GITHUB_OUTPUT}"
+          echo "preflight_exit_b=${CODE_B}" >> "${GITHUB_OUTPUT}"
+          for CODE in "${CODE_A}" "${CODE_B}"; do
+            if [ "${CODE}" -eq 75 ]; then
+              INFRA=true
+            elif [ "${CODE}" -ne 0 ]; then
+              echo "::error::warm-operator-preflight crashed (exit ${CODE}) — the preflight itself is broken, not the operator."
+              exit "${CODE}"
+            fi
+          done
+          if [ "${INFRA}" = "true" ]; then
             echo "infra_blocked=true" >> "${GITHUB_OUTPUT}"
-          elif [ "${CODE}" -ne 0 ]; then
-            echo "::error::warm-operator-preflight crashed (exit ${CODE}) — the preflight itself is broken, not the operator."
-            exit "${CODE}"
           fi
 
       # Short-circuit verdict for an infra-blocked operator: post a NEUTRAL
@@ -301,6 +374,14 @@ jobs:
       # hard-asserted; a flaky LLM never blocks. classifyFailure() inside the
       # run-tier scripts separates real-bug from flake-infra/timing, and only a
       # `real-bug` exits non-zero.
+      # T2.3 (multi-op SPA launcher-join flow) drives a real browser via
+      # Playwright. The browser binaries are NOT bundled with the npm package, so
+      # install Chromium (+ its OS deps) before the suite runs. Without this T2.3
+      # fails at browser launch and the whole tier-2 verdict goes red on infra.
+      - name: Install Playwright browser (Chromium) for T2.3
+        if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
+        run: yarn playwright install --with-deps chromium
+
       - name: Run environment suite
         if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
         id: suite
@@ -409,7 +490,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           shopt -s nullglob
-          for f in "${RUNNER_TEMP}"/env-suite/*.log "${RUNNER_TEMP}"/preflight.json; do
+          for f in "${RUNNER_TEMP}"/env-suite/*.log "${RUNNER_TEMP}"/preflight.json "${RUNNER_TEMP}"/preflight-b.json; do
             [ -f "$f" ] || continue
             sed -i -E 's#https?://[^[:space:]"'"'"']+#<redacted-url>#g' "$f"
           done
@@ -424,6 +505,7 @@ jobs:
           path: |
             ${{ runner.temp }}/env-suite/
             ${{ runner.temp }}/preflight.json
+            ${{ runner.temp }}/preflight-b.json
             ${{ runner.temp }}/environment-suite-verdict.json
           retention-days: 14
           if-no-files-found: ignore

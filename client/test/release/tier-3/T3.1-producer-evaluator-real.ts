@@ -61,7 +61,7 @@ import {
   type Log,
 } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { setupTier3Scenario, resolveGoldDaemonHome, type Tier3Handle } from './tier-3-helpers.js';
+import { setupTier3Scenario, resolveGoldDaemonHome, tierOpNames, type Tier3Handle } from './tier-3-helpers.js';
 import {
   classifyFailure,
   type ScenarioVerdict,
@@ -575,16 +575,20 @@ export async function runT31ProducerEvaluatorReal(
       // post-mortem has to spelunk chain + db + harness-specific logs.
       evidenceDir: path.dirname(opts.evidencePath),
     });
-    const opAPort = handle.daemons.daemons['op-a']!.apiPort;
-    const opBPort = handle.daemons.daemons['op-b']!.apiPort;
-    log(`   daemons up against real Base Sepolia (op-a :${opAPort}, op-b :${opBPort})`);
+    // Producer/evaluator and solver op names are resolved from the env
+    // (JINN_TIER_PRODUCER_OP / JINN_TIER_SOLVER_OP, defaults op-a/op-b) so the
+    // env suite can run as ops that are NOT the live daily-driver identity.
+    const { producer: producerOp, solver: solverOp } = tierOpNames();
+    const opAPort = handle.daemons.daemons[producerOp]!.apiPort;
+    const opBPort = handle.daemons.daemons[solverOp]!.apiPort;
+    log(`   daemons up against real Base Sepolia (${producerOp} :${opAPort}, ${solverOp} :${opBPort})`);
     // Surface the daemon log paths up front so a timeout failure has an
     // immediate breadcrumb to the per-daemon stdio capture instead of forcing
     // an investigator to spelunk chain + db + harness-specific logs.
-    const opALogPath = handle.daemons.daemons['op-a']!.logPath;
-    const opBLogPath = handle.daemons.daemons['op-b']!.logPath;
+    const opALogPath = handle.daemons.daemons[producerOp]!.logPath;
+    const opBLogPath = handle.daemons.daemons[solverOp]!.logPath;
     if (opALogPath || opBLogPath) {
-      log(`   daemon logs: op-a → ${opALogPath ?? '(disabled)'}, op-b → ${opBLogPath ?? '(disabled)'}`);
+      log(`   daemon logs: ${producerOp} → ${opALogPath ?? '(disabled)'}, ${solverOp} → ${opBLogPath ?? '(disabled)'}`);
     }
 
     // ── Resolve the deployed JinnRouter for the on-chain observation reads ────
@@ -665,7 +669,7 @@ export async function runT31ProducerEvaluatorReal(
     const jinnBin = fileURLToPath(
       new URL('../../../dist/bin/jinn.js', import.meta.url),
     );
-    const opAHome = resolveGoldDaemonHome('op-a');
+    const opAHome = resolveGoldDaemonHome(producerOp);
     // A UNIQUE task id per run drives a genuinely fresh producer→evaluator loop
     // each time the release-readiness gate runs. A stable id would make
     // `jinn tasks submit` idempotent — returning a *stale* on-chain task whose
@@ -860,10 +864,12 @@ export async function runT31ProducerEvaluatorReal(
     // direct breadcrumb to the per-daemon stdio capture, even if the failure
     // landed long after the start-of-run breadcrumb.
     if (handle) {
-      const opALog = handle.daemons.daemons['op-a']?.logPath;
-      const opBLog = handle.daemons.daemons['op-b']?.logPath;
+      // Re-resolve op names here: the try-scoped bindings are out of scope in catch.
+      const { producer: pOp, solver: sOp } = tierOpNames();
+      const opALog = handle.daemons.daemons[pOp]?.logPath;
+      const opBLog = handle.daemons.daemons[sOp]?.logPath;
       if (opALog || opBLog) {
-        log(`   see daemon logs for the in-flight window: op-a → ${opALog ?? '(disabled)'}, op-b → ${opBLog ?? '(disabled)'}`);
+        log(`   see daemon logs for the in-flight window: ${pOp} → ${opALog ?? '(disabled)'}, ${sOp} → ${opBLog ?? '(disabled)'}`);
       }
     }
     return {
