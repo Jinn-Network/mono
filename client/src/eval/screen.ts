@@ -1,4 +1,9 @@
 import type { PoolTask } from '../solver-types/_swe-rebench-v2-pool.js';
+import {
+  HELD_OUT_SLATE_SCHEMA_VERSION,
+  hashHeldOutSlateArtifact,
+  type HeldOutSlateArtifact,
+} from '../solver-types/_swe-rebench-v2-held-out-slate.js';
 
 /** Stratification / diversity key: the org prefix of an instance_id
  *  (`tobymao__sqlglot-4661` → `tobymao`). Derivable without an HF fetch. */
@@ -148,4 +153,29 @@ export async function screenBaseFailures(
   }
 
   return { heldOut, screened };
+}
+
+/** The on-disk v2 slate file = the hashed artifact + a provenance `comment`
+ *  (the comment is outside the canonical hash). solverType matches the
+ *  `${solverType}.v1` key `jinn eval` loads with. */
+export interface V2SlateFile extends HeldOutSlateArtifact {
+  comment: string;
+  hash: `sha256:${string}`;
+}
+
+const V2_SLATE_COMMENT =
+  'BASELINE-FAILURE REGRESSION BENCHMARK (issue #986). Screened: gradeable at the current ' +
+  'evalSemanticsVersion AND base claude-code/Haiku frozen fails 0/R (R≥3) AND a stronger Codex/GPT-5.5 ' +
+  'prover passes ≥1 (proven headroom). Baseline 0% by construction. Held out from the generator train ' +
+  'stream via the active-slate-version union. Content-addressed; scores comparable WITHIN this version only.';
+
+export function buildV2SlateFile(instanceIds: string[], generatedAt: string): V2SlateFile {
+  const artifact: HeldOutSlateArtifact = {
+    schemaVersion: HELD_OUT_SLATE_SCHEMA_VERSION,
+    solverType: 'swe-rebench-v2.v1',
+    version: 'v2',
+    generatedAt,
+    instanceIds: [...instanceIds].sort((a, b) => a.localeCompare(b)),
+  };
+  return { comment: V2_SLATE_COMMENT, ...artifact, hash: hashHeldOutSlateArtifact(artifact) };
 }

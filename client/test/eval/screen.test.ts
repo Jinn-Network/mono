@@ -80,3 +80,27 @@ describe('screenBaseFailures', () => {
     expect(runs).toBe(1); // first pass ⇒ not a reliable fail ⇒ stop
   });
 });
+
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildV2SlateFile } from '../../src/eval/screen.js';
+import { loadHeldOutSlate } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
+
+describe('buildV2SlateFile', () => {
+  it('builds a v2 slate that loadHeldOutSlate accepts with a matching hash', () => {
+    const file = buildV2SlateFile(['o__b-2', 'o__a-1'], '2026-06-03T00:00:00.000Z');
+    expect(file.version).toBe('v2');
+    expect(file.solverType).toBe('swe-rebench-v2.v1');
+    expect(file.instanceIds).toEqual(['o__a-1', 'o__b-2']); // sorted
+    const dir = mkdtempSync(join(tmpdir(), 'slate-test-'));
+    try {
+      writeFileSync(join(dir, 'held-out-slate.swe-rebench-v2.v2.json'), JSON.stringify(file));
+      const loaded = loadHeldOutSlate('swe-rebench-v2.v1', 'v2', { dir });
+      expect(loaded.hash).toBe(file.hash);
+      expect([...loaded.instanceIds].sort()).toEqual(['o__a-1', 'o__b-2']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
