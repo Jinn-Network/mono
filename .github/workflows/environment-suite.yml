@@ -295,7 +295,7 @@ jobs:
           # (not product) — the publish guard still blocks the cut, honestly.
           INFRA=false
           preflight_one() {  # $1=client dir, $2=op name, $3=preflight json path
-            tsx scripts/release/warm-operator-preflight.ts \
+            yarn tsx scripts/release/warm-operator-preflight.ts \
               --op-name "$2" \
               --jinn-client-dir "$1" \
               --repair \
@@ -397,11 +397,11 @@ jobs:
 
           set +e
           # 1. Cross-op donation + producer/evaluator (real testnet, two warm ops).
-          tsx scripts/release/run-tier-2.ts "${CANDIDATE_SHA}" 2>&1 | tee "${RESULT_DIR}/tier-2.log"
+          yarn tsx scripts/release/run-tier-2.ts "${CANDIDATE_SHA}" 2>&1 | tee "${RESULT_DIR}/tier-2.log"
           T2_CODE=${PIPESTATUS[0]}
 
           # 2. Real-harness producer/evaluator loop (autonomous — no human prompt).
-          tsx scripts/release/run-tier-3.ts "${CANDIDATE_SHA}" autonomous 2>&1 | tee "${RESULT_DIR}/tier-3.log"
+          yarn tsx scripts/release/run-tier-3.ts "${CANDIDATE_SHA}" autonomous 2>&1 | tee "${RESULT_DIR}/tier-3.log"
           T3_CODE=${PIPESTATUS[0]}
           set -e
 
