@@ -103,24 +103,27 @@ function buildLaunchedRecord(args: {
 
 interface MockRegistryClient extends SolverNetRegistryClient {
   listLaunchedCalls: number;
+  /** Arm the next `listLaunched` call to throw (consumed after one throw). */
+  failNextList: Error | null;
 }
 
 function makeMockRegistryClient(args: {
   summaries: SolverNetManifestSummary[];
+  failedCount?: number;
   failNextList?: Error;
 } = { summaries: [] }): MockRegistryClient {
   let listLaunchedCalls = 0;
-  let failNextList = args.failNextList ?? null;
   const client: MockRegistryClient = {
     get listLaunchedCalls() { return listLaunchedCalls; },
+    failNextList: args.failNextList ?? null,
     async listLaunched() {
       listLaunchedCalls += 1;
-      if (failNextList) {
-        const err = failNextList;
-        failNextList = null;
+      if (client.failNextList) {
+        const err = client.failNextList;
+        client.failNextList = null;
         throw err;
       }
-      return args.summaries;
+      return { summaries: args.summaries, failedCount: args.failedCount ?? 0 };
     },
     async publishManifest() {
       throw new Error('publishManifest not used in init tests');
@@ -536,6 +539,76 @@ describe('initSolverNetSubsystem — catalog cache', () => {
     // Pin the default so a refactor doesn't accidentally change it without
     // updating the catalog-refresh budget docs.
     expect(DEFAULT_CATALOG_REFRESH_INTERVAL_MS).toBe(30_000);
+  });
+});
+
+describe('initSolverNetSubsystem — partial-failure catalog', () => {
+  it('partial-failure-sets-lastError-preserves-partial-snapshot', async () => {
+    // AC-4 / AC-5: a refresh where the registry loaded some rows but could not
+    // load others (e.g. an IPFS body 404'd) is NOT a true-empty registry. The
+    // catalog must surface the loaded rows AND a distinct, non-null lastError
+    // that names the count of unloadable manifests — so the operator app can
+    // tell "nothing launched" apart from "discovery degraded".
+    const registryClient = makeMockRegistryClient({
+      summaries: [makeSampleSummary('partial-1')],
+      failedCount: 1,
+    });
+
+    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
+    try {
+      // Constructor kicks off a fire-and-forget refresh; let it settle.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Partial rows survive — the catalog is not blanked.
+      expect(subsystem.catalog.getCatalog()).toHaveLength(1);
+      expect(subsystem.catalog.getCatalog()[0]?.solverNetId).toBe('partial-1');
+
+      // The degradation is surfaced, not swallowed.
+      const lastError = subsystem.catalog.lastError();
+      expect(lastError).not.toBeNull();
+      expect(lastError?.message).toContain('1 manifest');
+
+      // A partial refresh still counts as a refresh (timestamp set).
+      expect(subsystem.catalog.lastRefreshedAt()?.toISOString()).toBe(
+        FIXED_NOW.toISOString(),
+      );
+    } finally {
+      subsystem.stop();
+    }
+  });
+
+  it('full-throw-preserves-previous-snapshot', async () => {
+    // AC-5: a transient IPFS/indexer blip (a full throw from listLaunched) must
+    // NOT blank a previously-populated catalog. The last good snapshot is held
+    // while lastError records the failure.
+    const registryClient = makeMockRegistryClient({
+      summaries: [makeSampleSummary('prev-good')],
+      failedCount: 0,
+    });
+
+    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
+    try {
+      // First (auto) refresh populates the snapshot.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(subsystem.catalog.getCatalog()).toHaveLength(1);
+      expect(subsystem.catalog.lastError()).toBeNull();
+
+      // Arm the next call to throw, then force a manual refresh.
+      registryClient.failNextList = new Error('indexer unreachable');
+      await subsystem.catalog.refresh();
+
+      // Snapshot is preserved (NOT blanked) and the error is recorded.
+      expect(subsystem.catalog.getCatalog()).toHaveLength(1);
+      expect(subsystem.catalog.getCatalog()[0]?.solverNetId).toBe('prev-good');
+      expect(subsystem.catalog.lastError()).not.toBeNull();
+      expect(subsystem.catalog.lastError()?.message).toContain(
+        'indexer unreachable',
+      );
+    } finally {
+      subsystem.stop();
+    }
   });
 });
 

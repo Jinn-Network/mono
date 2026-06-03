@@ -219,7 +219,7 @@ function makeMockRegistry(): MockRegistry {
         metadataBlockNumber: nextBlock++,
       };
     },
-    async listLaunched() { return []; },
+    async listLaunched() { return { summaries: [], failedCount: 0 }; },
     async getManifest() { throw new Error('not used'); },
     async getManifestFromCache() { return null; },
     async getLifecycleStatus() { throw new Error('not used'); },

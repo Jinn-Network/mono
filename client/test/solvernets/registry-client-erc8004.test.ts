@@ -587,8 +587,9 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
       },
     );
 
-    const summaries = await client.listLaunched({ network: 'base-sepolia' });
+    const { summaries, failedCount } = await client.listLaunched({ network: 'base-sepolia' });
     expect(summaries).toHaveLength(1);
+    expect(failedCount).toBe(0);
     const s = summaries[0]!;
     expect(s.manifestCid).toBe(cid);
     expect(s.status).toBe('paused');
@@ -688,14 +689,14 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
       network: 'base-sepolia',
       statusFilter: ['launched'],
     });
-    expect(launched).toHaveLength(1);
-    expect(launched[0]!.status).toBe('launched');
+    expect(launched.summaries).toHaveLength(1);
+    expect(launched.summaries[0]!.status).toBe('launched');
 
     const both = await client.listLaunched({
       network: 'base-sepolia',
       statusFilter: ['launched', 'paused'],
     });
-    expect(both).toHaveLength(2);
+    expect(both.summaries).toHaveLength(2);
   });
 
   it('sinceBlock is accepted but does not filter discoveryApi results (DiscoveryAPI has no sinceBlock)', async () => {
@@ -715,7 +716,8 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
 
     // Should not throw; result is empty because subgraph has no events.
     const result = await client.listLaunched({ network: 'base-sepolia', sinceBlock: 500 });
-    expect(result).toEqual([]);
+    expect(result.summaries).toEqual([]);
+    expect(result.failedCount).toBe(0);
     expect(discoveryApi.listLaunchedCalls).toBe(1);
   });
 
@@ -750,10 +752,68 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     // The manifest is `network: 'base-sepolia'`, so listing under 'base'
     // should yield no rows.
     const out = await client.listLaunched({ network: 'base' });
-    expect(out).toHaveLength(0);
+    expect(out.summaries).toHaveLength(0);
 
     const inOut = await client.listLaunched({ network: 'base-sepolia' });
-    expect(inOut).toHaveLength(1);
+    expect(inOut.summaries).toHaveLength(1);
+  });
+
+  it('counts manifests whose IPFS body cannot be fetched as failedCount, preserving fetchable rows', async () => {
+    // #984: a manifest can resolve on-chain (a MetadataSet event exists) but
+    // have an unfetchable IPFS body (transient gateway 404 / pinner blip). The
+    // catalog must keep the fetchable rows AND report the count of unfetchable
+    // ones so the operator app can distinguish a degraded fetch from a
+    // genuinely shorter registry.
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      discoveryApi,
+      network: 'base-sepolia',
+    });
+
+    // One real, fetchable manifest.
+    const good = await buildSignedManifest({ agentId: '5474', solverNetId: 'l/good' });
+    const goodLaunch = await client.publishManifest({
+      manifest: good.manifest,
+      signer: good.signer,
+    });
+    subgraph.events.push({
+      agentId: '5474',
+      key: `solvernet-manifest:${goodLaunch.manifestCid}`,
+      payload: {
+        schemaVersion: 'solvernet.lifecycle.v1',
+        status: 'launched',
+        at: '2026-05-06T00:00:00Z',
+        hash: manifestHash(good.manifest),
+      },
+      blockNumber: 100,
+      transactionIndex: 0,
+    });
+
+    // A second cid that resolves on-chain but was never pinned to IPFS — the
+    // mock's fetch throws "cid not found", exercising the skip-and-count path.
+    subgraph.events.push({
+      agentId: '8888',
+      key: 'solvernet-manifest:bafy-unpinned-orphan',
+      payload: {
+        schemaVersion: 'solvernet.lifecycle.v1',
+        status: 'launched',
+        at: '2026-05-06T01:00:00Z',
+        hash: `0x${'cd'.repeat(32)}` as `0x${string}`,
+      },
+      blockNumber: 200,
+      transactionIndex: 0,
+    });
+
+    const { summaries, failedCount } = await client.listLaunched({ network: 'base-sepolia' });
+    // The fetchable row survives; the orphan is counted, not silently dropped.
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.solverNetId).toBe(good.manifest.solverNetId);
+    expect(failedCount).toBe(1);
   });
 });
 

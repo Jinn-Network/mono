@@ -337,7 +337,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     network: string;
     statusFilter?: Array<'launched' | 'paused' | 'retired'>;
     sinceBlock?: number;
-  }): Promise<SolverNetManifestSummary[]> {
+  }): Promise<{ summaries: SolverNetManifestSummary[]; failedCount: number }> {
     if (!this.discoveryApi) {
       throw new Error(
         'IdentityRegistryBackedSolverNetRegistryClient requires a DiscoveryAPI for listLaunched',
@@ -354,6 +354,10 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     // This enriches the coarse summary (which has empty name/network/prices)
     // with the fields that come only from the manifest body.
     const out: SolverNetManifestSummary[] = [];
+    // Count manifests that resolved on-chain but whose IPFS body could not be
+    // fetched/validated this pass, so the caller can distinguish a true-empty
+    // registry from partial IPFS/indexer degradation. See #984.
+    let failedCount = 0;
 
     for (const row of rawSummaries) {
       let manifest: SolverNetManifestV1;
@@ -362,7 +366,10 @@ export class IdentityRegistryBackedSolverNetRegistryClient
       } catch {
         // Skip rows whose IPFS body can't be fetched/validated. Operators
         // see "missing/tampered manifest" rows nowhere, which is
-        // intentional — the catalog should not surface broken entries.
+        // intentional — the catalog should not surface broken entries. We
+        // still count them so a degraded fetch reads as "N couldn't load"
+        // rather than a silently-shorter catalog.
+        failedCount += 1;
         continue;
       }
 
@@ -390,7 +397,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
       });
     }
 
-    return out;
+    return { summaries: out, failedCount };
   }
 
   async getManifest(args: { manifestCid: string }): Promise<SolverNetManifestV1> {

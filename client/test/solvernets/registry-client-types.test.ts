@@ -53,8 +53,8 @@ class NoOpSolverNetRegistryClient implements SolverNetRegistryClient {
     network: string;
     statusFilter?: Array<'launched' | 'paused' | 'retired'>;
     sinceBlock?: number;
-  }): Promise<SolverNetManifestSummary[]> {
-    return [];
+  }): Promise<{ summaries: SolverNetManifestSummary[]; failedCount: number }> {
+    return { summaries: [], failedCount: 0 };
   }
 
   async getManifest(_args: { manifestCid: string }): Promise<SolverNetManifestV1> {
@@ -90,11 +90,12 @@ describe('SolverNetRegistryClient interface', () => {
     expect(typeof client.getLifecycleStatus).toBe('function');
   });
 
-  it('listLaunched is callable and returns a SolverNetManifestSummary[]', async () => {
+  it('listLaunched is callable and returns { summaries, failedCount }', async () => {
     const client: SolverNetRegistryClient = new NoOpSolverNetRegistryClient();
     const result = await client.listLaunched({ network: 'base-sepolia' });
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toHaveLength(0);
+    expect(Array.isArray(result.summaries)).toBe(true);
+    expect(result.summaries).toHaveLength(0);
+    expect(result.failedCount).toBe(0);
   });
 
   it('SignerWithAgentEoa accepts the documented data-only shape', () => {

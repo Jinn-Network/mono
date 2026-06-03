@@ -416,10 +416,23 @@ function createCatalogCache(config: CatalogCacheConfig): SolverNetCatalogCache {
 
   async function refresh(): Promise<void> {
     try {
-      const summaries = await config.registryClient.listLaunched({ network: config.network });
+      const { summaries, failedCount } = await config.registryClient.listLaunched({
+        network: config.network,
+      });
+      // Always adopt the (possibly partial) snapshot and bump the timestamp —
+      // a partial fetch still refreshed the catalog. A non-zero failedCount is
+      // degradation, not a true-empty registry: surface it via lastError so the
+      // operator app can distinguish "nothing launched" from "N manifests
+      // couldn't load" rather than blanking a populated catalog. See #984.
       snapshot = summaries;
       lastRefreshedAt = now();
-      lastError = null;
+      if (failedCount > 0) {
+        const message = `${failedCount} manifest(s) could not be loaded — IPFS or indexer may be degraded`;
+        lastError = { message, at: now() };
+        config.logger.warn(`[solvernet] catalog refresh degraded: ${message}`);
+      } else {
+        lastError = null;
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Preserve the typed `rpc_rate_limited` signal so the operator UI can
