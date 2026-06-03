@@ -56,12 +56,13 @@ test.beforeAll(async () => {
       const res = await fetch(`http://127.0.0.1:${PORT}/v1/bootstrap`, {
         headers: { 'x-jinn-ui-token': 'unused-but-required' },
       });
-      if (res.status === 200 || res.status === 401) break;
+      if (res.status === 200 || res.status === 401) return;
     } catch {
       // not yet
     }
     await new Promise((r) => setTimeout(r, 500));
   }
+  throw new Error('daemon API did not come up within 30s');
 });
 
 test.afterAll(async () => {
@@ -129,7 +130,7 @@ test('op-b discovers op-a\'s launched SolverNet in the catalog, joins it, and se
   const card = page.getByTestId('registry-card').filter({ has: page.locator(`[data-manifest-cid="${OP_A_CID}"]`) });
   await expect(card.first()).toBeVisible({ timeout: 15_000 });
 
-  await page.getByTestId('registry-join-cta').first().click();
+  await card.first().getByTestId('registry-join-cta').click();
   await expect(page).toHaveURL(new RegExp(`/operator/join/${OP_A_CID}`));
   await expect(page.getByTestId('join-flow')).toBeVisible({ timeout: 15_000 });
 
