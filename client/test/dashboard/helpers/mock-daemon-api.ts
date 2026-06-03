@@ -202,6 +202,97 @@ export const DEFAULT_SOLVERNETS_CATALOG = {
   ],
 } as const;
 
+/**
+ * Build a registry-catalog summary row (the shape RegistryCatalog renders).
+ * Mirrors `SolverNetManifestSummary`. Override any field per-test.
+ */
+export function makeRegistrySummary(
+  overrides: Partial<{
+    manifestCid: string;
+    name: string;
+    launcherAgentId: string;
+    launcherSafeAddress: string;
+    status: 'launched' | 'paused' | 'retired';
+    solutionPriceWei: string;
+    verdictPriceWei: string;
+    openRoles: Array<'solver' | 'evaluator'>;
+  }> = {},
+) {
+  return {
+    manifestCid: 'bafkreiopalaunchedsolvernet0000000000000000000000000000',
+    name: 'Prediction Markets',
+    launcherAgentId: '5474',
+    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+    status: 'launched' as const,
+    solutionPriceWei: '1000000000000000',
+    verdictPriceWei: '500000000000000',
+    openRoles: ['solver', 'evaluator'] as Array<'solver' | 'evaluator'>,
+    ...overrides,
+  };
+}
+
+/**
+ * Build a `RegistryManifestResponse` for the per-CID GET the JoinFlow form
+ * fetches (`GET /v1/solvernets/registry/:cid`). The manifest fields below are
+ * the minimum JoinFlow reads (name, contract.evaluationFunction.implementation,
+ * openRoles, prices).
+ */
+export function makeRegistryManifestResponse(
+  overrides: Partial<{ manifestCid: string; name: string }> = {},
+) {
+  const manifestCid = overrides.manifestCid ?? 'bafkreiopalaunchedsolvernet0000000000000000000000000000';
+  return {
+    manifest: {
+      schemaVersion: 'solvernet.manifest.v1' as const,
+      solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+      network: 'base-sepolia' as const,
+      name: overrides.name ?? 'Prediction Markets',
+      description: 'Forecast resolved outcomes; rewarded by Brier score.',
+      launcher: {
+        safeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+        agentEoa: '0x1111111111111111111111111111111111111111',
+        agentId: '5474',
+      },
+      contract: {
+        id: 'prediction',
+        version: 'v1',
+        schemas: { task: {}, solution: {}, verdict: {} },
+        claimPolicyDefaults: {
+          mode: 'parallel' as const,
+          maxClaims: 5,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+        },
+        credentialRequirements: { creator: [], solver: [], evaluator: [] },
+        evaluationFunction: {
+          id: 'predictionV1Eval',
+          deterministic: true,
+          inputs: ['solution.predictionPbool'],
+          output: 'verdict.brierScore',
+          implementation: 'jinn-builtin/prediction-v1-eval@1.0',
+        },
+        aggregationFunction: {
+          id: 'predictionV1Agg',
+          deterministic: true,
+          inputs: ['verdict.brierScore'],
+          output: 'aggregate.score',
+        },
+      },
+      solutionPriceWei: '1000000000000000',
+      verdictPriceWei: '500000000000000',
+      openRoles: ['solver', 'evaluator'] as Array<'solver' | 'evaluator'>,
+      createdAt: '2026-05-05T00:00:00Z',
+      launchedAt: '2026-05-05T00:01:00Z',
+    },
+    lifecycle: {
+      status: 'launched' as const,
+      statusUpdatedAt: '2026-05-05T00:01:00Z',
+      sourceBlock: 1,
+    },
+    manifestCid,
+  };
+}
+
 export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}): Promise<void> {
   // Use URL-function predicates throughout so Playwright's first-match-wins
   // semantics are deterministic — no glob ambiguity between similar paths.
@@ -371,6 +462,21 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
         contentType: 'application/json',
         body: JSON.stringify({ mode: 'train', codeDigest: 'mock-digest', lastModeSwitchAt: Date.now() }),
       }),
+  );
+
+  // ---- Per-harness readiness (#332) — probed by the JoinFlow form ----
+  // GET /v1/harnesses/:name/readiness. Default every harness to ready so the
+  // join form's Save & Join gate is open. Catalog/join tests that exercise the
+  // not-ready path override this route per-test (registered after mockDaemonApi).
+  await page.route(
+    (url) => /^\/v1\/harnesses\/[^/]+\/readiness$/.test(url.pathname),
+    (route) => {
+      const name = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3] ?? '');
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ harnessName: name, manifestCids: [], ready: true }),
+      });
+    },
   );
 
   // ---- Discovery (proxied via daemon's /v1/discovery/* routes, used by Build page) ----
