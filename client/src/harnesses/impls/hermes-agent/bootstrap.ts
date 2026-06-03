@@ -183,6 +183,7 @@ function mergePerTaskConfig(
     if (opts.provider) jinnModel.provider = opts.provider;
     if (opts.baseUrl) jinnModel.base_url = opts.baseUrl;
     const merged: Record<string, unknown> = { ...opModel, ...jinnModel };
+    if (opts.baseUrl && !opts.model) delete merged.default;
     const opMaxTokens = typeof opModel.max_tokens === 'number' ? opModel.max_tokens : undefined;
     merged.max_tokens = opMaxTokens != null
       ? Math.min(opMaxTokens, JINN_HERMES_MAX_TOKENS_CAP)

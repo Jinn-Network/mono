@@ -130,7 +130,7 @@ export class HermesHarnessAdapter {
 
   async runTask(inputs: TaskSessionInputs): Promise<void> {
     const hermesHome = inputs.implStateDir;
-    const model = inputs.model ?? inputs.claudeModel ?? this.hermesModel;
+    const model = this.hermesBaseUrl ? this.hermesModel : (inputs.model ?? inputs.claudeModel ?? this.hermesModel);
     // Provider resolution: local OpenAI-compatible endpoints must use Hermes'
     // custom provider. Otherwise, explicit `hermesProvider` wins, then model-id
     // inference. See `inferProviderFromModelId` above + gh #293 / #295.

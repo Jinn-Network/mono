@@ -1,6 +1,6 @@
 // client/test/harnesses/impls/hermes-agent/adapter.test.ts
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -158,6 +158,7 @@ describe('HermesHarnessAdapter', () => {
       const adapter = new HermesHarnessAdapter({
         hermesPath: '/bin/fake-hermes',
         operatorHermesHome: home,
+        hermesModel: 'qwen2.5-coder:7b',
         hermesProvider: 'openrouter',
         hermesBaseUrl: 'http://127.0.0.1:11434/v1',
         daemonApiUrl: 'http://127.0.0.1:7331',
@@ -169,9 +170,7 @@ describe('HermesHarnessAdapter', () => {
         }) as any,
       });
 
-      const taskInputs = inputs(work, home);
-      taskInputs.model = 'qwen2.5-coder:7b';
-      await adapter.runTask(taskInputs);
+      await adapter.runTask(inputs(work, home));
 
       expect(spawnCalls).toHaveLength(1);
       const call = spawnCalls[0];
@@ -184,6 +183,132 @@ describe('HermesHarnessAdapter', () => {
       expect(cfg.model.default).toBe('qwen2.5-coder:7b');
       expect(cfg.model.provider).toBe('custom');
       expect(cfg.model.base_url).toBe('http://127.0.0.1:11434/v1');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers configured local model over SolverNet catalog model when local provider URL is configured', async () => {
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        hermesModel: 'qwen2.5-coder:7b',
+        hermesBaseUrl: 'http://127.0.0.1:11434/v1',
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.model = 'anthropic/claude-opus-4.7';
+      await adapter.runTask(taskInputs);
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--model');
+      expect(call.args).toContain('qwen2.5-coder:7b');
+      expect(call.args).not.toContain('anthropic/claude-opus-4.7');
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('custom');
+
+      const cfg = yamlParse(readFileSync(join(home, 'config.yaml'), 'utf8')) as any;
+      expect(cfg.model.default).toBe('qwen2.5-coder:7b');
+      expect(cfg.model.provider).toBe('custom');
+      expect(cfg.model.base_url).toBe('http://127.0.0.1:11434/v1');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('does not pass SolverNet catalog model to local provider without a local model override', async () => {
+    const spawnCalls: SpawnCall[] = [];
+    const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-home-'));
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      writeFileSync(
+        join(operatorHome, 'config.yaml'),
+        'model:\n  default: anthropic/claude-opus-4.7\n  provider: openrouter\n',
+        'utf8',
+      );
+
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: operatorHome,
+        hermesBaseUrl: 'http://127.0.0.1:11434/v1',
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, taskHome);
+      taskInputs.model = 'anthropic/claude-opus-4.7';
+      await adapter.runTask(taskInputs);
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).not.toContain('--model');
+      expect(call.args).not.toContain('anthropic/claude-opus-4.7');
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('custom');
+
+      const cfg = yamlParse(readFileSync(join(taskHome, 'config.yaml'), 'utf8')) as any;
+      expect(cfg.model.default).toBeUndefined();
+      expect(cfg.model.provider).toBe('custom');
+      expect(cfg.model.base_url).toBe('http://127.0.0.1:11434/v1');
+    } finally {
+      rmSync(operatorHome, { recursive: true, force: true });
+      rmSync(taskHome, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps SolverNet catalog model precedence when no local provider URL is configured', async () => {
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        hermesModel: 'qwen2.5-coder:7b',
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.model = 'anthropic/claude-opus-4.7';
+      await adapter.runTask(taskInputs);
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--model');
+      expect(call.args).toContain('anthropic/claude-opus-4.7');
+      expect(call.args).not.toContain('qwen2.5-coder:7b');
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('openrouter');
     } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });
