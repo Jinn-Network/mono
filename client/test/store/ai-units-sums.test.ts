@@ -138,7 +138,7 @@ describe('finalizeClaimDelivered', () => {
       claimStatus: 'claimed',
       estimatedCostUsdMicros: 2_250_000,
     });
-    store.finalizeClaimDelivered('req-A', 3_100_000);
+    store.finalizeClaimDelivered('req-A', 3_100_000, false);
     const row = store.getRecentActivityEvents(10).find((r) => r.requestId === 'req-A');
     expect(row?.claimStatus).toBe('delivered');
     expect(row?.actualCostUsdMicros).toBe(3_100_000);
@@ -150,7 +150,7 @@ describe('finalizeClaimDelivered', () => {
 
   it('is a no-op when no claimed row exists for the request id', () => {
     store = freshStore();
-    expect(() => store.finalizeClaimDelivered('no-such', 100)).not.toThrow();
+    expect(() => store.finalizeClaimDelivered('no-such', 100, false)).not.toThrow();
   });
 });
 
@@ -240,6 +240,45 @@ describe('usdMicrosThisBlock / usdMicrosThisWeek (issue #1004 — actual-spend a
       estimatedCostUsdMicros: 150_000,
       actualCostUsdMicros: 480_000, // real cost, much higher than the estimate
     });
+    const r = store.usdMicrosThisBlock('anthropic:api-key', now);
+    expect(r.usdMicros).toBe(480_000);
+    expect(r.estimated).toBe(false);
+  });
+
+  it('marks the block estimated when a delivered row carries a heuristic actual cost (Hermes, AC4)', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:30:00.000Z'); // 12:00-18:00 block
+    const inBlock = new Date('2026-05-28T13:00:00.000Z');
+    // A delivered Hermes row: finalizeClaimDelivered writes a NON-null actual
+    // cost, but that figure is a pure heuristic (estimate-backed). The block
+    // must report estimated:true even though actual_cost_usd_micros is set.
+    store.recordActivityEvent({
+      ts: inBlock.toISOString(),
+      kind: 'claimed',
+      requestId: 'req-hermes',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'claimed',
+      estimatedCostUsdMicros: 1_000_000,
+    });
+    store.finalizeClaimDelivered('req-hermes', 1_000_000, true); // estimate-backed
+    const r = store.usdMicrosThisBlock('anthropic:api-key', now);
+    expect(r.usdMicros).toBe(1_000_000);
+    expect(r.estimated).toBe(true);
+  });
+
+  it('keeps the block metered when the only delivered row is observed telemetry (Codex/Claude-Code)', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:30:00.000Z');
+    const inBlock = new Date('2026-05-28T13:00:00.000Z');
+    store.recordActivityEvent({
+      ts: inBlock.toISOString(),
+      kind: 'claimed',
+      requestId: 'req-codex',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'claimed',
+      estimatedCostUsdMicros: 150_000,
+    });
+    store.finalizeClaimDelivered('req-codex', 480_000, false); // harvested telemetry
     const r = store.usdMicrosThisBlock('anthropic:api-key', now);
     expect(r.usdMicros).toBe(480_000);
     expect(r.estimated).toBe(false);

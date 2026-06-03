@@ -679,6 +679,12 @@ export class Store {
     addActivityColumn('claim_status', 'claim_status TEXT');
     addActivityColumn('estimated_cost_usd_micros', 'estimated_cost_usd_micros INTEGER');
     addActivityColumn('actual_cost_usd_micros', 'actual_cost_usd_micros INTEGER');
+    // Issue #1004 (AC4): whether actual_cost_usd_micros is estimate-backed
+    // (1) or harvested telemetry (0/null). A telemetry-less harness such as
+    // Hermes still writes a NON-null actual cost via finalizeClaimDelivered,
+    // so the column distinguishes a heuristic figure from a metered one. The
+    // gate's estimated flag reads this so a heuristic is not shown as metered.
+    addActivityColumn('actual_cost_estimated', 'actual_cost_estimated INTEGER');
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_activity_events_credential ON activity_events (credential_id, ts)`,
     );
@@ -1376,11 +1382,13 @@ export class Store {
    *     concurrent claims cannot slip the cap before any of them deliver,
    *   - failed claims (status `'claim_failed'`) are excluded.
    *
-   * `estimated` is true iff any contributing row lacked
-   * `actual_cost_usd_micros` (in-flight claims, or a harness with no usage
-   * telemetry such as Hermes whose delivered rows are estimate-only). The
-   * gate surfaces this so an estimate-backed figure is not presented as
-   * metered. Block boundaries mirror `aiUnitsThisBlock`.
+   * `estimated` is true iff the summed figure includes any estimate-backed
+   * cost: an in-flight `claimed` row with no `actual_cost_usd_micros` yet,
+   * OR a `delivered` row whose actual cost is itself a heuristic
+   * (`actual_cost_estimated = 1` — a telemetry-less harness such as Hermes).
+   * It is false only when every contributing row is harvested actual
+   * telemetry. The gate surfaces this so an estimate-backed figure is not
+   * presented as metered. Block boundaries mirror `aiUnitsThisBlock`.
    */
   usdMicrosThisBlock(
     credentialId: string,
@@ -1419,7 +1427,7 @@ export class Store {
       .prepare(
         `SELECT
            COALESCE(SUM(COALESCE(actual_cost_usd_micros, estimated_cost_usd_micros, 0)), 0) AS total,
-           COALESCE(SUM(CASE WHEN actual_cost_usd_micros IS NULL THEN 1 ELSE 0 END), 0) AS estimatedRows
+           COALESCE(SUM(CASE WHEN actual_cost_usd_micros IS NULL OR actual_cost_estimated = 1 THEN 1 ELSE 0 END), 0) AS estimatedRows
          FROM activity_events
          WHERE credential_id = @cid
            AND ts IS NOT NULL AND ts >= @from ${upper}
@@ -1468,15 +1476,30 @@ export class Store {
    * recomputed — it remains the per-task estimate for the legacy unit
    * surfaces. For subscription credentials the resulting USD figure is a
    * *proxy* budget, not an exact bound on the provider's plan quota.
-   * Idempotent: a no-op when no `claimed` row exists.
+   *
+   * `actualCostEstimated` (issue #1004, AC4) records whether the actual
+   * cost is itself a heuristic — true for a telemetry-less harness such as
+   * Hermes whose `harvestHarnessUsage` falls back to an a-priori estimate,
+   * false when the figure is harvested telemetry. The gate reads it so a
+   * delivered-but-heuristic row reports `estimated: true` rather than being
+   * presented as metered. Idempotent: a no-op when no `claimed` row exists.
    */
-  finalizeClaimDelivered(requestId: string, actualCostUsdMicros: number): void {
+  finalizeClaimDelivered(
+    requestId: string,
+    actualCostUsdMicros: number,
+    actualCostEstimated: boolean,
+  ): void {
     this.db.prepare(
       `UPDATE activity_events
          SET claim_status = 'delivered',
-             actual_cost_usd_micros = @actual
+             actual_cost_usd_micros = @actual,
+             actual_cost_estimated = @estimated
        WHERE request_id = @req AND claim_status = 'claimed'`,
-    ).run({ req: requestId, actual: actualCostUsdMicros });
+    ).run({
+      req: requestId,
+      actual: actualCostUsdMicros,
+      estimated: actualCostEstimated ? 1 : 0,
+    });
   }
 
   /** Newer events first, then ascending id for `jinn logs --follow` (oldest in batch printed first in caller). */

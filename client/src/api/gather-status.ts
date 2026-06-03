@@ -1319,6 +1319,10 @@ export async function gatherStatusForApi(
           usdMicrosThisWeek: week.usdMicros,
           capPerBlockUsdMicros: aiUnitsCfg.capPerBlockUsdMicros,
           capPerWeekUsdMicros: aiUnitsCfg.capPerWeekUsdMicros,
+          // estimated = the summed figure includes any estimate-backed cost
+          // (a telemetry-less/heuristic harness such as Hermes, or an
+          // in-flight claimed row not yet harvested); false only when every
+          // contributing row is harvested actual telemetry (issue #1004 AC4).
           estimated: block.estimated || week.estimated,
           paused,
           blockResetsAt,

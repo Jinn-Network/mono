@@ -101,9 +101,11 @@ export interface AiUnitsCredentialRow {
   capPerBlockUsdMicros: number;
   capPerWeekUsdMicros: number;
   /**
-   * True when any contributing row lacked a harvested actual cost — the USD
-   * figures are (partly) estimate-backed rather than fully metered. Always
-   * true for harnesses with no usage telemetry (e.g. Hermes). Issue #1004.
+   * True when the summed figure includes any estimate-backed cost: a
+   * telemetry-less/heuristic harness such as Hermes (whose delivered actual
+   * cost is itself a heuristic), or an in-flight claimed row not yet
+   * harvested. False only when every contributing row is harvested actual
+   * telemetry. Issue #1004 (AC4).
    */
   estimated: boolean;
   /** True when block or week sum has reached its cap and claims are paused. */
