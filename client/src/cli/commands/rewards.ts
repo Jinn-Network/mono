@@ -109,9 +109,9 @@ Examples:
             raw.pendingStakingRewardsWei = pr.sum;
             raw.pendingByService = pr.pendingByService;
             if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
-          } else {
-            raw.pendingRewardsError = pr.error;
           }
+          // pr.error path: leave the staking fields unset — assembleRewardsV1
+          // degrades to pending=0 / nextCheckpointAt=null (same as the catch).
         } catch {
           // Config unreadable or RPC error — assembleRewardsV1 degrades to
           // pending=0 / nextCheckpointAt=null, which the human renderer handles.

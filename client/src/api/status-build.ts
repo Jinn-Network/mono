@@ -142,8 +142,6 @@ export interface GatheredStatusRaw {
    * /v1/status hot path (#992).
    */
   pendingStakingRewardsWei?: string;
-  /** On-demand staking reward read error; populated only by `jinn rewards` (#992). */
-  pendingRewardsError?: string;
   /** Sepolia tJINN ERC-20 balances across fleet Safes. */
   tJinn?: TjinnStatus;
   /**

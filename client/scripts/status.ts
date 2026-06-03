@@ -64,12 +64,8 @@ function printHumanSummary(body: StatusV1Response): void {
   }
 
   console.log(`  rewards:    interval ${rw.claimLoopIntervalMs} ms  lastTick=${rw.lastClaimTickAt ?? 'never'}`);
-  if (rw.pendingStakingRewardsWei !== undefined) {
-    console.log(`  pending:    ${rw.pendingStakingRewardsWei} wei (sum calculateStakingReward)`);
-  }
-  if (rw.pendingRewardsError) {
-    console.log(`  pending:    error — ${rw.pendingRewardsError}`);
-  }
+  // The OLAS staking collector queue is no longer carried on /v1/status (#992);
+  // run `jinn rewards` for the on-demand pending total.
 
   const counts = body.activity.counts;
   const c = Object.keys(counts).length ? JSON.stringify(counts) : '{}';
