@@ -6,6 +6,23 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
+// HH3 + EDR async-revert noise guard.
+// When a tx is asserted to revert via `expect(...).to.be.revertedWithCustomError`,
+// EDR's automatic gas-estimation pass emits a *second*, async copy of the same
+// revert as a process-level unhandled rejection (name === "SolidityError").
+// @nomicfoundation/hardhat-mocha only swallows unhandled rejections whose name is
+// "AssertionError" (its missing-await guard), so the SolidityError copy reaches
+// Node's default `--unhandled-rejections=throw` and crashes the test process
+// mid-suite (HH2 never threw on these). The chai matcher has already asserted the
+// revert, so this duplicate is pure noise. Swallow exactly that one class; rethrow
+// everything else so genuine unhandled rejections still fail loud.
+process.on("unhandledRejection", (reason) => {
+  if (reason instanceof Error && reason.name === "SolidityError") {
+    return;
+  }
+  throw reason;
+});
+
 const optimizerSettings = {
   optimizer: {
     enabled: true,
@@ -27,6 +44,11 @@ const largeContractSettings = {
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthers],
   solidity: {
+    // HH3 only emits standalone artifacts for npm-dependency contracts listed
+    // here (HH2 emitted one for every compiled contract). deploy-jinn-mvi-l1.ts
+    // deploys OZ's TimelockController by fully-qualified name, so its artifact
+    // must be emitted even though it appears only as a constructor-param type.
+    npmFilesToBuild: ["@openzeppelin/contracts/governance/TimelockController.sol"],
     compilers: [
       { version: "0.8.25", settings: optimizerSettings },
       { version: "0.8.28", settings: optimizerSettings },
