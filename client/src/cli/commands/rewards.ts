@@ -5,15 +5,19 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { emitResult } from '../output.js';
 import { gatherIntrospectionRaw as defaultGatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleRewardsV1 as defaultAssembleRewardsV1, type RewardsV1Response } from '../../api/rewards-build.js';
+import { sumPendingStakingRewards as defaultSumPendingStakingRewards } from '../../api/gather-status.js';
+import { loadConfig, getConfigPathFromArgs } from '../../config.js';
 
 export interface RewardsDeps {
   gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
   assembleRewardsV1: typeof defaultAssembleRewardsV1;
+  sumPendingStakingRewards: typeof defaultSumPendingStakingRewards;
 }
 
 const PRODUCTION_DEPS: RewardsDeps = {
   gatherIntrospectionRaw: defaultGatherIntrospectionRaw,
   assembleRewardsV1: defaultAssembleRewardsV1,
+  sumPendingStakingRewards: defaultSumPendingStakingRewards,
 };
 
 function formatRewardAmount(wei: string): string {
@@ -90,6 +94,29 @@ Examples:
         return;
       }
       const raw = await deps.gatherIntrospectionRaw({ argv: ctx.argv });
+      // On-demand staking reward read — kept off the /v1/status hot path (#992).
+      // jinn rewards is the sanctioned ops-only surface for the OLAS staking
+      // collector queue. Resolve rpcUrl/network from config and read against
+      // the fleet that gather-status already loaded into `raw`.
+      if (raw.fleet && raw.rpc.ok) {
+        const configPath =
+          getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
+        try {
+          const config = loadConfig(configPath);
+          const rpcUrl = Array.isArray(config.rpcUrl) ? config.rpcUrl[0]! : config.rpcUrl;
+          const pr = await deps.sumPendingStakingRewards(rpcUrl, config.network, raw.fleet);
+          if ('sum' in pr) {
+            raw.pendingStakingRewardsWei = pr.sum;
+            raw.pendingByService = pr.pendingByService;
+            if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
+          } else {
+            raw.pendingRewardsError = pr.error;
+          }
+        } catch {
+          // Config unreadable or RPC error — assembleRewardsV1 degrades to
+          // pending=0 / nextCheckpointAt=null, which the human renderer handles.
+        }
+      }
       const payload = deps.assembleRewardsV1(raw);
       emitResult(payload, (v) => humanRewards(v as RewardsV1Response), {
         json: Boolean(parsed.values.json),
