@@ -612,6 +612,7 @@ describe('POST /v1/setup/drip', () => {
       requestFunding,
       maxFaucetIters: 5,
       interDripPauseMs: 0,
+      faucetRateLimitBackoffMs: 0,
       getBalance: async () => 0n,
     });
 

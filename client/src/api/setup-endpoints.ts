@@ -88,6 +88,13 @@ export interface SetupRoutesConfig {
   getBalance?: () => Promise<bigint | null>;
   maxFaucetIters?: number;
   interDripPauseMs?: number;
+  /**
+   * Backoff before retrying a transient CDP faucet 429 (issue #984). Defaults
+   * to RATE_LIMIT_BACKOFF_MS (15000 ms); tests pass 0 to skip the sleep.
+   * Independent of `interDripPauseMs` — mirrors `bootstrap.ts`'s
+   * `faucetRateLimitBackoffMs`.
+   */
+  faucetRateLimitBackoffMs?: number;
   /** Wall-clock cutoff for the drip loop; reaching target/rate-limit still wins first. */
   faucetLoopTimeoutMs?: number;
   /** Now-source override for deterministic faucet-loop tests. */
@@ -318,9 +325,10 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // carries NO fixed inter-drip sleep (issue #984 work unit 1). A transient
       // CDP 429 backs off and retries within the session instead of ending it
       // on the first throttle; the wall-clock deadline stays the safety rail.
-      // Backoff is skippable in tests by passing interDripPauseMs: 0.
+      // Backoff is skippable in tests by passing faucetRateLimitBackoffMs: 0.
       const MAX_RATE_LIMIT_RETRIES = 3;
       const RATE_LIMIT_BACKOFF_MS = 15_000;
+      const rateLimitBackoffMs = config.faucetRateLimitBackoffMs ?? RATE_LIMIT_BACKOFF_MS;
       let rateLimitRetries = 0;
       for (let i = 0; i < maxFaucetIters; i++) {
         if (now() >= deadline) {
@@ -342,9 +350,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         if (!result.ok) {
           if (result.rateLimited && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
             rateLimitRetries++;
-            await new Promise((r) =>
-              setTimeout(r, interDripPauseMs === 0 ? 0 : RATE_LIMIT_BACKOFF_MS),
-            );
+            await new Promise((r) => setTimeout(r, rateLimitBackoffMs));
             continue;
           }
           return c.json(

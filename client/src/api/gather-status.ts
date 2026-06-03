@@ -813,7 +813,12 @@ async function getCachedPendingStakingRewards(
   if (cached && cached.expiresAt > now) {
     return cached.promise;
   }
-  const promise = sumPendingStakingRewards(rpcUrl, network, fleet);
+  // Guard the STORED promise so a rejection is never cached and served for the
+  // TTL window — mirrors `getCachedTjinnBalances`. A rejection resolves to the
+  // function's own `{ error }` variant.
+  const promise = sumPendingStakingRewards(rpcUrl, network, fleet).catch(
+    (e): StakingRewardsResult => ({ error: e instanceof Error ? e.message : String(e) }),
+  );
   stakingRewardsCache.set(cacheKey, {
     expiresAt: now + STAKING_EVICTION_CACHE_TTL_MS,
     promise,
@@ -890,7 +895,12 @@ async function getCachedEvictionState(
   if (cached && cached.expiresAt > now) {
     return cached.promise;
   }
-  const promise = readEvictionState(client, fleet);
+  // Guard the STORED promise so a rejection is never cached and served for the
+  // TTL window — mirrors `getCachedTjinnBalances`. A rejection resolves to an
+  // empty snapshot (all per-service maps empty).
+  const promise = readEvictionState(client, fleet).catch(
+    (): EvictionStateSnapshot => ({ evictedByServiceIndex: {}, inactivityByServiceIndex: {} }),
+  );
   evictionStateCache.set(cacheKey, {
     expiresAt: now + STAKING_EVICTION_CACHE_TTL_MS,
     promise,
