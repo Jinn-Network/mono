@@ -13,7 +13,6 @@ type AttentionKind =
   | 'none'
   | 'low_gas'
   | 'identity_binding_pending'
-  | 'evicted'
   | 'stake_missing'
   | 'bond_insufficient'
   | 'reconcile_needed';
@@ -26,9 +25,8 @@ export interface FleetV1Service {
     agent: { address: string; balances: Array<{ asset: string; amountWei: string }> };
     multisig: { address: string; balances: Array<{ asset: string; amountWei: string }> };
   };
-  staking: { staked: boolean; evicted: boolean; sinceBlock: number | null; inactivitySeconds: number | null };
+  staking: { staked: boolean; sinceBlock: number | null };
   activity: { lastEventAt: string | null; counts: Record<string, number> };
-  rewards: { pending: string; asset: 'reward' };
   attention: null | {
     kind: AttentionKind;
     hint: string;
@@ -105,7 +103,6 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
   const network: 'testnet' | 'mainnet' =
     fleet?.chain === 'base' ? 'mainnet' : 'testnet';
   const masterAddress = fleet?.master_address ?? raw.master.address ?? '0x';
-  const pendingByService = raw.pendingByService ?? {};
 
   const services = (fleet?.services ?? []).map((svc, i) => {
     const di = displayFleetServiceIndex(svc);
@@ -129,17 +126,11 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
     },
     staking: {
       staked: isStakedLikeServiceStep(svc.step),
-      evicted: raw.evictedByServiceIndex?.[di] ?? false,
       sinceBlock: null,
-      inactivitySeconds: raw.inactivityByServiceIndex?.[di] ?? null,
     },
     activity: {
       lastEventAt: per?.lastEventAt ?? null,
       counts: per?.counts ?? {},
-    },
-    rewards: {
-      pending: pendingByService[di] ?? '0',
-      asset: 'reward' as const,
     },
     attention: computeAttention(svc, raw, i === 0),
   };
