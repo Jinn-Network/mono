@@ -38,11 +38,42 @@
 
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { adoptOperator } from './substrate-adopt.js';
 import { provisionSubstrate, type ProvisionResult } from './substrate-provision.js';
 import { verifySubstrate } from './substrate-verify.js';
 import { checkSubstrateTopup } from './substrate-topup.js';
 import { serializeVerifyResult, type SerializedVerifyResult, type TopupResult } from './types.js';
+import { requestTestnetFunding } from '../../src/earning/faucet.js';
+
+/**
+ * Best-effort gas top-up from the CDP testnet faucet (shipped creds — no stored
+ * private key). Reads the warm operator's master + agent EOAs from its restored
+ * earning state and drips each. This is why the env suite needs NO
+ * JINN_FUNDER_PRIVATE_KEY: the operator already carries a buffer, and the faucet
+ * (0.0001 ETH per address / 24h) keeps it topped at the gate's ~weekly cadence.
+ * Rate-limit + error tolerant — a drip failure is NEVER a blocker; the topup
+ * check below is the real funding gate.
+ */
+async function faucetTopUp(jinnClientDir: string): Promise<void> {
+  let state: { master_address?: string; agent_address?: string } = {};
+  try {
+    state = JSON.parse(readFileSync(path.join(jinnClientDir, 'earning', 'earning_state.json'), 'utf8'));
+  } catch {
+    return;
+  }
+  const addrs = [state.master_address, state.agent_address].filter((a): a is string => Boolean(a));
+  for (const addr of addrs) {
+    try {
+      const r = await requestTestnetFunding(addr, 'base-sepolia');
+      console.error(
+        `[faucet] ${addr}: ${r.ok ? 'dripped ' + r.txHash : r.rateLimited ? 'rate-limited (24h cap)' : 'skip — ' + r.reason}`,
+      );
+    } catch (e) {
+      console.error(`[faucet] ${addr}: error ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
 
 /**
  * Distinct exit code for an infra-blocked preflight. Chosen to be unambiguous in
@@ -132,11 +163,12 @@ export async function runWarmOperatorPreflight(opts: PreflightOptions = {}): Pro
     blockers.push(`substrate verify failed: ${verify.failures.join('; ')}`);
   }
 
-  // 4. Top-up gaps: ETH/USDC below the topup targets. Reported (not auto-funded
-  //    here — the workflow owns the top-up tx from JINN_FUNDER_PRIVATE_KEY); a
-  //    gap that the workflow's top-up step cannot close is the infra blocker.
+  // 4. Self-top-up from the CDP faucet (no stored funder key), THEN check gaps.
+  //    The faucet drip is best-effort; a gap that survives it (operator
+  //    critically low + faucet can't keep pace) is the real infra blocker.
   let topup: TopupResult | null = null;
   if (!(opts.skipOnChain ?? false)) {
+    await faucetTopUp(jinnClientDir);
     topup = await checkSubstrateTopup(opName, { substrateRoot: opts.substrateRoot });
     if (!topup.ok) {
       const gaps = topup.needs.map((n) => `${n.resource} have=${n.have} want=${n.want}`);

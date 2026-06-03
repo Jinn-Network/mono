@@ -20,9 +20,11 @@
 #
 # Security posture (§9, ENFORCED — not assumed):
 #   - testnet-gate is a HUMAN-CREATED protected GitHub Actions Environment; its
-#     secrets (warm-operator keystore, password, funder key, OAuth token) are
-#     scoped to it, not repo-wide. A human provisions it (spec §9/§11) — this
-#     workflow only CONSUMES them.
+#     secrets (warm-operator keystore, password, OAuth token) are scoped to it,
+#     not repo-wide. A human provisions it (spec §9/§11) — this workflow only
+#     CONSUMES them. NB: there is intentionally NO funder private key — the
+#     preflight self-tops-up the operator's gas from the CDP testnet faucet
+#     (shipped creds), removing that stored-key requirement entirely.
 #   - This workflow NEVER runs on pull_request from forks. Triggers are
 #     schedule / workflow_dispatch only, and the dispatch run is checked out on a
 #     candidate SHA that must be an ancestor of `next` or a `release/*` branch
@@ -223,13 +225,14 @@ jobs:
           JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           JINN_DISCOVERY_URL: ${{ secrets.JINN_DISCOVERY_URL }}
-          JINN_FUNDER_PRIVATE_KEY: ${{ secrets.JINN_FUNDER_PRIVATE_KEY }}
         run: |
           set +e
           # --repair makes the doctor idempotently reconcile the recurring drift
           # (RPC fallback chain, fleet_safe consistency, harness config). The
-          # top-up tx itself is funded from JINN_FUNDER_PRIVATE_KEY by the
-          # operator tooling; the preflight reports the gap loudly either way.
+          # preflight self-tops-up the operator's gas from the CDP testnet faucet
+          # (shipped creds, no stored key) — so NO JINN_FUNDER_PRIVATE_KEY secret
+          # is needed; a gap the faucet can't keep up with is reported as
+          # infra-blocked.
           tsx scripts/release/warm-operator-preflight.ts \
             --op-name warm-operator \
             --jinn-client-dir "${HOME}/.jinn-client" \
@@ -305,7 +308,6 @@ jobs:
           JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           JINN_DISCOVERY_URL: ${{ secrets.JINN_DISCOVERY_URL }}
-          JINN_FUNDER_PRIVATE_KEY: ${{ secrets.JINN_FUNDER_PRIVATE_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           JINN_E2E_HARNESS: claude-code
           CANDIDATE_SHA: ${{ steps.resolve.outputs.candidate_sha }}
