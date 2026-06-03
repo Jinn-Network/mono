@@ -40,8 +40,11 @@ describe('ApiServer.setStatusConfig', () => {
       aiUnits: {
         capPerBlock: 100,
         capPerWeek: 2800,
+        capPerBlockUsdMicros: 500_000,
+        capPerWeekUsdMicros: 14_000_000,
         manifestCredentials: { 'cid-1': 'anthropic:api-key' },
         manifestProjectedAiUnits: { 'cid-1': 5 },
+        manifestProjectedUsdMicros: { 'cid-1': 25_000 },
         manifestModels: { 'cid-1': 'claude-haiku-4-5' },
       },
     });
@@ -68,8 +71,11 @@ describe('ApiServer.setStatusConfig', () => {
         aiUnits: {
           capPerBlock: 100,
           capPerWeek: 2800,
+          capPerBlockUsdMicros: 500_000,
+          capPerWeekUsdMicros: 14_000_000,
           manifestCredentials: { 'cid-1': 'anthropic:api-key' },
           manifestProjectedAiUnits: { 'cid-1': 5 },
+          manifestProjectedUsdMicros: { 'cid-1': 25_000 },
           manifestModels: { 'cid-1': 'claude-haiku-4-5' },
         },
       },
