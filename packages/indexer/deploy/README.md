@@ -15,10 +15,13 @@ commit `57d6e610` for ~21 deploys while the last-good container kept serving).
 relative to the `/packages` Root Directory — the build context the Dockerfile needs to
 `COPY` the sibling `sdk/`); **watch paths** scoped to `packages/indexer/**` + `packages/sdk/**`
 so unrelated `next` merges (client SPA, dashboard, eval, …) stop redeploying the indexer;
-and a **`/health` healthcheck** so a redeploy gates traffic cutover on the new container
-serving (the missing healthcheck was the "indexer goes down momentarily when I merge a
-batch of PRs" symptom — every push redeployed, and cutover happened before the process
-was up).
+and a **`/ready` healthcheck** so a redeploy gates traffic cutover on the new container being
+caught-up-to-realtime (the missing healthcheck was the "indexer goes down momentarily when I
+merge a batch of PRs" symptom — every push redeployed, and cutover happened before the process
+was up). `/ready` rather than `/health` because the daemon discovery layer probes `/ready`; the
+old container keeps serving until the new one is `/ready`, so daemons never hit
+`DiscoveryUnavailableError`. Verified zero-downtime on 2026-06-03 (deploy `b7f25e05`: 0 non-200
+across the full build + cutover).
 
 **One-time service settings (not expressible in `railway.toml`), set once via dashboard or API:**
 

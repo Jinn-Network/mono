@@ -33,13 +33,20 @@ dockerfilePath = "indexer/deploy/Dockerfile"
 watchPatterns = ["packages/indexer/**", "packages/sdk/**"]
 
 [deploy]
-# Gate traffic cutover on the new container actually serving, so a redeploy does
-# not drop requests (the prior null healthcheck cut over before the process was
-# up — the "indexer goes down momentarily on merges" symptom). /health returns
-# 200 once the HTTP server is listening; /ready (caught-up-to-realtime) is the
-# stricter zero-downtime gate — see README §Zero-downtime rolling deploys.
-healthcheckPath = "/health"
-healthcheckTimeout = 300
+# Gate traffic cutover on the new container being caught-up-to-realtime, so a
+# redeploy never drops requests. /ready (not /health) because the daemon discovery
+# layer probes /ready — gating here keeps the old container serving until the new
+# one is /ready, so daemons never hit DiscoveryUnavailableError on a redeploy.
+# Verified zero-downtime on 2026-06-03 (deploy b7f25e05: 0 non-200 across the full
+# build + cutover). The prior null healthcheck cut over before the process was up —
+# the "indexer goes down momentarily on merges" symptom. Timeout is generous so a
+# slow resume/catch-up doesn't fail the deploy (raise toward 10800 for a full
+# cold-sync; a deploy that never reaches /ready just fails and the old one keeps
+# serving — see README §Zero-downtime rolling deploys).
+healthcheckPath = "/ready"
+healthcheckTimeout = 3600
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
-numReplicas = 1
+# numReplicas omitted: Railway config-as-code expresses replicas under
+# multiRegionConfig, not [deploy], and 1 is the default. True HA (multi-replica
+# ponder serve) is follow-up #652.
