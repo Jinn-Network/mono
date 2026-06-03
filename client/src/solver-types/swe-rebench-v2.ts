@@ -568,7 +568,9 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
           );
         }
         if (isTerminalRecoveryOutcome(recovery)) {
-          // recovered / local-pool-present / hash-mismatch — retrying can't help.
+          // recovered / local-pool-present — retrying can't help. (hash-mismatch is
+          // transient: rejected at write time, but a corrupted fetch or a re-published
+          // corrected ref can recover on a later attempt, bounded by the cap.)
           poolRecoverySettled = true;
         } else if (poolRecoveryAttempts >= POOL_RECOVERY_MAX_ATTEMPTS) {
           // Transient outcome but the bounded cap is exhausted: stop retrying.

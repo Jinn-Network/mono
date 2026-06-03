@@ -264,11 +264,11 @@ describe('isTerminalRecoveryOutcome (#957 latch decision)', () => {
   it('treats local-pool-present as terminal', () => {
     expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'local-pool-present' })).toBe(true);
   });
-  it('treats hash-mismatch as terminal (poisoned ref — must not loop)', () => {
-    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'hash-mismatch' })).toBe(true);
-  });
 
   // TRANSIENT — do NOT latch; the caller retries under a bounded cap.
+  it('treats hash-mismatch as transient (bad artifact is rejected at write time; a corrupted gateway response or a re-published corrected ref can recover on a later attempt — the bounded cap stops looping on a genuinely-bad ref)', () => {
+    expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'hash-mismatch' })).toBe(false);
+  });
   it('treats no-task as transient (fresh SolverNet may post its first task later)', () => {
     expect(isTerminalRecoveryOutcome({ recovered: false, reason: 'no-task' })).toBe(false);
   });

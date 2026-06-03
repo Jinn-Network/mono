@@ -63,18 +63,24 @@ export interface RecoverVettedPoolResult {
  *
  *   - `recovered === true`        — done; the pool was written.
  *   - `local-pool-present`        — a local pool already exists; nothing to recover.
- *   - `hash-mismatch`             — the published artifact is bad/untrusted; retrying
- *                                   loops on a poisoned ref, so we must stop.
  *
- * All other outcomes (`no-task`, `no-ref`, `error:*`) are TRANSIENT/retryable: a
- * fresh SolverNet may not have posted its first task yet, the task's eligibility
- * may not yet carry a vettedPoolRef, or the indexer / IPFS gateway may be having
- * a transient blip. Those can become recoverable on a later tick, so the caller
- * must NOT latch on them (it retries under a bounded cap instead).
+ * All other outcomes (`no-task`, `no-ref`, `error:*`, `hash-mismatch`) are
+ * TRANSIENT/retryable, so the caller must NOT latch on them (it retries under a
+ * bounded cap instead):
+ *   - `no-task` — a fresh SolverNet may not have posted its first task yet.
+ *   - `no-ref` — the task's eligibility may not yet carry a vettedPoolRef.
+ *   - `error:*` — the indexer / IPFS gateway may be having a transient blip.
+ *   - `hash-mismatch` — the fetched artifact's hash didn't match the ref. This is
+ *     SECURITY-rejected at write time (the bad artifact is NEVER written), and it
+ *     can be transient: a corrupted IPFS-gateway response may fetch cleanly on a
+ *     later attempt, or the launcher may re-publish a corrected ref that a later
+ *     task carries. Retrying re-resolves the most-recent task's ref AND re-fetches
+ *     from IPFS, so a corrected pool is picked up without a restart; the bounded
+ *     retry cap prevents looping on a genuinely-bad ref.
  */
 export function isTerminalRecoveryOutcome(result: RecoverVettedPoolResult): boolean {
   if (result.recovered) return true;
-  return result.reason === 'local-pool-present' || result.reason === 'hash-mismatch';
+  return result.reason === 'local-pool-present';
 }
 
 export interface RecoverVettedPoolDeps {
