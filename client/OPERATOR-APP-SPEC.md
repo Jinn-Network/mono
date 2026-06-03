@@ -90,15 +90,17 @@ ETH actually lives across three roles — the **agent address** (gas float for t
 
 The SolverNets this operator has joined. One entry per joined SolverNet, keyed by manifest CID.
 
+**Onboarding-essential.** Joining at least one SolverNet — with a ready harness (§2.9) and a selected model for its solver role — is part of the Bootstrap completion criterion (§2.8), not a post-onboarding optional step. A node with zero memberships is not eligible to claim any tasks, so onboarding does not report complete until the first membership exists. Evaluator-only joins follow §2.9's evaluator rule (no solver-harness selection required).
+
 - **Static (per joined SolverNet)**
   - last action at — the timestamp of the most recent loop tick that produced an event for this SolverNet (claim attempt, delivery, evaluation, or no-op check). This is the operator's liveness indicator for the membership; the spec deliberately does not expose a derived "participation health" metric on top.
   - environment
-    - harness
-    - model
+    - harness — *(onboarding-essential for the solver role; selected via the §2.9 Harness Selection surface)*
+    - model — *(onboarding-essential for the solver role)*
     - plugin
     - etc.
     - **Actions**
-      - change environment
+      - change environment *(uses the §2.9 Harness Selection surface; see §2.11 Settings for the post-onboarding home)*
   - **Actions**
     - leave SolverNet
     - browse SolverNets *(jumps to §2.5 Registry)*
@@ -131,7 +133,7 @@ Distinct from §2.4 Memberships: the Registry lists SolverNets the operator *cou
     - open roles
     - lifecycle status
 - **Actions**
-  - join SolverNet
+  - join SolverNet — *the first join is onboarding-essential (§2.8); the Registry is the surface from which onboarding's SolverNet-selection step is satisfied*
   - view manifest
 - **Streams**
   - new SolverNets registered
@@ -190,15 +192,31 @@ The state of joining the network for the first time.
 
 A separate component because it is a finite, single-pass state machine with its own blocking states. Once complete, the component is dormant; until then, the operator app treats it as a takeover surface — the operator should not be navigating to Memberships or Tasks while Bootstrap is blocked.
 
+**Completion criterion.** Bootstrap is complete when the node is **running and eligible to claim tasks** — not merely when the earning state machine (wallet → Safe → service → stake → mech) reaches its terminal `complete` step. Eligibility means the operator has, by the end of the takeover:
+
+- at least one **joined SolverNet** (§2.4); and
+- for that SolverNet's solver role, a **ready harness** (§2.9, installed + authenticated) and a **selected model**.
+
+(Evaluator-only joins satisfy the criterion without a solver harness — see §2.9.) The earning state machine reaching `complete` is necessary but not sufficient; a node that finished the state machine with zero memberships is *live but idle* and has not finished onboarding.
+
+**No separate restart.** These onboarding-essential selections are part of the takeover and land config *before* the bootstrap→running flip. The first running-mode boot composes the readiness registry and generators from the resulting `joinedSolverNets`, so a successfully-onboarded node enters running mode already eligible to claim — without a separate operator-initiated restart. (Cross-ref §3.2; this is why onboarding sequences join + harness/model selection ahead of the flip rather than deferring them to the post-onboarding join flow.)
+
+The onboarding-essential fields are **owned by their home components** and referenced here, not duplicated: join → §2.4 / §2.5; harness readiness + selection → §2.9; harness + model on the membership environment → §2.4.
+
 - **Static**
   - current step
   - prior steps
   - fleet stage
   - blocking reason (if any)
+  - onboarding-essential selections (gate completion; each owned elsewhere)
+    - joined SolverNet (≥1 required) — §2.4 / §2.5
+    - solver harness + model per joined SolverNet's solver role — §2.9 (selection + readiness), §2.4 (environment)
 - **Actions**
   - retry step
   - rebind Safe
   - change network
+  - join SolverNet — *onboarding-essential; satisfied via the §2.5 Registry surface rendered inside the takeover*
+  - select harness + model — *onboarding-essential for the solver role; uses the §2.9 Harness Selection surface*
 - **Streams**
   - step transitions
 - **State messages**
@@ -206,26 +224,43 @@ A separate component because it is a finite, single-pass state machine with its 
   - awaiting stake
   - Safe binding failed
   - bootstrap blocked
+  - join a SolverNet to finish — onboarding-local; raised when the state machine is otherwise done but no membership exists. Distinct from §2.10 `no_solvernets_joined`, which is the *running-mode* "left all SolverNets" case and never fires for a node still in the Bootstrap takeover.
+  - harness setup required — onboarding-local; the selected solver harness is not yet ready (§2.9). Resolved in-flow via the §2.9 install/auth action.
   - ready to start
 
-### 2.9 Harness Readiness
+### 2.9 Harness Selection
 
-Whether each supported execution harness is installed, authenticated, and ready to run.
+The surface for choosing an execution harness for a SolverNet's solver role and getting it ready (installed + authenticated) to run.
 
-Cross-cuts §2.4 Memberships because a single harness gates many SolverNets. Surfaced at the component level so the operator fixes "harness not authenticated" once, not per SolverNet.
+**Not a standalone dashboard surface.** This component is *not* a first-class card on the overview. Its only useful moments are *while selecting or readying a harness*, so it renders in exactly two places, sharing one model: **(a) onboarding** (the harness + model step of the Bootstrap takeover, §2.8) and **(b) §2.11 Settings** (the canonical post-onboarding home, reached via §2.4 "change environment"). Harness readiness for a joined SolverNet still cross-cuts §2.4 Memberships — a single harness gates many SolverNets, so the operator fixes "harness not authenticated" once — but the operator reaches that fix *through* this selection surface, not via a buried readiness card.
+
+**Three-tier availability.** A harness an operator can actually pick is the intersection of three tiers; the surface makes the distinction legible so an operator understands *why* a harness is or isn't offered:
+
+1. **Available in the protocol** — declared solver-compatible by the SolverNet's manifest. Varies per SolverNet.
+2. **Supported by this node build** — compiled into this daemon binary. Static for a given build; a protocol-available harness this build does not ship cannot be selected here.
+3. **Installed & authenticated on this machine** — present on the host and passing its readiness check. The operator-actionable tier; an in-tier harness may still be not-installed or auth-expired until the operator runs its install/auth action.
+
+The pickable set is tier 1 ∩ tier 2; selecting a pickable harness then drives it to tier 3 via the install/auth action below.
+
+**Evaluator harness.** The evaluator harness is **bound by the manifest**, not operator-chosen. An evaluator-only join requires no solver-harness selection on this surface; its readiness is still tracked (tier 3) and surfaced, and a "join now, set up later" affordance is permitted for the solver harness when the operator joins as evaluator-only.
 
 - **Static (per harness)**
   - name
-  - installed
-  - authenticated
-  - ready
+  - protocol-available (tier 1, relative to the SolverNet in context)
+  - node-supported (tier 2)
+  - installed (tier 3)
+  - authenticated (tier 3)
+  - ready (tier 3 — installed ∧ authenticated ∧ passing its check)
+  - role — solver (operator-selected) or evaluator (manifest-bound)
 - **Actions (per harness)**
+  - select — choose this harness for the solver role of the SolverNet in context (writes to the §2.4 environment)
+  - install / authenticate — the per-harness setup action that drives the harness to ready; generalises the existing precheck pattern (install command / auth step, then re-check). Optional per harness: pure-compute harnesses are ready with no action.
   - re-check
-  - re-authenticate
 - **State messages**
   - harness not installed
   - auth expired
   - version mismatch
+  - not supported by this node build — the harness is protocol-available for this SolverNet but not compiled into this build; informational, not operator-fixable from this surface
 
 ### 2.10 Notifications
 
@@ -256,7 +291,7 @@ Components raise state messages locally. The Notifications component is the unio
 - `rpc_unreachable`
 - `rpc_all_failed` — every slot in the RPC fallback chain has failed (`AllRpcsFailedError`). Severity: action_required. The masked host list is included.
 - `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.
-- `no_solvernets_joined`
+- `no_solvernets_joined` — fires **only** for a running node that has left all its SolverNets *after* onboarding. It is **never** shown to a freshly-onboarded node: onboarding's completion criterion (§2.8) guarantees ≥1 joined SolverNet, so a node that has just finished onboarding always has a membership. The onboarding-local "join a SolverNet to finish" prompt (§2.8 state messages) is the takeover-phase counterpart and is a distinct, non-taxonomy message.
 - `safe_binding_pending`
 - `claim_available`
 - `claim_failed`
@@ -264,6 +299,8 @@ Components raise state messages locally. The Notifications component is the unio
 ### 2.11 Settings
 
 Operator-tunable configuration.
+
+**Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a membership's harness/model (§2.4 "change environment") or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once.
 
 - **State** (read-only)
   - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.
