@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,7 +120,8 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
 
   // Resolve a single instance to the {task,row} the harness + grader need.
   const byId = new Map(pool.map((t) => [t.instance_id, t]));
-  async function runOnce(harness: Harness, poolTask: PoolTask, implStateDir: string): Promise<{ passed: boolean | null }> {
+  async function runOnce(harness: Harness, poolTask: PoolTask): Promise<{ passed: boolean | null }> {
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-screen-state-'));
     try {
       const [resolved] = await resolveSlateTasks({
         poolTasks: [poolTask], hf_dataset: poolTask.hf_dataset, hf_split: poolTask.hf_split, fetcher,
@@ -146,6 +147,8 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
       return { passed: verdict.passed_match };
     } catch {
       return { passed: null }; // any harness/grader/infra failure ⇒ unscorable, never a fail (#476)
+    } finally {
+      rmSync(implStateDir, { recursive: true, force: true });
     }
   }
 
@@ -153,6 +156,7 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   const hashOpts = baseHarness.freezeStateHashIgnore?.length
     ? { ignoreRelPaths: [...baseHarness.freezeStateHashIgnore] } : undefined;
   const baseCodeDigest = `sha256:${await hashImplStateDir(emptyBaseDir, hashOpts)}`;
+  rmSync(emptyBaseDir, { recursive: true, force: true });
 
   const deps: ScreenDeps = {
     log,
@@ -163,8 +167,8 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
       }, {});
       return (await validatedStore.getEntry(task.instance_id, EVAL_SEMANTICS_VERSION))?.scorable === true;
     },
-    runBaseFrozen: (task) => runOnce(baseHarness, byId.get(task.instance_id)!, mkdtempSync(join(tmpdir(), 'jinn-screen-base-'))),
-    runProverFrozen: (task) => runOnce(proverHarness, byId.get(task.instance_id)!, mkdtempSync(join(tmpdir(), 'jinn-screen-prover-'))),
+    runBaseFrozen: (task) => runOnce(baseHarness, byId.get(task.instance_id)!),
+    runProverFrozen: (task) => runOnce(proverHarness, byId.get(task.instance_id)!),
   };
 
   const result = await screenBaseFailures(candidates, deps, {
