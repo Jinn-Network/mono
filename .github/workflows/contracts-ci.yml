@@ -26,9 +26,14 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: yarn install --immutable
-      # Hardhat-only job: NO Foundry step here. The `.t.sol` invariant suite
-      # (contracts/test/jinn/invariants/*) and foundry.toml are independent and
-      # belong to a separate (deferred) Foundry job — see the migration plan.
+      # Foundry provides `forge`, required by test/storage-layout.test.ts, which
+      # shells out to `forge inspect <src/Contract> storage-layout --json` to
+      # assert upgrade-safe storage layouts under `yarn test`. `forge inspect`
+      # compiles only that contract's import subgraph — NOT the `.t.sol`
+      # invariant suite (test/jinn/invariants/*) — so it needs no forge-std /
+      # `lib/` submodule checkout. The Foundry invariant suite remains a
+      # separate (deferred) job per the migration plan.
       # `compile`/`test` are stable script NAMES; their bodies change HH2->HH3.
+      - uses: foundry-rs/foundry-toolchain@v1
       - run: yarn compile
       - run: yarn test
