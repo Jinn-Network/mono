@@ -654,6 +654,15 @@ export const verdictEnvelopeMeta = onchainTable(
      */
     actualScore: t.text().notNull().default(''),
     /**
+     * Graded per-test counts (Lever A, #1019). Populated for swe-rebench-v2
+     * verdict.v2 envelopes from payload.passedCount / payload.totalCount.
+     * 0/0 for v1 envelopes and non-swe-rebench-v2 types. gradedScore
+     * (= passedCount/totalCount) is derived at read time, never stored.
+     * Read ONLY by the learner discovery query — never by emissions.
+     */
+    passedCount: t.integer().notNull().default(0),
+    totalCount: t.integer().notNull().default(0),
+    /**
      * SWE-rebench v2 instance identifier (e.g. 'sympy__sympy-27510'). Populated
      * by the IPFS enrichment pass: when solverType starts with 'swe-rebench-v2',
      * the handler fetches the task body via the envelope's task.cid and reads
