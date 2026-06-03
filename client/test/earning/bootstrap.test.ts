@@ -529,7 +529,7 @@ describe('Fleet bootstrap', () => {
     );
   });
 
-  it('does not sweep abandoned Safe when standard service is only evicted (reStake path)', async () => {
+  it('defers an evicted standard service to the background EvictionLoop at resume — no inline startup reStake (#773/#789)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 
@@ -577,101 +577,34 @@ describe('Fleet bootstrap', () => {
     });
 
     vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(2);
-    vi.spyOn(bootstrapper as any, 'recoverEvictedService').mockImplementation(async (s: any, _m: string, index: number) => {
-      return store.updateService(index, { step: 'complete' });
-    });
+    // #773: resume must NOT inline-reStake an evicted service at startup —
+    // re-staking is orthogonal to earning and is handled out-of-band by the
+    // throttled background EvictionLoop. An eager startup reStake broadcasts
+    // from the agent EOA during boot and contends with other agent-EOA work
+    // (e.g. a launch's setMetadata, which then reverts and strands the launch).
+    // Spy so a regression that re-introduces the eager startup reStake fails.
+    const recoverSpy = vi
+      .spyOn(bootstrapper as any, 'recoverEvictedService')
+      .mockResolvedValue(undefined);
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
-
-    const result = await bootstrapper.bootstrap('test-password');
-    expect(result.ok).toBe(true);
-    expect(sweepSpy).not.toHaveBeenCalled();
-  }, BOOTSTRAP_TEST_TIMEOUT_MS);
-
-  it('logs an actionable (non-fatal) error and continues launch when startup reStake reverts with UnauthorizedAccount (#789)', async () => {
-    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
-    dirs.push(earningDir);
-
-    const mnemonic = generateMnemonic();
-    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
-    const store = new FleetStateStore(earningDir);
-    await store.saveMnemonicKeystore(encrypted);
-
-    const masterAddr = deriveMasterAddress(mnemonic);
-    const agentAddr = deriveAgentAddress(mnemonic, 1);
-    await store.save({
-      ...createDefaultFleetState('base'),
-      master_address: masterAddr,
-      services: [
-        {
-          index: 1,
-          agent_address: agentAddr,
-          safe_address: '0x2222222222222222222222222222222222222222',
-          service_id: 42,
-          mech_address: '0x3333333333333333333333333333333333333333',
-          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
-          step: 'complete',
-          error: null,
-        },
-      ],
-    });
-
-    const bootstrapper = new FleetBootstrapper({
-      earningDir,
-      chain: 'base',
-      rpcUrl: 'http://127.0.0.1:8545',
-      stakingMode: 'standard',
-    });
-
-    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
-      stakingState: 2,
-      stakingMultisig: '0x2222222222222222222222222222222222222222',
-      registryState: 4,
-      registryMultisig: '0x2222222222222222222222222222222222222222',
-      safeDeployed: true,
-    });
-    vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(2);
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
-
-    // Force recoverEvictedService down its UnauthorizedAccount catch-branch
-    // by throwing a viem-shaped revert from the underlying send. We spy on
-    // the `publicClient`'s internal send path via `writeContract` won't work
-    // here — the reStake path uses `viemSendTransactionWithRetry`. Mocking
-    // it across the ES-module boundary is brittle, so instead we spy on
-    // recoverEvictedService itself and directly reproduce the error the
-    // catch block produces. This asserts the SHAPE that downstream code
-    // sees; the logic that converts UnauthorizedAccount into this shape
-    // lives immediately above in the same file and is unit-level obvious.
-    vi.spyOn(bootstrapper as any, 'recoverEvictedService').mockImplementation(
-      async (_s: any, _m: string, index: number) => {
-        const masterAddress = '0xMASTERADDRESSLOCALFAKEMASTERADDRESSLOCAL';
-        throw new Error(
-          `Service ${index} (service_id 42) is evicted on the staking proxy, but master EOA ${masterAddress} is not authorized to reStake it. ` +
-          `The distributor only permits the recorded service operator, a managing agent, or the owner. ` +
-          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service, then re-run jinn bootstrap; otherwise request owner / managing-agent recovery or abandon-and-rebootstrap. ` +
-          `reStake revert: UnauthorizedAccount(address)`,
-        );
-      },
-    );
-
-    // #789: a startup reStake revert (incl. the permanent UnauthorizedAccount
-    // case) is non-fatal — the daemon still launches because work delivery +
-    // JINN claims are decoupled from OLAS staking. The actionable operator
-    // message is surfaced via the startup catch's console.error log (not a
-    // fatal result), and must still name the real recovery steps (earning dir
-    // / master EOA) and NOT the misleading setCuratingAgents path.
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await bootstrapper.bootstrap('test-password');
     expect(result.ok).toBe(true);
-
+    expect(recoverSpy).not.toHaveBeenCalled();
+    expect(sweepSpy).not.toHaveBeenCalled();
     const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(logged).toMatch(/startup reStake failed \(non-fatal\)/);
-    expect(logged).toMatch(/is evicted on the staking proxy/);
-    expect(logged).toMatch(/original master EOA/);
-    expect(logged).toMatch(/JINN_EARNING_DIR/);
-    expect(logged).not.toMatch(/setCuratingAgents/);
-  });
+    expect(logged).toMatch(/deferring to the background EvictionLoop/);
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
+
+  // (Removed) The startup-reStake-revert test (#789) no longer applies: resume
+  // does NOT inline-reStake an evicted service at startup (see the "defers … to
+  // the background EvictionLoop" test above — #773). The invariants it covered
+  // now live where the behaviour lives:
+  //   - non-fatal reStake-revert + throttle → test/daemon/eviction-loop.test.ts
+  //     ("keeps a reverted reStake attempt throttled within the window" — #917).
+  //   - the actionable UnauthorizedAccount operator message → test/operator-errors.test.ts.
 
   // ── ERC-8004 IdentityRegistry mint (jinn-mono-j07) ─────────────────────────
 

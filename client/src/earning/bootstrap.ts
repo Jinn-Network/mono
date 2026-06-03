@@ -1394,28 +1394,25 @@ export class FleetBootstrapper {
         throw error;
       }
       if (onChainState === 2) {
+        // Do NOT eagerly reStake at startup. Re-staking is orthogonal to the
+        // protocol loop and to JINN earning (JinnDistributor mints on
+        // delivered-work counts, not OLAS stake state), and an inline reStake
+        // here broadcasts from the agent EOA during boot — contending with
+        // other agent-EOA work that runs in the same window (e.g. a launch's
+        // IdentityRegistry.setMetadata, which then reverts and strands the
+        // launch at `launching`). #773 removed the inline reStake from the
+        // mech-adapter solve path with exactly this reasoning ("staking is
+        // orthogonal to the loop — re-staking is handled out-of-band by the
+        // background EvictionLoop"); this completes #773 for the startup-resume
+        // path it missed. The throttled EvictionLoop (#917) restakes on its own
+        // cadence when enabled; when staking is intentionally dropped
+        // (evictionCheckIntervalMs=0) the service simply stays evicted, which
+        // does not affect earning (#789).
         console.error(
-          `[jinn-earning] Noticed service ${svc.service_id} (fleet index ${index}) evicted on-chain; running distributor reStake to restake.`,
+          `[jinn-earning] Service ${svc.service_id} (fleet index ${index}) is evicted on-chain; ` +
+          `NOT reStaking inline at startup — deferring to the background EvictionLoop ` +
+          `(staking is orthogonal to earning; #773/#789/#917). Daemon launch continues.`,
         );
-        // #789: a startup reStake can revert (e.g. NotEnoughTimeStaked when the
-        // service was re-staked < minStakingDuration ago) or fail transiently.
-        // Treat it as non-fatal so the daemon still launches — work delivery and
-        // JINN claims are decoupled from OLAS staking (JinnDistributor mints on
-        // delivered-work counts, not stake state), so a failed startup reStake
-        // must not block the operator from earning. The standalone EvictionLoop
-        // retries on its own cadence when enabled; when staking is intentionally
-        // dropped (evictionCheckIntervalMs=0) this simply leaves the service
-        // evicted, which does not affect JINN earning.
-        try {
-          state = await this.recoverEvictedService(state, mnemonic, index);
-          svc = state.services.find(s => s.index === index)!;
-        } catch (err) {
-          console.error(
-            `[jinn-earning] Service ${svc.service_id} (fleet index ${index}) startup reStake failed (non-fatal); ` +
-            `continuing launch and deferring to EvictionLoop if enabled: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
       }
     }
 
