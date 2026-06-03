@@ -93,6 +93,24 @@ describeMaybe('hermetic bootstrap-from-scratch (spec §3.1 / §6 Home 1)', () =>
     'runs the real 11-step FleetBootstrapper to a STAKED service on the snapshot',
     async () => {
       const rpcUrl = chain!.rpcUrl;
+      const publicClient = createPublicClient({ chain: base, transport: http(rpcUrl) });
+      const stakingAbi = parseAbi([
+        'function getServiceIds() view returns (uint256[])',
+        'function getStakingState(uint256) view returns (uint8)',
+      ]);
+
+      // Snapshot the staking set BEFORE bootstrapping. The build-time warm-up
+      // operator already left a fully-staked service in the fixture that would
+      // satisfy every state assertion below (state===Deployed(4), in
+      // getServiceIds, stakingState===1). Without a before/after diff, a
+      // regression that REUSES an existing service instead of staking a fresh one
+      // would false-pass. We assert the bootstrapped service is NOT in this set
+      // and IS in the post-run set — proving THIS run executed a real stake.
+      const serviceIdsBefore = (await publicClient.readContract({
+        address: CHAIN_CONFIG.stakingContract as Address,
+        abi: stakingAbi,
+        functionName: 'getServiceIds',
+      })).map(Number);
 
       // ── awaiting_funding: generate the master EOA (ETH-only gate) ───────────
       const bootstrapper1 = new FleetBootstrapper({ earningDir: earningDir!, chain: 'base', rpcUrl });
@@ -120,8 +138,6 @@ describeMaybe('hermetic bootstrap-from-scratch (spec §3.1 / §6 Home 1)', () =>
       expect(safeAddress, 'no safe_address after bootstrap complete').toBeTruthy();
 
       // ── prove the flow actually reached STAKED state on-chain (staking.ts §5) ─
-      const publicClient = createPublicClient({ chain: base, transport: http(rpcUrl) });
-
       // Service state must be Deployed (4) — the terminal of service_deployed.
       const service = await publicClient.readContract({
         address: CHAIN_CONFIG.serviceRegistry as Address,
@@ -131,20 +147,27 @@ describeMaybe('hermetic bootstrap-from-scratch (spec §3.1 / §6 Home 1)', () =>
       });
       expect(Number(service.state), 'service state is not Deployed(4)').toBe(4);
 
-      // Service must be staked — present in the staking contract's getServiceIds.
-      const stakingAbi = parseAbi([
-        'function getServiceIds() view returns (uint256[])',
-        'function getStakingState(uint256) view returns (uint8)',
-      ]);
-      const serviceIds = await publicClient.readContract({
+      // Service must be staked BY THIS RUN — present in getServiceIds now.
+      const serviceIds = (await publicClient.readContract({
         address: CHAIN_CONFIG.stakingContract as Address,
         abi: stakingAbi,
         functionName: 'getServiceIds',
-      });
+      })).map(Number);
       expect(
-        serviceIds.map(Number).includes(serviceId!),
+        serviceIds.includes(serviceId!),
         `service ${serviceId} not in staked set [${serviceIds.join(', ')}]`,
       ).toBe(true);
+
+      // …and FRESH: it must NOT have been staked before this run. This is what
+      // makes the test prove a real bootstrap-from-scratch rather than passing on
+      // the build warm-up's leftover staked service (the §5 fidelity bar).
+      // NB: the staking set is slot-bounded — a fresh stake can take a slot
+      // without the set's length growing — so we assert membership + freshness,
+      // not growth.
+      expect(
+        serviceIdsBefore.includes(serviceId!),
+        `service ${serviceId} was already staked before this run ([${serviceIdsBefore.join(', ')}]) — bootstrap must stake a FRESH service, not reuse the warm-up's`,
+      ).toBe(false);
 
       // staking state should be Staked (1) — read defensively (smoke the wiring).
       const stakingState = await publicClient.readContract({

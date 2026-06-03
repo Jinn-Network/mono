@@ -27,6 +27,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import * as path from 'node:path';
 import * as net from 'node:net';
 
@@ -196,6 +197,15 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
   if (opts.secondaryRpcUrl !== undefined && secondaryChainId !== undefined) {
     env[`PONDER_RPC_URL_${secondaryChainId}`] = opts.secondaryRpcUrl;
   }
+
+  // Start each spawn from a CLEAN pglite database. Ponder persists its index to
+  // <ponderRoot>/.ponder; a previous run that was SIGKILLed (e.g. a test timeout)
+  // leaves that dir locked/stale, and the next `ponder dev` then hangs before its
+  // HTTP server comes up — a /health timeout that looks like a Ponder bug but is
+  // really a poisoned db. Tests want a fresh index per run anyway, so remove it.
+  // (Callers must run Ponder spawns sequentially — these tests do; see the
+  // hermetic gate's --no-file-parallelism.)
+  rmSync(path.join(ponderRoot, '.ponder'), { recursive: true, force: true });
 
   // Use '--disable-ui' to get structured log output (no ANSI escape sequences)
   // and '-p PORT' to set the HTTP port.

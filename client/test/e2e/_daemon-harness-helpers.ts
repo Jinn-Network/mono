@@ -33,6 +33,7 @@ const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const CONTRACTS_DIR = resolve(E2E_DIR, '..', '..', '..', 'contracts');
 import {
   spawnAnvilFork,
+  spawnAnvilFromState,
   jsonRpc as anvilJsonRpc,
   type AnvilHarness,
 } from '../_support/chain/anvil.js';
@@ -358,6 +359,44 @@ export async function deployMinimalV3Stack(
 export async function setupAnvilFixture(): Promise<DaemonHarnessFixture> {
   await compileContracts();
   const anvil = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, silent: true });
+  const operatorEoa = privateKeyToAccount(ANVIL_PRIVATE_KEYS[1]!); // skip deployer
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http(anvil.rpcUrl),
+  }) as unknown as PublicClient;
+
+  await anvilJsonRpc(anvil.rpcUrl, 'anvil_setBalance', [
+    operatorEoa.address,
+    '0x56bc75e2d63100000', // 100 ETH
+  ]);
+
+  const workingDirRoot = mkdtempSync(join(tmpdir(), 'jinn-daemon-harness-work-'));
+  const implStateRoot = mkdtempSync(join(tmpdir(), 'jinn-daemon-harness-state-'));
+
+  return {
+    anvil,
+    publicClient,
+    operatorEoa,
+    workingDirRoot,
+    implStateRoot,
+    async teardown() {
+      try { await anvil.teardown(); } catch {}
+      try { rmSync(workingDirRoot, { recursive: true, force: true }); } catch {}
+      try { rmSync(implStateRoot, { recursive: true, force: true }); } catch {}
+    },
+  };
+}
+
+/**
+ * Like {@link setupAnvilFixture}, but loads the committed Anvil `--dump-state`
+ * snapshot (deterministic, no live RPC) instead of forking Base. This is the
+ * HERMETIC-gate variant (spec §3.1/§4): the loaded state already carries the
+ * real OLAS + Safe + registry bytecode, so the full daemon loop runs without
+ * touching the network. `spawnAnvilFromState` forces the snapshot's chain id.
+ */
+export async function setupAnvilFixtureFromState(statePath: string): Promise<DaemonHarnessFixture> {
+  await compileContracts();
+  const anvil = await spawnAnvilFromState({ statePath, silent: true });
   const operatorEoa = privateKeyToAccount(ANVIL_PRIVATE_KEYS[1]!); // skip deployer
   const publicClient = createPublicClient({
     chain: base,

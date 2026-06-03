@@ -21,9 +21,10 @@
  * loaded via `spawnAnvilFromState` (the Step-1a helper) — deterministic, no live
  * RPC. The snapshot seeds a deterministic deployer EOA (key 0x..01) that
  * deployed the V3 stack and a mock mech whose `operator` is the operator EOA
- * (key 0x..02). We re-derive the router address from the deployer's deployment
- * nonce and read the marketplace/coordinator/activity-checker off the router
- * itself, so nothing is hard-coded against a fixture manifest.
+ * (key 0x..02). We read the deployed router/mech addresses from the build's
+ * addresses.json manifest (the forked deployer's nonce is its real Base nonce,
+ * so CREATE addresses are not derivable from a low nonce), then read the
+ * marketplace/coordinator/activity-checker off the router itself.
  *
  * SKIP-CLEAN: if the committed fixture is absent (it is large + human-generated;
  * see SHARED CONVENTIONS), the whole suite skips with a clear pointer to
@@ -47,7 +48,6 @@ import {
   createPublicClient,
   createWalletClient,
   decodeEventLog,
-  getContractAddress,
   http,
   keccak256,
   numberToHex,
@@ -68,7 +68,7 @@ import {
   type AnvilHarness,
 } from '../_support/chain/anvil.js';
 import { canClaimTask } from '../../src/adapters/mech/contracts.js';
-import { formatKnownRevert } from '../../src/adapters/mech/safe-revert.js';
+import { formatKnownRevert, formatKnownRevertDetail } from '../../src/adapters/mech/safe-revert.js';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const CONTRACTS_DIR = resolve(TEST_DIR, '..', '..', '..', 'contracts');
@@ -82,6 +82,7 @@ const SNAPSHOT_DIR = resolve(
   'anvil-base-v3-state',
 );
 const SNAPSHOT_STATE = join(SNAPSHOT_DIR, 'state.json');
+const SNAPSHOT_ADDRESSES = join(SNAPSHOT_DIR, 'addresses.json');
 
 /** Deterministic EOAs the snapshot builder seeded (build-anvil-snapshot.ts). */
 const DEPLOYER_PRIVATE_KEY =
@@ -92,15 +93,11 @@ const OPERATOR_PRIVATE_KEY =
 const CONTENDER_PRIVATE_KEY =
   '0x0000000000000000000000000000000000000000000000000000000000000003' as Hex;
 
-/**
- * The deployer deploys, in this nonce order (build-anvil-snapshot.ts):
- *   0 coordinator · 1 marketplace · 2 activityChecker · 3 router · 4..7 inits · 8 mockMech
- * The router exposes mechMarketplace()/taskCoordinator() so we only need the
- * router address derived from the deployer's nonce; everything else is read
- * off-chain from the router.
- */
-const ROUTER_DEPLOY_NONCE = 3n;
-const MOCK_MECH_DEPLOY_NONCE = 8n;
+// build-anvil-snapshot.ts writes the deployed addresses to addresses.json next
+// to state.json. The deployer EOA is a FORKED account whose nonce is its real
+// Base nonce (NOT 0), so deploy CREATE addresses are NOT derivable from a low
+// nonce — read them from the manifest. The router still exposes
+// mechMarketplace()/taskCoordinator(), so we read those off-chain from it.
 
 const NATIVE_PAYMENT_TYPE =
   '0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1' as Hex;
@@ -166,8 +163,12 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     const operator = privateKeyToAccount(OPERATOR_PRIVATE_KEY);
     const contender = privateKeyToAccount(CONTENDER_PRIVATE_KEY);
 
-    const routerAddress = getContractAddress({ from: deployer.address, nonce: ROUTER_DEPLOY_NONCE });
-    const mockMechAddress = getContractAddress({ from: deployer.address, nonce: MOCK_MECH_DEPLOY_NONCE });
+    const manifest = JSON.parse(await readFile(SNAPSHOT_ADDRESSES, 'utf8')) as {
+      router: Address;
+      mockMech: Address;
+    };
+    const routerAddress = manifest.router;
+    const mockMechAddress = manifest.mockMech;
 
     // Read the marketplace off the real router so we don't depend on a fixture
     // manifest, and assert the snapshot is wired the way we expect.
@@ -343,9 +344,14 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     return { taskId, requestId };
   }
 
-  /** Deliver `requestId` from `mechOperator`'s mech to the marketplace. */
-  async function deliver(mech: Address, mechOperator: PrivateKeyAccount, requestId: Hex, digest: Hex): Promise<void> {
-    await send(mechOperator, mech, ctx.artifacts.mech, 'deliverToMarketplace', [[requestId], [digest]]);
+  /** Deliver `requestId` from `mechOperator`'s mech to the marketplace; returns the receipt. */
+  async function deliver(
+    mech: Address,
+    mechOperator: PrivateKeyAccount,
+    requestId: Hex,
+    digest: Hex,
+  ): Promise<Awaited<ReturnType<PublicClient['waitForTransactionReceipt']>>> {
+    return send(mechOperator, mech, ctx.artifacts.mech, 'deliverToMarketplace', [[requestId], [digest]]);
   }
 
   async function isClaimed(requestId: Hex): Promise<boolean> {
@@ -381,13 +387,20 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
    * recovers the name from the revert data regardless of ABI. Falls back to the
    * raw message when no known selector is extractable.
    */
-  async function expectRevert(action: () => Promise<unknown>): Promise<string> {
+  async function expectRevert(action: () => Promise<unknown>): Promise<{ message: string; name: string | null }> {
     try {
       await action();
     } catch (err) {
       const known = formatKnownRevert(err);
       const raw = err instanceof Error ? err.message : String(err);
-      return known ? `${known} | ${raw}` : raw;
+      // `name` is the PRODUCTION decoder's output (safe-revert.ts KNOWN_INNER_ERRORS
+      // selector→name map) — distinct from the raw router-ABI string. Asserting on
+      // it verifies the decoder's name mapping, so a KNOWN_INNER_ERRORS name/selector
+      // regression is caught here (not only by abi-selector-conformance).
+      return {
+        message: known ? `${known} | ${raw}` : raw,
+        name: formatKnownRevertDetail(err)?.name ?? null,
+      };
     }
     throw new Error('expected the contract call to revert, but it succeeded');
   }
@@ -405,10 +418,12 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     expect(await isClaimed(requestId)).toBe(true);
 
     // Second claim hits the real RouterAlreadyClaimed guard.
-    const message = await expectRevert(() =>
+    const { message, name } = await expectRevert(() =>
       send(ctx.operator, ctx.routerAddress, ctx.artifacts.router, 'claimSolutionDelivery', [requestId, SOLUTION_DIGEST]),
     );
     expect(message).toMatch(/RouterAlreadyClaimed/);
+    // The production decoder must map the real selector to the right name.
+    expect(name).toBe('RouterAlreadyClaimed');
     expect(await isClaimed(requestId)).toBe(true);
   }, 60_000);
 
@@ -419,10 +434,11 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     // not Delivered → the real _requireDelivered fires. This is exactly the
     // branch the production claimDelivery helper retries on (NotDelivered).
     expect(await requestStatus(requestId)).not.toBe(3 /* Delivered */);
-    const message = await expectRevert(() =>
+    const { message, name } = await expectRevert(() =>
       send(ctx.operator, ctx.routerAddress, ctx.artifacts.router, 'claimSolutionDelivery', [requestId, SOLUTION_DIGEST]),
     );
     expect(message).toMatch(/RouterNotDelivered/);
+    expect(name).toBe('RouterNotDelivered');
     expect(await isClaimed(requestId)).toBe(false);
 
     // Deliver, then the same call succeeds — proving the retry window closes
@@ -509,10 +525,13 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     await send(ctx.operator, ctx.routerAddress, ctx.artifacts.router, 'claimTask', [taskId, ctx.mockMechAddress]);
 
     // The contender re-claiming the same task exceeds its per-operator limit.
-    const message = await expectRevert(() =>
+    const { message, name } = await expectRevert(() =>
       send(ctx.contender, ctx.routerAddress, ctx.artifacts.router, 'claimTask', [taskId, ctx.contenderMechAddress]),
     );
     expect(message).toMatch(/TCOperatorClaimLimitReached/);
+    // A TaskCoordinator error that bubbles through the router (not in the router
+    // ABI) — only the production selector-table decoder recovers the name.
+    expect(name).toBe('TCOperatorClaimLimitReached');
   }, 60_000);
 
   it('idempotent re-delivery: replaying deliverToMarketplace keeps the request Delivered and the claim final', async () => {
@@ -526,15 +545,20 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
 
     // Crash-replay: re-run the real deliver tx (the mock mech re-emits Deliver
     // and re-marks the marketplace Delivered — the idempotency boundary the
-    // production callDeliverToMarketplace treats as success). State is unchanged.
-    await deliver(ctx.mockMechAddress, ctx.operator, requestId, SOLUTION_DIGEST);
+    // production callDeliverToMarketplace treats as success). Assert the replay
+    // ACTUALLY executed (emitted Deliver) — a no-op re-delivery would otherwise
+    // let this scenario false-pass on the unchanged downstream state.
+    const replayReceipt = await deliver(ctx.mockMechAddress, ctx.operator, requestId, SOLUTION_DIGEST);
+    const replayEvent = decodeFirst(replayReceipt, ctx.artifacts.mech, 'Deliver');
+    expect(String(replayEvent['requestId'])).toBe(requestId);
     expect(await requestStatus(requestId)).toBe(3 /* Delivered */);
 
     // And a re-settle still hits RouterAlreadyClaimed — the claim is final.
-    const message = await expectRevert(() =>
+    const { message, name } = await expectRevert(() =>
       send(ctx.operator, ctx.routerAddress, ctx.artifacts.router, 'claimSolutionDelivery', [requestId, SOLUTION_DIGEST]),
     );
     expect(message).toMatch(/RouterAlreadyClaimed/);
+    expect(name).toBe('RouterAlreadyClaimed');
     expect(await isClaimed(requestId)).toBe(true);
   }, 60_000);
 });

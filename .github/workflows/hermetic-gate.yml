@@ -116,10 +116,15 @@ jobs:
       # transport. The positional path scopes vitest to just this home (the same
       # filename-filter form `release:tier-1:T1.3` uses) so the gate's verdict
       # maps 1:1 to the hermetic surface.
+      # The dedicated hermetic config runs the suite SEQUENTIALLY
+      # (fileParallelism:false) with a long timeout — its heavy files each spawn
+      # Anvil (+ Ponder / a real daemon) and would contend/flake if run
+      # concurrently. The snapshot/subprocess tests run ONLY here (excluded from
+      # the default unit `yarn test`), so this is the one place they execute.
       - name: Run hermetic suite
         id: hermetic
         working-directory: client
-        run: yarn vitest run test/hermetic/
+        run: yarn test:hermetic
 
       # The existing T1.3 indexer round-trip — local Ponder vs the snapshot chain
       # (closes the #341 permanent-skip stub). It self-skips cleanly when its

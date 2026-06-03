@@ -97,7 +97,46 @@ function buildIndexerFallback(urls: readonly string[]) {
 const baseSepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_84532'], 'https://sepolia.base.org');
 const sepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_11155111'], 'https://ethereum-sepolia-rpc.publicnode.com');
 
-export default createConfig({
+/**
+ * Hermetic snapshot mode (the T1.3 indexer round-trip, spec §3.1 / #341).
+ *
+ * When `JINN_INDEXER_SNAPSHOT_ROUTER` is set, the indexer targets a single,
+ * locally-loaded Anvil snapshot chain instead of the live testnet: it indexes
+ * ONLY the snapshot's JinnRouter (address + start block + chain id from env),
+ * with its RPC from `PONDER_RPC_URL_<chainId>`. IdentityRegistry/JinnDistributor
+ * are still DECLARED (so their handler registrations in src/index.ts resolve)
+ * but pointed at a dead address so they index nothing — this keeps the config a
+ * single chain with a single live RPC, fully deterministic with no network.
+ */
+const SNAPSHOT_ROUTER = process.env['JINN_INDEXER_SNAPSHOT_ROUTER'];
+const DEAD_ADDRESS = '0x000000000000000000000000000000000000dEaD' as const;
+
+function buildSnapshotConfig(): ReturnType<typeof createConfig> {
+  const chainId = Number(process.env['JINN_INDEXER_SNAPSHOT_CHAIN_ID'] ?? '8453');
+  const startBlock = Number(process.env['JINN_INDEXER_SNAPSHOT_START_BLOCK'] ?? '0');
+  const rpc = parseRpcChain(process.env[`PONDER_RPC_URL_${chainId}`], 'http://127.0.0.1:8545');
+  return createConfig({
+    chains: {
+      snapshot: { id: chainId, rpc: buildIndexerFallback(rpc), ethGetLogsBlockRange: 2000 },
+    },
+    contracts: {
+      JinnRouter: {
+        abi: JINN_ROUTER_ABI,
+        chain: { snapshot: { address: SNAPSHOT_ROUTER as `0x${string}`, startBlock } },
+      },
+      IdentityRegistry: {
+        abi: IDENTITY_REGISTRY_ABI,
+        chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
+      },
+      JinnDistributor: {
+        abi: JINN_DISTRIBUTOR_ABI,
+        chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
+      },
+    },
+  });
+}
+
+const testnetConfig = createConfig({
   chains: {
     baseSepolia: {
       id: 84532,
@@ -148,3 +187,5 @@ export default createConfig({
     },
   },
 });
+
+export default SNAPSHOT_ROUTER ? buildSnapshotConfig() : testnetConfig;

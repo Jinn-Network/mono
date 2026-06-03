@@ -36,6 +36,18 @@ export default defineConfig({
       // in the default run.
       'test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts',
       'test/release/tier-1/T1.2-harness-readiness-contract.test.ts',
+      // Snapshot/subprocess-heavy hermetic-gate tests: each spawns Anvil
+      // (+ Ponder / a real daemon) against the committed snapshot fixture and
+      // needs Foundry on PATH. They run ONLY via the hermetic gate
+      // (vitest.hermetic.config.ts, sequential) — not the default unit `yarn test`
+      // (which a clean / no-Foundry checkout runs). The two pure-unit hermetic
+      // tests (abi-selector-conformance, rpc-fallback) deliberately stay in the
+      // default run.
+      'test/hermetic/adversarial-claim-delivery.test.ts',
+      'test/hermetic/adapter-claim-delivery.test.ts',
+      'test/hermetic/bootstrap-from-scratch.test.ts',
+      'test/hermetic/full-loop.test.ts',
+      'test/hermetic/indexer-roundtrip.test.ts',
     ],
     // Default to node; SPA component tests opt into jsdom via the .tsx
     // matcher below. Keeps the daemon-side suite as fast as it is today.
