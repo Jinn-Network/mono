@@ -4,14 +4,36 @@ A reference Railway deployment for a hosted `@jinn-network/client` operator daem
 
 Operators who want to run locally should use `jinn run` directly (see `client/README.md`) — this directory is only for headless, hosted deployments.
 
-## What's here
+## Shape: thin overlay on the container-native base
 
-- **`Dockerfile`** — multi-stage build (build = `node:22-slim` + monorepo source; runtime = `node:22-slim` + Claude CLI + Codex CLI + entrypoint). Built from the monorepo root as the build context so the `client/` source and `packages/sdk/` workspace dependency are both available. Future simplification: switch to `npm install -g @jinn-network/client` and drop the build stage (see "Open follow-ups" below).
-- **`entrypoint.sh`** — materialises per-deployment state from env vars on each container boot:
+`Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/client` (the
+container-native base, #988):
+
+```dockerfile
+ARG BASE_TAG=latest
+FROM ghcr.io/jinn-network/client:${BASE_TAG}
+RUN npm install -g @openai/codex@0.133.0
+ENV JINN_CONFIG=/data/config.json
+COPY deploy/railway-operator-codex/seed.sh /usr/local/bin/jinn-codex-seed.sh
+RUN chmod +x /usr/local/bin/jinn-codex-seed.sh
+CMD ["/usr/local/bin/jinn-codex-seed.sh", "run", "--config", "/data/config.json"]
+```
+
+The base owns the non-root gosu-drop entrypoint, `JINN_STATE_DIR=/data` (the
+daemon derives earning/db/impl-state/swe-rebench under it), env-auth, and no
+VOLUME. `seed.sh` is **seeding-only**: it writes the codex auth file, sets the
+git identity, seeds `/data/config.json` on first boot, then
+`exec node dist/bin/jinn.js`.
+
+`BASE_TAG` must point to a base release that includes #988. See
+[`../README.md`](../README.md) for the full deploy path (the public-GHCR ops
+step, the deploy contract, the claim-relayer, and the consolidation checklist).
+
+- **`seed.sh`** — materialises per-deployment state from env vars on each boot:
   - Sets a global git identity so the harness's plugin session-start hooks can `git commit --allow-empty` to initialise their per-task workdirs without an `"Author identity unknown"` error.
   - Decodes the base64 `CODEX_AUTH_JSON` env var into `$CODEX_HOME/auth.json` so the Codex CLI is authenticated without an interactive login.
   - Seeds `/data/config.json` from `CONFIG_TEMPLATE_JSON` on first boot only — durable config lives on the Railway volume after that.
-- **`railway.toml`** (in this directory — **must NOT be at the monorepo root**) — points Railway at this Dockerfile and sets `restartPolicyType=ON_FAILURE` with 10 retries. ⚠️ A root `railway.toml` is applied by Railway to *every* service that deploys from this monorepo — including `jinn-indexer` (Ponder), `jinn-worker`, etc. — overriding their own build configs and forcing this operator-codex image on them. That is exactly what broke the indexer for hours (#846): the indexer started building this image instead of `packages/indexer/deploy/Dockerfile`, OOM-failed every deploy, and the `ON_FAILURE` retry churn knocked the live indexer offline. So this recipe lives here, not at root, and **the codex-operator service must set its Railway "Config as code" path to `deploy/railway-operator-codex/railway.toml`** (Settings → Config-as-code) so the recipe applies only to it.
+- **`railway.toml`** (in this directory — **must NOT be at the monorepo root**) — points Railway at this Dockerfile and sets `restartPolicyType=ON_FAILURE` with 10 retries. A root `railway.toml` is applied by Railway to *every* service that deploys from this monorepo — including `jinn-indexer` (Ponder), `jinn-worker`, etc. — overriding their own build configs. That is exactly what broke the indexer for hours (#846). So this recipe lives here, not at root, and **the codex-operator service must set its Railway "Config as code" path to `deploy/railway-operator-codex/railway.toml`** (Settings → Config-as-code) so the recipe applies only to it.
 
 ## Required Railway env vars
 
@@ -23,15 +45,14 @@ Set these in the service's Variables panel:
 | `CODEX_AUTH_JSON` | `base64 -i ~/.codex/auth.json \| tr -d '\n'` (from a machine where Codex is logged in) | Base64-encoded Codex auth file. Decoded into the container's `$CODEX_HOME/auth.json` on each boot. |
 | `CONFIG_TEMPLATE_JSON` | The operator config JSON, minified onto one line | Seeded into `/data/config.json` on first boot. Must include a `joinedSolverNets` entry with a `contract: { id, version }` field (see [#674](https://github.com/Jinn-Network/mono/issues/674)). |
 
-The Dockerfile also bakes in these defaults (overridable via Railway env):
+The base/overlay bake in these defaults (overridable via Railway env):
 
 ```
 JINN_NETWORK=testnet
 JINN_AUTO_TESTNET_FAUCET=1
 CODEX_HOME=/data/codex-home
 JINN_CONFIG=/data/config.json
-JINN_EARNING_DIR=/data/earning
-JINN_DB_PATH=/data/jinn.db
+JINN_STATE_DIR=/data        # base; the daemon derives earning/db/impl-state/swe-rebench under it
 ```
 
 ## Required Railway volume
@@ -72,9 +93,10 @@ railway up --service <name> --environment production --ci -m "<message>"
 
 The Railway CLI uploads the worktree (respecting `.gitignore`, so `node_modules` is skipped) and builds the Dockerfile remotely.
 
-**One-time service setup (required since the recipe is no longer at the repo root):** in this service's Railway settings, set **Config as code → `deploy/railway-operator-codex/railway.toml`**. Without it the service falls back to nixpacks/auto-detect and won't build this Dockerfile. Do **not** move `railway.toml` back to the repo root — see the warning above (it hijacks `jinn-indexer` and every other monorepo service, #846).
+**One-time service setup (required since the recipe is not at the repo root):** in this service's Railway settings, set **Config as code → `deploy/railway-operator-codex/railway.toml`**. Without it the service falls back to nixpacks/auto-detect and won't build this Dockerfile. Do **not** move `railway.toml` back to the repo root — see the warning above (it hijacks `jinn-indexer` and every other monorepo service, #846).
 
-## Open follow-ups
+## Earning needs the separate claim-relayer
 
-- **Simplify the Dockerfile to npm-install.** The current multi-stage build copies the full `client/` source and runs `yarn build`. A 5-line Dockerfile that does `npm install -g @jinn-network/client@<version> @openai/codex@<version>` would skip the source upload and the build stage entirely — pin to a published version, get reproducibility for free. Worth doing once the GHCR-published image is also reachable (currently private, see #661 follow-ups).
-- **Stage 1 auto-faucet gap** ([#661](https://github.com/Jinn-Network/mono/issues/661) sub-issue). Until that lands, cold-start requires manual EOA funding.
+The daemon is emit-only; earning settlement runs through the separate
+`packages/claim-relayer` service — deploy it alongside this operator (see
+[`../README.md`](../README.md)).

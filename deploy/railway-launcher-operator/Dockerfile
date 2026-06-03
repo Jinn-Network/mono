@@ -1,102 +1,26 @@
-# Railway launcher+operator deploy image (claude-code / Haiku).
+# Railway launcher+operator deploy image (claude-code / Haiku) — thin overlay.
 #
 # Hosts the operator's single jinn-run daemon that is BOTH the SWE-rebench v2
 # launcher/generator (owns a launched record) AND a solver — one wallet, both
 # roles (see docs/superpowers/specs/2026-06-01-host-supervised-launcher-operator-daemon-design.md).
 #
-# Derived from client/Dockerfile. Differences:
-#   - entrypoint wrapper materialises config + launched record (+ optional
-#     one-shot state restore) from env onto the /data volume on each boot.
-#   - no VOLUME directive (Railway rejects it; volume attached at service level).
-#
-# Build context MUST be the monorepo root (copies from client/ and packages/sdk/).
+# This is now a ~4-line overlay on the container-native base (#988). The base
+# already has: the non-root gosu-drop entrypoint, pinned claude-code, gosu,
+# env-auth default, JINN_STATE_DIR=/data, and no VOLUME. This overlay adds only
+# the launcher/operator's per-deployment seeding + testnet env.
 
-# ── Build stage ──────────────────────────────────────────────────────────────
-FROM node:22-slim AS build
-
-ARG JINN_BUILD_COMMIT=unknown
-ENV JINN_BUILD_COMMIT=$JINN_BUILD_COMMIT
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY client/package.json client/yarn.lock client/.yarnrc.yml ./client/
-COPY client/src/dashboard/spa/package.json ./client/src/dashboard/spa/package.json
-COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/README.md ./packages/sdk/
-RUN corepack enable && cd client && yarn install --immutable
-
-COPY packages/sdk/tsconfig.json ./packages/sdk/
-COPY packages/sdk/src/ ./packages/sdk/src/
-
-COPY client/src/ ./client/src/
-COPY client/deployments/ ./client/deployments/
-COPY client/docs/ ./client/docs/
-COPY client/plugins/ ./client/plugins/
-COPY client/scripts/ ./client/scripts/
-COPY client/templates/ ./client/templates/
-COPY client/tsconfig.json ./client/
-
-WORKDIR /app/client
-RUN yarn build
-
-# ── Runtime stage ────────────────────────────────────────────────────────────
-FROM node:22-slim
-
-ARG JINN_BUILD_COMMIT=unknown
-ENV JINN_BUILD_COMMIT=$JINN_BUILD_COMMIT
-
-WORKDIR /app
-
-# gosu lets the entrypoint drop from root to a non-root user at boot (see below).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 git curl ca-certificates gosu \
-    && rm -rf /var/lib/apt/lists/*
-
-# Claude CLI for the claude-code harness. Pinned to the version verified in the
-# Task 0 spike (env-only CLAUDE_CODE_OAUTH_TOKEN auth confirmed at this version).
-RUN npm install -g @anthropic-ai/claude-code@2.1.159
-
-# The daemon runs as the non-root `node` user: Claude Code refuses
-# --dangerously-skip-permissions when running as root, which crashed every
-# claude-code solve. Pre-create node's home + .claude dir so the CLI can write
-# its session/config state. The entrypoint chowns /data and drops root → node.
-RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
-
-COPY --from=build /app/client/dist dist/
-COPY --from=build /app/client/deployments deployments/
-COPY --from=build /app/client/plugins plugins/
-COPY --from=build /app/client/node_modules node_modules/
-COPY --from=build /app/client/package.json ./
-
-# Durable state on the Railway volume at /data.
-ENV NODE_ENV=production
-ENV JINN_EARNING_DIR=/data/earning
-ENV JINN_DB_PATH=/data/jinn.db
-ENV JINN_CONFIG=/data/config.json
-# Generator state + validated-pool artifact MUST live on the volume. The default
-# is $HOME/.jinn-client/swe-rebench-v2 (= /root/...), which is off-volume and
-# wiped on every restart — and the validated pool has no IPFS fetch fallback, so
-# an unseeded/ephemeral state dir means the generator posts ZERO tasks.
-ENV JINN_SWE_REBENCH_V2_STATE_DIR=/data/swe-rebench-v2
-# The learner's persistent self-state (impl-state git repo: strategies/templates/
-# consolidations). Defaults to $HOME/.jinn-client/engine/impl-state (= /home/node/...)
-# which is an ephemeral overlay wiped on every container restart — so a completed
-# learn-loop's gains vanish and the codeDigest lineage resets each boot. Pinning it
-# to the volume keeps self-improvement durable and the codeDigest chain continuous.
-# (Working dirs stay ephemeral on purpose — they're per-task and reaped.)
-ENV JINN_ENGINE_IMPL_STATE_DIR_ROOT=/data/engine/impl-state
+ARG BASE_TAG=latest
+FROM ghcr.io/jinn-network/client:${BASE_TAG}
+# NOTE: BASE_TAG must point to a published base that includes the container-native
+# changes (#988); flip the ghcr.io/jinn-network/client package PUBLIC first (see README).
 ENV JINN_NETWORK=testnet
 ENV JINN_AUTO_TESTNET_FAUCET=1
+ENV JINN_CONFIG=/data/config.json
+COPY deploy/railway-launcher-operator/seed.sh /usr/local/bin/jinn-launcher-seed.sh
+RUN chmod +x /usr/local/bin/jinn-launcher-seed.sh
 
-EXPOSE 7331
-# NOTE: no `VOLUME ["/data"]` — Railway rejects the Dockerfile directive.
-# Attach the /data volume at the service level (railway volume add --mount-path /data).
-
-COPY deploy/railway-launcher-operator/entrypoint.sh /usr/local/bin/jinn-launcher-operator-entrypoint.sh
-RUN chmod +x /usr/local/bin/jinn-launcher-operator-entrypoint.sh
-
-ENTRYPOINT ["/usr/local/bin/jinn-launcher-operator-entrypoint.sh"]
-CMD ["run", "--config", "/data/config.json"]
+# Keep the base ENTRYPOINT (the gosu drop runs first, then dispatches this CMD).
+# The base case-dispatch matches the absolute-path CMD[0] and exec's the seed
+# script as the node user; the seed script ends with `exec node dist/bin/jinn.js`
+# so the CMD tail (run --config /data/config.json) reaches the daemon.
+CMD ["/usr/local/bin/jinn-launcher-seed.sh", "run", "--config", "/data/config.json"]

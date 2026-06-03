@@ -1,6 +1,13 @@
 [build]
 builder = "DOCKERFILE"
+# Pinned to the per-harness overlay Dockerfile, NEVER the repo root (#846 — a
+# root railway.toml hijacks jinn-indexer and every other monorepo service).
 dockerfilePath = "deploy/railway-operator-codex/Dockerfile"
+# The overlay's BASE_TAG build arg defaults to `latest`. Pin it to a published
+# base release that includes the container-native changes (#988) via a BASE_TAG
+# service variable, or here:
+#   [build.args]
+#   BASE_TAG = "0.1.4"
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

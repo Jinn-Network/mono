@@ -7,6 +7,30 @@ blocks (see `docs/superpowers/specs/2026-06-01-host-supervised-launcher-operator
 
 Run locally with `jinn run`; this directory is only for the headless hosted deploy.
 
+## Shape: thin overlay on the container-native base
+
+`Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/client` (the
+container-native base, #988):
+
+```dockerfile
+ARG BASE_TAG=latest
+FROM ghcr.io/jinn-network/client:${BASE_TAG}
+ENV JINN_NETWORK=testnet JINN_AUTO_TESTNET_FAUCET=1 JINN_CONFIG=/data/config.json
+COPY deploy/railway-launcher-operator/seed.sh /usr/local/bin/jinn-launcher-seed.sh
+RUN chmod +x /usr/local/bin/jinn-launcher-seed.sh
+CMD ["/usr/local/bin/jinn-launcher-seed.sh", "run", "--config", "/data/config.json"]
+```
+
+The base already owns the four former daemon-correctness workarounds — the
+gosu root→node drop (base entrypoint), and `rm daemon.pid` / `find ._* -delete`
+/ state-dir derivation (the daemon, #954/#955/#956). `seed.sh` is **seeding-only**:
+config + launched-record + optional one-shot state restore, then
+`exec node dist/bin/jinn.js`.
+
+`BASE_TAG` must point to a base release that includes #988. See
+[`../README.md`](../README.md) for the full deploy path (the public-GHCR ops
+step, the deploy contract, the claim-relayer, and the consolidation checklist).
+
 ## Required Railway env vars (secrets)
 
 | Variable | Source | Purpose |
@@ -18,27 +42,27 @@ Run locally with `jinn run`; this directory is only for the headless hosted depl
 | `LAUNCHED_RECORD_JSON` *(fresh, alt to tarball)* | the owned `…/solvernets/launched/<id>.json` | Seeds the launched record so the generator spawns. Redundant if the tarball already carries it. See "Launched record" below. |
 
 Baked-in defaults (override via Railway env): `JINN_NETWORK=testnet`,
-`JINN_AUTO_TESTNET_FAUCET=1`, `JINN_EARNING_DIR=/data/earning`,
-`JINN_DB_PATH=/data/jinn.db`, `JINN_CONFIG=/data/config.json`,
-`JINN_SWE_REBENCH_V2_STATE_DIR=/data/swe-rebench-v2`.
+`JINN_AUTO_TESTNET_FAUCET=1`, `JINN_CONFIG=/data/config.json`. State paths
+(earning, db, swe-rebench-v2, impl-state) are derived by the daemon from the
+base's `JINN_STATE_DIR=/data` — no per-key overrides needed.
 
 ## Generator state + validated pool (required, or the generator posts 0 tasks)
 
-The generator reads its validated pool from `JINN_SWE_REBENCH_V2_STATE_DIR`
-(default `/data/swe-rebench-v2`) — there is **no IPFS fetch fallback**. If that
-dir has no `validated-pool.json` under `admissionMode: required`, the pool is
-empty and the generator posts nothing. Two ways to satisfy it:
+The generator reads its validated pool from the daemon's swe-rebench-v2 state
+dir (derived under `/data`) — there is **no IPFS fetch fallback**. If that dir
+has no `validated-pool.json` under `admissionMode: required`, the pool is empty
+and the generator posts nothing. Two ways to satisfy it:
 
 - **Migration (recommended):** include `swe-rebench-v2` in the state tarball (the
   command above already does). It carries your local `validated-pool.json`.
 - **Fresh box:** run `jinn solver-nets validate-pool swe-rebench-v2` on the box
-  (writes into `JINN_SWE_REBENCH_V2_STATE_DIR`) before the generator can post.
+  before the generator can post.
 
 ## Launched record
 
 The generator spawns only for an owned record with `status: "launched"` and
-`generatorEnabled: true` (it walks `${JINN_EARNING_DIR}/solvernets/launched/`).
-The record is schema-validated on load and **silently dropped** if it fails
+`generatorEnabled: true` (it walks `${earning}/solvernets/launched/`). The record
+is schema-validated on load and **silently dropped** if it fails
 (`solvernet.launched.v1`: requires `solverNetId`, `manifestCid`, `manifestHash`
 (`0x…`), `launcherAgentId`, `launcherSafeAddress` (20-byte address), `launchedAt`,
 `status`, `statusUpdatedAt`, `generatorEnabled`, `registry`). Provide it via the
@@ -46,11 +70,9 @@ migration tarball, or as `LAUNCHED_RECORD_JSON` — use your **real** local reco
 verbatim (a placeholder with a malformed `manifestHash` parses but is dropped at
 load, and the generator never spawns).
 
-> Auth mechanism is **env-only** — the Task 0 spike confirmed the claude CLI
-> (verified at `@anthropic-ai/claude-code@2.1.159`, pinned in the Dockerfile)
-> authenticates non-interactively from `CLAUDE_CODE_OAUTH_TOKEN` alone, with no
-> `~/.claude.json` file. The entrypoint's file-based fallback stays commented
-> out unless a future CLI version stops honouring the env var.
+> Auth mechanism is **env-only** — the claude CLI (pinned in the base image,
+> #988) authenticates non-interactively from `CLAUDE_CODE_OAUTH_TOKEN` alone,
+> with no `~/.claude.json` file.
 
 ## Volume
 
@@ -84,8 +106,9 @@ the EOA manually past the Stage-1 minimum (~0.02 ETH) first.
 ## Verification
 
 - Boot log shows `[ai-units] cap=100/2800 per (block, week) source=…` → throttle engaged. **If absent, the credential didn't resolve — check `CLAUDE_CODE_OAUTH_TOKEN`.**
-- `[entrypoint] claude CLI: <version>` and `[creator] …` task-posting lines appear.
-- Task-creation rate on the indexer is non-zero and continuous (no gap > a few minutes). If creation is silent, check that `JINN_SWE_REBENCH_V2_STATE_DIR` holds a `validated-pool.json` (see "Generator state + validated pool" above).
+- `[seed] claude CLI: <version>` and `[creator] …` task-posting lines appear.
+- Task-creation rate on the indexer is non-zero and continuous (no gap > a few minutes). If creation is silent, confirm the swe-rebench-v2 state dir holds a `validated-pool.json` (see "Generator state + validated pool" above).
+- Headless observability is on `/v1/status` (ai-units / loop-completion / impl-state cadence / earning, S6/#959) — no more `railway ssh` + SQLite. `measure-learning.sh` is retired.
 
 ## Caveats
 
@@ -95,3 +118,4 @@ the EOA manually past the Stage-1 minimum (~0.02 ETH) first.
 - True supply redundancy needs a **second** launcher with its own wallet + launch (future).
 - A Claude OAuth token lives in Railway secrets (same posture as the codex recipe's `CODEX_AUTH_JSON`).
 - **Launcher + solver only.** This image installs no Docker; swe-rebench v2 *evaluation* needs a Docker daemon, so do not add the `evaluator` role to this box's `joinedSolverNets` — evaluation tasks would fail at pickup.
+- **Earning needs the separate claim-relayer.** The daemon is emit-only; deploy `packages/claim-relayer` alongside it (see [`../README.md`](../README.md)).

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Materialise per-deployment state from env vars before launching the daemon.
-# Persistent state lives on the Railway volume mounted at /data so the daemon
-# survives restarts.
+# Per-deployment seeding for the codex-harness operator overlay.
+#
+# Runs as the non-root `node` user (the base entrypoint already dropped
+# root→node and chowned $JINN_STATE_DIR). Seeding-only — the daemon derives its
+# state dirs from JINN_STATE_DIR, so no per-key mkdir workarounds here.
 set -euo pipefail
 
-DATA_DIR="${JINN_EARNING_DIR:-/data/earning}"
 CODEX_HOME="${CODEX_HOME:-/data/codex-home}"
 CONFIG_PATH="${JINN_CONFIG:-/data/config.json}"
 
-mkdir -p "$DATA_DIR"
+# CODEX_HOME holds the codex auth file (written below); ensure it exists.
 mkdir -p "$CODEX_HOME"
 
 # Global git identity so plugin session-start hooks — which do `git commit
@@ -23,18 +24,18 @@ git config --global user.email "jinn-operator-codex@local" || true
 # inside the volume is preserved, but a redeploy with rotated secret always
 # wins.
 if [ -n "${CODEX_AUTH_JSON:-}" ]; then
-  echo "[entrypoint] writing CODEX_HOME=$CODEX_HOME/auth.json from CODEX_AUTH_JSON env"
+  echo "[seed] writing CODEX_HOME=$CODEX_HOME/auth.json from CODEX_AUTH_JSON env"
   printf '%s' "$CODEX_AUTH_JSON" | base64 -d > "$CODEX_HOME/auth.json"
   chmod 600 "$CODEX_HOME/auth.json"
 else
-  echo "[entrypoint] WARNING: CODEX_AUTH_JSON unset; codex CLI will fail at first task pickup unless OPENAI_API_KEY is present"
+  echo "[seed] WARNING: CODEX_AUTH_JSON unset; codex CLI will fail at first task pickup unless OPENAI_API_KEY is present"
 fi
 
 # Quick reachability probe — non-fatal, just visible in logs.
 if command -v codex >/dev/null 2>&1; then
-  echo "[entrypoint] codex CLI: $(codex --version 2>&1 | head -1)"
+  echo "[seed] codex CLI: $(codex --version 2>&1 | head -1)"
 else
-  echo "[entrypoint] ERROR: codex CLI not in PATH; codex harness tasks will fail"
+  echo "[seed] ERROR: codex CLI not in PATH; codex harness tasks will fail"
 fi
 
 # --- Operator config (only seeded on first run) ---
@@ -43,13 +44,13 @@ fi
 # image.
 if [ ! -f "$CONFIG_PATH" ]; then
   if [ -n "${CONFIG_TEMPLATE_JSON:-}" ]; then
-    echo "[entrypoint] seeding $CONFIG_PATH from CONFIG_TEMPLATE_JSON env"
+    echo "[seed] seeding $CONFIG_PATH from CONFIG_TEMPLATE_JSON env"
     printf '%s' "$CONFIG_TEMPLATE_JSON" > "$CONFIG_PATH"
   else
-    echo "[entrypoint] WARNING: no CONFIG_TEMPLATE_JSON and $CONFIG_PATH missing — daemon will start with defaults (no SolverNets joined)"
+    echo "[seed] WARNING: no CONFIG_TEMPLATE_JSON and $CONFIG_PATH missing — daemon will start with defaults (no SolverNets joined)"
   fi
 fi
 
 # --- Hand off to the daemon ---
-echo "[entrypoint] exec node dist/bin/jinn.js $*"
+echo "[seed] exec node dist/bin/jinn.js $*"
 exec node dist/bin/jinn.js "$@"
