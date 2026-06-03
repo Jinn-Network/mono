@@ -38,6 +38,7 @@ import {
   handleTaskBudgetRefunded,
   handleClaimed,
   parseCheckpointManifestLite,
+  parseSolverNetManifestLite,
   parseVerdictEnvelopeLite,
   type HandlerContext,
 } from '../src/handlers.js';
@@ -1280,6 +1281,73 @@ describe('MetadataSet harness.checkpoint: enrichment → harnessCheckpoint', () 
     const row = db.get(harnessCheckpoint, { agentId: '99', cid: CKPT_CID, chainId: CHAIN_ID });
     expect(row).toBeDefined();
     expect(row?.enrichmentStatus).toBe('pending');
+  });
+});
+
+// ─── parseSolverNetManifestLite (pure) ────────────────────────────────────────
+
+describe('parseSolverNetManifestLite (issue #985 — full summary fields)', () => {
+  const SYNTHETIC_SOLVERNET_MANIFEST = {
+    schemaVersion: 'solvernet.manifest.v1',
+    solverNetId: 'launcher/swe-rebench-v2',
+    network: 'base-sepolia',
+    name: 'SWE-rebench v2',
+    description: 'A coding benchmark SolverNet.',
+    launcher: {
+      safeAddress: '0x' + 'ab'.repeat(20),
+      agentEoa: '0x' + 'cd'.repeat(20),
+      agentId: '5474',
+    },
+    contract: {
+      id: 'swe-rebench-v2',
+      version: 'v1',
+    },
+    solutionPriceWei: '1000000000000000',
+    verdictPriceWei: '500000000000000',
+    openRoles: ['solver', 'evaluator'],
+  };
+
+  it('parses all summary fields from a valid manifest body', () => {
+    const result = parseSolverNetManifestLite(SYNTHETIC_SOLVERNET_MANIFEST);
+    expect(result).not.toBeNull();
+    expect(result).toEqual({
+      name: 'SWE-rebench v2',
+      description: 'A coding benchmark SolverNet.',
+      solverNetId: 'launcher/swe-rebench-v2',
+      network: 'base-sepolia',
+      solutionPriceWei: '1000000000000000',
+      verdictPriceWei: '500000000000000',
+      openRoles: ['solver', 'evaluator'],
+      launcherSafeAddress: '0x' + 'ab'.repeat(20),
+      contractId: 'swe-rebench-v2',
+      contractVersion: 'v1',
+    });
+  });
+
+  it('returns null for a non-object body', () => {
+    expect(parseSolverNetManifestLite('string')).toBeNull();
+    expect(parseSolverNetManifestLite(null)).toBeNull();
+    expect(parseSolverNetManifestLite(42)).toBeNull();
+  });
+
+  it('returns null when the required name field is missing', () => {
+    const { name: _omit, ...body } = SYNTHETIC_SOLVERNET_MANIFEST;
+    expect(parseSolverNetManifestLite(body)).toBeNull();
+  });
+
+  it('degrades missing nested launcher/contract to empty strings (still parses)', () => {
+    const { launcher: _l, contract: _c, ...body } = SYNTHETIC_SOLVERNET_MANIFEST;
+    const result = parseSolverNetManifestLite(body);
+    expect(result).not.toBeNull();
+    expect(result?.launcherSafeAddress).toBe('');
+    expect(result?.contractId).toBe('');
+    expect(result?.contractVersion).toBe('');
+  });
+
+  it('degrades non-array openRoles to an empty array', () => {
+    const body = { ...SYNTHETIC_SOLVERNET_MANIFEST, openRoles: 'solver' };
+    const result = parseSolverNetManifestLite(body);
+    expect(result?.openRoles).toEqual([]);
   });
 });
 
