@@ -971,6 +971,13 @@ export async function handleMetadataSet({
               name: m.name,
               description: m.description,
               solverNetId: m.solverNetId,
+              network: m.network,
+              solutionPriceWei: m.solutionPriceWei,
+              verdictPriceWei: m.verdictPriceWei,
+              openRoles: m.openRoles,
+              launcherSafeAddress: m.launcherSafeAddress,
+              contractId: m.contractId,
+              contractVersion: m.contractVersion,
               manifestEnrichmentStatus: 'ok',
             });
         } else {
