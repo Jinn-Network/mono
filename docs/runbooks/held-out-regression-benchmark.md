@@ -36,13 +36,18 @@ jinn solver-nets screen-held-out swe-rebench-v2 \
 ```
 Whole-pool by default (repo-stratified). Scope with `--repo tobymao` (within-repo
 sanity check) or `--instance-id <id> ...`. **Candidates are drawn only from the
-never-posted, never-held-out remainder**: the screen excludes instances already
-in an active held-out slate AND instances the generator has already posted
-(`posted > 0` in generator-state) — a posted task may already be in the train
-stream, so holding it out later would make a trained-checkpoint pass count as
-memorization, not generalization. (`--instance-id` is an explicit override: it
-screens exactly those, warning if any are already posted/held-out. The posted set
-is THIS launcher's history — complete for a single-launcher SolverNet.) The prover (layer 3) is selectable:
+never-trained, never-held-out remainder**, excluding the union of: (1) the active
+held-out slate (would overlap an existing exam); (2) instances **already attempted
+on-network** — any verdict envelope, passed or failed — read from the **indexer**
+(`verdictEnvelopeMeta`, cross-operator and current); and (3) this box's posted
+ledger (`posted > 0` in generator-state) as a belt. The indexer is the source of
+truth because the local ledger can be **stale** when a different generator (e.g.
+a hosted operator) is the active poster. An attempted instance was executed → the
+learner trained on it → holding it out later would make a trained-checkpoint pass
+count as memorization, not generalization. If the indexer is unreachable the
+screen **aborts** (it must not screen against an unknown attempted set).
+(`--instance-id` is an explicit override: it screens exactly those, warning if any
+are already attempted/posted/held-out.) The prover (layer 3) is selectable:
 `--prover-harness codex` (default, GPT-5.5) or `--prover-harness claude-code
 --prover-model opus` (a stronger same-family prover via the Claude auth — useful
 when codex is rate-limited; Haiku→Opus is a clean capability ladder). Emits, next

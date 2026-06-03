@@ -23,9 +23,12 @@ import {
 } from '../solver-types/_swe-rebench-v2-validated-pool.js';
 import { resolveSlateTasks } from './resolve-slate-tasks.js';
 import {
-  loadActiveHeldOutSlateIds, ACTIVE_HELD_OUT_SLATE_VERSIONS, excludeHeldOutSlate,
+  loadActiveHeldOutSlateIds, ACTIVE_HELD_OUT_SLATE_VERSIONS,
 } from '../solver-types/_swe-rebench-v2-held-out-slate.js';
 import { GeneratorStateStore } from '../solver-types/_swe-rebench-v2-state.js';
+import { fetchAttemptedInstanceIds } from './screen-discovery.js';
+import { DEFAULT_TESTNET_DISCOVERY_URL } from '../config.js';
+import { solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 import { SweRebenchV2Evaluator } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { HttpHfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner } from '../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
@@ -133,29 +136,45 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   let pool = cacheResult.pool;
   if (pool.length === 0) throw new Error(`SWE-rebench v2 pool empty${cacheResult.error ? ` (${cacheResult.error.message})` : ''}`);
 
-  // Held-out discipline (#986): the exam must be drawn from the never-posted,
-  // never-held-out remainder. An already-posted instance may have been trained
-  // on, so holding it out later would make a trained-checkpoint pass count as
-  // memorization, not generalization; an instance already in an active slate
-  // would overlap an existing exam. `posted` is THIS launcher's history (the
-  // sole poster on a single-launcher net).
+  // Held-out discipline (#986): draw the exam from the never-trained, never-held-out
+  // remainder. Union three exclusion sources:
+  //  - active held-out slate (would overlap an existing exam);
+  //  - already-ATTEMPTED on-network (indexer verdictEnvelopeMeta, any verdict,
+  //    cross-operator, CURRENT) — the authoritative "the learner trained on it"
+  //    signal; and
+  //  - this box's posted ledger (belt — may be STALE when another generator is
+  //    the active poster, e.g. a hosted operator; hence the indexer is the truth).
+  // A trained instance held out later would make a trained-checkpoint pass count
+  // as memorization, not generalization.
   const heldOutIds = loadActiveHeldOutSlateIds(DISPATCH_SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS);
   const postedIds = await new GeneratorStateStore({ stateDir }).postedInstanceIds();
+  let attemptedIds = new Set<string>();
+  const discoveryUrl = config.discovery?.url?.trim()
+    || (config.network === 'testnet' ? DEFAULT_TESTNET_DISCOVERY_URL : undefined);
+  const joinedNet = Object.values(config.joinedSolverNets ?? {}).find(
+    (n) => solverTypeFromJoinedContract(n) === DISPATCH_SOLVER_TYPE,
+  );
+  if (discoveryUrl && joinedNet?.manifestCid) {
+    attemptedIds = await fetchAttemptedInstanceIds(discoveryUrl, joinedNet.manifestCid);
+    log(`[screen] indexer: ${attemptedIds.size} instance(s) already attempted on-network (authoritative, cross-operator) → excluded`);
+  } else {
+    log('[screen] WARNING: no discovery URL / manifestCid — cannot exclude already-attempted instances; relying on the local posted ledger, which may be stale');
+  }
+  const excludeIds = new Set<string>([...heldOutIds, ...postedIds, ...attemptedIds]);
   if (opts.instanceIds?.length) {
     // Explicit operator override — screen exactly these, but warn if any are
-    // already contaminated (posted/held-out) so an intentional pick is informed.
+    // already contaminated (attempted/posted/held-out) so an intentional pick is informed.
     const want = new Set(opts.instanceIds);
     pool = pool.filter((t) => want.has(t.instance_id));
-    const tainted = pool.filter((t) => heldOutIds.has(t.instance_id) || postedIds.has(t.instance_id))
-      .map((t) => t.instance_id);
+    const tainted = pool.filter((t) => excludeIds.has(t.instance_id)).map((t) => t.instance_id);
     if (tainted.length > 0) {
-      log(`[screen] WARNING: ${tainted.length} explicitly-named instance(s) are already posted/held-out (NOT clean held-out candidates): ${tainted.join(', ')}`);
+      log(`[screen] WARNING: ${tainted.length} explicitly-named instance(s) are already attempted/posted/held-out (NOT clean held-out candidates): ${tainted.join(', ')}`);
     }
   } else {
     if (opts.repo) pool = pool.filter((t) => t.instance_id.startsWith(`${opts.repo}__`));
     const before = pool.length;
-    pool = excludeHeldOutSlate(pool, heldOutIds).filter((t) => !postedIds.has(t.instance_id));
-    log(`[screen] candidate pool ${before} → ${pool.length} (excluded ${heldOutIds.size} held-out + ${postedIds.size} already-posted instance(s) → never-trained remainder)`);
+    pool = pool.filter((t) => !excludeIds.has(t.instance_id));
+    log(`[screen] candidate pool ${before} → ${pool.length} (excluded ${excludeIds.size}: ${heldOutIds.size} held-out ∪ ${postedIds.size} posted ∪ ${attemptedIds.size} attempted → never-trained remainder)`);
   }
   const candidates = stratifyByRepo(pool);
   log(`[screen] ${candidates.length} candidate(s) after stratification`);
