@@ -67,6 +67,23 @@ export class GeneratorStateStore {
     return state.tasks[instance_id] ?? { posted: 0, successful: 0, last_posted_at: 0 };
   }
 
+  /**
+   * Instance ids this generator has posted at least once — i.e. that entered
+   * the SolverNet train stream. Used by held-out screening (#986) to keep the
+   * exam to the never-posted remainder (a posted task may have been trained on,
+   * so holding it out later would make a trained-checkpoint pass memorization,
+   * not generalization). This is THIS launcher's posting history; complete for a
+   * single-launcher SolverNet.
+   */
+  async postedInstanceIds(): Promise<Set<string>> {
+    const state = await this.load();
+    return new Set(
+      Object.entries(state.tasks)
+        .filter(([, c]) => c.posted > 0)
+        .map(([id]) => id),
+    );
+  }
+
   async recordPosted(instance_id: string, now: number = Date.now()): Promise<void> {
     const state = await this.load();
     const c = state.tasks[instance_id] ?? { posted: 0, successful: 0, last_posted_at: 0 };

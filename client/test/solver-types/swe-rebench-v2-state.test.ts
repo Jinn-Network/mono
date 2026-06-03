@@ -71,4 +71,20 @@ describe('GeneratorStateStore', () => {
     await store.recordLastTaskId('a', '200');
     expect((await store.getCounters('a')).last_task_id).toBe('200');
   });
+
+  it('postedInstanceIds returns only instances with posted > 0 (held-out screening, #986)', async () => {
+    const store = new GeneratorStateStore({ stateDir: dir });
+    await store.recordPosted('posted-1');
+    await store.recordPosted('posted-2');
+    await store.recordSuccess('successful-only'); // success without a post → not "posted"
+    expect([...(await store.postedInstanceIds())].sort()).toEqual(['posted-1', 'posted-2']);
+
+    const reloaded = new GeneratorStateStore({ stateDir: dir });
+    expect([...(await reloaded.postedInstanceIds())].sort()).toEqual(['posted-1', 'posted-2']);
+  });
+
+  it('postedInstanceIds is empty for a fresh store', async () => {
+    const store = new GeneratorStateStore({ stateDir: dir });
+    expect((await store.postedInstanceIds()).size).toBe(0);
+  });
 });

@@ -35,7 +35,14 @@ jinn solver-nets screen-held-out swe-rebench-v2 \
   --runs 3 --held-out-count 10 --max-candidates 60 --per-repo-cap 3
 ```
 Whole-pool by default (repo-stratified). Scope with `--repo tobymao` (within-repo
-sanity check) or `--instance-id <id> ...`. The prover (layer 3) is selectable:
+sanity check) or `--instance-id <id> ...`. **Candidates are drawn only from the
+never-posted, never-held-out remainder**: the screen excludes instances already
+in an active held-out slate AND instances the generator has already posted
+(`posted > 0` in generator-state) — a posted task may already be in the train
+stream, so holding it out later would make a trained-checkpoint pass count as
+memorization, not generalization. (`--instance-id` is an explicit override: it
+screens exactly those, warning if any are already posted/held-out. The posted set
+is THIS launcher's history — complete for a single-launcher SolverNet.) The prover (layer 3) is selectable:
 `--prover-harness codex` (default, GPT-5.5) or `--prover-harness claude-code
 --prover-model opus` (a stronger same-family prover via the Claude auth — useful
 when codex is rate-limited; Haiku→Opus is a clean capability ladder). Emits, next
