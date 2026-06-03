@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
+  SweRebenchV2VerdictV2PayloadSchema,
 } from '../src/payloads/swe-rebench-v2.js';
 
 describe('SweRebenchV2SolutionPayloadSchema', () => {
@@ -75,5 +76,37 @@ describe('SweRebenchV2VerdictPayloadSchema', () => {
       evaluator_cost_usd: 0,
     };
     expect(() => SweRebenchV2VerdictPayloadSchema.parse(v)).not.toThrow();
+  });
+});
+
+describe('swe-rebench-v2-verdict.v2 (graded, additive)', () => {
+  const v2 = {
+    schemaVersion: 'swe-rebench-v2-verdict.v2' as const,
+    score: 0 as const,
+    passed_match: false,
+    evaluator_cost_usd: 0,
+    passedCount: 18,
+    totalCount: 20,
+  };
+
+  it('parses a v2 verdict with graded counts', () => {
+    const parsed = SweRebenchV2VerdictV2PayloadSchema.parse(v2);
+    expect(parsed.passedCount).toBe(18);
+    expect(parsed.totalCount).toBe(20);
+  });
+
+  it('rejects negative or non-integer counts', () => {
+    expect(() => SweRebenchV2VerdictV2PayloadSchema.parse({ ...v2, passedCount: -1 })).toThrow();
+    expect(() => SweRebenchV2VerdictV2PayloadSchema.parse({ ...v2, totalCount: 1.5 })).toThrow();
+  });
+
+  it('rejects passedCount greater than totalCount', () => {
+    expect(() => SweRebenchV2VerdictV2PayloadSchema.parse({ ...v2, passedCount: 21, totalCount: 20 })).toThrow();
+  });
+
+  it('union accepts both v1 and v2', () => {
+    const v1 = { schemaVersion: 'swe-rebench-v2-verdict.v1' as const, score: 1 as const, passed_match: true, evaluator_cost_usd: 0 };
+    expect(SweRebenchV2VerdictPayloadSchema.parse(v1).schemaVersion).toBe('swe-rebench-v2-verdict.v1');
+    expect(SweRebenchV2VerdictPayloadSchema.parse(v2).schemaVersion).toBe('swe-rebench-v2-verdict.v2');
   });
 });

@@ -48,7 +48,7 @@ export const SweRebenchV2SolutionPayloadSchema = z.object({
 
 export type SweRebenchV2SolutionPayload = z.infer<typeof SweRebenchV2SolutionPayloadSchema>;
 
-export const SweRebenchV2VerdictPayloadSchema = z.object({
+export const SweRebenchV2VerdictV1PayloadSchema = z.object({
   schemaVersion: z.literal('swe-rebench-v2-verdict.v1'),
   /** Pass@1 score: 1 if the test suite passed, 0 otherwise. */
   score: z.union([z.literal(0), z.literal(1)]),
@@ -62,4 +62,31 @@ export const SweRebenchV2VerdictPayloadSchema = z.object({
   evaluator_cost_usd: z.number().nonnegative(),
 });
 
+/**
+ * v2 — additive graded signal (Lever A, #1019). Superset of v1: keeps the
+ * binary `score`/`passed_match` (the objective) and adds the per-test counts
+ * the grader already computes. `gradedScore = passedCount / totalCount` is
+ * derived downstream, never stored, to keep one source of truth.
+ */
+export const SweRebenchV2VerdictV2PayloadSchema = z.object({
+  schemaVersion: z.literal('swe-rebench-v2-verdict.v2'),
+  score: z.union([z.literal(0), z.literal(1)]),
+  passed_match: z.boolean(),
+  evaluator_cost_usd: z.number().nonnegative(),
+  /** Count of individual tests that passed in this run. */
+  passedCount: z.number().int().nonnegative(),
+  /** Total gradeable tests in this run (FAIL_TO_PASS ∪ PASS_TO_PASS as the runner reported). */
+  totalCount: z.number().int().nonnegative(),
+}).refine((p) => p.passedCount <= p.totalCount, {
+  message: 'passedCount must not exceed totalCount',
+});
+
+/** Accept either schema version on the read path. */
+export const SweRebenchV2VerdictPayloadSchema = z.union([
+  SweRebenchV2VerdictV1PayloadSchema,
+  SweRebenchV2VerdictV2PayloadSchema,
+]);
+
+export type SweRebenchV2VerdictV1Payload = z.infer<typeof SweRebenchV2VerdictV1PayloadSchema>;
+export type SweRebenchV2VerdictV2Payload = z.infer<typeof SweRebenchV2VerdictV2PayloadSchema>;
 export type SweRebenchV2VerdictPayload = z.infer<typeof SweRebenchV2VerdictPayloadSchema>;
