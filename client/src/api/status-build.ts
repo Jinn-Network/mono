@@ -83,13 +83,29 @@ export interface SpendStatus {
   credentials: SpendCredentialRow[];
 }
 
-/** Per-credential AI-units row exposed on /v1/status (issue #815). */
+/** Per-credential AI-units row exposed on /v1/status (issues #815, #1004). */
 export interface AiUnitsCredentialRow {
   credentialId: string;
+  // #1006: legacy unit-denominated fields the SPA reads today. Derived from
+  // the USD accumulator via the GPT-5.4-mini peg so they track the real gate.
+  // Remove when #1006 migrates the SPA to the USD fields below.
   unitsThisBlock: number;
   unitsThisWeek: number;
   capPerBlock: number;
   capPerWeek: number;
+  /** Actual USD spend this 6h block, in micros (issue #1004). */
+  usdMicrosThisBlock: number;
+  /** Actual USD spend this 7d window, in micros (issue #1004). */
+  usdMicrosThisWeek: number;
+  /** USD ceiling for the block / week, in micros (issue #1004). */
+  capPerBlockUsdMicros: number;
+  capPerWeekUsdMicros: number;
+  /**
+   * True when any contributing row lacked a harvested actual cost — the USD
+   * figures are (partly) estimate-backed rather than fully metered. Always
+   * true for harnesses with no usage telemetry (e.g. Hermes). Issue #1004.
+   */
+  estimated: boolean;
   /** True when block or week sum has reached its cap and claims are paused. */
   paused: boolean;
   /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */

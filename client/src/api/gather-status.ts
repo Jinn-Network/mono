@@ -14,7 +14,7 @@ import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../daemon/spend-cap-gate.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
-import { blockResetsAtUtc, weekResetsAtUtc } from '../spend/ai-units.js';
+import { blockResetsAtUtc, weekResetsAtUtc, GPT_5_4_MINI_USD_PER_BLOCK } from '../spend/ai-units.js';
 import { FleetStateStore } from '../earning/store.js';
 import {
   DEFAULT_TESTNET_ARTIFACTS,
@@ -1296,18 +1296,30 @@ export async function gatherStatusForApi(
     // Dedupe credentials across manifests — multiple SolverNets on the same
     // credential share one row.
     const uniqueCredentials = new Set(Object.values(aiUnitsCfg.manifestCredentials));
+    // Peg: usd_micros = units / 100 * GPT_5_4_MINI_USD_PER_BLOCK * 1e6.
+    // Inverse (USD micros -> units) for the legacy unit surface (#1006).
+    const usdMicrosToUnits = (usdMicros: number): number =>
+      (usdMicros / 1_000_000 / GPT_5_4_MINI_USD_PER_BLOCK) * 100;
     body.aiUnits = {
       credentials: [...uniqueCredentials].map((credentialId) => {
-        const unitsThisBlock = store.aiUnitsThisBlock(credentialId, now);
-        const unitsThisWeek = store.aiUnitsThisWeek(credentialId, now);
+        const block = store.usdMicrosThisBlock(credentialId, now);
+        const week = store.usdMicrosThisWeek(credentialId, now);
         const paused =
-          unitsThisBlock >= aiUnitsCfg.capPerBlock || unitsThisWeek >= aiUnitsCfg.capPerWeek;
+          block.usdMicros >= aiUnitsCfg.capPerBlockUsdMicros ||
+          week.usdMicros >= aiUnitsCfg.capPerWeekUsdMicros;
         return {
           credentialId,
-          unitsThisBlock,
-          unitsThisWeek,
+          // #1006: legacy unit fields, derived from USD via the peg.
+          unitsThisBlock: usdMicrosToUnits(block.usdMicros),
+          unitsThisWeek: usdMicrosToUnits(week.usdMicros),
           capPerBlock: aiUnitsCfg.capPerBlock,
           capPerWeek: aiUnitsCfg.capPerWeek,
+          // USD fields (issue #1004).
+          usdMicrosThisBlock: block.usdMicros,
+          usdMicrosThisWeek: week.usdMicros,
+          capPerBlockUsdMicros: aiUnitsCfg.capPerBlockUsdMicros,
+          capPerWeekUsdMicros: aiUnitsCfg.capPerWeekUsdMicros,
+          estimated: block.estimated || week.estimated,
           paused,
           blockResetsAt,
           weekResetsAt,
