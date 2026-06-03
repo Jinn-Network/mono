@@ -1,0 +1,34 @@
+name: Contracts CI
+
+on:
+  pull_request:
+    paths: ['contracts/**']
+  push:
+    branches: [next, main]
+    paths: ['contracts/**']
+
+concurrency:
+  group: contracts-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: contracts
+
+jobs:
+  compile-and-test:
+    name: Compile & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      # Hardhat-only job: NO Foundry step here. The `.t.sol` invariant suite
+      # (contracts/test/jinn/invariants/*) and foundry.toml are independent and
+      # belong to a separate (deferred) Foundry job — see the migration plan.
+      # `compile`/`test` are stable script NAMES; their bodies change HH2->HH3.
+      - run: yarn compile
+      - run: yarn test
