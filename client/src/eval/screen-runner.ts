@@ -137,13 +137,17 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
 
   // Resolve a single instance to the {task,row} the harness + grader need.
   const byId = new Map(pool.map((t) => [t.instance_id, t]));
-  async function runOnce(harness: Harness, poolTask: PoolTask): Promise<{ passed: boolean | null }> {
+  async function runOnce(harness: Harness, poolTask: PoolTask): Promise<{ passed: boolean | null; unscorableReason?: string }> {
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-screen-state-'));
+    // Track which stage we're in so an unscorable result names its cause (#476
+    // excludes infra failures from the denominator — but it must be diagnosable,
+    // not an opaque black box).
+    let stage: 'resolve' | 'harness' | 'grade' = 'resolve';
     try {
       const [resolved] = await resolveSlateTasks({
         poolTasks: [poolTask], hf_dataset: poolTask.hf_dataset, hf_split: poolTask.hf_split, fetcher,
       });
-      if (!resolved) return { passed: null };
+      if (!resolved) return { passed: null, unscorableReason: 'resolve: instance not in pool' };
       const task: Task = {
         id: poolTask.instance_id,
         description: resolved.task.problem_statement,
@@ -152,18 +156,28 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
         spec: resolved.task as unknown as Record<string, unknown>,
         window: { startTs: 0, endTs: Date.now() + RUN_BUDGET_MS },
       };
+      stage = 'harness';
       const run = await runHarnessForEval({
         harness, task, solverType: DISPATCH_SOLVER_TYPE, runtimePlugins, implStateDir, mode: 'frozen',
       });
-      if (run.violation || !run.solution) return { passed: null };
+      if (run.violation) return { passed: null, unscorableReason: 'harness: freeze-fence violation' };
+      if (!run.solution) return { passed: null, unscorableReason: 'harness: no solution produced' };
+      stage = 'grade';
       const verdict = await evaluator.grade({
         task: resolved.task,
         solutionPayload: { schemaVersion: 'swe-rebench-v2-solution.v1', patch: run.solution.patch },
         row: resolved.row,
       });
       return { passed: verdict.passed_match };
-    } catch {
-      return { passed: null }; // any harness/grader/infra failure ⇒ unscorable, never a fail (#476)
+    } catch (err) {
+      // Any harness/grader/infra failure ⇒ unscorable, never a fail (#476). Name
+      // the stage + error so the exclusion is diagnosable. An "agent produced no
+      // patch" throw is flagged distinctly from a true infra/grader error.
+      const msg = err instanceof Error ? err.message : String(err);
+      const reason = /produced no\b|no .*patch/i.test(msg)
+        ? `${stage}: agent produced no patch`
+        : `${stage}-error: ${msg.slice(0, 200)}`;
+      return { passed: null, unscorableReason: reason };
     } finally {
       rmSync(implStateDir, { recursive: true, force: true });
     }

@@ -46,6 +46,10 @@ export function stratifyByRepo(pool: PoolTask[]): PoolTask[] {
 /** One frozen run's grade outcome. `null` = unscorable (Docker/grader/infra failure). */
 export interface ScreenCandidateRun {
   passed: boolean | null;
+  /** When `passed === null`, the stage + error that made it unscorable
+   *  (e.g. `resolve: …`, `harness: no patch`, `grade-error: …`) — surfaced so an
+   *  exclusion is never an opaque black box. */
+  unscorableReason?: string;
 }
 
 export interface ScreenDeps {
@@ -81,6 +85,9 @@ export interface ScreenedCandidate {
   proverPassed: boolean | null; // null = not reached or unscorable
   heldOut: boolean;
   reason: ScreenReason;
+  /** For `base-unscorable` / `no-headroom`-via-unscorable: the stage + error
+   *  the run reported, so the exclusion is diagnosable without transcript digs. */
+  unscorableReason?: string;
 }
 
 export interface ScreenResult {
@@ -119,15 +126,17 @@ export async function screenBaseFailures(
     // Layer 2: base Haiku × R, early-stop on the first pass.
     let basePasses = 0;
     let baseUnscorable = false;
+    let baseReason: string | undefined;
     let r = 0;
     for (; r < opts.R; r++) {
       const run = await deps.runBaseFrozen(task);
-      if (run.passed === null) { baseUnscorable = true; break; }
+      if (run.passed === null) { baseUnscorable = true; baseReason = run.unscorableReason; break; }
       if (run.passed) { basePasses++; break; }
     }
     const baseRuns = r + (baseUnscorable || basePasses > 0 ? 1 : 0);
     if (baseUnscorable) {
-      screened.push({ ...base, baseRuns, gradeable: true, heldOut: false, reason: 'base-unscorable' });
+      if (baseReason) log(`[screen] ${task.instance_id} base-unscorable: ${baseReason}`);
+      screened.push({ ...base, baseRuns, gradeable: true, heldOut: false, reason: 'base-unscorable', ...(baseReason ? { unscorableReason: baseReason } : {}) });
       continue;
     }
     if (basePasses > 0) {
@@ -138,7 +147,13 @@ export async function screenBaseFailures(
     // Layer 3: prover ≥1 pass (existence proof of headroom).
     const prover = await deps.runProverFrozen(task);
     if (prover.passed !== true) {
-      screened.push({ ...base, baseRuns: opts.R, gradeable: true, proverPassed: prover.passed, heldOut: false, reason: 'no-headroom' });
+      if (prover.passed === null && prover.unscorableReason) {
+        log(`[screen] ${task.instance_id} prover-unscorable: ${prover.unscorableReason}`);
+      }
+      screened.push({
+        ...base, baseRuns: opts.R, gradeable: true, proverPassed: prover.passed, heldOut: false, reason: 'no-headroom',
+        ...(prover.passed === null && prover.unscorableReason ? { unscorableReason: prover.unscorableReason } : {}),
+      });
       continue;
     }
     if ((perRepo.get(repo) ?? 0) >= opts.perRepoCap) {
