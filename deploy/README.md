@@ -62,6 +62,15 @@ so the CMD tail (`run --config /data/config.json`) reaches the daemon.
 pin it via a `BASE_TAG` Railway service variable or `[build.args]` in the
 recipe's `railway.toml`.
 
+> **Architecture:** the base + overlay images must be **`linux/amd64`** to run on
+> Railway/Fly. CI (`docker.yml`) publishes multi-arch (`linux/amd64,linux/arm64`),
+> so released images are fine. But a **hand-built single-arch image (e.g. `arm64`
+> from an Apple-Silicon `docker build`) fails to start on Railway** — the deploy
+> goes `FAILED` with empty logs (the container can't exec). If you build locally
+> for a deploy, use `docker buildx build --platform linux/amd64 …`. (Verified
+> 2026-06-03: an arm64 launcher overlay `FAILED` on Railway; the amd64 rebuild
+> deployed and booted cleanly.)
+
 ### Build context — what each build actually needs
 
 - **The base image** (`client/Dockerfile`, built **once** in CI by
@@ -132,6 +141,15 @@ impl-state commit cadence, and earning (S6/#959). No more `railway ssh` + SQLite
 spelunking; the `measure-learning.sh` script is **retired**.
 
 ## Verify the consolidation (regression reference)
+
+> **Pre-merge smoke validation done (2026-06-03).** A launcher overlay (amd64),
+> built `FROM` the public base and deployed to a throwaway Railway service with a
+> `/data` volume, booted cleanly: the base entrypoint chowned `/data` + dropped
+> root→`node` (`uid=1000`) on Railway's root-mounted volume, the seed wrote
+> `/data/config.json`, and the daemon reached `Running fleet bootstrap → Awaiting
+> funding`. This confirms the Railway-platform layer (volume mount, non-root drop,
+> public-base pull). The full launched/generating + `/v1/status` assertions below
+> still want a funded operator with a real launched record.
 
 Run this after merge, in CI or against a real Railway deploy, to confirm the
 overlay path is equivalent to the pre-consolidation recipe — with **none** of the
