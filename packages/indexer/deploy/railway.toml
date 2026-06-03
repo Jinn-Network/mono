@@ -28,8 +28,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "indexer/deploy/Dockerfile"
 # Only redeploy when the indexer or its portal SDK dependency changes — not on
 # every push to next. Gitignore-style, anchored at the REPO ROOT (per Railway's
-# monorepo docs, whose example uses /packages/backend). Confirm after enabling:
-# a push touching only client/** must NOT redeploy the indexer.
+# monorepo docs, whose example uses /packages/backend). Base confirmed repo-root
+# on 2026-06-03: non-indexer merge #952 was SKIPPED; indexer merge #998 deployed.
 watchPatterns = ["packages/indexer/**", "packages/sdk/**"]
 
 [deploy]

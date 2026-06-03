@@ -26,31 +26,30 @@ across the full build + cutover).
 **One-time service settings (not expressible in `railway.toml`), set once via dashboard or API:**
 
 - **Root Directory** → `/packages`
-- **Config as code** → `packages/indexer/deploy/railway.toml` — **set this only after the watch-path check below passes** (see the ordering warning).
+- **Config as code** → `packages/indexer/deploy/railway.toml` — set 2026-06-03; this file is now authoritative for the service's build/deploy config.
 
 ⚠️ **#846:** never move `railway.toml` to the repo root — a root `railway.toml` is applied
 by Railway to *every* monorepo service and hijacks their build configs. Keep it here.
 
-⚠️ **Ordering — confirm `watchPatterns` before making this file authoritative.** The watch-path
-base is not yet empirically verified: `packages/indexer/**` (repo-root-relative, per Railway's
-monorepo docs) vs `indexer/**` (rootDirectory-relative). **If it is wrong, no push matches and
-the indexer silently stops auto-deploying its own changes** — and the
-[`indexer-monitor`](../../../.github/workflows/indexer-monitor.yml) workflow (#548) watches
-**data freshness, not deployed-code version**, so it will **not** alert on a frozen-code state
-(the container keeps serving stale code while the chain keeps indexing — exactly the 2026-06-02
-failure). So run the check below against the **live (API-set)** `watchPatterns` first, and only
-set the Config-as-code path once it passes. Until then, if an indexer change doesn't auto-deploy,
-ship it with a manual `serviceInstanceDeploy(latestCommit:true)`.
+**Watch-path base — confirmed repo-root-relative (2026-06-03).** `watchPatterns` use `packages/...`
+paths anchored at the repo root (note this differs from `dockerfilePath`, which is relative to the
+`/packages` Root Directory). Confirmed via a real merge-batch: a non-indexer merge (#952) was
+`SKIPPED` by Railway, while an indexer-touching merge (#998, `packages/indexer/deploy/**`) produced
+a real Dockerfile build that reached `/ready` before a zero-downtime cutover. If you ever change the
+Root Directory, **re-confirm** with the check below — and note the
+[`indexer-monitor`](../../../.github/workflows/indexer-monitor.yml) workflow (#548) watches **data
+freshness, not deployed-code version**, so a wrong base (→ the indexer silently stops auto-deploying
+its own changes) would not raise an alert.
 
-**Watch-path check** (run against the live `watchPatterns`, *before* setting Config-as-code):
+**Watch-path check** (to re-confirm after any Root Directory change):
 
-1. A merge to `next` touching only `client/**` or docs → the indexer must **not** redeploy.
+1. A merge to `next` touching only `client/**` or docs → the indexer must **not** redeploy (Railway marks it `SKIPPED`).
 2. A merge touching `packages/indexer/**` → the indexer **must** redeploy, build via the
    Dockerfile (build log shows the multi-stage `[build N/16]` / `[stage-1]` steps, not
    `[railpack]`), and reach `/ready` before cutover.
 
 If (2) does not auto-deploy, the base is rootDirectory-relative → set `watchPatterns` to
-`["indexer/**", "sdk/**"]` (live + in this file) and re-check.
+`["indexer/**", "sdk/**"]` and re-check.
 
 ## Required infrastructure
 
