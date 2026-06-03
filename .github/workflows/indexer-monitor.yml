@@ -134,10 +134,19 @@ jobs:
           ${REASON}
           \`\`\`
           COMMENT_EOF
-            gh issue comment "$EXISTING" \
-              --repo "${REPO}" \
-              --body-file "$COMMENT_FILE"
-            echo "::warning::Commented on existing indexer-outage issue #${EXISTING}"
+            # Throttle "still failing" comments to ~hourly: the */5 freshness cadence
+            # would otherwise post ~12 comments/hr during a sustained outage. The alert
+            # issue stays open (and the job stays red via exit 1) throughout; only the
+            # top-of-hour run adds a fresh note. 10# forces base-10 so a zero-padded
+            # minute (e.g. "08") is not parsed as octal.
+            if [ "$((10#$(date -u +%M)))" -lt 5 ]; then
+              gh issue comment "$EXISTING" \
+                --repo "${REPO}" \
+                --body-file "$COMMENT_FILE"
+              echo "::warning::Commented on existing indexer-outage issue #${EXISTING}"
+            else
+              echo "::warning::indexer-outage issue #${EXISTING} still failing — hourly comment throttle, skipped this run"
+            fi
           else
             gh issue create \
               --repo "${REPO}" \
