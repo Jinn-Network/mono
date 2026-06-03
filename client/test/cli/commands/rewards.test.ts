@@ -23,7 +23,7 @@ const mockRaw: GatheredStatusRaw = {
         safe_address: null,
         service_id: 42,
         mech_address: null,
-        staking_address: null,
+        staking_address: '0x5555555555555555555555555555555555555555',
         step: 'complete',
         error: null,
       },
@@ -33,12 +33,16 @@ const mockRaw: GatheredStatusRaw = {
   master: { address: null },
   pollIntervalMs: 5000,
   masterDailyEstimateWei: '0',
-  pendingStakingRewardsWei: '1000',
 };
 
 const fakeDeps = {
-  gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
+  gatherIntrospectionRaw: async () => ({ ...mockRaw }) as GatheredStatusRaw,
   assembleRewardsV1,
+  sumPendingStakingRewards: async () => ({
+    sum: '1000',
+    pendingByService: { 0: '1000' },
+    nextCheckpointAt: '2026-04-15T00:00:00.000Z',
+  }),
 };
 
 describe('rewards command', () => {
@@ -50,6 +54,37 @@ describe('rewards command', () => {
     const parsed = envelopes[0] as { lastClaimAt: string; services: Array<{ pending: string }> };
     expect(parsed.lastClaimAt).toBe('2026-04-14T11:00:00.000Z');
     expect(parsed.services[0].pending).toBe('1000');
+  });
+
+  it('invokes the on-demand staking extractor and renders its pending value (#992)', async () => {
+    let extractorCalls = 0;
+    const cmd = createRewardsCommand({
+      gatherIntrospectionRaw: async () => ({ ...mockRaw }) as GatheredStatusRaw,
+      assembleRewardsV1,
+      sumPendingStakingRewards: async () => {
+        extractorCalls += 1;
+        return { sum: '1000', pendingByService: { 0: '1000' }, nextCheckpointAt: '2026-04-15T00:00:00.000Z' };
+      },
+    });
+    const { envelopes, exits } = await runCommand(cmd);
+    expect(exits).toEqual([]);
+    expect(extractorCalls).toBe(1);
+    const parsed = envelopes[0] as { services: Array<{ pending: string }>; nextCheckpointAt: string };
+    expect(parsed.services[0].pending).toBe('1000');
+    expect(parsed.nextCheckpointAt).toBe('2026-04-15T00:00:00.000Z');
+  });
+
+  it('renders pending=0 and a null checkpoint when the extractor errors (#992)', async () => {
+    const cmd = createRewardsCommand({
+      gatherIntrospectionRaw: async () => ({ ...mockRaw }) as GatheredStatusRaw,
+      assembleRewardsV1,
+      sumPendingStakingRewards: async () => ({ error: 'rpc down' }),
+    });
+    const { envelopes, exits } = await runCommand(cmd);
+    expect(exits).toEqual([]);
+    const parsed = envelopes[0] as { services: Array<{ pending: string }>; nextCheckpointAt: string | null };
+    expect(parsed.services[0].pending).toBe('0');
+    expect(parsed.nextCheckpointAt).toBeNull();
   });
 
   it('emits invalid_invocation for bad flags', async () => {
