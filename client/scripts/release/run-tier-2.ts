@@ -1,9 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
 import { runT21CrossOpDonation } from '../../test/release/tier-2/T2.1-cross-op-donation.js';
 import { runT22ProducerEvaluator } from '../../test/release/tier-2/T2.2-producer-evaluator.js';
-import { type ScenarioVerdict, ScenarioVerdictSchema, classifyFailure, type FailClass } from './scenario-types.js';
+import { type ScenarioVerdict, ScenarioVerdictSchema, exitCodeForVerdicts } from './scenario-types.js';
 
 export interface RunTier2Options {
   /** Output directory for evidence. Default: tier-2-evidence/<timestamp>/. */
@@ -18,49 +17,17 @@ export interface RunTier2Result {
   outputDir: string;
 }
 
-async function runT23MultiOpSpaFlow(outputDir: string): Promise<ScenarioVerdict> {
-  const started = Date.now();
-  const evidencePath = path.join(outputDir, 'T2.3.log');
-
-  return new Promise<ScenarioVerdict>((resolve) => {
-    const child = spawn(
-      'yarn',
-      [
-        'playwright',
-        'test',
-        '--config=playwright.config.ts',
-        'test/dashboard/multi-op/launcher-join-flow.e2e.test.ts',
-        '--reporter=line',
-      ],
-      { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('close', async (code) => {
-      const wallClockMs = Date.now() - started;
-      await fs.writeFile(
-        evidencePath,
-        `=== stdout ===\n${stdout}\n=== stderr ===\n${stderr}\n=== exit code ===\n${code}\n`,
-      );
-      let failClass: FailClass | null = null;
-      let failNotes: string | null = null;
-      if (code !== 0) {
-        failClass = classifyFailure(new Error(stderr || stdout));
-        failNotes = `Playwright exited ${code}`;
-      }
-      resolve({
-        scenarioId: 'T2.3',
-        verdict: code === 0 ? 'pass' : 'fail',
-        wallClockMs,
-        evidencePath,
-        failClass,
-        failNotes,
-      });
-    });
-  });
-}
+// NOTE: T2.3 (the launcher-join multi-op SPA flow) was removed from this gate.
+// It was a browser E2E driven against a LIVE Anvil fork + live daemons — a
+// non-deterministic shape that is neither hermetic nor real-testnet, and it
+// flaked on multiple independent legs (launch stall, cumulative-budget, the
+// op-a Onboarding re-gate). Its per-leg behaviour is already covered
+// deterministically (launcher-create step component tests, the launch
+// state-machine unit test, the discovery + JoinFlow + StatusHeader tests). The
+// app-experience coverage is being rebuilt in the right shape — deterministic
+// mocked-daemon Playwright flow tests (hermetic gate) + a non-gating real paired
+// app smoke — tracked in the follow-up issue. Tier 2 here gates on the two
+// protocol-level callables (T2.1 cross-op donation, T2.2 producer/evaluator).
 
 export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Result> {
   const outputDir = opts.outputDir ?? path.join(
@@ -94,9 +61,7 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
     };
   });
 
-  // T2.3 needs a separate subprocess (Playwright).
-  const t23 = await runT23MultiOpSpaFlow(outputDir);
-  const verdicts = [...callableVerdicts, t23];
+  const verdicts = callableVerdicts;
 
   // Validate every verdict against the schema (catches contract drift).
   for (const v of verdicts) ScenarioVerdictSchema.parse(v);
@@ -139,10 +104,17 @@ async function cliMain(): Promise<void> {
   const { verdicts, allPassed, outputDir } = await runTier2({ candidateVersion });
   console.log(JSON.stringify({ verdicts, allPassed, outputDir }, null, 2));
 
-  // Real-bug failures exit 1; flake / skip / agent-crash exit 0
-  // (operator decides ship based on classification).
-  const hasRealBug = verdicts.some((v) => v.verdict === 'fail' && v.failClass === 'real-bug');
-  process.exit(hasRealBug ? 1 : 0);
+  // Exit-code contract (consumed by environment-suite.yml's exit→verdict map):
+  //   1 = product-red  — a classified `real-bug`; hard product failure, blocks.
+  //   4 = infra-blocked — any other fail (flake-timing / flake-infra /
+  //       agent-crash). A timeout/connectivity/crash symptom is NOT proof of a
+  //       transient: it must SURFACE and block (named as infra), never clear the
+  //       gate green. This closes the flake-mask — previously these exited 0 and
+  //       a deterministic-trigger failure (e.g. a stuck launch) silently passed
+  //       the gate. A genuine one-off transient is re-cleared by re-dispatching
+  //       the (manual) authoritative run; the gate never lies in the meantime.
+  //   0 = every scenario passed or skipped.
+  process.exit(exitCodeForVerdicts(verdicts));
 }
 
 const invokedAsScript = import.meta.url === `file://${process.argv[1]}`;

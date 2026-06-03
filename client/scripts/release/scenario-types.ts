@@ -64,6 +64,33 @@ export function classifyFailure(err: unknown): FailClass {
   return 'real-bug';
 }
 
+/**
+ * The run-tier process exit code for a set of scenario verdicts — the contract
+ * `environment-suite.yml` decodes (1 → product-red, 4 → infra-blocked, 0 → ok):
+ *
+ *   1 = product-red    — at least one `real-bug`. A hard product failure; the
+ *                        gate fails and blocks the cut.
+ *   4 = infra-blocked  — at least one OTHER fail (flake-timing / flake-infra /
+ *                        agent-crash) and no real-bug. A timeout/connectivity/
+ *                        crash symptom is NOT proof of a transient, so it must
+ *                        SURFACE and block (named as infra), never clear the
+ *                        gate green. (This is the flake-mask fix: these used to
+ *                        exit 0 and silently pass, letting a deterministic-
+ *                        trigger failure — e.g. a stuck launch — slip the gate.)
+ *                        A genuine one-off transient is re-cleared by re-running
+ *                        the authoritative dispatch; the gate never lies meanwhile.
+ *   0 = every scenario passed or was skipped.
+ *
+ * real-bug dominates infra-blocked (a confirmed product regression is the more
+ * severe, more actionable signal).
+ */
+export function exitCodeForVerdicts(verdicts: ScenarioVerdict[]): 0 | 1 | 4 {
+  const isFail = (v: ScenarioVerdict): boolean => v.verdict === 'fail';
+  if (verdicts.some((v) => isFail(v) && v.failClass === 'real-bug')) return 1;
+  if (verdicts.some((v) => isFail(v) && v.failClass !== 'real-bug')) return 4;
+  return 0;
+}
+
 /** Outcome a scenario body returns when it does not fail (which throws). */
 export type ScenarioOutcome =
   | { verdict: 'pass' }

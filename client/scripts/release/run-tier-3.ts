@@ -2,7 +2,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { runT31ProducerEvaluatorReal } from '../../test/release/tier-3/T3.1-producer-evaluator-real.js';
-import { type ScenarioVerdict, ScenarioVerdictSchema } from './scenario-types.js';
+import { type ScenarioVerdict, ScenarioVerdictSchema, exitCodeForVerdicts } from './scenario-types.js';
 
 interface RunOptions {
   outputDir?: string;
@@ -58,8 +58,7 @@ async function cliMain(): Promise<void> {
   const mode = (process.argv[3] as 'human-invoked' | 'autonomous' | undefined) ?? 'human-invoked';
   const { verdicts, allPassed } = await runTier3({ candidateVersion, mode });
   console.log(JSON.stringify({ verdicts, allPassed }, null, 2));
-  const hasRealBug = verdicts.some((v) => v.verdict === 'fail' && v.failClass === 'real-bug');
-  process.exit(hasRealBug ? 1 : 0);
+  process.exit(exitCodeForVerdicts(verdicts));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

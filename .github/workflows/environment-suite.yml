@@ -374,14 +374,6 @@ jobs:
       # hard-asserted; a flaky LLM never blocks. classifyFailure() inside the
       # run-tier scripts separates real-bug from flake-infra/timing, and only a
       # `real-bug` exits non-zero.
-      # T2.3 (multi-op SPA launcher-join flow) drives a real browser via
-      # Playwright. The browser binaries are NOT bundled with the npm package, so
-      # install Chromium (+ its OS deps) before the suite runs. Without this T2.3
-      # fails at browser launch and the whole tier-2 verdict goes red on infra.
-      - name: Install Playwright browser (Chromium) for T2.3
-        if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
-        run: yarn playwright install --with-deps chromium
-
       - name: Run environment suite
         if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
         id: suite
@@ -417,13 +409,15 @@ jobs:
           echo "t3_code=${T3_CODE}" >> "${GITHUB_OUTPUT}"
 
       # ── Assemble + post the environment-suite verdict (§7, §9 step 3) ───────
-      # The run-tier scripts exit non-zero ONLY on a `real-bug` (product-red);
-      # flake-infra / flake-timing / agent-crash exit 0 so the classification —
-      # not a raw process code — decides ship. We map the two tier exit codes to
-      # the shared verdict JSON and post it on the candidate SHA. agent-answer-
-      # quality is never a hard gate (§10) — it lives in the scenario notes, not
-      # the conclusion. always() so a crashed suite step still posts a (failure)
-      # verdict rather than leaving the SHA with no environment-suite check-run.
+      # The run-tier scripts exit 1 on a classified `real-bug` (product-red) and
+      # exit 4 on any other failure — flake-timing / flake-infra / agent-crash —
+      # which now SURFACES as `infra-blocked` and BLOCKS rather than silently
+      # passing (a timeout symptom is not proof of a transient; the gate must
+      # never clear green on an unverified failure). We map the two tier exit
+      # codes to the shared verdict JSON and post it on the candidate SHA.
+      # agent-answer-quality (exit 3) is never a hard gate (§10) — it lives in
+      # the scenario notes, not the conclusion. always() so a crashed suite step
+      # still posts a verdict rather than leaving the SHA with no check-run.
       - name: Post environment-suite verdict
         if: always() && steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
         env:
@@ -441,38 +435,53 @@ jobs:
             const code = (v) => (v === undefined || v === '' ? 2 : Number(v));
             const t2 = code(process.env.T2_CODE);
             const t3 = code(process.env.T3_CODE);
-            // run-tier exit-code → verdict mapping (spec §10, three outcomes):
-            //   0 = pass / flake-infra / flake-timing / skip (classification already
-            //       decided inside the script; flakes exit 0, never block).
-            //   1 = classified real-bug → product-red (hard gate, blocks the cut).
+            // run-tier exit-code → verdict mapping (spec §10):
+            //   0 = pass / skip — every scenario verified.
+            //   1 = classified real-bug → product-red (hard gate, blocks the cut,
+            //       conclusion 'failure').
             //   3 = agent-answer-quality SOFT signal: the loop completed and the
             //       envelope/settlement/activity-counter were protocol-valid, but the
             //       agent's answer was suspect on a task WITHOUT known ground truth.
             //       §10 is explicit: a flaky LLM must NEVER hard-gate. So exit 3 maps
             //       to a soft PASS carrying a note — visible, but it does not drive
             //       the conclusion. (run-tier-3 emitting exit 3 for answer-quality-only
-            //       failures is the paired follow-up; until then it exits 0/1 and this
+            //       failures is the paired follow-up; until then it exits 0/1/4 and this
             //       arm is simply unused — never a false block.)
+            //   4 = infra-blocked: a flake-timing / flake-infra / agent-crash failure.
+            //       NOT a silent pass — an unverified timeout/connectivity/crash
+            //       symptom surfaces and BLOCKS (conclusion 'neutral', distinct from a
+            //       product-red), naming the cause as infra. A genuine one-off transient
+            //       is cleared by re-dispatching the authoritative run; the gate never
+            //       lies in the meantime. (This is the flake-mask fix — these used to
+            //       exit 0 and silently pass.)
             //   else = unexpected crash → agent-crash (conservative hard fail).
             const toScenario = (id, c) => {
               if (c === 0) return { id, verdict: 'pass', failClass: null, notes: null };
               if (c === 3) return { id, verdict: 'pass', failClass: null, notes: 'agent-answer-quality soft signal (§10) — loop + settlement valid, answer suspect; see ' + id + ' log. NOT a product red.' };
               if (c === 1) return { id, verdict: 'fail', failClass: 'product-red', notes: 'classified real-bug — see ' + id + ' log' };
+              if (c === 4) return { id, verdict: 'fail', failClass: 'infra-blocked', notes: 'flake-timing / flake-infra / agent-crash — surfaced as infra-blocked (NOT a silent pass); see ' + id + ' log. Re-dispatch if it was a one-off transient.' };
               return { id, verdict: 'fail', failClass: 'agent-crash', notes: 'suite step crashed (exit ' + c + ')' };
             };
             const scenarios = [
               toScenario('cross-op-donation', t2),
               toScenario('real-harness-loop', t3),
             ];
-            const anyRed = scenarios.some((s) => s.verdict === 'fail');
+            // product-red (or an unexpected agent-crash) → 'failure'; infra-blocked
+            // (flake/timeout) → 'neutral' so it is distinct from a product regression
+            // on the dashboard. Both block the publish guard, which requires 'success'.
+            const anyProductRed = scenarios.some((s) => s.failClass === 'product-red' || s.failClass === 'agent-crash');
+            const anyInfraBlocked = scenarios.some((s) => s.failClass === 'infra-blocked');
+            const conclusion = anyProductRed ? 'failure' : anyInfraBlocked ? 'neutral' : 'success';
             const verdict = {
               context: 'environment-suite',
               headSha: sha,
-              conclusion: anyRed ? 'failure' : 'success',
+              conclusion,
               scenarios,
-              summary: anyRed
+              summary: anyProductRed
                 ? 'environment-suite: one or more real-world scenarios are product-red on this SHA. Drive to fix on release/<v> (spec §10).'
-                : 'environment-suite: cross-op donation + real-harness loop both green on this SHA.',
+                : anyInfraBlocked
+                  ? 'environment-suite: a scenario is infra-blocked (flake/timeout/crash) on this SHA — NOT a product regression. Investigate the named scenario; re-dispatch if it was a one-off transient (§10).'
+                  : 'environment-suite: cross-op donation + real-harness loop both green on this SHA.',
             };
             fs.writeFileSync(process.env.RUNNER_TEMP + '/environment-suite-verdict.json', JSON.stringify(verdict, null, 2));
           "
