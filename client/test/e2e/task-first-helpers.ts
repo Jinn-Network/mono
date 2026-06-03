@@ -928,15 +928,29 @@ export async function spawnPlainAnvil(): Promise<AnvilHarness> {
 
 async function runChild(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    // Pipe stderr (still tee'd to the parent for live logs) so a non-zero exit
+    // carries its tail in the thrown error. The release-suite classifier
+    // (scenario-types.classifyFailure) reads that message to tell a setup
+    // failure — e.g. "node_modules state file - running an install might help"
+    // when a workspace wasn't installed — apart from a genuine compile/test
+    // failure: the former is infra-blocked, the latter product-red. #1018.
     const child = spawn(command, args, {
       cwd: options.cwd,
-      stdio: 'inherit',
+      stdio: ['inherit', 'inherit', 'pipe'],
       env: options.env ?? process.env,
+    });
+    let stderrTail = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      process.stderr.write(chunk); // preserve live logging
+      stderrTail = (stderrTail + chunk.toString()).slice(-2000);
     });
     child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`${command} ${args.join(' ')} failed with exit code ${code}`));
+      else reject(new Error(
+        `${command} ${args.join(' ')} failed with exit code ${code}` +
+          (stderrTail.trim() ? `\n${stderrTail.trim()}` : ''),
+      ));
     });
   });
 }

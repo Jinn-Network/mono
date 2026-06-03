@@ -37,10 +37,12 @@ export interface ScenarioOptions {
 const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
   {
     klass: 'flake-infra',
-    // Each pattern must denote a genuine connectivity failure. A bare /network/i
-    // over-matches real bugs (e.g. "network mismatch (expected base-sepolia)"),
-    // so connectivity is matched only via the specific phrases below.
+    // Each pattern must denote a genuine connectivity / transient / setup
+    // failure. A bare /network/i over-matches real bugs (e.g. "network mismatch
+    // (expected base-sepolia)"), so each phrase below is deliberately specific —
+    // a false flake-infra would let a real regression pass the gate.
     patterns: [
+      // ── connectivity ──
       /HTTP request failed/i,
       /ECONNREFUSED/i,
       /ECONNRESET/i,
@@ -48,6 +50,30 @@ const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
       /network error/i,
       /network connection/i,
       /getaddrinfo/i,
+      // ── transient on-chain tx (#1018): nonce races + underpriced replacements.
+      // The tx didn't land but the candidate is fine — re-dispatchable, not a
+      // product regression.
+      /replacement transaction underpriced/i,
+      /replacement fee too low/i,
+      /transaction underpriced/i,
+      /nonce too low/i,
+      /nonce has already been used/i,
+      /already known/i,
+      // ── RPC transients (#1018): 429 / 5xx / overloaded provider. ──
+      /\b429\b/,
+      /too many requests/i,
+      /rate limit/i,
+      /bad gateway/i,
+      /service unavailable/i,
+      /gateway timeout/i,
+      // ── harness build/setup not installed in the runner (#1018): e.g. `yarn
+      // compile` in a workspace whose deps were never installed. The env
+      // couldn't set up the test — not a product regression. These install-
+      // missing signals are unambiguous; a genuine solc/Hardhat compile error
+      // carries none of them and correctly stays real-bug.
+      /node_modules state file/i,
+      /running an install might help/i,
+      /findPackageLocation/i,
     ],
   },
   {

@@ -92,4 +92,48 @@ describe('classifyFailure', () => {
     expect(classifyFailure(new Error('network error: connection lost'))).toBe('flake-infra');
     expect(classifyFailure(new Error('getaddrinfo ENOTFOUND base.org'))).toBe('flake-infra');
   });
+
+  // ── #1018: transient on-chain + RPC + harness-setup failures are infra, not
+  // product. On run 26911246506 both env-suite reds were these, mis-graded as
+  // real-bug (→ product-red exit 1) instead of flake-infra (→ infra-blocked
+  // exit 4), which red-gated a clean SHA on tooling noise.
+  it('#1018: classifies transient on-chain tx failures as flake-infra', () => {
+    // failure 2 (tier-3) verbatim shape: jinn exit 50 + underpriced replacement.
+    expect(classifyFailure(new Error(
+      'jinn tasks submit exited 50. stderr:\nreplacement transaction underpriced\nNo TaskCreated event returned from router',
+    ))).toBe('flake-infra');
+    expect(classifyFailure(new Error('replacement transaction underpriced'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('replacement fee too low'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('nonce too low'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('nonce has already been used'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('already known'))).toBe('flake-infra');
+  });
+
+  it('#1018: classifies RPC 429/5xx transients as flake-infra', () => {
+    expect(classifyFailure(new Error('Request failed with status 429'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('429 Too Many Requests'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('rate limit exceeded'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('503 Service Unavailable'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('502 Bad Gateway'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('504 Gateway Timeout'))).toBe('flake-infra');
+  });
+
+  it('#1018: classifies harness build/setup (yarn install missing) as flake-infra', () => {
+    // failure 1 (tier-2) verbatim shape: `yarn compile` in contracts/ fails
+    // because that workspace was never installed in the runner. The install-
+    // missing signal is carried in the runChild error (stderr tail). Not product.
+    expect(classifyFailure(new Error(
+      "yarn compile failed with exit code 1\nUsage Error: Couldn't find the node_modules state file - running an install might help (findPackageLocation)",
+    ))).toBe('flake-infra');
+    expect(classifyFailure(new Error('running an install might help'))).toBe('flake-infra');
+  });
+
+  it('#1018: does NOT mask a real contracts compile error as flake-infra', () => {
+    // A genuine solc/Hardhat compile error (no install-missing signal) must stay
+    // real-bug — the precision guard so the build-setup pattern is not a blanket
+    // "any compile failure is infra".
+    expect(classifyFailure(new Error(
+      "yarn compile failed with exit code 1\nCompilerError: Expected identifier but got '}'",
+    ))).toBe('real-bug');
+  });
 });
