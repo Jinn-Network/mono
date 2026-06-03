@@ -422,6 +422,8 @@ const command: CommandModule = {
             Read-only report of the local validated-pool.json: total entries,
             scorable/unscorable counts, histogram by normalised reason, and
             the highest-yield unscorable blocker. Does not run any eval.
+  jinn solver-nets screen-held-out swe-rebench-v2 [--repo <org>] [--instance-id <id> ...]
+      [--runs 3] [--held-out-count 10] [--max-candidates 60] [--per-repo-cap 3] [--prover-model <m>]
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by
@@ -450,6 +452,13 @@ Output flags:
         'seed-positive': { type: 'boolean' },
         'known-bad': { type: 'boolean' },
         'known-pytest-missing': { type: 'boolean' },
+        // screen-held-out (#986)
+        runs: { type: 'string' },
+        'held-out-count': { type: 'string' },
+        'max-candidates': { type: 'string' },
+        'per-repo-cap': { type: 'string' },
+        'prover-model': { type: 'string' },
+        repo: { type: 'string' },
       },
     });
     const human = Boolean(parsed.values['human']);
@@ -629,6 +638,59 @@ Output flags:
         (v) => {
           const s = v as { poolSize: number; checked: number; scorable: number; unscorable: number; skipped: number };
           return `pool=${s.poolSize}  checked=${s.checked}  scorable=${s.scorable}  unscorable=${s.unscorable}  skipped(non-pytest)=${s.skipped}`;
+        },
+      );
+      return;
+    }
+
+    if (subverb === 'screen-held-out') {
+      if (name !== 'swe-rebench-v2') {
+        fail(ctx, 'solver-nets screen-held-out currently supports only `swe-rebench-v2`');
+        return;
+      }
+      // Docker must be reachable (spec §8 precondition) or every base/prover
+      // grade is unscorable and the screen yields nothing — fail loud instead.
+      if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
+        fail(ctx, 'Docker daemon not reachable — start Docker, then re-run `jinn solver-nets screen-held-out swe-rebench-v2`');
+        return;
+      }
+      const num = (key: string, dflt: number): number => {
+        const raw = parsed.values[key] as string | undefined;
+        const v = raw ? Number.parseInt(raw, 10) : NaN;
+        return Number.isFinite(v) && v > 0 ? v : dflt;
+      };
+      const { runScreenHeldOut } = await import('../../eval/screen-runner.js');
+      const instanceIds = resolveValidatePoolInstanceIds({
+        instanceId: parsed.values['instance-id'] as string[] | undefined,
+        instancesFile: parsed.values['instances-file'] as string | undefined,
+        seedPositive: Boolean(parsed.values['seed-positive']),
+        knownBad: Boolean(parsed.values['known-bad']),
+        knownPytestMissing: Boolean(parsed.values['known-pytest-missing']),
+      });
+      const summary = await runScreenHeldOut({
+        R: num('runs', 3),
+        heldOutCount: num('held-out-count', 10),
+        maxCandidates: num('max-candidates', 60),
+        perRepoCap: num('per-repo-cap', 3),
+        ...(parsed.values['prover-model'] ? { proverModel: parsed.values['prover-model'] as string } : {}),
+        ...(instanceIds.length ? { instanceIds } : {}),
+        ...(parsed.values['repo'] ? { repo: parsed.values['repo'] as string } : {}),
+        ...(parsed.values['config'] ? { configPath: parsed.values['config'] as string } : {}),
+        log: (m) => process.stderr.write(`${m}\n`),
+      });
+      emit(
+        ctx,
+        {
+          verb: 'solver-nets screen-held-out', solverNet: 'swe-rebench-v2',
+          heldOut: summary.heldOutCount, baseCodeDigest: summary.baseCodeDigest,
+          slatePath: summary.slatePath, reportPath: summary.reportPath,
+          screened: summary.result.screened.length,
+        },
+        human, json,
+        (v) => {
+          const s = v as { heldOut: number; baseCodeDigest: string; slatePath: string };
+          return `held-out=${s.heldOut}  base=${s.baseCodeDigest}\n  slate: ${s.slatePath}\n` +
+            `  next: jinn eval v2 --checkpoint <trained-cid> --parent ${s.baseCodeDigest}`;
         },
       );
       return;
