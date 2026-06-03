@@ -54,7 +54,6 @@ describe('assembleFleetV1', () => {
     expect(svc.wallets.agent.address).toBe('0xAGENT');
     expect(svc.wallets.multisig.address).toBe('0xSAFE');
     expect(svc.staking.staked).toBe(true);
-    expect(svc.staking.evicted).toBe(false);
   });
 
   it('sets attention=null when no issue detected', () => {
@@ -83,31 +82,5 @@ describe('assembleFleetV1', () => {
     raw.fleet = { ...raw.fleet!, chain: 'base' };
     const out = assembleFleetV1(raw);
     expect(out.network).toBe('mainnet');
-  });
-
-  it('populates staking.evicted from evictedByServiceIndex (jinn-mono-hjex.3)', () => {
-    // The display index for service at index 1 (via displayFleetServiceIndex) is 0
-    // (fleet-display-index uses 0-based display index from the services array position).
-    const raw = makeRaw({ evictedByServiceIndex: { 0: true } });
-    const out = assembleFleetV1(raw);
-    expect(out.services[0]!.staking.evicted).toBe(true);
-  });
-
-  it('defaults staking.evicted to false when evictedByServiceIndex absent (jinn-mono-hjex.3)', () => {
-    const raw = makeRaw();
-    const out = assembleFleetV1(raw);
-    expect(out.services[0]!.staking.evicted).toBe(false);
-  });
-
-  it('populates staking.inactivitySeconds from inactivityByServiceIndex (jinn-mono-hjex.3)', () => {
-    const raw = makeRaw({ inactivityByServiceIndex: { 0: 7200 } });
-    const out = assembleFleetV1(raw);
-    expect(out.services[0]!.staking.inactivitySeconds).toBe(7200);
-  });
-
-  it('defaults staking.inactivitySeconds to null when inactivityByServiceIndex absent (jinn-mono-hjex.3)', () => {
-    const raw = makeRaw();
-    const out = assembleFleetV1(raw);
-    expect(out.services[0]!.staking.inactivitySeconds).toBeNull();
   });
 });

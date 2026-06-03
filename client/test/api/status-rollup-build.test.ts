@@ -42,12 +42,11 @@ function makeRaw(): GatheredStatusRaw {
     master: { address: '0xM', balanceWei: '1' },
     pollIntervalMs: 5000,
     masterDailyEstimateWei: '1',
-    pendingStakingRewardsWei: '42',
   };
 }
 
 describe('assembleStatusRollupV1', () => {
-  it('emits the §4.1 roll-up shape with daemon/rpc/fleet/earnings/exit', () => {
+  it('emits the §4.1 roll-up shape with daemon/rpc/fleet/exit', () => {
     const parsed = assembleStatusRollupV1(makeRaw());
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.daemon.state).toBe('running');
@@ -57,8 +56,6 @@ describe('assembleStatusRollupV1', () => {
     expect(parsed.fleet.size).toBe(2);
     expect(parsed.fleet.complete).toBe(1);
     expect(parsed.fleet.needsAttention).toBe(1);
-    expect(parsed.earnings.pendingTotal).toBe('42');
-    expect(parsed.earnings.asset).toBe('reward');
     expect(parsed.exit.blocking).toBe(true);
     expect(parsed.exit.hint).toContain('fleet');
   });

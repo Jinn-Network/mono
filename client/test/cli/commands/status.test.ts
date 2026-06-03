@@ -143,7 +143,7 @@ const fakeDeps = {
 };
 
 describe('status command', () => {
-  it('emits the §4.1 roll-up shape with daemon/rpc/fleet/earnings/exit', async () => {
+  it('emits the §4.1 roll-up shape with daemon/rpc/fleet/exit', async () => {
     const cmd = createStatusCommand(fakeDeps);
     const { envelopes, exits } = await runCommand(cmd);
     expect(exits).toEqual([]);
@@ -153,7 +153,6 @@ describe('status command', () => {
       daemon: { state: string; startedAt: string; network: string };
       rpc: { ok: boolean; chainId: number };
       fleet: { size: number; complete: number; needsAttention: number };
-      earnings: { pendingTotal: string; asset: string };
       exit: { blocking: boolean; hint: string };
       paths: { earningDir: string; dbPath: string };
       taskNative: {
@@ -173,8 +172,6 @@ describe('status command', () => {
     expect(parsed.fleet.size).toBe(2);
     expect(parsed.fleet.complete).toBe(1);
     expect(parsed.fleet.needsAttention).toBe(1);
-    expect(parsed.earnings.pendingTotal).toBe('42');
-    expect(parsed.earnings.asset).toBe('reward');
     expect(parsed.exit.blocking).toBe(true);
     expect(parsed.exit.hint).toContain('fleet');
     expect(parsed.paths).toEqual({

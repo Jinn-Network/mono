@@ -195,7 +195,7 @@ describe('assembleStatusV1', () => {
     expect(j.nextActions.some(a => a.includes('RPC'))).toBe(true);
   });
 
-  it('reports total rewards as claimed plus claimable', () => {
+  it('reports claimed staking rewards summed across services', () => {
     const raw: GatheredStatusRaw = {
       ...tjinnIdentityFields,
       shutdownState: 'running',
@@ -207,7 +207,6 @@ describe('assembleStatusV1', () => {
       fleet: minimalFleet(),
       rpc: { ok: true, chainId: 8453, blockNumber: '1' },
       master: { address: '0x1111111111111111111111111111111111111111' },
-      pendingStakingRewardsWei: '200',
       claimedByService: {
         0: { total: '300', lastAt: '2026-01-01T00:00:00.000Z', lastTxHash: '0xabc' },
         1: { total: '500', lastAt: '2026-01-01T00:00:01.000Z', lastTxHash: '0xdef' },
@@ -217,10 +216,9 @@ describe('assembleStatusV1', () => {
     };
     const j = assembleStatusV1(raw);
     expect(j.rewards.claimedStakingRewardsWei).toBe('800');
-    expect(j.rewards.totalStakingRewardsWei).toBe('1000');
   });
 
-  it('keeps real tJINN balance separate from pending staking rewards', () => {
+  it('keeps real tJINN balance available on the status boundary', () => {
     const raw: GatheredStatusRaw = {
       ...tjinnIdentityFields,
       shutdownState: 'running',
@@ -232,7 +230,6 @@ describe('assembleStatusV1', () => {
       fleet: minimalFleet(),
       rpc: { ok: true, chainId: 8453, blockNumber: '1' },
       master: { address: '0x1111111111111111111111111111111111111111' },
-      pendingStakingRewardsWei: '999000000000000000000',
       tJinn: {
         state: 'ready',
         chainId: 11155111,
@@ -256,9 +253,7 @@ describe('assembleStatusV1', () => {
       masterDailyEstimateWei: '1',
     };
     const j = assembleStatusV1(raw);
-    expect(j.rewards.pendingStakingRewardsWei).toBe('999000000000000000000');
     expect(j.tJinn.safeBalanceWei).toBe('1500000000000000000');
-    expect(j.tJinn.safeBalanceWei).not.toBe(j.rewards.pendingStakingRewardsWei);
   });
 
   it('redacts raw tJINN read errors at the public status boundary', () => {
@@ -514,49 +509,7 @@ describe('assembleStatusV1 → status.harness', () => {
   });
 });
 
-describe('assembleStatusV1 — eviction suppression fields (#651)', () => {
-  it('emits evictedSince=null when service not evicted', () => {
-    const raw: GatheredStatusRaw = {
-      ...tjinnIdentityFields,
-      shutdownState: 'running',
-      dbPath: '/tmp/x.db',
-      activityCounts: {},
-      recentActivity: [],
-      lastRewardClaimTickAt: null,
-      rewardClaimIntervalMs: 0,
-      fleet: minimalFleet(),
-      rpc: { ok: true },
-      master: { address: '0x1111111111111111111111111111111111111111' },
-      pollIntervalMs: 5000,
-      masterDailyEstimateWei: '1000',
-    };
-    const j = assembleStatusV1(raw);
-    expect(j.fleet.services[0].evicted).toBe(false);
-    expect(j.fleet.services[0].evictedSince).toBeNull();
-  });
-
-  it('emits evictedSince ISO when service is evicted and tracker set', () => {
-    const raw: GatheredStatusRaw = {
-      ...tjinnIdentityFields,
-      shutdownState: 'running',
-      dbPath: '/tmp/x.db',
-      activityCounts: {},
-      recentActivity: [],
-      lastRewardClaimTickAt: null,
-      rewardClaimIntervalMs: 0,
-      fleet: minimalFleet(),
-      rpc: { ok: true },
-      master: { address: '0x1111111111111111111111111111111111111111' },
-      pollIntervalMs: 5000,
-      masterDailyEstimateWei: '1000',
-      evictedByServiceIndex: { 0: true },
-      evictedSinceByServiceIndex: { 0: '2026-05-26T10:00:00.000Z' },
-    };
-    const j = assembleStatusV1(raw);
-    expect(j.fleet.services[0].evicted).toBe(true);
-    expect(j.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
-  });
-
+describe('assembleStatusV1 — autoRestake observability (#651)', () => {
   it('emits autoRestake.enabled=false + checkIntervalMs=0 by default', () => {
     const raw: GatheredStatusRaw = {
       ...tjinnIdentityFields,
