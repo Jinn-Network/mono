@@ -978,6 +978,85 @@ describe('gatherStatusForApi', () => {
   });
 });
 
+describe('gatherStatusForApi — no staking reads on the hot path (#992)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock('viem');
+    vi.resetModules();
+  });
+
+  it('never calls calculateStakingReward / getStakingState / getServiceInfo / getNextRewardCheckpointTimestamp', async () => {
+    const stakingFns = new Set([
+      'calculateStakingReward',
+      'getStakingState',
+      'getServiceInfo',
+      'getNextRewardCheckpointTimestamp',
+    ]);
+    const calledStakingFns: string[] = [];
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          multicall: async (req: { contracts: ReadonlyArray<{ functionName: string }> }) =>
+            req.contracts.map((c) => {
+              if (stakingFns.has(c.functionName)) calledStakingFns.push(c.functionName);
+              return { status: 'success' as const, result: 0n };
+            }),
+          readContract: async (req: { functionName: string }) => {
+            if (stakingFns.has(req.functionName)) {
+              calledStakingFns.push(req.functionName);
+              throw new Error(`staking read ${req.functionName} must not run on the hot path`);
+            }
+            return 0n;
+          },
+          getLogs: async () => [],
+        }),
+        http: () => ({}),
+      };
+    });
+
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-no-staking-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: '0x3333333333333333333333333333333333333333',
+            service_id: 41,
+            mech_address: null,
+            staking_address: '0x5555555555555555555555555555555555555555',
+            step: 'complete',
+            error: null,
+          },
+        ],
+      });
+
+      const apiStatus = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      expect(calledStakingFns).toEqual([]);
+      expect(apiStatus.statusMode).toBe('full');
+      expect(apiStatus.fleet.services).toHaveLength(1);
+    });
+  });
+});
+
 describe('gather-status eviction first-seen tracker (#651)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
