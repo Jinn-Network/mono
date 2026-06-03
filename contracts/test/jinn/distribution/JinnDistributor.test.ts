@@ -17,8 +17,7 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { network } from "hardhat";
 
 const JINN_FQN = "src/jinn/token/JINN.sol:JINN";
 const DISTRIBUTOR_FQN = "src/jinn/distribution/JinnDistributor.sol:JinnDistributor";
@@ -30,13 +29,25 @@ const ONE = 10n ** 18n;
 const RATIO_OPERATOR = (ONE * 75n) / 100n; // 0.75e18
 const RATIO_DAO = (ONE * 25n) / 100n; // 0.25e18
 
-function encodeProof(serviceId: bigint): string {
-  return ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [serviceId]);
-}
+describe("JinnDistributor (Phase A3)", function () {
+  this.timeout(120_000);
 
-async function deployFixture() {
-  const [deployer, dao, alice, bob, carol, timelock, attacker] =
-    await ethers.getSigners();
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
+
+  before(async () => {
+    ({ ethers, networkHelpers } = await network.connect());
+  });
+
+  const loadFixture = <T>(fn: () => Promise<T>) => networkHelpers.loadFixture(fn);
+
+  function encodeProof(serviceId: bigint): string {
+    return ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [serviceId]);
+  }
+
+  async function deployFixture() {
+    const [deployer, dao, alice, bob, carol, timelock, attacker] =
+      await ethers.getSigners();
 
   // Real JINN token, deployer as owner.
   const Jinn = await ethers.getContractFactory(JINN_FQN);
@@ -78,10 +89,7 @@ async function deployFixture() {
     messenger,
     distributor,
   };
-}
-
-describe("JinnDistributor (Phase A3)", function () {
-  this.timeout(120_000);
+  }
 
   describe("Deploy state", function () {
     it("reflects all constructor args in storage and starts with zero supply", async function () {

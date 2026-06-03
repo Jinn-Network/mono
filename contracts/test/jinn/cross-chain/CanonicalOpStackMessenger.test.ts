@@ -7,17 +7,17 @@
  * relying on either game's implementation-specific selectors.
  */
 
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 import {
-  CLAIM_TICKET_TOPIC,
+  claimTicketTopic,
   buildOutputRootArtifacts,
   buildOutputRootArtifactsWithStoredHash,
   claimSnapshotStorageSlot,
   encodeProof,
   snapshotHash,
   type ClaimSnapshotFields,
-} from './_op-stack-fixture';
+} from './_op-stack-fixture.js';
 
 const GAME_TYPE_CANNON = 0;
 const GAME_TYPE_AZUL = 621;
@@ -28,6 +28,9 @@ const STATUS_DEFENDER_WINS = 2;
 
 describe('CanonicalOpStackMessenger (storage proof path)', function () {
   this.timeout(60000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
+  let CLAIM_TICKET_TOPIC: string;
 
   let messenger: any;
   let factory: any;
@@ -44,6 +47,11 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
   const VERDICT_WEIGHT = 9n;
   const AIRGAP = 60n;
   const DISPUTE_GAME_INDEX = 42n;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+    CLAIM_TICKET_TOPIC = claimTicketTopic(ethers);
+  });
 
   beforeEach(async function () {
     const signers = await ethers.getSigners();
@@ -89,7 +97,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       verdictDeliveryWeight: opts.fields?.verdictDeliveryWeight ?? VERDICT_WEIGHT,
       multisig: opts.fields?.multisig ?? multisig.address,
     };
-    const artifacts = buildOutputRootArtifacts(emitter.address, fields);
+    const artifacts = buildOutputRootArtifacts(ethers, emitter.address, fields);
     const now = BigInt((await ethers.provider.getBlock('latest'))!.timestamp);
     const resolvedAt = now - AIRGAP - 1n;
     const gameType = opts.gameType ?? GAME_TYPE_AZUL;
@@ -98,7 +106,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
     await game.setWasRespectedGameTypeWhenCreated(opts.wasRespected ?? true);
     await factory.setGame(DISPUTE_GAME_INDEX, gameType, resolvedAt, await game.getAddress());
 
-    const proofBytes = encodeProof({
+    const proofBytes = encodeProof(ethers, {
       disputeGameId: ethers.zeroPadValue(ethers.toBeHex(DISPUTE_GAME_INDEX), 32),
       outputRootProofBytes: artifacts.outputRootProofBytes,
       accountProof: artifacts.accountProof,
@@ -290,19 +298,19 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
         verdictDeliveryWeight: VERDICT_WEIGHT,
         multisig: multisig.address,
       };
-      const artifacts = buildOutputRootArtifacts(otherEmitter.address, fields);
+      const artifacts = buildOutputRootArtifacts(ethers, otherEmitter.address, fields);
       const resolvedAt = BigInt((await ethers.provider.getBlock('latest'))!.timestamp) - AIRGAP - 1n;
       await game.configure(STATUS_DEFENDER_WINS, GAME_TYPE_AZUL, resolvedAt, artifacts.outputRoot);
       await factory.setGame(DISPUTE_GAME_INDEX, GAME_TYPE_AZUL, resolvedAt, await game.getAddress());
 
-      const proofBytes = encodeProof({
+      const proofBytes = encodeProof(ethers, {
         disputeGameId: ethers.zeroPadValue(ethers.toBeHex(DISPUTE_GAME_INDEX), 32),
         outputRootProofBytes: artifacts.outputRootProofBytes,
         accountProof: artifacts.accountProof,
         storageProof: artifacts.storageProof,
         fields,
       });
-      await expect(messenger.verifyClaim(proofBytes)).to.be.reverted;
+      await expect(messenger.verifyClaim(proofBytes)).to.revert(ethers);
     });
 
     it('reverts on empty storage proof', async function () {
@@ -331,7 +339,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
         ['(bytes32,bytes,bytes[],bytes[],uint256,uint256,uint256,uint256,uint256,address)'],
         [[decoded[0], decoded[1], decoded[2], decoded[3], CLAIM_ID + 1n, decoded[5], decoded[6], decoded[7], decoded[8], decoded[9]]],
       );
-      await expect(messenger.verifyClaim(tampered)).to.be.reverted;
+      await expect(messenger.verifyClaim(tampered)).to.revert(ethers);
     });
 
     it('reverts when the tuple no longer matches the stored snapshot hash', async function () {
@@ -374,7 +382,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       // pure storage-trie path. We then pass the fields so the
       // messenger recomputes a snapshot hash that matches the stored
       // one.
-      const baseHash = snapshotHash(fields);
+      const baseHash = snapshotHash(ethers, fields);
       const forcedHigh = '0x00' + baseHash.slice(4);
       // Patch the snapshot inputs so keccak(fields) == forcedHigh:
       // build the fixture two ways. Easiest: deploy a custom emitter
@@ -396,7 +404,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
           '0x' + ((baseAddr ^ i) & ((1n << 160n) - 1n)).toString(16).padStart(40, '0'),
         );
         const candidate = { ...fields, multisig: candidateAddr };
-        const h = snapshotHash(candidate);
+        const h = snapshotHash(ethers, candidate);
         if (h.startsWith('0x00')) {
           probedFields = candidate;
           probedHash = h;
@@ -408,6 +416,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       expect(probedHash.startsWith('0x00')).to.equal(true);
 
       const artifacts = buildOutputRootArtifactsWithStoredHash(
+        ethers,
         emitter.address,
         probedFields.claimId,
         probedHash,
@@ -417,7 +426,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       await game.setWasRespectedGameTypeWhenCreated(true);
       await factory.setGame(DISPUTE_GAME_INDEX, GAME_TYPE_AZUL, resolvedAt, await game.getAddress());
 
-      const proofBytes = encodeProof({
+      const proofBytes = encodeProof(ethers, {
         disputeGameId: ethers.zeroPadValue(ethers.toBeHex(DISPUTE_GAME_INDEX), 32),
         outputRootProofBytes: artifacts.outputRootProofBytes,
         accountProof: artifacts.accountProof,
@@ -428,7 +437,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       expect(result.serviceId).to.equal(probedFields.serviceId);
       expect(result.multisig).to.equal(probedFields.multisig);
       // Storage slot wiring is exercised end-to-end here.
-      expect(claimSnapshotStorageSlot(probedFields.claimId)).to.match(/^0x[0-9a-f]{64}$/);
+      expect(claimSnapshotStorageSlot(ethers, probedFields.claimId)).to.match(/^0x[0-9a-f]{64}$/);
     });
 
     it('reverts AccountMPTInvalid on a 3-field account RLP (canonical accounts have 4 fields)', async function () {
@@ -448,11 +457,11 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       // Reuse the storage trie + output-root machinery from the
       // canonical fixture, but rebuild the account trie with a
       // 3-field RLP.
-      const slot = claimSnapshotStorageSlot(fields.claimId);
+      const slot = claimSnapshotStorageSlot(ethers, fields.claimId);
       const storageTrieKey = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [slot]),
       );
-      const sHash = snapshotHash(fields);
+      const sHash = snapshotHash(ethers, fields);
       const storedValue = ethers.encodeRlp(
         BigInt(sHash) === 0n ? '0x' : ethers.toBeHex(BigInt(sHash)),
       );
@@ -491,7 +500,7 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       await game.setWasRespectedGameTypeWhenCreated(true);
       await factory.setGame(DISPUTE_GAME_INDEX, GAME_TYPE_AZUL, resolvedAt, await game.getAddress());
 
-      const proofBytes = encodeProof({
+      const proofBytes = encodeProof(ethers, {
         disputeGameId: ethers.zeroPadValue(ethers.toBeHex(DISPUTE_GAME_INDEX), 32),
         outputRootProofBytes,
         accountProof: [accountLeaf],

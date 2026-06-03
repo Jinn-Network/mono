@@ -1,13 +1,18 @@
 /**
  * Helpers for constructing OP-output-root + storage-proof-shaped fixtures for
  * `CanonicalOpStackMessenger`.
+ *
+ * Under Hardhat 3 there is no module-scope `ethers`; every helper that needs
+ * the ethers utility surface receives the connection's `ethers` as its first
+ * argument. Callers obtain it from `await network.connect()` and pass it in.
  */
 
-const { ethers } = require('hardhat');
+import type { network } from 'hardhat';
 
-export const CLAIM_TICKET_TOPIC = ethers.id(
-  'ClaimTicket(uint256,uint256,uint256,uint256,uint256,address,address)',
-);
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>['ethers'];
+
+export const claimTicketTopic = (ethers: HardhatEthers): string =>
+  ethers.id('ClaimTicket(uint256,uint256,uint256,uint256,uint256,address,address)');
 
 export const CLAIM_SNAPSHOT_HASHES_SLOT = 1n;
 
@@ -36,7 +41,7 @@ function leafPathForHashedKey(hashedKey: string): string {
   return `0x20${hashedKey.slice(2)}`;
 }
 
-function buildSingleLeafTrie(hashedKey: string, leafValue: string): {
+function buildSingleLeafTrie(ethers: HardhatEthers, hashedKey: string, leafValue: string): {
   root: string;
   proof: string[];
 } {
@@ -47,7 +52,7 @@ function buildSingleLeafTrie(hashedKey: string, leafValue: string): {
   };
 }
 
-export function snapshotHash(fields: ClaimSnapshotFields): string {
+export function snapshotHash(ethers: HardhatEthers, fields: ClaimSnapshotFields): string {
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       ['uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'address'],
@@ -63,7 +68,7 @@ export function snapshotHash(fields: ClaimSnapshotFields): string {
   );
 }
 
-export function claimSnapshotStorageSlot(claimId: bigint): string {
+export function claimSnapshotStorageSlot(ethers: HardhatEthers, claimId: bigint): string {
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       ['uint256', 'uint256'],
@@ -81,7 +86,7 @@ export function claimSnapshotStorageSlot(claimId: bigint): string {
  * - Non-zero hash → strip leading zero bytes, then RLP-encode the
  *   trimmed bytes as a string (handled correctly by `ethers.encodeRlp`).
  */
-export function rlpEncodeStorageValue(hash: string): string {
+export function rlpEncodeStorageValue(ethers: HardhatEthers, hash: string): string {
   const value = BigInt(hash);
   if (value === 0n) {
     return ethers.encodeRlp('0x');
@@ -101,16 +106,17 @@ export function rlpEncodeStorageValue(hash: string): string {
  * variant is a test escape hatch.
  */
 export function buildOutputRootArtifactsWithStoredHash(
+  ethers: HardhatEthers,
   emitter: string,
   claimId: bigint,
   storedSnapshotHash: string,
 ): OutputRootArtifacts {
-  const slot = claimSnapshotStorageSlot(claimId);
+  const slot = claimSnapshotStorageSlot(ethers, claimId);
   const storageTrieKey = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [slot]),
   );
-  const storedValue = rlpEncodeStorageValue(storedSnapshotHash);
-  const storageTrie = buildSingleLeafTrie(storageTrieKey, storedValue);
+  const storedValue = rlpEncodeStorageValue(ethers, storedSnapshotHash);
+  const storageTrie = buildSingleLeafTrie(ethers, storageTrieKey, storedValue);
 
   const accountTrieKey = ethers.keccak256(emitter);
   const accountRlp = ethers.encodeRlp([
@@ -119,7 +125,7 @@ export function buildOutputRootArtifactsWithStoredHash(
     storageTrie.root,
     ethers.id('mock-emitter-code-hash'),
   ]);
-  const accountTrie = buildSingleLeafTrie(accountTrieKey, accountRlp);
+  const accountTrie = buildSingleLeafTrie(ethers, accountTrieKey, accountRlp);
 
   const version = ethers.id('output-root-version-v1');
   const messagePasserStorageRoot = ethers.id('mock-msg-passer-root');
@@ -143,15 +149,16 @@ export function buildOutputRootArtifactsWithStoredHash(
 }
 
 export function buildOutputRootArtifacts(
+  ethers: HardhatEthers,
   emitter: string,
   fields: ClaimSnapshotFields,
 ): OutputRootArtifacts {
-  const slot = claimSnapshotStorageSlot(fields.claimId);
+  const slot = claimSnapshotStorageSlot(ethers, fields.claimId);
   const storageTrieKey = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [slot]),
   );
-  const storedValue = rlpEncodeStorageValue(snapshotHash(fields));
-  const storageTrie = buildSingleLeafTrie(storageTrieKey, storedValue);
+  const storedValue = rlpEncodeStorageValue(ethers, snapshotHash(ethers, fields));
+  const storageTrie = buildSingleLeafTrie(ethers, storageTrieKey, storedValue);
 
   const accountTrieKey = ethers.keccak256(emitter);
   const accountRlp = ethers.encodeRlp([
@@ -160,7 +167,7 @@ export function buildOutputRootArtifacts(
     storageTrie.root,
     ethers.id('mock-emitter-code-hash'),
   ]);
-  const accountTrie = buildSingleLeafTrie(accountTrieKey, accountRlp);
+  const accountTrie = buildSingleLeafTrie(ethers, accountTrieKey, accountRlp);
 
   const version = ethers.id('output-root-version-v1');
   const messagePasserStorageRoot = ethers.id('mock-msg-passer-root');
@@ -183,7 +190,7 @@ export function buildOutputRootArtifacts(
   };
 }
 
-export function encodeProof(args: {
+export function encodeProof(ethers: HardhatEthers, args: {
   disputeGameId: string;
   outputRootProofBytes: string;
   accountProof: string[];

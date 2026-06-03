@@ -6,11 +6,13 @@
  * control, and revert paths.
  */
 
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('MockMessenger', function () {
   this.timeout(30000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
 
   let messenger: any;
   let owner: any;
@@ -20,6 +22,10 @@ describe('MockMessenger', function () {
   const CLAIM_ID = 101n;
   const CLAIM_ID_2 = 102n;
   const SERVICE_ID = 7n;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
 
   beforeEach(async function () {
     [owner, other, multisig] = await ethers.getSigners();

@@ -6,11 +6,13 @@
  * values returned by those mocks at emit time.
  */
 
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('JinnClaimEmitter', function () {
   this.timeout(30000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
 
   let emitter: any;
   let checker: any;
@@ -21,6 +23,10 @@ describe('JinnClaimEmitter', function () {
   let multisig: any;
 
   const SERVICE_ID = 42n;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
 
   function expectedSnapshotHash(args: {
     claimId: bigint;

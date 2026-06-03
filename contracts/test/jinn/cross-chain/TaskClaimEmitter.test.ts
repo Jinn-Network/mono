@@ -2,11 +2,13 @@
  * Tests for the Task-native TaskClaimEmitter snapshot surface.
  */
 
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('TaskClaimEmitter', function () {
   this.timeout(30000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
 
   let emitter: any;
   let checker: any;
@@ -16,6 +18,10 @@ describe('TaskClaimEmitter', function () {
   let multisig: any;
 
   const SERVICE_ID = 42n;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
 
   function expectedSnapshotHash(args: {
     claimId: bigint;

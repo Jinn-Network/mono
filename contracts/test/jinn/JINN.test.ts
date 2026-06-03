@@ -3,24 +3,32 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { network } from "hardhat";
 
 const JINN_FQN = "src/jinn/token/JINN.sol:JINN";
 
-async function deployJinnFixture() {
-  const [deployer, alice, bob, carol, distributor, newDistributor, newOwner] =
-    await ethers.getSigners();
-
-  const Factory = await ethers.getContractFactory(JINN_FQN);
-  const jinn = await Factory.deploy("Jinn", "JINN", deployer.address);
-  await jinn.waitForDeployment();
-
-  return { jinn, deployer, alice, bob, carol, distributor, newDistributor, newOwner };
-}
-
 describe("JINN (v0 ERC20Votes governance token)", function () {
   this.timeout(60_000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
+
+  before(async () => {
+    ({ ethers, networkHelpers } = await network.connect());
+  });
+
+  async function deployJinnFixture() {
+    const [deployer, alice, bob, carol, distributor, newDistributor, newOwner] =
+      await ethers.getSigners();
+
+    const Factory = await ethers.getContractFactory(JINN_FQN);
+    const jinn = await Factory.deploy("Jinn", "JINN", deployer.address);
+    await jinn.waitForDeployment();
+
+    return { jinn, deployer, alice, bob, carol, distributor, newDistributor, newOwner };
+  }
+
+  const loadFixture = <T>(fn: () => Promise<T>) => networkHelpers.loadFixture(fn);
 
   describe("Deploy state", function () {
     it("has zero total supply at deploy", async function () {

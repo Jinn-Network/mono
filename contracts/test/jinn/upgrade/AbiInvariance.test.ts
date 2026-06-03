@@ -19,7 +19,9 @@
 
 import { expect } from 'chai';
 import { Interface, id, keccak256, toUtf8Bytes } from 'ethers';
-import { artifacts } from 'hardhat';
+import hre from 'hardhat';
+
+const artifacts = hre.artifacts;
 
 // Canonical pre-rename signatures from git@217cb804^:
 //   contracts/src/tasks/TaskCoordinator.sol
