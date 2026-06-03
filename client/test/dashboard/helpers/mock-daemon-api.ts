@@ -209,24 +209,36 @@ export const DEFAULT_SOLVERNETS_CATALOG = {
 export function makeRegistrySummary(
   overrides: Partial<{
     manifestCid: string;
+    solverNetId: string;
     name: string;
+    network: string;
     launcherAgentId: string;
     launcherSafeAddress: string;
     status: 'launched' | 'paused' | 'retired';
+    statusUpdatedAt: string;
+    contractId: string;
+    contractVersion: string;
     solutionPriceWei: string;
     verdictPriceWei: string;
     openRoles: Array<'solver' | 'evaluator'>;
+    anchorBlock: number;
   }> = {},
 ) {
   return {
     manifestCid: 'bafkreiopalaunchedsolvernet0000000000000000000000000000',
+    solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
     name: 'Prediction Markets',
+    network: 'base-sepolia',
     launcherAgentId: '5474',
     launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
     status: 'launched' as const,
+    statusUpdatedAt: '2026-05-05T00:01:00Z',
+    contractId: 'prediction',
+    contractVersion: 'v1',
     solutionPriceWei: '1000000000000000',
     verdictPriceWei: '500000000000000',
     openRoles: ['solver', 'evaluator'] as Array<'solver' | 'evaluator'>,
+    anchorBlock: 1,
     ...overrides,
   };
 }
@@ -281,15 +293,21 @@ export function makeRegistryManifestResponse(
       solutionPriceWei: '1000000000000000',
       verdictPriceWei: '500000000000000',
       openRoles: ['solver', 'evaluator'] as Array<'solver' | 'evaluator'>,
+      registry: { manifestCid },
       createdAt: '2026-05-05T00:00:00Z',
       launchedAt: '2026-05-05T00:01:00Z',
+      signature: {
+        alg: 'eip-191' as const,
+        signer: '0x1111111111111111111111111111111111111111',
+        value:
+          '0x2222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222',
+      },
     },
     lifecycle: {
       status: 'launched' as const,
       statusUpdatedAt: '2026-05-05T00:01:00Z',
       sourceBlock: 1,
     },
-    manifestCid,
   };
 }
 
