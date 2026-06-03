@@ -44,8 +44,25 @@ The fields you need:
 |---|---|
 | Issue Type is set | "Issue #N is not triage-complete (Issue Type missing). Set the Issue Type via the Project board, then re-invoke." |
 | `Blocked on` is `Nothing` | "Issue #N is blocked (`Blocked on: <value>`). This issue is not for autonomous implementation. Resolve the block first." |
+| Human-surface fields present (when the issue is a human-surface change) | "Issue #N is a human-surface change but is missing required fields: <list>. It must carry a domain-model delta, a design artifact, and an existing-user impact + comms plan. Add them via `file-issue` and re-invoke." |
 
-Both failures are **stop** — do not proceed past precondition checks.
+All three failures are **stop** — do not proceed past precondition checks.
+
+### Human-surface gate
+
+A change that alters the **domain model or action surface of a load-bearing human surface** (one currently visible to users or canon other work derives from — DR-2026-06-03) carries extra preconditions. Treat the issue as human-surface when it is labeled `human-surface` **or** its `Files/components` / scope alters a render surface of the operator dashboard SPA (`client/src/dashboard/`) or an `*-APP-SPEC.md` model. A pure copy or value tweak is **not** in scope here — it stays agent-reviewable at intake and is caught at merge by the CODEOWNERS human-review gate (DR-2026-06-03). This is the merge-time gate's intake-side counterpart, not a duplicate of it.
+
+For a human-surface change the issue body must already contain three **input** fields (the `file-issue` skill collects them):
+
+1. **Domain-model delta** — the change as edits to the relevant `*-APP-SPEC.md` component(s) across the four axes (Static / Streams / Actions / State messages), the resulting model complete (no silent axis; empty/loading/error covered), and any banner/notification change reflected in the §2.10 taxonomy.
+2. **Design artifact** — a link/path to the exported design + instructions (Claude Design / Figma).
+3. **Existing-user impact + comms plan** — the predicted effect on current users and whether/how it is communicated.
+
+If any is missing, **fail loud with the table message and stop** — do not start the pipeline. Check only that the fields are *present*; do not judge their quality (that is the Stage 5 reviewer's job and the spec's CODEOWNERS gate at PR time).
+
+Two further requirements are **outputs** this pipeline produces, not preconditions:
+- **Frontend/UX compliance** — the implementation is validated against the Frontend + Design-System rules in `CLAUDE.md` (shadcn-first/snowflake, tokens, radii, no-emoji, voice); attested in the Stage 8 PR body.
+- **Verify artifact** — Stage 7 (`testing-jinn-app`) is mandatory for a human-surface change; its UI walk / screenshot is linked in the PR body.
 
 ---
 
@@ -245,7 +262,7 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 ### Stage 7 — Jinn-app test
 
-**Condition:** run this stage only when the change touches an operator-visible surface (the operator dashboard SPA, the daemon API, bootstrap flows, or any surface in `client/src/dashboard/`).
+**Condition:** run this stage only when the change touches an operator-visible surface (the operator dashboard SPA, the daemon API, bootstrap flows, or any surface in `client/src/dashboard/`). For an issue under the **Human-surface gate** (Step 1) this stage is **mandatory** and must not be skipped — its UI walk / screenshot is the **verify artifact** that gate requires, and it is linked in the Stage 8 PR body.
 
 **Dispatcher:** dispatch a test subagent.
 
@@ -284,6 +301,8 @@ EOF
 The `--label engine:review` opt-in flag enrols this PR in the independent `review-pr` loop (Autopilot's PR-triggered review). See `docs/superpowers/specs/2026-05-29-pr-review-loop-design.md`.
 
 **PR title rule:** shape-prefixed Conventional Commit, e.g. `fix(dashboard): hero stats do not update after claim` or `feat(daemon): add balance topup loop`.
+
+**Human-surface PR body:** for an issue under the Human-surface gate, the PR body must also include a `## Human-surface` section with (a) the **frontend/UX compliance** attestation (validated against the Frontend + Design-System rules in `CLAUDE.md`) and (b) a link to the **Stage 7 verify artifact** (the `testing-jinn-app` walk / screenshot).
 
 **Zero-commit guard:** after the subagent reports done, verify the PR exists externally before declaring this stage complete:
 

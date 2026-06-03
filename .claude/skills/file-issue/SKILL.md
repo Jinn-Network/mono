@@ -48,6 +48,23 @@ Pick the most likely Issue Type from the nine below. A wrong type mis-routes the
 
 Confirm with the person: "I'd classify this as **`fix`** — does that match what you're experiencing, or is it closer to something else?"
 
+## Step 3.5 — Human-surface check
+
+Ask: **does this change alter the domain model or action surface of a load-bearing human surface?** A surface is *load-bearing* when it is currently visible to users or is canon other work derives from (DR-2026-06-03). The trigger is **not** "anything an operator sees" — a pure copy or value tweak is agent-reviewable at intake and is caught at merge by the CODEOWNERS human-review gate (DR-2026-06-03). What earns the intake fields is a change that alters the **model or action surface** of such a surface — a new or changed component, state, stream, action, or state-message — which is exactly the change CLAUDE.md §Frontends already says must land *with* a spec update.
+
+If it does **not** alter the model / action surface of a load-bearing surface, skip to Step 4.
+
+If it **does**, do two things:
+
+1. **Mark it.** Apply the `human-surface` label when you file (Step 6).
+2. **Collect three extra input fields** into the body. These are the preconditions the `implement-issue` gate enforces — an autonomous run is refused without them. Interview only for what is missing, under the same 1–3 question cap:
+
+   - **Domain-model delta** — the change expressed as edits to the relevant `*-APP-SPEC.md` component(s) along the four axes (Static / Streams / Actions / State messages). The resulting model must be complete — no silent axis, empty/loading/error covered — and any banner/notification change reflected in the §2.10 notification taxonomy. Name the spec file and the component(s) touched. This *is* the operator-visible delta, expressed in the canonical model rather than as free text.
+   - **Design artifact** — a link or path to the exported design + instructions (Claude Design / Figma / equivalent). A human-surface change without a design artifact is not ready to implement: set `Blocked on: Human` (a design pass is needed first) rather than filing it as ready.
+   - **Existing-user impact + comms plan** — the predicted effect on current users, whether the change needs communicating, and the plan if so.
+
+Do **not** route the person to a separate design skill — the required fields above force the design work on their own. Two further requirements (frontend/UX-rule compliance and a verify artifact) are *outputs* the `implement-issue` pipeline produces, not fields you collect here.
+
 ## Step 4 — Draft the issue body
 
 The issue body has four short sections. Keep it tight — scoped issues with binary acceptance criteria and file/component hints raise autonomous-implementation merge rates; long bodies lower them. External web URLs and Slack links go in comments after filing, not in the body; internal repo paths (spec files, source files) belong in `Files/components` and are encouraged.
@@ -67,6 +84,8 @@ The issue body has four short sections. Keep it tight — scoped issues with bin
 
 **Files/components.** [Path(s) and surface name(s), or "Unknown." If a path was inferred by you — not stated by the person — mark it `(estimated)`. If genuinely uncertain, write "Unknown." Internal repo paths (spec files, source files) are welcome here; they help autonomous agents navigate the codebase.]
 ```
+
+**Human-surface section (only when the `human-surface` label applies).** After the four sections above, append a `## Human-surface change` block carrying the three fields from Step 3.5 — Domain-model delta, Design artifact, and Existing-user impact + comms plan.
 
 **Worked example — use this as the model:**
 
@@ -128,10 +147,11 @@ Filing a GitHub issue is an outward-facing, published action. Always show the pe
    - Blocked on: `Nothing`
    - Effort: `Low`
    - Priority: `P1`
+   - Label (only if a human-surface change): `human-surface`
 
 Invite edits: "Here's the draft. Anything you'd like to change before I file it?"
 
-**On confirmation:** follow `references/gh-taxonomy.md` — create the issue with its Issue Type, add it to the "Jinn engineering" Project (number 1, owner `Jinn-Network`), and set the three fields (`Blocked on`, `Effort`, `Priority`). Output the issue URL and number.
+**On confirmation:** follow `references/gh-taxonomy.md` — create the issue with its Issue Type, add it to the "Jinn engineering" Project (number 1, owner `Jinn-Network`), and set the three fields (`Blocked on`, `Effort`, `Priority`). For a human-surface change, also apply the `human-surface` label (create it once with `gh label create human-surface` if it does not yet exist). Output the issue URL and number.
 
 **On decline:** do not file. Leave the draft in the conversation. The person may copy it and file manually.
 
@@ -145,6 +165,7 @@ Before you output the draft to the person, verify:
 - [ ] Every acceptance criterion is binary — answerable yes/no.
 - [ ] All three routing fields are set (`Blocked on`, `Effort`, `Priority`).
 - [ ] The body is short — no paragraph longer than 4 sentences, no external URLs or Slack links in the body (internal repo paths in `Files/components` are fine and encouraged).
+- [ ] If this is a human-surface change: the `human-surface` label is applied and the body carries the `## Human-surface change` block (domain-model delta, design artifact, existing-user impact + comms plan).
 
 If any check fails, fix before showing the draft.
 
@@ -158,3 +179,4 @@ If any check fails, fix before showing the draft.
 | Leaving a routing field unset | All three fields must be set; an issue without them is not triage-complete |
 | Putting external URLs or Slack links in the body | Put web/Slack links in a comment after filing; internal repo paths in `Files/components` are fine |
 | Long body with multiple problems bundled | One issue per problem; offer to file separate issues if scope is unclear |
+| Filing a frontend / operator-visible change without the human-surface fields | Run the Step 3.5 check; if it's a human-surface change, add the label and the `## Human-surface change` block, or `implement-issue` will refuse it |
