@@ -40,6 +40,7 @@ import {
   waitForDelivery,
   readActivityCount,
   selectorToHarnessName,
+  startMockPolymarketGammaServer,
   ANVIL_PRIVATE_KEYS,
   type HarnessSelector,
 } from '../e2e/_daemon-harness-helpers.js';
@@ -71,6 +72,21 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
     async () => {
       const fixture = await setupAnvilFixtureFromState(SNAPSHOT_STATE);
       const mockIpfs = await startMockIpfsServer();
+      // Deterministic, offline Polymarket Gamma mirror keyed to the task-4
+      // fixture identifiers (see postPredictionV1Task). The restoration leg
+      // (prediction-v1-baseline) needs no market lookup, but once the daemon
+      // delivers it can create a self-evaluation job whose evaluator resolves
+      // the market via getResolution. Without this mirror that call reaches the
+      // LIVE gamma-api.polymarket.com and 422s (the slug is a fixture, not a
+      // real market) — a live-network dependency the hermetic gate forbids, and
+      // the extra failing tick perturbs the loop enough to lose the
+      // waitForDelivery scan-floor race. Pointing the evaluator here keeps the
+      // whole gate offline and deterministic regardless of runner timing.
+      const mockGamma = await startMockPolymarketGammaServer({
+        marketId: 'jinn-daemon-harness-e2e-task4',
+        conditionId: '0xcondition-daemon-harness-e2e-task4',
+        slug: 'jinn-daemon-harness-e2e-task4',
+      });
       let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
       try {
         // Fresh staked operator on the loaded state (bootstrap correctness itself
@@ -98,6 +114,7 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
           mockIpfs.baseUrl, // ipfsGatewayUrl (task fetch)
           v3Env,
           mockIpfs.baseUrl, // ipfsRegistryUrl (envelope upload)
+          { polymarketGammaBaseUrl: mockGamma.baseUrl }, // offline market resolution
         );
 
         // Baseline the activity counter before posting.
@@ -135,6 +152,7 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         // Daemon must stop before Anvil tears down (loops throw on disconnect).
         if (running) { try { await running.stop(); } catch { /* best-effort */ } }
         try { await mockIpfs.close(); } catch { /* best-effort */ }
+        try { await mockGamma.close(); } catch { /* best-effort */ }
         try { await fixture.teardown(); } catch { /* best-effort */ }
       }
     },

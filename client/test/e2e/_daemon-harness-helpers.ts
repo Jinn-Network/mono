@@ -1371,12 +1371,24 @@ export async function waitForDelivery(
   const mechAddress = v3Env.mockMechAddress;
   const deadline = Date.now() + timeoutMs;
 
-  // Start scanning from the current block at call time — Deliver can only happen
-  // after the claim (which is already on-chain). Using the current tip as the
-  // floor avoids the 10,000-block getLogs range limit when scanning an Anvil
-  // fork of Base mainnet (which starts at block ~46M).
-  const startBlock = await fixture.publicClient.getBlockNumber();
-  let scannedUpTo = startBlock > 1n ? startBlock - 1n : 0n;
+  // Floor the scan at the CLAIM's block, not the current tip. The daemon can
+  // deliver in the same instant it claims (Anvil instant-mine + a fast loop),
+  // so by the time this function is called the Deliver event may already sit a
+  // few blocks BELOW the current tip. Anchoring to the current tip would put
+  // that floor above the Deliver block and miss it permanently — the daemon
+  // delivered, yet waitForDelivery spins until timeout (the CI symptom). Deliver
+  // can only occur at or after the claim, so the claim block is a sound, race-
+  // free lower bound; the claim→now span is tiny on a locally-mined snapshot
+  // chain, well within the getLogs range limit.
+  let claimBlock: bigint;
+  if (claim.txHash && claim.txHash !== '0x') {
+    claimBlock = (await fixture.publicClient.getTransactionReceipt({ hash: claim.txHash })).blockNumber;
+  } else {
+    // No claim tx hash (shouldn't happen on a mined chain) — fall back to the
+    // current tip rather than throwing.
+    claimBlock = await fixture.publicClient.getBlockNumber();
+  }
+  let scannedUpTo = claimBlock > 0n ? claimBlock - 1n : 0n;
 
   while (Date.now() < deadline) {
     const currentBlock = await fixture.publicClient.getBlockNumber();
