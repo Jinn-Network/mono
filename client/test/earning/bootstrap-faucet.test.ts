@@ -126,6 +126,14 @@ describe('Fleet bootstrap faucet cap', () => {
     dirs.push(earningDir);
 
     let now = 0;
+    // #984 work unit 1 removed the unconditional inter-drip setTimeout, so the
+    // wall-clock now-source must advance through a seam that survives that
+    // change. The faucet call itself trips the clock past the deadline — same
+    // pattern as the setup-endpoints drip-timeout test.
+    const tripClockMock = vi.fn(async () => {
+      now = 3;
+      return { ok: true as const, txHash: '0x' + '12'.repeat(32) };
+    });
     const { FleetBootstrapper } = await import('../../src/earning/bootstrap.js');
     const bootstrapper = new FleetBootstrapper({
       earningDir,
@@ -133,17 +141,12 @@ describe('Fleet bootstrap faucet cap', () => {
       rpcUrl: 'https://sepolia.base.org',
       env: {},
       stakingMode: 'standard',
-      requestFunding: requestTestnetFundingMock,
+      requestFunding: tripClockMock,
       faucetLoopTimeoutMs: 2,
       now: () => now,
     });
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation((cb: (...args: unknown[]) => void) => {
-      now = 3;
-      queueMicrotask(cb);
-      return 0 as unknown as ReturnType<typeof setTimeout>;
-    });
     // Stage 1 must short-circuit so the faucet loop in ensureStage1And2 runs.
     vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
       ok: true,
@@ -165,6 +168,57 @@ describe('Fleet bootstrap faucet cap', () => {
 
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
-    expect(requestTestnetFundingMock).toHaveBeenCalledTimes(1);
+    expect(tripClockMock).toHaveBeenCalledTimes(1);
+  });
+
+  // AC-2 (issue #984 work unit 1): a transient CDP 429 must back off and retry
+  // within the bootstrap drip loop rather than `break`-ing on the first
+  // throttle. `faucetRateLimitBackoffMs: 0` skips the real 15s backoff so the
+  // test stays fast.
+  it('bootstrap faucet backs off on 429 and retries', async () => {
+    const earningDir = await mkdtemp(join(tmpdir(), 'jinn-faucet-429-'));
+    dirs.push(earningDir);
+
+    let call = 0;
+    const flakyFundingMock = vi.fn(async () => {
+      call += 1;
+      if (call <= 2) {
+        return { ok: false as const, rateLimited: true, reason: 'rate limited' };
+      }
+      return { ok: true as const, txHash: '0x' + '34'.repeat(32) };
+    });
+
+    const { FleetBootstrapper } = await import('../../src/earning/bootstrap.js');
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'https://sepolia.base.org',
+      env: {},
+      stakingMode: 'standard',
+      requestFunding: flakyFundingMock,
+      faucetRateLimitBackoffMs: 0,
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+    // Stage 1 must short-circuit so the faucet loop in ensureStage1And2 runs.
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
+      ok: true,
+      fleet_state: {
+        master_address: null,
+        chain: 'base-sepolia',
+        staking_mode: 'standard',
+        services: [],
+        updated_at: new Date().toISOString(),
+        fleet_agent_id: null,
+        fleet_safe_address: null,
+        fleet_identity_registry: null,
+        fleet_stage: 'stage1',
+      },
+      message: 'Stage 1 already complete.',
+    });
+
+    await bootstrapper.bootstrap('test-password');
+
+    expect(flakyFundingMock.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 });

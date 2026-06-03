@@ -80,6 +80,12 @@ export interface SetupRoutesConfig {
   onClaudePathSelected?: (claudePath: string) => void;
   onSolverNetsUpdated?: (solverNets: Record<string, Record<string, unknown>>) => void;
   requestFunding?: typeof requestTestnetFunding;
+  /**
+   * Injectable balance reader — defaults to a live `publicClient.getBalance`
+   * closure. Tests pass a spy/stub to drive the drip loop without an RPC and
+   * to assert the read cadence (issue #984 work unit 1).
+   */
+  getBalance?: () => Promise<bigint | null>;
   maxFaucetIters?: number;
   interDripPauseMs?: number;
   /** Wall-clock cutoff for the drip loop; reaching target/rate-limit still wins first. */
@@ -217,10 +223,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const now = config.now ?? Date.now;
     const faucetLoopTimeoutMs = config.faucetLoopTimeoutMs ?? DEFAULT_FAUCET_LOOP_TIMEOUT_MS;
 
-    const getBalance = async (): Promise<bigint | null> => {
-      if (!publicClient) return null;
-      return publicClient.getBalance({ address: address as `0x${string}` });
-    };
+    const getBalance =
+      config.getBalance ??
+      (async (): Promise<bigint | null> => {
+        if (!publicClient) return null;
+        return publicClient.getBalance({ address: address as `0x${string}` });
+      });
     const persistFundingGate = (balanceWei: bigint | null): void => {
       if (targetWei === null || balanceWei === null) return;
       const requiredWei = balanceWei >= targetWei ? 0n : targetWei - balanceWei;
@@ -305,6 +313,15 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         balanceWei,
       });
       const deadline = now() + faucetLoopTimeoutMs;
+      // requestFunding returns synchronously with a txHash and there is no
+      // on-chain confirmation to wait for between drips, so the happy path
+      // carries NO fixed inter-drip sleep (issue #984 work unit 1). A transient
+      // CDP 429 backs off and retries within the session instead of ending it
+      // on the first throttle; the wall-clock deadline stays the safety rail.
+      // Backoff is skippable in tests by passing interDripPauseMs: 0.
+      const MAX_RATE_LIMIT_RETRIES = 3;
+      const RATE_LIMIT_BACKOFF_MS = 15_000;
+      let rateLimitRetries = 0;
       for (let i = 0; i < maxFaucetIters; i++) {
         if (now() >= deadline) {
           return c.json(
@@ -323,6 +340,13 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         }
         const result = await requestFunding(address, 'base-sepolia');
         if (!result.ok) {
+          if (result.rateLimited && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+            rateLimitRetries++;
+            await new Promise((r) =>
+              setTimeout(r, interDripPauseMs === 0 ? 0 : RATE_LIMIT_BACKOFF_MS),
+            );
+            continue;
+          }
           return c.json(
             {
               ok: false,
@@ -339,24 +363,27 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
           );
         }
         if (result.txHash) txHashes.push(result.txHash);
-        if (i < maxFaucetIters - 1) {
-          await new Promise((r) => setTimeout(r, interDripPauseMs));
-        }
-        balanceWei = await getBalance();
-        persistFundingGate(balanceWei);
-        if (targetWei !== null && balanceWei !== null && balanceWei >= targetWei) {
-          return c.json(
-            {
-              ok: true,
-              address,
-              txHash: result.txHash,
-              txHashes,
-              attempts: i + 1,
-              balanceWei: balanceWei.toString(),
-              targetWei: targetWei.toString(),
-            },
-            202,
-          );
+        // Balance is no longer read once per drip — only every 5th drip and on
+        // the final iteration. Target/early-exit is only checked on iterations
+        // where balance was just refreshed.
+        const refreshBalance = (i + 1) % 5 === 0 || i === maxFaucetIters - 1;
+        if (refreshBalance) {
+          balanceWei = await getBalance();
+          persistFundingGate(balanceWei);
+          if (targetWei !== null && balanceWei !== null && balanceWei >= targetWei) {
+            return c.json(
+              {
+                ok: true,
+                address,
+                txHash: result.txHash,
+                txHashes,
+                attempts: i + 1,
+                balanceWei: balanceWei.toString(),
+                targetWei: targetWei.toString(),
+              },
+              202,
+            );
+          }
         }
       }
 

@@ -288,6 +288,8 @@ const MASTER_ETH_RUNWAY_WARN_DAYS = 7n;
  */
 const DEFAULT_SAFE_BINDING_MAX_ATTEMPTS = 3;
 const DEFAULT_SAFE_BINDING_RETRY_DELAY_MS = 3_000;
+const FAUCET_RATE_LIMIT_MAX_RETRIES = 3;
+const DEFAULT_FAUCET_RATE_LIMIT_BACKOFF_MS = 15_000;
 
 export interface FleetBootstrapperOptions {
   earningDir?: string;
@@ -339,6 +341,11 @@ export interface FleetBootstrapperOptions {
    * (~1.5 Base Sepolia blocks). Tests pass 0 to skip the sleep entirely.
    */
   safeBindingRetryDelayMs?: number;
+  /**
+   * Backoff before retrying a transient CDP faucet 429 (issue #984 work unit 1).
+   * Defaults to 15000 ms. Tests pass 0 to skip the sleep entirely.
+   */
+  faucetRateLimitBackoffMs?: number;
 }
 
 export class FleetBootstrapper {
@@ -357,6 +364,7 @@ export class FleetBootstrapper {
   private readonly autoTestnetFaucet: boolean;
   private readonly safeBindingMaxAttempts: number;
   private readonly safeBindingRetryDelayMs: number;
+  private readonly faucetRateLimitBackoffMs: number;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
@@ -374,6 +382,8 @@ export class FleetBootstrapper {
       options.safeBindingMaxAttempts ?? DEFAULT_SAFE_BINDING_MAX_ATTEMPTS;
     this.safeBindingRetryDelayMs =
       options.safeBindingRetryDelayMs ?? DEFAULT_SAFE_BINDING_RETRY_DELAY_MS;
+    this.faucetRateLimitBackoffMs =
+      options.faucetRateLimitBackoffMs ?? DEFAULT_FAUCET_RATE_LIMIT_BACKOFF_MS;
     const dailyOpt = options.masterEthDailyEstimateWei;
     this.masterEthDailyEstimateWei =
       dailyOpt !== undefined
@@ -733,8 +743,13 @@ export class FleetBootstrapper {
           targetWei: requiredMasterEth,
           balanceWei: systemEth,
         });
-        const INTER_DRIP_PAUSE_MS = 1_000;
         const deadline = this.now() + this.faucetLoopTimeoutMs;
+        // requestFunding returns synchronously with a txHash and there is no
+        // on-chain confirmation to wait for between drips, so the happy path
+        // carries NO fixed inter-drip sleep (issue #984 work unit 1). A transient
+        // CDP 429 backs off and retries within the session instead of ending it
+        // on the first throttle; the wall-clock deadline stays the safety rail.
+        let rateLimitRetries = 0;
         console.error(
           `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
           `Draining CDP faucet on ${this.chain} via ${rpcHostForDisplay(this.config.rpcUrl)} ` +
@@ -751,6 +766,15 @@ export class FleetBootstrapper {
           }
           const faucetResult = await this.requestFunding(masterAddress, 'base-sepolia');
           if (!faucetResult.ok) {
+            if (faucetResult.rateLimited && rateLimitRetries < FAUCET_RATE_LIMIT_MAX_RETRIES) {
+              rateLimitRetries++;
+              console.error(
+                `[fleet-bootstrap] CDP faucet rate-limited after ${i} drips: ${faucetResult.reason}. ` +
+                `Backing off (retry ${rateLimitRetries}/${FAUCET_RATE_LIMIT_MAX_RETRIES}).`,
+              );
+              await new Promise(r => setTimeout(r, this.faucetRateLimitBackoffMs));
+              continue;
+            }
             if (faucetResult.rateLimited) {
               console.error(`[fleet-bootstrap] CDP faucet rate-limited after ${i} drips: ${faucetResult.reason}`);
             } else {
@@ -758,16 +782,19 @@ export class FleetBootstrapper {
             }
             break;
           }
-          await new Promise(r => setTimeout(r, INTER_DRIP_PAUSE_MS));
+          // Balance is no longer read once per drip — only every 5th drip and on
+          // the final iteration (issue #984 work unit 1). Target/early-exit is
+          // only checked on iterations where balance was just refreshed.
+          if ((i + 1) % 5 !== 0 && i !== maxFaucetIters - 1) {
+            continue;
+          }
           const refreshed = await refreshSystemEth();
           systemEth = refreshed.system;
           masterBalance = refreshed.master;
-          if ((i + 1) % 5 === 0) {
-            console.error(
-              `[fleet-bootstrap] drip ${i + 1}/${maxFaucetIters} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
-              `master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
-            );
-          }
+          console.error(
+            `[fleet-bootstrap] drip ${i + 1}/${maxFaucetIters} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
+            `master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
+          );
           if (systemEth >= requiredMasterEth) {
             console.error(
               `[fleet-bootstrap] Faucet funding sufficient after ${i + 1} drip${i === 0 ? '' : 's'} ` +

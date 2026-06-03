@@ -582,6 +582,82 @@ describe('POST /v1/setup/drip', () => {
     expect(body.ok).toBe(false);
     expect(body.rateLimited).toBe(true);
   });
+
+  // ── Drip-loop pacing (issue #984 work unit 1) ────────────────────────────
+  //
+  // AC-2: a transient CDP throttle (429) must back off and retry WITHIN the
+  // session rather than ending it on the first 429. Before #984 the first
+  // `rateLimited` result returned immediately, killing the whole drip session.
+  it('retries after a transient 429 instead of bailing', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-retry-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x8888888888888888888888888888888888888888',
+    });
+
+    let call = 0;
+    const requestFunding = vi.fn(async () => {
+      call += 1;
+      if (call <= 2) {
+        return { ok: false, rateLimited: true, reason: 'rate limited' };
+      }
+      return { ok: true, txHash: '0x' + '88'.repeat(32) };
+    });
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      maxFaucetIters: 5,
+      interDripPauseMs: 0,
+      getBalance: async () => 0n,
+    });
+
+    const res = await app.request('/v1/setup/drip', { method: 'POST' });
+
+    expect(requestFunding.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  // AC-3: balance must not be read once per drip. Before #984 every iteration
+  // did a `getBalance()` RPC call; the loop now reads on a reduced cadence
+  // (~every 5 drips + the final iteration), gated by the 5-min wall-clock cap.
+  it('does not read balance once per drip on a multi-drip session', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-balance-cadence-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x9999999999999999999999999999999999999999',
+    });
+
+    const requestFunding = vi.fn(async () => ({
+      ok: true,
+      txHash: '0x' + '99'.repeat(32),
+    }));
+    const getBalance = vi.fn(async () => 0n);
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      maxFaucetIters: 20,
+      interDripPauseMs: 0,
+      getBalance,
+    });
+
+    const res = await app.request('/v1/setup/drip', { method: 'POST' });
+
+    expect(res.status).toBe(202);
+    const balanceReads = getBalance.mock.calls.length;
+    const drips = requestFunding.mock.calls.length;
+    expect(balanceReads).toBeLessThan(drips);
+    // ~ceil(20/5) cadence reads + pre-loop + final, with headroom.
+    expect(balanceReads).toBeLessThanOrEqual(Math.ceil(20 / 5) + 2);
+  });
 });
 
 describe('POST /v1/setup/solvernets/:name (retired in issue #421)', () => {
