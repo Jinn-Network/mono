@@ -32,7 +32,13 @@ jobs:
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
       - run: yarn lint:no-late-mount
+      # SKIP_HL_TESTS gates test/venues/hyperliquid/client.test.ts, which hits
+      # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
+      # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).
+      # The test file documents this var as the offline-CI gate.
       - run: yarn test
+        env:
+          SKIP_HL_TESTS: '1'
       - run: yarn build
 
   pack-smoke:
