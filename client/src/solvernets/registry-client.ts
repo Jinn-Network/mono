@@ -111,19 +111,11 @@ export interface SolverNetRegistryClient {
     metadataBlockNumber: number;
   }>;
 
-  /**
-   * Returns the launched-instance summaries for the catalog, plus a
-   * `failedCount` of manifests that resolved on-chain but whose IPFS body
-   * could not be fetched/validated this pass. A non-zero `failedCount` with a
-   * non-empty `summaries` is partial degradation (IPFS/indexer blip), not a
-   * true-empty registry — callers surface it as a distinct state rather than
-   * blanking the catalog. See #984.
-   */
   listLaunched(args: {
     network: string;
     statusFilter?: Array<'launched' | 'paused' | 'retired'>;
     sinceBlock?: number;
-  }): Promise<{ summaries: SolverNetManifestSummary[]; failedCount: number }>;
+  }): Promise<SolverNetManifestSummary[]>;
 
   getManifest(args: {
     manifestCid: string;

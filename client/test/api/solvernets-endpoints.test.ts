@@ -562,7 +562,7 @@ function makeMockRegistry(): MockRegistry {
       };
     },
     async listLaunched() {
-      return { summaries: [], failedCount: 0 };
+      return [];
     },
     async getManifest() {
       throw new Error('not used');
@@ -1796,7 +1796,7 @@ function makeMockRegistryGet(args: {
       throw new Error('not used');
     },
     async listLaunched() {
-      return { summaries: [], failedCount: 0 };
+      return [];
     },
     async getManifest(arg) {
       getManifestCalls.push(arg.manifestCid);

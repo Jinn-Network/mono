@@ -101,18 +101,6 @@ const TJINN_BALANCE_CACHE_TTL_MS = 30_000;
 const TJINN_BALANCE_TIMEOUT_MS = 6_000;
 
 /**
- * TTL for the per-service staking-reward + eviction-state fan-outs (issue #984).
- *
- * `/v1/status` is polled every 2s for liveness, but each gather ran the full
- * `calculateStakingReward` (≈N reads) + `getStakingState`/`getServiceInfo`
- * (≈2N reads) fan-out against Base-L2. Caching the RAW RPC results for 30s
- * (matching `TJINN_BALANCE_CACHE_TTL_MS`) collapses ~3N+ reads per 2s into
- * one fan-out per 30s. The first-seen-evicted bookkeeping still runs on every
- * call — only the on-chain reads are cached.
- */
-const STAKING_EVICTION_CACHE_TTL_MS = 30_000;
-
-/**
  * Approximate Sepolia blocks per 24 hours. The chain produces a block every
  * ~12s; 86_400 / 12 = 7_200. We pad to 7_500 to absorb the occasional
  * slower block and keep the window comfortably within the common 10k-block
@@ -195,42 +183,6 @@ const tjinnBalanceCache = new Map<
   string,
   { expiresAt: number; promise: Promise<TjinnBalanceSnapshot> }
 >();
-
-/** Result of `sumPendingStakingRewards` — discriminated success / error. */
-type StakingRewardsResult =
-  | { sum: string; pendingByService: Record<number, string>; nextCheckpointAt?: string }
-  | { error: string };
-
-/** Raw eviction/inactivity RPC reads, before first-seen bookkeeping. */
-interface EvictionStateSnapshot {
-  evictedByServiceIndex: Record<number, boolean>;
-  inactivityByServiceIndex: Record<number, number>;
-}
-
-/**
- * In-process TTL caches for the two `/v1/status` Base-L2 fan-outs (issue #984).
- * Mirror `tjinnBalanceCache`: keyed by an opaque cache key, value holds the
- * stored promise + its `expiresAt`. The 2s liveness poll reuses these for up
- * to `STAKING_EVICTION_CACHE_TTL_MS` instead of re-running the fan-out.
- */
-const stakingRewardsCache = new Map<
-  string,
-  { expiresAt: number; promise: Promise<StakingRewardsResult> }
->();
-const evictionStateCache = new Map<
-  string,
-  { expiresAt: number; promise: Promise<EvictionStateSnapshot> }
->();
-
-/** Test-only: clear the staking-rewards fan-out cache. Not for production. */
-export function __resetStakingRewardsCacheForTests(): void {
-  stakingRewardsCache.clear();
-}
-
-/** Test-only: clear the eviction-state fan-out cache. Not for production. */
-export function __resetEvictionStateCacheForTests(): void {
-  evictionStateCache.clear();
-}
 
 function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
   if (!earningDir) return undefined;
@@ -528,31 +480,6 @@ function tJinnBalanceCacheKey(
   ].join('\0');
 }
 
-/** Non-null service ids for a fleet — the cache-key input shared by the
- *  staking-reward and eviction-state fan-outs (issue #984). */
-function fleetServiceIds(fleet: FleetState): number[] {
-  return fleet.services
-    .map((s) => s.service_id)
-    .filter((id): id is number => id != null);
-}
-
-/**
- * Cache key for the staking-reward + eviction-state fan-outs (issue #984).
- * Mirrors `tJinnBalanceCacheKey`: the read result is a pure function of the
- * RPC endpoint, the chain (network), and the sorted set of service ids.
- */
-function stakingEvictionCacheKey(
-  rpcUrl: string,
-  network: 'mainnet' | 'testnet',
-  serviceIds: readonly number[],
-): string {
-  return [
-    rpcUrl,
-    network,
-    [...serviceIds].sort((a, b) => a - b).join(','),
-  ].join('\0');
-}
-
 function timeoutError(message: string): Error {
   const error = new Error(message);
   error.name = 'TimeoutError';
@@ -745,7 +672,7 @@ async function sumPendingStakingRewards(
   rpcUrl: string,
   network: 'mainnet' | 'testnet',
   fleet: FleetState,
-): Promise<StakingRewardsResult> {
+): Promise<{ sum: string; pendingByService: Record<number, string>; nextCheckpointAt?: string } | { error: string }> {
   const targets = listStolasClaimTargets(fleet.services);
   if (targets.length === 0) {
     return { sum: '0', pendingByService: {} };
@@ -795,117 +722,6 @@ async function sumPendingStakingRewards(
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
-}
-
-/**
- * TTL-cached wrapper over `sumPendingStakingRewards` (issue #984). On a cache
- * hit within the window the stored promise is reused so the 2s liveness poll
- * does not re-run the per-service `calculateStakingReward` fan-out.
- */
-async function getCachedPendingStakingRewards(
-  rpcUrl: string,
-  network: 'mainnet' | 'testnet',
-  fleet: FleetState,
-): Promise<StakingRewardsResult> {
-  const cacheKey = stakingEvictionCacheKey(rpcUrl, network, fleetServiceIds(fleet));
-  const now = Date.now();
-  const cached = stakingRewardsCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
-    return cached.promise;
-  }
-  // Guard the STORED promise so a rejection is never cached and served for the
-  // TTL window — mirrors `getCachedTjinnBalances`. A rejection resolves to the
-  // function's own `{ error }` variant.
-  const promise = sumPendingStakingRewards(rpcUrl, network, fleet).catch(
-    (e): StakingRewardsResult => ({ error: e instanceof Error ? e.message : String(e) }),
-  );
-  stakingRewardsCache.set(cacheKey, {
-    expiresAt: now + STAKING_EVICTION_CACHE_TTL_MS,
-    promise,
-  });
-  return promise;
-}
-
-/**
- * Raw per-service eviction/inactivity fan-out (≈2N reads). Each per-service
- * read is independently error-safe: a transient RPC failure leaves that
- * service absent from `evictedByServiceIndex` rather than rejecting the batch,
- * preserving the issue-#651 "read failed → leave prior state untouched"
- * three-way semantics in the caller's first-seen bookkeeping.
- */
-async function readEvictionState(
-  client: Pick<PublicClient, 'readContract'>,
-  fleet: FleetState,
-): Promise<EvictionStateSnapshot> {
-  const evictedByServiceIndex: Record<number, boolean> = {};
-  const inactivityByServiceIndex: Record<number, number> = {};
-  await Promise.all(
-    fleet.services.map(async (svc) => {
-      const serviceId = svc.service_id;
-      const stakingProxy = svc.staking_address;
-      if (!serviceId || !stakingProxy) return;
-      const di = displayFleetServiceIndex(svc);
-      try {
-        const [state, info] = await Promise.all([
-          client.readContract({
-            address: stakingProxy as `0x${string}`,
-            abi: JINN_STAKING_ABI,
-            functionName: 'getStakingState',
-            args: [BigInt(serviceId)],
-          }),
-          client.readContract({
-            address: stakingProxy as `0x${string}`,
-            abi: JINN_STAKING_ABI,
-            functionName: 'getServiceInfo',
-            args: [BigInt(serviceId)],
-          }).catch(() => null),
-        ]);
-        // getStakingState returns uint8; 2 = Evicted enum value
-        evictedByServiceIndex[di] = Number(state) === 2;
-        // getServiceInfo returns a struct — inactivity is seconds of accumulated inactivity
-        if (info != null) {
-          const inactivity = (info as { inactivity: bigint }).inactivity;
-          if (typeof inactivity === 'bigint') {
-            inactivityByServiceIndex[di] = Number(inactivity);
-          }
-        }
-      } catch {
-        // Transient RPC errors: skip silently; evicted defaults to false
-      }
-    }),
-  );
-  return { evictedByServiceIndex, inactivityByServiceIndex };
-}
-
-/**
- * TTL-cached wrapper over `readEvictionState` (issue #984). Only the RAW RPC
- * reads are cached — the first-seen-evicted bookkeeping runs on every status
- * call against the (cached or fresh) snapshot, so the suppression window keeps
- * advancing regardless of cache hits.
- */
-async function getCachedEvictionState(
-  client: Pick<PublicClient, 'readContract'>,
-  rpcUrl: string,
-  network: 'mainnet' | 'testnet',
-  fleet: FleetState,
-): Promise<EvictionStateSnapshot> {
-  const cacheKey = stakingEvictionCacheKey(rpcUrl, network, fleetServiceIds(fleet));
-  const now = Date.now();
-  const cached = evictionStateCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
-    return cached.promise;
-  }
-  // Guard the STORED promise so a rejection is never cached and served for the
-  // TTL window — mirrors `getCachedTjinnBalances`. A rejection resolves to an
-  // empty snapshot (all per-service maps empty).
-  const promise = readEvictionState(client, fleet).catch(
-    (): EvictionStateSnapshot => ({ evictedByServiceIndex: {}, inactivityByServiceIndex: {} }),
-  );
-  evictionStateCache.set(cacheKey, {
-    expiresAt: now + STAKING_EVICTION_CACHE_TTL_MS,
-    promise,
-  });
-  return promise;
 }
 
 /**
@@ -1438,7 +1254,7 @@ export async function gatherGatheredStatusRaw(
   }
 
   if (fleet && raw.rpc.ok) {
-    const pr = await getCachedPendingStakingRewards(status.rpcUrl, status.network, fleet);
+    const pr = await sumPendingStakingRewards(status.rpcUrl, status.network, fleet);
     if ('sum' in pr) {
       raw.pendingStakingRewardsWei = pr.sum;
       raw.pendingByService = pr.pendingByService;
@@ -1449,10 +1265,43 @@ export async function gatherGatheredStatusRaw(
 
     // Eviction state + inactivity — best-effort; never blocks the rest of status assembly.
     try {
-      // Only the RAW RPC reads are cached (issue #984); the first-seen
-      // bookkeeping below runs on every status call against the snapshot.
-      const { evictedByServiceIndex, inactivityByServiceIndex } =
-        await getCachedEvictionState(client, status.rpcUrl, status.network, fleet);
+      const evictedByServiceIndex: Record<number, boolean> = {};
+      const inactivityByServiceIndex: Record<number, number> = {};
+      await Promise.all(
+        fleet.services.map(async (svc) => {
+          const serviceId = svc.service_id;
+          const stakingProxy = svc.staking_address;
+          if (!serviceId || !stakingProxy) return;
+          const di = displayFleetServiceIndex(svc);
+          try {
+            const [state, info] = await Promise.all([
+              client.readContract({
+                address: stakingProxy as `0x${string}`,
+                abi: JINN_STAKING_ABI,
+                functionName: 'getStakingState',
+                args: [BigInt(serviceId)],
+              }),
+              client.readContract({
+                address: stakingProxy as `0x${string}`,
+                abi: JINN_STAKING_ABI,
+                functionName: 'getServiceInfo',
+                args: [BigInt(serviceId)],
+              }).catch(() => null),
+            ]);
+            // getStakingState returns uint8; 2 = Evicted enum value
+            evictedByServiceIndex[di] = Number(state) === 2;
+            // getServiceInfo returns a struct — inactivity is seconds of accumulated inactivity
+            if (info != null) {
+              const inactivity = (info as { inactivity: bigint }).inactivity;
+              if (typeof inactivity === 'bigint') {
+                inactivityByServiceIndex[di] = Number(inactivity);
+              }
+            }
+          } catch {
+            // Transient RPC errors: skip silently; evicted defaults to false
+          }
+        }),
+      );
       raw.evictedByServiceIndex = evictedByServiceIndex;
       raw.inactivityByServiceIndex = inactivityByServiceIndex;
 
