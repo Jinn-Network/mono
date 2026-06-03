@@ -713,6 +713,8 @@ export interface VerdictEnvelopeLite {
   evidenceTier: string;
   actualPassed: boolean;
   actualScore: string;
+  passedCount: number;
+  totalCount: number;
   evaluatorVerdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN';
 }
 
@@ -778,6 +780,8 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
 
   let actualPassed = false;
   let actualScore = '';
+  let passedCount = 0;
+  let totalCount = 0;
   let evaluatorVerdict: VerdictEnvelopeLite['evaluatorVerdict'] = 'UNKNOWN';
 
   // SWE-rebench v2 (solverType prefix): payload.passed_match + payload.score.
@@ -795,6 +799,10 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
     } else if (typeof scoreRaw === 'string') {
       actualScore = scoreRaw;
     }
+    const pc = payloadObj['passedCount'] ?? payloadObj['passed_count'];
+    const tc = payloadObj['totalCount'] ?? payloadObj['total_count'];
+    passedCount = safeInt(pc, 0);
+    totalCount = safeInt(tc, 0);
     evaluatorVerdict = actualPassed ? 'PASS' : 'FAIL';
   } else {
     // Generic: payload.verdict (uppercase normalize).
@@ -814,6 +822,8 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
     evidenceTier,
     actualPassed,
     actualScore,
+    passedCount,
+    totalCount,
     evaluatorVerdict,
   };
 }
@@ -1264,6 +1274,8 @@ export async function handleMetadataSet({
               evidenceTier: meta.evidenceTier,
               actualPassed: meta.actualPassed,
               actualScore: meta.actualScore,
+              passedCount: meta.passedCount,
+              totalCount: meta.totalCount,
               instanceId,
               solverNetManifestCid: bodySolverNetManifestCid,
               evaluatorVerdict: meta.evaluatorVerdict,
@@ -1284,6 +1296,8 @@ export async function handleMetadataSet({
                   evidenceTier: meta.evidenceTier,
                   actualPassed: meta.actualPassed,
                   actualScore: meta.actualScore,
+                  passedCount: meta.passedCount,
+                  totalCount: meta.totalCount,
                   instanceId,
                   solverNetManifestCid: bodySolverNetManifestCid,
                   evaluatorVerdict: meta.evaluatorVerdict,
@@ -1303,6 +1317,8 @@ export async function handleMetadataSet({
                 evidenceTier: row.evidenceTier,
                 actualPassed: row.actualPassed,
                 actualScore: row.actualScore,
+                passedCount: row.passedCount,
+                totalCount: row.totalCount,
                 instanceId: row.instanceId,
                 solverNetManifestCid: row.solverNetManifestCid,
                 evaluatorVerdict: row.evaluatorVerdict,

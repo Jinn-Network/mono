@@ -1557,6 +1557,31 @@ describe('parseVerdictEnvelopeLite', () => {
     expect(m!.evaluatorVerdict).toBe('UNKNOWN');
     expect(m!.actualPassed).toBe(false);
   });
+
+  it('parses graded counts from a swe-rebench-v2 verdict.v2 envelope', () => {
+    const body = {
+      solverType: 'swe-rebench-v2.v1',
+      task: { requestId: '0xabc', attemptIndex: 0, taskId: '1', cid: '' },
+      participant: { safeAddress: '0xeval' },
+      payload: { schemaVersion: 'swe-rebench-v2-verdict.v2', score: 0, passed_match: false, passedCount: 18, totalCount: 20 },
+    };
+    const meta = parseVerdictEnvelopeLite(body);
+    expect(meta?.passedCount).toBe(18);
+    expect(meta?.totalCount).toBe(20);
+    expect(meta?.actualPassed).toBe(false); // binary unchanged
+  });
+
+  it('defaults graded counts to 0 for a v1 verdict envelope', () => {
+    const body = {
+      solverType: 'swe-rebench-v2.v1',
+      task: { requestId: '0xdef', attemptIndex: 0, taskId: '1', cid: '' },
+      participant: { safeAddress: '0xeval' },
+      payload: { schemaVersion: 'swe-rebench-v2-verdict.v1', score: 1, passed_match: true },
+    };
+    const meta = parseVerdictEnvelopeLite(body);
+    expect(meta?.passedCount).toBe(0);
+    expect(meta?.totalCount).toBe(0);
+  });
 });
 
 // ─── MetadataSet evaluation: enrichment → verdictEnvelopeMeta ─────────────────
