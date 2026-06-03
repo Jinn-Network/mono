@@ -8,7 +8,7 @@
 import type {
   SweRebenchV2Task,
   SweRebenchV2SolutionPayload,
-  SweRebenchV2VerdictPayload,
+  SweRebenchV2VerdictV2Payload,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 
 export interface HfRow {
@@ -62,7 +62,7 @@ export class SweRebenchV2Evaluator {
     private readonly deps: { fetcher: HfFetcher; runner: EvalRunner },
   ) {}
 
-  async grade(args: GradeArgs): Promise<SweRebenchV2VerdictPayload & { test_log: string }> {
+  async grade(args: GradeArgs): Promise<SweRebenchV2VerdictV2Payload & { test_log: string }> {
     const row = args.row ?? await this.deps.fetcher.fetchTaskRow({
       hf_dataset: args.task.hf_dataset,
       hf_split: args.task.hf_split,
@@ -84,10 +84,12 @@ export class SweRebenchV2Evaluator {
       pass_to_pass: row.PASS_TO_PASS,
     });
     return {
-      schemaVersion: 'swe-rebench-v2-verdict.v1',
+      schemaVersion: 'swe-rebench-v2-verdict.v2',
       score: result.passed_match ? 1 : 0,
       passed_match: result.passed_match,
       evaluator_cost_usd: 0,  // populated by caller from runtime metrics
+      passedCount: result.passed.length,
+      totalCount: result.passed.length + result.failed.length,
       test_log: result.log,
     };
   }

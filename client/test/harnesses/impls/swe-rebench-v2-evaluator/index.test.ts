@@ -70,6 +70,42 @@ describe('SweRebenchV2Evaluator', () => {
     expect(verdict.score).toBe(0);
   });
 
+  it('emits v2 graded counts from passed/failed arrays', async () => {
+    const fakeRunner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: false,
+        passed: ['t1', 't2', 't3'],
+        failed: ['t4'],
+        log: 'three pass, one fail',
+        exitCode: 1,
+      }),
+    };
+    const fakeFetcher = {
+      fetchTaskRow: vi.fn().mockResolvedValue({
+        instance_id: 'unidata__netcdf-c-1925',
+        repo: 'Unidata/netcdf-c',
+        image_name: 'docker.io/swerebenchv2/unidata-netcdf-c:1925-ad6bff3',
+        FAIL_TO_PASS: ['t1', 't2', 't3'],
+        PASS_TO_PASS: ['t4'],
+        test_patch: 'diff --git ...',
+        install_config: { install: 'pip install -e .', test_cmd: 'make test', log_parser: 'pytest' },
+      }),
+    };
+    const evaluator = new SweRebenchV2Evaluator({ fetcher: fakeFetcher, runner: fakeRunner });
+    const verdict = await evaluator.grade({
+      task: {
+        instance_id: 'unidata__netcdf-c-1925',
+        hf_dataset: 'nebius/SWE-rebench-leaderboard',
+        hf_split: '2026_02',
+      } as any,
+      solutionPayload: { patch: 'diff ...' },
+    });
+    expect(verdict.schemaVersion).toBe('swe-rebench-v2-verdict.v2');
+    expect(verdict.passedCount).toBe(3);
+    expect(verdict.totalCount).toBe(4);
+    expect(verdict.score).toBe(0); // binary unchanged: passed_match was false
+  });
+
   it('throws on missing image_name in HF row', async () => {
     const fakeRunner = { runEval: vi.fn() };
     const fakeFetcher = {

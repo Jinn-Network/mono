@@ -7,8 +7,10 @@ export type { SweRebenchV2Task } from '../swe-rebench-v2.js';
 export {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
+  SweRebenchV2VerdictV2PayloadSchema,
 } from '../payloads/swe-rebench-v2.js';
 export type {
   SweRebenchV2SolutionPayload,
   SweRebenchV2VerdictPayload,
+  SweRebenchV2VerdictV2Payload,
 } from '../payloads/swe-rebench-v2.js';
