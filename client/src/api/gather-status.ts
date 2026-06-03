@@ -205,25 +205,6 @@ function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['d
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
 /**
- * Module-scoped first-seen-evicted tracker for the suppression window (issue #651).
- *
- * Key: `${chain}:${serviceId}`. Value: epoch ms when this gatherer first
- * observed `getStakingState === 2` for the service. Cleared as soon as the
- * service is no longer reported evicted, so a successful auto-restake (or a
- * manual one) immediately resets the window.
- *
- * Lives at module scope intentionally: gather-status is invoked on every
- * status read and we need state to persist across reads. The daemon is
- * single-process; no cross-instance coordination required.
- */
-const evictionFirstSeenMs = new Map<string, number>();
-
-/** Test-only: clear the first-seen-evicted tracker. Do not call from production code. */
-export function __resetEvictionFirstSeenForTests(): void {
-  evictionFirstSeenMs.clear();
-}
-
-/**
  * Drop any cached prediction operator status for `config`.
  *
  * The cache key is the live `JinnConfig` object reference. When the SPA
@@ -668,7 +649,7 @@ async function getCachedTjinnBalances(
   return promise;
 }
 
-async function sumPendingStakingRewards(
+export async function sumPendingStakingRewards(
   rpcUrl: string,
   network: 'mainnet' | 'testnet',
   fleet: FleetState,
@@ -1250,96 +1231,6 @@ export async function gatherGatheredStatusRaw(
         address: fleet.master_address,
         error: e instanceof Error ? e.message : String(e),
       };
-    }
-  }
-
-  if (fleet && raw.rpc.ok) {
-    const pr = await sumPendingStakingRewards(status.rpcUrl, status.network, fleet);
-    if ('sum' in pr) {
-      raw.pendingStakingRewardsWei = pr.sum;
-      raw.pendingByService = pr.pendingByService;
-      if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
-    } else {
-      raw.pendingRewardsError = pr.error;
-    }
-
-    // Eviction state + inactivity — best-effort; never blocks the rest of status assembly.
-    try {
-      const evictedByServiceIndex: Record<number, boolean> = {};
-      const inactivityByServiceIndex: Record<number, number> = {};
-      await Promise.all(
-        fleet.services.map(async (svc) => {
-          const serviceId = svc.service_id;
-          const stakingProxy = svc.staking_address;
-          if (!serviceId || !stakingProxy) return;
-          const di = displayFleetServiceIndex(svc);
-          try {
-            const [state, info] = await Promise.all([
-              client.readContract({
-                address: stakingProxy as `0x${string}`,
-                abi: JINN_STAKING_ABI,
-                functionName: 'getStakingState',
-                args: [BigInt(serviceId)],
-              }),
-              client.readContract({
-                address: stakingProxy as `0x${string}`,
-                abi: JINN_STAKING_ABI,
-                functionName: 'getServiceInfo',
-                args: [BigInt(serviceId)],
-              }).catch(() => null),
-            ]);
-            // getStakingState returns uint8; 2 = Evicted enum value
-            evictedByServiceIndex[di] = Number(state) === 2;
-            // getServiceInfo returns a struct — inactivity is seconds of accumulated inactivity
-            if (info != null) {
-              const inactivity = (info as { inactivity: bigint }).inactivity;
-              if (typeof inactivity === 'bigint') {
-                inactivityByServiceIndex[di] = Number(inactivity);
-              }
-            }
-          } catch {
-            // Transient RPC errors: skip silently; evicted defaults to false
-          }
-        }),
-      );
-      raw.evictedByServiceIndex = evictedByServiceIndex;
-      raw.inactivityByServiceIndex = inactivityByServiceIndex;
-
-      // First-seen tracker for the suppression window (issue #651).
-      // Key by `${chain}:${serviceId}` to survive multi-chain fleet layouts.
-      const nowMs = Date.now();
-      const chainKey = fleet.chain;
-      const evictedSinceByServiceIndex: Record<number, string> = {};
-      for (const svc of fleet.services) {
-        const di = displayFleetServiceIndex(svc);
-        const sid = svc.service_id;
-        if (sid == null) continue;
-        const key = `${chainKey}:${sid}`;
-        // Three-way: `true` → start/preserve window; `false` → clear it;
-        // `undefined` (read failed) → leave prior state untouched so a
-        // transient RPC flap does not reset the suppression window
-        // (issue #651 review Finding B).
-        if (evictedByServiceIndex[di] === true) {
-          let firstSeen = evictionFirstSeenMs.get(key);
-          if (firstSeen === undefined) {
-            firstSeen = nowMs;
-            evictionFirstSeenMs.set(key, firstSeen);
-          }
-          evictedSinceByServiceIndex[di] = new Date(firstSeen).toISOString();
-        } else if (evictedByServiceIndex[di] === false) {
-          evictionFirstSeenMs.delete(key);
-        } else {
-          // Read failed — preserve any prior `evictedSince` so the next
-          // successful read does not bump the timestamp.
-          const firstSeen = evictionFirstSeenMs.get(key);
-          if (firstSeen !== undefined) {
-            evictedSinceByServiceIndex[di] = new Date(firstSeen).toISOString();
-          }
-        }
-      }
-      raw.evictedSinceByServiceIndex = evictedSinceByServiceIndex;
-    } catch {
-      // Non-fatal: staking state reads should not prevent status from returning
     }
   }
 
