@@ -92,17 +92,11 @@ describe('gatherStatusForApi', () => {
               }
               return { status: 'success' as const, result: 0n };
             }),
-          readContract: async (req: {
+          readContract: async (_req: {
             address: string;
             functionName: string;
             args?: readonly [`0x${string}`] | readonly [bigint];
           }) => {
-            if (chain.id === 84532 && req.functionName === 'calculateStakingReward') {
-              return 999000000000000000000n;
-            }
-            if (req.functionName === 'getNextRewardCheckpointTimestamp') return 0n;
-            if (req.functionName === 'getStakingState') return 0;
-            if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
             return 0n;
           },
           getLogs: async (req: {
@@ -184,7 +178,6 @@ describe('gatherStatusForApi', () => {
         rewardClaimIntervalMs: 0,
       });
 
-      expect(apiStatus.rewards.pendingStakingRewardsWei).toBe('2997000000000000000000');
       expect(apiStatus.tJinn).toMatchObject({
         state: 'ready',
         chainId: 11155111,
@@ -196,7 +189,6 @@ describe('gatherStatusForApi', () => {
         safeCount: 2,
         error: null,
       });
-      expect(apiStatus.tJinn.safeBalanceWei).not.toBe(apiStatus.rewards.pendingStakingRewardsWei);
       expect(apiStatus.tJinn.services.map((svc) => svc.balanceWei)).toEqual([
         '1500000000000000000',
         '1500000000000000000',
@@ -1057,7 +1049,7 @@ describe('gatherStatusForApi — no staking reads on the hot path (#992)', () =>
   });
 });
 
-describe('gather-status eviction first-seen tracker (#651)', () => {
+describe('gather-status autoRestake gating (#651)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.doUnmock('viem');
@@ -1066,12 +1058,11 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
   });
 
   /**
-   * Mock viem with a controllable `evictedFn` for `getStakingState`. Each call
-   * to the mock returns whatever `evictedFn()` returns at the time the read
-   * happens — so the same fleet can be observed evicted on one read and not
-   * on the next.
+   * Plain viem mock for the gather. The staking-read branches were removed
+   * with the hot-path staking deletion (#992), so the mock no longer needs to
+   * answer getStakingState / getServiceInfo / calculateStakingReward.
    */
-  function mockEvictionViem(evictedFn: () => boolean): void {
+  function mockGatherViem(): void {
     vi.doMock('viem', async (importOriginal) => {
       const actual = await importOriginal<typeof import('viem')>();
       return {
@@ -1083,13 +1074,7 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
           multicall: async (req: {
             contracts: ReadonlyArray<{ functionName: string }>;
           }) => req.contracts.map(() => ({ status: 'success' as const, result: 0n })),
-          readContract: async (req: { functionName: string }) => {
-            if (req.functionName === 'getStakingState') return evictedFn() ? 2 : 0;
-            if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
-            if (req.functionName === 'calculateStakingReward') return 0n;
-            if (req.functionName === 'getNextRewardCheckpointTimestamp') return 0n;
-            return 0n;
-          },
+          readContract: async () => 0n,
           getLogs: async () => [],
         }),
         http: () => ({}),
@@ -1120,95 +1105,11 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
     return earningDir;
   }
 
-  it('sets evictedSince on first observation and preserves it across reads', async () => {
-    let evicted = true;
-    mockEvictionViem(() => evicted);
-    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
-      '../../src/api/gather-status.js'
-    );
-    __resetEvictionFirstSeenForTests();
-
-    await withTempStore(async (store) => {
-      const earningDir = await setupFleet();
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
-
-      const first = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      expect(first.fleet.services[0].evicted).toBe(true);
-      expect(first.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
-
-      vi.setSystemTime(new Date('2026-05-26T10:00:30.000Z'));
-      const second = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      // Same ISO — the first-seen timestamp is sticky.
-      expect(second.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
-    });
-  });
-
-  it('clears the tracker entry when service is no longer evicted', async () => {
-    let evicted = true;
-    mockEvictionViem(() => evicted);
-    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
-      '../../src/api/gather-status.js'
-    );
-    __resetEvictionFirstSeenForTests();
-
-    await withTempStore(async (store) => {
-      const earningDir = await setupFleet();
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
-
-      await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-
-      vi.setSystemTime(new Date('2026-05-26T10:01:00.000Z'));
-      evicted = false;
-      const recovered = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      expect(recovered.fleet.services[0].evicted).toBe(false);
-      expect(recovered.fleet.services[0].evictedSince).toBeNull();
-
-      // Re-eviction gets a fresh timestamp, not the old one.
-      vi.setSystemTime(new Date('2026-05-26T10:02:00.000Z'));
-      evicted = true;
-      const reEvicted = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      expect(reEvicted.fleet.services[0].evictedSince).toBe('2026-05-26T10:02:00.000Z');
-    });
-  });
-
   it('emits autoRestake.enabled=true only when all three predicate clauses are met', async () => {
-    mockEvictionViem(() => false);
-    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+    mockGatherViem();
+    const { gatherStatusForApi } = await import(
       '../../src/api/gather-status.js'
     );
-    __resetEvictionFirstSeenForTests();
 
     await withTempStore(async (store) => {
       const earningDir = await setupFleet();
@@ -1264,11 +1165,10 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
   // L1 distributor). The two contracts happen to bundle together in our
   // current testnet deployment but they are semantically distinct.
   it('gates autoRestake on stOLAS distributor presence, not tJINN distributor presence', async () => {
-    mockEvictionViem(() => false);
-    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
+    mockGatherViem();
+    const { gatherStatusForApi } = await import(
       '../../src/api/gather-status.js'
     );
-    __resetEvictionFirstSeenForTests();
 
     await withTempStore(async (store) => {
       const earningDir = await setupFleet();
@@ -1309,93 +1209,6 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
         enabled: true,
         checkIntervalMs: 60_000,
       });
-    });
-  });
-
-  // Finding B (review): transient RPC errors must not reset the
-  // suppression window. The deletion branch should run ONLY on a confirmed
-  // `false` read; a read failure must leave the prior `evictedSince`
-  // untouched. Otherwise a single flap during transient RPC trouble
-  // re-arms the 2 × checkIntervalMs silence window — exactly the
-  // silent-failure shape the issue warned about.
-  it('preserves evictedSince across a transient RPC failure', async () => {
-    // Reads are sequenced: succeed (evicted), throw, succeed (evicted).
-    let readNo = 0;
-    vi.doMock('viem', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('viem')>();
-      return {
-        ...actual,
-        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
-          getBlockNumber: async () => 123n,
-          getChainId: async () => chain.id,
-          getBalance: async () => 0n,
-          multicall: async (req: {
-            contracts: ReadonlyArray<{ functionName: string }>;
-          }) => req.contracts.map(() => ({ status: 'success' as const, result: 0n })),
-          readContract: async (req: { functionName: string }) => {
-            if (req.functionName === 'getStakingState') {
-              readNo += 1;
-              if (readNo === 2) throw new Error('transient RPC error');
-              return 2; // Evicted
-            }
-            if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
-            if (req.functionName === 'calculateStakingReward') return 0n;
-            if (req.functionName === 'getNextRewardCheckpointTimestamp') return 0n;
-            return 0n;
-          },
-          getLogs: async () => [],
-        }),
-        http: () => ({}),
-      };
-    });
-    const { gatherStatusForApi, __resetEvictionFirstSeenForTests } = await import(
-      '../../src/api/gather-status.js'
-    );
-    __resetEvictionFirstSeenForTests();
-
-    await withTempStore(async (store) => {
-      const earningDir = await setupFleet();
-      vi.useFakeTimers();
-
-      // T=0 — service observed evicted. evictedSince is set.
-      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
-      const first = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      expect(first.fleet.services[0].evicted).toBe(true);
-      expect(first.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
-
-      // T=30s — RPC read fails. The tracker entry must be preserved so the
-      // suppression window does not restart on the next successful read.
-      vi.setSystemTime(new Date('2026-05-26T10:00:30.000Z'));
-      const middle = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      // Read failed → evicted reverts to false (no info), but evictedSince
-      // is preserved server-side. The wire shape may surface it or may not,
-      // but the next successful read MUST NOT bump the timestamp.
-      expect(middle.fleet.services[0].evicted).toBe(false);
-
-      // T=60s — RPC recovers, service still evicted. evictedSince must
-      // remain T=0, NOT be reset to T=60s.
-      vi.setSystemTime(new Date('2026-05-26T10:01:00.000Z'));
-      const third = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-      expect(third.fleet.services[0].evicted).toBe(true);
-      expect(third.fleet.services[0].evictedSince).toBe('2026-05-26T10:00:00.000Z');
     });
   });
 });
