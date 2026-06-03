@@ -21,18 +21,32 @@ env-based auth (no `~/.claude.json` file), and `JINN_STATE_DIR=/data`; it ships
 The daemon owns the four former entrypoint workarounds — pidfile reclaim (#955),
 dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
 
-### Ops step (one-time): make the GHCR package PUBLIC
+### Ops step (one-time): let the build pull the private base
 
-The `ghcr.io/jinn-network/client` package starts **private**. The overlays
-`FROM` it with no registry auth, so the package must be flipped to **public**
-(open-question #1 resolved → public). This is a registry setting, **not** a code
-change — do it in the GitHub UI:
+The `ghcr.io/jinn-network/client` package is **private**, and the
+`Jinn-Network` org **disallows public packages** (the "Change visibility →
+Public" control reports *"Setting is disabled by organization
+administrators"*). So overlays authenticate to GHCR to pull the base — no
+org-policy change needed. Two equivalent ways:
 
-> **org → Packages → `client` → Package settings → Danger Zone → Change visibility → Public**
-> (`https://github.com/orgs/Jinn-Network/packages/container/client/settings`)
+- **Railway:** add `ghcr.io/jinn-network/client` as a private image source /
+  set GHCR registry credentials on the service — a token with **`read:packages`**
+  on the `client` package (a classic PAT or a fine-grained token).
+- **CI / local:** `echo "$GHCR_TOKEN" | docker login ghcr.io -u <user> --password-stdin`
+  before `docker build` of an overlay.
 
-Until that flip lands, an overlay build pulling the base will fail with an
-unauthorized/denied error.
+This is the documented default. Two alternatives, if you'd rather not wire a
+pull-token:
+- **ARG build-from-source** — the overlays can instead build the client from
+  source (one shared Dockerfile, `ARG AGENT_CLI`), needing no registry pull at
+  all, at the cost of a full rebuild per target. (Requires the `client/` +
+  `packages/sdk/` sources in the build context.)
+- **Re-enable public packages org-wide** — an org *owner* can flip
+  Org → Settings → Packages to allow public, then make `client` public. Broader
+  policy change; only worth it if you want public packages generally.
+
+Until the build can pull (or build) the base, an overlay build will fail with
+an `unauthorized`/`denied` error on the `FROM` line.
 
 ## The overlay pattern
 
@@ -58,6 +72,21 @@ so the CMD tail (`run --config /data/config.json`) reaches the daemon.
 `BASE_TAG` must point to a base release that includes #988. Default is `latest`;
 pin it via a `BASE_TAG` Railway service variable or `[build.args]` in the
 recipe's `railway.toml`.
+
+### Build context — what each build actually needs
+
+- **The base image** (`client/Dockerfile`, built **once** in CI by
+  `.github/workflows/docker.yml`) compiles only **`client/` + `packages/sdk/`**
+  (the SDK is a Yarn-portal workspace dependency). It does **not** touch
+  `contracts/`, `docs/`, `spec/`, etc. — the build context is the repo root but
+  `.dockerignore` keeps it to those two subtrees.
+- **An overlay build** needs only this recipe's **`deploy/<recipe>/` files +
+  pull access to the base image** — no monorepo compilation, no `client/`, no
+  `sdk/`. On Railway, point the service at this repo with
+  `RAILWAY_DOCKERFILE_PATH=deploy/<recipe>/Dockerfile`; Railway clones the repo
+  for context but the build only `COPY`s `deploy/<recipe>/seed.sh` and pulls the
+  base. (An overlay could equally live in a thin standalone deploy repo pointing
+  at the published base — the monorepo is only the *base build's* concern.)
 
 Current recipes:
 
