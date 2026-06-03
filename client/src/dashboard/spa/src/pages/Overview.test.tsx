@@ -259,7 +259,6 @@ describe('OverviewPage eviction surfaces (#773)', () => {
 
 describe('OverviewPage Wallet wiring', () => {
   const baseStatus = {
-    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
     fleet: { services: [] },
     predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
@@ -280,10 +279,9 @@ describe('OverviewPage Wallet wiring', () => {
     expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
   });
 
-  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei and ignores pending staking rewards', async () => {
+  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei', async () => {
     getStatusMock.mockResolvedValue({
       ...baseStatus,
-      rewards: { pendingStakingRewardsWei: '999000000000000000000' },
       tJinn: {
         state: 'ready',
         chainId: 11155111,
@@ -300,7 +298,7 @@ describe('OverviewPage Wallet wiring', () => {
     render(withProviders(<OverviewPage />));
 
     // The tJINN-earned value derives from status.tJinn.safeBalanceWei
-    // (1.5 tJINN), not rewards.pendingStakingRewardsWei (999 collector-token).
+    // (1.5 tJINN); the OLAS staking collector queue never reaches the SPA (#992).
     await waitFor(() =>
       expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
     );

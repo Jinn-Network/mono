@@ -56,7 +56,6 @@ describe('useNotifications', () => {
     apiMocks.getBootstrap.mockReset();
     apiMocks.getStatus.mockResolvedValue({
       masterGas: { balanceWei: '0' }, // zero balance → runway 0 → funding_low fires
-      rewards: { pendingStakingRewardsWei: '0' },
       services: [],
       version: '0.1.5',
     });
@@ -112,7 +111,6 @@ describe('useNotifications', () => {
   it('does not create claim notifications from collector pending rewards', async () => {
     apiMocks.getStatus.mockResolvedValue({
       masterGas: { balanceWei: '0' },
-      rewards: { pendingStakingRewardsWei: '1000000000000000000' },
       fleet: { services: [] },
       version: '0.1.5',
     });
