@@ -423,7 +423,8 @@ const command: CommandModule = {
             scorable/unscorable counts, histogram by normalised reason, and
             the highest-yield unscorable blocker. Does not run any eval.
   jinn solver-nets screen-held-out swe-rebench-v2 [--repo <org>] [--instance-id <id> ...]
-      [--runs 3] [--held-out-count 10] [--max-candidates 60] [--per-repo-cap 3] [--prover-model <m>]
+      [--runs 3] [--held-out-count 10] [--max-candidates 60] [--per-repo-cap 3]
+      [--prover-harness codex|claude-code] [--prover-model <m>]
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by
@@ -457,6 +458,7 @@ Output flags:
         'held-out-count': { type: 'string' },
         'max-candidates': { type: 'string' },
         'per-repo-cap': { type: 'string' },
+        'prover-harness': { type: 'string' },
         'prover-model': { type: 'string' },
         repo: { type: 'string' },
       },
@@ -667,11 +669,17 @@ Output flags:
         knownBad: Boolean(parsed.values['known-bad']),
         knownPytestMissing: Boolean(parsed.values['known-pytest-missing']),
       });
+      const proverHarnessRaw = parsed.values['prover-harness'] as string | undefined;
+      if (proverHarnessRaw && proverHarnessRaw !== 'codex' && proverHarnessRaw !== 'claude-code') {
+        fail(ctx, `--prover-harness must be 'codex' or 'claude-code' (got ${JSON.stringify(proverHarnessRaw)})`);
+        return;
+      }
       const summary = await runScreenHeldOut({
         R: num('runs', 3),
         heldOutCount: num('held-out-count', 10),
         maxCandidates: num('max-candidates', 60),
         perRepoCap: num('per-repo-cap', 3),
+        ...(proverHarnessRaw ? { proverHarness: proverHarnessRaw as 'codex' | 'claude-code' } : {}),
         ...(parsed.values['prover-model'] ? { proverModel: parsed.values['prover-model'] as string } : {}),
         ...(instanceIds.length ? { instanceIds } : {}),
         ...(parsed.values['repo'] ? { repo: parsed.values['repo'] as string } : {}),

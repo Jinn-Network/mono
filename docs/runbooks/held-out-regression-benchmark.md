@@ -35,7 +35,11 @@ jinn solver-nets screen-held-out swe-rebench-v2 \
   --runs 3 --held-out-count 10 --max-candidates 60 --per-repo-cap 3
 ```
 Whole-pool by default (repo-stratified). Scope with `--repo tobymao` (within-repo
-sanity check) or `--instance-id <id> ...`. Emits, next to the slate module:
+sanity check) or `--instance-id <id> ...`. The prover (layer 3) is selectable:
+`--prover-harness codex` (default, GPT-5.5) or `--prover-harness claude-code
+--prover-model opus` (a stronger same-family prover via the Claude auth — useful
+when codex is rate-limited; Haiku→Opus is a clean capability ladder). Emits, next
+to the slate module:
 - `held-out-slate.swe-rebench-v2.v2.json` (content-hashed exam)
 - `held-out-slate.swe-rebench-v2.v2.screening-report.json` (per-candidate evidence)
 and records the base arm (all-fail) under the printed `baseCodeDigest`.

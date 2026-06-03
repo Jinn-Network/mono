@@ -40,6 +40,11 @@ export interface ScreenRunOptions {
   heldOutCount: number;
   maxCandidates: number;
   perRepoCap: number;
+  /** Prover agent harness: `codex` (default) or `claude-code` (e.g. an Opus prover
+   *  via the working Claude auth — useful when codex is rate-limited). */
+  proverHarness?: 'codex' | 'claude-code';
+  /** Prover model: `codexModel` for the codex harness, `claudeModel` for the
+   *  claude-code harness (defaults to `opus` there). */
   proverModel?: string;
   /** Restrict candidates to these instance ids (else whole gradeable pool). */
   instanceIds?: string[];
@@ -100,12 +105,21 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     adapter: new ClaudeCodeHarnessAdapter({ ...common, claudeModel: config.claudeModel }),
     claudePath: common.claudePath,
   });
-  const proverHarness: Harness = new LearnerHarness({
-    name: CODEX_HARNESS,
-    adapter: new CodexCodeHarnessAdapter({ ...common, ...(opts.proverModel ? { codexModel: opts.proverModel } : {}) }),
-    claudePath: common.claudePath,
-    ...(config.codexPath !== undefined ? { codexPath: config.codexPath } : {}),
-  });
+  // Prover harness: codex (default) or claude-code (e.g. an Opus prover via the
+  // working Claude auth, sidestepping a codex rate limit; same-family Haiku→Opus
+  // is a clean capability ladder for "proven headroom").
+  const proverKind = opts.proverHarness ?? 'codex';
+  const proverHarness: Harness = proverKind === 'claude-code'
+    ? new LearnerHarness({
+        adapter: new ClaudeCodeHarnessAdapter({ ...common, claudeModel: opts.proverModel ?? 'opus' }),
+        claudePath: common.claudePath,
+      })
+    : new LearnerHarness({
+        name: CODEX_HARNESS,
+        adapter: new CodexCodeHarnessAdapter({ ...common, ...(opts.proverModel ? { codexModel: opts.proverModel } : {}) }),
+        claudePath: common.claudePath,
+        ...(config.codexPath !== undefined ? { codexPath: config.codexPath } : {}),
+      });
 
   // Candidate pool (whole gradeable pool by default; scopeable).
   const cacheResult = await loadPoolWithCacheFallback({
@@ -203,7 +217,9 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   const reportPath = join(slatesDir(), 'held-out-slate.swe-rebench-v2.v2.screening-report.json');
   writeFileSync(reportPath, `${JSON.stringify({
     generatedAt, evalSemanticsVersion: EVAL_SEMANTICS_VERSION, baseCodeDigest,
-    R: opts.R, proverModel: opts.proverModel ?? 'codex-default', heldOut: result.heldOut, screened: result.screened,
+    R: opts.R, proverHarness: proverKind,
+    proverModel: opts.proverModel ?? (proverKind === 'claude-code' ? 'opus' : 'codex-default'),
+    heldOut: result.heldOut, screened: result.screened,
   }, null, 2)}\n`);
 
   // Persist the base arm (all-fail) so `jinn eval v2 --parent <baseCodeDigest>` reports McNemar.
