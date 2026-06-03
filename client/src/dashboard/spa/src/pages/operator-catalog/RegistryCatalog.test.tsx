@@ -406,4 +406,95 @@ describe('RegistryCatalog', () => {
     const action = screen.getByTestId('registry-catalog-error-action');
     expect(action.getAttribute('href')).toBe('/operator#network');
   });
+
+  // ── AC-4 (#984): distinguish "no SolverNets launched" from "discovery
+  // degraded / N manifests couldn't load". The daemon's catalog cache now SETS
+  // `lastError` on a partial IPFS/indexer failure while still returning the
+  // summaries it could load, so the 200-response path (not the query-error
+  // path) is where a degraded-but-partial load must surface. These cases lock
+  // the three-way distinction the operator must be able to read.
+  describe('AC-4 — degraded discovery vs. empty catalog', () => {
+    const DEGRADED_ONE = '1 manifest(s) could not be loaded — IPFS or indexer may be degraded';
+    const DEGRADED_TWO = '2 manifest(s) could not be loaded — IPFS or indexer may be degraded';
+
+    function summary(overrides: Record<string, unknown> = {}) {
+      return {
+        manifestCid: 'bafybeiloaded',
+        solverNetId: 'agent5474_prediction.v1-1_loaded',
+        name: 'Loaded SolverNet',
+        network: 'base-sepolia',
+        launcherAgentId: '5474',
+        launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+        status: 'launched',
+        statusUpdatedAt: '2026-06-03T00:00:00Z',
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solutionPriceWei: '1000000000000000',
+        verdictPriceWei: '500000000000000',
+        openRoles: ['solver'],
+        anchorBlock: 1,
+        ...overrides,
+      };
+    }
+
+    it('healthy empty registry: plain empty state, NO degraded warning', async () => {
+      listRegistryMock.mockResolvedValue({
+        summaries: [],
+        lastRefreshedAt: '2026-06-03T01:00:00Z',
+        lastError: null,
+      });
+      render(withProviders(<RegistryCatalog />));
+      await waitFor(() =>
+        expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
+      );
+      expect(
+        screen.getByText(/no launched solvernets available\./i),
+      ).toBeTruthy();
+      // The degraded/stale warning must be ABSENT — an empty-but-healthy
+      // registry is not a degraded one.
+      expect(screen.queryByTestId('registry-catalog-warn')).toBeNull();
+    });
+
+    it('degraded with partial results: loaded row IS shown AND a degraded warning IS visible', async () => {
+      listRegistryMock.mockResolvedValue({
+        summaries: [summary()],
+        lastRefreshedAt: '2026-06-03T01:00:00Z',
+        lastError: { message: DEGRADED_ONE, at: '2026-06-03T01:00:30Z' },
+      });
+      render(withProviders(<RegistryCatalog />));
+
+      // The manifest that loaded still renders as a card…
+      await waitFor(() =>
+        expect(screen.queryAllByTestId('registry-card')).toHaveLength(1),
+      );
+      expect(screen.getByText('Loaded SolverNet')).toBeTruthy();
+
+      // …and the partial failure is surfaced, not swallowed: the generic
+      // "stale (<message>)" banner carries the daemon's degraded message.
+      const warn = screen.getByTestId('registry-catalog-warn');
+      expect(warn.textContent).toContain(DEGRADED_ONE);
+      expect(warn.textContent).toMatch(/^stale \(/i);
+      // Not the rate-limited variant — a generic IPFS/indexer degradation.
+      expect(warn.getAttribute('data-error-code')).toBeNull();
+    });
+
+    it('degraded with zero results: warning IS visible so an all-failed load is not mistaken for a healthy empty registry', async () => {
+      listRegistryMock.mockResolvedValue({
+        summaries: [],
+        lastRefreshedAt: '2026-06-03T01:00:00Z',
+        lastError: { message: DEGRADED_TWO, at: '2026-06-03T01:00:30Z' },
+      });
+      render(withProviders(<RegistryCatalog />));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('registry-catalog-warn')).toBeTruthy(),
+      );
+      // The empty card still renders (nothing loaded), but the degraded
+      // warning above it stops it from reading as a clean, healthy registry.
+      expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy();
+      expect(screen.getByTestId('registry-catalog-warn').textContent).toContain(
+        DEGRADED_TWO,
+      );
+    });
+  });
 });
