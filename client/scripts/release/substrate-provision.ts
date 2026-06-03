@@ -168,16 +168,17 @@ export function rpcChainIsHealthy(rpcUrl: string | string[] | undefined): boolea
 }
 
 /**
- * Default harness-creds probe. claude-code-learner authenticates via the
- * `claude` CLI session (`~/.claude` or a logged-in CLI), so its presence is a
- * best-effort directory probe; codex needs `~/.codex/auth.json` (or an
- * OPENAI_API_KEY); hermes needs OPENROUTER_API_KEY.
+ * Default harness-creds probe. claude-code-learner authenticates via a
+ * `CLAUDE_CODE_OAUTH_TOKEN` (the `claude setup-token` subscription token — the
+ * env-based auth path used by the hosted operator and this suite's solve step),
+ * an `ANTHROPIC_API_KEY`, or a logged-in `~/.claude` CLI session; codex needs
+ * `~/.codex/auth.json` (or an OPENAI_API_KEY); hermes needs OPENROUTER_API_KEY.
  */
 async function defaultHasHarnessCreds(harness: string): Promise<boolean> {
   const canonical = canonicalHarnessName(harness);
   const home = process.env.HOME ?? '';
   if (canonical === 'claude-code') {
-    if (process.env.ANTHROPIC_API_KEY) return true;
+    if (process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY) return true;
     return fs.stat(path.join(home, '.claude')).then(() => true).catch(() => false);
   }
   if (canonical === 'codex') {
