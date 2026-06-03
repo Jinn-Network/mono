@@ -532,6 +532,13 @@ export interface SolverNetManifestLite {
   name: string;
   description: string;
   solverNetId: string;
+  network: string;
+  solutionPriceWei: string;
+  verdictPriceWei: string;
+  openRoles: string[];
+  launcherSafeAddress: string;
+  contractId: string;
+  contractVersion: string;
 }
 
 export function parseSolverNetManifestLite(body: unknown): SolverNetManifestLite | null {
@@ -546,7 +553,39 @@ export function parseSolverNetManifestLite(body: unknown): SolverNetManifestLite
   if (typeof raw === 'string') solverNetId = raw;
   else if (typeof raw === 'number' && Number.isFinite(raw)) solverNetId = String(raw);
   else if (typeof raw === 'bigint') solverNetId = raw.toString();
-  return { name, description, solverNetId };
+
+  // Issue #985 criterion 1: read the remaining summary fields with the same
+  // defensive reads. Field sources are manifest-schema.ts: top-level network /
+  // solutionPriceWei / verdictPriceWei / openRoles; nested launcher.safeAddress;
+  // nested contract.id / contract.version.
+  const network = safeStr(b['network']);
+  const solutionPriceWei = safeStr(b['solutionPriceWei']);
+  const verdictPriceWei = safeStr(b['verdictPriceWei']);
+  const openRoles = Array.isArray(b['openRoles'])
+    ? (b['openRoles'] as unknown[]).filter((r): r is string => typeof r === 'string')
+    : [];
+  const launcher = b['launcher'];
+  const launcherObj: Record<string, unknown> =
+    launcher !== null && typeof launcher === 'object' ? (launcher as Record<string, unknown>) : {};
+  const launcherSafeAddress = safeStr(launcherObj['safeAddress']);
+  const contract = b['contract'];
+  const contractObj: Record<string, unknown> =
+    contract !== null && typeof contract === 'object' ? (contract as Record<string, unknown>) : {};
+  const contractId = safeStr(contractObj['id']);
+  const contractVersion = safeStr(contractObj['version']);
+
+  return {
+    name,
+    description,
+    solverNetId,
+    network,
+    solutionPriceWei,
+    verdictPriceWei,
+    openRoles,
+    launcherSafeAddress,
+    contractId,
+    contractVersion,
+  };
 }
 
 // ── Envelope lite parser ──────────────────────────────────────────────────────
