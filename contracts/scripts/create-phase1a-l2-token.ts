@@ -1,9 +1,11 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Create the Base Sepolia bridge-compatible JINN representation using the
  * canonical OptimismMintableERC20Factory.
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import type { ContractTransactionReceipt, Interface, Log, Signer } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
@@ -12,7 +14,7 @@ import {
   getL2TokenDeploymentArtifactName as getProfileAwareL2TokenDeploymentArtifactName,
   loadJson,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 type EnvMap = Record<string, string | undefined>;
 
@@ -279,16 +281,17 @@ export async function createTokenRepresentation(
 }
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
+  const { ethers: hh } = await network.connect();
+  const [deployer] = await hh.getSigners();
+  const net = await hh.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
   const timingProfile = resolvePhase1aTimingProfile();
 
   console.log("=== Jinn Phase 1a L2 Token Creation ===");
-  console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployer.address}`);
   console.log(
-    `Balance:  ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH`,
+    `Balance:  ${ethers.formatEther(await hh.provider.getBalance(deployer.address))} ETH`,
   );
   console.log();
 
@@ -308,7 +311,7 @@ async function main() {
 
   const output = {
     network: networkName,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
     config: {
@@ -342,7 +345,7 @@ async function main() {
   console.log(`\nDeployment written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

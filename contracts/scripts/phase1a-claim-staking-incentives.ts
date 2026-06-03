@@ -1,9 +1,11 @@
-import { ethers } from "hardhat";
+import { isRunEntry } from "./lib/run-entry.js";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import {
   BASE_SEPOLIA_CHAIN_ID,
   buildStakingNominee,
   loadPhase1aArtifactsFromDisk,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 interface ClaimStakingConfig {
   numClaimedEpochs: bigint;
@@ -46,8 +48,9 @@ export function resolveClaimStakingIncentivesConfig(
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const config = resolveClaimStakingIncentivesConfig(artifacts.stakingTokenL2);
   const dispenser = new ethers.Contract(artifacts.dispenserL1, DISPENSER_ABI, signer);
   const depositProcessor = new ethers.Contract(artifacts.depositProcessorL1, DEPOSIT_PROCESSOR_ABI, signer);
@@ -86,7 +89,7 @@ async function main() {
   await tx.wait();
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

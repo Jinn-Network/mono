@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Deploy the full stOLAS L2 stack on Base Sepolia.
  *
@@ -46,15 +47,17 @@
  *   npx hardhat run scripts/deploy-stolas-l2.ts --network baseSepolia
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer, TransactionRequest } from "ethers";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { ethers as ethersLib, JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
   getPhase1aArtifactSuffix,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // ─── Pre-existing addresses (Base Sepolia) ──────────────────────────────────
 
@@ -94,14 +97,14 @@ const L1_CHAIN_ID = 11155111;
 
 // Agent ID and config hash for StakingManager
 const AGENT_ID = 103;
-const CONFIG_HASH = ethers.id("jinn-stolas-staking-v1");
+const CONFIG_HASH = ethersLib.id("jinn-stolas-staking-v1");
 // Liveness ratio for ModuleActivityChecker (matches fast-test profile)
-const LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
+const LIVENESS_RATIO = ethersLib.parseEther("0.001"); // 1e15
 
 // REWARD operation hash (used by Collector for operation receivers)
 const REWARD_HASH = "0x0b9821ae606ebc7c79bf3390bdd3dc93e1b4a7cda27aad60646e7b88ff55b001";
 // UNSTAKE operation hash
-const UNSTAKE_HASH = ethers.id("UNSTAKE");
+const UNSTAKE_HASH = ethersLib.id("UNSTAKE");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -111,7 +114,7 @@ function isLocalNetwork(networkName: string): boolean {
   return LOCAL_NETWORKS.has(networkName);
 }
 
-async function getDeployerSigner(networkName: string): Promise<Signer> {
+async function getDeployerSigner(ethers: HardhatEthers, networkName: string): Promise<Signer> {
   if (isLocalNetwork(networkName)) {
     const [deployer] = await ethers.getSigners();
     return deployer;
@@ -126,8 +129,8 @@ function liveL2TxOverrides(): TransactionRequest {
   const maxFeeGwei = process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2";
   const prioGwei = process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1";
   return {
-    maxFeePerGas: ethers.parseUnits(maxFeeGwei, "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(prioGwei, "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(maxFeeGwei, "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(prioGwei, "gwei"),
   };
 }
 
@@ -165,6 +168,7 @@ function packStakingConfig(
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const { ethers } = await network.connect();
   // Load L1 deployment artifact for cross-chain reference
   const l1ArtifactPath = process.env.STOLAS_L1_DEPLOYMENT?.trim() || "./deployment-stolas-l1-sepolia-fast.json";
   const l1ArtifactResolved = path.resolve(process.cwd(), l1ArtifactPath);
@@ -181,15 +185,15 @@ async function main() {
   if (!baseDepositProcessorL1) throw new Error("L1 artifact missing baseDepositProcessorL1");
   if (!l1DistributorProxy) throw new Error("L1 artifact missing distributorProxy");
 
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
-  const deployer = await getDeployerSigner(networkName);
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
+  const deployer = await getDeployerSigner(ethers, networkName);
   const deployerAddress = await deployer.getAddress();
   const balanceProvider = deployer.provider ?? (isLocalNetwork(networkName) ? ethers.provider : undefined);
   if (!balanceProvider) throw new Error("Deployer signer is missing a provider.");
 
   console.log("=== stOLAS L2 Deployment (Base Sepolia) ===");
-  console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployerAddress}`);
   console.log(`Balance:  ${ethers.formatEther(await balanceProvider.getBalance(deployerAddress))} ETH`);
   console.log(`L2 JINN:  ${L2_JINN}`);
@@ -498,7 +502,7 @@ async function main() {
 
   const output = {
     network: normalizedNetwork,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployerAddress,
     deployedAt: new Date().toISOString(),
     config: {
@@ -542,7 +546,7 @@ async function main() {
   console.log(`2. Depository.createAndActivateStakingModels(...)`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

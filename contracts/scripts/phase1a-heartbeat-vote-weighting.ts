@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * phase1a-heartbeat-vote-weighting.ts — Keep VoteWeighting.timeSum fresh.
  *
@@ -15,12 +16,13 @@
  *     npx hardhat run scripts/phase1a-heartbeat-vote-weighting.ts --network sepolia
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import {
   BASE_SEPOLIA_CHAIN_ID,
   buildStakingNominee,
   loadPhase1aArtifactsFromDisk,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 const VW_ABI = [
   "function WEEK() view returns (uint256)",
@@ -31,11 +33,12 @@ const VW_ABI = [
 ];
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const vw = new ethers.Contract(artifacts.voteWeightingL1, VW_ABI, signer);
 
-  const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+  const now = BigInt((await hh.provider.getBlock("latest"))!.timestamp);
   const week = (await vw.WEEK()) as bigint;
   const max = (await vw.MAX_NUM_WEEKS()) as bigint;
   const before = (await vw.timeSum()) as bigint;
@@ -63,7 +66,7 @@ async function main() {
   console.log(`checkpointNominee tx:   ${cnTx.hash} gas=${cnReceipt?.gasUsed}`);
 
   const after = (await vw.timeSum()) as bigint;
-  const nowAfter = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+  const nowAfter = BigInt((await hh.provider.getBlock("latest"))!.timestamp);
   const gapAfter = nowAfter > after ? (nowAfter - after) / week : 0n;
   console.log(`timeSum after: ${after} (gap=${gapAfter} periods)`);
 
@@ -77,7 +80,7 @@ async function main() {
   console.log(`✓ Walker healthy.`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

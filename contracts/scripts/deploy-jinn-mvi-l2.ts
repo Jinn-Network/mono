@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * deploy-jinn-mvi-l2.ts — Phase A6 of the Jinn v0 MVI.
  *
@@ -45,7 +46,7 @@
  *                                   V3 artifact suffix when explicitly set
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -54,7 +55,9 @@ import {
   CHAIN_ID_BASE_MAINNET,
   JINN_MVI_L2_ALLOWED_CHAINS,
   assertChainIdAllowed,
-} from "./lib/jinn-mvi-helpers";
+} from "./lib/jinn-mvi-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // ---------------------------------------------------------------------------
 // Chain-pinned defaults
@@ -220,6 +223,7 @@ async function retryRead<T>(label: string, read: () => Promise<T>): Promise<T> {
  * already gates the storage-slot invariant.
  */
 export async function deployJinnMviL2(
+  ethers: HardhatEthers,
   signer: import("ethers").Signer,
   wiring: JinnMviL2Wiring,
 ): Promise<JinnMviL2DeployResult> {
@@ -264,10 +268,11 @@ export async function deployJinnMviL2(
 }
 
 async function main() {
+  const { ethers } = await network.connect();
   const [deployer] = await ethers.getSigners();
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
-  const chainId = Number(network.chainId);
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
+  const chainId = Number(net.chainId);
 
   // chainId gate: Hardhat + Base Sepolia by default. Mainnet (8453)
   // requires explicit `JINN_MVI_ALLOW_CHAIN=8453` opt-in.
@@ -332,7 +337,7 @@ async function main() {
   console.log(`OLAS ServiceRegistry:    ${wiring.registry}`);
   console.log();
 
-  const result = await deployJinnMviL2(deployer, wiring);
+  const result = await deployJinnMviL2(ethers, deployer, wiring);
 
   console.log("=== Deployment Summary ===");
   console.log(`  TaskClaimEmitter   ${result.emitter}`);
@@ -360,7 +365,7 @@ async function main() {
   console.log(`Deployment written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

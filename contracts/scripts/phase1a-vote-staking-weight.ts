@@ -1,10 +1,12 @@
-import { ethers } from "hardhat";
+import { isRunEntry } from "./lib/run-entry.js";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import type { Contract } from "ethers";
 import {
   BASE_SEPOLIA_CHAIN_ID,
   buildStakingNominee,
   loadPhase1aArtifactsFromDisk,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -74,8 +76,9 @@ async function approveIfNeeded(token: Contract, owner: string, spender: string, 
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const signerAddress = signer.address;
   const weightBps = parsePositiveBigInt(process.env.PHASE1A_VOTE_WEIGHT_BPS, "PHASE1A_VOTE_WEIGHT_BPS");
   const lockAmount = parsePositiveBigInt(process.env.PHASE1A_VOTE_LOCK_AMOUNT, "PHASE1A_VOTE_LOCK_AMOUNT");
@@ -93,7 +96,7 @@ async function main() {
   const veOLAS = new ethers.Contract(artifacts.veOLASL1, VE_ABI, signer);
   const voteWeighting = new ethers.Contract(artifacts.voteWeightingL1, VOTE_WEIGHTING_ABI, signer);
 
-  const latestBlock = await ethers.provider.getBlock("latest");
+  const latestBlock = await hh.provider.getBlock("latest");
   const now = BigInt(latestBlock!.timestamp);
   const votePeriodSeconds = (await voteWeighting.WEEK()) as bigint;
   const weightVoteDelaySeconds = (await voteWeighting.WEIGHT_VOTE_DELAY()) as bigint;
@@ -203,7 +206,7 @@ async function main() {
   console.log("Note: vote weights are boundary-rounded and do not become active immediately.");
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

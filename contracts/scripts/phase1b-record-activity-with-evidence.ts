@@ -16,8 +16,9 @@
  *   EVIDENCE_MODE           "novel" | "duplicate" | "custom" (default: "custom" if EVIDENCE_HASH set, "novel" otherwise)
  */
 
-import { ethers } from "hardhat";
-import { loadJson, resolvePhase1aArtifactPaths } from "./lib/phase1a-rollout-helpers";
+import { network } from "hardhat";
+import { loadJson, resolvePhase1aArtifactPaths } from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
 
 interface DeploymentArtifact {
   contracts: Record<string, string | undefined>;
@@ -40,6 +41,7 @@ const STAKING_ABI = [
 ];
 
 async function main() {
+  const { ethers } = await network.connect();
   const paths = resolvePhase1aArtifactPaths();
   const deployment = loadJson<DeploymentArtifact>(paths.l2);
   const activityCheckerAddress = deployment.contracts.activityChecker;
@@ -145,7 +147,7 @@ async function main() {
   console.log(`Evidence hashes stored: ${hashCount}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

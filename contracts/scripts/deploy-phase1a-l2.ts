@@ -14,16 +14,26 @@
  *   7. Factory-created StakingProxy instance initialized via the implementation
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { ContractTransactionReceipt, Log, Signer, TransactionRequest } from "ethers";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { ethers as ethersLib, Contract, JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
-import type { Phase1aTimingProfile } from "./lib/phase1a-rollout-helpers";
+import type { Phase1aTimingProfile } from "./lib/phase1a-rollout-helpers.js";
 import {
   getL2DeploymentArtifactName as getProfileAwareL2DeploymentArtifactName,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
+
+/**
+ * Under Hardhat 3 there is no module-scope `ethers`. Connection-bound calls
+ * (`getContractFactory`, `getSigners`, `ethers.provider`) need the connection's
+ * ethers, obtained via `await network.connect()` inside `main()` and threaded
+ * into the deploy helpers. Pure ethers utilities used at module scope read from
+ * the bare `ethers` package (`ethersLib`).
+ */
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 type JinnTokenSource = "external" | "test";
 type ServiceRegistrySource = "external" | "stub";
@@ -77,10 +87,10 @@ interface L2DeployConfig {
 }
 
 const BASE_L2_CONFIG = {
-  livenessRatio: ethers.parseEther("0.001"),
+  livenessRatio: ethersLib.parseEther("0.001"),
   maxNumServices: 100,
-  rewardsPerSecond: ethers.parseEther("0.0001"),
-  minStakingDeposit: ethers.parseEther("10"),
+  rewardsPerSecond: ethersLib.parseEther("0.0001"),
+  minStakingDeposit: ethersLib.parseEther("10"),
   minNumStakingPeriods: 3,
   maxNumInactivityPeriods: 2,
   livenessPeriod: 86400,
@@ -94,7 +104,7 @@ export const DEFAULT_L2_CONFIG: L2DeployConfig = {
   jinnTokenSource: "test",
   serviceRegistrySource: "stub",
   serviceRegistryTokenUtilitySource: "stub",
-  proxyHash: ethers.id("proxy-hash-placeholder"),
+  proxyHash: ethersLib.id("proxy-hash-placeholder"),
   proxyHashSource: "placeholder",
   activityCheckerVersion: "v1",
   similarityThreshold: 64,
@@ -132,7 +142,7 @@ function isLocalL2Network(networkName: string): boolean {
  * Hardhat's remote-network signer can reuse the same tx nonce across back-to-back
  * deploys on some JSON-RPC providers. Use a plain ethers Wallet for live Base Sepolia.
  */
-async function getL2DeployerSigner(networkName: string): Promise<Signer> {
+async function getL2DeployerSigner(ethers: HardhatEthers, networkName: string): Promise<Signer> {
   if (isLocalL2Network(networkName)) {
     const [deployer] = await ethers.getSigners();
     return deployer;
@@ -152,8 +162,8 @@ export function liveL2TxOverrides(): TransactionRequest {
   const maxFeeGwei = process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2";
   const prioGwei = process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1";
   return {
-    maxFeePerGas: ethers.parseUnits(maxFeeGwei, "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(prioGwei, "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(maxFeeGwei, "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(prioGwei, "gwei"),
   };
 }
 
@@ -191,7 +201,7 @@ function requireLiveAddress(
   if (!value) {
     throw new Error(`${key} is required for live/testnet L2 deployments.`);
   }
-  if (!ethers.isAddress(value)) {
+  if (!ethersLib.isAddress(value)) {
     throw new Error(`${key} must be a valid address. Received: ${value}`);
   }
   return value;
@@ -205,7 +215,7 @@ function requireLiveProxyHash(
   if (!value) {
     throw new Error(`${key} is required for live/testnet L2 deployments.`);
   }
-  if (!ethers.isHexString(value, 32)) {
+  if (!ethersLib.isHexString(value, 32)) {
     throw new Error(`${key} must be a 32-byte hex string. Received: ${value}`);
   }
   return value;
@@ -243,7 +253,7 @@ async function verifyFactoryInstanceWithRetry(
     throw new Error("Missing provider while verifying staking factory deployment.");
   }
 
-  const factory = new ethers.Contract(
+  const factory = new Contract(
     factoryAddress,
     [
       "function verifyInstance(address) view returns (bool)",
@@ -297,7 +307,7 @@ export function resolveL2DeployConfig(
 
   const suppliedServiceRegistry = env.SERVICE_REGISTRY_ADDRESS?.trim();
   if (suppliedServiceRegistry) {
-    if (!ethers.isAddress(suppliedServiceRegistry)) {
+    if (!ethersLib.isAddress(suppliedServiceRegistry)) {
       throw new Error(`SERVICE_REGISTRY_ADDRESS must be a valid address. Received: ${suppliedServiceRegistry}`);
     }
     config.serviceRegistryAddress = suppliedServiceRegistry;
@@ -309,7 +319,7 @@ export function resolveL2DeployConfig(
 
   const suppliedTokenUtility = env.SERVICE_REGISTRY_TOKEN_UTILITY_ADDRESS?.trim();
   if (suppliedTokenUtility) {
-    if (!ethers.isAddress(suppliedTokenUtility)) {
+    if (!ethersLib.isAddress(suppliedTokenUtility)) {
       throw new Error(
         "SERVICE_REGISTRY_TOKEN_UTILITY_ADDRESS must be a valid address. " +
           `Received: ${suppliedTokenUtility}`,
@@ -407,6 +417,7 @@ export function getL2DeploymentArtifactName(networkName: string): string {
 }
 
 export async function deployL2Stack(
+  ethers: HardhatEthers,
   deployer: Signer,
   config: L2DeployConfig = DEFAULT_L2_CONFIG,
   txOverrides: TransactionRequest = {},
@@ -598,9 +609,10 @@ export async function deployL2Stack(
 }
 
 async function main() {
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
-  const deployer = await getL2DeployerSigner(networkName);
+  const { ethers } = await network.connect();
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
+  const deployer = await getL2DeployerSigner(ethers, networkName);
   const deployerAddress = await deployer.getAddress();
   const balanceProvider =
     deployer.provider ?? (isLocalL2Network(networkName) ? ethers.provider : undefined);
@@ -609,7 +621,7 @@ async function main() {
   }
 
   console.log("=== Jinn Phase 1a L2 Staking Deployment ===");
-  console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployerAddress}`);
   console.log(
     `Balance:  ${ethers.formatEther(await balanceProvider.getBalance(deployerAddress))} ETH`,
@@ -621,7 +633,7 @@ async function main() {
 
   console.log("Deploying L2 staking stack...\n");
   const txOverrides = isLocalL2Network(networkName) ? {} : liveL2TxOverrides();
-  const deployment = await deployL2Stack(deployer, config, txOverrides);
+  const deployment = await deployL2Stack(ethers, deployer, config, txOverrides);
 
   console.log("\n=== Deployment Summary ===");
   for (const [name, value] of Object.entries(deployment)) {
@@ -630,7 +642,7 @@ async function main() {
 
   const output = {
     network: networkName,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployerAddress,
     deployedAt: new Date().toISOString(),
     config: {
@@ -672,7 +684,7 @@ async function main() {
   console.log(`\nDeployment written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

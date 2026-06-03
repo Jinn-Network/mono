@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * phase1a-redeploy-vote-weighting.ts — Redeploy VoteWeightingFast and rewire.
  *
@@ -36,7 +37,8 @@
  * Safe to re-run: step 2 short-circuits the happy path.
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -45,7 +47,7 @@ import {
   loadJson,
   resolvePhase1aArtifactPaths,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 interface DeploymentArtifact {
   contracts: Record<string, string | undefined>;
@@ -83,6 +85,7 @@ function requireAddress(value: string | undefined, label: string): string {
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   if (resolvePhase1aTimingProfile() !== "fast-test") {
     throw new Error(
       "This script targets VoteWeightingFast only. Set PHASE1A_TIMING_PROFILE=fast-test.",
@@ -105,7 +108,7 @@ async function main() {
     "stakingToken (L2)",
   );
 
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const vwOldContract = new ethers.Contract(vwOld, VW_ABI, signer);
   const dispenser = new ethers.Contract(dispenserAddr, DISPENSER_ABI, signer);
   const treasuryContract = new ethers.Contract(treasury, TREASURY_ABI, signer);
@@ -162,7 +165,7 @@ async function main() {
   // ── Step 3: Deploy new VoteWeightingFast ──────────────────────────────
   console.log();
   console.log(`Deploying VoteWeightingFast(${veOLAS})...`);
-  const Factory = await ethers.getContractFactory("VoteWeightingFast", signer);
+  const Factory = await hh.getContractFactory("VoteWeightingFast", signer);
   const vwNewContract = await Factory.deploy(veOLAS);
   const deployTx = vwNewContract.deploymentTransaction();
   if (deployTx) {
@@ -250,7 +253,7 @@ async function main() {
   console.log();
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

@@ -18,7 +18,7 @@
  * step-by-step cast commands.
  */
 
-import { ethers } from 'hardhat';
+import { network } from 'hardhat';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -27,9 +27,10 @@ const DEFAULT_DRIP_AMOUNT_ETHER = '100';
 const DEFAULT_DRIP_INTERVAL_SECONDS = 24 * 60 * 60;
 
 async function main() {
+  const { ethers } = await network.connect();
   const [deployer] = await ethers.getSigners();
-  const network = await ethers.provider.getNetwork();
-  const chainId = Number(network.chainId);
+  const net = await ethers.provider.getNetwork();
+  const chainId = Number(net.chainId);
 
   if (chainId !== 84532) {
     throw new Error(
@@ -44,7 +45,7 @@ async function main() {
     : DEFAULT_DRIP_INTERVAL_SECONDS;
   const dripAmount = ethers.parseEther(dripAmountEther);
 
-  console.log('Network        :', network.name, `(chainId=${chainId})`);
+  console.log('Network        :', net.name, `(chainId=${chainId})`);
   console.log('Deployer       :', deployer.address);
   console.log('Balance        :', ethers.formatEther(await ethers.provider.getBalance(deployer.address)), 'ETH');
   console.log('L2 JINN token  :', jinnAddress);
@@ -60,7 +61,7 @@ async function main() {
 
   // Write conventional deployment JSON
   const summary = {
-    network: network.name || 'baseSepolia',
+    network: net.name || 'baseSepolia',
     chainId,
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),

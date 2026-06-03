@@ -13,7 +13,7 @@
  *   deployment-phase1a-{network}.json  - JSON file with all contract addresses
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -21,19 +21,20 @@ import {
   DEFAULT_DEPLOY_CONFIG,
   FAST_TEST_DEPLOY_CONFIG,
   DeployConfig,
-} from "./lib/deploy-helpers";
+} from "./lib/deploy-helpers.js";
 import {
   getL1DeploymentArtifactName,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 async function main() {
+  const { ethers } = await network.connect();
   const [deployer] = await ethers.getSigners();
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
 
   console.log("=== Jinn Phase 1a L1 Stack Deployment ===");
-  console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployer.address}`);
   console.log(
     `Balance:  ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH`
@@ -54,7 +55,7 @@ async function main() {
   }
 
   console.log("Deploying L1 stack (this may take a minute)...\n");
-  const d = await deployL1Stack(deployer, config);
+  const d = await deployL1Stack(ethers, deployer, config);
 
   // Collect addresses
   const addresses: Record<string, string> = {};
@@ -97,7 +98,7 @@ async function main() {
   // Build output JSON
   const output = {
     network: networkName,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
     config: {

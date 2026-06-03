@@ -1,8 +1,10 @@
-import { ethers } from "hardhat";
+import { isRunEntry } from "./lib/run-entry.js";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import {
   BASE_SEPOLIA_CHAIN_ID,
   loadPhase1aArtifactsFromDisk,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 const DISPENSER_ABI = [
   "function mapChainIdDepositProcessors(uint256) view returns (address)",
@@ -10,8 +12,9 @@ const DISPENSER_ABI = [
 ];
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const dispenser = new ethers.Contract(artifacts.dispenserL1, DISPENSER_ABI, signer);
 
   const current = (await dispenser.mapChainIdDepositProcessors(BASE_SEPOLIA_CHAIN_ID)) as string;
@@ -37,7 +40,7 @@ async function main() {
   console.log(`Updated deposit processor: ${updated}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

@@ -1,4 +1,6 @@
-import { ethers } from "hardhat";
+import { isRunEntry } from "./lib/run-entry.js";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import type { JsonRpcProvider } from "ethers";
 import {
   BASE_SEPOLIA_CHAIN_ID,
@@ -8,7 +10,7 @@ import {
   loadPhase1aArtifactsFromDisk,
   resolvePhase1aArtifactPaths,
   SEPOLIA_CHAIN_ID,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
 
 const PLACEHOLDER_PROXY_HASH = ethers.id("proxy-hash-placeholder");
 
@@ -274,8 +276,9 @@ async function main() {
   const configuredProxyHashSource = getConfigString(l2Config, "proxyHashSource");
   const treasuryAddress = l1Deployment.contracts.Treasury;
 
-  const [signer] = await ethers.getSigners();
-  const l1Provider = ethers.provider;
+  const { ethers: hh } = await network.connect();
+  const [signer] = await hh.getSigners();
+  const l1Provider = hh.provider;
   const { provider: l2Provider, rpcUrl: l2RpcUrl } = await getWorkingBaseSepoliaProvider();
 
   const baseReads = await readNamedCalls({
@@ -674,7 +677,7 @@ async function main() {
   process.exitCode = 1;
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(process.exitCode ?? 0))
     .catch((error) => {

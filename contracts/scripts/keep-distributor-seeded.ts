@@ -33,7 +33,7 @@
  *   L2_JINN_ADDRESS          L2 JINN token (default: 0xAB9a01cd…)
  */
 
-import { ethers } from 'hardhat';
+import { network } from 'hardhat';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -57,9 +57,10 @@ function readJson(filePath: string): Record<string, unknown> {
 }
 
 async function main() {
+  const { ethers } = await network.connect();
   const [signer] = await ethers.getSigners();
-  const network = await ethers.provider.getNetwork();
-  const chainId = Number(network.chainId);
+  const net = await ethers.provider.getNetwork();
+  const chainId = Number(net.chainId);
   if (chainId !== 84532) {
     throw new Error(`Expected Base Sepolia (chainId 84532); got ${chainId}. Run with --network baseSepolia.`);
   }
@@ -108,7 +109,7 @@ async function main() {
     );
   })();
 
-  console.log('Network          :', network.name, `(chainId=${chainId})`);
+  console.log('Network          :', net.name, `(chainId=${chainId})`);
   console.log('Signer           :', signer.address);
   console.log('L2 JINN token    :', l2Jinn);
   console.log('Distributor      :', distributorAddress);

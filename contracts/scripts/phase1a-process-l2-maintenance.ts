@@ -1,5 +1,7 @@
-import { ethers } from "hardhat";
-import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers";
+import { network } from "hardhat";
+import { ethers } from "ethers";
+import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
 
 interface MaintenanceConfig {
   data: string;
@@ -47,8 +49,9 @@ export function resolveMaintenanceConfig(
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const config = resolveMaintenanceConfig();
   const targetDispenser = new ethers.Contract(artifacts.targetDispenserL2, TARGET_DISPENSER_ABI, signer);
 
@@ -62,7 +65,7 @@ async function main() {
   await tx.wait();
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

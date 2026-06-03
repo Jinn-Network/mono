@@ -42,9 +42,18 @@
  *            d. VoteWeighting.changeDispenser(dispenser)
  */
 
-import { ethers } from "hardhat";
-import { Signer, Contract } from "ethers";
-import type { Phase1aTimingProfile } from "./phase1a-rollout-helpers";
+import { ethers as baseEthers, Signer, Contract } from "ethers";
+import type { network } from "hardhat";
+import type { Phase1aTimingProfile } from "./phase1a-rollout-helpers.js";
+
+/**
+ * Under Hardhat 3 there is no module-scope `ethers`. `deployL1Stack` receives
+ * the connection's `ethers` (which carries `getContractFactory`) as its first
+ * argument; callers obtain it from `await network.connect()`. Module-scope
+ * config constants use only pure ethers utilities (`parseEther`, `ZeroAddress`,
+ * `zeroPadValue`), so they read those from the bare `ethers` package.
+ */
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -116,12 +125,12 @@ export const DEFAULT_DEPLOY_CONFIG: DeployConfig = {
   votePeriodSeconds: 604800,
   weightVoteDelaySeconds: 864000,
   voteCheckpointHorizon: 250,
-  retainer: ethers.zeroPadValue("0x01", 32), // arbitrary non-zero bytes32
+  retainer: baseEthers.zeroPadValue("0x01", 32), // arbitrary non-zero bytes32
   maxNumClaimingEpochs: 10,
   maxNumStakingTargets: 100,
   defaultMinStakingWeight: 100, // 1%
-  defaultMaxStakingIncentive: ethers.parseEther("100").toString(), // 100 JINN
-  donatorBlacklist: ethers.ZeroAddress,
+  defaultMaxStakingIncentive: baseEthers.parseEther("100").toString(), // 100 JINN
+  donatorBlacklist: baseEthers.ZeroAddress,
 };
 
 // ---------------------------------------------------------------------------
@@ -131,11 +140,14 @@ export const DEFAULT_DEPLOY_CONFIG: DeployConfig = {
 /**
  * Deploys the full Jinn L1 tokenomics stack in the correct order.
  *
+ * @param ethers    The connection's ethers (from `await network.connect()`),
+ *                  carrying `getContractFactory`.
  * @param deployer  Signer that will own all contracts initially.
  * @param config    Deployment parameters (epoch length, staking params, etc.).
  * @returns All deployed contract instances.
  */
 export async function deployL1Stack(
+  ethers: HardhatEthers,
   deployer: Signer,
   config: DeployConfig = DEFAULT_DEPLOY_CONFIG
 ): Promise<Phase1aDeployment> {

@@ -1,8 +1,13 @@
-import { ethers } from "hardhat";
+import { network } from "hardhat";
+import { ethers } from "ethers";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers";
+import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
+type HardhatProvider = HardhatEthers["provider"];
 
 const SAFE_EXECUTION_GAS_LIMIT = 2_000_000n;
 
@@ -84,8 +89,8 @@ function isSameAddress(lhs: string, rhs: string) {
   return ethers.getAddress(lhs) === ethers.getAddress(rhs);
 }
 
-async function loadSafeInfo(owner: string): Promise<SafeInfo | null> {
-  const safe = new ethers.Contract(owner, SAFE_ABI, ethers.provider);
+async function loadSafeInfo(provider: HardhatProvider, owner: string): Promise<SafeInfo | null> {
+  const safe = new ethers.Contract(owner, SAFE_ABI, provider);
 
   try {
     const [owners, threshold, nonce] = (await Promise.all([
@@ -104,8 +109,8 @@ async function loadSafeInfo(owner: string): Promise<SafeInfo | null> {
   }
 }
 
-async function buildCandidateSigners(): Promise<CandidateSigner[]> {
-  const [defaultSigner] = await ethers.getSigners();
+async function buildCandidateSigners(hh: HardhatEthers): Promise<CandidateSigner[]> {
+  const [defaultSigner] = await hh.getSigners();
   const defaultAddress = await defaultSigner.getAddress();
   const candidates: CandidateSigner[] = [
     {
@@ -118,9 +123,9 @@ async function buildCandidateSigners(): Promise<CandidateSigner[]> {
   return candidates;
 }
 
-async function loadConfiguredSafeOwnerSigner(config: ClaimL2Config): Promise<CandidateSigner | null> {
+async function loadConfiguredSafeOwnerSigner(provider: HardhatProvider, config: ClaimL2Config): Promise<CandidateSigner | null> {
   if (config.safeOwnerPrivateKey) {
-    const privateKeyWallet = new ethers.Wallet(config.safeOwnerPrivateKey, ethers.provider);
+    const privateKeyWallet = new ethers.Wallet(config.safeOwnerPrivateKey, provider);
     return {
       signer: privateKeyWallet,
       address: ethers.getAddress(privateKeyWallet.address),
@@ -138,7 +143,7 @@ async function loadConfiguredSafeOwnerSigner(config: ClaimL2Config): Promise<Can
   }
 
   const keystoreJson = fs.readFileSync(config.safeOwnerKeystorePath, "utf8");
-  const keystoreWallet = (await ethers.Wallet.fromEncryptedJson(keystoreJson, password)).connect(ethers.provider);
+  const keystoreWallet = (await ethers.Wallet.fromEncryptedJson(keystoreJson, password)).connect(provider);
   return {
     signer: keystoreWallet,
     address: ethers.getAddress(keystoreWallet.address),
@@ -150,14 +155,14 @@ function pickSafeSigner(candidates: CandidateSigner[], safeOwners: string[]): Ca
   return candidates.find((candidate) => safeOwners.some((owner) => isSameAddress(owner, candidate.address)));
 }
 
-async function resolveSafeSigner(config: ClaimL2Config, safeOwners: string[]): Promise<CandidateSigner | undefined> {
-  const candidates = await buildCandidateSigners();
+async function resolveSafeSigner(hh: HardhatEthers, config: ClaimL2Config, safeOwners: string[]): Promise<CandidateSigner | undefined> {
+  const candidates = await buildCandidateSigners(hh);
   const directMatch = pickSafeSigner(candidates, safeOwners);
   if (directMatch) {
     return directMatch;
   }
 
-  const configuredSigner = await loadConfiguredSafeOwnerSigner(config);
+  const configuredSigner = await loadConfiguredSafeOwnerSigner(hh.provider, config);
   if (!configuredSigner) {
     return undefined;
   }
@@ -165,14 +170,14 @@ async function resolveSafeSigner(config: ClaimL2Config, safeOwners: string[]): P
   return safeOwners.some((owner) => isSameAddress(owner, configuredSigner.address)) ? configuredSigner : undefined;
 }
 
-async function resolveDirectOwnerSigner(config: ClaimL2Config, owner: string): Promise<CandidateSigner | undefined> {
-  const candidates = await buildCandidateSigners();
+async function resolveDirectOwnerSigner(hh: HardhatEthers, config: ClaimL2Config, owner: string): Promise<CandidateSigner | undefined> {
+  const candidates = await buildCandidateSigners(hh);
   const directMatch = candidates.find((candidate) => isSameAddress(candidate.address, owner));
   if (directMatch) {
     return directMatch;
   }
 
-  const configuredSigner = await loadConfiguredSafeOwnerSigner(config);
+  const configuredSigner = await loadConfiguredSafeOwnerSigner(hh.provider, config);
   if (!configuredSigner) {
     return undefined;
   }
@@ -185,6 +190,7 @@ function formatRewardSummary(label: string, value: bigint) {
 }
 
 async function claimAsSafe(
+  provider: HardhatProvider,
   config: ClaimL2Config,
   serviceInfo: ServiceInfo,
   safeInfo: SafeInfo,
@@ -199,7 +205,7 @@ async function claimAsSafe(
   }
 
   const safe = new ethers.Contract(serviceInfo.owner, SAFE_ABI, candidate.signer);
-  const staking = new ethers.Contract(stakingAddress, STAKING_ABI, ethers.provider);
+  const staking = new ethers.Contract(stakingAddress, STAKING_ABI, provider);
   const claimData = staking.interface.encodeFunctionData(config.mode, [config.serviceId]);
 
   console.log(`Execution:    Safe owner via ${candidate.source}`);
@@ -253,11 +259,13 @@ async function claimAsSafe(
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
+  const provider = hh.provider;
   const artifacts = loadPhase1aArtifactsFromDisk();
   const config = resolveClaimL2Config();
-  const staking = new ethers.Contract(artifacts.stakingTokenL2, STAKING_ABI, ethers.provider);
+  const staking = new ethers.Contract(artifacts.stakingTokenL2, STAKING_ABI, provider);
   const serviceInfo = (await staking.getServiceInfo(config.serviceId)) as ServiceInfo;
-  const safeInfo = await loadSafeInfo(serviceInfo.owner);
+  const safeInfo = await loadSafeInfo(provider, serviceInfo.owner);
   const calculatedReward = (await staking.calculateStakingReward(config.serviceId)) as bigint;
 
   console.log(`Staking:      ${artifacts.stakingTokenL2}`);
@@ -275,9 +283,9 @@ async function main() {
 
   if (safeInfo) {
     console.log("Ownership:    Safe-owned service");
-    const safeSigner = await resolveSafeSigner(config, safeInfo.owners);
+    const safeSigner = await resolveSafeSigner(hh, config, safeInfo.owners);
     if (!safeSigner) {
-      const candidates = await buildCandidateSigners();
+      const candidates = await buildCandidateSigners(hh);
       const candidateSummary = candidates.map((candidate) => `${candidate.address} (${candidate.source})`).join(", ");
       const keystoreHint =
         fs.existsSync(config.safeOwnerKeystorePath) && !process.env.JINN_PASSWORD
@@ -289,14 +297,14 @@ async function main() {
       );
     }
 
-    await claimAsSafe(config, serviceInfo, safeInfo, safeSigner, artifacts.stakingTokenL2);
+    await claimAsSafe(provider, config, serviceInfo, safeInfo, safeSigner, artifacts.stakingTokenL2);
     return;
   }
 
   console.log("Ownership:    Direct EOA-owned service");
-  const directSigner = await resolveDirectOwnerSigner(config, serviceInfo.owner);
+  const directSigner = await resolveDirectOwnerSigner(hh, config, serviceInfo.owner);
   if (!directSigner) {
-    const candidates = await buildCandidateSigners();
+    const candidates = await buildCandidateSigners(hh);
     const candidateSummary = candidates.map((candidate) => `${candidate.address} (${candidate.source})`).join(", ");
     const keystoreHint =
       fs.existsSync(config.safeOwnerKeystorePath) && !process.env.JINN_PASSWORD
@@ -322,7 +330,7 @@ async function main() {
   await tx.wait();
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

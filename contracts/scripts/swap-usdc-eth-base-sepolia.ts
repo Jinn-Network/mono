@@ -17,6 +17,7 @@
 import * as dotenv from "dotenv";
 import * as path from "path";
 import { Contract, JsonRpcProvider, Wallet, ethers } from "ethers";
+import { isRunEntry } from "./lib/run-entry.js";
 
 dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
@@ -263,7 +264,7 @@ async function main() {
   console.log("Δ ETH (wei):", (ethAfter - ethBefore).toString());
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main().catch((e) => {
     console.error(e);
     process.exit(1);

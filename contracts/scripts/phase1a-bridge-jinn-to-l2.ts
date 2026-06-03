@@ -1,5 +1,7 @@
-import { ethers } from "hardhat";
-import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers";
+import { network } from "hardhat";
+import { ethers } from "ethers";
+import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
 
 interface BridgeToL2Config {
   recipient: string;
@@ -40,8 +42,9 @@ export function resolveBridgeToL2Config(
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const config = resolveBridgeToL2Config(signer.address);
   const bridgeAddress = process.env.L1_STANDARD_BRIDGE_PROXY ?? "0xfd0Bf71F60660E2f608ed56e1659C450eB113120";
 
@@ -84,7 +87,7 @@ async function main() {
   await tx.wait();
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

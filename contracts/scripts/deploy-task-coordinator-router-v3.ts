@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Deploy the clean-break TaskCoordinator + JinnRouterV3 stack.
  *
@@ -22,15 +23,17 @@
  *   DEPLOYER_PRIVATE_KEY           live deployer
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer, TransactionRequest } from "ethers";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { ethers as ethersLib, JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
   getPhase1aArtifactSuffix,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 const LOCAL_NETWORKS = new Set(["hardhat", "localhost"]);
 const DEFAULT_MECH_ARTIFACT = "deployment-phase1b-mech-baseSepolia-fast.json";
@@ -47,7 +50,7 @@ function isLocalNetwork(networkName: string): boolean {
   return LOCAL_NETWORKS.has(networkName);
 }
 
-async function getDeployerSigner(networkName: string): Promise<Signer> {
+async function getDeployerSigner(ethers: HardhatEthers, networkName: string): Promise<Signer> {
   if (isLocalNetwork(networkName)) {
     const [deployer] = await ethers.getSigners();
     return deployer;
@@ -66,8 +69,8 @@ function liveL2TxOverrides(): TransactionRequest {
   const maxFeeGwei = process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2";
   const prioGwei = process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1";
   return {
-    maxFeePerGas: ethers.parseUnits(maxFeeGwei, "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(prioGwei, "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(maxFeeGwei, "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(prioGwei, "gwei"),
   };
 }
 
@@ -127,7 +130,7 @@ function readArtifactAddress(
     contracts?: Record<string, string | undefined>;
   };
   const address = artifact.contracts?.[contractKey];
-  if (!address || !ethers.isAddress(address)) {
+  if (!address || !ethersLib.isAddress(address)) {
     throw new Error(
       `${artifactPath} is missing a valid contracts.${contractKey}. Got: ${address}`,
     );
@@ -150,7 +153,7 @@ function resolveLiveAddress(params: {
   for (const envName of params.directEnvNames) {
     const raw = process.env[envName]?.trim();
     if (raw) {
-      if (!ethers.isAddress(raw)) {
+      if (!ethersLib.isAddress(raw)) {
         throw new Error(`Invalid ${envName}: ${raw}`);
       }
       return { address: raw, source: envName };
@@ -175,11 +178,12 @@ function resolveLiveAddress(params: {
 }
 
 async function main() {
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
+  const { ethers } = await network.connect();
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
   const normalizedNetwork = normalizeNetworkName(networkName);
   const local = isLocalNetwork(networkName);
-  const deployer = await getDeployerSigner(networkName);
+  const deployer = await getDeployerSigner(ethers, networkName);
   const deployerAddress = await deployer.getAddress();
   const balanceProvider =
     deployer.provider ?? (local ? ethers.provider : undefined);
@@ -193,7 +197,7 @@ async function main() {
   }
 
   console.log("=== TaskCoordinator + JinnRouterV3 Deployment ===");
-  console.log(`Network:  ${normalizedNetwork} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${normalizedNetwork} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployerAddress}`);
   console.log(`Owner:    ${finalOwner}`);
   console.log(
@@ -483,7 +487,7 @@ async function main() {
   const artifactName = `deployment-task-coordinator-router-v3-${normalizedNetwork}${suffix}.json`;
   const output = {
     network: normalizedNetwork,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployerAddress,
     owner: finalOwner,
     deployedAt: new Date().toISOString(),
@@ -510,7 +514,7 @@ async function main() {
   console.log(`\nDeployment artifact written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

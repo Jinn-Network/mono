@@ -8,9 +8,11 @@
  *   npx hardhat run scripts/validate-phase1a.ts
  */
 
-import { ethers } from "hardhat";
-import { deployL1Stack, DEFAULT_DEPLOY_CONFIG } from "./lib/deploy-helpers";
-import { deployL2Stack } from "./deploy-phase1a-l2";
+import { network } from "hardhat";
+import { deployL1Stack, DEFAULT_DEPLOY_CONFIG } from "./lib/deploy-helpers.js";
+import { deployL2Stack } from "./deploy-phase1a-l2.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -26,7 +28,7 @@ function fail(step: string, err: unknown): never {
   process.exit(1);
 }
 
-async function increaseTime(seconds: number) {
+async function increaseTime(ethers: HardhatEthers, seconds: number) {
   await ethers.provider.send("evm_increaseTime", [seconds]);
   await ethers.provider.send("evm_mine", []);
 }
@@ -36,6 +38,7 @@ async function increaseTime(seconds: number) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  const { ethers } = await network.connect();
   const [deployer] = await ethers.getSigners();
   const deployerAddress = await deployer.getAddress();
 
@@ -47,7 +50,7 @@ async function main() {
   let l1: Awaited<ReturnType<typeof deployL1Stack>>;
   try {
     process.stdout.write("Step 1: Deploying L1 stack...     ");
-    l1 = await deployL1Stack(deployer, DEFAULT_DEPLOY_CONFIG);
+    l1 = await deployL1Stack(ethers, deployer, DEFAULT_DEPLOY_CONFIG);
     const contractCount = Object.keys(l1).length;
     pass("", `(${contractCount} contracts)`);
   } catch (e) {
@@ -63,7 +66,7 @@ async function main() {
     // Suppress the verbose output from deployL2Stack by temporarily redirecting
     // (we just capture the result — console.log in the helper still fires but
     //  that's acceptable for a validation script)
-    l2 = await deployL2Stack(deployer);
+    l2 = await deployL2Stack(ethers, deployer);
     const contractCount = [
       l2.jinnToken,
       l2.serviceRegistry,
@@ -165,7 +168,7 @@ async function main() {
     const epochCounterBefore = await l1.tokenomics.epochCounter();
 
     // Advance time by epochLen + 1 second (MIN_EPOCH_LENGTH = 864000 = 10 days)
-    await increaseTime(DEFAULT_DEPLOY_CONFIG.epochLen + 1);
+    await increaseTime(ethers, DEFAULT_DEPLOY_CONFIG.epochLen + 1);
 
     const tx = await l1.tokenomics.checkpoint();
     await tx.wait();

@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * deploy-jinn-mvi-l1.ts — Phase A5 of the Jinn v0 MVI.
  *
@@ -56,7 +57,7 @@
  *   deployment-jinn-mvi-l1-{network}{-fast?}.json
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -78,7 +79,9 @@ import {
   resolveJinnMviTimingProfileForChain,
   resolveJinnMviMessengerMode,
   resolveCanonicalMessengerWiring,
-} from "./lib/jinn-mvi-helpers";
+} from "./lib/jinn-mvi-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 /**
  * Parameters that fully specify how a JinnDistributor messenger is
@@ -134,6 +137,7 @@ export interface JinnMviL1Deployment {
  * address — the caller wires it into the JinnDistributor.
  */
 async function deployMessenger(
+  ethers: HardhatEthers,
   signer: import("ethers").Signer,
   params: MessengerDeployParams,
 ): Promise<{ address: string; mode: JinnMviMessengerMode }> {
@@ -162,6 +166,7 @@ async function deployMessenger(
 }
 
 export async function deployJinnMviL1(
+  ethers: HardhatEthers,
   signer: import("ethers").Signer,
   config: JinnMviGovernanceConfig,
   options: {
@@ -239,7 +244,7 @@ export async function deployJinnMviL1(
   // Step 4: Messenger — `mock` for fast-test / dev, `canonical` for live
   // OP-Stack message-passing finality.
   // -----------------------------------------------------------------------
-  const messenger = await deployMessenger(signer, messengerParams);
+  const messenger = await deployMessenger(ethers, signer, messengerParams);
 
   // -----------------------------------------------------------------------
   // Step 5: JinnDistributor — initialOwner = deployer (so we can call the
@@ -364,6 +369,7 @@ export async function deployJinnMviL1(
  * §3.2 ("post-deploy ceremony reads back from chain").
  */
 export async function verifyDeploy(
+  ethers: HardhatEthers,
   deployment: JinnMviL1Deployment,
   deployerAddress: string,
   renounceAdmin: boolean,
@@ -461,10 +467,11 @@ export async function verifyDeploy(
 }
 
 async function main() {
+  const { ethers } = await network.connect();
   const [deployer] = await ethers.getSigners();
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
-  const chainId = Number(network.chainId);
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
+  const chainId = Number(net.chainId);
 
   // Fix 8: chainId gate. Refuse to deploy on chains we have not signed
   // off on (e.g. mainnet, Base, Polygon) unless the captain explicitly
@@ -522,7 +529,7 @@ async function main() {
   const tokenSymbol = process.env.JINN_TOKEN_SYMBOL ?? (isTestnet ? "tJINN" : "JINN");
 
   console.log("=== Jinn v0 MVI L1 Deployment ===");
-  console.log(`Network:        ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:        ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer:       ${deployer.address}`);
   console.log(
     `Balance:        ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH`,
@@ -557,7 +564,7 @@ async function main() {
   console.log(
     "Deploying JINN, TimelockController, JinnGovernor, Messenger, JinnDistributor…\n",
   );
-  const deployment = await deployJinnMviL1(deployer, config, {
+  const deployment = await deployJinnMviL1(ethers, deployer, config, {
     messenger: messengerParams,
     distributorConfig,
     mockMessengerOwner,
@@ -568,7 +575,7 @@ async function main() {
 
   // Fix 12: post-deploy sanity assertions, before writing the artifact.
   // Throws on the first mismatch. Required by threat model §3.2.
-  await verifyDeploy(deployment, deployer.address, renounceAdmin, {
+  await verifyDeploy(ethers, deployment, deployer.address, renounceAdmin, {
     tokenName,
     tokenSymbol,
   });
@@ -616,7 +623,7 @@ async function main() {
 
   const output = {
     network: networkName,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
     config: {
@@ -659,7 +666,7 @@ async function main() {
   console.log(`\nDeployment written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

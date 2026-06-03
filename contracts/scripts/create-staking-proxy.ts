@@ -1,8 +1,9 @@
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import { JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 
 async function main() {
+  const { ethers } = await network.connect();
   const privateKey = process.env.DEPLOYER_PRIVATE_KEY!;
   const deployer = new Wallet(privateKey, new JsonRpcProvider("https://sepolia.base.org"));
   console.log("Deployer:", deployer.address);

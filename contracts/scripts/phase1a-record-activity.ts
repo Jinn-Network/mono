@@ -1,5 +1,7 @@
-import { ethers } from "hardhat";
-import { loadJson, resolvePhase1aArtifactPaths } from "./lib/phase1a-rollout-helpers";
+import { network } from "hardhat";
+import { ethers } from "ethers";
+import { loadJson, resolvePhase1aArtifactPaths } from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
 
 interface DeploymentArtifact {
   contracts: Record<string, string | undefined>;
@@ -40,6 +42,7 @@ export function resolveRecordActivityConfig(
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const paths = resolvePhase1aArtifactPaths();
   const deployment = loadJson<DeploymentArtifact>(paths.l2);
   const activityCheckerAddress = deployment.contracts.activityChecker;
@@ -48,7 +51,7 @@ async function main() {
     throw new Error("L2 deployment artifact must include activityChecker and stakingToken.");
   }
 
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const config = resolveRecordActivityConfig();
   let multisig = config.multisig;
 
@@ -82,7 +85,7 @@ async function main() {
   }
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

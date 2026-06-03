@@ -1,7 +1,8 @@
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import { Wallet, JsonRpcProvider } from "ethers";
 
 async function main() {
+  const { ethers } = await network.connect();
   const deployer = new Wallet(process.env.DEPLOYER_PRIVATE_KEY!, new JsonRpcProvider("https://sepolia.base.org"));
   
   const Factory = await ethers.getContractFactory("ExternalStakingDistributor", deployer);

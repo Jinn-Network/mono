@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Deploy the Jinn Phase 1b mech marketplace stack on Base Sepolia.
  *
@@ -18,15 +19,17 @@
  * fresh via CREATE2 (new MechFixedPriceNative{salt:...}), so no pre-deployed template is needed.
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer, TransactionRequest } from "ethers";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { ethers as ethersLib, JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
   getPhase1aArtifactSuffix,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -34,7 +37,7 @@ const NATIVE_PAYMENT_TYPE = "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb
 const MARKETPLACE_FEE = 0;
 const MIN_RESPONSE_TIMEOUT = 60;
 const MAX_RESPONSE_TIMEOUT = 300;
-const LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
+const LIVENESS_RATIO = ethersLib.parseEther("0.001"); // 1e15
 
 // Default OLAS ServiceRegistryL2 on Base Sepolia
 const DEFAULT_SERVICE_REGISTRY = "0x31D3202d8744B16A120117A053459DDFAE93c855";
@@ -49,7 +52,7 @@ function isLocalNetwork(networkName: string): boolean {
   return LOCAL_NETWORKS.has(networkName);
 }
 
-async function getMechDeployerSigner(networkName: string): Promise<Signer> {
+async function getMechDeployerSigner(ethers: HardhatEthers, networkName: string): Promise<Signer> {
   if (isLocalNetwork(networkName)) {
     const [deployer] = await ethers.getSigners();
     return deployer;
@@ -68,8 +71,8 @@ function liveL2TxOverrides(): TransactionRequest {
   const maxFeeGwei = process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2";
   const prioGwei = process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1";
   return {
-    maxFeePerGas: ethers.parseUnits(maxFeeGwei, "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(prioGwei, "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(maxFeeGwei, "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(prioGwei, "gwei"),
   };
 }
 
@@ -99,9 +102,10 @@ function withGas(
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
-  const deployer = await getMechDeployerSigner(networkName);
+  const { ethers } = await network.connect();
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
+  const deployer = await getMechDeployerSigner(ethers, networkName);
   const deployerAddress = await deployer.getAddress();
   const balanceProvider = deployer.provider ?? (isLocalNetwork(networkName) ? ethers.provider : undefined);
   if (!balanceProvider) {
@@ -109,7 +113,7 @@ async function main() {
   }
 
   console.log("=== Jinn Phase 1b Mech Marketplace Deployment ===");
-  console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployerAddress}`);
   console.log(`Balance:  ${ethers.formatEther(await balanceProvider.getBalance(deployerAddress))} ETH`);
   console.log();
@@ -398,7 +402,7 @@ async function main() {
 
   const output = {
     network: normalizedNetwork,
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployerAddress,
     deployedAt: new Date().toISOString(),
     config: {
@@ -427,7 +431,7 @@ async function main() {
   console.log(`\nDeployment artifact written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

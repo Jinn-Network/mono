@@ -1,5 +1,7 @@
-import { ethers } from "hardhat";
-import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers";
+import { network } from "hardhat";
+import { ethers } from "ethers";
+import { loadPhase1aArtifactsFromDisk } from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
 
 interface DepositRewardsConfig {
   stakingToken: string;
@@ -39,8 +41,9 @@ export function resolveDepositRewardsConfig(
 }
 
 async function main() {
+  const { ethers: hh } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
-  const [signer] = await ethers.getSigners();
+  const [signer] = await hh.getSigners();
   const config = resolveDepositRewardsConfig(artifacts.stakingTokenL2);
   const token = new ethers.Contract(artifacts.jinnL2, ERC20_ABI, signer);
   const staking = new ethers.Contract(config.stakingToken, STAKING_ABI, signer);
@@ -82,7 +85,7 @@ async function main() {
   console.log(`Staking balance after:    ${ethers.formatEther(stakingBalanceAfter)} JINN`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

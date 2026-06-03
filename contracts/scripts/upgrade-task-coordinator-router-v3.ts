@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Hard-upgrade the deployed TaskCoordinator + JinnRouterV3 stack in-place.
  *
@@ -7,15 +8,17 @@
  * proxy deployment.
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { TransactionRequest } from "ethers";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { ethers as ethersLib, JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
   getPhase1aArtifactSuffix,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 const PROXY_ABI = [
   "function getAdmin() view returns (address)",
@@ -48,8 +51,8 @@ function normalizeNetworkName(networkName: string): string {
 
 function liveL2TxOverrides(): TransactionRequest {
   return {
-    maxFeePerGas: ethers.parseUnits(process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2", "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1", "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2", "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1", "gwei"),
   };
 }
 
@@ -64,9 +67,9 @@ function withGas(tx: TransactionRequest, kind: "standard" | "call"): Transaction
   return { ...tx, gasLimit: deployGasLimit(kind) };
 }
 
-async function getDeployer() {
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
+async function getDeployer(ethers: HardhatEthers) {
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
   if (networkName === "hardhat" || networkName === "localhost") {
     const [deployer] = await ethers.getSigners();
     return deployer;
@@ -92,17 +95,18 @@ function deploymentPath(networkName: string): string {
 }
 
 function requireAddress(label: string, value: unknown): string {
-  if (typeof value !== "string" || !ethers.isAddress(value)) {
+  if (typeof value !== "string" || !ethersLib.isAddress(value)) {
     throw new Error(`${label} is missing or invalid: ${String(value)}`);
   }
   return value;
 }
 
 async function main() {
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
+  const { ethers } = await network.connect();
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
   const normalizedNetwork = normalizeNetworkName(networkName);
-  const deployer = await getDeployer();
+  const deployer = await getDeployer(ethers);
   const deployerAddress = await deployer.getAddress();
   const provider = deployer.provider ?? ethers.provider;
   const txOverrides = networkName === "hardhat" || networkName === "localhost" ? {} : liveL2TxOverrides();
@@ -122,7 +126,7 @@ async function main() {
   const marketplace = requireAddress("contracts.mechMarketplace", contracts.mechMarketplace);
 
   console.log("=== TaskCoordinator + JinnRouterV3 Hard Upgrade ===");
-  console.log(`Network:       ${normalizedNetwork} (chainId: ${network.chainId})`);
+  console.log(`Network:       ${normalizedNetwork} (chainId: ${net.chainId})`);
   console.log(`Deployer:      ${deployerAddress}`);
   console.log(`Artifact:      ${artifactPath}`);
   console.log(`Coordinator:   ${taskCoordinator}`);
@@ -269,7 +273,7 @@ async function main() {
   console.log(`\nUpdated deployment artifact: ${artifactPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

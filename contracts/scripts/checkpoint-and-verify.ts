@@ -16,7 +16,7 @@
  *   7. Prints full health report
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 // ─── L1 Contract Addresses (Sepolia — live fast deployment) ────────────────
 // Sourced from deployment-phase1a-sepolia-fast.json (2026-04-08 redeploy).
@@ -51,6 +51,7 @@ const TREASURY_ABI = [
 ];
 
 async function main() {
+  const { ethers } = await network.connect();
   const [signer] = await ethers.getSigners();
   const provider = ethers.provider;
 

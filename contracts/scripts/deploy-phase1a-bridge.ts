@@ -1,10 +1,12 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Deploy the Jinn Phase 1a bridge contracts across Sepolia (L1) and Base
  * Sepolia (L2) using the Phase 1a deployment artifacts as the source of truth.
  */
 
-import { ethers, network } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
+import { ethers as ethersLib } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -12,7 +14,9 @@ import {
   getL1DeploymentArtifactName,
   getL2DeploymentArtifactName,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 const OP_STACK_SEPOLIA = {
   L1StandardBridgeProxy: "0xfd0Bf71F60660E2f608ed56e1659C450eB113120",
@@ -84,8 +88,8 @@ export function bridgeTxFees(chain: "l1" | "l2", env: EnvMap = process.env): Bri
   const defaultPrio = chain === "l1" ? "2" : "2";
 
   return {
-    maxFeePerGas: ethers.parseUnits(env[maxFeeKey] ?? defaultMax, "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(env[prioKey] ?? defaultPrio, "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(env[maxFeeKey] ?? defaultMax, "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(env[prioKey] ?? defaultPrio, "gwei"),
   };
 }
 
@@ -172,7 +176,7 @@ function requireAddress(value: string | undefined, label: string): string {
     throw new Error(`Missing required bridge input: ${label}.`);
   }
 
-  if (!ethers.isAddress(value)) {
+  if (!ethersLib.isAddress(value)) {
     throw new Error(`Invalid address for ${label}: ${value}`);
   }
 
@@ -224,6 +228,7 @@ export function resolveBridgeDeployConfig({
 }
 
 export async function deployBridgeContracts(
+  ethers: HardhatEthers,
   l1Deployer: Signer,
   l2Deployer: Signer,
   config: BridgeDeployConfig,
@@ -289,8 +294,11 @@ export async function deployBridgeContracts(
   };
 }
 
-async function getBridgeDeployers(): Promise<BridgeDeployers> {
-  const executionMode = resolveBridgeExecutionMode(network.name);
+async function getBridgeDeployers(
+  ethers: HardhatEthers,
+  networkName: string,
+): Promise<BridgeDeployers> {
+  const executionMode = resolveBridgeExecutionMode(networkName);
   if (executionMode === "local") {
     const [deployer] = await ethers.getSigners();
     return {
@@ -312,14 +320,16 @@ async function getBridgeDeployers(): Promise<BridgeDeployers> {
 
   return {
     mode: "remote" as const,
-    l1Deployer: new ethers.Wallet(privateKey, new ethers.JsonRpcProvider(sepoliaRpcUrl)),
-    l2Deployer: new ethers.Wallet(privateKey, new ethers.JsonRpcProvider(baseSepoliaRpcUrl)),
+    l1Deployer: new ethersLib.Wallet(privateKey, new ethersLib.JsonRpcProvider(sepoliaRpcUrl)),
+    l2Deployer: new ethersLib.Wallet(privateKey, new ethersLib.JsonRpcProvider(baseSepoliaRpcUrl)),
     l1RpcUrl: sepoliaRpcUrl,
     l2RpcUrl: baseSepoliaRpcUrl,
   };
 }
 
 async function main() {
+  const connection = await network.connect();
+  const { ethers } = connection;
   const timingProfile = resolvePhase1aTimingProfile();
   const artifactPaths = {
     l1: process.env.PHASE1A_L1_DEPLOYMENT ?? getL1DeploymentArtifactName(timingProfile, "sepolia"),
@@ -331,7 +341,7 @@ async function main() {
   const l1Deployment = loadJson<DeploymentArtifact>(artifactPaths.l1);
   const l2Deployment = loadJson<DeploymentArtifact>(artifactPaths.l2);
   const config = resolveBridgeDeployConfig({ l1Deployment, l2Deployment });
-  const deployers = await getBridgeDeployers();
+  const deployers = await getBridgeDeployers(ethers, connection.networkName);
   const [l1Network, l2Network] = await Promise.all([
     deployers.l1Deployer.provider!.getNetwork(),
     deployers.l2Deployer.provider!.getNetwork(),
@@ -368,6 +378,7 @@ async function main() {
 
   console.log("Deploying bridge contracts...\n");
   const deployment = await deployBridgeContracts(
+    ethers,
     deployers.l1Deployer,
     deployers.l2Deployer,
     config,
@@ -399,7 +410,7 @@ async function main() {
   console.log(`\nDeployment written to: ${outPath}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

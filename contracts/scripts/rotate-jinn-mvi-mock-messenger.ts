@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * rotate-jinn-mvi-mock-messenger.ts
  *
@@ -20,14 +21,17 @@
  *                                     artifacts that exist are updated
  */
 
-import { ethers, network } from "hardhat";
+import { network } from "hardhat";
+import { ethers as ethersLib } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
   CHAIN_ID_HARDHAT,
   CHAIN_ID_SEPOLIA,
   assertChainIdAllowed,
-} from "./lib/jinn-mvi-helpers";
+} from "./lib/jinn-mvi-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 const DISTRIBUTOR_FQN = "src/jinn/distribution/JinnDistributor.sol:JinnDistributor";
 const MOCK_MESSENGER_FQN = "src/jinn/cross-chain/MockMessenger.sol:MockMessenger";
@@ -57,8 +61,8 @@ function pickAddress(root: unknown, paths: string[][]): string | undefined {
     for (const segment of segments) {
       cursor = asRecord(cursor)[segment];
     }
-    if (typeof cursor === "string" && ethers.isAddress(cursor)) {
-      return ethers.getAddress(cursor);
+    if (typeof cursor === "string" && ethersLib.isAddress(cursor)) {
+      return ethersLib.getAddress(cursor);
     }
   }
   return undefined;
@@ -93,10 +97,10 @@ function resolveArtifactPaths(networkName: string): string[] {
 function resolveDistributorAddress(artifactPaths: string[]): string {
   const override = process.env.JINN_MVI_DISTRIBUTOR;
   if (override) {
-    if (!ethers.isAddress(override)) {
+    if (!ethersLib.isAddress(override)) {
       throw new Error("JINN_MVI_DISTRIBUTOR must be an EVM address");
     }
-    return ethers.getAddress(override);
+    return ethersLib.getAddress(override);
   }
 
   for (const artifactPath of artifactPaths) {
@@ -118,10 +122,10 @@ function resolveDistributorAddress(artifactPaths: string[]): string {
 function resolveMessengerOwner(deployer: string): string {
   const configured = process.env.JINN_MVI_MOCK_MESSENGER_OWNER;
   if (!configured || configured.trim() === "") return deployer;
-  if (!ethers.isAddress(configured)) {
+  if (!ethersLib.isAddress(configured)) {
     throw new Error("JINN_MVI_MOCK_MESSENGER_OWNER must be an EVM address");
   }
-  return ethers.getAddress(configured);
+  return ethersLib.getAddress(configured);
 }
 
 export function applyMockMessengerRotationArtifact(
@@ -173,6 +177,7 @@ function updateArtifacts(artifactPaths: string[], rotation: MockMessengerRotatio
 }
 
 export async function rotateJinnMviMockMessenger(
+  ethers: HardhatEthers,
   signer: import("ethers").Signer,
   options: {
     distributorAddress: string;
@@ -236,6 +241,9 @@ export async function rotateJinnMviMockMessenger(
 }
 
 async function main(): Promise<void> {
+  const connection = await network.connect();
+  const { ethers } = connection;
+  const networkName = connection.networkName;
   const chain = await ethers.provider.getNetwork();
   const chainId = Number(chain.chainId);
   assertChainIdAllowed({
@@ -246,16 +254,16 @@ async function main(): Promise<void> {
 
   const [deployer] = await ethers.getSigners();
   const deployerAddress = ethers.getAddress(deployer.address);
-  const artifactPaths = resolveArtifactPaths(network.name);
+  const artifactPaths = resolveArtifactPaths(networkName);
   const distributorAddress = resolveDistributorAddress(artifactPaths);
   const messengerOwner = resolveMessengerOwner(deployerAddress);
 
-  console.log(`Network: ${network.name} (${chainId})`);
+  console.log(`Network: ${networkName} (${chainId})`);
   console.log(`Deployer: ${deployerAddress}`);
   console.log(`JinnDistributor: ${distributorAddress}`);
   console.log(`New MockMessenger owner: ${messengerOwner}`);
 
-  const rotation = await rotateJinnMviMockMessenger(deployer, {
+  const rotation = await rotateJinnMviMockMessenger(ethers, deployer, {
     distributorAddress,
     messengerOwner,
   });
@@ -268,7 +276,7 @@ async function main(): Promise<void> {
   updateArtifacts(artifactPaths, rotation);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

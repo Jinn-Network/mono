@@ -1,3 +1,4 @@
+import { isRunEntry } from "./lib/run-entry.js";
 /**
  * Deploy the full stOLAS L1 stack on Sepolia.
  *
@@ -32,15 +33,17 @@
  *   DEPLOYER_PRIVATE_KEY=0x... npx hardhat run scripts/deploy-stolas-l1.ts --network sepolia
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer, TransactionRequest } from "ethers";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { ethers as ethersLib, JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 import {
   getPhase1aArtifactSuffix,
   resolvePhase1aTimingProfile,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // ─── Pre-existing addresses (Sepolia) ───────────────────────────────────────
 
@@ -69,7 +72,7 @@ function isLocalNetwork(networkName: string): boolean {
   return LOCAL_NETWORKS.has(networkName);
 }
 
-async function getDeployerSigner(networkName: string): Promise<Signer> {
+async function getDeployerSigner(ethers: HardhatEthers, networkName: string): Promise<Signer> {
   if (isLocalNetwork(networkName)) {
     const [deployer] = await ethers.getSigners();
     return deployer;
@@ -88,8 +91,8 @@ function liveL1TxOverrides(): TransactionRequest {
   const maxFeeGwei = process.env.SEPOLIA_MAX_FEE_GWEI ?? "20";
   const prioGwei = process.env.SEPOLIA_PRIORITY_FEE_GWEI ?? "2";
   return {
-    maxFeePerGas: ethers.parseUnits(maxFeeGwei, "gwei"),
-    maxPriorityFeePerGas: ethers.parseUnits(prioGwei, "gwei"),
+    maxFeePerGas: ethersLib.parseUnits(maxFeeGwei, "gwei"),
+    maxPriorityFeePerGas: ethersLib.parseUnits(prioGwei, "gwei"),
   };
 }
 
@@ -111,9 +114,10 @@ function withGas(
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const network = await ethers.provider.getNetwork();
-  const networkName = network.name === "unknown" ? "hardhat" : network.name;
-  const deployer = await getDeployerSigner(networkName);
+  const { ethers } = await network.connect();
+  const net = await ethers.provider.getNetwork();
+  const networkName = net.name === "unknown" ? "hardhat" : net.name;
+  const deployer = await getDeployerSigner(ethers, networkName);
   const deployerAddress = await deployer.getAddress();
   const balanceProvider = deployer.provider ?? (isLocalNetwork(networkName) ? ethers.provider : undefined);
   if (!balanceProvider) {
@@ -121,7 +125,7 @@ async function main() {
   }
 
   console.log("=== stOLAS L1 Deployment (Sepolia) ===");
-  console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
+  console.log(`Network:  ${networkName} (chainId: ${net.chainId})`);
   console.log(`Deployer: ${deployerAddress}`);
   console.log(`Balance:  ${ethers.formatEther(await balanceProvider.getBalance(deployerAddress))} ETH`);
   console.log(`L1 JINN:  ${L1_JINN}`);
@@ -388,7 +392,7 @@ async function main() {
 
   const output = {
     network: "sepolia",
-    chainId: Number(network.chainId),
+    chainId: Number(net.chainId),
     deployer: deployerAddress,
     deployedAt: new Date().toISOString(),
     config: {
@@ -428,7 +432,7 @@ async function main() {
   console.log(`   Depository.createAndActivateStakingModels(...)`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {

@@ -1,9 +1,10 @@
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import {
   getTargetPauseStateForStaking,
   isStakingIncentivesEnabled,
   loadPhase1aArtifactsFromDisk,
-} from "./lib/phase1a-rollout-helpers";
+} from "./lib/phase1a-rollout-helpers.js";
+import { isRunEntry } from "./lib/run-entry.js";
 
 const DISPENSER_ABI = [
   "function paused() view returns (uint8)",
@@ -26,6 +27,7 @@ function pauseLabel(value: bigint): string {
 }
 
 async function main() {
+  const { ethers } = await network.connect();
   const artifacts = loadPhase1aArtifactsFromDisk();
   const [signer] = await ethers.getSigners();
   const dispenser = new ethers.Contract(artifacts.dispenserL1, DISPENSER_ABI, signer);
@@ -61,7 +63,7 @@ async function main() {
   console.log(`Updated pause state: ${pauseLabel(after)}`);
 }
 
-if (require.main === module) {
+if (isRunEntry(import.meta.url)) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {
