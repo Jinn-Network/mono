@@ -21,12 +21,12 @@ export type AiUnitsGateWindow = 'block' | 'week';
 
 export interface AiUnitsGateArgs {
   credentialId: string;
-  /** AI units projected for the next claim, or `null` when unknown. */
-  projectedAiUnits: number | null;
-  unitsThisBlock: number;
-  unitsThisWeek: number;
-  capPerBlock: number;
-  capPerWeek: number;
+  /** USD micros projected for the next claim, or `null` when unknown. */
+  projectedUsdMicros: number | null;
+  usdMicrosThisBlock: number;
+  usdMicrosThisWeek: number;
+  capPerBlockUsdMicros: number;
+  capPerWeekUsdMicros: number;
   /** Stable id for the current 6h UTC block — used to dedupe pause logs. */
   blockId: string;
   logger: GateLogger;
@@ -79,23 +79,23 @@ function memoKey(credentialId: string, window: AiUnitsGateWindow): string {
 const warnedUnknownProjection = new Set<string>();
 
 export function gateClaimByAiUnits(args: AiUnitsGateArgs): AiUnitsGateDecision {
-  if (args.projectedAiUnits == null) {
+  if (args.projectedUsdMicros == null) {
     if (!warnedUnknownProjection.has(args.credentialId)) {
       args.logger.warn(
         `[ai-units-gate] ${args.credentialId} projection unknown for this harness/model; ` +
-          'gate is fail-open (proceeding). Add the model to MODEL_COST_TABLE to enable AI-units gating.',
+          'gate is fail-open (proceeding). Add the model to MODEL_COST_TABLE to enable spend gating.',
       );
       warnedUnknownProjection.add(args.credentialId);
     }
     return { proceed: true };
   }
 
-  const projected = args.projectedAiUnits;
-  const blockTotal = args.unitsThisBlock + projected;
-  const weekTotal = args.unitsThisWeek + projected;
+  const projected = args.projectedUsdMicros;
+  const blockTotal = args.usdMicrosThisBlock + projected;
+  const weekTotal = args.usdMicrosThisWeek + projected;
 
-  const overBlock = blockTotal > args.capPerBlock;
-  const overWeek = weekTotal > args.capPerWeek;
+  const overBlock = blockTotal > args.capPerBlockUsdMicros;
+  const overWeek = weekTotal > args.capPerWeekUsdMicros;
 
   if (!overBlock && !overWeek) {
     // Clear memos for this credential when we are below both caps.
@@ -108,10 +108,11 @@ export function gateClaimByAiUnits(args: AiUnitsGateArgs): AiUnitsGateDecision {
   // operator-relevant frame; the weekly cap is the safety net.
   const window: AiUnitsGateWindow = overBlock ? 'block' : 'week';
   const total = window === 'block' ? blockTotal : weekTotal;
-  const cap = window === 'block' ? args.capPerBlock : args.capPerWeek;
+  const cap = window === 'block' ? args.capPerBlockUsdMicros : args.capPerWeekUsdMicros;
   const reason =
-    `AI-units ${window} cap reached for ${args.credentialId} ` +
-    `(${total.toFixed(1)} / ${cap} units; +${projected.toFixed(1)} projected for this claim)`;
+    `Spend ${window} cap reached for ${args.credentialId} ` +
+    `($${(total / 1_000_000).toFixed(4)} / $${(cap / 1_000_000).toFixed(4)}; ` +
+    `+$${(projected / 1_000_000).toFixed(4)} projected for this claim)`;
 
   const key = memoKey(args.credentialId, window);
   // Cross-restart hydration: the first time this process encounters a

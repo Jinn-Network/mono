@@ -20,11 +20,11 @@ describe('gateClaimByAiUnits — under-cap path', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     const r = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 5,
-      unitsThisBlock: 10,
-      unitsThisWeek: 100,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 5,
+      usdMicrosThisBlock: 10,
+      usdMicrosThisWeek: 100,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
@@ -35,11 +35,11 @@ describe('gateClaimByAiUnits — under-cap path', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     const r = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: null,
-      unitsThisBlock: 50,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: null,
+      usdMicrosThisBlock: 50,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
@@ -49,15 +49,15 @@ describe('gateClaimByAiUnits — under-cap path', () => {
 });
 
 describe('gateClaimByAiUnits — over-cap path', () => {
-  it('skips when block sum + projection would exceed capPerBlock', () => {
+  it('skips when block sum + projection would exceed capPerBlockUsdMicros', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     const r = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
@@ -69,15 +69,15 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     expect(logger.warn).toHaveBeenCalledOnce();
   });
 
-  it('skips when week sum + projection would exceed capPerWeek (block OK)', () => {
+  it('skips when week sum + projection would exceed capPerWeekUsdMicros (block OK)', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     const r = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 10,
-      unitsThisWeek: 2790,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 10,
+      usdMicrosThisWeek: 2790,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
@@ -92,11 +92,11 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     const args = {
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     } as const;
@@ -111,22 +111,22 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
     // New block, over-cap again (simulated)
     const r2 = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T18:00:00.000Z',
       logger,
     });
@@ -142,11 +142,11 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     // First daemon lifetime: over-cap encounter writes the persisted row.
     const r1 = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId,
       logger,
     });
@@ -162,11 +162,11 @@ describe('gateClaimByAiUnits — over-cap path', () => {
 
     const r2 = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId,
       logger,
       hasPersistedCapReached,
@@ -183,11 +183,11 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     const blockId = '2026-05-28T12:00:00.000Z';
     gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId,
       logger,
     });
@@ -196,11 +196,11 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     const newBlockId = '2026-05-28T18:00:00.000Z';
     const r2 = gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 60,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 60,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: newBlockId,
       logger,
       hasPersistedCapReached: () => false,
@@ -213,21 +213,21 @@ describe('gateClaimByAiUnits — over-cap path', () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     gateClaimByAiUnits({
       credentialId: 'anthropic:api-key',
-      projectedAiUnits: 50,
-      unitsThisBlock: 80,
-      unitsThisWeek: 200,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 50,
+      usdMicrosThisBlock: 80,
+      usdMicrosThisWeek: 200,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
     const r2 = gateClaimByAiUnits({
       credentialId: 'openai:api-key',
-      projectedAiUnits: 5,
-      unitsThisBlock: 0,
-      unitsThisWeek: 0,
-      capPerBlock: 100,
-      capPerWeek: 2800,
+      projectedUsdMicros: 5,
+      usdMicrosThisBlock: 0,
+      usdMicrosThisWeek: 0,
+      capPerBlockUsdMicros: 100,
+      capPerWeekUsdMicros: 2800,
       blockId: '2026-05-28T12:00:00.000Z',
       logger,
     });
