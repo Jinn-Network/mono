@@ -22,6 +22,10 @@ import { network } from 'hardhat';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+// ESM (package "type":"module" + nodenext) has no CJS `__dirname`; derive it
+// from import.meta (same transform used in test/storage-layout.test.ts).
+const __dirname = import.meta.dirname;
+
 const DEFAULT_L2_JINN = '0xAB9a01cd4A379e36006ec6df2960CF39EF79df63';
 const DEFAULT_DRIP_AMOUNT_ETHER = '100';
 const DEFAULT_DRIP_INTERVAL_SECONDS = 24 * 60 * 60;
