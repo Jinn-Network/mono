@@ -1351,6 +1351,74 @@ describe('parseSolverNetManifestLite (issue #985 — full summary fields)', () =
   });
 });
 
+// ─── MetadataSet solvernet-manifest: enrichment → solverNetManifest ───────────
+// The pure-parser tests above prove parseSolverNetManifestLite; this exercises
+// the end-to-end enrichment write (handlers.ts ~968-982) with enrichEnvelopes:
+// true and a mocked IPFS body, asserting the enriched columns + 'ok' status land.
+
+describe('MetadataSet solvernet-manifest: enrichment → solverNetManifest', () => {
+  const ENRICH_MANIFEST_CID = 'bafymanifestenrich';
+  const SOLVERNET_MANIFEST_BODY = {
+    schemaVersion: 'solvernet.manifest.v1',
+    solverNetId: 'launcher/swe-rebench-v2',
+    network: 'base-sepolia',
+    name: 'SWE-rebench v2',
+    description: 'A coding benchmark SolverNet.',
+    launcher: { safeAddress: '0x' + 'ab'.repeat(20), agentEoa: '0x' + 'cd'.repeat(20), agentId: '5474' },
+    contract: { id: 'swe-rebench-v2', version: 'v1' },
+    solutionPriceWei: '1000000000000000',
+    verdictPriceWei: '500000000000000',
+    openRoles: ['solver', 'evaluator'],
+  };
+
+  it('successful fetch → row has the enriched summary fields + manifestEnrichmentStatus=ok', async () => {
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => SOLVERNET_MANIFEST_BODY,
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 5n,
+          metadataKey: `solvernet-manifest:${ENRICH_MANIFEST_CID}`,
+          metadataValue: lifecyclePayload({ status: 'launched', at: '2026-05-11T00:00:00Z', hash: MANIFEST_HASH }),
+        },
+        { block: 41_600_000n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      pluginPublication,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    const row = db.get(solverNetManifest, { id: ENRICH_MANIFEST_CID });
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      id: ENRICH_MANIFEST_CID,
+      // The 7 enriched summary fields surfaced on the list path...
+      name: 'SWE-rebench v2',
+      network: 'base-sepolia',
+      solutionPriceWei: '1000000000000000',
+      verdictPriceWei: '500000000000000',
+      openRoles: ['solver', 'evaluator'],
+      launcherSafeAddress: '0x' + 'ab'.repeat(20),
+      contractId: 'swe-rebench-v2',
+      contractVersion: 'v1',
+      // ...plus the remaining enriched columns and the status flip.
+      description: 'A coding benchmark SolverNet.',
+      solverNetId: 'launcher/swe-rebench-v2',
+      manifestEnrichmentStatus: 'ok',
+    });
+  });
+});
+
 // ─── parseVerdictEnvelopeLite (pure) ──────────────────────────────────────────
 
 describe('parseVerdictEnvelopeLite', () => {

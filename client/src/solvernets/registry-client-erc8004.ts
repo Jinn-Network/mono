@@ -356,9 +356,13 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     // Step 1: Obtain enriched summaries from the DiscoveryAPI. Post-#985 the
     // indexer persists every summary field (name/network/prices/openRoles/
     // launcher safe / contract id+version) on the solverNetManifest row, so a
-    // single GraphQL query returns the full catalog. Note: listLaunchedSolverNets
-    // does not accept sinceBlock — that was a subgraph optimisation that does
-    // not translate to the abstract interface.
+    // single GraphQL query returns the catalog. Rows the indexer hasn't enriched
+    // yet (or that an old indexer omits) pass through unenriched here — empty
+    // name, '0' prices, zero launcher address; they are not re-enriched via IPFS
+    // on this path. Full fields appear once enrichment lands, or via the
+    // hash-verified getManifest detail path. Note: listLaunchedSolverNets does
+    // not accept sinceBlock — that was a subgraph optimisation that does not
+    // translate to the abstract interface.
     const rawSummaries = await this.discoveryApi.listLaunchedSolverNets(
       args.statusFilter !== undefined ? { status: args.statusFilter } : undefined,
     );

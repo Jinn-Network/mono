@@ -169,6 +169,9 @@ query ListSolverNets($where: solverNetManifestFilter, $limit: Int!) {
 // pre-enrichment field set, safe against an OLD indexer that lacks the
 // enriched columns. The projection fills sentinels for the missing fields and
 // leaves manifestEnrichmentStatus undefined → treated as not-ok → sentinels.
+// These rows surface unenriched on the LIST path (empty name, '0' prices, zero
+// address); they are not re-enriched anywhere — full fields require an indexer
+// that persists the enriched columns, or the hash-verified getManifest detail path.
 const LIST_SOLVER_NETS_QUERY_LEGACY = `
 query ListSolverNetsLegacy($where: solverNetManifestFilter, $limit: Int!) {
   solverNetManifests(
@@ -1017,8 +1020,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return (data.solverNetManifests?.items ?? []).map((row): SolverNetManifestSummary => {
       // Only trust enriched fields when the indexer marked the row 'ok'. A
       // pending/failed row (or an old indexer that omits the field) keeps the
-      // sentinel rather than presenting an empty-string price as a real value;
-      // consumers degrade to a per-CID IPFS fetch for those rows.
+      // sentinel rather than presenting an empty-string price as a real value.
+      // On the LIST hot path these rows pass through unenriched (degraded but
+      // present — empty name, '0' prices, zero address); full fields arrive once
+      // indexer enrichment lands, or via the hash-verified getManifest detail path.
       const enriched = row.manifestEnrichmentStatus === 'ok';
       return {
         manifestCid: row.id,
