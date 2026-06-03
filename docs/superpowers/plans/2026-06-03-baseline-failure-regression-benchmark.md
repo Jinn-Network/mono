@@ -933,9 +933,14 @@ is held out from it and scored against frozen checkpoints over time.
 - `jinn harnesses enable swe-rebench-v2-evaluator` (clones the upstream eval repo).
 - Docker reachable.
 - The Codex prover configured (the `codex` CLI + its API key) for layer 3.
-- `JINN_EVAL_DISK_FLOOR_GB ≥ 40`. A full whole-pool screen wants a ≥100 GB host;
-  on a laptop, scope to small/medium repos (`--repo`) — large-image repos
-  (pandas / OpenHands / litellm) can exhaust disk.
+- `JINN_EVAL_DISK_FLOOR_GB ≥ 40`. The evaluator prunes Docker per instance
+  (`rmi` + `container`/`builder prune`) and gates each round on the floor, so
+  peak disk ≈ the heaviest single image (~12.6 GB), NOT the sum — a whole-pool
+  screen runs on a normal machine, exactly like `validate-pool`. If an instance
+  can't hold the floor the runner aborts that grade cleanly
+  (`InsufficientDiskError` → unscorable → skipped); it never crashes. The DR §4
+  laptop crash was a low *starting* disk (~14 GB), not a leak. No 100 GB host
+  needed; on a very tight box raise headroom or scope with `--repo`.
 
 ## Cut the exam (screening)
 ```
@@ -993,8 +998,9 @@ git commit -m "docs(runbook): held-out regression benchmark protocol (#986)"
 ### Task 7: Cut the v2 slate (operator run) + activate the exclusion
 
 **Real inference + Docker — not a CI step.** This produces the committed `v2`
-artifact and turns on the train-stream exclusion. Run on a disk-adequate host (or
-scope to small/medium repos on a laptop).
+artifact and turns on the train-stream exclusion. Run on any machine with ≥40 GB
+free disk — the evaluator prunes Docker per instance, so peak ≈ one image, not the
+sum (scope with `--repo` on a very tight box).
 
 **Files:**
 - Create (emitted): `client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v2.json`

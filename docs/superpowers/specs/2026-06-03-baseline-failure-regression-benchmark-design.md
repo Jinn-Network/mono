@@ -141,7 +141,7 @@ This is the generator-only approach (no publication-level exclusion). See Threat
 
 - **Evaluator enabled** (`jinn harnesses enable swe-rebench-v2-evaluator`) + **Docker reachable** — same as `validate-pool`.
 - **Codex prover configured** — the `codex` CLI + its API key must be available for layer 3; if absent, fail loud with an actionable message (or skip layer 3 only on explicit `--no-prover`, which weakens the exam and must be logged). (Cf. the OpenRouter/Codex key dependency noted in operator runbooks.)
-- **Disk:** keep `JINN_EVAL_DISK_FLOOR_GB ≥ 40`; the candidate sampler **skips known large-image repos when under the floor and logs them**; an unrestricted whole-pool screen wants a ≥100 GB host (DR §4).
+- **Disk:** keep `JINN_EVAL_DISK_FLOOR_GB ≥ 40`. The evaluator (`PythonEvalRunner`) prunes Docker **per instance** (`rmi` + `container`/`builder prune`) and gates each round on the floor, so peak disk ≈ the heaviest single image (~12.6 GB), **not the sum** — a whole-pool screen runs on a normal machine, exactly as `validate-pool` already walks all 841 tasks. If an individual instance can't hold the floor, the runner aborts that grade cleanly (`InsufficientDiskError` → unscorable → excluded) and screening continues to the next; it never crashes. The DR §4 laptop crash was a low *starting* disk (~14 GB, below the 20 GB default floor), not a leak or an accumulation. **No ≥100 GB host is required**; on a very tight box, raise headroom or scope with `--repo`.
 
 ## 9. Threats to validity (Legibility)
 
@@ -161,7 +161,7 @@ No Docker/inference in CI. The heavy run is the subverb, exercised manually (the
 ## 11. Scope & sequencing
 
 - **Stacked on PR #987** (`paired.ts`); merge order #987 → this.
-- **In this unit:** `screen.ts` + the `screen-held-out` subverb + generator union-exclusion + protocol doc + unit tests, **plus a real screening run** that emits & commits the `v2` slate + base arm + report. (Laptop-feasible if scoped to small/medium repos under the disk floor; a full whole-pool screen wants a ≥100 GB host.)
+- **In this unit:** `screen.ts` + the `screen-held-out` subverb + generator union-exclusion + protocol doc + unit tests, **plus a real screening run** that emits & commits the `v2` slate + base arm + report. (Laptop-feasible with ≥40 GB free — per-instance Docker prune keeps peak ≈ one image; scope with `--repo` on a very tight box.)
 - **Follow-on (tracked, non-blocking merge):** the live trained-checkpoint delta — Milestone 1 (whole-pool, after meaningful SolverNet training) and, if cross-repo signal is slow to surface, a within-repo `--repo sqlglot` sanity check.
 
 ## 12. Decided parameters
@@ -178,4 +178,4 @@ No Docker/inference in CI. The heavy run is the subverb, exercised manually (the
 | Selection | deterministic order, content-hashed, frozen before measurement; widen-don't-pad; log drops |
 | Enforcement | generator-only, union `['v1','v2']` |
 | Eval / stat | reuse `jinn eval v2 --parent <emptyTreeDigest>`; Wilson + paired McNemar (#987) |
-| Disk | `JINN_EVAL_DISK_FLOOR_GB ≥ 40`; skip+log large-image repos under floor; ≥100 GB host for full screen |
+| Disk | `JINN_EVAL_DISK_FLOOR_GB ≥ 40`; per-instance Docker prune keeps peak ≈ one image (~12.6 GB); clean abort (`InsufficientDiskError`→unscorable→skip) if the floor can't hold — no ≥100 GB host needed |

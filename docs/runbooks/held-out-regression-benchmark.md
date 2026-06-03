@@ -14,9 +14,16 @@ is held out from it and scored against frozen checkpoints over time.
 - `jinn harnesses enable swe-rebench-v2-evaluator` (clones the upstream eval repo).
 - Docker reachable.
 - The Codex prover configured (the `codex` CLI + its API key) for layer 3.
-- `JINN_EVAL_DISK_FLOOR_GB ≥ 40`. A full whole-pool screen wants a ≥100 GB host;
-  on a laptop, scope to small/medium repos (`--repo`) — large-image repos
-  (pandas / OpenHands / litellm) can exhaust disk.
+- `JINN_EVAL_DISK_FLOOR_GB ≥ 40`. The evaluator prunes Docker per instance
+  (`rmi` + `container`/`builder prune`) and gates each round on the floor, so
+  peak disk ≈ the heaviest single image (~12.6 GB), NOT the sum — a whole-pool
+  screen runs on a normal machine, exactly like `validate-pool` walks all 841
+  tasks. If an instance can't hold the floor the runner aborts that grade
+  cleanly (`InsufficientDiskError` → unscorable → skipped); it never crashes.
+  The DR §4 laptop crash was a low *starting* disk (~14 GB, below the 20 GB
+  default floor), not a leak. Keep ≥40 GB free (peak image + build overhead);
+  on a very tight box raise headroom or scope with `--repo`. No 100 GB host
+  needed.
 
 ## Cut the exam (screening)
 ```
