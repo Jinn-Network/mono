@@ -801,8 +801,8 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
     }
     const pc = payloadObj['passedCount'] ?? payloadObj['passed_count'];
     const tc = payloadObj['totalCount'] ?? payloadObj['total_count'];
-    passedCount = safeInt(pc, 0);
-    totalCount = safeInt(tc, 0);
+    passedCount = Math.max(0, safeInt(pc, 0));
+    totalCount = Math.max(0, safeInt(tc, 0));
     evaluatorVerdict = actualPassed ? 'PASS' : 'FAIL';
   } else {
     // Generic: payload.verdict (uppercase normalize).

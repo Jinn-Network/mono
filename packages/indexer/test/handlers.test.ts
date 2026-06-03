@@ -1582,6 +1582,18 @@ describe('parseVerdictEnvelopeLite', () => {
     expect(meta?.passedCount).toBe(0);
     expect(meta?.totalCount).toBe(0);
   });
+
+  it('falls back to snake_case keys when camelCase keys are absent', () => {
+    const body = {
+      solverType: 'swe-rebench-v2.v1',
+      task: { requestId: '0xfed', attemptIndex: 0, taskId: '1', cid: '' },
+      participant: { safeAddress: '0xeval' },
+      payload: { schemaVersion: 'swe-rebench-v2-verdict.v2', score: 1, passed_match: true, passed_count: 7, total_count: 10 },
+    };
+    const meta = parseVerdictEnvelopeLite(body);
+    expect(meta?.passedCount).toBe(7);
+    expect(meta?.totalCount).toBe(10);
+  });
 });
 
 // ─── MetadataSet evaluation: enrichment → verdictEnvelopeMeta ─────────────────
@@ -1633,6 +1645,8 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       evidenceTier: 'committed',
       actualPassed: false,
       actualScore: '0',
+      passedCount: 0,
+      totalCount: 0,
       evaluatorVerdict: 'FAIL',
       enrichmentStatus: 'ok',
       chainId: CHAIN_ID,
