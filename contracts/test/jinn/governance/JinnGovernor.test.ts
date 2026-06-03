@@ -12,16 +12,18 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
 
 import {
   CANONICAL_GOVERNANCE_CONFIG,
   FAST_TEST_GOVERNANCE_CONFIG,
-  JinnMviGovernanceConfig,
-} from "../../../scripts/lib/jinn-mvi-helpers";
-import { deployJinnMviL1 } from "../../../scripts/deploy-jinn-mvi-l1";
+  type JinnMviGovernanceConfig,
+} from "../../../scripts/lib/jinn-mvi-helpers.js";
+import { deployJinnMviL1 } from "../../../scripts/deploy-jinn-mvi-l1.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
+type HardhatNetworkHelpers = Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
 
 // IGovernor.ProposalState (mirrored locally because it's an enum on an
 // interface and TypeChain returns it as bigint).
@@ -36,9 +38,9 @@ const ProposalState = {
   Executed: 7n,
 } as const;
 
-async function deploy(config: JinnMviGovernanceConfig) {
+async function deploy(ethers: HardhatEthers, config: JinnMviGovernanceConfig) {
   const [deployer, alice, bob, carol] = await ethers.getSigners();
-  const result = await deployJinnMviL1(deployer, config);
+  const result = await deployJinnMviL1(ethers, deployer, config);
 
   const jinn = await ethers.getContractAt(
     "src/jinn/token/JINN.sol:JINN",
@@ -63,6 +65,7 @@ async function deploy(config: JinnMviGovernanceConfig) {
  * post-deploy state once a first Governor proposal has executed.
  */
 async function acceptOwnershipAsTimelock(
+  ethers: HardhatEthers,
   jinn: any,
   timelockAddress: string,
 ): Promise<void> {
@@ -84,6 +87,7 @@ async function acceptOwnershipAsTimelock(
  * and the Timelock to be impersonated.
  */
 async function bootstrapVotingPower(
+  ethers: HardhatEthers,
   jinn: any,
   timelockAddress: string,
   holders: { signer: Signer; amount: bigint }[],
@@ -109,12 +113,21 @@ async function bootstrapVotingPower(
 describe("JinnGovernor", function () {
   this.timeout(120_000);
 
+  let ethers: HardhatEthers;
+  let time: HardhatNetworkHelpers["time"];
+
+  before(async function () {
+    const connection = await network.connect();
+    ethers = connection.ethers;
+    time = connection.networkHelpers.time;
+  });
+
   // -------------------------------------------------------------------------
   // 1. Deploy state
   // -------------------------------------------------------------------------
   describe("deploy state", function () {
     it("canonical profile records the locked Governor + Timelock parameters", async function () {
-      const { governor, timelock } = await deploy(CANONICAL_GOVERNANCE_CONFIG);
+      const { governor, timelock } = await deploy(ethers, CANONICAL_GOVERNANCE_CONFIG);
 
       expect(await governor.votingDelay()).to.equal(
         CANONICAL_GOVERNANCE_CONFIG.votingDelaySeconds,
@@ -135,7 +148,7 @@ describe("JinnGovernor", function () {
     });
 
     it("fast-test profile records compressed timing", async function () {
-      const { governor, timelock } = await deploy(FAST_TEST_GOVERNANCE_CONFIG);
+      const { governor, timelock } = await deploy(ethers, FAST_TEST_GOVERNANCE_CONFIG);
 
       expect(await governor.votingDelay()).to.equal(
         FAST_TEST_GOVERNANCE_CONFIG.votingDelaySeconds,
@@ -149,7 +162,7 @@ describe("JinnGovernor", function () {
     });
 
     it("Timelock holds JINN ownership after the new owner accepts", async function () {
-      const { jinn, timelock, deployer, result } = await deploy(
+      const { jinn, timelock, deployer, result } = await deploy(ethers, 
         FAST_TEST_GOVERNANCE_CONFIG,
       );
 
@@ -159,14 +172,14 @@ describe("JinnGovernor", function () {
       expect(await jinn.pendingOwner()).to.equal(result.timelock);
 
       // Once the Timelock accepts, it becomes the canonical owner.
-      await acceptOwnershipAsTimelock(jinn, result.timelock);
+      await acceptOwnershipAsTimelock(ethers, jinn, result.timelock);
       expect(await jinn.owner()).to.equal(result.timelock);
       expect(await jinn.pendingOwner()).to.equal(ethers.ZeroAddress);
       void timelock; // (silence unused)
     });
 
     it("grants the Governor PROPOSER + EXECUTOR + CANCELLER on the Timelock", async function () {
-      const { governor, timelock } = await deploy(FAST_TEST_GOVERNANCE_CONFIG);
+      const { governor, timelock } = await deploy(ethers, FAST_TEST_GOVERNANCE_CONFIG);
       const governorAddress = await governor.getAddress();
 
       const proposer = await timelock.PROPOSER_ROLE();
@@ -179,7 +192,7 @@ describe("JinnGovernor", function () {
     });
 
     it("renounces the deployer's optional Timelock admin role", async function () {
-      const { timelock, deployer } = await deploy(FAST_TEST_GOVERNANCE_CONFIG);
+      const { timelock, deployer } = await deploy(ethers, FAST_TEST_GOVERNANCE_CONFIG);
       const adminRole = await timelock.DEFAULT_ADMIN_ROLE();
       expect(
         await timelock.hasRole(adminRole, await deployer.getAddress()),
@@ -197,13 +210,13 @@ describe("JinnGovernor", function () {
   describe("propose → vote → queue → execute", function () {
     it("executes a Governor proposal that updates the Governor's own voting delay", async function () {
       const { jinn, timelock, governor, alice, bob, carol, result } =
-        await deploy(FAST_TEST_GOVERNANCE_CONFIG);
+        await deploy(ethers, FAST_TEST_GOVERNANCE_CONFIG);
 
       // Move ownership so the Timelock can mint via setMinter.
-      await acceptOwnershipAsTimelock(jinn, result.timelock);
+      await acceptOwnershipAsTimelock(ethers, jinn, result.timelock);
 
       // Mint enough JINN to easily exceed the 4% quorum (1000 JINN total).
-      await bootstrapVotingPower(jinn, result.timelock, [
+      await bootstrapVotingPower(ethers, jinn, result.timelock, [
         { signer: alice, amount: ethers.parseEther("400") },
         { signer: bob, amount: ethers.parseEther("400") },
         { signer: carol, amount: ethers.parseEther("200") },
@@ -283,17 +296,17 @@ describe("JinnGovernor", function () {
   // -------------------------------------------------------------------------
   describe("quorum failure", function () {
     it("a proposal with sub-quorum FOR votes ends in Defeated", async function () {
-      const { jinn, governor, alice, bob, result } = await deploy(
+      const { jinn, governor, alice, bob, result } = await deploy(ethers, 
         FAST_TEST_GOVERNANCE_CONFIG,
       );
 
       // Move ownership so the Timelock can mint via setMinter.
-      await acceptOwnershipAsTimelock(jinn, result.timelock);
+      await acceptOwnershipAsTimelock(ethers, jinn, result.timelock);
 
       // 100 JINN to alice (the proposer), 9_900 JINN to bob (silent
       // majority). Quorum is 4% of total supply at the proposal block =
       // 400 JINN. Alice's 100 JINN is below quorum, and bob will not vote.
-      await bootstrapVotingPower(jinn, result.timelock, [
+      await bootstrapVotingPower(ethers, jinn, result.timelock, [
         { signer: alice, amount: ethers.parseEther("100") },
         { signer: bob, amount: ethers.parseEther("9900") },
       ]);
@@ -336,7 +349,7 @@ describe("JinnGovernor", function () {
   // -------------------------------------------------------------------------
   describe("settings access", function () {
     it("public getters return the deploy-time parameters", async function () {
-      const { governor, jinn, timelock } = await deploy(
+      const { governor, jinn, timelock } = await deploy(ethers, 
         FAST_TEST_GOVERNANCE_CONFIG,
       );
 

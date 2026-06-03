@@ -8,22 +8,24 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
-import { deployL2Stack, L2Deployment } from "../../scripts/deploy-phase1a-l2";
+import { deployL2Stack, type L2Deployment } from "../../scripts/deploy-phase1a-l2.js";
 
 describe("L2 Staking Distribution", function () {
   // Compilation is heavy; generous timeout
   this.timeout(120_000);
 
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
   let deployer: Signer;
   let deployerAddress: string;
   let deployment: L2Deployment;
 
   before(async function () {
+    ({ ethers } = await network.connect());
     [deployer] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
-    deployment = await deployL2Stack(deployer);
+    deployment = await deployL2Stack(ethers, deployer);
   });
 
   // =========================================================================
@@ -99,7 +101,7 @@ describe("L2 Staking Distribution", function () {
       };
       await expect(
         staking.initialize(fakeParams, deployerAddress, deployment.jinnToken)
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
   });
 
@@ -135,7 +137,7 @@ describe("L2 Staking Distribution", function () {
         deployment.activityChecker
       );
       const multisig = ethers.Wallet.createRandom().address;
-      await expect(checker.recordActivity(multisig, 3)).to.be.reverted;
+      await expect(checker.recordActivity(multisig, 3)).to.revert(ethers);
     });
 
     it("rejects zero multisig", async function () {
@@ -143,7 +145,7 @@ describe("L2 Staking Distribution", function () {
         "RestorationActivityChecker",
         deployment.activityChecker
       );
-      await expect(checker.recordActivity(ethers.ZeroAddress, 0)).to.be.reverted;
+      await expect(checker.recordActivity(ethers.ZeroAddress, 0)).to.revert(ethers);
     });
 
     it("isRatioPass returns true when activity rate meets liveness ratio", async function () {
@@ -299,7 +301,7 @@ describe("L2 Staking Distribution", function () {
 
       // Try to stake without depositing rewards first
       // stake(uint256) should revert with NoRewardsAvailable
-      await expect(freshStaking["stake(uint256)"](1)).to.be.reverted;
+      await expect(freshStaking["stake(uint256)"](1)).to.revert(ethers);
     });
 
     it("creates a mock service in the registry stub", async function () {
@@ -399,7 +401,7 @@ describe("L2 Staking Distribution", function () {
 
       // Attempt to stake — should revert at proxyHash check (UnauthorizedMultisig)
       // since the multisig is an EOA with no code
-      await expect(staking["stake(uint256)"](serviceId)).to.be.reverted;
+      await expect(staking["stake(uint256)"](serviceId)).to.revert(ethers);
     });
   });
 

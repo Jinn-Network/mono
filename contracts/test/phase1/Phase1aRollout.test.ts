@@ -1,16 +1,18 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
-import * as deployL2Module from "../../scripts/deploy-phase1a-l2";
-import * as bridgeModule from "../../scripts/deploy-phase1a-bridge";
-import * as claimL2Module from "../../scripts/phase1a-claim-l2-rewards";
-import * as claimStakingModule from "../../scripts/phase1a-claim-staking-incentives";
-import * as maintenanceModule from "../../scripts/phase1a-process-l2-maintenance";
-import * as mintVoteModule from "../../scripts/phase1a-mint-jinn-for-vote";
-import * as recordActivityModule from "../../scripts/phase1a-record-activity";
-import * as statusModule from "../../scripts/status-phase1a-live";
-import * as swapModule from "../../scripts/swap-usdc-eth-base-sepolia";
-import { deployL1Stack, DEFAULT_DEPLOY_CONFIG } from "../../scripts/lib/deploy-helpers";
+import * as deployL2Module from "../../scripts/deploy-phase1a-l2.js";
+import * as bridgeModule from "../../scripts/deploy-phase1a-bridge.js";
+import * as claimL2Module from "../../scripts/phase1a-claim-l2-rewards.js";
+import * as claimStakingModule from "../../scripts/phase1a-claim-staking-incentives.js";
+import * as maintenanceModule from "../../scripts/phase1a-process-l2-maintenance.js";
+import * as mintVoteModule from "../../scripts/phase1a-mint-jinn-for-vote.js";
+import * as recordActivityModule from "../../scripts/phase1a-record-activity.js";
+import * as statusModule from "../../scripts/status-phase1a-live.js";
+import * as swapModule from "../../scripts/swap-usdc-eth-base-sepolia.js";
+import * as rolloutHelpersModule from "../../scripts/lib/phase1a-rollout-helpers.js";
+import * as l2TokenCreationModule from "../../scripts/create-phase1a-l2-token.js";
+import { deployL1Stack, DEFAULT_DEPLOY_CONFIG } from "../../scripts/lib/deploy-helpers.js";
 import {
   getBridgeDeploymentArtifactName,
   getL1DeploymentArtifactName,
@@ -18,9 +20,11 @@ import {
   getL2TokenDeploymentArtifactName,
   resolvePhase1aArtifactPaths,
   resolvePhase1aTimingProfile,
-} from "../../scripts/lib/phase1a-rollout-helpers";
+} from "../../scripts/lib/phase1a-rollout-helpers.js";
 
-function buildStakingParams(serviceRegistry: string, activityChecker: string) {
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
+
+function buildStakingParams(ethers: HardhatEthers, serviceRegistry: string, activityChecker: string) {
   return {
     metadataHash: ethers.id("phase1a-rollout-test"),
     maxNumServices: 100,
@@ -40,44 +44,40 @@ function buildStakingParams(serviceRegistry: string, activityChecker: string) {
   };
 }
 
-function buildMaintenanceData(target: string, amount: bigint, batchHash: string): string {
+function buildMaintenanceData(ethers: HardhatEthers, target: string, amount: bigint, batchHash: string): string {
   return ethers.AbiCoder.defaultAbiCoder().encode(
     ["address[]", "uint256[]", "bytes32"],
     [[target], [amount], batchHash],
   );
 }
 
-async function configureTokenomicsForCheckpoint(tokenomicsAddress: string) {
+async function configureTokenomicsForCheckpoint(ethers: HardhatEthers, tokenomicsAddress: string) {
   const tokenomics = await ethers.getContractAt("Tokenomics", tokenomicsAddress);
   const tx = await tokenomics.changeTokenomicsImplementation(tokenomicsAddress);
   await tx.wait();
 }
 
-async function advanceEpoch() {
+async function advanceEpoch(ethers: HardhatEthers) {
   await ethers.provider.send("evm_increaseTime", [DEFAULT_DEPLOY_CONFIG.epochLen + 1]);
   await ethers.provider.send("evm_mine", []);
 }
 
 function loadRolloutHelpers(): Record<string, unknown> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("../../scripts/lib/phase1a-rollout-helpers");
-  } catch {
-    return {};
-  }
+  return rolloutHelpersModule as unknown as Record<string, unknown>;
 }
 
 function loadL2TokenCreationModule(): Record<string, unknown> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("../../scripts/create-phase1a-l2-token");
-  } catch {
-    return {};
-  }
+  return l2TokenCreationModule as unknown as Record<string, unknown>;
 }
 
 describe("Phase 1a rollout regressions", function () {
   this.timeout(120_000);
+
+  let ethers: HardhatEthers;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
 
   describe("Timing profile helpers", function () {
     it("defaults to canonical timing and artifact names", function () {
@@ -173,7 +173,7 @@ describe("Phase 1a rollout regressions", function () {
 
     it("returns a factory-backed staking proxy deployment", async function () {
       const [deployer] = await ethers.getSigners();
-      const deployment = await deployL2Module.deployL2Stack(deployer);
+      const deployment = await deployL2Module.deployL2Stack(ethers, deployer);
       const extended = deployment as any;
 
       expect(extended.stakingFactory, "stakingFactory missing").to.properAddress;
@@ -208,7 +208,7 @@ describe("Phase 1a rollout regressions", function () {
       await tokenUtility.waitForDeployment();
 
       const proxyHash = ethers.id("safe-proxy-runtime");
-      const deployment = await deployL2Module.deployL2Stack(deployer, {
+      const deployment = await deployL2Module.deployL2Stack(ethers, deployer, {
         ...deployL2Module.DEFAULT_L2_CONFIG,
         jinnTokenAddress: await token.getAddress(),
         jinnTokenSource: "external",
@@ -283,7 +283,7 @@ describe("Phase 1a rollout regressions", function () {
 
     it("factory verification rejects rogue staking configurations", async function () {
       const [deployer] = await ethers.getSigners();
-      const deployment = await deployL2Module.deployL2Stack(deployer);
+      const deployment = await deployL2Module.deployL2Stack(ethers, deployer);
       const factory = await ethers.getContractAt("StakingFactory", deployment.stakingFactory);
 
       const StakingToken = await ethers.getContractFactory("StakingToken", deployer);
@@ -291,14 +291,14 @@ describe("Phase 1a rollout regressions", function () {
       await rogueImplementation.waitForDeployment();
 
       const initPayload = StakingToken.interface.encodeFunctionData("initialize", [
-        buildStakingParams(ethers.Wallet.createRandom().address, deployment.activityChecker),
+        buildStakingParams(ethers, ethers.Wallet.createRandom().address, deployment.activityChecker),
         deployment.serviceRegistryTokenUtility,
         deployment.jinnToken,
       ]);
 
       await expect(
         factory.createStakingInstance(await rogueImplementation.getAddress(), initPayload),
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
   });
 
@@ -678,7 +678,7 @@ describe("Phase 1a rollout regressions", function () {
           PHASE1A_MAINTENANCE_BATCH_HASH: batchHash,
         }),
       ).to.deep.equal({
-        data: buildMaintenanceData(target, 42n, batchHash),
+        data: buildMaintenanceData(ethers, target, 42n, batchHash),
         updateWithheldAmount: false,
       });
     });
@@ -717,7 +717,7 @@ describe("Phase 1a rollout regressions", function () {
     beforeEach(async function () {
       [deployer] = await ethers.getSigners();
       deployerAddress = await deployer.getAddress();
-      deployment = await deployL2Module.deployL2Stack(deployer);
+      deployment = await deployL2Module.deployL2Stack(ethers, deployer);
       token = await ethers.getContractAt("TestERC20", deployment.jinnToken);
       factoryAddress = (deployment as any).stakingFactory;
       expect(factoryAddress, "stakingFactory missing").to.properAddress;
@@ -729,7 +729,7 @@ describe("Phase 1a rollout regressions", function () {
       await standalone.waitForDeployment();
 
       const initTx = await standalone.initialize(
-        buildStakingParams(deployment.serviceRegistry, deployment.activityChecker),
+        buildStakingParams(ethers, deployment.serviceRegistry, deployment.activityChecker),
         deployment.serviceRegistryTokenUtility,
         deployment.jinnToken,
       );
@@ -750,7 +750,7 @@ describe("Phase 1a rollout regressions", function () {
 
       const batchHash = ethers.keccak256(ethers.toUtf8Bytes("non-factory-target"));
       const tx = await targetDispenser.processDataMaintenance(
-        buildMaintenanceData(await standalone.getAddress(), amount, batchHash),
+        buildMaintenanceData(ethers, await standalone.getAddress(), amount, batchHash),
         false,
       );
       await tx.wait();
@@ -776,7 +776,7 @@ describe("Phase 1a rollout regressions", function () {
       const staking = await ethers.getContractAt("StakingToken", deployment.stakingToken);
       const batchHash = ethers.keccak256(ethers.toUtf8Bytes("verified-target"));
       const tx = await targetDispenser.processDataMaintenance(
-        buildMaintenanceData(deployment.stakingToken, amount, batchHash),
+        buildMaintenanceData(ethers, deployment.stakingToken, amount, batchHash),
         false,
       );
       await tx.wait();
@@ -790,8 +790,8 @@ describe("Phase 1a rollout regressions", function () {
   describe("Nominee epoch bookmark", function () {
     it("requires a later epoch after nominee registration before claiming begins", async function () {
       const [deployer] = await ethers.getSigners();
-      const l1 = await deployL1Stack(deployer);
-      await configureTokenomicsForCheckpoint(await l1.tokenomics.getAddress());
+      const l1 = await deployL1Stack(ethers, deployer);
+      await configureTokenomicsForCheckpoint(ethers, await l1.tokenomics.getAddress());
 
       await l1.dispenser.setPauseState(0);
 
@@ -803,9 +803,9 @@ describe("Phase 1a rollout regressions", function () {
 
       await expect(
         l1.dispenser.calculateStakingIncentives.staticCall(1, chainId, stakingTarget, 18),
-      ).to.be.reverted;
+      ).to.revert(ethers);
 
-      await advanceEpoch();
+      await advanceEpoch(ethers);
       await l1.tokenomics.checkpoint();
 
       const result = await l1.dispenser.calculateStakingIncentives.staticCall(

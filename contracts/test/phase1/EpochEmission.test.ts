@@ -14,24 +14,26 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { network } from "hardhat";
 import {
   deployL1Stack,
   DEFAULT_DEPLOY_CONFIG,
-  Phase1aDeployment,
-} from "../../scripts/lib/deploy-helpers";
+  type Phase1aDeployment,
+} from "../../scripts/lib/deploy-helpers.js";
 
 describe("Epoch Emission (checkpoint integration)", function () {
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
   let d: Phase1aDeployment;
   let deployerAddress: string;
 
   before(async function () {
     this.timeout(120_000);
 
+    ({ ethers, networkHelpers } = await network.connect());
     const [deployer] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
-    d = await deployL1Stack(deployer, DEFAULT_DEPLOY_CONFIG);
+    d = await deployL1Stack(ethers, deployer, DEFAULT_DEPLOY_CONFIG);
 
     // CRITICAL: Set PROXY_TOKENOMICS so checkpoint() doesn't revert with
     // DelegatecallOnly(). In a real proxy deployment, the proxy sets this.
@@ -92,7 +94,7 @@ describe("Epoch Emission (checkpoint integration)", function () {
       epochCounterBefore = await d.tokenomics.epochCounter();
 
       // Advance time by epochLen + 1 second to ensure we're past the boundary
-      await time.increase(DEFAULT_DEPLOY_CONFIG.epochLen + 1);
+      await networkHelpers.time.increase(DEFAULT_DEPLOY_CONFIG.epochLen + 1);
 
       // Mine a block so block.timestamp is updated
       await ethers.provider.send("evm_mine", []);
@@ -155,7 +157,7 @@ describe("Epoch Emission (checkpoint integration)", function () {
   // -------------------------------------------------------------------------
   describe("checkpoint after second epoch", function () {
     before(async function () {
-      await time.increase(DEFAULT_DEPLOY_CONFIG.epochLen + 1);
+      await networkHelpers.time.increase(DEFAULT_DEPLOY_CONFIG.epochLen + 1);
       await ethers.provider.send("evm_mine", []);
     });
 

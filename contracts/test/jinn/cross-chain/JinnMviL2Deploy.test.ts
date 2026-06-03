@@ -12,7 +12,7 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 import {
   CHAIN_ID_HARDHAT,
@@ -20,14 +20,20 @@ import {
   CHAIN_ID_BASE_MAINNET,
   JINN_MVI_L2_ALLOWED_CHAINS,
   assertChainIdAllowed,
-} from "../../../scripts/lib/jinn-mvi-helpers";
+} from "../../../scripts/lib/jinn-mvi-helpers.js";
 import {
   deployJinnMviL2,
   resolveTaskV3ArtifactPath,
-} from "../../../scripts/deploy-jinn-mvi-l2";
+} from "../../../scripts/deploy-jinn-mvi-l2.js";
 
 describe("Jinn MVI L2 emitter deploy script", function () {
   this.timeout(60_000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
 
   describe("artifact defaults", function () {
     it("uses the bundled Base Sepolia fast V3 router artifact by default", function () {
@@ -108,7 +114,7 @@ describe("Jinn MVI L2 emitter deploy script", function () {
         checker: await checker.getAddress(),
         registry: await registry.getAddress(),
       };
-      const result = await deployJinnMviL2(deployer, wiring);
+      const result = await deployJinnMviL2(ethers, deployer, wiring);
 
       expect(result.emitter).to.match(/^0x[0-9a-fA-F]{40}$/);
       expect(result.wiring.checker).to.equal(wiring.checker);

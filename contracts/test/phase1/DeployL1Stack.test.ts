@@ -4,15 +4,16 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import {
   deployL1Stack,
   DEFAULT_DEPLOY_CONFIG,
   FAST_TEST_DEPLOY_CONFIG,
-  Phase1aDeployment,
-} from "../../scripts/lib/deploy-helpers";
+  type Phase1aDeployment,
+} from "../../scripts/lib/deploy-helpers.js";
 
 describe("L1 Stack Deployment", function () {
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
   let d: Phase1aDeployment;
   let deployerAddress: string;
 
@@ -20,9 +21,10 @@ describe("L1 Stack Deployment", function () {
     // Tokenomics compilation is heavy; give it time
     this.timeout(120_000);
 
+    ({ ethers } = await network.connect());
     const [deployer] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
-    d = await deployL1Stack(deployer, DEFAULT_DEPLOY_CONFIG);
+    d = await deployL1Stack(ethers, deployer, DEFAULT_DEPLOY_CONFIG);
   });
 
   // ---------------------------------------------------------------------------
@@ -221,12 +223,12 @@ describe("L1 Stack Deployment", function () {
         await d.serviceRegistry.getAddress(),
         ethers.ZeroAddress
       )
-    ).to.be.reverted;
+    ).to.revert(ethers);
   });
 
   it("deploys the fast-test governance timing profile when requested", async function () {
     const [deployer] = await ethers.getSigners();
-    const fast = await deployL1Stack(deployer, FAST_TEST_DEPLOY_CONFIG);
+    const fast = await deployL1Stack(ethers, deployer, FAST_TEST_DEPLOY_CONFIG);
 
     expect(await fast.tokenomics.epochLen()).to.equal(FAST_TEST_DEPLOY_CONFIG.epochLen);
     expect(await fast.voteWeighting.WEEK()).to.equal(FAST_TEST_DEPLOY_CONFIG.votePeriodSeconds);

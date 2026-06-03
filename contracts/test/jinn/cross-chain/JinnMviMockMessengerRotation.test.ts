@@ -1,15 +1,15 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 import {
   FAST_TEST_GOVERNANCE_CONFIG,
   LOCKED_DISTRIBUTOR_INITIAL_CONFIG,
-} from "../../../scripts/lib/jinn-mvi-helpers";
-import { deployJinnMviL1 } from "../../../scripts/deploy-jinn-mvi-l1";
+} from "../../../scripts/lib/jinn-mvi-helpers.js";
+import { deployJinnMviL1 } from "../../../scripts/deploy-jinn-mvi-l1.js";
 import {
   applyMockMessengerRotationArtifact,
   rotateJinnMviMockMessenger,
-} from "../../../scripts/rotate-jinn-mvi-mock-messenger";
+} from "../../../scripts/rotate-jinn-mvi-mock-messenger.js";
 
 const DISTRIBUTOR_FQN = "src/jinn/distribution/JinnDistributor.sol:JinnDistributor";
 const MOCK_MESSENGER_FQN = "src/jinn/cross-chain/MockMessenger.sol:MockMessenger";
@@ -17,15 +17,21 @@ const MOCK_MESSENGER_FQN = "src/jinn/cross-chain/MockMessenger.sol:MockMessenger
 describe("JINN MVI mock messenger rotation", function () {
   this.timeout(120_000);
 
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
+
   it("deploys a new MockMessenger and points the distributor at it", async function () {
     const [deployer, relayerOwner] = await ethers.getSigners();
-    const deployment = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+    const deployment = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
       messenger: { mode: "mock" },
       distributorConfig: { ...LOCKED_DISTRIBUTOR_INITIAL_CONFIG },
       renounceAdmin: false,
     });
 
-    const rotation = await rotateJinnMviMockMessenger(deployer, {
+    const rotation = await rotateJinnMviMockMessenger(ethers, deployer, {
       distributorAddress: deployment.distributor,
       messengerOwner: relayerOwner.address,
       rotatedAt: "2026-05-20T00:00:00.000Z",

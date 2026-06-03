@@ -12,13 +12,13 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import type { Signer } from "ethers";
+import { network } from "hardhat";
+import { Wallet, type Signer } from "ethers";
 import {
   deployBridgeContracts,
-  BridgeDeployConfig,
-  BridgeDeployment,
-} from "../../scripts/deploy-phase1a-bridge";
+  type BridgeDeployConfig,
+  type BridgeDeployment,
+} from "../../scripts/deploy-phase1a-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -26,7 +26,7 @@ import {
 
 /** Return a fresh random address (non-zero, not a real contract). */
 function fakeAddr(): string {
-  return ethers.Wallet.createRandom().address;
+  return Wallet.createRandom().address;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,7 @@ describe("Bridge Deployment Configuration", function () {
   // Compilation + 5 deployments — generous timeout
   this.timeout(120_000);
 
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
   let deployer: Signer;
 
   // Config values we'll verify in tests
@@ -54,6 +55,7 @@ describe("Bridge Deployment Configuration", function () {
   let deployment: BridgeDeployment;
 
   before(async function () {
+    ({ ethers } = await network.connect());
     [deployer] = await ethers.getSigners();
 
     // Use random addresses as stand-ins for external contracts
@@ -79,7 +81,7 @@ describe("Bridge Deployment Configuration", function () {
       l1ChainId,
     };
 
-    deployment = await deployBridgeContracts(deployer, deployer, config);
+    deployment = await deployBridgeContracts(ethers, deployer, deployer, config);
   });
 
   // =========================================================================
@@ -375,7 +377,7 @@ describe("Bridge Deployment Configuration", function () {
           l2ChainId,
           ethers.ZeroAddress // _olasL2 = zero
         )
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
 
     it("L1 processor reverts if l1Dispenser is zero", async function () {
@@ -392,7 +394,7 @@ describe("Bridge Deployment Configuration", function () {
           l2ChainId,
           jinnL2
         )
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
 
     it("L2 dispenser reverts if olas is zero", async function () {
@@ -408,7 +410,7 @@ describe("Bridge Deployment Configuration", function () {
           deployment.depositProcessorL1,
           l1ChainId
         )
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
 
     it("L2 dispenser reverts if proxyFactory is zero", async function () {
@@ -424,7 +426,7 @@ describe("Bridge Deployment Configuration", function () {
           deployment.depositProcessorL1,
           l1ChainId
         )
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
 
     it("L2 dispenser reverts if l1SourceChainId is zero", async function () {
@@ -440,7 +442,7 @@ describe("Bridge Deployment Configuration", function () {
           deployment.depositProcessorL1,
           0 // _l1SourceChainId = zero
         )
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
   });
 
@@ -458,7 +460,7 @@ describe("Bridge Deployment Configuration", function () {
       const [, nonOwner] = await ethers.getSigners();
       await expect(
         processor.connect(nonOwner).setL2TargetDispenser(fakeAddr())
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
 
     it("reverts if called a second time (owner is zero)", async function () {
@@ -469,7 +471,7 @@ describe("Bridge Deployment Configuration", function () {
       // owner is address(0), so any signer is unauthorized
       await expect(
         processor.connect(deployer).setL2TargetDispenser(fakeAddr())
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
   });
 });

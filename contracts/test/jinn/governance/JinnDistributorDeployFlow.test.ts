@@ -27,7 +27,7 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 import {
   FAST_TEST_GOVERNANCE_CONFIG,
@@ -39,13 +39,15 @@ import {
   JINN_MVI_L1_ALLOWED_CHAINS,
   assertChainIdAllowed,
   resolveJinnMviTimingProfileForChain,
-} from "../../../scripts/lib/jinn-mvi-helpers";
+} from "../../../scripts/lib/jinn-mvi-helpers.js";
 import {
   deployJinnMviL1,
   resolveRenounceAdmin,
   verifyDeploy,
   type MessengerDeployParams,
-} from "../../../scripts/deploy-jinn-mvi-l1";
+} from "../../../scripts/deploy-jinn-mvi-l1.js";
+
+type HardhatEthers = Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 const ONE = 10n ** 18n;
 
@@ -55,7 +57,7 @@ const MOCK_MESSENGER_FQN = "src/jinn/cross-chain/MockMessenger.sol:MockMessenger
 const CANONICAL_MESSENGER_FQN =
   "src/jinn/cross-chain/CanonicalOpStackMessenger.sol:CanonicalOpStackMessenger";
 
-function encodeServiceProof(serviceId: bigint): string {
+function encodeServiceProof(ethers: HardhatEthers, serviceId: bigint): string {
   return ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [serviceId]);
 }
 
@@ -65,6 +67,7 @@ function encodeServiceProof(serviceId: bigint): string {
  * mirrors what the first Governor proposal does on a live network.
  */
 async function timelockAcceptsOwnership(
+  ethers: HardhatEthers,
   jinn: any,
   distributor: any,
   timelockAddress: string,
@@ -85,11 +88,17 @@ async function timelockAcceptsOwnership(
 describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
   this.timeout(120_000);
 
+  let ethers: HardhatEthers;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
+
   describe("mock messenger mode (fast-test default)", function () {
     it("post-deploy: JINN.minter is the distributor, ownership is pending Timelock", async function () {
       const [deployer] = await ethers.getSigners();
 
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         distributorConfig: { ...LOCKED_DISTRIBUTOR_INITIAL_CONFIG },
       });
@@ -136,7 +145,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
     it("Timelock acceptOwnership ceremony transfers both JINN and Distributor", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
       });
 
@@ -146,7 +155,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
         result.distributor,
       );
 
-      await timelockAcceptsOwnership(jinn, distributor, result.timelock);
+      await timelockAcceptsOwnership(ethers, jinn, distributor, result.timelock);
 
       expect(await jinn.owner()).to.equal(result.timelock);
       expect(await jinn.pendingOwner()).to.equal(ethers.ZeroAddress);
@@ -156,7 +165,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
     it("happy-path claim: JINN mints to operator multisig and to Timelock", async function () {
       const [deployer, operatorMultisig] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
       });
 
@@ -172,7 +181,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
       // Run the Timelock acceptOwnership ceremony so the post-handover state
       // is exercised end-to-end.
-      await timelockAcceptsOwnership(jinn, distributor, result.timelock);
+      await timelockAcceptsOwnership(ethers, jinn, distributor, result.timelock);
 
       // Pre-claim: zero supply.
       expect(await jinn.totalSupply()).to.equal(0n);
@@ -205,7 +214,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
       // Anyone can submit the proof — the recovered multisig + daoTreasury
       // are the mint recipients regardless of who pays gas.
-      await expect(distributor.claim(encodeServiceProof(SERVICE_ID)))
+      await expect(distributor.claim(encodeServiceProof(ethers, SERVICE_ID)))
         .to.emit(distributor, "Claimed")
         .withArgs(
           SERVICE_ID,
@@ -233,7 +242,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
     it("replay protection: re-submitting the same proof is a clean no-op", async function () {
       const [deployer, operatorMultisig] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
       });
       const jinn = await ethers.getContractAt(JINN_FQN, result.jinn);
@@ -255,11 +264,11 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
         multisig: operatorMultisig.address,
       });
 
-      await distributor.claim(encodeServiceProof(SERVICE_ID));
+      await distributor.claim(encodeServiceProof(ethers, SERVICE_ID));
       const supplyAfterFirst = await jinn.totalSupply();
 
       // Replay — accumulators are sticky, no further mint, no event.
-      const tx = await distributor.claim(encodeServiceProof(SERVICE_ID));
+      const tx = await distributor.claim(encodeServiceProof(ethers, SERVICE_ID));
       const receipt = await tx.wait();
       expect(await jinn.totalSupply()).to.equal(supplyAfterFirst);
       const claimedTopic = distributor.interface.getEvent("Claimed")!.topicHash;
@@ -347,7 +356,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
   describe("MockMessenger ownership transfer (Fix 10)", function () {
     it("transfers ownership when JINN_MVI_MOCK_MESSENGER_OWNER differs from deployer", async function () {
       const [deployer, daemonKey] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         mockMessengerOwner: daemonKey.address,
       });
@@ -380,7 +389,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
     it("keeps the deployer as owner when no override is supplied", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
       });
       expect(result.messengerOwner).to.equal(deployer.address);
@@ -407,7 +416,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
     it("renounceAdmin=false leaves the deployer as Timelock admin", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         renounceAdmin: false,
       });
@@ -423,7 +432,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
     it("renounceAdmin=true clears the admin role from the deployer", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         renounceAdmin: true,
       });
@@ -441,33 +450,33 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
   describe("Post-deploy sanity assertions (Fix 12)", function () {
     it("verifyDeploy passes on a clean deploy with renounceAdmin=true", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         renounceAdmin: true,
       });
       // Should not throw.
-      await verifyDeploy(result, deployer.address, true);
+      await verifyDeploy(ethers, result, deployer.address, true);
     });
 
     it("verifyDeploy passes on a clean deploy with renounceAdmin=false", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         renounceAdmin: false,
       });
-      await verifyDeploy(result, deployer.address, false);
+      await verifyDeploy(ethers, result, deployer.address, false);
     });
 
     it("verifyDeploy throws when renounceAdmin asserts but the role is still held", async function () {
       const [deployer] = await ethers.getSigners();
-      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+      const result = await deployJinnMviL1(ethers, deployer, FAST_TEST_GOVERNANCE_CONFIG, {
         messenger: { mode: "mock" },
         renounceAdmin: false, // role retained
       });
       // Lie to verifyDeploy: claim we renounced when we didn't.
       let threw = false;
       try {
-        await verifyDeploy(result, deployer.address, true);
+        await verifyDeploy(ethers, result, deployer.address, true);
       } catch (e: any) {
         threw = true;
         expect(String(e.message)).to.match(/DEFAULT_ADMIN_ROLE/);
@@ -494,6 +503,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
       };
 
       const result = await deployJinnMviL1(
+        ethers,
         deployer,
         FAST_TEST_GOVERNANCE_CONFIG,
         { messenger: params },
