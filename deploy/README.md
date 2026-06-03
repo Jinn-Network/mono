@@ -21,32 +21,21 @@ env-based auth (no `~/.claude.json` file), and `JINN_STATE_DIR=/data`; it ships
 The daemon owns the four former entrypoint workarounds — pidfile reclaim (#955),
 dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
 
-### Ops step (one-time): let the build pull the private base
+### Pulling the base
 
-The `ghcr.io/jinn-network/client` package is **private**, and the
-`Jinn-Network` org **disallows public packages** (the "Change visibility →
-Public" control reports *"Setting is disabled by organization
-administrators"*). So overlays authenticate to GHCR to pull the base — no
-org-policy change needed. Two equivalent ways:
+The `ghcr.io/jinn-network/client` package is **public** (set 2026-06-03;
+verified — an unauthenticated `docker pull ghcr.io/jinn-network/client:latest`
+succeeds). So the overlays `FROM` it with **no registry auth** — nothing to
+wire on Railway/CI/local. This is the default path, and it matches the
+"anyone can run an operator" posture (the base bakes no secrets — auth is
+env-only at runtime).
 
-- **Railway:** add `ghcr.io/jinn-network/client` as a private image source /
-  set GHCR registry credentials on the service — a token with **`read:packages`**
-  on the `client` package (a classic PAT or a fine-grained token).
-- **CI / local:** `echo "$GHCR_TOKEN" | docker login ghcr.io -u <user> --password-stdin`
-  before `docker build` of an overlay.
-
-This is the documented default. Two alternatives, if you'd rather not wire a
-pull-token:
-- **ARG build-from-source** — the overlays can instead build the client from
-  source (one shared Dockerfile, `ARG AGENT_CLI`), needing no registry pull at
-  all, at the cost of a full rebuild per target. (Requires the `client/` +
-  `packages/sdk/` sources in the build context.)
-- **Re-enable public packages org-wide** — an org *owner* can flip
-  Org → Settings → Packages to allow public, then make `client` public. Broader
-  policy change; only worth it if you want public packages generally.
-
-Until the build can pull (or build) the base, an overlay build will fail with
-an `unauthorized`/`denied` error on the `FROM` line.
+**Forks / private re-deploys** that keep the package private instead must
+authenticate the pull: on Railway add GHCR registry credentials (a token with
+**`read:packages`**), or `echo "$GHCR_TOKEN" | docker login ghcr.io …` before
+the overlay build. The **`ARG` build-from-source** overlay (one shared
+Dockerfile, no registry pull, full rebuild per target — needs `client/` +
+`packages/sdk/` in context) is the no-registry fallback.
 
 ## The overlay pattern
 
