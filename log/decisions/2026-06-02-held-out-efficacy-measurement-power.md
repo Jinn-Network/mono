@@ -291,6 +291,8 @@ the exam.)
 
 ## §7 — Scoped follow-ups (the path to an actual efficacy proof)
 
+**Tracking:** this finding + fixes ship in **[PR #987](https://github.com/Jinn-Network/mono/pull/987)** (→ `next`). The forward path (3 below, made concrete) is filed as **[#986](https://github.com/Jinn-Network/mono/issues/986)** — SolverNet-as-training + a baseline-failure regression benchmark (anchors baseline at 0%, the most sensitive operating point). Start there.
+
 1. **`feat(learner)` — land the steer hook on `next` (the unblocker, mostly done).**
    The fix is `fbea4aad` (SessionStart `additionalContext` steer) — it just needs
    to reach `next`. It is currently stranded in the unrelated Railway-hosting
