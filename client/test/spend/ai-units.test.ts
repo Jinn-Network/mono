@@ -11,8 +11,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GPT_5_4_MINI_USD_PER_BLOCK,
   REFERENCE_CEILING,
+  REFERENCE_CEILING_USD_MICROS,
   projectAiUnits,
+  projectTaskUsdMicros,
   resolveReferenceCeiling,
+  resolveReferenceCeilingUsdMicros,
 } from '../../src/spend/ai-units.js';
 
 describe('AI-units calibration', () => {
@@ -155,5 +158,35 @@ describe('resolveReferenceCeiling (env override)', () => {
         warn.mockRestore();
       }
     }
+  });
+});
+
+describe('USD ceiling + projection (issue #1004)', () => {
+  it('REFERENCE_CEILING_USD_MICROS pegs 100 units/block to $0.50/block', () => {
+    // 100 units / 100 * GPT_5_4_MINI_USD_PER_BLOCK ($0.5) = $0.50 = 500_000 micros.
+    expect(REFERENCE_CEILING_USD_MICROS.usd_micros_per_block).toBe(500_000);
+    // Weekly = 28 blocks => $14 => 14_000_000 micros.
+    expect(REFERENCE_CEILING_USD_MICROS.usd_micros_per_week).toBe(14_000_000);
+  });
+
+  it('projectTaskUsdMicros returns the per-task USD estimate in micros for a priced paid harness', () => {
+    // gpt-5.4-mini @ 50k input + 20k output = 0.0525 USD => 52_500 micros.
+    expect(projectTaskUsdMicros('hermes-agent', 'gpt-5.4-mini')).toBe(52_500);
+  });
+
+  it('projectTaskUsdMicros returns 0 for a non-LLM harness and null for an unpriceable model', () => {
+    expect(projectTaskUsdMicros('prediction-v1-baseline', undefined)).toBe(0);
+    expect(projectTaskUsdMicros('hermes-agent', 'no-such-model-xyz')).toBeNull();
+  });
+
+  it('resolveReferenceCeilingUsdMicros honours JINN_AI_UNITS_CEILING_OVERRIDE via the peg', () => {
+    // Override 10 units/block => $0.05/block => 50_000 micros; weekly 28x.
+    const out = resolveReferenceCeilingUsdMicros({ JINN_AI_UNITS_CEILING_OVERRIDE: '10' });
+    expect(out.usd_micros_per_block).toBe(50_000);
+    expect(out.usd_micros_per_week).toBe(50_000 * 28);
+  });
+
+  it('resolveReferenceCeilingUsdMicros falls back to the baked-in USD ceiling on a missing override', () => {
+    expect(resolveReferenceCeilingUsdMicros({})).toEqual(REFERENCE_CEILING_USD_MICROS);
   });
 });

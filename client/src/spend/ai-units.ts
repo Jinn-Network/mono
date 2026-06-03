@@ -18,6 +18,13 @@
  * The cap is layered with the existing per-credential USD `spendCaps`
  * spend-cap gate from PR #345/#346 — both gates run; the more
  * conservative one wins. This module owns the AI-units side only.
+ *
+ * Issue #1004: the gate's comparison now runs in **USD** (actual harvested
+ * spend vs a USD ceiling), not projected AI units. The peg below survives
+ * as the calibration constant deriving that USD ceiling and as the
+ * presentation-layer conversion for the legacy unit fields the SPA still
+ * reads. For subscription credentials the USD ceiling is a *proxy* budget —
+ * it bounds Jinn-attributable model cost, not the provider's plan quota.
  */
 
 import { estimateModelCost } from '../harnesses/cost-estimates.js';
@@ -35,6 +42,11 @@ import {
  *
  * Conservative — biases toward over-warning rather than under-warning so
  * the ceiling pauses early rather than late.
+ *
+ * Issue #1004: demoted to a calibration constant — it derives
+ * {@link REFERENCE_CEILING_USD_MICROS} and converts the legacy unit fields
+ * for presentation, but no longer appears in the gate's comparison. Kept
+ * exported because the SPA's `HarnessFootprintPanel.tsx` imports it (#1006).
  */
 export const GPT_5_4_MINI_USD_PER_BLOCK = 0.5;
 
@@ -50,6 +62,30 @@ export const REFERENCE_CEILING: { readonly units_per_block: number; readonly uni
   units_per_block: 100,
   units_per_week: 100 * 28,
 };
+
+/**
+ * USD-micros ceiling (issue #1004). The gate now compares **actual USD
+ * spend** against this ceiling rather than projected AI units. Derived
+ * directly from {@link REFERENCE_CEILING} through the GPT-5.4-mini peg:
+ *   usd_micros = units / 100 * GPT_5_4_MINI_USD_PER_BLOCK * 1_000_000.
+ * Default 100 units/block => $0.50/block (500_000 micros); 2800 units/week
+ * => $14/week (14_000_000 micros). Calibration is preserved; only the
+ * comparison unit changed. For subscription credentials this USD budget is
+ * a *proxy* — it bounds Jinn-attributable model cost, not the provider's
+ * plan quota directly.
+ */
+export const REFERENCE_CEILING_USD_MICROS: {
+  readonly usd_micros_per_block: number;
+  readonly usd_micros_per_week: number;
+} = {
+  usd_micros_per_block: unitsToUsdMicros(REFERENCE_CEILING.units_per_block),
+  usd_micros_per_week: unitsToUsdMicros(REFERENCE_CEILING.units_per_week),
+};
+
+/** Convert an AI-unit count to USD micros through the GPT-5.4-mini peg. */
+function unitsToUsdMicros(units: number): number {
+  return Math.round((units / 100) * GPT_5_4_MINI_USD_PER_BLOCK * 1_000_000);
+}
 
 /** 6h block in milliseconds — UTC blocks start at 00:00 / 06:00 / 12:00 / 18:00. */
 const SIX_HOUR_BLOCK_MS = 6 * 60 * 60 * 1_000;
@@ -98,6 +134,37 @@ export function projectAiUnits(
 }
 
 /**
+ * Project the per-task cost of one harness/model combination in USD micros
+ * (issue #1004). This is the in-flight debit the gate books for a claim
+ * before its actual cost is harvested. Same harness classification as
+ * {@link projectAiUnits}:
+ *   - `0` for harnesses that make no marginal LLM call,
+ *   - `null` when a paid-LLM harness's model is unknown to the cost table
+ *     (gate fails open with a warn),
+ *   - otherwise `round(estimateModelCost(model).usd * 1_000_000)`.
+ *
+ * `_credentialId` does not change the projection (the model costs the same
+ * regardless of auth path); it labels the accounting bucket only.
+ */
+export function projectTaskUsdMicros(
+  harness: string | undefined,
+  model: string | undefined,
+  _credentialId?: string | null,
+): number | null {
+  if (!harness) return null;
+  const canonical = canonicalHarnessName(harness);
+  const isPaidLlmHarness =
+    canonical === CLAUDE_CODE_HARNESS ||
+    canonical === CODEX_HARNESS ||
+    canonical === HERMES_AGENT_HARNESS;
+  if (!isPaidLlmHarness) return 0;
+  if (!model) return null;
+  const cost = estimateModelCost(model);
+  if (!cost) return null;
+  return Math.round(cost.usd * 1_000_000);
+}
+
+/**
  * Resolve the active ceiling from env. CI / tests override the baked-in
  * 100 units via `JINN_AI_UNITS_CEILING_OVERRIDE`. Accepts:
  *
@@ -131,6 +198,22 @@ export function resolveReferenceCeiling(
   }
   warnMalformedOverride(raw);
   return { units_per_block: REFERENCE_CEILING.units_per_block, units_per_week: REFERENCE_CEILING.units_per_week };
+}
+
+/**
+ * Resolve the active USD-micros ceiling from env (issue #1004). Reuses
+ * {@link resolveReferenceCeiling} so the `JINN_AI_UNITS_CEILING_OVERRIDE`
+ * parsing (integer or `<block>:<week>`, malformed-warn, default fallback)
+ * lives in one place, then converts both bounds through the peg.
+ */
+export function resolveReferenceCeilingUsdMicros(
+  env: NodeJS.ProcessEnv,
+): { usd_micros_per_block: number; usd_micros_per_week: number } {
+  const units = resolveReferenceCeiling(env);
+  return {
+    usd_micros_per_block: unitsToUsdMicros(units.units_per_block),
+    usd_micros_per_week: unitsToUsdMicros(units.units_per_week),
+  };
 }
 
 function warnMalformedOverride(raw: string): void {
