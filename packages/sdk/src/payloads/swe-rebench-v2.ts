@@ -73,6 +73,7 @@ export const SweRebenchV2VerdictV2PayloadSchema = z.object({
   score: z.union([z.literal(0), z.literal(1)]),
   passed_match: z.boolean(),
   evaluator_cost_usd: z.number().nonnegative(),
+  // camelCase matches schemaVersion/totalUsd elsewhere in this file and the #1019 design.
   /** Count of individual tests that passed in this run. */
   passedCount: z.number().int().nonnegative(),
   /** Total gradeable tests in this run (FAIL_TO_PASS ∪ PASS_TO_PASS as the runner reported). */

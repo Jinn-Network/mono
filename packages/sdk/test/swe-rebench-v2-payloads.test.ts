@@ -104,6 +104,16 @@ describe('swe-rebench-v2-verdict.v2 (graded, additive)', () => {
     expect(() => SweRebenchV2VerdictV2PayloadSchema.parse({ ...v2, passedCount: 21, totalCount: 20 })).toThrow();
   });
 
+  it('accepts passedCount === totalCount (all tests pass)', () => {
+    expect(() => SweRebenchV2VerdictV2PayloadSchema.parse({ ...v2, passedCount: 20, totalCount: 20 })).not.toThrow();
+  });
+
+  it('accepts the (0,0) no-gradeable-tests boundary', () => {
+    // Downstream treats totalCount===0 as gradedScore=null (design §7), so the
+    // schema stays permissive and does not reject the zero-gradeable-test run.
+    expect(() => SweRebenchV2VerdictV2PayloadSchema.parse({ ...v2, passedCount: 0, totalCount: 0 })).not.toThrow();
+  });
+
   it('union accepts both v1 and v2', () => {
     const v1 = { schemaVersion: 'swe-rebench-v2-verdict.v1' as const, score: 1 as const, passed_match: true, evaluator_cost_usd: 0 };
     expect(SweRebenchV2VerdictPayloadSchema.parse(v1).schemaVersion).toBe('swe-rebench-v2-verdict.v1');
