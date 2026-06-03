@@ -1,0 +1,12 @@
+{
+  "comment": "BASELINE-FAILURE REGRESSION BENCHMARK (issue #986). Screened: gradeable at the current evalSemanticsVersion AND base claude-code/Haiku frozen fails 0/R (R≥3) AND a stronger Codex/GPT-5.5 prover passes ≥1 (proven headroom). Baseline 0% by construction. Held out from the generator train stream via the active-slate-version union. Content-addressed; scores comparable WITHIN this version only.",
+  "schemaVersion": "held-out-slate.v1",
+  "solverType": "swe-rebench-v2.v1",
+  "version": "v2",
+  "generatedAt": "2026-06-03T19:02:25.890Z",
+  "instanceIds": [
+    "astropy__astropy-19438",
+    "con__nwb2bids-347_interface"
+  ],
+  "hash": "sha256:ee4e5a0f783c481781c150f4e0308dc4e6aa47d2a9a192eaa6e618620e8a7d8b"
+}
