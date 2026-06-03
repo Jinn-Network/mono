@@ -18,13 +18,12 @@ name: indexer monitor
 
 on:
   workflow_dispatch:
-  # schedule crons are COMMENTED OUT until a manual workflow_dispatch run
-  # validates the probe + alert path end-to-end (mirrors broadcast-bot.yml's
-  # "enable after a manual run validates" discipline). Uncomment after a clean
-  # dispatch run.
-  # schedule:
-  #   - cron: '*/5 * * * *'   # indexer freshness — every ~5 min
-  #   - cron: '0 9 * * *'     # tenderly key-health — daily 09:00 UTC
+  # Enabled after the validating workflow_dispatch run on 2026-06-03 (run
+  # 26880149059, both jobs green) confirmed the probe + alert path end-to-end —
+  # the "enable after a manual run validates" discipline (mirrors broadcast-bot.yml).
+  schedule:
+    - cron: '*/5 * * * *'   # indexer freshness — every ~5 min
+    - cron: '0 9 * * *'     # tenderly key-health — daily 09:00 UTC
 
 permissions:
   contents: read

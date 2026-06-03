@@ -1,0 +1,45 @@
+# Railway production config-as-code for the jinn-indexer service.
+#
+# Why this file exists (2026-06-03): the service's build config had drifted in
+# the Railway dashboard to the RAILPACK auto-builder. RAILPACK builds from the
+# service Root Directory and runs `yarn install`, which cannot resolve the
+# indexer's `@jinn-network/sdk@portal:../sdk` sibling — every deploy failed at
+# the install step ("Manifest not found"), freezing the live indexer on stale
+# code while build-failures kept the last-good container serving. Pinning the
+# Dockerfile here makes the build reproducible and dashboard-drift-proof.
+#
+# !! #846 guardrail: this file MUST stay under packages/indexer/deploy/ and the
+# service's "Config as code" path MUST point at packages/indexer/deploy/railway.toml.
+# A railway.toml at the REPO ROOT is applied by Railway to EVERY monorepo service
+# (jinn-worker, jinn-operator-*, claim-relayer, …), overriding their build
+# configs — that is exactly what broke the indexer for hours in #846.
+#
+# Two one-time service settings are NOT expressible in this file (set once in
+# the Railway dashboard / API):
+#   - Root Directory = /packages  (the Dockerfile's build context: it COPYs the
+#     sibling sdk/ and indexer/ trees, matching the CI build
+#     `docker build -f indexer/deploy/Dockerfile .` run from packages/).
+#   - Config as code  = packages/indexer/deploy/railway.toml
+
+[build]
+builder = "DOCKERFILE"
+# Relative to the service Root Directory (/packages). Verified: a deploy with
+# this path built green on 2026-06-03 (commit 71f5960d).
+dockerfilePath = "indexer/deploy/Dockerfile"
+# Only redeploy when the indexer or its portal SDK dependency changes — not on
+# every push to next. Gitignore-style, anchored at the REPO ROOT (per Railway's
+# monorepo docs, whose example uses /packages/backend). Confirm after enabling:
+# a push touching only client/** must NOT redeploy the indexer.
+watchPatterns = ["packages/indexer/**", "packages/sdk/**"]
+
+[deploy]
+# Gate traffic cutover on the new container actually serving, so a redeploy does
+# not drop requests (the prior null healthcheck cut over before the process was
+# up — the "indexer goes down momentarily on merges" symptom). /health returns
+# 200 once the HTTP server is listening; /ready (caught-up-to-realtime) is the
+# stricter zero-downtime gate — see README §Zero-downtime rolling deploys.
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+numReplicas = 1
