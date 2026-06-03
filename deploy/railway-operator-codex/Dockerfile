@@ -12,6 +12,10 @@ FROM ghcr.io/jinn-network/client:${BASE_TAG}
 
 # Codex CLI for the codex harness. Pinned to the version verified locally.
 RUN npm install -g @openai/codex@0.133.0
+# Testnet + faucet auto-drip — parity with the prior codex image and the launcher
+# overlay; the README's first-boot funding flow depends on JINN_AUTO_TESTNET_FAUCET=1.
+ENV JINN_NETWORK=testnet
+ENV JINN_AUTO_TESTNET_FAUCET=1
 ENV JINN_CONFIG=/data/config.json
 COPY deploy/railway-operator-codex/seed.sh /usr/local/bin/jinn-codex-seed.sh
 RUN chmod +x /usr/local/bin/jinn-codex-seed.sh
