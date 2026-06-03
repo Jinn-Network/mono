@@ -146,6 +146,35 @@ jobs:
         working-directory: client
         run: yarn release:tier-1:T1.3
 
+      # App-flow determinism (#1014, DR-2026-06-03): the deterministic
+      # mocked-daemon Playwright journeys run in THIS gate per the redesign's
+      # taxonomy (deterministic → hermetic). create→launch (solvernet-flow) +
+      # discover→join→observe (join) drive the real SPA bundle with every /v1/*
+      # call intercepted at the page.route() boundary — no fork, no live daemon
+      # data path — so they are deterministic by construction and cannot
+      # reintroduce the T2.3 live-fork flake. Chromium is the only browser
+      # playwright.config.ts targets.
+      - name: Install Playwright Chromium for app-flow tests
+        working-directory: client
+        run: yarn playwright install --with-deps chromium
+
+      # Scoped allowlist (solvernet-flow + join) — deliberately NOT
+      # `yarn e2e:dashboard`, which drags in the quarantined stale dashboard
+      # tests. A failure here short-circuits the job into the product-red
+      # verdict below, same as any other deterministic regression.
+      - name: App-flow determinism (Playwright, mocked daemon)
+        id: appflow
+        working-directory: client
+        run: yarn e2e:app-flow
+
+      - name: Upload app-flow traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-flow-traces
+          path: client/test-results/
+          retention-days: 7
+
       # Write the verdict JSON. Reaching this step means every prior step
       # succeeded (the snapshot suite + T1.3 both passed; a failure of either
       # short-circuits the job before here). `if: success()` is explicit so the
@@ -160,9 +189,10 @@ jobs:
             "conclusion": "success",
             "scenarios": [
               { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery on snapshot bytecode + deterministic RPC fallback) green" },
-              { "id": "indexer-round-trip-T1.3", "verdict": "pass", "failClass": null, "notes": "local Ponder vs snapshot chain (closes #341 stub)" }
+              { "id": "indexer-round-trip-T1.3", "verdict": "pass", "failClass": null, "notes": "local Ponder vs snapshot chain (closes #341 stub)" },
+              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" }
             ],
-            "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip."
+            "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."
           }
           EOF
 

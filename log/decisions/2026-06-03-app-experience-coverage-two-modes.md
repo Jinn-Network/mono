@@ -7,7 +7,7 @@ status: ratified
 authors: opus (brainstorming session with ritsuKai2000)
 issue: [#1014](https://github.com/Jinn-Network/mono/issues/1014)
 relates-to: [#923](https://github.com/Jinn-Network/mono/issues/923) (two-gate consolidation) via PR [#960](https://github.com/Jinn-Network/mono/pull/960), `docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md` (the two-gate target this builds on), [#351](https://github.com/Jinn-Network/mono/issues/351) (operator-join count surface), [#773](https://github.com/Jinn-Network/mono/issues/773) (staking/launch decouple — the race T2.3 surfaced), `.claude/skills/testing-jinn-app` (the two-mode pattern this leans into)
-sequenced-after: PR [#960](https://github.com/Jinn-Network/mono/pull/960) (this DR targets the merged two-gate world; implementation lands after #960)
+sequenced-after: PR [#960](https://github.com/Jinn-Network/mono/pull/960) — MERGED 2026-06-03; the two-gate world this targets is live, so the CI wiring (hermetic-gate.yml + environment-suite.yml) ships in this same branch rather than a follow-up.
 ---
 
 ## Context
@@ -158,21 +158,27 @@ onto the protocol scenarios.
 ## Acceptance-criteria mapping (#1014)
 
 - Deterministic gating coverage of create→launch→join →
-  `solvernet-flow` + net-new `join.e2e` in `hermetic-gate.yml`. ✓
+  `solvernet-flow` (repaired) + net-new `join.e2e`, bundled as `yarn e2e:app-flow`
+  and run in `hermetic-gate.yml`. ✓ (wiring shipped in this branch)
 - Non-gating real paired smoke (real SPA + real testnet), classified so it
-  never blocks → neutral `continue-on-error` job in `environment-suite.yml`. ✓
+  never blocks → `continue-on-error` job in `environment-suite.yml` that posts no
+  check-run. ✓ (job shipped; **stays a no-op skip until a human provisions the two
+  hosted-dashboard URLs `JINN_SMOKE_OP_A_URL` / `JINN_SMOKE_OP_B_URL` in the
+  `testnet-gate` Environment** — the test self-skips when they are absent)
 - No live-fork browser E2E reintroduced into any blocking gate → join is
   fully mocked; the smoke is real-testnet **and** non-gating. ✓
 - Design recorded → this DR. ✓
 
 ## Sequencing
 
-This DR targets the **merged** two-gate world. Implementation lands **after**
-PR #960 merges (or stacks on its branch), because Mode 1 wires into
-`hermetic-gate.yml` and Mode 2 wires into `environment-suite.yml` — both
-introduced by #960. The test code (`join.e2e.test.ts`) can be authored against
-the existing `mock-daemon-api.ts` helpers independently; only the CI wiring is
-gated on #960.
+This DR targeted the two-gate world; **PR #960 merged 2026-06-03**, so that world
+is live and the CI wiring ships in this same branch (not a follow-up): Mode 1 adds
+a scoped Chromium + `yarn e2e:app-flow` step to `hermetic-gate.yml`; Mode 2 adds a
+non-gating `real-paired-smoke` job to `environment-suite.yml`. One human prereq
+remains before Mode 2 produces signal: provision `JINN_SMOKE_OP_A_URL` /
+`JINN_SMOKE_OP_B_URL` (two externally-hosted operator dashboards) in the
+`testnet-gate` Environment. Until then the smoke job runs and self-skips — green,
+no-op, no blocking effect.
 
 ## Consequences
 

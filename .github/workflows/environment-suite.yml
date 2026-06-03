@@ -533,3 +533,54 @@ jobs:
             ${{ runner.temp }}/environment-suite-verdict.json
           retention-days: 14
           if-no-files-found: ignore
+
+  # ── Real paired app smoke (NON-GATING) ─────────────────────────────────────
+  # Mode 2 of the app-experience coverage (#1014, DR-2026-06-03). Drives two
+  # real testnet operator DASHBOARDS through create→launch→join and uploads
+  # screenshots + trace for per-cut visibility.
+  #
+  # NON-GATING BY CLASSIFICATION: `continue-on-error: true` and it posts NO
+  # check-run. Only the `environment-suite` job posts the gating verdict the
+  # publish guard reads, so a flake or timeout here is a NEUTRAL signal that can
+  # never block the cut. A browser-on-real-world run is legitimate ONLY when it
+  # is non-gating — this is the home for it (the deterministic version lives in
+  # the hermetic gate).
+  #
+  # Independent of the gating job's warm operator: it targets EXTERNALLY-hosted
+  # operator dashboards via JINN_SMOKE_OP_A_URL / JINN_SMOKE_OP_B_URL (distinct
+  # keystores / nonces from the in-job warm operator), so running alongside the
+  # singleton `environment-suite` job is safe. The test self-skips when those
+  # URLs are absent, so this job is a clean no-op until a human provisions the
+  # two hosted-dashboard URLs in the testnet-gate Environment.
+  real-paired-smoke:
+    name: Real paired app smoke (non-gating)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    environment: testnet-gate
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Install client deps
+        working-directory: client
+        run: yarn install --immutable
+      - name: Install Playwright Chromium
+        working-directory: client
+        run: yarn playwright install --with-deps chromium
+      - name: Drive the real paired app smoke
+        working-directory: client
+        env:
+          JINN_SMOKE_OP_A_URL: ${{ secrets.JINN_SMOKE_OP_A_URL }}
+          JINN_SMOKE_OP_B_URL: ${{ secrets.JINN_SMOKE_OP_B_URL }}
+        run: yarn e2e:real-paired-smoke
+      - name: Upload smoke artifacts (screenshots + trace)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-paired-smoke
+          path: client/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
