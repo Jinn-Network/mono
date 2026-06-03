@@ -33,9 +33,13 @@ export function recordTaskCost(
       model: usage.model,
       detail: usage.estimated ? 'estimated' : 'observed',
     });
-    // Issue #815: fill actual_cost_usd_micros on the per-request claimed
-    // row + set claim_status='delivered'. ai_units stays as captured at
-    // claim time (estimates are the gate input, never recomputed).
+    // Issue #1004: fill actual_cost_usd_micros on the per-request claimed
+    // row + set claim_status='delivered'. The gate's accumulator reads this
+    // column (COALESCE actual, estimated) so the delivered actual replaces
+    // the claim-time estimate in the running total. For subscription
+    // credentials the resulting USD figure is a *proxy* budget — it bounds
+    // Jinn-attributable model cost, not the provider's plan quota directly.
+    // ai_units stays as captured at claim time (legacy unit surface, #1006).
     // Idempotent: no-op when no claimed row exists for this request id.
     store.finalizeClaimDelivered(args.requestId, actualCostUsdMicros);
   } catch (err) {
