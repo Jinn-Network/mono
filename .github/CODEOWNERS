@@ -8,3 +8,24 @@
 /GLOSSARY.md   @oaksprout @ritsukai
 /CLAUDE.md     @oaksprout @ritsukai
 /README.md     @oaksprout @ritsukai
+
+# Load-bearing human surfaces — the currently-visible parts of the two live
+# frontends. A skilled human MUST review; agent review cannot satisfy this gate.
+# See log/decisions/2026-06-03-human-surface-review-gate.md.
+# Render dirs only — logic (api/ hooks/ lib/ notifications/) is agent-reviewable.
+# A NEW render directory must be added here by hand; the glob does not infer it.
+
+# Operator app (client/src/dashboard/spa)
+/client/src/dashboard/spa/src/App.tsx     @oaksprout @ritsukai
+/client/src/dashboard/spa/src/routes.ts   @oaksprout @ritsukai
+/client/src/dashboard/spa/src/pages/      @oaksprout @ritsukai
+/client/src/dashboard/spa/src/components/ @oaksprout @ritsukai
+/client/src/dashboard/spa/src/regions/    @oaksprout @ritsukai
+/client/src/dashboard/spa/src/shell/      @oaksprout @ritsukai
+/client/src/dashboard/spa/src/styles/     @oaksprout @ritsukai
+
+# Network explorer (packages/indexer/explorer)
+/packages/indexer/explorer/src/App.tsx     @oaksprout @ritsukai
+/packages/indexer/explorer/src/views/      @oaksprout @ritsukai
+/packages/indexer/explorer/src/components/ @oaksprout @ritsukai
+/packages/indexer/explorer/src/styles/     @oaksprout @ritsukai
