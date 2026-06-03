@@ -45,7 +45,9 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -67,6 +69,11 @@ import {
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getChainConfig } from '../../client/src/earning/contracts';
+import { FleetBootstrapper } from '../../client/src/earning/bootstrap';
+// CJS package; top-level import → tsx compiles to require() so NODE_PATH
+// (client/node_modules) resolves it. A dynamic import() would use ESM
+// resolution, which ignores NODE_PATH and fails ERR_MODULE_NOT_FOUND.
+import * as safeDeployments from '@safe-global/safe-deployments';
 
 // ── Configuration (env-overridable; CHAIN_CONFIG-derived addresses) ────────────
 
@@ -88,8 +95,14 @@ const DEFAULT_OUT_DIR = path.join(
  * fixture identical run-to-run. Bump deliberately when refreshing; OLAS
  * on-chain contracts are effectively fixed so the exact pin is not load-bearing
  * for the gate (spec §4).
+ *
+ * MUST be ≥ the deployment block of every Jinn contract the warm-up bootstrap
+ * touches — notably the ERC-8004 IdentityRegistry (0x8004…), which deployed on
+ * Base mainnet between blocks 40M and 44M. An earlier pin leaves register() a
+ * no-op (no code → "Registered event missing") and the warm-up fails. 46M is
+ * comfortably past every Jinn deploy and is archive-served by public RPCs.
  */
-const DEFAULT_FORK_BLOCK = 33_400_000;
+const DEFAULT_FORK_BLOCK = 46_000_000;
 
 const CHAIN_CONFIG = getChainConfig('base');
 
@@ -362,6 +375,111 @@ async function main(): Promise<void> {
     console.log(`  router:          ${router}`);
     console.log(`  mockMech:        ${mockMech}`);
     console.log();
+
+    // 5.5 Write the address manifest next to the snapshot. The deployer EOA is a
+    //     forked account whose nonce is its real Base nonce (NOT 0), so deploy
+    //     CREATE addresses are NOT derivable from a low nonce — consumers must
+    //     read them from here, never re-derive. Self-describing fixture.
+    const addresses = {
+      coordinator,
+      marketplace,
+      activityChecker,
+      router,
+      mockMech,
+      deployer: deployer.address,
+      operator: operator.address,
+      forkBlock,
+      nativePaymentType: NATIVE_PAYMENT_TYPE,
+    };
+    writeFileSync(path.join(outDir, 'addresses.json'), JSON.stringify(addresses, null, 2) + '\n');
+    console.log(`Step 6.5: wrote address manifest → ${path.join(outDir, 'addresses.json')}`);
+
+    // 5.6 Warm the OLAS service stack + Safe contracts into the dump (spec §4 —
+    //     "seed the Safe factory, registries"). `--dump-state` only persists
+    //     accounts TOUCHED this session; the per-PR gate loads it with NO fork
+    //     fallback, so anything bootstrap reads must already be cached. Rather
+    //     than guess which registry/factory/distributor slots the 11-step flow
+    //     reads, run the REAL FleetBootstrapper once here (offline, against the
+    //     fork) — it touches exactly the transitive closure, caching every
+    //     account + slot into the dump. This warm-up operator is a throwaway; the
+    //     hermetic bootstrap-from-scratch test bootstraps its OWN fresh operator
+    //     at load time and benefits from the cached infra.
+    console.log('Step 6.6: warm-up bootstrap (caches OLAS/Safe stack into the dump)...');
+    const warmDir = await mkdtemp(path.join(tmpdir(), 'jinn-snapshot-warm-'));
+    try {
+      const WARM_PASSWORD = 'snapshot-warmup';
+      const b1 = new FleetBootstrapper({ earningDir: warmDir, chain: 'base', rpcUrl });
+      const phase1 = await b1.bootstrap(WARM_PASSWORD);
+      if (!phase1.funding) {
+        throw new Error(`warm-up: expected awaiting_funding, got ok=${phase1.ok} message=${phase1.message}`);
+      }
+      await jsonRpc(rpcUrl, 'anvil_setBalance', [phase1.funding.master_address, numberToHex(parseEther('100'))]);
+      await jsonRpc(rpcUrl, 'evm_mine', []);
+      const b2 = new FleetBootstrapper({ earningDir: warmDir, chain: 'base', rpcUrl });
+      const phase2 = await b2.bootstrap(WARM_PASSWORD);
+      if (!phase2.ok) {
+        throw new Error(`warm-up bootstrap did not complete: ${phase2.message}`);
+      }
+      console.log(`  warm-up bootstrap complete (service_id=${phase2.fleet_state.services[0]?.service_id ?? '?'}) — OLAS/Safe stack now in the dump`);
+    } finally {
+      await rm(warmDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    // 5.7 Persist Safe singletons the SDK *validates* (read-only getCode) but the
+    //     warm-up deploy never *executes*. `anvil --dump-state` only journals
+    //     accounts touched by TRANSACTIONS, not fork accounts merely read via
+    //     eth_getCode — so a read-validated singleton is absent on --load-state
+    //     and Safe SDK init fails with "MultiSend contract is not deployed on the
+    //     current network". Copy their fork bytecode into local state (read →
+    //     setCode = a journaled write) so the hermetic gate, which loads with NO
+    //     fork fallback, sees them. Resolve the addresses from
+    //     @safe-global/safe-deployments — the SAME source @safe-global/protocol-kit
+    //     uses — so we get Base's actual (EIP-155, non-canonical) deployment
+    //     addresses, not the chainId-0 canonical ones.
+    console.log('Step 6.7: persisting read-validated Safe singletons into the dump...');
+    const chainKey = String(base.id);
+    const sd: any = (safeDeployments as any).default ?? safeDeployments;
+    const SAFE_GETTERS = [
+      'getMultiSendDeployment',
+      'getMultiSendCallOnlyDeployment',
+      'getProxyFactoryDeployment',
+      'getSafeSingletonDeployment',
+      'getSafeL2SingletonDeployment',
+      'getCompatibilityFallbackHandlerDeployment',
+      'getFallbackHandlerDeployment',
+      'getSignMessageLibDeployment',
+      'getCreateCallDeployment',
+      'getSimulateTxAccessorDeployment',
+    ];
+    const SAFE_VERSIONS = ['1.4.1', '1.3.0'];
+    const safeAddrs = new Set<string>();
+    for (const getter of SAFE_GETTERS) {
+      const fn = sd[getter];
+      if (typeof fn !== 'function') continue;
+      for (const version of SAFE_VERSIONS) {
+        let deployment: any;
+        try {
+          deployment = fn({ network: chainKey, version });
+        } catch {
+          continue;
+        }
+        if (!deployment) continue;
+        const raw = deployment.networkAddresses?.[chainKey] ?? deployment.defaultAddress;
+        for (const a of Array.isArray(raw) ? raw : [raw]) {
+          if (a) safeAddrs.add(getAddress(a as string));
+        }
+      }
+    }
+    let persisted = 0;
+    for (const addr of safeAddrs) {
+      const code = (await jsonRpc(rpcUrl, 'eth_getCode', [addr as Address, 'latest'])) as string;
+      if (code && code !== '0x') {
+        await jsonRpc(rpcUrl, 'anvil_setCode', [addr as Address, code]);
+        persisted++;
+      }
+    }
+    await jsonRpc(rpcUrl, 'evm_mine', []);
+    console.log(`  persisted ${persisted}/${safeAddrs.size} Safe-deployment contracts for chain ${chainKey} from the fork`);
 
     // 6. Trigger the state dump: SIGTERM makes anvil flush --dump-state to disk,
     //    then exit. We resolve when the process exits cleanly.

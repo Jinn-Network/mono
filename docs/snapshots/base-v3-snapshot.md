@@ -63,7 +63,7 @@ The script:
 | Env var | Default | Meaning |
 |---|---|---|
 | `BASE_RPC_URL` | *(required)* | Base mainnet RPC to fork once |
-| `JINN_SNAPSHOT_FORK_BLOCK` | `33400000` | pinned Base block |
+| `JINN_SNAPSHOT_FORK_BLOCK` | `46000000` | pinned Base block (must be ≥ the IdentityRegistry deploy, ~block 44M) |
 | `JINN_SNAPSHOT_OUT_DIR` | the committed fixture dir | output directory |
 | `JINN_SNAPSHOT_ANVIL_PORT` | `8545` | anvil port |
 | `JINN_SNAPSHOT_READY_TIMEOUT_MS` | `60000` | readiness poll timeout |

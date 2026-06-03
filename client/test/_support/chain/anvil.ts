@@ -69,7 +69,12 @@ export async function spawnAnvilFromState(opts: SpawnAnvilFromStateOpts): Promis
   const readyTimeoutMs = opts.readyTimeoutMs ?? 15_000;
   const chain = opts.chain ?? base;
 
-  const args = ['--load-state', opts.statePath];
+  // `--load-state` (with no `--fork-url`) resets the chain id to anvil's default
+  // (31337). The snapshot is a Base fork, and chain-id-keyed lookups — notably
+  // the Safe SDK's multiSend/proxyFactory resolution used by FleetBootstrapper —
+  // must see the real chain id or fail with "Invalid multiSend contract address".
+  // Pin it to the snapshot's chain so the loaded state is faithful.
+  const args = ['--load-state', opts.statePath, '--chain-id', String(chain.id)];
   if (silent) args.push('--silent');
 
   return startAnvil({ extraArgs: args, silent, readyTimeoutMs, chain });
