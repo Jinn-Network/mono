@@ -33,8 +33,9 @@ services:
     volumes:
       # Persistent daemon state: database, keystore, and earning progress
       - jinn-data:/data
-      # Persistent authentication state: stores Claude's OAuth token
-      - jinn-claude-state:/root/.claude
+      # Persistent authentication state: stores Claude's OAuth token. The image
+      # now runs as the non-root `node` user, so file-auth lives at /home/node/.claude.
+      - jinn-claude-state:/home/node/.claude
     command: ["run"]
 
 volumes:
