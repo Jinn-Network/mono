@@ -188,4 +188,12 @@ const testnetConfig = createConfig({
   },
 });
 
-export default SNAPSHOT_ROUTER ? buildSnapshotConfig() : testnetConfig;
+// The runtime value is the snapshot config when env-gated, otherwise the live
+// testnet config. The static type is pinned to `typeof testnetConfig` so Ponder
+// codegen resolves a single concrete contract/event set: a ternary union of two
+// `createConfig` shapes (snapshot declares the chain key `snapshot`; testnet
+// declares `baseSepolia`/`sepolia`) collapses the virtual `ponder:registry`
+// event names to `never`. Both branches declare the same JinnRouter /
+// IdentityRegistry / JinnDistributor contracts, so the testnet type is a sound
+// description of either runtime value for handler registration.
+export default (SNAPSHOT_ROUTER ? buildSnapshotConfig() : testnetConfig) as typeof testnetConfig;

@@ -97,9 +97,20 @@ async function startAnvil(params: {
 
   const args = [...extraArgs, '--port', String(port)];
 
+  // Even in silent mode, PIPE stderr (not 'ignore') so a crash-on-startup —
+  // e.g. anvil rejecting a `--load-state` fixture whose dump-state schema was
+  // written by a different anvil version — surfaces its real reason instead of
+  // an opaque `code=2`. stdout stays suppressed (the banner is noise); stderr
+  // is buffered and folded into the early-exit error below.
   const child: ChildProcess = spawn('anvil', args, {
-    stdio: silent ? 'ignore' : 'inherit',
+    stdio: silent ? ['ignore', 'ignore', 'pipe'] : 'inherit',
     detached: false,
+  });
+
+  let stderrTail = '';
+  child.stderr?.on('data', (chunk: Buffer) => {
+    // Keep only the last ~2KB so a chatty process can't grow this unbounded.
+    stderrTail = (stderrTail + chunk.toString()).slice(-2048);
   });
 
   // Race readiness against early process exit. Without the exit watcher, a
@@ -107,9 +118,10 @@ async function startAnvil(params: {
   // full timeout.
   const exitPromise = new Promise<never>((_, reject) => {
     child.once('error', (err) => reject(new Error(`anvil failed to spawn: ${err.message}`)));
-    child.once('exit', (code, signal) =>
-      reject(new Error(`anvil exited before becoming ready (code=${code}, signal=${signal})`)),
-    );
+    child.once('exit', (code, signal) => {
+      const detail = stderrTail.trim() ? `: ${stderrTail.trim()}` : '';
+      reject(new Error(`anvil exited before becoming ready (code=${code}, signal=${signal})${detail}`));
+    });
   });
   const readyPromise = (async () => {
     const deadline = Date.now() + readyTimeoutMs;

@@ -66,7 +66,18 @@ jobs:
 
       # Foundry provides `anvil` — the snapshot is loaded via `anvil --load-state`
       # (deterministic, local disk I/O, no live RPC on the gate path).
+      #
+      # PIN the anvil version: anvil's `--dump-state` JSON schema is NOT stable
+      # across releases. The committed fixture was authored with this nightly;
+      # newer anvil rejects it at load (`missing field 'address'`) and current
+      # stable rejects it too (`SerializableTransactionType`), so an unpinned
+      # toolchain exits code 2 before becoming ready and reddens the whole gate.
+      # This tag must move IN LOCKSTEP with the fixture: to bump anvil, rebuild
+      # the snapshot (docs/snapshots/base-v3-snapshot.md) under the new version
+      # and update this pin in the same PR.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
 
       - name: Install client deps
         working-directory: client
