@@ -684,13 +684,17 @@ Output flags:
           verb: 'solver-nets screen-held-out', solverNet: 'swe-rebench-v2',
           heldOut: summary.heldOutCount, baseCodeDigest: summary.baseCodeDigest,
           slatePath: summary.slatePath, reportPath: summary.reportPath,
-          screened: summary.result.screened.length,
+          screened: summary.result.screened.length, proverUnscorable: summary.proverUnscorable,
         },
         human, json,
         (v) => {
-          const s = v as { heldOut: number; baseCodeDigest: string; slatePath: string };
+          const s = v as { heldOut: number; baseCodeDigest: string; slatePath: string; proverUnscorable: number };
+          const warn = s.proverUnscorable > 0
+            ? `\n  WARNING: prover returned no gradeable result on ${s.proverUnscorable} candidate(s) — ` +
+              `prover may be UNAVAILABLE (check codex >=0.133.0 + auth); re-run before trusting an empty slate`
+            : '';
           return `held-out=${s.heldOut}  base=${s.baseCodeDigest}\n  slate: ${s.slatePath}\n` +
-            `  next: jinn eval v2 --checkpoint <trained-cid> --parent ${s.baseCodeDigest}`;
+            `  next: jinn eval v2 --checkpoint <trained-cid> --parent ${s.baseCodeDigest}${warn}`;
         },
       );
       return;

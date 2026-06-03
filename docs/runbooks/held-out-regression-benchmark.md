@@ -13,7 +13,11 @@ is held out from it and scored against frozen checkpoints over time.
 ## Preconditions
 - `jinn harnesses enable swe-rebench-v2-evaluator` (clones the upstream eval repo).
 - Docker reachable.
-- The Codex prover configured (the `codex` CLI + its API key) for layer 3.
+- The Codex prover configured for layer 3: `codex` CLI **>= 0.133.0** (older CLIs
+  deliver the prompt differently and the prover returns unscorable → every
+  base-fail is logged as `no-headroom` and the slate comes out empty) + valid auth
+  (`~/.codex/auth.json`). The screen logs a loud WARNING if the prover returns no
+  gradeable result, so an unavailable prover can't masquerade as "no headroom".
 - `JINN_EVAL_DISK_FLOOR_GB ≥ 40`. The evaluator prunes Docker per instance
   (`rmi` + `container`/`builder prune`) and gates each round on the floor, so
   peak disk ≈ the heaviest single image (~12.6 GB), NOT the sum — a whole-pool

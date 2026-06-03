@@ -55,6 +55,9 @@ export interface ScreenRunSummary {
   slatePath: string;
   reportPath: string;
   heldOutCount: number;
+  /** Base-failing candidates whose prover run returned no gradeable result
+   *  (excluded as no-headroom) — a signal the prover may be unavailable. */
+  proverUnscorable: number;
 }
 
 /** dist/src parity: the shipped slate JSON lives next to the compiled module. */
@@ -175,6 +178,23 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     R: opts.R, heldOutCount: opts.heldOutCount, maxCandidates: opts.maxCandidates, perRepoCap: opts.perRepoCap,
   });
 
+  // Diagnosability: a base-failing candidate routed to the prover that comes
+  // back `proverPassed: null` means the prover produced NO gradeable result
+  // (errored / no patch), not a clean "the prover can't solve it". That silently
+  // routes to `no-headroom` and can yield a misleadingly empty slate when the
+  // prover is simply unavailable (e.g. codex CLI < 0.133.0, or auth missing).
+  // Surface it loudly rather than swallow it.
+  const proverUnscorable = result.screened.filter(
+    (s) => s.reason === 'no-headroom' && s.proverPassed === null,
+  ).length;
+  if (proverUnscorable > 0) {
+    log(
+      `[screen] WARNING: the prover returned no gradeable result on ${proverUnscorable} base-failing ` +
+      `candidate(s) — excluded as no-headroom, but this likely means the prover is UNAVAILABLE rather than ` +
+      `unable. Verify the codex CLI (>=0.133.0) + auth, then re-run. See proverPassed=null rows in the report.`,
+    );
+  }
+
   const generatedAt = new Date().toISOString();
   const slateFile = buildV2SlateFile(result.heldOut.map((h) => h.instance_id), generatedAt);
   mkdirSync(slatesDir(), { recursive: true });
@@ -201,5 +221,5 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     store.close?.();
   }
 
-  return { result, baseCodeDigest, slatePath, reportPath, heldOutCount: result.heldOut.length };
+  return { result, baseCodeDigest, slatePath, reportPath, heldOutCount: result.heldOut.length, proverUnscorable };
 }
