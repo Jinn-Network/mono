@@ -24,7 +24,7 @@ describe('stratifyByRepo', () => {
   });
 });
 
-import { screenBaseFailures, type ScreenDeps, type ScreenOpts } from '../../src/eval/screen.js';
+import { screenBaseFailures, type ScreenDeps, type ScreenOpts, type ScreenMeasurement } from '../../src/eval/screen.js';
 
 function deps(over: Partial<ScreenDeps>): ScreenDeps {
   return {
@@ -35,6 +35,46 @@ function deps(over: Partial<ScreenDeps>): ScreenDeps {
   };
 }
 const OPTS: ScreenOpts = { R: 3, heldOutCount: 10, maxCandidates: 100, perRepoCap: 10 };
+
+describe('screenBaseFailures resumability (cache)', () => {
+  it('replays a cached measurement without re-running gradeable/base/prover', async () => {
+    let calls = 0;
+    const cached: ScreenMeasurement = {
+      gradeable: true, basePasses: 0, baseRuns: 3, baseUnscorable: false, proverRan: true, proverPassed: true,
+    };
+    const r = await screenBaseFailures([t('o__a-1')], deps({
+      ensureGradeable: async () => { calls++; throw new Error('should not measure on cache hit'); },
+      runBaseFrozen: async () => { calls++; return { passed: false }; },
+      runProverFrozen: async () => { calls++; return { passed: true }; },
+      getCachedMeasurement: () => cached,
+    }), OPTS);
+    expect(calls).toBe(0);
+    expect(r.heldOut.map((h) => h.instance_id)).toEqual(['o__a-1']); // cached held-out replayed
+  });
+
+  it('records a freshly-measured candidate for resume', async () => {
+    const recorded: Record<string, ScreenMeasurement> = {};
+    await screenBaseFailures([t('o__a-1')], deps({
+      getCachedMeasurement: () => undefined,
+      recordMeasurement: (id, m) => { recorded[id] = m; },
+    }), OPTS);
+    expect(recorded['o__a-1']).toMatchObject({ gradeable: true, basePasses: 0, proverRan: true, proverPassed: true });
+  });
+
+  it('budget bounds only NEW measurements; cache hits are free', async () => {
+    let measured = 0;
+    const cache: Record<string, ScreenMeasurement> = {
+      'o__a-1': { gradeable: true, basePasses: 1, baseRuns: 1, baseUnscorable: false, proverRan: false, proverPassed: null },
+    };
+    const r = await screenBaseFailures([t('o__a-1'), t('o__b-1'), t('o__c-1')], deps({
+      runBaseFrozen: async () => { measured++; return { passed: true }; }, // base-passes
+      getCachedMeasurement: (id) => cache[id],
+    }), { ...OPTS, maxCandidates: 1 });
+    // a-1 is cached (free); budget=1 allows one new measurement (b-1); c-1 hits budget → break.
+    expect(measured).toBe(1);
+    expect(r.screened.map((s) => s.instance_id)).toEqual(['o__a-1', 'o__b-1']);
+  });
+});
 
 describe('screenBaseFailures', () => {
   it('admits gradeable × base-0/R × prover-pass; classifies the rest', async () => {

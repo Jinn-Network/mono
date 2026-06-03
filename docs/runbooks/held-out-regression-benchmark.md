@@ -51,6 +51,16 @@ to the slate module:
 - `held-out-slate.swe-rebench-v2.v2.screening-report.json` (per-candidate evidence)
 and records the base arm (all-fail) under the printed `baseCodeDigest`.
 
+**Resumable.** A real R≥3 cut is hours of inference; it is NOT one-shot. Each
+candidate's measurement (gradeable + base R-runs + prover) is cached to
+`<stateDir>/held-out-screen-progress.json`. **Re-run the exact same command to
+resume** — cached candidates replay instantly (no inference, no budget cost) and
+`--max-candidates` bounds only the *new* work, so a long screen proceeds in
+budget-sized chunks across invocations (and survives a rate-limit / crash / disk
+abort). The cache is keyed by a config signature (base model, prover, `--runs`,
+eval-semantics version); changing any of those starts fresh. To force a clean
+re-screen, delete `held-out-screen-progress.json`.
+
 Then add `'v2'` to `ACTIVE_HELD_OUT_SLATE_VERSIONS` and commit the slate + report
 (see the plan, Task 7). The generator now holds v2 out of the train stream.
 

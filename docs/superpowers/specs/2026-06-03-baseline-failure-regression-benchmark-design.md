@@ -177,6 +177,7 @@ No Docker/inference in CI. The heavy run is the subverb, exercised manually (the
 | Candidate pool | whole gradeable pool, repo-stratified round-robin, `--max-candidates` ~60–100; scopeable via `--instance-id`/`--repo` |
 | Exam cap | **N=10** default (range 10–20, `--held-out-count`), per-repo diversity cap |
 | Selection | deterministic order, content-hashed, frozen before measurement; widen-don't-pad; log drops |
+| Resumability | per-candidate measurement cached to `held-out-screen-progress.json` (signature = base model / prover / R / semantics); re-run the same command to resume — cache hits replay free, `--max-candidates` bounds only new work, so a multi-hour cut proceeds in chunks and survives interruptions |
 | Enforcement | generator-only, union `['v1','v2']` |
 | Eval / stat | reuse `jinn eval v2 --parent <emptyTreeDigest>`; Wilson + paired McNemar (#987) |
 | Disk | `JINN_EVAL_DISK_FLOOR_GB ≥ 40`; per-instance Docker prune keeps peak ≈ one image (~12.6 GB); clean abort (`InsufficientDiskError`→unscorable→skip) if the floor can't hold — no ≥100 GB host needed |

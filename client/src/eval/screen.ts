@@ -52,6 +52,25 @@ export interface ScreenCandidateRun {
   unscorableReason?: string;
 }
 
+/**
+ * The expensive, cacheable per-candidate outcome — gradeability + the base R-run
+ * loop + (if base is 0/R) the prover. Decoupled from the selection decision so a
+ * resumed run replays it from cache without re-spending inference. The decision
+ * (held-out / no-headroom / caps) is always recomputed fresh from this.
+ */
+export interface ScreenMeasurement {
+  gradeable: boolean;
+  basePasses: number;
+  baseRuns: number;
+  baseUnscorable: boolean;
+  baseUnscorableReason?: string;
+  /** Whether the prover was reached (only when base is gradeable + 0/R). */
+  proverRan: boolean;
+  /** Meaningful only when `proverRan`; `null` = prover unscorable. */
+  proverPassed: boolean | null;
+  proverUnscorableReason?: string;
+}
+
 export interface ScreenDeps {
   /** Confirm gradeable at the current semantics version (idempotent; cheap/cached). */
   ensureGradeable(task: PoolTask): Promise<boolean>;
@@ -59,6 +78,13 @@ export interface ScreenDeps {
   runBaseFrozen(task: PoolTask): Promise<ScreenCandidateRun>;
   /** Prover (Codex/GPT-5.5), frozen, empty impl-state. `passed: null` = unscorable. */
   runProverFrozen(task: PoolTask): Promise<ScreenCandidateRun>;
+  /** Resumability (optional): return a cached measurement for this instance, or
+   *  undefined to measure live. A cache hit replays for free (no inference) and
+   *  does NOT consume the maxCandidates budget. */
+  getCachedMeasurement?(instance_id: string): ScreenMeasurement | undefined;
+  /** Resumability (optional): persist a freshly-measured candidate so a later
+   *  re-run of the same command resumes instead of restarting. */
+  recordMeasurement?(instance_id: string, m: ScreenMeasurement): void;
   log?: (msg: string) => void;
 }
 
@@ -96,9 +122,49 @@ export interface ScreenResult {
 }
 
 /**
+ * The expensive part: gradeable → base R-runs (early-stop on first pass) →
+ * prover (only if base is 0/R). Pure measurement; no selection/caps. This is what
+ * gets cached for resumability.
+ */
+async function measureCandidate(task: PoolTask, deps: ScreenDeps, R: number): Promise<ScreenMeasurement> {
+  const none: ScreenMeasurement = { gradeable: false, basePasses: 0, baseRuns: 0, baseUnscorable: false, proverRan: false, proverPassed: null };
+  if (!(await deps.ensureGradeable(task))) return none;
+
+  let basePasses = 0;
+  let baseUnscorable = false;
+  let baseUnscorableReason: string | undefined;
+  let r = 0;
+  for (; r < R; r++) {
+    const run = await deps.runBaseFrozen(task);
+    if (run.passed === null) { baseUnscorable = true; baseUnscorableReason = run.unscorableReason; break; }
+    if (run.passed) { basePasses++; break; }
+  }
+  const baseRuns = r + (baseUnscorable || basePasses > 0 ? 1 : 0);
+  if (baseUnscorable) {
+    return { gradeable: true, basePasses: 0, baseRuns, baseUnscorable: true, ...(baseUnscorableReason ? { baseUnscorableReason } : {}), proverRan: false, proverPassed: null };
+  }
+  if (basePasses > 0) {
+    return { gradeable: true, basePasses, baseRuns, baseUnscorable: false, proverRan: false, proverPassed: null };
+  }
+  // Base reliably fails (0/R) → layer 3: prover (existence proof of headroom).
+  const prover = await deps.runProverFrozen(task);
+  return {
+    gradeable: true, basePasses: 0, baseRuns, baseUnscorable: false, proverRan: true, proverPassed: prover.passed,
+    ...(prover.passed === null && prover.unscorableReason ? { proverUnscorableReason: prover.unscorableReason } : {}),
+  };
+}
+
+/**
  * Partition a candidate stream into the held-out exam vs the rest, applying the
  * three filter layers cheapest-first. `candidates` MUST already be ordered (use
  * {@link stratifyByRepo}); selection order is the iteration order and is frozen.
+ *
+ * Resumable: if `deps.getCachedMeasurement` is provided, an already-measured
+ * candidate replays from cache (no inference, no budget cost), so re-running the
+ * same command resumes — the `maxCandidates` budget bounds only NEW measurements
+ * per invocation, letting a long screen proceed in budget-sized chunks. The
+ * selection decision (caps, held-out) is always recomputed fresh, so the cached
+ * measurements stay valid even if `heldOutCount`/`perRepoCap` change.
  */
 export async function screenBaseFailures(
   candidates: PoolTask[],
@@ -109,61 +175,53 @@ export async function screenBaseFailures(
   const heldOut: ScreenResult['heldOut'] = [];
   const screened: ScreenedCandidate[] = [];
   const perRepo = new Map<string, number>();
-  let baseScreened = 0;
+  let liveMeasured = 0;
 
   for (const task of candidates) {
     if (heldOut.length >= opts.heldOutCount) break;
     const repo = repoOf(task);
-    const base = { instance_id: task.instance_id, repo, baseRuns: 0, basePasses: 0, proverPassed: null as boolean | null };
+    const base = { instance_id: task.instance_id, repo, basePasses: 0, proverPassed: null as boolean | null };
 
-    if (!(await deps.ensureGradeable(task))) {
-      screened.push({ ...base, gradeable: false, heldOut: false, reason: 'not-gradeable' });
-      continue;
-    }
-    if (baseScreened >= opts.maxCandidates) break; // budget bounds expensive runs
-    baseScreened++;
-
-    // Layer 2: base Haiku × R, early-stop on the first pass.
-    let basePasses = 0;
-    let baseUnscorable = false;
-    let baseReason: string | undefined;
-    let r = 0;
-    for (; r < opts.R; r++) {
-      const run = await deps.runBaseFrozen(task);
-      if (run.passed === null) { baseUnscorable = true; baseReason = run.unscorableReason; break; }
-      if (run.passed) { basePasses++; break; }
-    }
-    const baseRuns = r + (baseUnscorable || basePasses > 0 ? 1 : 0);
-    if (baseUnscorable) {
-      if (baseReason) log(`[screen] ${task.instance_id} base-unscorable: ${baseReason}`);
-      screened.push({ ...base, baseRuns, gradeable: true, heldOut: false, reason: 'base-unscorable', ...(baseReason ? { unscorableReason: baseReason } : {}) });
-      continue;
-    }
-    if (basePasses > 0) {
-      screened.push({ ...base, baseRuns, basePasses, gradeable: true, heldOut: false, reason: 'base-passes' });
-      continue;
+    // Measure (from cache, or live — bounded by the per-invocation budget).
+    let m = deps.getCachedMeasurement?.(task.instance_id);
+    if (!m) {
+      if (liveMeasured >= opts.maxCandidates) break; // budget bounds NEW (inference-spending) measurements
+      m = await measureCandidate(task, deps, opts.R);
+      liveMeasured += 1;
+      deps.recordMeasurement?.(task.instance_id, m);
     }
 
-    // Layer 3: prover ≥1 pass (existence proof of headroom).
-    const prover = await deps.runProverFrozen(task);
-    if (prover.passed !== true) {
-      if (prover.passed === null && prover.unscorableReason) {
-        log(`[screen] ${task.instance_id} prover-unscorable: ${prover.unscorableReason}`);
-      }
+    // Decide from the measurement (always fresh; cap/diversity not cached).
+    if (!m.gradeable) {
+      screened.push({ ...base, baseRuns: 0, gradeable: false, heldOut: false, reason: 'not-gradeable' });
+      continue;
+    }
+    if (m.baseUnscorable) {
+      if (m.baseUnscorableReason) log(`[screen] ${task.instance_id} base-unscorable: ${m.baseUnscorableReason}`);
+      screened.push({ ...base, baseRuns: m.baseRuns, gradeable: true, heldOut: false, reason: 'base-unscorable', ...(m.baseUnscorableReason ? { unscorableReason: m.baseUnscorableReason } : {}) });
+      continue;
+    }
+    if (m.basePasses > 0) {
+      screened.push({ ...base, baseRuns: m.baseRuns, basePasses: m.basePasses, gradeable: true, heldOut: false, reason: 'base-passes' });
+      continue;
+    }
+    // Base 0/R → prover outcome (layer 3).
+    if (m.proverPassed !== true) {
+      if (m.proverPassed === null && m.proverUnscorableReason) log(`[screen] ${task.instance_id} prover-unscorable: ${m.proverUnscorableReason}`);
       screened.push({
-        ...base, baseRuns: opts.R, gradeable: true, proverPassed: prover.passed, heldOut: false, reason: 'no-headroom',
-        ...(prover.passed === null && prover.unscorableReason ? { unscorableReason: prover.unscorableReason } : {}),
+        ...base, baseRuns: m.baseRuns, gradeable: true, proverPassed: m.proverPassed, heldOut: false, reason: 'no-headroom',
+        ...(m.proverPassed === null && m.proverUnscorableReason ? { unscorableReason: m.proverUnscorableReason } : {}),
       });
       continue;
     }
     if ((perRepo.get(repo) ?? 0) >= opts.perRepoCap) {
-      screened.push({ ...base, baseRuns: opts.R, gradeable: true, proverPassed: true, heldOut: false, reason: 'per-repo-cap' });
+      screened.push({ ...base, baseRuns: m.baseRuns, gradeable: true, proverPassed: true, heldOut: false, reason: 'per-repo-cap' });
       continue;
     }
 
     perRepo.set(repo, (perRepo.get(repo) ?? 0) + 1);
-    heldOut.push({ instance_id: task.instance_id, repo, baseRuns: opts.R });
-    screened.push({ ...base, baseRuns: opts.R, gradeable: true, proverPassed: true, heldOut: true, reason: 'held-out' });
+    heldOut.push({ instance_id: task.instance_id, repo, baseRuns: m.baseRuns });
+    screened.push({ ...base, baseRuns: m.baseRuns, gradeable: true, proverPassed: true, heldOut: true, reason: 'held-out' });
     log(`[screen] held out ${task.instance_id} (${heldOut.length}/${opts.heldOutCount})`);
   }
 

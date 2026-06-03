@@ -34,6 +34,7 @@ import {
   stratifyByRepo, screenBaseFailures, buildV2SlateFile,
   type ScreenDeps, type ScreenResult,
 } from './screen.js';
+import { ScreenProgressStore, screenSignature } from './screen-progress.js';
 
 const DISPATCH_SOLVER_TYPE = 'swe-rebench-v2.v1';
 const SLATE_VERSION = 'v2';
@@ -213,8 +214,24 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   const baseCodeDigest = `sha256:${await hashImplStateDir(emptyBaseDir, hashOpts)}`;
   rmSync(emptyBaseDir, { recursive: true, force: true });
 
+  // Resumability: cache each candidate's measurement under a config signature so
+  // an interrupted run resumes (re-run the same command). The base policy is fixed
+  // (empty impl-state) so its measurement is stable; the signature invalidates the
+  // cache if the base model / prover / R / semantics change.
+  const proverModelLabel = opts.proverModel ?? (proverKind === 'claude-code' ? 'opus' : 'codex-default');
+  const progress = new ScreenProgressStore({
+    stateDir,
+    signature: screenSignature({
+      baseModel: config.claudeModel, proverHarness: proverKind, proverModel: proverModelLabel,
+      R: opts.R, evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+    }),
+  });
+  if (progress.size > 0) log(`[screen] resuming: ${progress.size} candidate(s) already measured (cached) for this config`);
+
   const deps: ScreenDeps = {
     log,
+    getCachedMeasurement: (id) => progress.get(id),
+    recordMeasurement: (id, m) => progress.record(id, m),
     ensureGradeable: async (task) => {
       await validatePoolInstances([task], {
         fetcher, runner: new PythonEvalRunner({ upstreamRepoDir }), store: validatedStore,
