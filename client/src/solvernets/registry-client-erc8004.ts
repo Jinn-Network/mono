@@ -50,8 +50,8 @@ import { DiscoveryUnavailableError } from '../discovery/types.js';
 export const SOLVERNET_MANIFEST_KEY_PREFIX = 'solvernet-manifest:';
 
 /**
- * Map the operator-facing network name to the on-chain chain id used by the
- * indexer for chain scoping. Mirrors discovery/onchain.ts chainForId.
+ * Map the operator-facing network name (manifest-schema.ts `network` enum) to
+ * the on-chain chain id the indexer scopes rows by.
  * Issue #985 criterion 2 — the list path filters on the indexed chainId, not
  * on a manifest body fetched per-row from IPFS.
  */

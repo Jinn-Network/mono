@@ -463,6 +463,14 @@ interface SolverNetRow {
   manifestEnrichmentStatus?: string;
 }
 
+/** Sentinel for an unenriched / unknown launcher safe address. */
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
+
+/** Coerce an indexer-supplied address to a typed hex, or fall back to the zero sentinel. */
+function safeAddr(a: string | undefined): `0x${string}` {
+  return typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) ? (a as `0x${string}`) : ZERO_ADDR;
+}
+
 interface SolverNetPage {
   solverNetManifests: { items: SolverNetRow[] };
 }
@@ -1006,21 +1014,18 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       }
     }
 
-    const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
     return (data.solverNetManifests?.items ?? []).map((row): SolverNetManifestSummary => {
       // Only trust enriched fields when the indexer marked the row 'ok'. A
       // pending/failed row (or an old indexer that omits the field) keeps the
       // sentinel rather than presenting an empty-string price as a real value;
       // consumers degrade to a per-CID IPFS fetch for those rows.
       const enriched = row.manifestEnrichmentStatus === 'ok';
-      const safeAddr = (a: string | undefined): `0x${string}` =>
-        typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) ? (a as `0x${string}`) : (ZERO_ADDR as `0x${string}`);
       return {
         manifestCid: row.id,
         solverNetId: enriched && row.solverNetId ? row.solverNetId : row.id,
         name: enriched ? (row.name ?? '') : '',
         network: enriched ? (row.network ?? '') : '',
-        launcherSafeAddress: enriched ? safeAddr(row.launcherSafeAddress) : (ZERO_ADDR as `0x${string}`),
+        launcherSafeAddress: enriched ? safeAddr(row.launcherSafeAddress) : ZERO_ADDR,
         contractId: enriched ? (row.contractId ?? '') : '',
         contractVersion: enriched ? (row.contractVersion ?? '') : '',
         solutionPriceWei: enriched ? (row.solutionPriceWei ?? '0') : '0',
