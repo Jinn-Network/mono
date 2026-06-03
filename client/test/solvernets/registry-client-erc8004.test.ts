@@ -273,7 +273,10 @@ function makeMockSubgraph(): SubgraphClient & {
  * events (mirroring HttpSubgraphDiscoveryAPI) and returns coarse summaries.
  * The registry client then enriches each summary with an IPFS fetch.
  */
-function makeMockDiscoveryApi(subgraph: SubgraphClient): DiscoveryAPI & {
+function makeMockDiscoveryApi(
+  subgraph: SubgraphClient,
+  ipfs: ReturnType<typeof makeMockIpfs>,
+): DiscoveryAPI & {
   listLaunchedCalls: number;
 } {
   let listLaunchedCalls = 0;
@@ -294,21 +297,29 @@ function makeMockDiscoveryApi(subgraph: SubgraphClient): DiscoveryAPI & {
       for (const row of resolved) {
         if (args?.launcherAgentId !== undefined && row.launcherAgentId !== args.launcherAgentId) continue;
         if (args?.status !== undefined && !args.status.includes(row.status)) continue;
+        // Simulate an indexer that has enriched the row: read the manifest the
+        // launcher uploaded (the registry pinned it during publishManifest) and
+        // project its summary fields, exactly as the real indexer would. The
+        // registry client must NOT re-fetch this from IPFS on the list path.
+        const body = ipfs.uploads.get(row.manifestCid) as
+          | import('@jinn-network/sdk/solvernets').SolverNetManifestV1
+          | undefined;
         out.push({
           manifestCid: row.manifestCid,
-          solverNetId: row.manifestCid,
-          name: '',
-          network: '',
+          solverNetId: body?.solverNetId ?? row.manifestCid,
+          name: body?.name ?? '',
+          network: body?.network ?? '',
           launcherAgentId: row.launcherAgentId,
-          launcherSafeAddress: '0x0000000000000000000000000000000000000000',
+          launcherSafeAddress: body?.launcher.safeAddress ?? '0x0000000000000000000000000000000000000000',
           status: row.status,
           statusUpdatedAt: row.statusUpdatedAt,
-          contractId: '',
-          contractVersion: '',
-          solutionPriceWei: '0',
-          verdictPriceWei: '0',
-          openRoles: [],
+          contractId: body?.contract.id ?? '',
+          contractVersion: body?.contract.version ?? '',
+          solutionPriceWei: body?.solutionPriceWei ?? '0',
+          verdictPriceWei: body?.verdictPriceWei ?? '0',
+          openRoles: body?.openRoles ?? [],
           anchorBlock: row.anchorBlock,
+          chainId: (body?.network ?? '') === 'base' ? 8453 : 84532,
         });
       }
       return out;
@@ -552,11 +563,11 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
 // ── Tests: listLaunched ─────────────────────────────────────────────────────
 
 describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
-  it('returns summaries from discoveryApi with IPFS enrichment applied', async () => {
+  it('returns fully-enriched summaries from discoveryApi without fetching IPFS on the list path', async () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -605,13 +616,17 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     expect(s.solutionPriceWei).toBe(manifest.solutionPriceWei);
     expect(s.verdictPriceWei).toBe(manifest.verdictPriceWei);
     expect(s.openRoles).toEqual(manifest.openRoles);
+    // Criterion 2: the list path must not fetch IPFS — all fields come from
+    // the indexer-enriched summary.
+    expect(ipfs.fetchCalls).toBe(0);
+    expect(s.chainId).toBe(84532); // base-sepolia
   });
 
   it('delegates discovery to discoveryApi.listLaunchedSolverNets (not direct subgraph)', async () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -644,7 +659,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -705,7 +720,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -723,7 +738,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -754,6 +769,9 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
 
     const inOut = await client.listLaunched({ network: 'base-sepolia' });
     expect(inOut).toHaveLength(1);
+
+    // chainId-based scoping must not require an IPFS fetch.
+    expect(ipfs.fetchCalls).toBe(0);
   });
 });
 
@@ -1072,7 +1090,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -1118,7 +1136,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
@@ -1155,7 +1173,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
-    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
