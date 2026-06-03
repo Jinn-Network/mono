@@ -2,8 +2,9 @@
 title: Graded reward signal for the learning loop (Lever A) — expose per-test score, thread it into the Consolidator's keep/revert gate
 date: 2026-06-03
 author: opus (brainstormed on design/graded-reward-signal-lever-a; operator adrianobradley/Ritsu)
-status: design-locked — pending operator review of this spec, then implementation plan
+status: design-locked — operator-reviewed; implementation plan next
 version: 0.1
+issue: https://github.com/Jinn-Network/mono/issues/1019
 relates-to: >
   Discussion #770 (the RL-on-harness ladder + Oak's two comments — this implements
   the "cheaper lever" Oak names),
