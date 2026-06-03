@@ -28,6 +28,14 @@ So an operator who finishes onboarding then has to *discover* they must still jo
 
 ## 2. What to design (surfaces)
 
+> **SCOPE — read before designing. Do NOT redesign the existing onboarding screens.**
+>
+> The existing onboarding screens — **provision wallet**, **fund wallet**, **join Jinn** — already ship in code (`client/src/dashboard/spa/src/regions/Onboarding.tsx`). They are **code-canonical and out of scope**. Do **not** re-draw, re-lay-out, re-style, restructure, or merge them. Reproducing them from scratch is the failure mode this revision exists to prevent.
+>
+> Design **only the net-new surfaces**: the SolverNet-selection step, the Harness Selection surface (+ model), the "you're live" entry, and the state matrix for those. Where you need to show the existing screens for context (e.g. in the stepper), render them **collapsed / done / locked placeholders** — a one-line label per existing step, not a designed screen. The output is a *visual target for the new pieces only*; a coding agent (Claude Code) grafts them into the existing components afterward.
+>
+> If you find yourself laying out the wallet address field, the funding instructions, or the Safe/stake progress — stop. That is existing UI you must not touch.
+
 ### A. Onboarding takeover — new selection steps
 
 Extend the onboarding takeover with two new operator-facing steps, sequenced **before** the node flips into Operating mode (so the selections are applied on the node's first running boot — there is **no** "restart to start" step the operator must click):
@@ -35,7 +43,7 @@ Extend the onboarding takeover with two new operator-facing steps, sequenced **b
 1. **Choose a SolverNet** — browse the registry of launched SolverNets and join at least one. Minimum to proceed: one membership.
 2. **Set up your harness + model** — for the chosen SolverNet's *solver* role, pick a harness, get it ready (install / authenticate in-flow), and pick a model.
 
-These join the existing three phases. The takeover should read as one continuous guided flow from "provision wallet" through "you're running." The operator must not be able to reach the Operating dashboard without having satisfied the completion criterion below.
+These two steps **append** to the existing stepper (after "join Jinn"). Design the two new steps as full screens; render the existing provision/fund/join steps only as collapsed/done rows in the stepper rail — do not lay them out as screens (see the SCOPE banner above). What you are adding is the *tail* of the flow, not a re-imagining of the whole. The operator must not be able to reach the Operating dashboard without having satisfied the completion criterion below.
 
 **Completion criterion (the gate):** onboarding is complete only when the node is *running and eligible to claim tasks* — i.e. ≥1 joined SolverNet **with** a ready harness **and** a selected model for its solver role. (An *evaluator-only* join is complete without a solver harness — see the evaluator rule in §B.)
 
@@ -105,7 +113,7 @@ The produced design is graded against these — they are not suggestions.
 
 ## 5. Deliverables expected from Claude Design
 
-1. The onboarding takeover with the two new steps integrated into the existing three-phase flow (show the full step sequence, not just the new screens in isolation).
+1. The **two new onboarding steps** (Choose a SolverNet; Set up harness + model) as full screens, with the existing provision/fund/join steps shown only as collapsed/done rows in the stepper rail — **not** redesigned screens (see SCOPE banner).
 2. The Harness Selection surface in its onboarding context **and** its Settings context (demonstrate it is one component in two homes).
 3. The full state set from §3 for the Harness Selection surface and the SolverNet-selection step.
 4. The happy-path "you're live" Operating entry (no residue).
@@ -127,5 +135,6 @@ I (the reviewing agent) will grade the returned design against this rubric befor
 8. **Design-system compliance.** Radii on the softened-brutalist scale; no emoji; no decorative gradients; semantic colour roles mapped to the three-severity model; correct palette/type.
 9. **Voice + PII.** Copy is terse plain-speech, plain (non-metaphor) on money/auth/safety, British English; no personal/identifying detail; no "team/co-founder/executive" framing.
 10. **One component, two homes.** The Harness Selection surface is demonstrably the *same* model in onboarding and Settings — not two divergent designs.
+11. **Scope — existing screens untouched.** The provision/fund/join screens are **not** redesigned, restyled, or merged; they appear only as collapsed stepper rows. Any re-drawn existing screen is an immediate blocking fail (this is the failure this revision targets).
 
-Anything that fails 1–6 is a blocking revision. 7–10 are revision items unless trivially correctable in the spec/handoff.
+Anything that fails 1–6 or 11 is a blocking revision. 7–10 are revision items unless trivially correctable in the spec/handoff.
