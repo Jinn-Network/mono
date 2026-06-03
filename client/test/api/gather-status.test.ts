@@ -1320,3 +1320,149 @@ describe('gather-status eviction first-seen tracker (#651)', () => {
     });
   });
 });
+
+describe('gather-status staking/eviction RPC fan-out cache (#984)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock('viem');
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  /**
+   * Mock viem and count every read of the staking/eviction fan-out functions
+   * (`calculateStakingReward`, `getStakingState`, `getServiceInfo`). Each call
+   * pushes the function name onto `reads` so the test can assert how many RPC
+   * round-trips a `/v1/status` gather incurred.
+   */
+  function mockCountingViem(reads: string[]): void {
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          multicall: async (req: {
+            contracts: ReadonlyArray<{ functionName: string }>;
+          }) => req.contracts.map(() => ({ status: 'success' as const, result: 0n })),
+          readContract: async (req: { functionName: string }) => {
+            if (
+              req.functionName === 'calculateStakingReward' ||
+              req.functionName === 'getStakingState' ||
+              req.functionName === 'getServiceInfo'
+            ) {
+              reads.push(req.functionName);
+            }
+            if (req.functionName === 'getStakingState') return 0;
+            if (req.functionName === 'getServiceInfo') return { inactivity: 0n };
+            if (req.functionName === 'calculateStakingReward') return 0n;
+            if (req.functionName === 'getNextRewardCheckpointTimestamp') return 0n;
+            return 0n;
+          },
+          getLogs: async () => [],
+        }),
+        http: () => ({}),
+      };
+    });
+  }
+
+  async function setupSingleService(): Promise<string> {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-cache-test-'));
+    const fleetStore = new FleetStateStore(earningDir);
+    const state = await fleetStore.load('base-sepolia');
+    await fleetStore.save({
+      ...state,
+      master_address: '0x1111111111111111111111111111111111111111',
+      services: [
+        {
+          index: 1,
+          agent_address: '0x2222222222222222222222222222222222222222',
+          safe_address: '0x3333333333333333333333333333333333333333',
+          service_id: 41,
+          mech_address: null,
+          staking_address: '0x5555555555555555555555555555555555555555',
+          step: 'complete',
+          error: null,
+        },
+      ],
+    });
+    return earningDir;
+  }
+
+  const cacheStatus = (earningDir: string) => ({
+    earningDir,
+    rpcUrl: 'http://base-sepolia.example',
+    network: 'testnet' as const,
+    pollIntervalMs: 5000,
+    rewardClaimIntervalMs: 0,
+  });
+
+  it('serves staking/eviction reads from cache on a repeat call within TTL (AC-6)', async () => {
+    const reads: string[] = [];
+    mockCountingViem(reads);
+    const {
+      gatherStatusForApi,
+      __resetEvictionFirstSeenForTests,
+      __resetStakingRewardsCacheForTests,
+      __resetEvictionStateCacheForTests,
+    } = await import('../../src/api/gather-status.js');
+    __resetEvictionFirstSeenForTests();
+    __resetStakingRewardsCacheForTests();
+    __resetEvictionStateCacheForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupSingleService();
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
+
+      await gatherStatusForApi(store, cacheStatus(earningDir));
+      const afterFirst = [...reads];
+      // First call must incur all three fan-out reads at least once.
+      expect(afterFirst).toContain('calculateStakingReward');
+      expect(afterFirst).toContain('getStakingState');
+      expect(afterFirst).toContain('getServiceInfo');
+
+      // 15s later — well within the 30s TTL.
+      vi.setSystemTime(new Date('2026-05-26T10:00:15.000Z'));
+      await gatherStatusForApi(store, cacheStatus(earningDir));
+
+      // The second poll must add ZERO staking/eviction reads — both fan-outs
+      // are served from the in-process cache.
+      expect(reads).toEqual(afterFirst);
+    });
+  });
+
+  it('bypasses the staking/eviction cache after the TTL expires', async () => {
+    const reads: string[] = [];
+    mockCountingViem(reads);
+    const {
+      gatherStatusForApi,
+      __resetEvictionFirstSeenForTests,
+      __resetStakingRewardsCacheForTests,
+      __resetEvictionStateCacheForTests,
+    } = await import('../../src/api/gather-status.js');
+    __resetEvictionFirstSeenForTests();
+    __resetStakingRewardsCacheForTests();
+    __resetEvictionStateCacheForTests();
+
+    await withTempStore(async (store) => {
+      const earningDir = await setupSingleService();
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-26T10:00:00.000Z'));
+
+      await gatherStatusForApi(store, cacheStatus(earningDir));
+      const afterFirst = reads.length;
+      expect(afterFirst).toBeGreaterThan(0);
+
+      // 31s later — past the 30s TTL; reads must be re-incurred.
+      vi.setSystemTime(new Date('2026-05-26T10:00:31.000Z'));
+      await gatherStatusForApi(store, cacheStatus(earningDir));
+
+      expect(reads.length).toBeGreaterThan(afterFirst);
+      // The post-TTL poll incurs the same per-call fan-out again.
+      expect(reads.length).toBe(afterFirst * 2);
+    });
+  });
+});
