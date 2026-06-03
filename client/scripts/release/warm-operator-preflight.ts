@@ -56,7 +56,13 @@ import { requestTestnetFunding } from '../../src/earning/faucet.js';
  * check below is the real funding gate.
  */
 async function faucetTopUp(jinnClientDir: string): Promise<void> {
-  let state: { master_address?: string; agent_address?: string; safe_address?: string } = {};
+  let state: {
+    master_address?: string;
+    agent_address?: string;
+    safe_address?: string;
+    fleet_safe_address?: string;
+    services?: Array<{ agent_address?: string; safe_address?: string }>;
+  } = {};
   try {
     state = JSON.parse(readFileSync(path.join(jinnClientDir, 'earning', 'earning_state.json'), 'utf8'));
   } catch {
@@ -72,14 +78,24 @@ async function faucetTopUp(jinnClientDir: string): Promise<void> {
       console.error(`[faucet] ${token} ${addr}: error ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+  // Fleet operators carry no TOP-LEVEL agent_address / safe_address — the agent
+  // EOA lives on the first service, and the operating Safe IS the fleetSafe
+  // (recorded as fleet_safe_address, verified by the doctor's
+  // fleet-safe-consistency check). Resolve through the fleet shape first so
+  // fleet ops self-fund instead of silently skipping the USDC/agent drips (#1018
+  // — op-b had to be funded by hand because this read the empty top-level field).
+  const svc0 = state.services?.[0];
+  const agentAddr = state.agent_address ?? svc0?.agent_address;
+  const safeAddr = state.fleet_safe_address ?? svc0?.safe_address ?? state.safe_address;
+
   // ETH gas for the master + agent EOAs.
-  for (const addr of [state.master_address, state.agent_address].filter((a): a is string => Boolean(a))) {
+  for (const addr of [state.master_address, agentAddr].filter((a): a is string => Boolean(a))) {
     await drip(addr, 'eth');
   }
-  // USDC on the Safe (x402 / cross-op donation scenarios — checkSubstrateTopup's
-  // USDC target is on operator.safeAddress).
-  if (state.safe_address) {
-    await drip(state.safe_address, 'usdc');
+  // USDC on the operating Safe (x402 / cross-op donation; checkSubstrateTopup's
+  // USDC target is the same Safe).
+  if (safeAddr) {
+    await drip(safeAddr, 'usdc');
   }
 }
 
