@@ -47,7 +47,7 @@ The full design note, current-state map, and stacked-PR plan are in the companio
 
 ## Open questions to ratify
 
-1. **GHCR package visibility (private→public?).** **Resolved 2026-06-02 → public.** The overlays `FROM ghcr.io/jinn-network/client:${BASE_TAG}` (S8, #989). Implementation reuses the existing release publish (no new Dockerfile); the **private→public flip is a required ops action** (GitHub package settings — not code), documented in `deploy/README.md`. The `ARG`-build-from-source bridge was not needed. Secondary (faster-than-release `:next`/`:canary` publish tag) remains a possible follow-up, not done.
+1. **GHCR base reachability.** **Resolved 2026-06-02 → private base + `read:packages` pull-token** (NOT public). The overlays `FROM ghcr.io/jinn-network/client:${BASE_TAG}` (S8, #989), reusing the existing release publish (no new Dockerfile). The initially-preferred "flip the package public" path is **blocked by org policy** — the `Jinn-Network` org disallows public packages ("Setting is disabled by organization administrators"), verified 2026-06-03. So the deploy environment (Railway / CI) authenticates to GHCR with a `read:packages` token to pull the private base — no org-policy change, no Dockerfile change. Alternatives (documented in `deploy/README.md`): the `ARG` build-from-source overlay (no token, rebuilds per target), or an org owner re-enabling public packages org-wide. Secondary (faster-than-release `:next`/`:canary` publish tag) remains a possible follow-up.
 2. **Non-root posture.** Recommended: image-default `USER node` + a minimal root→node gosu chown shim (Railway mounts `/data` as root). Confirm vs. requiring host-side chown.
 3. **`JINN_STATE_DIR` naming + derivation precedence.** Confirm derive-don't-collapse and `workingDirRoot`-stays-ephemeral.
 4. **A4 artifact-CID resolution path.** ~~On-chain `IdentityRegistry.getMetadata` read by manifestCid, vs. extending the DiscoveryAPI read-shape.~~ **Resolved 2026-06-02 → Option B (indexer/DiscoveryAPI).** Investigation found no on-chain `getMetadata` read exists, and the vetted-pool ref is not written via `setMetadata` — it travels in each posted task's `eligibility` (`vettedPoolRef`). Resolution reuses the indexer: a new `DiscoveryAPI.getMostRecentTaskCidDigest(manifestCid)` (pure indexer/chain read) returns a recent task's digest; the generator reconstructs the IPFS task CID, reads the ref from the task's eligibility, and fetches + hash-verifies the pool. Shipped in [#982](https://github.com/Jinn-Network/mono/pull/982) (S4 / child #957).
@@ -64,10 +64,10 @@ The full design note, current-state map, and stacked-PR plan are in the companio
 ## Status / next steps
 
 `proposed`. Design ratified by the maintainer 2026-06-02; all eight slices (six `#952`-independent daemon slices + the two image-consolidation slices) carved into child issues and implemented (see Implementation status). Remaining human steps:
-1. Ratify the residual open question #5 (`CLAUDE_CODE_OAUTH_TOKEN` headless lifecycle). #1 (GHCR public) and #4 (artifact-CID path) are resolved.
-2. **Ops action:** flip the `ghcr.io/jinn-network/client` GHCR package private→public (GitHub package settings — required before the S8 overlays can `FROM` it; see `deploy/README.md`).
+1. Ratify the residual open question #5 (`CLAUDE_CODE_OAUTH_TOKEN` headless lifecycle). #1 (base reachability → private + pull-token) and #4 (artifact-CID path) are resolved.
+2. **Ops action:** wire a GHCR `read:packages` pull-token into the deploy env (Railway registry creds / `docker login`) so the S8 overlays can pull the **private** base — public is disallowed by org policy (see `deploy/README.md`).
 3. Land **PR #952** (the regression reference) + the six daemon-slice PRs; then the image-consolidation PR #990 (stacked on the integration branch) can retarget/merge to `next`.
-4. Run the `deploy/README.md` "Verify the consolidation" checklist in CI / on a Railway deploy (the overlay build/run can't be verified in the authoring env).
+4. Run the `deploy/README.md` "Verify the consolidation" checklist on a Railway deploy. **Validated 2026-06-03 in the dev env:** full vitest suite + real-chain protocol-loop e2e green on the integration branch; real Docker build of the base + both overlays + full in-container boot-to-funding green (see #951 validation comment). Remaining: Railway-platform + funded-wallet verification.
 
 ## Implementation status (2026-06-02)
 
