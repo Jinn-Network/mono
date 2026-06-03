@@ -247,7 +247,8 @@ export function makeRegistrySummary(
  * Build a `RegistryManifestResponse` for the per-CID GET the JoinFlow form
  * fetches (`GET /v1/solvernets/registry/:cid`). The manifest fields below are
  * the minimum JoinFlow reads (name, contract.evaluationFunction.implementation,
- * openRoles, prices).
+ * openRoles, prices). Only `manifestCid` and `name` are overridable; for a
+ * different network/launcher, build a full manual object.
  */
 export function makeRegistryManifestResponse(
   overrides: Partial<{ manifestCid: string; name: string }> = {},
@@ -489,6 +490,7 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
   await page.route(
     (url) => /^\/v1\/harnesses\/[^/]+\/readiness$/.test(url.pathname),
     (route) => {
+      // pathname = ['', 'v1', 'harnesses', <name>, 'readiness'] → name at [3]
       const name = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3] ?? '');
       return route.fulfill({
         contentType: 'application/json',
