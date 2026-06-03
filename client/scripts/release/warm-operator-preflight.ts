@@ -46,6 +46,39 @@ import { checkSubstrateTopup } from './substrate-topup.js';
 import { serializeVerifyResult, type SerializedVerifyResult, type TopupResult } from './types.js';
 import { requestTestnetFunding } from '../../src/earning/faucet.js';
 
+/** Minimal earning-state shape the faucet top-up reads. */
+export interface FaucetTargetState {
+  master_address?: string;
+  agent_address?: string;
+  safe_address?: string;
+  fleet_safe_address?: string;
+  services?: Array<{ agent_address?: string; safe_address?: string }>;
+}
+
+/**
+ * Resolve the faucet drip targets (master + agent EOAs for ETH gas; the
+ * operating Safe for USDC) from an earning state, handling BOTH shapes:
+ *   - legacy single-service: top-level `agent_address` / `safe_address`.
+ *   - FLEET: the agent EOA lives on the first service, and the operating Safe
+ *     IS the fleetSafe (`fleet_safe_address`, verified by the doctor's
+ *     fleet-safe-consistency check). Fleet ops carry NO top-level
+ *     `agent_address` / `safe_address`, so reading those alone silently skipped
+ *     the agent + USDC drips — op-b had to be hand-funded (#1018).
+ * Pure + exported so the fleet/legacy resolution is unit-tested.
+ */
+export function resolveFaucetTargets(state: FaucetTargetState): {
+  master?: string;
+  agent?: string;
+  safe?: string;
+} {
+  const svc0 = state.services?.[0];
+  return {
+    master: state.master_address,
+    agent: state.agent_address ?? svc0?.agent_address,
+    safe: state.fleet_safe_address ?? svc0?.safe_address ?? state.safe_address,
+  };
+}
+
 /**
  * Best-effort gas top-up from the CDP testnet faucet (shipped creds — no stored
  * private key). Reads the warm operator's master + agent EOAs from its restored
@@ -56,13 +89,7 @@ import { requestTestnetFunding } from '../../src/earning/faucet.js';
  * check below is the real funding gate.
  */
 async function faucetTopUp(jinnClientDir: string): Promise<void> {
-  let state: {
-    master_address?: string;
-    agent_address?: string;
-    safe_address?: string;
-    fleet_safe_address?: string;
-    services?: Array<{ agent_address?: string; safe_address?: string }>;
-  } = {};
+  let state: FaucetTargetState = {};
   try {
     state = JSON.parse(readFileSync(path.join(jinnClientDir, 'earning', 'earning_state.json'), 'utf8'));
   } catch {
@@ -78,24 +105,15 @@ async function faucetTopUp(jinnClientDir: string): Promise<void> {
       console.error(`[faucet] ${token} ${addr}: error ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  // Fleet operators carry no TOP-LEVEL agent_address / safe_address — the agent
-  // EOA lives on the first service, and the operating Safe IS the fleetSafe
-  // (recorded as fleet_safe_address, verified by the doctor's
-  // fleet-safe-consistency check). Resolve through the fleet shape first so
-  // fleet ops self-fund instead of silently skipping the USDC/agent drips (#1018
-  // — op-b had to be funded by hand because this read the empty top-level field).
-  const svc0 = state.services?.[0];
-  const agentAddr = state.agent_address ?? svc0?.agent_address;
-  const safeAddr = state.fleet_safe_address ?? svc0?.safe_address ?? state.safe_address;
-
+  const { master, agent, safe } = resolveFaucetTargets(state);
   // ETH gas for the master + agent EOAs.
-  for (const addr of [state.master_address, agentAddr].filter((a): a is string => Boolean(a))) {
+  for (const addr of [master, agent].filter((a): a is string => Boolean(a))) {
     await drip(addr, 'eth');
   }
   // USDC on the operating Safe (x402 / cross-op donation; checkSubstrateTopup's
   // USDC target is the same Safe).
-  if (safeAddr) {
-    await drip(safeAddr, 'usdc');
+  if (safe) {
+    await drip(safe, 'usdc');
   }
 }
 
