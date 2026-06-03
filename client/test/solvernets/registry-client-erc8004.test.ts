@@ -773,6 +773,108 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     // chainId-based scoping must not require an IPFS fetch.
     expect(ipfs.fetchCalls).toBe(0);
   });
+
+  it('survives an IPFS-gateway outage — catalog populated from indexer fields, ipfs.fetch never called', async () => {
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const discoveryApi = makeMockDiscoveryApi(subgraph, ipfs);
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      discoveryApi,
+      network: 'base-sepolia',
+    });
+
+    const { manifest, signer } = await buildSignedManifest({ agentId: '5474' });
+    const launch = await client.publishManifest({ manifest, signer });
+    const cid = launch.manifestCid;
+    subgraph.events.push({
+      agentId: '5474',
+      key: `solvernet-manifest:${cid}`,
+      payload: {
+        schemaVersion: 'solvernet.lifecycle.v1',
+        status: 'launched',
+        at: '2026-05-06T00:00:00Z',
+        hash: manifestHash(manifest),
+      },
+      blockNumber: 100,
+      transactionIndex: 0,
+    });
+
+    // Simulate a total IPFS outage: every fetch throws. The mock's enriched
+    // summary already carries the fields (it read the upload map at publish
+    // time, mirroring the indexer's enrichment), so the list path needs no
+    // IPFS at all.
+    const ipfsFetchMock = vi.fn(async (_cid: string): Promise<unknown> => {
+      throw new Error('IPFS gateway 504');
+    });
+    ipfs.fetch = ipfsFetchMock as unknown as typeof ipfs.fetch;
+
+    const summaries = await client.listLaunched({ network: 'base-sepolia' });
+
+    // Catalog is fully populated despite the outage.
+    expect(summaries).toHaveLength(1);
+    const s = summaries[0]!;
+    expect(s.name).toBe(manifest.name);
+    expect(s.solutionPriceWei).toBe(manifest.solutionPriceWei);
+    expect(s.verdictPriceWei).toBe(manifest.verdictPriceWei);
+    expect(s.openRoles).toEqual(manifest.openRoles);
+    expect(s.launcherSafeAddress).toBe(manifest.launcher.safeAddress);
+    expect(s.contractId).toBe(manifest.contract.id);
+    expect(s.contractVersion).toBe(manifest.contract.version);
+
+    // The list hot path must never touch IPFS.
+    expect(ipfsFetchMock).not.toHaveBeenCalled();
+  });
+
+  it('handles an enrichment-pending row gracefully (no crash; row still listed)', async () => {
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    // A discoveryApi that returns a row the indexer has NOT yet enriched:
+    // populated identity fields but sentinel body fields, status pending.
+    const discoveryApi = {
+      listLaunchedCalls: 0,
+      async listLaunchedSolverNets(): Promise<SolverNetManifestSummary[]> {
+        return [{
+          manifestCid: 'bafypending',
+          solverNetId: 'bafypending',
+          name: '',
+          network: '',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+          status: 'launched' as const,
+          statusUpdatedAt: '2026-05-06T00:00:00Z',
+          contractId: '',
+          contractVersion: '',
+          solutionPriceWei: '0',
+          verdictPriceWei: '0',
+          openRoles: [],
+          anchorBlock: 100,
+          chainId: 84532,
+        }];
+      },
+      async getLifecycleStatus() { return undefined; },
+      async findClaimableTasks() { return []; },
+      async queryEnvelopes() { return []; },
+    } as unknown as DiscoveryAPI & { listLaunchedCalls: number };
+    const ipfsFetchMock = vi.fn(async (): Promise<unknown> => { throw new Error('IPFS gateway 504'); });
+    ipfs.fetch = ipfsFetchMock as unknown as typeof ipfs.fetch;
+
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      discoveryApi,
+      network: 'base-sepolia',
+    });
+
+    // Does not throw; the pending row is listed with sentinel body fields.
+    const summaries = await client.listLaunched({ network: 'base-sepolia' });
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.manifestCid).toBe('bafypending');
+    expect(summaries[0]!.name).toBe('');
+    expect(ipfsFetchMock).not.toHaveBeenCalled();
+  });
 });
 
 // ── Tests: getManifest ──────────────────────────────────────────────────────
