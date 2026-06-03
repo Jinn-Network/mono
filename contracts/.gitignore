@@ -2,6 +2,9 @@ node_modules/
 cache/
 artifacts/
 typechain-types/
+# HH3's hardhat-typechain plugin emits generated ethers typings here
+# (HH2's @typechain/hardhat used typechain-types/ above).
+types/
 .env
 artifact-backups/
 
