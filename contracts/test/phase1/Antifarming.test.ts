@@ -5,11 +5,15 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
 
+// One HH3 connection shared across the module-scope helpers below. Assigned
+// in the top-level describe's `before` hook before any `it`/helper runs.
+let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+
 // Default anti-farming parameters for tests
-const DEFAULT_LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
+let DEFAULT_LIVENESS_RATIO: bigint; // 1e15 (assigned in before)
 const DEFAULT_SIMILARITY_THRESHOLD = 64n; // 25% of 256 bits
 const DEFAULT_DECAY_MULTIPLIER = 0n; // Binary: similar = zero weight
 const DEFAULT_COMPARISON_WINDOW = 20n;
@@ -59,6 +63,8 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
   let deployerAddress: string;
 
   before(async function () {
+    ({ ethers } = await network.connect());
+    DEFAULT_LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
     [deployer] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
   });
@@ -159,12 +165,12 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
 
     it("rejects invalid activity type", async function () {
       const checker = await deployV2Checker(deployer);
-      await expect(checker.recordActivity(ethers.Wallet.createRandom().address, 3)).to.be.reverted;
+      await expect(checker.recordActivity(ethers.Wallet.createRandom().address, 3)).to.revert(ethers);
     });
 
     it("rejects zero multisig", async function () {
       const checker = await deployV2Checker(deployer);
-      await expect(checker.recordActivity(ethers.ZeroAddress, 0)).to.be.reverted;
+      await expect(checker.recordActivity(ethers.ZeroAddress, 0)).to.revert(ethers);
     });
   });
 
@@ -245,14 +251,14 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
       const checker = await deployV2Checker(deployer);
       await expect(
         checker.recordActivityWithEvidence(ethers.ZeroAddress, 0, ethers.id("test"))
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
 
     it("rejects invalid activity type", async function () {
       const checker = await deployV2Checker(deployer);
       await expect(
         checker.recordActivityWithEvidence(ethers.Wallet.createRandom().address, 3, ethers.id("test"))
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
   });
 

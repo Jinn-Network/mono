@@ -14,15 +14,19 @@
  */
 
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import type { Signer } from "ethers";
+
+// One HH3 connection shared across the module-scope helper below. Assigned
+// in the top-level describe's `before` hook before any `it`/helper runs.
+let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
 
 // keccak256("FixedPriceNative")
 const NATIVE_PAYMENT_TYPE = "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1";
 const MARKETPLACE_FEE = 0;
 const MIN_RESPONSE_TIMEOUT = 60;
 const MAX_RESPONSE_TIMEOUT = 300;
-const LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
+let LIVENESS_RATIO: bigint; // 1e15 (assigned in before)
 
 // Encode a uint256 maxDeliveryRate as factory payload (must be exactly 32 bytes)
 function encodeMaxDeliveryRate(rate: bigint): string {
@@ -56,6 +60,8 @@ describe("JinnRouterV2 + RestorationActivityCheckerV2 Integration", function () 
   let mechAddress: string;
 
   before(async function () {
+    ({ ethers } = await network.connect());
+    LIVENESS_RATIO = ethers.parseEther("0.001"); // 1e15
     [deployer, operator, attacker] = await ethers.getSigners();
     deployerAddress = await deployer.getAddress();
     operatorAddress = await operator.getAddress();
@@ -270,7 +276,7 @@ describe("JinnRouterV2 + RestorationActivityCheckerV2 Integration", function () 
     it("router cannot be initialized twice", async function () {
       await expect(
         router.initialize(await marketplace.getAddress(), LIVENESS_RATIO, await checker.getAddress())
-      ).to.be.reverted;
+      ).to.revert(ethers);
     });
   });
 

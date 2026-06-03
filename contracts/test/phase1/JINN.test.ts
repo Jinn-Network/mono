@@ -2,16 +2,22 @@
  * Tests for JINN token contract
  */
 
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('JINN', function () {
   this.timeout(30000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
 
   let jinn: any;
   let owner: any;
   let minter: any;
   let other: any;
+
+  before(async function () {
+    ({ ethers } = await network.connect());
+  });
 
   beforeEach(async function () {
     [owner, minter, other] = await ethers.getSigners();
@@ -48,7 +54,10 @@ describe('JINN', function () {
   });
 
   describe('Minting', function () {
-    const mintAmount = ethers.parseEther('1000');
+    let mintAmount: bigint;
+    before(function () {
+      mintAmount = ethers.parseEther('1000');
+    });
 
     it('should allow minter to mint tokens', async function () {
       await jinn.connect(owner).mint(other.address, mintAmount);
