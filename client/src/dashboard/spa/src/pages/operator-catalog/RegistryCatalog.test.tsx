@@ -138,6 +138,107 @@ describe('RegistryCatalog', () => {
     expect(roleChips.length).toBeGreaterThanOrEqual(3);
   });
 
+  it('renders an enrichment-pending (degraded) row alongside an enriched one without crashing', async () => {
+    // Issue #985: the daemon now lists every chain-matched row from the
+    // indexer instead of silently skipping rows whose manifest could not be
+    // fetched/verified from IPFS. A row the indexer has not enriched yet
+    // (or an old indexer omits) passes through "degraded-but-present":
+    // empty name, '0' prices, zero launcher address, empty openRoles.
+    // The catalog must render such a row acceptably — no crash, no NaN, no
+    // broken layout — beside a fully-enriched row.
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          // Fully enriched row.
+          manifestCid: 'bafybeienriched',
+          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+          name: 'Prediction Markets',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '1000000000000000', // 0.001 ETH
+          verdictPriceWei: '500000000000000', // 0.0005 ETH
+          openRoles: ['solver', 'evaluator'],
+          anchorBlock: 1,
+        },
+        {
+          // Enrichment-pending row — the exact degraded shape #985 emits:
+          // empty name, sentinel '0' prices, zero launcher address, empty
+          // openRoles. launcherAgentId + status pass through from the chain.
+          manifestCid: 'bafybeipending',
+          solverNetId: 'bafybeipending', // falls back to cid when not enriched
+          name: '',
+          network: '',
+          launcherAgentId: '9999',
+          launcherSafeAddress: '0x0000000000000000000000000000000000000000',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: '',
+          contractVersion: '',
+          solutionPriceWei: '0',
+          verdictPriceWei: '0',
+          openRoles: [],
+          anchorBlock: 2,
+        },
+      ],
+      lastRefreshedAt: '2026-05-05T01:00:00Z',
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+
+    // Both rows render — the degraded one is present, not silently dropped.
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(2),
+    );
+
+    const cards = screen.getAllByTestId('registry-card');
+    const enrichedCard = cards.find(
+      (c) => c.getAttribute('data-manifest-cid') === 'bafybeienriched',
+    )!;
+    const pendingCard = cards.find(
+      (c) => c.getAttribute('data-manifest-cid') === 'bafybeipending',
+    )!;
+    expect(enrichedCard).toBeTruthy();
+    expect(pendingCard).toBeTruthy();
+
+    // The enriched row is unaffected.
+    expect(enrichedCard.textContent).toContain('Prediction Markets');
+
+    // Degraded row: '0' wei prices format as a clean "0 ETH" — never NaN /
+    // undefined / scientific notation.
+    expect(pendingCard.textContent).toContain('0 ETH');
+    expect(pendingCard.textContent).not.toMatch(/NaN/);
+    expect(pendingCard.textContent).not.toMatch(/undefined/);
+    expect(pendingCard.textContent).not.toMatch(/\de[-+]\d/); // no 5e-9 etc.
+
+    // Empty openRoles degrades to the explicit "no open roles" copy rather
+    // than an empty chip strip.
+    expect(pendingCard.textContent).toContain('no open roles');
+
+    // The zero launcher address is truncated, not rendered raw or as a blank.
+    expect(pendingCard.textContent).toContain('0x0000…0000');
+    // launcherAgentId still passes through from the chain row.
+    expect(pendingCard.textContent).toContain('9999');
+
+    // Status badge still renders for the degraded row (chain-sourced status).
+    const pendingBadge = pendingCard.querySelector(
+      '[data-testid="registry-status-badge"]',
+    );
+    expect(pendingBadge?.getAttribute('data-status')).toBe('launched');
+
+    // The Join CTA still routes by manifest cid for the degraded (launched) row.
+    const pendingCta = pendingCard.querySelector(
+      '[data-testid="registry-join-cta"]',
+    );
+    expect(pendingCta?.getAttribute('href')).toBe(
+      '/operator/join/bafybeipending',
+    );
+  });
+
   it('hides SolverNets that are already joined from Discover', async () => {
     listJoinedMock.mockResolvedValue({
       joinedSolverNets: {
