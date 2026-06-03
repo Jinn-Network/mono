@@ -42,6 +42,34 @@ function EmptyDash(): JSX.Element {
   return <span data-testid="identity-stat-empty" className={emptyValue}>—</span>;
 }
 
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through to the legacy path below.
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  try {
+    if (document.execCommand('copy') !== true) {
+      throw new Error('Copy command failed');
+    }
+  } finally {
+    textarea.remove();
+  }
+}
+
 function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <div className="flex flex-col gap-1">
@@ -56,14 +84,25 @@ function AddressStat({ label, address, testId }: {
   address: string | null;
   testId: string;
 }): JSX.Element {
+  const copy = (): void => {
+    if (!address) return;
+    void copyToClipboard(address).catch(() => {});
+  };
+
   return (
     <Stat label={label}>
       {address ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span data-testid={testId} tabIndex={0} className={`cursor-help ${statValue}`}>
+            <button
+              type="button"
+              data-testid={testId}
+              aria-label={`Copy full ${label} address`}
+              onClick={copy}
+              className={`cursor-copy border-0 bg-transparent p-0 text-left ${statValue}`}
+            >
               {trunc(address)}
-            </span>
+            </button>
           </TooltipTrigger>
           <TooltipContent>{address}</TooltipContent>
         </Tooltip>
