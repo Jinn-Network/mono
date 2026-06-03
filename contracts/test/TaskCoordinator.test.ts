@@ -1,15 +1,27 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import { network } from "hardhat";
+import { anyValue } from "@nomicfoundation/hardhat-ethers-chai-matchers/withArgs";
 
 describe("TaskCoordinator", function () {
-  const TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("task-cid"));
-  const SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
-  const REQUEST_ID = ethers.keccak256(ethers.toUtf8Bytes("solution-request-1"));
-  const VERDICT_REQUEST_ID = ethers.keccak256(ethers.toUtf8Bytes("verdict-request-1"));
-  const SOLUTION_CID = ethers.keccak256(ethers.toUtf8Bytes("solution-1"));
-  const VERDICT_CID = ethers.keccak256(ethers.toUtf8Bytes("verdict-1"));
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
+
+  let TASK_CID: string;
+  let SOLVER_TYPE: string;
+  let REQUEST_ID: string;
+  let VERDICT_REQUEST_ID: string;
+  let SOLUTION_CID: string;
+  let VERDICT_CID: string;
+
+  before(async () => {
+    ({ ethers, networkHelpers } = await network.connect());
+    TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("task-cid"));
+    SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
+    REQUEST_ID = ethers.keccak256(ethers.toUtf8Bytes("solution-request-1"));
+    VERDICT_REQUEST_ID = ethers.keccak256(ethers.toUtf8Bytes("verdict-request-1"));
+    SOLUTION_CID = ethers.keccak256(ethers.toUtf8Bytes("solution-1"));
+    VERDICT_CID = ethers.keccak256(ethers.toUtf8Bytes("verdict-1"));
+  });
 
   async function deploy() {
     const [owner, router, creator, operator, evaluator, other] = await ethers.getSigners();
@@ -21,7 +33,7 @@ describe("TaskCoordinator", function () {
   }
 
   async function makePolicy(maxClaims = 1, maxClaimsPerOperator = 1, requiredVerdicts = 1) {
-    const now = await time.latest();
+    const now = await networkHelpers.time.latest();
     return {
       claimWindowStart: now,
       claimWindowEnd: now + 600,
@@ -49,7 +61,7 @@ describe("TaskCoordinator", function () {
 
   it("creates a Task and defaults zero evaluation policy values", async function () {
     const { coordinator, router, creator } = await deploy();
-    const now = await time.latest();
+    const now = await networkHelpers.time.latest();
     const policy = {
       claimWindowStart: now,
       claimWindowEnd: now + 600,
@@ -147,7 +159,7 @@ describe("TaskCoordinator", function () {
     await coordinator.connect(router).createTask(await creator.getAddress(), TASK_CID, SOLVER_TYPE, policy);
     await coordinator.connect(router).claimTask(1, await operator.getAddress());
     await coordinator.connect(router).registerAttemptRequest(1, 0, REQUEST_ID);
-    await time.increase(31);
+    await networkHelpers.time.increase(31);
 
     await expect(
       coordinator.connect(router).recordSubmission(REQUEST_ID, await operator.getAddress(), SOLUTION_CID, 7)
@@ -212,7 +224,7 @@ describe("TaskCoordinator", function () {
     await coordinator.connect(router).recordSubmission(REQUEST_ID, await operator.getAddress(), SOLUTION_CID, 7);
     await coordinator.connect(router).claimEvaluation(1, 0, await evaluator.getAddress());
     await coordinator.connect(router).registerVerdictRequest(1, 0, 0, VERDICT_REQUEST_ID);
-    await time.increase(31);
+    await networkHelpers.time.increase(31);
 
     await expect(
       coordinator.connect(router).recordVerdict(
@@ -226,7 +238,7 @@ describe("TaskCoordinator", function () {
 
   it("rejects claims outside the claim window", async function () {
     const { coordinator, router, creator, operator } = await deploy();
-    const now = await time.latest();
+    const now = await networkHelpers.time.latest();
     const policy = await makePolicy();
     policy.claimWindowStart = now + 100;
     policy.claimWindowEnd = now + 200;
@@ -246,7 +258,7 @@ describe("TaskCoordinator", function () {
     policy.claimLeaseTtlSeconds = 30;
     await coordinator.connect(router).createTask(await creator.getAddress(), TASK_CID, SOLVER_TYPE, policy);
     await coordinator.connect(router).claimTask(1, await operator.getAddress());
-    await time.increase(31);
+    await networkHelpers.time.increase(31);
 
     await expect(coordinator.expireAttempt(1, 0))
       .to.emit(coordinator, "TaskAttemptExpired")

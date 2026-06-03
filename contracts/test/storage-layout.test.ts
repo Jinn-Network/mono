@@ -31,7 +31,7 @@
 
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
-const { expect } = require('chai');
+import { expect } from 'chai';
 
 interface PinnedSlot {
   contractPath: string; // forge inspect identifier `<src-path>:<ContractName>`
@@ -186,7 +186,7 @@ const PINNED_SLOTS: PinnedSlot[] = [
  * warnings to stderr; we capture stdout only.
  */
 function readStorageLayout(contractPath: string): Array<{ label: string; slot: string }> {
-  const cwd = path.resolve(__dirname, '..');
+  const cwd = path.resolve(import.meta.dirname, '..');
   const stdout = execFileSync(
     'forge',
     ['inspect', contractPath, 'storage-layout', '--json'],

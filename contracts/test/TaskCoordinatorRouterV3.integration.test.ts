@@ -1,26 +1,42 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { network } from "hardhat";
 
 describe("TaskCoordinator + JinnRouterV3 integration", function () {
-  const TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("prediction-v1-task"));
-  const EVAL_TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("prediction-v1-evaluation-task"));
-  const SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
-  const SOLUTION_A = ethers.keccak256(ethers.toUtf8Bytes("solution-a"));
-  const SOLUTION_B = ethers.keccak256(ethers.toUtf8Bytes("solution-b"));
-  const VERDICT_A = ethers.keccak256(ethers.toUtf8Bytes("verdict-a"));
-  const VERDICT_B = ethers.keccak256(ethers.toUtf8Bytes("verdict-b"));
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
+
+  let TASK_CID: string;
+  let EVAL_TASK_CID: string;
+  let SOLVER_TYPE: string;
+  let SOLUTION_A: string;
+  let SOLUTION_B: string;
+  let VERDICT_A: string;
+  let VERDICT_B: string;
   const NATIVE_PAYMENT_TYPE = "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1";
-  const ONE = ethers.parseEther("1");
+  let ONE: bigint;
   const SERVICE_ID = 48n;
-  const OPERATOR_RATIO = (ONE * 75n) / 100n;
-  const DAO_RATIO = (ONE * 25n) / 100n;
+  let OPERATOR_RATIO: bigint;
+  let DAO_RATIO: bigint;
   const JINN_FQN = "src/jinn/token/JINN.sol:JINN";
   const DISTRIBUTOR_FQN = "src/jinn/distribution/JinnDistributor.sol:JinnDistributor";
   const MOCK_MESSENGER_FQN = "src/jinn/cross-chain/MockMessenger.sol:MockMessenger";
 
+  before(async () => {
+    ({ ethers, networkHelpers } = await network.connect());
+    TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("prediction-v1-task"));
+    EVAL_TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("prediction-v1-evaluation-task"));
+    SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
+    SOLUTION_A = ethers.keccak256(ethers.toUtf8Bytes("solution-a"));
+    SOLUTION_B = ethers.keccak256(ethers.toUtf8Bytes("solution-b"));
+    VERDICT_A = ethers.keccak256(ethers.toUtf8Bytes("verdict-a"));
+    VERDICT_B = ethers.keccak256(ethers.toUtf8Bytes("verdict-b"));
+    ONE = ethers.parseEther("1");
+    OPERATOR_RATIO = (ONE * 75n) / 100n;
+    DAO_RATIO = (ONE * 25n) / 100n;
+  });
+
   async function policy(maxClaims = 2, maxClaimsPerOperator = 1, ttl = 300) {
-    const now = await time.latest();
+    const now = await networkHelpers.time.latest();
     return {
       claimWindowStart: now,
       claimWindowEnd: now + 600,

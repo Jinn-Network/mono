@@ -1,8 +1,10 @@
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('RestorationActivityChecker', function () {
   this.timeout(30000);
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
 
   let checker: any;
   let owner: any;
@@ -10,6 +12,7 @@ describe('RestorationActivityChecker', function () {
   let other: any;
 
   before(async function () {
+    ({ ethers } = await network.connect());
     [owner, worker, other] = await ethers.getSigners();
     const Factory = await ethers.getContractFactory('RestorationActivityChecker');
     checker = await Factory.deploy('11574074074074', owner.address);

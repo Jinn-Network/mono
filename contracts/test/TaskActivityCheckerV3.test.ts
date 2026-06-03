@@ -1,7 +1,12 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 describe("TaskActivityCheckerV3", function () {
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  before(async () => {
+    ({ ethers } = await network.connect());
+  });
+
   async function deploy() {
     const [owner, router, operator, evaluator, creator] = await ethers.getSigners();
     const Checker = await ethers.getContractFactory("TaskActivityCheckerV3");

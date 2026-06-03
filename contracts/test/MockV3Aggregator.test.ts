@@ -1,7 +1,12 @@
 import { expect } from 'chai';
-import { ethers } from 'hardhat';
+import { network } from 'hardhat';
 
 describe('MockV3Aggregator', () => {
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
+  before(async () => {
+    ({ ethers } = await network.connect());
+  });
+
   it('initial constructor sets answer + round 1', async () => {
     const F = await ethers.getContractFactory('MockV3Aggregator');
     const m = await F.deploy(8, 340_000_000_000n);

@@ -1,17 +1,28 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { network } from "hardhat";
 
 describe("JinnRouterV3", function () {
-  const TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("task-cid"));
-  const EVAL_TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("evaluation-task-cid"));
-  const SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
-  const SOLUTION_DIGEST = ethers.keccak256(ethers.toUtf8Bytes("solution-envelope"));
-  const VERDICT_DIGEST = ethers.keccak256(ethers.toUtf8Bytes("verdict-envelope"));
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
+
+  let TASK_CID: string;
+  let EVAL_TASK_CID: string;
+  let SOLVER_TYPE: string;
+  let SOLUTION_DIGEST: string;
+  let VERDICT_DIGEST: string;
   const NATIVE_PAYMENT_TYPE = "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1";
 
+  before(async () => {
+    ({ ethers, networkHelpers } = await network.connect());
+    TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("task-cid"));
+    EVAL_TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("evaluation-task-cid"));
+    SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
+    SOLUTION_DIGEST = ethers.keccak256(ethers.toUtf8Bytes("solution-envelope"));
+    VERDICT_DIGEST = ethers.keccak256(ethers.toUtf8Bytes("verdict-envelope"));
+  });
+
   async function policy(maxClaims = 2, maxClaimsPerOperator = 1, ttl = 300, requiredVerdicts = 1) {
-    const now = await time.latest();
+    const now = await networkHelpers.time.latest();
     return {
       claimWindowStart: now,
       claimWindowEnd: now + 600,
@@ -227,10 +238,10 @@ describe("JinnRouterV3", function () {
     const p = await policy(2, 1);
     await createTask(router, creator, p, solutionRate, verdictRate);
     await claimSolution(router, solver, 1, solverMech);
-    await time.increase(2401);
+    await networkHelpers.time.increase(2401);
 
     await expect(router.connect(creator).refundUnusedTaskBudget(1))
-      .to.changeEtherBalances([router, creator], [-(solutionRate + verdictRate * 2n), solutionRate + verdictRate * 2n]);
+      .to.changeEtherBalances(ethers, [router, creator], [-(solutionRate + verdictRate * 2n), solutionRate + verdictRate * 2n]);
 
     const payment = await router.taskPayments(1);
     expect(payment.solutionBudgetRemaining).to.equal(0);

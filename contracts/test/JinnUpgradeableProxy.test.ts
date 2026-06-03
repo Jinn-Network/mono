@@ -1,7 +1,12 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 describe("JinnUpgradeableProxy", function () {
+  let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
+  before(async () => {
+    ({ ethers } = await network.connect());
+  });
+
   it("initializes implementation behind proxy and upgrades by owner", async function () {
     const [owner, router, attacker] = await ethers.getSigners();
     const Coordinator = await ethers.getContractFactory("TaskCoordinator");

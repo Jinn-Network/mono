@@ -1,8 +1,13 @@
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('ExternalStakingDistributor reStake access', function () {
   const SERVICE_ID = 42n;
+
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
+  before(async () => {
+    ({ ethers } = await network.connect());
+  });
 
   let distributor: any;
   let staking: any;

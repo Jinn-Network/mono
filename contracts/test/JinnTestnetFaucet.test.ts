@@ -2,14 +2,16 @@
  * Tests for JinnTestnetFaucet — testnet JINN drip with per-recipient rate limit.
  */
 
-const { expect } = require('chai');
-const { ethers } = require('hardhat');
-const { time } = require('@nomicfoundation/hardhat-network-helpers');
+import { expect } from 'chai';
+import { network } from 'hardhat';
 
 describe('JinnTestnetFaucet', function () {
   this.timeout(30000);
 
-  const DRIP_AMOUNT = ethers.parseEther('100');
+  let ethers: Awaited<ReturnType<typeof network.connect>>['ethers'];
+  let networkHelpers: Awaited<ReturnType<typeof network.connect>>['networkHelpers'];
+
+  let DRIP_AMOUNT: bigint;
   const DRIP_INTERVAL = 24 * 60 * 60; // 24 hours
 
   let faucet: any;
@@ -18,6 +20,11 @@ describe('JinnTestnetFaucet', function () {
   let aliceSender: any;
   let aliceRecipient: any;
   let bobRecipient: any;
+
+  before(async function () {
+    ({ ethers, networkHelpers } = await network.connect());
+    DRIP_AMOUNT = ethers.parseEther('100');
+  });
 
   beforeEach(async function () {
     [owner, aliceSender, aliceRecipient, bobRecipient] = await ethers.getSigners();
@@ -99,7 +106,7 @@ describe('JinnTestnetFaucet', function () {
     it('should allow second drip after dripInterval + 1', async function () {
       await faucet.connect(aliceSender).drip(aliceRecipient.address);
 
-      await time.increase(DRIP_INTERVAL + 1);
+      await networkHelpers.time.increase(DRIP_INTERVAL + 1);
 
       await expect(faucet.connect(aliceSender).drip(aliceRecipient.address))
         .to.emit(faucet, 'Dripped');
