@@ -1367,6 +1367,72 @@ export class Store {
   }
 
   /**
+   * Actual-spend accumulator for the current 6h UTC block (issue #1004).
+   *
+   * Sums `COALESCE(actual_cost_usd_micros, estimated_cost_usd_micros, 0)`
+   * over rows whose `claim_status` is `'claimed'` or `'delivered'`:
+   *   - delivered rows contribute the real harvested cost (`actual_*`),
+   *   - in-flight claimed rows contribute their estimate so a burst of
+   *     concurrent claims cannot slip the cap before any of them deliver,
+   *   - failed claims (status `'claim_failed'`) are excluded.
+   *
+   * `estimated` is true iff any contributing row lacked
+   * `actual_cost_usd_micros` (in-flight claims, or a harness with no usage
+   * telemetry such as Hermes whose delivered rows are estimate-only). The
+   * gate surfaces this so an estimate-backed figure is not presented as
+   * metered. Block boundaries mirror `aiUnitsThisBlock`.
+   */
+  usdMicrosThisBlock(
+    credentialId: string,
+    now: Date = new Date(),
+  ): { usdMicros: number; estimated: boolean } {
+    const startOfDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const sinceDayStart = now.getTime() - startOfDay;
+    const sixHoursMs = 6 * 60 * 60 * 1_000;
+    const blocksIn = Math.min(Math.floor(sinceDayStart / sixHoursMs), 3);
+    const blockStart = new Date(startOfDay + blocksIn * sixHoursMs).toISOString();
+    const blockEnd = new Date(startOfDay + (blocksIn + 1) * sixHoursMs).toISOString();
+    return this.sumUsdMicros(credentialId, blockStart, blockEnd);
+  }
+
+  /**
+   * Actual-spend accumulator for the trailing 7-day rolling window from
+   * `now` (issue #1004). Same COALESCE + claim_status filter + `estimated`
+   * semantics as {@link usdMicrosThisBlock}.
+   */
+  usdMicrosThisWeek(
+    credentialId: string,
+    now: Date = new Date(),
+  ): { usdMicros: number; estimated: boolean } {
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+    return this.sumUsdMicros(credentialId, weekStart, undefined);
+  }
+
+  /** Shared COALESCE-sum + estimate-flag query for the USD accumulators. */
+  private sumUsdMicros(
+    credentialId: string,
+    fromIso: string,
+    toIso: string | undefined,
+  ): { usdMicros: number; estimated: boolean } {
+    const upper = toIso ? 'AND ts < @to' : '';
+    const row = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(COALESCE(actual_cost_usd_micros, estimated_cost_usd_micros, 0)), 0) AS total,
+           COALESCE(SUM(CASE WHEN actual_cost_usd_micros IS NULL THEN 1 ELSE 0 END), 0) AS estimatedRows
+         FROM activity_events
+         WHERE credential_id = @cid
+           AND ts IS NOT NULL AND ts >= @from ${upper}
+           AND claim_status IN ('claimed', 'delivered')`,
+      )
+      .get({ cid: credentialId, from: fromIso, to: toIso }) as {
+        total: number;
+        estimatedRows: number;
+      };
+    return { usdMicros: row.total ?? 0, estimated: (row.estimatedRows ?? 0) > 0 };
+  }
+
+  /**
    * True iff an `ai_units_cap_reached` row exists for the given
    * (credentialId, window, blockId). Used by the daemon to hydrate the
    * AI-units gate's in-memory pause memo across restarts so the
@@ -1395,10 +1461,14 @@ export class Store {
 
   /**
    * Mark the per-request `claimed` row as `delivered` and record
-   * `actual_cost_usd_micros`. The `ai_units` projection captured at
-   * claim time is intentionally NOT recomputed — the issue spec says
-   * "estimates are the gate input, never recomputed". Idempotent: a
-   * no-op when no `claimed` row exists.
+   * `actual_cost_usd_micros` (issue #1004 — the gate's accumulator now
+   * reads this column via COALESCE, so a delivered row's real harvested
+   * cost replaces its claim-time estimate in the running total). The
+   * `ai_units` projection captured at claim time is intentionally NOT
+   * recomputed — it remains the per-task estimate for the legacy unit
+   * surfaces. For subscription credentials the resulting USD figure is a
+   * *proxy* budget, not an exact bound on the provider's plan quota.
+   * Idempotent: a no-op when no `claimed` row exists.
    */
   finalizeClaimDelivered(requestId: string, actualCostUsdMicros: number): void {
     this.db.prepare(

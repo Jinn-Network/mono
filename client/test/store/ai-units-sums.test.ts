@@ -220,3 +220,104 @@ describe('hasAiUnitsCapReachedFor (issue #815 finding 1 — cross-restart memo)'
     ).toBe(false);
   });
 });
+
+describe('usdMicrosThisBlock / usdMicrosThisWeek (issue #1004 — actual-spend accumulator)', () => {
+  let store: Store;
+  afterEach(() => store?.close());
+
+  it('sums actual_cost_usd_micros for delivered rows in the current 6h block', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:30:00.000Z'); // 12:00-18:00 block
+    const inBlock = new Date('2026-05-28T13:00:00.000Z');
+    // A delivered row carries the real harvested cost.
+    store.recordActivityEvent({
+      ts: inBlock.toISOString(),
+      kind: 'claimed',
+      requestId: 'req-1',
+      credentialId: 'anthropic:api-key',
+      aiUnits: 30, // projection — must NOT be what the USD sum reads
+      claimStatus: 'delivered',
+      estimatedCostUsdMicros: 150_000,
+      actualCostUsdMicros: 480_000, // real cost, much higher than the estimate
+    });
+    const r = store.usdMicrosThisBlock('anthropic:api-key', now);
+    expect(r.usdMicros).toBe(480_000);
+    expect(r.estimated).toBe(false);
+  });
+
+  it('falls back to estimated_cost_usd_micros for an in-flight claimed row (no actual yet)', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:30:00.000Z');
+    store.recordActivityEvent({
+      ts: new Date('2026-05-28T13:00:00.000Z').toISOString(),
+      kind: 'claimed',
+      requestId: 'req-1',
+      credentialId: 'anthropic:api-key',
+      aiUnits: 30,
+      claimStatus: 'claimed',
+      estimatedCostUsdMicros: 150_000,
+      // actualCostUsdMicros omitted — claim still in flight
+    });
+    const r = store.usdMicrosThisBlock('anthropic:api-key', now);
+    expect(r.usdMicros).toBe(150_000);
+    expect(r.estimated).toBe(true); // estimate-backed contribution present
+  });
+
+  it('excludes claim_failed rows and previous-block rows', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:30:00.000Z');
+    store.recordActivityEvent({
+      ts: new Date('2026-05-28T13:00:00.000Z').toISOString(),
+      kind: 'claim_failed',
+      requestId: 'req-fail',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'claim_failed',
+      estimatedCostUsdMicros: 999_000,
+    });
+    store.recordActivityEvent({
+      ts: new Date('2026-05-28T11:00:00.000Z').toISOString(), // prev block
+      kind: 'claimed',
+      requestId: 'req-old',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 500_000,
+    });
+    const r = store.usdMicrosThisBlock('anthropic:api-key', now);
+    expect(r.usdMicros).toBe(0);
+    expect(r.estimated).toBe(false);
+  });
+
+  it('sums actual cost across the trailing 7-day window', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:00:00.000Z');
+    const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+    const eightDaysAgo = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+    store.recordActivityEvent({
+      ts: fiveDaysAgo.toISOString(),
+      kind: 'claimed',
+      requestId: 'req-1',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 200_000,
+    });
+    store.recordActivityEvent({
+      ts: eightDaysAgo.toISOString(),
+      kind: 'claimed',
+      requestId: 'req-2',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 500_000,
+    });
+    const r = store.usdMicrosThisWeek('anthropic:api-key', now);
+    expect(r.usdMicros).toBe(200_000);
+    expect(r.estimated).toBe(false);
+  });
+
+  it('returns zero / not-estimated for an unknown credential', () => {
+    store = freshStore();
+    expect(store.usdMicrosThisWeek('nobody:none', new Date())).toEqual({
+      usdMicros: 0,
+      estimated: false,
+    });
+  });
+});
