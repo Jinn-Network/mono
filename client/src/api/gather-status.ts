@@ -528,6 +528,14 @@ function tJinnBalanceCacheKey(
   ].join('\0');
 }
 
+/** Non-null service ids for a fleet — the cache-key input shared by the
+ *  staking-reward and eviction-state fan-outs (issue #984). */
+function fleetServiceIds(fleet: FleetState): number[] {
+  return fleet.services
+    .map((s) => s.service_id)
+    .filter((id): id is number => id != null);
+}
+
 /**
  * Cache key for the staking-reward + eviction-state fan-outs (issue #984).
  * Mirrors `tJinnBalanceCacheKey`: the read result is a pure function of the
@@ -799,10 +807,7 @@ async function getCachedPendingStakingRewards(
   network: 'mainnet' | 'testnet',
   fleet: FleetState,
 ): Promise<StakingRewardsResult> {
-  const serviceIds = fleet.services
-    .map((s) => s.service_id)
-    .filter((id): id is number => id != null);
-  const cacheKey = stakingEvictionCacheKey(rpcUrl, network, serviceIds);
+  const cacheKey = stakingEvictionCacheKey(rpcUrl, network, fleetServiceIds(fleet));
   const now = Date.now();
   const cached = stakingRewardsCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
@@ -879,10 +884,7 @@ async function getCachedEvictionState(
   network: 'mainnet' | 'testnet',
   fleet: FleetState,
 ): Promise<EvictionStateSnapshot> {
-  const serviceIds = fleet.services
-    .map((s) => s.service_id)
-    .filter((id): id is number => id != null);
-  const cacheKey = stakingEvictionCacheKey(rpcUrl, network, serviceIds);
+  const cacheKey = stakingEvictionCacheKey(rpcUrl, network, fleetServiceIds(fleet));
   const now = Date.now();
   const cached = evictionStateCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
