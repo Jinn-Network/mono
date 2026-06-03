@@ -726,8 +726,13 @@ test('Launcher happy-path: walks Create wizard and lands on the post-launch dash
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
   await expect(page.getByText('jinn operator')).toBeVisible();
 
-  // Switch to the Launcher workspace via the primary tabs.
-  await page.getByRole('link', { name: /^launcher$/i }).click();
+  // Navigate directly to the Launcher page. The Launcher tab is only
+  // conditionally rendered in TopTabs when there are already launched records
+  // or the current route is under /launcher — so clicking it from the
+  // overview (with an empty state) is not possible; use direct navigation
+  // instead (mirrors the approach used by the passing lifecycle-transitions
+  // test and the sibling join.e2e.test.ts).
+  await page.goto(dashboardUrl('/launcher'));
 
   // Empty-state CTA appears — click "Create SolverNet".
   await expect(page.getByText(/no solvernets created yet\./i)).toBeVisible();
@@ -873,10 +878,14 @@ test('Operator catalog join flow writes manifest-cid keyed evaluator config from
   });
   await mockDaemonApi(page, state);
 
-  await page.goto(dashboardUrl('/'));
+  // Navigate directly to the Operator registry sub-route. The TopTabs renders
+  // the /operator path as "Settings" (not "operator"), and the registry
+  // catalog lives at /operator/registry (not the bare /operator which
+  // redirects to /operator/memberships). Direct navigation mirrors the
+  // approach in the sibling join.e2e.test.ts.
+  await page.goto(dashboardUrl('/operator/registry'));
   await expect(page.getByText('jinn operator')).toBeVisible();
-  await page.getByRole('link', { name: /^operator$/i }).click();
-  await expect(page).toHaveURL(/\/operator/);
+  await expect(page).toHaveURL(/\/operator\/registry/);
 
   const card = page.getByTestId('registry-card');
   await expect(card).toContainText(MOCK_MANIFEST.name);
@@ -898,8 +907,13 @@ test('Operator catalog join flow writes manifest-cid keyed evaluator config from
   await expect(page.getByTestId('join-flow-solver-fields')).toHaveCount(0);
   await page.getByTestId('join-flow-submit').click();
 
-  await expect(page).toHaveURL(/\/operator#solvernets$/);
-  await expect(page.getByText(/Joined · 1/i)).toBeVisible();
+  // Post-join: the SPA now renders an explicit success card in-place at the
+  // /operator/join/:cid route rather than redirecting to /operator#solvernets
+  // (that redirect was removed in issue #333 fix — the silent redirect left
+  // operators unsure the join had landed). Assert the success card is visible
+  // and the URL stayed on the join page.
+  await expect(page).toHaveURL(new RegExp(`/operator/join/${MANIFEST_CID}`));
+  await expect(page.getByTestId('join-flow-success-card')).toBeVisible();
 
   expect(state.joinedSolverNets[MANIFEST_CID]).toMatchObject({
     manifestCid: MANIFEST_CID,
@@ -917,15 +931,21 @@ test('Fresh daemon empty states show no launched operator catalog and no owned l
   const state = makeMockState();
   await mockDaemonApi(page, state);
 
-  await page.goto(dashboardUrl('/'));
+  // Navigate directly to /operator/registry — the TopTabs label for /operator
+  // is "Settings" (not "operator"), and the registry catalog empty state lives
+  // at /operator/registry, not /operator (which redirects to /operator/memberships).
+  await page.goto(dashboardUrl('/operator/registry'));
   await expect(page.getByText('jinn operator')).toBeVisible();
-  await page.getByRole('link', { name: /^operator$/i }).click();
 
   await expect(page.getByTestId('registry-catalog-empty')).toContainText(
     'No launched SolverNets available.',
   );
 
-  await page.getByRole('link', { name: /^launcher$/i }).click();
+  // Navigate directly to /launcher — the Launcher tab in TopTabs is only
+  // rendered when there are owned launched records or the current route is
+  // under /launcher, so clicking it from the registry page (empty state) is
+  // not possible.
+  await page.goto(dashboardUrl('/launcher'));
   await expect(page.getByTestId('launcher-empty-state')).toContainText(
     'No SolverNets created yet.',
   );
