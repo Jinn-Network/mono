@@ -705,6 +705,150 @@ describe('listLaunchedSolverNets', () => {
     await expect(client.listLaunchedSolverNets()).rejects.toThrow(DiscoveryUnavailableError);
   });
 
+  it('projects enriched fields when manifestEnrichmentStatus is "ok" (issue #985)', async () => {
+    // A new indexer returns the row already enriched. The list path must
+    // project the indexer fields verbatim — no IPFS round-trip.
+    const { impl } = mockFetch({
+      data: {
+        solverNetManifests: {
+          items: [
+            {
+              id: 'bafyenriched',
+              launcherAgentId: '5474',
+              status: 'launched',
+              statusUpdatedAt: '2026-05-11T00:00:00Z',
+              manifestHash: '0x' + 'ff'.repeat(32),
+              anchorBlock: '12345',
+              chainId: 84532,
+              name: 'SWE-rebench v2',
+              network: 'base-sepolia',
+              solutionPriceWei: '1000000000000000',
+              verdictPriceWei: '500000000000000',
+              openRoles: ['solver', 'evaluator'],
+              launcherSafeAddress: '0x' + 'ab'.repeat(20),
+              contractId: 'swe-rebench-v2',
+              contractVersion: 'v1',
+              solverNetId: 'launcher/swe-rebench-v2',
+              manifestEnrichmentStatus: 'ok',
+            },
+          ],
+        },
+      },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const rows = await client.listLaunchedSolverNets();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.name).toBe('SWE-rebench v2');
+    expect(row.network).toBe('base-sepolia');
+    expect(row.solutionPriceWei).toBe('1000000000000000');
+    expect(row.verdictPriceWei).toBe('500000000000000');
+    expect(row.openRoles).toEqual(['solver', 'evaluator']);
+    expect(row.launcherSafeAddress).toBe('0x' + 'ab'.repeat(20));
+    expect(row.contractId).toBe('swe-rebench-v2');
+    expect(row.contractVersion).toBe('v1');
+    expect(row.solverNetId).toBe('launcher/swe-rebench-v2');
+    expect(row.chainId).toBe(84532);
+  });
+
+  it('keeps sentinels for a pending/failed enrichment row (does not present empty price as real)', async () => {
+    // Enrichment has not landed: the indexer returns the row with the default
+    // empty fields and status !== 'ok'. The guard must keep sentinels.
+    const { impl } = mockFetch({
+      data: {
+        solverNetManifests: {
+          items: [
+            {
+              id: 'bafypending',
+              launcherAgentId: '5474',
+              status: 'launched',
+              statusUpdatedAt: '2026-05-11T00:00:00Z',
+              manifestHash: '0x' + 'ff'.repeat(32),
+              anchorBlock: '99',
+              chainId: 84532,
+              name: '',
+              network: '',
+              solutionPriceWei: '',
+              verdictPriceWei: '',
+              openRoles: [],
+              launcherSafeAddress: '',
+              contractId: '',
+              contractVersion: '',
+              solverNetId: '',
+              manifestEnrichmentStatus: 'pending',
+            },
+          ],
+        },
+      },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const rows = await client.listLaunchedSolverNets();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.name).toBe('');
+    expect(row.network).toBe('');
+    expect(row.solutionPriceWei).toBe('0');
+    expect(row.verdictPriceWei).toBe('0');
+    expect(row.openRoles).toEqual([]);
+    expect(row.launcherSafeAddress).toBe('0x0000000000000000000000000000000000000000');
+    expect(row.solverNetId).toBe('bafypending'); // best-effort: cid as id
+    expect(row.chainId).toBe(84532);
+  });
+
+  it('degrades to the legacy query against an old indexer (no enriched columns)', async () => {
+    // An OLD indexer rejects the extended selection set with a GraphQL
+    // validation error; the daemon must re-run the legacy query and project
+    // sentinels rather than throw. Mirrors the getPluginScores degrade path.
+    const graphqlQueries: string[] = [];
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      const body = JSON.parse(init?.body as string) as { query: string };
+      graphqlQueries.push(body.query);
+      // First GraphQL POST: the extended selection set → validation error.
+      if (graphqlQueries.length === 1) {
+        return new Response(
+          JSON.stringify({
+            errors: [{ message: 'Cannot query field "openRoles" on type "solverNetManifest".' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      // Second GraphQL POST: the legacy query → a valid page, no enriched cols.
+      return new Response(
+        JSON.stringify({
+          data: {
+            solverNetManifests: {
+              items: [
+                {
+                  id: 'bafyold',
+                  launcherAgentId: '5474',
+                  status: 'launched',
+                  statusUpdatedAt: '2026-05-06T00:00:00Z',
+                  manifestHash: '0x' + 'ab'.repeat(32),
+                  anchorBlock: 100,
+                  chainId: 84532,
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const rows = await client.listLaunchedSolverNets();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].chainId).toBe(84532);
+    expect(rows[0].name).toBe('');            // sentinel — old indexer has no enriched field
+    expect(rows[0].solutionPriceWei).toBe('0');
+    expect(rows[0].openRoles).toEqual([]);
+    // Proves the degrade re-query fired: two GraphQL POSTs, the second is the
+    // legacy query (no openRoles in its selection set).
+    expect(graphqlQueries).toHaveLength(2);
+    expect(graphqlQueries[1]).not.toContain('openRoles');
+  });
+
   it('throws DiscoveryUnavailableError on network failure', async () => {
     const client = createHttpDiscoveryAPI({
       url: BASE_URL,

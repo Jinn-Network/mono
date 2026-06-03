@@ -953,6 +953,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
         verdictPriceWei: '0',             // requires IPFS fetch
         openRoles: [],                     // requires IPFS fetch
         anchorBlock: row.anchorBlock,
+        chainId: opts.chainId,             // issue #985: indexed chain scope
       });
     }
 

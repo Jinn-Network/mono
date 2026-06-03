@@ -560,6 +560,9 @@ function summarizeLaunchedRecord(
     verdictPriceWei: manifest.verdictPriceWei,
     openRoles: manifest.openRoles,
     anchorBlock: record.registry.metadataBlockNumber ?? 0,
+    // Issue #985: derive the indexed chain id from the manifest network so this
+    // local-record projection matches the registry/discovery summary shape.
+    chainId: manifest.network === 'base' ? 8453 : 84532,
   };
 }
 

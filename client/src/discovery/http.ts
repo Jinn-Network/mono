@@ -150,6 +150,41 @@ query ListSolverNets($where: solverNetManifestFilter, $limit: Int!) {
       manifestHash
       anchorBlock
       chainId
+      name
+      network
+      solutionPriceWei
+      verdictPriceWei
+      openRoles
+      launcherSafeAddress
+      contractId
+      contractVersion
+      solverNetId
+      manifestEnrichmentStatus
+    }
+  }
+}
+`;
+
+// Legacy selection for the backward-compat degrade path (issue #985): the
+// pre-enrichment field set, safe against an OLD indexer that lacks the
+// enriched columns. The projection fills sentinels for the missing fields and
+// leaves manifestEnrichmentStatus undefined → treated as not-ok → sentinels.
+const LIST_SOLVER_NETS_QUERY_LEGACY = `
+query ListSolverNetsLegacy($where: solverNetManifestFilter, $limit: Int!) {
+  solverNetManifests(
+    where: $where,
+    limit: $limit,
+    orderBy: "anchorBlock",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      launcherAgentId
+      status
+      statusUpdatedAt
+      manifestHash
+      anchorBlock
+      chainId
     }
   }
 }
@@ -414,6 +449,18 @@ interface SolverNetRow {
   manifestHash: string;
   anchorBlock: string | number;
   chainId: number;
+  // Issue #985: enriched summary fields. Absent (undefined) when querying an
+  // OLD indexer that predates these columns — the degrade catch handles that.
+  name?: string;
+  network?: string;
+  solutionPriceWei?: string;
+  verdictPriceWei?: string;
+  openRoles?: string[];
+  launcherSafeAddress?: string;
+  contractId?: string;
+  contractVersion?: string;
+  solverNetId?: string;
+  manifestEnrichmentStatus?: string;
 }
 
 interface SolverNetPage {
@@ -933,32 +980,61 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     if (args?.status && args.status.length > 0) where['status_in'] = args.status;
     if (args?.launcherAgentId) where['launcherAgentId'] = args.launcherAgentId;
 
-    const data = await postGql<SolverNetPage>(
-      gqlUrl,
-      fetchImpl,
-      LIST_SOLVER_NETS_QUERY,
-      { where, limit: 200 },
-    );
+    let data: SolverNetPage;
+    try {
+      data = await postGql<SolverNetPage>(
+        gqlUrl,
+        fetchImpl,
+        LIST_SOLVER_NETS_QUERY,
+        { where, limit: 200 },
+      );
+    } catch (err) {
+      // Backward-compat degrade (issue #985): an OLD indexer that predates the
+      // enriched columns rejects the extended selection set with a GraphQL
+      // validation error. Mirror the getPluginScores degrade pattern: re-run
+      // the minimal legacy query and project sentinels, so a daemon on a new
+      // build still lists against an old indexer (consumers re-enrich via IPFS).
+      if (err instanceof Error && /Unknown type|Cannot query|Cannot query field/.test(err.message)) {
+        data = await postGql<SolverNetPage>(
+          gqlUrl,
+          fetchImpl,
+          LIST_SOLVER_NETS_QUERY_LEGACY,
+          { where, limit: 200 },
+        );
+      } else {
+        throw err;
+      }
+    }
 
-    return (data.solverNetManifests?.items ?? []).map((row): SolverNetManifestSummary => ({
-      manifestCid: row.id,
-      // The 8 fields below are IPFS-only: not stored in the indexer. Populate
-      // with the same sentinels used by OnchainDiscoveryAPI.listLaunchedSolverNets
-      // in client/src/discovery/onchain.ts. Consumers enrich via IPFS fetch.
-      solverNetId: row.id,                                          // best-effort: cid as id
-      name: '',                                                      // requires IPFS fetch
-      network: '',                                                   // requires IPFS fetch
-      launcherSafeAddress: '0x0000000000000000000000000000000000000000', // requires IPFS fetch
-      contractId: '',                                                // requires IPFS fetch
-      contractVersion: '',                                           // requires IPFS fetch
-      solutionPriceWei: '0',                                        // requires IPFS fetch
-      verdictPriceWei: '0',                                         // requires IPFS fetch
-      openRoles: [],                                                 // requires IPFS fetch
-      launcherAgentId: row.launcherAgentId,
-      status: (row.status as 'launched' | 'paused' | 'retired') ?? 'launched',
-      statusUpdatedAt: row.statusUpdatedAt,
-      anchorBlock: Number(row.anchorBlock),
-    }));
+    const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+    return (data.solverNetManifests?.items ?? []).map((row): SolverNetManifestSummary => {
+      // Only trust enriched fields when the indexer marked the row 'ok'. A
+      // pending/failed row (or an old indexer that omits the field) keeps the
+      // sentinel rather than presenting an empty-string price as a real value;
+      // consumers degrade to a per-CID IPFS fetch for those rows.
+      const enriched = row.manifestEnrichmentStatus === 'ok';
+      const safeAddr = (a: string | undefined): `0x${string}` =>
+        typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) ? (a as `0x${string}`) : (ZERO_ADDR as `0x${string}`);
+      return {
+        manifestCid: row.id,
+        solverNetId: enriched && row.solverNetId ? row.solverNetId : row.id,
+        name: enriched ? (row.name ?? '') : '',
+        network: enriched ? (row.network ?? '') : '',
+        launcherSafeAddress: enriched ? safeAddr(row.launcherSafeAddress) : (ZERO_ADDR as `0x${string}`),
+        contractId: enriched ? (row.contractId ?? '') : '',
+        contractVersion: enriched ? (row.contractVersion ?? '') : '',
+        solutionPriceWei: enriched ? (row.solutionPriceWei ?? '0') : '0',
+        verdictPriceWei: enriched ? (row.verdictPriceWei ?? '0') : '0',
+        openRoles: enriched
+          ? ((row.openRoles ?? []).filter((r): r is 'solver' | 'evaluator' => r === 'solver' || r === 'evaluator'))
+          : [],
+        launcherAgentId: row.launcherAgentId,
+        status: (row.status as 'launched' | 'paused' | 'retired') ?? 'launched',
+        statusUpdatedAt: row.statusUpdatedAt,
+        anchorBlock: Number(row.anchorBlock),
+        chainId: row.chainId,
+      };
+    });
   }
 
   // ── getLifecycleStatus ────────────────────────────────────────────────────

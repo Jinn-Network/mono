@@ -49,6 +49,16 @@ import { DiscoveryUnavailableError } from '../discovery/types.js';
  */
 export const SOLVERNET_MANIFEST_KEY_PREFIX = 'solvernet-manifest:';
 
+/**
+ * Map the operator-facing network name to the on-chain chain id used by the
+ * indexer for chain scoping. Mirrors discovery/onchain.ts chainForId.
+ * Issue #985 criterion 2 — the list path filters on the indexed chainId, not
+ * on a manifest body fetched per-row from IPFS.
+ */
+function networkToChainId(network: string): number {
+  return network === 'base' ? 8453 : 84532;
+}
+
 function warnAndRethrowDiscoveryUnavailable(manifestCid: string, err: unknown): void {
   if (!(err instanceof DiscoveryUnavailableError)) {
     return;
@@ -343,51 +353,28 @@ export class IdentityRegistryBackedSolverNetRegistryClient
         'IdentityRegistryBackedSolverNetRegistryClient requires a DiscoveryAPI for listLaunched',
       );
     }
-    // Step 1: Obtain coarse summaries (manifestCid + lifecycle status) from
-    // the DiscoveryAPI. Note: listLaunchedSolverNets does not accept sinceBlock —
-    // that arg was a subgraph optimisation that does not translate to the abstract interface.
+    // Step 1: Obtain enriched summaries from the DiscoveryAPI. Post-#985 the
+    // indexer persists every summary field (name/network/prices/openRoles/
+    // launcher safe / contract id+version) on the solverNetManifest row, so a
+    // single GraphQL query returns the full catalog. Note: listLaunchedSolverNets
+    // does not accept sinceBlock — that was a subgraph optimisation that does
+    // not translate to the abstract interface.
     const rawSummaries = await this.discoveryApi.listLaunchedSolverNets(
       args.statusFilter !== undefined ? { status: args.statusFilter } : undefined,
     );
 
-    // Step 2: For each summary, fetch the full manifest body from IPFS.
-    // This enriches the coarse summary (which has empty name/network/prices)
-    // with the fields that come only from the manifest body.
+    // Step 2: Chain-scope and project. The registry is global; the catalog is
+    // chain-scoped. We filter on the INDEXED chainId — no per-row IPFS fetch.
+    //
+    // Trust delta: this list path now trusts the indexer's enriched fields.
+    // The on-demand detail path (getManifest) still hash-verifies the IPFS body
+    // against the on-chain advertised hash, so a tampered catalog row surfaces
+    // the moment an operator opens that SolverNet's detail.
+    const targetChainId = networkToChainId(args.network);
     const out: SolverNetManifestSummary[] = [];
-
     for (const row of rawSummaries) {
-      let manifest: SolverNetManifestV1;
-      try {
-        manifest = await this.fetchAndValidateManifest(row.manifestCid);
-      } catch {
-        // Skip rows whose IPFS body can't be fetched/validated. Operators
-        // see "missing/tampered manifest" rows nowhere, which is
-        // intentional — the catalog should not surface broken entries.
-        continue;
-      }
-
-      // Per-network filter — the registry is global; the catalog is
-      // chain-scoped. `args.network` is what the operator asked for; the
-      // constructor's `this.network` is the chain this client serves and
-      // is informational only.
-      if (manifest.network !== args.network) continue;
-
-      out.push({
-        manifestCid: row.manifestCid,
-        solverNetId: manifest.solverNetId,
-        name: manifest.name,
-        network: manifest.network,
-        launcherAgentId: row.launcherAgentId,
-        launcherSafeAddress: manifest.launcher.safeAddress,
-        status: row.status,
-        statusUpdatedAt: row.statusUpdatedAt,
-        contractId: manifest.contract.id,
-        contractVersion: manifest.contract.version,
-        solutionPriceWei: manifest.solutionPriceWei,
-        verdictPriceWei: manifest.verdictPriceWei,
-        openRoles: manifest.openRoles,
-        anchorBlock: row.anchorBlock,
-      });
+      if (row.chainId !== targetChainId) continue;
+      out.push(row);
     }
 
     return out;

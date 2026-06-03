@@ -79,6 +79,12 @@ export interface SolverNetManifestSummary {
   verdictPriceWei: string;
   openRoles: Array<'solver' | 'evaluator'>;
   anchorBlock: number;
+  /**
+   * Indexed chain id from the on-chain MetadataSet event (84532 = base-sepolia,
+   * 8453 = base). Used by listLaunched for chain scoping without an IPFS fetch.
+   * Issue #985 criterion 2.
+   */
+  chainId: number;
 }
 
 // ── Interface ───────────────────────────────────────────────────────────────
