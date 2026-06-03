@@ -51,14 +51,6 @@ permissions:
   statuses: write
   contents: read
 
-# The warm operator is a SINGLETON (§9, §11). Serialize every run — two suites
-# hitting the same keystore / nonce / staking checkpoint would corrupt each
-# other. cancel-in-progress: false so an in-flight authoritative run is never
-# pre-empted by the Thursday pre-flight.
-concurrency:
-  group: environment-suite-warm-operator
-  cancel-in-progress: false
-
 defaults:
   run:
     working-directory: client
@@ -66,6 +58,15 @@ defaults:
 jobs:
   environment-suite:
     name: environment-suite
+    # The warm operator is a SINGLETON (§9, §11). Serialize on the JOB (not the
+    # whole workflow) — two suites hitting the same keystore / nonce / staking
+    # checkpoint would corrupt each other. Job-level so the non-gating
+    # real-paired-smoke job (which touches NO keystore) is not also held by this
+    # lock. cancel-in-progress: false so an in-flight authoritative run is never
+    # pre-empted by the Thursday pre-flight.
+    concurrency:
+      group: environment-suite-warm-operator
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # The protected, HUMAN-CREATED Environment that holds the testnet-gate
     # secrets (§9). If it does not exist yet, the run fails fast at secret
@@ -548,14 +549,21 @@ jobs:
   #
   # Independent of the gating job's warm operator: it targets EXTERNALLY-hosted
   # operator dashboards via JINN_SMOKE_OP_A_URL / JINN_SMOKE_OP_B_URL (distinct
-  # keystores / nonces from the in-job warm operator), so running alongside the
-  # singleton `environment-suite` job is safe. The test self-skips when those
-  # URLs are absent, so this job is a clean no-op until a human provisions the
-  # two hosted-dashboard URLs in the testnet-gate Environment.
+  # keystores / nonces from the in-job warm operator), so it never contends for
+  # the `environment-suite-warm-operator` lock (now scoped to that job). It DOES
+  # carry its own lock: the two hosted dashboards are fixed singletons too, so two
+  # overlapping smoke runs (e.g. Thursday schedule + a manual dispatch) would race
+  # op-a's launch nonce. cancel-in-progress: false queues the second rather than
+  # corrupting the first. The test self-skips when the URLs are absent, so this
+  # job is a clean no-op until a human provisions them in the testnet-gate
+  # Environment.
   real-paired-smoke:
     name: Real paired app smoke (non-gating)
     runs-on: ubuntu-latest
     continue-on-error: true
+    concurrency:
+      group: real-paired-smoke-hosted-operators
+      cancel-in-progress: false
     environment: testnet-gate
     timeout-minutes: 20
     steps:
