@@ -136,7 +136,13 @@ export interface GatheredStatusRaw {
     balanceWei?: string;
     error?: string;
   };
+  /**
+   * On-demand staking reward queue total (wei). Populated only by `jinn rewards`
+   * splicing the result of `sumPendingStakingRewards` onto raw, never on the
+   * /v1/status hot path (#992).
+   */
   pendingStakingRewardsWei?: string;
+  /** On-demand staking reward read error; populated only by `jinn rewards` (#992). */
   pendingRewardsError?: string;
   /** Sepolia tJINN ERC-20 balances across fleet Safes. */
   tJinn?: TjinnStatus;
@@ -158,7 +164,11 @@ export interface GatheredStatusRaw {
    * operator lifetime claimed totals via `totalClaimedOperator(serviceId)`.
    */
   tjinnDistributorAddress?: string;
-  /** ISO timestamp when the staking contract will next accept a checkpoint. */
+  /**
+   * ISO timestamp when the staking contract will next accept a checkpoint.
+   * Populated only by `jinn rewards` on demand, never on the /v1/status hot
+   * path (#992).
+   */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
   /** Resolved daily burn estimate for runway (wei string). */
@@ -177,21 +187,14 @@ export interface GatheredStatusRaw {
     number,
     { counts: Record<string, number>; lastEventAt: string | null }
   >;
+  /**
+   * Per-service pending staking reward queue (wei) keyed by display index.
+   * Populated only by `jinn rewards` on demand, never on the /v1/status hot
+   * path (#992).
+   */
   pendingByService?: Record<number, string>;
   claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
   migrationArchive?: EarningMigrationArchive;
-  /**
-   * Per-service eviction state keyed by display index.
-   * Populated by gather-status via on-chain getStakingState reads.
-   * `true` means the staking proxy reports state === 2 (Evicted).
-   */
-  evictedByServiceIndex?: Record<number, boolean>;
-  /**
-   * Per-service inactivity seconds keyed by display index.
-   * Populated by gather-status via on-chain getServiceInfo reads (jinn-mono-hjex.3).
-   * Value is the `inactivity` field from the ServiceInfo struct (seconds).
-   */
-  inactivityByServiceIndex?: Record<number, number>;
   /**
    * Harness readiness rollup — single boolean + name + reason summary across
    * all joined harnesses. Populated by gather-status from the daemon's
@@ -201,14 +204,6 @@ export interface GatheredStatusRaw {
    * on the wire. See `status-harness-rollup.ts`.
    */
   harnessRollup?: HarnessRollup;
-  /**
-   * Per-service first-observed-evicted timestamps (ISO 8601) keyed by display
-   * index. Populated by gather-status's module-scoped first-seen tracker.
-   * Absent when the service is not currently evicted. Exposed on `/v1/status`
-   * for observability; operator dashboard no longer surfaces eviction alarms
-   * (issue #773).
-   */
-  evictedSinceByServiceIndex?: Record<number, string>;
   /**
    * Mirror of the `main.ts` predicate that gates the EvictionLoop:
    * `evictionCheckIntervalMs > 0 && stakingMode === 'standard' && !!distributorAddress`.
@@ -244,13 +239,6 @@ export interface StatusV1Response {
       identityRegistryAddress: string | null;
       safeBoundToAgent: boolean;
       identityBindingStatus: 'bound' | 'pending' | 'not_applicable';
-      /** True when the staking proxy reports this service as evicted (getStakingState === 2). */
-      evicted: boolean;
-      /**
-       * ISO 8601 first-observed-evicted timestamp. `null` when the service is
-       * not currently evicted. Observability only (issue #773).
-       */
-      evictedSince: string | null;
     }>;
     stakedLikeCount: number;
     completeCount: number;
@@ -270,10 +258,7 @@ export interface StatusV1Response {
   rewards: {
     claimLoopIntervalMs: number;
     lastClaimTickAt: string | null;
-    pendingStakingRewardsWei?: string;
     claimedStakingRewardsWei: string;
-    totalStakingRewardsWei?: string;
-    pendingRewardsError?: string;
   };
   tJinn: TjinnStatus;
   /** Per-role ETH balance (master / agent / Safe). Wei strings, base-10. */
@@ -348,8 +333,6 @@ export function resolveMasterDailyEstimateWei(
 
 function fleetSummary(
   fleet: FleetState | null,
-  evictedByServiceIndex?: Record<number, boolean>,
-  evictedSinceByServiceIndex?: Record<number, string>,
 ): StatusV1Response['fleet'] {
   if (!fleet) {
     return {
@@ -378,8 +361,6 @@ function fleetSummary(
           ? 'pending'
           : 'not_applicable'
     ) as 'bound' | 'pending' | 'not_applicable',
-    evicted: evictedByServiceIndex?.[di] ?? false,
-    evictedSince: evictedSinceByServiceIndex?.[di] ?? null,
     };
   });
   const stakedLikeCount = fleet.services.filter(s => isStakedLikeServiceStep(s.step)).length;
@@ -479,17 +460,10 @@ function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['f
   if (raw.hintsScope === 'sqlite_only') {
     return 'Fleet and on-chain earnings hints omitted in API-only mode.';
   }
-  if (raw.pendingRewardsError) {
-    return `Could not read pending staking rewards: ${raw.pendingRewardsError}`;
-  }
-  if (raw.pendingStakingRewardsWei !== undefined) {
-    const n = fleetSum.stakedLikeCount;
-    return `Sum of on-chain calculateStakingReward (wei) across eligible services: ${raw.pendingStakingRewardsWei} (${n} staked-like service(s) in local state).`;
-  }
   if (!fleetSum.loaded || fleetSum.services.length === 0) {
     return 'No fleet services in local state — earnings accrue after staking completes.';
   }
-  return 'Pending reward sum not available (no RPC or no staking proxies on services).';
+  return 'On-chain staking reward queue is reported by `jinn rewards`, not /v1/status.';
 }
 
 function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string[] {
@@ -583,17 +557,9 @@ function buildEthBalances(raw: GatheredStatusRaw): StatusV1Response['balances'][
 }
 
 export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
-  const fleetSum = fleetSummary(raw.fleet, raw.evictedByServiceIndex, raw.evictedSinceByServiceIndex);
+  const fleetSum = fleetSummary(raw.fleet);
   const mode: 'full' | 'sqlite_only' = raw.hintsScope === 'sqlite_only' ? 'sqlite_only' : 'full';
   const claimedRewardsWei = sumClaimedRewardsWei(raw);
-  let pendingRewardsWei: bigint | undefined;
-  if (raw.pendingStakingRewardsWei !== undefined) {
-    try {
-      pendingRewardsWei = BigInt(raw.pendingStakingRewardsWei);
-    } catch {
-      pendingRewardsWei = undefined;
-    }
-  }
   const runway =
     raw.master.balanceWei !== undefined
       ? computeRunwayDaysExcess(
@@ -624,13 +590,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     rewards: {
       claimLoopIntervalMs: raw.rewardClaimIntervalMs,
       lastClaimTickAt: raw.lastRewardClaimTickAt,
-      pendingStakingRewardsWei: raw.pendingStakingRewardsWei,
       claimedStakingRewardsWei: claimedRewardsWei.toString(),
-      totalStakingRewardsWei:
-        pendingRewardsWei !== undefined
-          ? (claimedRewardsWei + pendingRewardsWei).toString()
-          : claimedRewardsWei.toString(),
-      pendingRewardsError: raw.pendingRewardsError,
     },
     tJinn: publicTjinnStatus(raw.tJinn, raw.tjinnTokenAddress, raw.tjinnChainId),
     balances: { eth: buildEthBalances(raw) },
