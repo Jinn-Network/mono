@@ -23,7 +23,7 @@ import {
 } from '../solver-types/_swe-rebench-v2-validated-pool.js';
 import { resolveSlateTasks } from './resolve-slate-tasks.js';
 import {
-  loadActiveHeldOutSlateIds, ACTIVE_HELD_OUT_SLATE_VERSIONS,
+  loadActiveHeldOutSlateIds, ACTIVE_HELD_OUT_SLATE_VERSIONS, loadHeldOutSlate,
 } from '../solver-types/_swe-rebench-v2-held-out-slate.js';
 import { GeneratorStateStore } from '../solver-types/_swe-rebench-v2-state.js';
 import { fetchAttemptedInstanceIds } from './screen-discovery.js';
@@ -295,8 +295,23 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     );
   }
 
+  // Cumulative v2: union the EXISTING slate with this run's NEW held-out, so
+  // re-running to GROW the exam never drops already-reserved instances. (The
+  // active-slate exclusion keeps existing held-out OUT of candidates, so
+  // result.heldOut is only the new admits.) Growing changes the slate's content
+  // hash; re-recording the base arm for the FULL set below upserts the prior rows
+  // to the new hash, so the orchestrator's slate-hash-drift guard stays satisfied.
+  let existingHeldOut: string[] = [];
+  try {
+    existingHeldOut = [...loadHeldOutSlate(DISPATCH_SOLVER_TYPE, SLATE_VERSION).instanceIds];
+  } catch {
+    /* no v2 slate yet — this is the first cut */
+  }
+  const newHeldOut = result.heldOut.map((h) => h.instance_id);
+  const allHeldOutIds = [...new Set([...existingHeldOut, ...newHeldOut])];
+
   const generatedAt = new Date().toISOString();
-  const slateFile = buildV2SlateFile(result.heldOut.map((h) => h.instance_id), generatedAt);
+  const slateFile = buildV2SlateFile(allHeldOutIds, generatedAt);
   mkdirSync(slatesDir(), { recursive: true });
   const slatePath = join(slatesDir(), 'held-out-slate.swe-rebench-v2.v2.json');
   writeFileSync(slatePath, `${JSON.stringify(slateFile, null, 2)}\n`);
@@ -305,17 +320,20 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     generatedAt, evalSemanticsVersion: EVAL_SEMANTICS_VERSION, baseCodeDigest,
     R: opts.R, proverHarness: proverKind,
     proverModel: opts.proverModel ?? (proverKind === 'claude-code' ? 'opus' : 'codex-default'),
-    heldOut: result.heldOut, screened: result.screened,
+    heldOutTotal: allHeldOutIds.length, newThisRun: newHeldOut, carriedOver: existingHeldOut,
+    screened: result.screened,
   }, null, 2)}\n`);
 
-  // Persist the base arm (all-fail) so `jinn eval v2 --parent <baseCodeDigest>` reports McNemar.
+  // Persist the base arm (all-fail) for the FULL held-out set under the (possibly
+  // new) slate hash. The upsert is keyed by (checkpoint, slate_version, instance_id),
+  // so prior rows get their slate_hash refreshed to match the grown slate — no drift.
   const store = new Store(config.dbPath);
   try {
     const runAtMs = Date.now();
-    for (const h of result.heldOut) {
+    for (const id of allHeldOutIds) {
       store.recordEvalResult({
         checkpoint_cid: baseCodeDigest, slate_hash: slateFile.hash, slate_version: SLATE_VERSION,
-        instance_id: h.instance_id, passed: false, unscorable: false, code_digest: baseCodeDigest,
+        instance_id: id, passed: false, unscorable: false, code_digest: baseCodeDigest,
         run_at_ms: runAtMs, test_log_excerpt: 'base arm (screening): consistent fail 0/R',
       });
     }
@@ -323,5 +341,5 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     store.close?.();
   }
 
-  return { result, baseCodeDigest, slatePath, reportPath, heldOutCount: result.heldOut.length, proverUnscorable };
+  return { result, baseCodeDigest, slatePath, reportPath, heldOutCount: allHeldOutIds.length, proverUnscorable };
 }
