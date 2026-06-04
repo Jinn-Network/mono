@@ -111,11 +111,15 @@ export function validateNumericFlags(flags: {
 
 function toAggregate(
   codeDigest: string,
-  rows: Array<{ codeDigest: string; attempts: number; passes: number; passRate: number; gradedScores: number[] }>,
+  rows: Array<{ codeDigest: string; attempts: number; passes: number; passRate: number; gradedScores?: number[] }>,
 ): CodeDigestAggregate {
   const found = rows.find((r) => r.codeDigest === codeDigest);
   if (!found) return { codeDigest, attempts: 0, passes: 0, passRate: 0, gradedScores: [] };
-  return { codeDigest, attempts: found.attempts, passes: found.passes, passRate: found.passRate, gradedScores: found.gradedScores };
+  // A v1 indexer (pre-#1019 migration) returns rows without gradedScores.
+  // Default to [] — mirroring the not-found branch — so decideRevert's Tier-2
+  // readiness check sees an empty arm and falls back to the binary signal
+  // rather than dereferencing `undefined.length` (§5.6 0.1.0↔0.2.0 boundary).
+  return { codeDigest, attempts: found.attempts, passes: found.passes, passRate: found.passRate, gradedScores: found.gradedScores ?? [] };
 }
 
 export function createCodedigestRevertCheckCommand(

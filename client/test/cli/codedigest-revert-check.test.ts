@@ -23,6 +23,8 @@ describe('jinn codedigest-revert-check', () => {
   it('emits recommendRevert=true for a significant regression', async () => {
     const cmd = createCodedigestRevertCheckCommand({
       buildDiscovery: () => ({
+        // v1-indexer shape: rows carry no gradedScores. toAggregate must
+        // default it to [] so the binary tier fires instead of crashing.
         getCodeDigestRewards: async () => [
           { codeDigest: 'sha256:CHILD', attempts: 100, passes: 40, passRate: 0.4, avgScore: 0.4 },
           { codeDigest: 'sha256:PARENT', attempts: 100, passes: 80, passRate: 0.8, avgScore: 0.8 },
