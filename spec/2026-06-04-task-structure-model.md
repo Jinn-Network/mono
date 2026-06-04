@@ -3,6 +3,7 @@ version: 0.1
 date: 2026-06-04
 author: opus
 status: proposed
+discussion: 'https://github.com/Jinn-Network/mono/discussions/1036'
 ---
 
 # Task structure model — Result, Process, Solution
@@ -17,8 +18,9 @@ loop (see §4).
 
 This spec is a **proposal**. It does not edit `GLOSSARY.md` or `SPEC.md`
 in place; canonical content changes only through a linked Discussion +
-CODEOWNERS review (`spec/2026-04-28-canonical-docs.md`). §5 lists the exact
-edits this proposal would anchor.
+CODEOWNERS review (`spec/2026-04-28-canonical-docs.md`). The anchoring
+Discussion is [#1036](https://github.com/Jinn-Network/mono/discussions/1036);
+§5 lists the exact edits this proposal would anchor.
 
 ## 1. The problem in one paragraph
 
