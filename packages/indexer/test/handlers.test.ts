@@ -914,6 +914,60 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
     ]);
   });
 
+  it('test 1b: materializes claude-code-learner (with version) into pluginsJson, baseline plugins preserved (#1035)', async () => {
+    // A learner run's envelope carries the learner plugin alongside the
+    // SolverNet's baseline runtime plugins. The indexer must round-trip all of
+    // them into pluginsJson verbatim so a query can partition by
+    // claude-code-learner version (AC2/AC3) without dropping the baseline (AC4).
+    const learnerEnvelope = {
+      ...SYNTHETIC_ENVELOPE,
+      executor: {
+        ...SYNTHETIC_ENVELOPE.executor,
+        plugins: [
+          { name: '@jinn-network/network-tools', version: '0.3.0', sha256: 'aa'.repeat(32) },
+          { name: 'swe-rebench-v2', version: '1.0', sha256: 'dd'.repeat(32) },
+          { name: 'claude-code-learner', version: '0.1.0', sha256: 'cc'.repeat(32) },
+        ],
+      },
+    };
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => learnerEnvelope,
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 9n,
+          metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`,
+          metadataValue: envelopePayloadV2({ tier: 1, manifestHash: MANIFEST_HASH }),
+        },
+        { block: 41_200_003n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    const metaRow = db.get(attemptEnvelopeMeta, { requestId: ENVELOPE_REQUEST_ID, chainId: CHAIN_ID });
+    expect(metaRow).toBeDefined();
+    // Verbatim round-trip, order-preserving (the indexer does not sort).
+    expect(JSON.parse(metaRow!.pluginsJson as string)).toEqual([
+      { name: '@jinn-network/network-tools', version: '0.3.0', sha256: 'aa'.repeat(32) },
+      { name: 'swe-rebench-v2', version: '1.0', sha256: 'dd'.repeat(32) },
+      { name: 'claude-code-learner', version: '0.1.0', sha256: 'cc'.repeat(32) },
+    ]);
+    // AC3: claude-code-learner version is observable for version-partitioned queries.
+    const plugins = JSON.parse(metaRow!.pluginsJson as string) as Array<{ name: string; version: string }>;
+    expect(plugins.find((p) => p.name === 'claude-code-learner')?.version).toBe('0.1.0');
+  });
+
   it('test 2: fetch failure — no attemptEnvelopeMeta row, no throw, envelope row IS written', async () => {
     const stubFetch: FetchLike = async (_url, _opts) => ({ ok: false, status: 500, json: async () => null });
 
