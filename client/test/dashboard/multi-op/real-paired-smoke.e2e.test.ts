@@ -20,7 +20,7 @@
 // a clean no-op everywhere except the provisioned CI environment.
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // CI sets these to the two restored warm-operator HOME dirs (each contains a
@@ -115,7 +115,7 @@ test.describe('real paired app smoke (non-gating)', () => {
     // Two real daemons + on-chain launch confirmation + op-b catalog propagation
     // each cross several ~30s cadences; budget generously. Non-gating, so a
     // timeout is a neutral signal, never a blocked cut.
-    test.setTimeout(15 * 60 * 1000);
+    test.setTimeout(20 * 60 * 1000);
 
     let opADaemon: Daemon | null = null;
     let opBDaemon: Daemon | null = null;
@@ -150,31 +150,67 @@ test.describe('real paired app smoke (non-gating)', () => {
       // Step 5: Review + Launch
       await opA.getByRole('button', { name: /launch/i }).click();
 
-      await expect(opA.getByText(/launched/i).first()).toBeVisible({ timeout: 180_000 });
-      // NB: the launched dashboard's `manifest-cid` testid renders a TRUNCATED
-      // CID for display, so it is unusable as a cross-operator key. We discover
-      // op-a's SolverNet in op-b's catalog by its unique NAME (set in Step 1),
-      // which the registry card renders verbatim.
+      // Real on-chain launch (manifest pin to IPFS + registry tx + confirmation)
+      // can take a few minutes on a congested testnet — the dashboard sits on
+      // "Broadcasting tx" until the receipt lands. Budget generously.
+      await expect(opA.getByText(/launched/i).first()).toBeVisible({ timeout: 300_000 });
+
+      // Cross-operator key = the FULL manifest CID. The launched dashboard
+      // renders only a TRUNCATED CID, and the human-readable NAME lags behind
+      // IPFS metadata resolution (op-b's card shows "Metadata pending" for a
+      // while), so neither is a reliable matcher. The launched RECORD on op-a's
+      // disk carries the full CID immediately, and op-b's registry card exposes
+      // that same CID in `data-manifest-cid` straight off the on-chain anchor.
+      const solverNetId = new URL(opA.url()).pathname.split('/').filter(Boolean).pop();
+      const recordPath = join(
+        OP_A_HOME!,
+        '.jinn-client',
+        'earning',
+        'solvernets',
+        'launched',
+        `${solverNetId}.json`,
+      );
+      if (!existsSync(recordPath)) {
+        throw new Error(`op-a launched record not found at ${recordPath}`);
+      }
+      const manifestCid = JSON.parse(readFileSync(recordPath, 'utf-8')).manifestCid as string;
+      expect(manifestCid).toMatch(/^bafk?rei/);
 
       // ===== op-b: discover in the catalog + join =====
       await opB.goto(opBDaemon.handshakeUrl);
 
-      // op-b's substrate refreshes its catalog on its own cadence; reload until
-      // op-a's SolverNet (matched by its unique name) appears — real
-      // cross-operator propagation via chain + indexer (the leg that made T2.3
-      // flaky, here non-gating by design).
-      const card = opB.getByTestId('registry-card').filter({ hasText: solverNetName });
+      // Reload op-b's registry until op-a's card (matched by CID, available off
+      // the on-chain anchor immediately) appears. The catalog renders the card
+      // as "Metadata pending" until IPFS metadata resolves — but we key on the
+      // CID, not the lagging name. This is the real cross-operator propagation
+      // leg (the part that made T2.3 flaky, here non-gating by design).
+      const cardByCid = opB.locator(
+        `[data-testid="registry-card"][data-manifest-cid="${manifestCid}"]`,
+      );
       let found = false;
       for (let i = 0; i < 20 && !found; i++) {
         await opB.goto(`${opBDaemon.origin}/operator/registry`);
-        if (await card.count()) found = true;
+        if (await cardByCid.count()) found = true;
         else await opB.waitForTimeout(15_000);
       }
       expect(found, "op-b should discover op-a's SolverNet in the catalog").toBe(true);
 
-      await card.first().getByTestId('registry-join-cta').click();
-      await expect(opB.getByTestId('join-flow')).toBeVisible({ timeout: 30_000 });
-      await opB.getByTestId('join-flow').getByLabel('Solver').check();
+      await opB
+        .locator(`[data-testid="registry-join-cta"][data-manifest-cid="${manifestCid}"]`)
+        .first()
+        .click();
+      // Clicking Join is what triggers JoinFlow's full-manifest fetch from IPFS,
+      // so allow a generous window for the form to load (the catalog metadata may
+      // still have been "pending" when we clicked).
+      await expect(opB.getByTestId('join-flow')).toBeVisible({ timeout: 120_000 });
+      // Join as EVALUATOR, not Solver. The smoke validates the discover→join app
+      // flow, not solver-harness execution (T3.1 covers the real claude-code
+      // loop). The Solver role gates Save & Join on a *ready* solver harness
+      // (claude-code), which depends on live OAuth that the test operators may
+      // not carry; the prediction evaluator is a deterministic built-in with no
+      // such gate, so an evaluator join exercises the same JoinFlow + config
+      // write without an external-auth dependency.
+      await opB.getByTestId('join-flow').getByLabel('Evaluator').check();
       await opB.getByTestId('join-flow-submit').click();
       await expect(opB.getByTestId('join-flow-success-card')).toBeVisible({ timeout: 60_000 });
     } finally {

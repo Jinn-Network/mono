@@ -146,6 +146,20 @@ screenshots as artifacts for per-cut visibility.
 - **Self-skips** (clean no-op) whenever the two warm-operator HOME trees are
   absent — every local run, and any CI run before the warm-operator secrets are
   provisioned in the `testnet-gate` Environment.
+- **op-c joins as Evaluator**, not Solver. The smoke validates the
+  discover→join app flow, not solver-harness execution (T3.1 owns the real
+  claude-code loop). The Solver role gates Save & Join on a *ready* solver
+  harness (claude-code OAuth), an external-auth dependency the test operators may
+  not carry; the prediction evaluator is a deterministic built-in with no such
+  gate. The cross-operator match keys on the launch's **manifest CID** (read
+  from op-a's launched record), since the dashboard renders only a truncated CID
+  and the catalog name lags behind IPFS metadata resolution.
+- **Validated end-to-end on real Base Sepolia** (2026-06-04) against the two
+  isolated warm operators (`~/jinn-dev/operators/op-b` + `op-c`): local-spawn →
+  on-chain launch → cross-operator catalog discovery → JoinFlow manifest fetch →
+  evaluator join all pass. The launch-confirmation step showed real testnet
+  latency (one run needed >180s for the receipt), which is exactly the
+  non-determinism that keeps this leg non-gating.
 
 ### Lane discipline (unchanged)
 
