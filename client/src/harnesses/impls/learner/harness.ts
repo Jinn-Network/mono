@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import type {
   Harness,
   HarnessContext,
   ReadyStatus,
+  RuntimePlugin,
   Solution,
 } from '../../types.js';
 import type { Task } from '../../../types/task.js';
@@ -13,6 +15,8 @@ import type {
   LearnerHarnessConfig,
 } from './types.js';
 import { resolvePluginRoot } from './plugin-path.js';
+import { digestDirectory } from '../../../plugins/digest.js';
+import { findSolverPluginManifest } from '../../../plugins/manifest.js';
 import { harvestOutput } from './harvest.js';
 import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
@@ -43,6 +47,7 @@ export class LearnerHarness implements Harness {
   private readonly codexPath: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
+  private readonly attributionPlugin: RuntimePlugin;
 
   constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
@@ -53,6 +58,32 @@ export class LearnerHarness implements Harness {
     this.codexPath = config.codexPath;
     this.codexDoctorTimeoutMs = config.codexDoctorTimeoutMs;
     this.runtimeMode = config.runtimeMode ?? 'bare';
+
+    // #1035: self-attribute the learner plugin so it lands in the envelope's
+    // executor.plugins like any SolverNet runtime plugin. We do NOT use
+    // resolveSolverPlugin/loadSolverPluginManifest here: the learner manifest
+    // (.claude-plugin/plugin.json) has only name+version and no jinn.supports,
+    // so the SolverPlugin validator would reject it. Read name+version directly.
+    const manifestPath = findSolverPluginManifest(this.pluginRoot);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { name?: string; version?: string };
+    this.attributionPlugin = {
+      name: manifest.name ?? 'claude-code-learner',
+      version: manifest.version ?? '0.0.0',
+      source: 'bundled:learner',
+      sourceKind: 'bundled',
+      root: this.pluginRoot,
+      manifestPath,
+      sha256: digestDirectory(this.pluginRoot),
+      provenance: 'default',
+    };
+  }
+
+  /**
+   * #1035 — advertise the bundled learner plugin for envelope attribution.
+   * The descriptor is built once in the constructor (stable digest per run).
+   */
+  attributionPlugins(): RuntimePlugin[] {
+    return [this.attributionPlugin];
   }
 
   private readonly claudeIsReady = buildClaudeIsReady({
