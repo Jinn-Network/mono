@@ -711,10 +711,12 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     });
 
     const verdictPayload: SweRebenchV2VerdictPayload = {
-      schemaVersion: 'swe-rebench-v2-verdict.v1',
+      schemaVersion: 'swe-rebench-v2-verdict.v2',
       score: graded.score,
       passed_match: graded.passed_match,
       evaluator_cost_usd: 0,
+      passedCount: graded.passedCount,
+      totalCount: graded.totalCount,
     };
     const verdictArtifactPayload = {
       schemaVersion: 'swe-rebench-v2-verdict-artifact.v1',

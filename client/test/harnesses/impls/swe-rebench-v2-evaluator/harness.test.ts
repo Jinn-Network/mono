@@ -427,11 +427,15 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     // feedback hook keys on this field (jinn-mono-uy6v.10). passed_match=true
     // → 'PASS'; passed_match=false → 'FAIL'.
     expect(sol.gating).toEqual({ score: 1, passed_match: true, verdict: 'PASS' });
+    // harness must now emit v2 and forward passedCount/totalCount from the grader.
+    // runner stub returns passed=['test_a','test_b'], failed=[] → passedCount=2, totalCount=2.
     expect(sol.verdictPayload).toMatchObject({
-      schemaVersion: 'swe-rebench-v2-verdict.v1',
+      schemaVersion: 'swe-rebench-v2-verdict.v2',
       score: 1,
       passed_match: true,
       evaluator_cost_usd: 0,
+      passedCount: 2,
+      totalCount: 2,
     });
     expect(sol.verdictPayload).not.toHaveProperty('test_log_cid');
     // The pinned-blob CID is surfaced as artifact metadata, not as a typed
@@ -444,9 +448,11 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     expect(verdictArtifactPayload).toMatchObject({
       schemaVersion: 'swe-rebench-v2-verdict-artifact.v1',
       verdict: {
-        schemaVersion: 'swe-rebench-v2-verdict.v1',
+        schemaVersion: 'swe-rebench-v2-verdict.v2',
         score: 1,
         passed_match: true,
+        passedCount: 2,
+        totalCount: 2,
       },
       informational: {
         instance_id: 'unidata__netcdf-c-1925',
