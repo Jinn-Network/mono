@@ -51,7 +51,7 @@ const ALL_BUNDLED_PLUGINS: ReadonlyArray<{
   defaultIncluded: true;
 }> = [
   { name: 'network-tools', version: '0.1.0', defaultIncluded: true },
-  { name: 'claude-code-learner', version: '0.1.0', defaultIncluded: true },
+  { name: 'claude-code-learner', version: '0.2.0', defaultIncluded: true },
 ];
 
 /**

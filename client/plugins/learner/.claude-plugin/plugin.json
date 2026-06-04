@@ -1,7 +1,7 @@
 {
   "name": "claude-code-learner",
   "description": "Generic learning agent plugin — runs a goal through a seven-phase pipeline (Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation) and self-improves between runs by mutating its own state directory.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Jinn Network",
     "url": "https://github.com/Jinn-Network/mono"

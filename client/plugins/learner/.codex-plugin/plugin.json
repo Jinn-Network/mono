@@ -1,6 +1,6 @@
 {
   "name": "claude-code-learner",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Generic learning agent plugin - runs a goal through a seven-phase pipeline and self-improves between runs by mutating its own state directory.",
   "author": {
     "name": "Jinn Network",
