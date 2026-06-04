@@ -115,24 +115,37 @@ publish-guard-change skill + waiver plumbing — overkill.
 
 ### Mode 2 — Real paired smoke (non-gating)
 
-A `continue-on-error` job in `environment-suite.yml` that drives the **two
-warm operators' real testnet SPAs** through create → launch → join, posts a
-**neutral** result (never failing), and uploads screenshots + Playwright trace
-as artifacts for per-cut visibility.
+A `continue-on-error` `real-paired-smoke` job in `environment-suite.yml`
+(`needs: environment-suite`, `if: always()`) that drives **two real testnet
+operators** through create → launch → join, posts **no check-run**, and uploads
+screenshots as artifacts for per-cut visibility.
 
 - **Resolves open Q1 (human-run vs CI-dispatched): CI-dispatched, non-gating.**
   "Visible on every cut" is a stated goal; only a CI leg on the candidate SHA
   that `release-readiness` already dispatches delivers that automatically.
-- Reuses the warm-operator + `testnet-gate` secrets already provisioned in
-  `environment-suite.yml` — no new secret wiring.
+- **Local-spawn, not hosted dashboards.** The job restores the SAME two
+  warm-operator state blobs the gating job uses (`JINN_WARM_OPERATOR_STATE` /
+  `_B_STATE`) into two HOME trees; the test then spawns a real `jinn run`
+  daemon from each (`spa.e2e.test.ts`'s spawn pattern, ×2), each serving its own
+  dashboard on a local port. **No externally-hosted dashboards, no new URL
+  secrets** — it reuses the warm-operator + `testnet-gate` secrets the env-suite
+  already holds.
+- **Singleton-safe.** `needs: environment-suite` orders the smoke after the
+  gating job releases the warm operators within a run; the **workflow-level**
+  `environment-suite-warm-operator` concurrency group makes the whole
+  gate+smoke run one critical section across runs, so no second run touches the
+  same keystore/nonce concurrently.
 - The T2.3-flake concern is fully defused by **classification**: the job's
   outcome never feeds the gating verdict, so flake cannot block. A
   browser-on-real-world run is legitimate *only* when non-gating.
-- It runs against **real testnet** (the warm operators' live dashboards), not
-  an Anvil fork — so it is not a resurrection of T2.3, and **no live-fork
-  browser E2E enters any blocking gate** (acceptance criterion satisfied).
-- Shares selectors / page objects with the deterministic `join.e2e` test where
-  possible, so there is one maintenance surface across the two modes.
+- It runs against **real testnet**, not an Anvil fork — so it is not a
+  resurrection of T2.3, and **no live-fork browser E2E enters any blocking
+  gate** (acceptance criterion satisfied).
+- Shares catalog/join selectors with the deterministic `join.e2e` test, so
+  there is one maintenance surface across the two modes.
+- **Self-skips** (clean no-op) whenever the two warm-operator HOME trees are
+  absent — every local run, and any CI run before the warm-operator secrets are
+  provisioned in the `testnet-gate` Environment.
 
 ### Lane discipline (unchanged)
 
@@ -161,10 +174,12 @@ onto the protocol scenarios.
   `solvernet-flow` (repaired) + net-new `join.e2e`, bundled as `yarn e2e:app-flow`
   and run in `hermetic-gate.yml`. ✓ (wiring shipped in this branch)
 - Non-gating real paired smoke (real SPA + real testnet), classified so it
-  never blocks → `continue-on-error` job in `environment-suite.yml` that posts no
-  check-run. ✓ (job shipped; **stays a no-op skip until a human provisions the two
-  hosted-dashboard URLs `JINN_SMOKE_OP_A_URL` / `JINN_SMOKE_OP_B_URL` in the
-  `testnet-gate` Environment** — the test self-skips when they are absent)
+  never blocks → `continue-on-error` `real-paired-smoke` job in
+  `environment-suite.yml` that posts no check-run; **local-spawn** (restores the
+  existing `JINN_WARM_OPERATOR_STATE` / `_B_STATE` blobs and spawns a daemon per
+  operator — no hosted dashboards, no new secrets). ✓ (job shipped; runs for real
+  on the next env-suite dispatch where the warm-operator secrets are present, and
+  self-skips otherwise)
 - No live-fork browser E2E reintroduced into any blocking gate → join is
   fully mocked; the smoke is real-testnet **and** non-gating. ✓
 - Design recorded → this DR. ✓
@@ -174,11 +189,12 @@ onto the protocol scenarios.
 This DR targeted the two-gate world; **PR #960 merged 2026-06-03**, so that world
 is live and the CI wiring ships in this same branch (not a follow-up): Mode 1 adds
 a scoped Chromium + `yarn e2e:app-flow` step to `hermetic-gate.yml`; Mode 2 adds a
-non-gating `real-paired-smoke` job to `environment-suite.yml`. One human prereq
-remains before Mode 2 produces signal: provision `JINN_SMOKE_OP_A_URL` /
-`JINN_SMOKE_OP_B_URL` (two externally-hosted operator dashboards) in the
-`testnet-gate` Environment. Until then the smoke job runs and self-skips — green,
-no-op, no blocking effect.
+non-gating `real-paired-smoke` job to `environment-suite.yml`. The smoke is
+**local-spawn** — it reuses the warm-operator state already provisioned for the
+gating job, so there is **no separate provisioning prerequisite**: it runs for
+real on the next env-suite dispatch where those secrets are present, and
+self-skips (green, no-op) anywhere they are absent (every local run; any future
+environment that has not provisioned the warm operators).
 
 ## Consequences
 

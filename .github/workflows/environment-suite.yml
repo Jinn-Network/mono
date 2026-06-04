@@ -51,6 +51,16 @@ permissions:
   statuses: write
   contents: read
 
+# The warm operator is a SINGLETON (§9, §11). Serialize every run — two suites
+# hitting the same keystore / nonce / staking checkpoint would corrupt each
+# other. cancel-in-progress: false so an in-flight authoritative run is never
+# pre-empted by the Thursday pre-flight. Workflow-level so it ALSO covers the
+# `real-paired-smoke` job (#1014), which spawns the same warm operators — the
+# whole gate+smoke run is one critical section across runs.
+concurrency:
+  group: environment-suite-warm-operator
+  cancel-in-progress: false
+
 defaults:
   run:
     working-directory: client
@@ -58,15 +68,6 @@ defaults:
 jobs:
   environment-suite:
     name: environment-suite
-    # The warm operator is a SINGLETON (§9, §11). Serialize on the JOB (not the
-    # whole workflow) — two suites hitting the same keystore / nonce / staking
-    # checkpoint would corrupt each other. Job-level so the non-gating
-    # real-paired-smoke job (which touches NO keystore) is not also held by this
-    # lock. cancel-in-progress: false so an in-flight authoritative run is never
-    # pre-empted by the Thursday pre-flight.
-    concurrency:
-      group: environment-suite-warm-operator
-      cancel-in-progress: false
     runs-on: ubuntu-latest
     # The protected, HUMAN-CREATED Environment that holds the testnet-gate
     # secrets (§9). If it does not exist yet, the run fails fast at secret
@@ -536,9 +537,9 @@ jobs:
           if-no-files-found: ignore
 
   # ── Real paired app smoke (NON-GATING) ─────────────────────────────────────
-  # Mode 2 of the app-experience coverage (#1014, DR-2026-06-03). Drives two
-  # real testnet operator DASHBOARDS through create→launch→join and uploads
-  # screenshots + trace for per-cut visibility.
+  # Mode 2 of the app-experience coverage (#1014, DR-2026-06-03). Drives two real
+  # testnet operators through create→launch→join and uploads screenshots for
+  # per-cut visibility.
   #
   # NON-GATING BY CLASSIFICATION: `continue-on-error: true` and it posts NO
   # check-run. Only the `environment-suite` job posts the gating verdict the
@@ -547,25 +548,27 @@ jobs:
   # is non-gating — this is the home for it (the deterministic version lives in
   # the hermetic gate).
   #
-  # Independent of the gating job's warm operator: it targets EXTERNALLY-hosted
-  # operator dashboards via JINN_SMOKE_OP_A_URL / JINN_SMOKE_OP_B_URL (distinct
-  # keystores / nonces from the in-job warm operator), so it never contends for
-  # the `environment-suite-warm-operator` lock (now scoped to that job). It DOES
-  # carry its own lock: the two hosted dashboards are fixed singletons too, so two
-  # overlapping smoke runs (e.g. Thursday schedule + a manual dispatch) would race
-  # op-a's launch nonce. cancel-in-progress: false queues the second rather than
-  # corrupting the first. The test self-skips when the URLs are absent, so this
-  # job is a clean no-op until a human provisions them in the testnet-gate
-  # Environment.
+  # LOCAL-SPAWN model: it restores the SAME two warm-operator states the gating
+  # job uses (JINN_WARM_OPERATOR_STATE / _B_STATE) into two HOME trees, then the
+  # test spawns a real `jinn run` daemon from each — serving its own dashboard on
+  # a local port — and drives those. No externally-hosted dashboards needed.
+  #
+  # `needs: environment-suite` + the WORKFLOW-LEVEL `environment-suite-warm-
+  # operator` concurrency group (above) make this safe against the warm-operator
+  # singleton: within a run it starts only after the gating job releases the
+  # operators; across runs the whole gate+smoke run is one critical section, so a
+  # second run cannot touch the same keystore/nonce concurrently. `if: always()`
+  # so the smoke still runs (and stays visible) even when the gating job is red.
+  # Self-skips when the warm states are absent (every local run; any CI run before
+  # the secrets are provisioned) — a clean no-op, never a failure.
   real-paired-smoke:
     name: Real paired app smoke (non-gating)
+    needs: environment-suite
+    if: always()
     runs-on: ubuntu-latest
     continue-on-error: true
-    concurrency:
-      group: real-paired-smoke-hosted-operators
-      cancel-in-progress: false
     environment: testnet-gate
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -575,15 +578,49 @@ jobs:
       - name: Install client deps
         working-directory: client
         run: yarn install --immutable
+      - name: Build client (daemon dist + dashboard bundle)
+        working-directory: client
+        run: yarn build
       - name: Install Playwright Chromium
         working-directory: client
         run: yarn playwright install --with-deps chromium
+
+      # Restore both warm operators into two SEPARATE HOME trees (each as
+      # <home>/.jinn-client) so the test can spawn a daemon per operator via HOME.
+      # Same base64 .tar.gz blobs the gating job restores; self-skips downstream
+      # if either is unset. JINN_WARM_OPERATOR_B_STATE is required here (op-b is
+      # the joiner) — without it the test simply skips.
+      - name: Restore warm operators into per-operator HOME trees
+        id: warmhomes
+        env:
+          JINN_WARM_OPERATOR_STATE: ${{ secrets.JINN_WARM_OPERATOR_STATE }}
+          JINN_WARM_OPERATOR_B_STATE: ${{ secrets.JINN_WARM_OPERATOR_B_STATE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JINN_WARM_OPERATOR_STATE:-}" ] || [ -z "${JINN_WARM_OPERATOR_B_STATE:-}" ]; then
+            echo "::notice::warm-operator state(s) unset — real paired smoke will self-skip (no-op)."
+            exit 0
+          fi
+          OP_A_HOME="${RUNNER_TEMP}/smoke-op-a"
+          OP_B_HOME="${RUNNER_TEMP}/smoke-op-b"
+          mkdir -p "${OP_A_HOME}/.jinn-client" "${OP_B_HOME}/.jinn-client"
+          echo "${JINN_WARM_OPERATOR_STATE}"   | base64 -d | tar -xzf - --no-same-owner -C "${OP_A_HOME}/.jinn-client"
+          echo "${JINN_WARM_OPERATOR_B_STATE}" | base64 -d | tar -xzf - --no-same-owner -C "${OP_B_HOME}/.jinn-client"
+          echo "OP_A_HOME=${OP_A_HOME}" >> "${GITHUB_OUTPUT}"
+          echo "OP_B_HOME=${OP_B_HOME}" >> "${GITHUB_OUTPUT}"
+          echo "restored op-a → ${OP_A_HOME}/.jinn-client, op-b → ${OP_B_HOME}/.jinn-client"
+
       - name: Drive the real paired app smoke
         working-directory: client
         env:
-          JINN_SMOKE_OP_A_URL: ${{ secrets.JINN_SMOKE_OP_A_URL }}
-          JINN_SMOKE_OP_B_URL: ${{ secrets.JINN_SMOKE_OP_B_URL }}
+          # Empty when the restore step skipped → the test self-skips.
+          JINN_SMOKE_OP_A_HOME: ${{ steps.warmhomes.outputs.OP_A_HOME }}
+          JINN_SMOKE_OP_B_HOME: ${{ steps.warmhomes.outputs.OP_B_HOME }}
+          JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          JINN_DISCOVERY_URL: ${{ secrets.JINN_DISCOVERY_URL }}
         run: yarn e2e:real-paired-smoke
+
       - name: Upload smoke artifacts (screenshots + trace)
         if: always()
         uses: actions/upload-artifact@v7
