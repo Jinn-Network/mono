@@ -198,10 +198,10 @@ export function isRpcQuotaError(err: unknown): boolean {
   let cursor: unknown = err;
   while (cursor instanceof Error && !seen.has(cursor)) {
     seen.add(cursor);
-    const status = (cursor as { status?: unknown }).status;
-    if (typeof status === 'number' && status === 429) return true;
-    const code = (cursor as { code?: unknown }).code;
-    if (typeof code === 'number' && code === LimitExceededRpcError.code) return true;
+    // Comparing against a numeric constant already excludes non-numbers, so no
+    // separate `typeof === 'number'` guard is needed here.
+    if ((cursor as { status?: unknown }).status === 429) return true;
+    if ((cursor as { code?: unknown }).code === LimitExceededRpcError.code) return true;
     if (quotaMessage.test(cursor.message)) return true;
     cursor = (cursor as { cause?: unknown }).cause;
   }
