@@ -18,6 +18,10 @@ Anything that writes to `implStateDir` happens here, including:
 - **Unused skills / hooks / tools** — anything not invoked in the last N runs (default 20; check policy override). Move to `implStateDir/.archive/<ts>/` or delete per policy.
 - **Regressed promotions** — revert an Improve commit only when it actually made things worse. There are two triggers; act on either:
   1. **Qualitative trigger** — if the trend in `analysisPath` (the Debrief signal) indicates a recent change made things worse, `git revert <commit-sha>` it. Be specific: revert the exact commit identified, not a bulk rollback. The target sha is `improvePromotionsDir/<n>.json`'s `implStateDirShaAfter`.
+  > The graded score (Tier 2) lowers the variance of the keep/revert decision only.
+  > It never overrules the binary verdict, and it MUST NOT be used to size on-chain
+  > reward — that path is gated on the withheld-test challenge (#1019, design §5.5).
+
   2. **Quantitative trigger (#764)** — for each candidate Improve commit on recent `implStateDir` git history (the commits since `implStateDirShaBefore`, identified from each `improvePromotionsDir/<n>.json` `implStateDirShaAfter`), ask the network-truth indexer whether the commit's per-codeDigest pass rate is significantly worse than its parent's. **Do not hand-roll the codeDigest hash or the statistics — shell out to the CLI**, which exports each commit's tree (`git archive`, no `.git`) and hashes it the way production stamps codeDigest, then runs the documented test:
 
      ```bash
