@@ -37,19 +37,45 @@ contradiction, not just a vagueness.
 
 ## 2. The model
 
-One task moves through the loop (Creation → Execution → Evaluation → Knowledge)
-and precipitates the objects below.
+The model has two layers: the **entities** that do the work, and the
+**objects** a task precipitates as it moves through the loop (Creation →
+Execution → Evaluation → Knowledge).
+
+### 2.1 Entities — who and what does the work
+
+| Entity | Plain English | Notes |
+|---|---|---|
+| **Operator** | The human who owns, runs, and manages one or more nodes. | Accountable off-chain. Not the key-holder — the node is (see §6). |
+| **Node** | The software bundle an operator runs: daemon + operator app (frontend) + local store. | *May* run an indexer, but by default consumes a **shared** indexer — per-node self-indexing is the 2026-05-23 substrate incident. Holds the keys and signs on-chain. |
+| **Run** | One instance of work a node does to contribute to a task. Typed by loop phase: **creation run**, **solve run**, **evaluation run**. | A *solve run* is the loop's "Execution" phase. The act of solving — **not** the Solution it may produce (§2.2). |
+| **Role** | The relationship a run establishes to a task: **creator**, **solver**, **evaluator**. | A *hat worn per-run*, not a fixed identity. One node can do all three run types; an **independence rule** forbids invalid combinations on the same task (you cannot evaluate your own solve run). |
+
+Two roles are **standing**, not per-task runs:
+
+- **Curator** — stakes JINN, defines the evaluation criteria, and launches a
+  SolverNet (canonical in `GLOSSARY.md`; renamed from Launcher / Trainer). It
+  directs emissions and bears the convergence bet; it is not a unit of work a
+  node "runs."
+- **App** — consumes the substrate; locks JINN for service-tier reads. A reader,
+  not a runner.
+
+The chain proves runs are **distinct** (different addresses, different
+transactions); it does not prove they are **independent** (different real-world
+operators). The independence rule is therefore an economic / reputational
+constraint layered on top of distinctness, not something the run-type taxonomy
+enforces by itself.
+
+### 2.2 Objects — what a task precipitates
 
 | Object | Plain English | What it answers | Lifetime |
 |---|---|---|---|
-| **Task / Intent** | The desired state a Creator publishes, with fee. | *What is wanted?* | One task |
-| **Execution / Attempt** | One operator's run against the task. | *Who tried, under which Solution?* | One run |
-| **Result / Outcome** | The end-state the attempt reached; whether the desired state was made true. | *Did it work?* | One run |
-| **Process / Trace** | The trajectory of work that produced the result — the steps, the method, the record of how. | *How did it get there?* | One run; **distillable** |
-| **Solution** | The reusable, content-addressed method distilled from good processes and stored in the corpus (skill / plugin / prompt set / harness config / environment). | *What should the next attempt reuse?* | Persists across tasks |
+| **Task** | The desired state a creation run publishes, with fee. Canonical umbrella over the older `intent` / `desired state` / `DesiredState`. | *What is wanted?* | One task |
+| **Result / Outcome** | The end-state a solve run reached; whether the task was made true. | *Did it work?* | One run |
+| **Process / Trace** | The trajectory of work the solve run took to reach the result — the steps, the method, the record of how. | *How did it get there?* | One run; **distillable** |
+| **Solution** | The reusable, content-addressed method distilled from good processes and stored in the corpus (skill / plugin / prompt set / harness config / environment). | *What should the next solve run reuse?* | Persists across tasks |
 | **Knowledge** | The accumulating corpus of Solutions plus the verdicts attached to them. | *What has the network learned?* | The substrate |
 
-The two claims worth stating flatly:
+The three claims worth stating flatly:
 
 1. **A Result and a Process are distinct, and each is independently valuable.**
    The Result has value as a verified outcome (someone wanted X; X is now true,
@@ -59,9 +85,33 @@ The two claims worth stating flatly:
    a substrate of *processes-distilled-into-methods*, not a ledger of answers.
 
 2. **A Solution is not a Result.** A Solution is what a Process becomes when it
-   is abstracted out of a single attempt and made reusable. The Result is
-   consumed by the Creator who wanted it; the Solution is consumed by every
-   future attempt. Conflating them is the core of the reporting gap.
+   is abstracted out of a single solve run and made reusable. The Result is
+   consumed by the creator who wanted it; the Solution is consumed by every
+   future solve run. Conflating them is the core of the reporting gap — and it
+   is why "solve run," not "solution run," is the name for the act (a solve run
+   only *sometimes* yields a Solution).
+
+3. **A role is a hat, not an identity.** Creator, solver, and evaluator are
+   relationships a *run* establishes to a task, not types of operator. One
+   operator's node can perform all three run types; the independence rule
+   governs which combinations are valid on a single task. This keeps the entity
+   model small (operator → node → run) and pushes the "who may do what" question
+   onto a single economic rule rather than a taxonomy of entity types.
+
+The whole model in one picture:
+
+```
+operator (human)  ──owns──▶  node (daemon + frontend + store; maybe indexer)
+node  ──performs──▶  runs, each typed by loop phase:
+                       creation run · solve run · evaluation run
+run   ──establishes──▶  a per-task role (creator / solver / evaluator),
+                        under an independence rule
+standing roles (not runs):  curator (stakes, defines eval, launches SolverNet)
+                            app     (consumes the substrate)
+task  ──is──▶  created · solved · evaluated against
+a solve run  ──produces──▶  a result + a process  →  sometimes distilled
+                                                      into a solution  →  knowledge
+```
 
 ## 3. The economics already split it
 
@@ -143,7 +193,20 @@ These do not land with this spec; they are what a ratified version anchors.
    Process, and the Result/Process split is tied to the outcome/restoration
    reward channels already named in the tokenomics section.
 
-5. **Operator app / reporting** — follow-up Issue, not a canonical edit: stop
+5. **`GLOSSARY.md` — add the entity terms** (§2.1): `Operator` (human who owns
+   and runs nodes), `Node` (the software bundle: daemon + frontend + store; may
+   run an indexer but defaults to a shared one), `Run` (one instance of a node's
+   work, typed by loop phase: creation / solve / evaluation run), and `Role` (a
+   per-run relationship to a task — creator / solver / evaluator — distinct from
+   the standing `Curator` and `App` roles). Cross-reference the existing
+   `Curator` entry. Use **solve run**, never "solution run."
+
+6. **`SPEC.md` — Roles section** currently says the Operator "posts execution
+   bonds, writes attestations." Reconcile with §2.1: the **node** holds keys and
+   signs; the **operator** owns the node and is accountable. State the
+   attribution once (see the open question in §6).
+
+7. **Operator app / reporting** — follow-up Issue, not a canonical edit: stop
    reporting a single "value of the solution"; report Result-value and
    Process-value as distinct, matching the on-chain channels. Scope and surface
    per `client/OPERATOR-APP-SPEC.md`.
@@ -154,6 +217,17 @@ These do not land with this spec; they are what a ratified version anchors.
   "Outcome" may be the better head term with "Result" as the plain alias. "Trace"
   vs "Process" — "Trace" is more precise (the recorded artifact) where "Process"
   is the broader notion. The Discussion settles these; this spec uses the pairs.
+- **On-chain attribution: operator or node?** §2.1 proposes the node holds keys
+  and signs while the operator is the off-chain owner, so a bond, attestation, or
+  slash attaches to a **node address**, with the operator accountable behind it.
+  SPEC currently attributes these to the "Operator." Settling this fixes who a
+  receipt names — relevant to the comms rule that addresses are pseudonymous, not
+  PII. Left open here.
+- **Run vs reward-channel asymmetry.** Three run types (creation / solve /
+  evaluation) but four reward channels (creation / restoration / outcome /
+  evaluation). The **outcome** channel rewards a *result holding over time* — it
+  is not a run a node performs. The model should not grow an "outcome run" to
+  force symmetry; the asymmetry is correct and worth stating.
 - **Where the Process is stored and served.** The Result is attestable on-chain;
   the Process is bytes (a trajectory record). Whether it rides the same
   `search → inspect → acquire` artifact chain as Solutions, and what the schema
