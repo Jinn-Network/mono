@@ -457,6 +457,46 @@ describe('buildFallbackTransport', () => {
     expect(calls[1]).toBe('secondary');
   });
 
+  it('AC1: after a 429 on primary, the next request routes to the healthy secondary first', async () => {
+    // Request #1: primary 429s → secondary serves. The 429 demotes the primary
+    // for the cooldown window. Request #2 (still inside cooldown) must hit the
+    // secondary FIRST and not re-call the cooled primary at all.
+    const calls: string[] = [];
+    const primary = vi.fn(async () => {
+      calls.push('primary');
+      throw new HttpRequestError({
+        body: { method: 'eth_blockNumber', params: [] },
+        details: 'Too Many Requests',
+        status: 429,
+        url: 'https://a.example',
+      });
+    });
+    const secondary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('secondary');
+      if (method === 'eth_blockNumber') return '0x10';
+      return null;
+    });
+
+    let clock = 0;
+    const transport = buildFallbackTransportFromMocks(
+      [primary, secondary],
+      ['https://a.example', 'https://b.example'],
+      { now: () => clock, cooldownMs: 60_000 },
+    );
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['primary', 'secondary']);
+
+    // Advance time but stay well inside the cooldown.
+    clock = 30_000;
+    calls.length = 0;
+    primary.mockClear();
+    await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['secondary']);
+    expect(primary).not.toHaveBeenCalled();
+  });
+
   it('AC3: no quota errors → static fallback order is unchanged across calls', async () => {
     // Identity permutation: when only non-quota (network) errors occur, the
     // chain walks the slots in the exact configured order p → s → t on every

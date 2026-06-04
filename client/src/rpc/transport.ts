@@ -266,38 +266,85 @@ buildFallbackTransport.buildFromTransports = function buildFromTransports(
   options: BuildFallbackTransportOptions = {},
 ): FallbackTransport {
   const maskedProviders = urls.map(maskRpcHost);
-  const inner = fallback(transports, {
-    rank: options.rank ?? false,
-    retryCount: 0,
+  const now = options.now ?? Date.now;
+  const cooldownMs = options.cooldownMs ?? DEFAULT_RPC_COOLDOWN_MS;
+  const rank = options.rank ?? false;
+
+  // Cooldown bookkeeping, indexed by ORIGINAL slot index (#835). A slot that
+  // returns a quota / rate-limit error is demoted behind the healthy slots
+  // until `cooldownUntil[i]`, then becomes eligible again (AC1 + AC2). When no
+  // quota errors occur every entry stays 0 and the configured order is
+  // preserved verbatim (AC3).
+  const cooldownUntil = new Array<number>(transports.length).fill(0);
+
+  // Self-stamping slot wrappers, built ONCE over the original slot order. Each
+  // wraps its original transport FACTORY, closing over its ORIGINAL index `i`.
+  // When the instantiated slot's request rejects with a quota error it stamps
+  // its OWN `cooldownUntil[i]` and re-throws unchanged. This per-slot
+  // self-stamping is why we don't use viem's `onResponse` — its `transport`
+  // arg is a freshly-instantiated instance that can't be mapped back to a slot
+  // index. Only the wrapper ARRAY is reordered per request (below); the
+  // wrappers themselves keep their original index for the lifetime of the
+  // chain.
+  const stampingTransports: Transport[] = transports.map((make, i) => {
+    return ((config) => {
+      const instance = make(config);
+      const innerRequest = instance.request.bind(instance);
+      instance.request = (async (args: { method: string; params: unknown[] }) => {
+        try {
+          return await innerRequest(args);
+        } catch (err) {
+          // A revert / user-rejected (shouldThrow-class) is an EVM/wallet
+          // signal, never a transport quota problem — must NOT cool the slot.
+          if (!isViemShouldThrowError(err) && isRpcQuotaError(err)) {
+            cooldownUntil[i] = now() + cooldownMs;
+          }
+          throw err;
+        }
+      }) as typeof instance.request;
+      return instance;
+    }) as Transport;
   });
 
-  // Wrap the transport so that the final exhausted-chain rejection surfaces
-  // as our structured `AllRpcsFailedError` (carrying the masked host list).
-  // We do the wrap at the transport-factory level rather than swapping the
-  // returned function's `request` so the FallbackTransport's typed shape
-  // (`onResponse`, `transports`, etc.) is preserved.
+  // Per-request slot order: healthy slots (in original order) first, then
+  // cooling slots (in original order) as a last resort. Strict `<` means a
+  // slot is healthy again exactly at `now() === cooldownUntil[i]`.
+  const orderSlots = (): Transport[] => {
+    const healthy: Transport[] = [];
+    const cooling: Transport[] = [];
+    const t = now();
+    for (let i = 0; i < stampingTransports.length; i++) {
+      if (t < cooldownUntil[i]!) cooling.push(stampingTransports[i]!);
+      else healthy.push(stampingTransports[i]!);
+    }
+    return [...healthy, ...cooling];
+  };
+
   const wrapped: FallbackTransport = ((config) => {
-    const t = inner(config);
-    const originalRequest = t.request.bind(t);
-    t.request = (async (args: { method: string; params: unknown[] }) => {
+    // Instantiate one inner fallback so the returned object carries the
+    // canonical `FallbackTransport` shape (`type: 'fallback'`, `onResponse`,
+    // `transports`). Its `request` is overridden to rebuild a fresh
+    // `fallback()` over the reordered slots on every call — the reorder is the
+    // whole point of #835, and a fresh chain with `retryCount: 0` reproduces
+    // the existing per-slot fall-through behaviour exactly.
+    const shape = fallback(stampingTransports, { rank, retryCount: 0 })(config);
+    shape.request = (async (args: { method: string; params: unknown[] }) => {
+      const perCall = fallback(orderSlots(), { rank, retryCount: 0 })(config);
       try {
-        return await originalRequest(args);
+        return await perCall.request(args as never);
       } catch (err) {
-        // viem's fallback() short-circuits on shouldThrow-class errors
-        // (contract revert, user-rejected, CAIP 5000) — those are
-        // EVM/wallet-level, not transport-level failures. Propagate them
-        // unchanged so callers (and the operator-app's `rpc_all_failed`
-        // state message) don't misread a single-slot revert as an
-        // exhausted-chain outage.
+        // shouldThrow-class errors (revert, user-rejected, CAIP 5000) are
+        // EVM/wallet-level — propagate unchanged so a single-slot revert is
+        // never misread as an exhausted-chain outage.
         if (isViemShouldThrowError(err)) throw err;
-        // Otherwise: viem doesn't expose a distinct "all transports failed"
-        // error class — when fallback exhausts the chain it throws the last
-        // underlying error. Wrap so the caller gets a stable structural
-        // error carrying the masked provider list.
+        // The whole chain is exhausted. viem has no distinct "all transports
+        // failed" class, so wrap the last underlying error in our structured
+        // `AllRpcsFailedError` carrying the masked host list in ORIGINAL
+        // configured order (never reordered).
         throw new AllRpcsFailedError(maskedProviders, err);
       }
-    }) as typeof t.request;
-    return t;
+    }) as typeof shape.request;
+    return shape;
   }) as FallbackTransport;
 
   return wrapped;
