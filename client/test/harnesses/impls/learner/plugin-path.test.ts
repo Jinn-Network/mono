@@ -62,6 +62,20 @@ describe('resolvePluginRoot', () => {
     );
   });
 
+  it('throws with an actionable message when the plugin manifest is missing', () => {
+    // Simulate a corrupted/partial plugin tree: pluginRoot exists, skills and
+    // hooks exist, but .claude-plugin/plugin.json is absent. Without this guard
+    // the learner harness would degrade to un-attributed envelopes (re-#1035).
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path.endsWith('.claude-plugin/plugin.json')) return false;
+      return true;
+    });
+    expect(() => resolvePluginRoot()).toThrowError(
+      /missing \.claude-plugin\/plugin\.json — plugin manifest missing; learner attribution would be silently dropped — rebuild the plugin/,
+    );
+  });
+
   it('resolves inside dist/plugins/learner when running from a compiled dist tree', () => {
     // When running from the compiled dist/, the impl file lives at
     // dist/harnesses/impls/learner/plugin-path.js. The build copies
