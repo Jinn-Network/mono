@@ -93,6 +93,13 @@ COPY --from=build /app/client/package.json ./
 ENV NODE_ENV=production
 ENV JINN_STATE_DIR=/data
 
+# Base-contract version (#1066): the contract that overlays depend on. Contract
+# 1 == the #988 entrypoint dispatch that exec's an absolute-path CMD[0] (an
+# overlay seed script) as-is. Overlay seed scripts read this and fail loud if a
+# base is too old, turning future contract drift into a clear message instead of
+# a cryptic "Unknown verb" crash. Bump only when the entrypoint contract changes.
+ENV JINN_BASE_CONTRACT=1
+
 # Expose API port
 EXPOSE 7331
 

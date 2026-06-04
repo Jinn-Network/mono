@@ -51,6 +51,23 @@ if [ ! -f "$CONFIG_PATH" ]; then
   fi
 fi
 
+# --- Base-contract guard (#1066) ---
+# This overlay needs the #988 container-native base contract: the base
+# entrypoint must exec this absolute-path seed script as-is rather than feed it
+# to `jinn` as a verb. A #988+ base sets JINN_BASE_CONTRACT. A pre-#988 base
+# dies on "Unknown verb" before reaching this line, so the guard's real value is
+# future-proofing against a base whose contract is bumped past what this overlay
+# expects — a clear message instead of a cryptic crash.
+REQUIRED_BASE_CONTRACT=1
+contract="${JINN_BASE_CONTRACT:-0}"
+case "$contract" in (*[!0-9]*|'') contract=0 ;; esac
+if [ "$contract" -lt "$REQUIRED_BASE_CONTRACT" ]; then
+  echo "[seed] FATAL: base image contract '${JINN_BASE_CONTRACT:-unset}' < required ${REQUIRED_BASE_CONTRACT}." >&2
+  echo "[seed] FATAL: this overlay needs a base built from #988+ (absolute-path CMD dispatch)." >&2
+  echo "[seed] FATAL: rebuild against a newer ghcr.io/jinn-network/client base (BASE_IMAGE/BASE_TAG)." >&2
+  exit 1
+fi
+
 # --- Hand off to the daemon ---
 echo "[seed] exec node dist/bin/jinn.js $*"
 exec node dist/bin/jinn.js "$@"

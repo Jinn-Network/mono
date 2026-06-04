@@ -6,9 +6,15 @@
 # impl-state/swe-rebench under it), env-auth, and no VOLUME.
 
 ARG BASE_TAG=latest
-FROM ghcr.io/jinn-network/client:${BASE_TAG}
-# NOTE: BASE_TAG must point to a published base that includes the container-native
-# changes (#988); flip the ghcr.io/jinn-network/client package PUBLIC first (see README).
+# BASE_IMAGE lets CI weld this overlay to an exact base digest built from the
+# SAME commit (--build-arg BASE_IMAGE=ghcr.io/jinn-network/client@sha256:…), so
+# base+overlay can never be mismatched (#1066). It defaults to the BASE_TAG-
+# resolved tag, so Railway's existing BASE_TAG service var keeps working.
+ARG BASE_IMAGE=ghcr.io/jinn-network/client:${BASE_TAG}
+FROM ${BASE_IMAGE}
+# NOTE: BASE_TAG/BASE_IMAGE must point to a published base that includes the
+# container-native changes (#988); flip the ghcr.io/jinn-network/client package
+# PUBLIC first (see README).
 
 # Codex CLI for the codex harness. Pinned to the version verified locally.
 RUN npm install -g @openai/codex@0.133.0

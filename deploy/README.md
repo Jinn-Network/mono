@@ -43,7 +43,8 @@ Each per-harness recipe is a ~4-line overlay:
 
 ```dockerfile
 ARG BASE_TAG=latest
-FROM ghcr.io/jinn-network/client:${BASE_TAG}
+ARG BASE_IMAGE=ghcr.io/jinn-network/client:${BASE_TAG}
+FROM ${BASE_IMAGE}
 RUN npm install -g <agent-cli>@<pinned-version>   # claude-code is already in the base
 ENV <seed env...>
 COPY deploy/<recipe>/seed.sh /usr/local/bin/<recipe>-seed.sh
@@ -60,7 +61,9 @@ so the CMD tail (`run --config /data/config.json`) reaches the daemon.
 
 `BASE_TAG` must point to a base release that includes #988. Default is `latest`;
 pin it via a `BASE_TAG` Railway service variable or `[build.args]` in the
-recipe's `railway.toml`.
+recipe's `railway.toml`. CI also pins the base by **immutable digest** through the
+`BASE_IMAGE` build-arg (`--build-arg BASE_IMAGE=ghcr.io/jinn-network/client@sha256:…`),
+welding overlay+base to one commit — see the canary lane below.
 
 > **Architecture:** the base + overlay images must be **`linux/amd64`** to run on
 > Railway/Fly. CI (`docker.yml`) publishes multi-arch (`linux/amd64,linux/arm64`),
@@ -92,6 +95,44 @@ Current recipes:
 |---|---|---|
 | [`railway-launcher-operator/`](railway-launcher-operator/) | claude-code / Haiku | none (claude-code is in the base) |
 | [`railway-operator-codex/`](railway-operator-codex/) | codex | `@openai/codex@0.133.0` |
+
+## Canary lane — running `next` on the pre-release test operator
+
+One operator is the **pre-release canary**: it runs `next` so regressions surface
+before a named release; every other operator runs the latest release. Because the
+overlays `FROM` the base and the base publishes only on release (`docker.yml`),
+the canary needs its own pre-release images — built and **smoke-booted** per push
+to `next` by [`operator-images.yml`](../.github/workflows/operator-images.yml)
+(the container analogue of the npm `canary` dist-tag). On every push to `next` it:
+
+1. builds the base from the commit and publishes `client:{canary-<sha>, next}`;
+2. builds each overlay **`FROM` that exact base digest** (overlay+base welded to
+   one commit — never mismatched);
+3. **smoke-boots** each overlay with its baked default CMD and fails the build on
+   the pre-#988 `Unknown verb` crash, so a broken image never publishes
+   ([`smoke-boot-operator.sh`](../.github/scripts/smoke-boot-operator.sh));
+4. publishes `operator-launcher:{canary-<sha>, next}` and
+   `operator-codex:{canary-<sha>, next}` (linux/amd64).
+
+**The test operator runs the prebuilt image** — set its Railway service
+**Source → Image** to `ghcr.io/jinn-network/operator-launcher:next` (or pin a
+specific `:canary-<sha>`), keeping the same `/data` volume + seed env vars. No
+deploy-time build; the running container is the exact CI-smoke-tested artifact.
+
+- **Rollback:** repoint the tag to a known-good `:canary-<sha>` (atomic) or to
+  `:latest` (drops the test operator back to the release line).
+- **One-time:** the new `operator-launcher` / `operator-codex` GHCR packages must
+  be **public** (like the base — see *Pulling the base*), or add a `read:packages`
+  registry credential on the Railway service.
+
+A **base-contract guard** (`JINN_BASE_CONTRACT` baked in the base, checked by each
+seed script) fails loud if an overlay is ever run on a base too old for it — so a
+future contract drift surfaces as a clear message instead of `Unknown verb`.
+
+> Release operators are unchanged — they keep building `FROM client:latest`.
+> Moving them onto prebuilt `operator-*:latest` images (a stable lane) is a
+> planned follow-up; until then this workflow's release path is intentionally
+> omitted (those images would have no consumer).
 
 ## The deploy contract
 

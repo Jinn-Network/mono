@@ -1,0 +1,161 @@
+name: Operator Images
+
+# Canary lane for the per-harness operator container images (#1066), mirroring
+# npm-publish.yml's canary cadence. On every push to `next` this:
+#   1. builds the container-native base (`client/Dockerfile`) from THIS commit,
+#   2. builds each operator overlay FROM that exact base DIGEST — so base+overlay
+#      are welded to one commit and can never be mismatched,
+#   3. SMOKE-BOOTS each overlay with its baked default CMD (catches the pre-#988
+#      "Unknown verb" crash that took the test operator down on 2026-06-04
+#      *before* anything publishes),
+#   4. publishes canary tags.
+# The pre-release test operator runs `ghcr.io/<owner>/operator-<harness>:next`.
+#
+# Scope: CANARY (push to `next`) only. The STABLE base image stays docker.yml's
+# job (on release: published). Publishing stable `operator-*:{<semver>,latest}`
+# is deferred to the follow-up that moves the *release* operators onto prebuilt
+# images — until then those images have no consumer, and building them here
+# would couple to docker.yml's base ownership for no benefit.
+on:
+  push:
+    branches: [next]
+    paths:
+      - 'client/**'
+      - 'deploy/railway-launcher-operator/**'
+      - 'deploy/railway-operator-codex/**'
+      - '.github/workflows/operator-images.yml'
+      - '.github/scripts/smoke-boot-operator.sh'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  operator-images:
+    name: Build, smoke-boot & publish operator canary images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve image metadata
+        id: meta
+        shell: bash
+        run: |
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-8)"
+          {
+            echo "base_repo=ghcr.io/${OWNER}/client"
+            echo "launcher_repo=ghcr.io/${OWNER}/operator-launcher"
+            echo "codex_repo=ghcr.io/${OWNER}/operator-codex"
+            echo "sha=${SHORT_SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # ── Base (this commit): build amd64 → smoke → publish canary, capture digest ──
+      - name: Build base image (smoke)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: client/Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.base_repo }}:smoke-${{ steps.meta.outputs.sha }}
+          build-args: |
+            JINN_BUILD_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=operator-base
+          cache-to: type=gha,scope=operator-base,mode=max
+
+      - name: Smoke test base
+        shell: bash
+        run: |
+          IMAGE="${{ steps.meta.outputs.base_repo }}:smoke-${{ steps.meta.outputs.sha }}"
+          docker run --rm "${IMAGE}" version --json \
+            | node -e "const p=JSON.parse(require('fs').readFileSync(0,'utf8')); if(p.schemaVersion!==1){console.error('base version --json: schemaVersion!==1');process.exit(1)}"
+
+      - name: Publish base canary
+        id: base
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: client/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.meta.outputs.base_repo }}:canary-${{ steps.meta.outputs.sha }}
+            ${{ steps.meta.outputs.base_repo }}:next
+          build-args: |
+            JINN_BUILD_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=operator-base
+
+      # ── Launcher overlay: build FROM base@digest → smoke-boot → publish ──────────
+      - name: Build launcher overlay (smoke)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/railway-launcher-operator/Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.launcher_repo }}:smoke-${{ steps.meta.outputs.sha }}
+          build-args: |
+            BASE_IMAGE=${{ steps.meta.outputs.base_repo }}@${{ steps.base.outputs.digest }}
+          cache-from: type=gha,scope=operator-launcher
+          cache-to: type=gha,scope=operator-launcher,mode=max
+
+      - name: Smoke-boot launcher overlay
+        shell: bash
+        run: ./.github/scripts/smoke-boot-operator.sh "${{ steps.meta.outputs.launcher_repo }}:smoke-${{ steps.meta.outputs.sha }}" launcher
+
+      - name: Publish launcher overlay
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/railway-launcher-operator/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.meta.outputs.launcher_repo }}:canary-${{ steps.meta.outputs.sha }}
+            ${{ steps.meta.outputs.launcher_repo }}:next
+          build-args: |
+            BASE_IMAGE=${{ steps.meta.outputs.base_repo }}@${{ steps.base.outputs.digest }}
+          cache-from: type=gha,scope=operator-launcher
+
+      # ── Codex overlay: build FROM base@digest → smoke-boot → publish ─────────────
+      - name: Build codex overlay (smoke)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/railway-operator-codex/Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.codex_repo }}:smoke-${{ steps.meta.outputs.sha }}
+          build-args: |
+            BASE_IMAGE=${{ steps.meta.outputs.base_repo }}@${{ steps.base.outputs.digest }}
+          cache-from: type=gha,scope=operator-codex
+          cache-to: type=gha,scope=operator-codex,mode=max
+
+      - name: Smoke-boot codex overlay
+        shell: bash
+        run: ./.github/scripts/smoke-boot-operator.sh "${{ steps.meta.outputs.codex_repo }}:smoke-${{ steps.meta.outputs.sha }}" codex
+
+      - name: Publish codex overlay
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/railway-operator-codex/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.meta.outputs.codex_repo }}:canary-${{ steps.meta.outputs.sha }}
+            ${{ steps.meta.outputs.codex_repo }}:next
+          build-args: |
+            BASE_IMAGE=${{ steps.meta.outputs.base_repo }}@${{ steps.base.outputs.digest }}
+          cache-from: type=gha,scope=operator-codex
