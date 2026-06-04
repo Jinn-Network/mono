@@ -47,7 +47,8 @@ export class LearnerHarness implements Harness {
   private readonly codexPath: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
-  private readonly attributionPlugin: RuntimePlugin;
+  /** Memoized #1035 attribution descriptor (built lazily on first request). */
+  private attributionPlugin: RuntimePlugin | null | undefined;
 
   constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
@@ -58,32 +59,48 @@ export class LearnerHarness implements Harness {
     this.codexPath = config.codexPath;
     this.codexDoctorTimeoutMs = config.codexDoctorTimeoutMs;
     this.runtimeMode = config.runtimeMode ?? 'bare';
-
-    // #1035: self-attribute the learner plugin so it lands in the envelope's
-    // executor.plugins like any SolverNet runtime plugin. We do NOT use
-    // resolveSolverPlugin/loadSolverPluginManifest here: the learner manifest
-    // (.claude-plugin/plugin.json) has only name+version and no jinn.supports,
-    // so the SolverPlugin validator would reject it. Read name+version directly.
-    const manifestPath = findSolverPluginManifest(this.pluginRoot);
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { name?: string; version?: string };
-    this.attributionPlugin = {
-      name: manifest.name ?? 'claude-code-learner',
-      version: manifest.version ?? '0.0.0',
-      source: 'bundled:learner',
-      sourceKind: 'bundled',
-      root: this.pluginRoot,
-      manifestPath,
-      sha256: digestDirectory(this.pluginRoot),
-      provenance: 'default',
-    };
   }
 
   /**
-   * #1035 — advertise the bundled learner plugin for envelope attribution.
-   * The descriptor is built once in the constructor (stable digest per run).
+   * #1035 — advertise the bundled learner plugin for envelope attribution so it
+   * lands in the envelope's executor.plugins like any SolverNet runtime plugin.
+   *
+   * Built lazily and memoized: the directory digest is stable per run, but the
+   * plugin root may legitimately lack a manifest in non-production contexts
+   * (unit tests pass synthetic roots), so we degrade to an empty array rather
+   * than failing the run. We do NOT use resolveSolverPlugin/
+   * loadSolverPluginManifest here: the learner manifest
+   * (.claude-plugin/plugin.json) has only name+version and no jinn.supports, so
+   * the SolverPlugin validator would reject it. Read name+version directly.
    */
   attributionPlugins(): RuntimePlugin[] {
-    return [this.attributionPlugin];
+    if (this.attributionPlugin === undefined) {
+      this.attributionPlugin = this.buildAttributionPlugin();
+    }
+    return this.attributionPlugin ? [this.attributionPlugin] : [];
+  }
+
+  private buildAttributionPlugin(): RuntimePlugin | null {
+    try {
+      const manifestPath = findSolverPluginManifest(this.pluginRoot);
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { name?: string; version?: string };
+      return {
+        name: manifest.name ?? 'claude-code-learner',
+        version: manifest.version ?? '0.0.0',
+        source: 'bundled:learner',
+        sourceKind: 'bundled',
+        root: this.pluginRoot,
+        manifestPath,
+        sha256: digestDirectory(this.pluginRoot),
+        provenance: 'default',
+      };
+    } catch (err) {
+      console.warn(
+        `[learner] attributionPlugins: no plugin manifest at ${this.pluginRoot}; ` +
+          `skipping self-attribution (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return null;
+    }
   }
 
   private readonly claudeIsReady = buildClaudeIsReady({
