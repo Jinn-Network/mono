@@ -233,6 +233,20 @@ export interface Harness {
    */
   freezeStateHashIgnore?: readonly string[];
   /**
+   * Optional self-attribution: runtime plugins this harness bundles and runs
+   * itself (not provided by the SolverNet's `runtimePlugins`), so they appear
+   * in the solution envelope's `executor.plugins` like any other plugin.
+   *
+   * Only `LearnerHarness` implements this — it returns a descriptor for the
+   * `claude-code-learner` plugin it loads from its own plugin root. Every other
+   * harness omits the method and is unaffected (#1035).
+   *
+   * Called synchronously by the engine at the RUNNING transition; the digest is
+   * stable per run, so implementers should compute it once (e.g. in their
+   * constructor) and return the cached array.
+   */
+  attributionPlugins?(): RuntimePlugin[];
+  /**
    * Return true if this Harness should handle the given (solverType, role) pair.
    *
    * `role` reflects Task.role:
