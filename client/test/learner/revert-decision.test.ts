@@ -74,7 +74,8 @@ const arm = (codeDigest: string, attempts: number, passes: number, gradedScores:
   ({ codeDigest, attempts, passes, passRate: attempts ? passes / attempts : 0, gradedScores });
 
 describe('two-tier graded gate (#1019)', () => {
-  it('Tier 2 rescues an insufficient-binary case with a significant graded regression', () => {
+  it('tier 2 rescues an insufficient-binary case with a significant graded regression', () => {
+    // binary underpowered (5<30); 10 graded scores per arm = at the gradedMinSamplesPerArm floor
     const withCommit = arm('w', 5, 1, [0.1, 0.15, 0.2, 0.1, 0.05, 0.12, 0.08, 0.11, 0.09, 0.13]);
     const atParent = arm('p', 5, 4, [0.85, 0.9, 0.8, 0.95, 0.88, 0.82, 0.91, 0.86, 0.89, 0.84]);
     const d = decideRevert({ withCommit, atParent }, P);
@@ -83,6 +84,7 @@ describe('two-tier graded gate (#1019)', () => {
   });
 
   it('holds (does not revert) when binary says regress but graded says improve', () => {
+    // binary: 18/40 vs 30/40 (regress); graded: 0.9 vs 0.4 (improve) → hold
     const withCommit = arm('w', 40, 18, Array(10).fill(0.9));
     const atParent = arm('p', 40, 30, Array(10).fill(0.4));
     const d = decideRevert({ withCommit, atParent }, P);

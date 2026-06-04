@@ -69,7 +69,13 @@ export interface RevertDecisionInput {
 export interface RevertDecision {
   withCommit: { codeDigest: string; n: number; passRate: number };
   atParent: { codeDigest: string; n: number; passRate: number };
+  /**
+   * Tier 1: proportion delta (pass-rate difference, [-1,1]). Tier 2
+   * (reason='graded_regression_provisional'): mean graded-score delta.
+   * Scale differs by tier — inspect `reason` to interpret.
+   */
   delta: number;
+  /** p-value from the two-proportion z-test (Tier 1) or Mann-Whitney U (Tier 2). */
   pValue: number;
   significant: boolean;
   recommendRevert: boolean;
@@ -90,7 +96,8 @@ export function decideRevert(
   const gradedReady =
     withCommit.gradedScores.length >= policy.gradedMinSamplesPerArm &&
     atParent.gradedScores.length >= policy.gradedMinSamplesPerArm;
-  const gradedDelta = mean(withCommit.gradedScores) - mean(atParent.gradedScores);
+  // gradedDelta is only meaningful when gradedReady; mean([]) === 0 is a sentinel otherwise.
+  const gradedDelta = gradedReady ? mean(withCommit.gradedScores) - mean(atParent.gradedScores) : 0;
 
   // Tier 1 — binary objective.
   const binaryUnderpowered =
