@@ -547,6 +547,110 @@ describe('buildFallbackTransport', () => {
     expect(blockNumber).toBe(0xaan);
   });
 
+  it('a revert (code 3) on the primary never cools it — next call still tries primary first', async () => {
+    // A contract revert is a shouldThrow-class error: it short-circuits past the
+    // secondary AND must NOT cool the primary. So the next request still places
+    // the primary in slot 0.
+    const calls: string[] = [];
+    const primary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('primary');
+      if (clock === 0) {
+        throw new RpcRequestError({
+          body: { method, params: [] },
+          error: { code: 3, message: 'execution reverted' },
+          url: 'https://a.example',
+        });
+      }
+      if (method === 'eth_blockNumber') return '0xcc';
+      return null;
+    });
+    const secondary = vi.fn(async () => {
+      calls.push('secondary');
+      throw new Error('secondary must not be consulted after a revert');
+    });
+
+    let clock = 0;
+    const transport = buildFallbackTransportFromMocks(
+      [primary, secondary],
+      ['https://a.example', 'https://b.example'],
+      { now: () => clock, cooldownMs: 60_000 },
+    );
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    // t=0 — revert short-circuits past the secondary, not wrapped as AllRpcsFailedError.
+    let caught: unknown;
+    try {
+      await client.getBlockNumber({ cacheTime: 0 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AllRpcsFailedError);
+    expect(secondary).not.toHaveBeenCalled();
+
+    // Next call, still inside any hypothetical cooldown window — primary was
+    // NOT cooled, so it is tried first again and now serves.
+    clock = 10_000;
+    calls.length = 0;
+    const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['primary']);
+    expect(blockNumber).toBe(0xccn);
+  });
+
+  it('all slots cooling stays a last resort — both 429 then secondary recovers', async () => {
+    // Request #1: both slots 429 → AllRpcsFailedError AND both cooled.
+    // Request #2 (inside cooldown): with every slot cooling, the chain still
+    // attempts BOTH in original order as a last resort; the secondary recovers.
+    const calls: string[] = [];
+    const primary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('primary');
+      throw new HttpRequestError({
+        body: { method, params: [] },
+        details: 'Too Many Requests',
+        status: 429,
+        url: 'https://a.example',
+      });
+    });
+    const secondary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('secondary');
+      if (clock === 0) {
+        throw new HttpRequestError({
+          body: { method, params: [] },
+          details: 'Too Many Requests',
+          status: 429,
+          url: 'https://b.example',
+        });
+      }
+      if (method === 'eth_blockNumber') return '0xee';
+      return null;
+    });
+
+    let clock = 0;
+    const transport = buildFallbackTransportFromMocks(
+      [primary, secondary],
+      ['https://a.example', 'https://b.example'],
+      { now: () => clock, cooldownMs: 60_000 },
+    );
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    // Request #1 — both 429, chain exhausted.
+    let caught: unknown;
+    try {
+      await client.getBlockNumber({ cacheTime: 0 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AllRpcsFailedError);
+    expect(calls).toEqual(['primary', 'secondary']);
+
+    // Request #2 — both still cooling (t=30_000 < 60_000), but with every slot
+    // cooling the chain attempts BOTH in original order as a last resort.
+    clock = 30_000;
+    calls.length = 0;
+    const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['primary', 'secondary']);
+    expect(blockNumber).toBe(0xeen);
+  });
+
   it('AC3: no quota errors → static fallback order is unchanged across calls', async () => {
     // Identity permutation: when only non-quota (network) errors occur, the
     // chain walks the slots in the exact configured order p → s → t on every
