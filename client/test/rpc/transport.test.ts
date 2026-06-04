@@ -8,7 +8,14 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createPublicClient, custom, HttpRequestError, RpcRequestError } from 'viem';
+import {
+  createPublicClient,
+  custom,
+  ExecutionRevertedError,
+  HttpRequestError,
+  LimitExceededRpcError,
+  RpcRequestError,
+} from 'viem';
 import { mainnet } from 'viem/chains';
 import {
   parseRpcUrls,
@@ -16,6 +23,8 @@ import {
   describeFallbackChain,
   AllRpcsFailedError,
   MAX_RPC_CHAIN_LENGTH,
+  isRpcQuotaError,
+  DEFAULT_RPC_COOLDOWN_MS,
 } from '../../src/rpc/transport.js';
 
 describe('parseRpcUrls', () => {
@@ -87,6 +96,86 @@ describe('parseRpcUrls', () => {
       'https://a.example',
       'https://b.example',
     ]);
+  });
+});
+
+describe('isRpcQuotaError', () => {
+  it('exposes a 60s default cooldown constant', () => {
+    expect(DEFAULT_RPC_COOLDOWN_MS).toBe(60_000);
+  });
+
+  it('is TRUE for an HttpRequestError with status 429', () => {
+    expect(
+      isRpcQuotaError(
+        new HttpRequestError({
+          body: { method: 'eth_blockNumber', params: [] },
+          details: 'Too Many Requests',
+          status: 429,
+          url: 'https://a.example',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('is TRUE for a 429 nested in the cause chain', () => {
+    const inner = new HttpRequestError({
+      body: { method: 'eth_blockNumber', params: [] },
+      details: 'Too Many Requests',
+      status: 429,
+      url: 'https://a.example',
+    });
+    const outer = Object.assign(new Error('request failed'), { cause: inner });
+    expect(isRpcQuotaError(outer)).toBe(true);
+  });
+
+  it('is TRUE for an RpcRequestError carrying LimitExceededRpcError.code (-32005)', () => {
+    const limit = new RpcRequestError({
+      body: { method: 'eth_blockNumber', params: [] },
+      error: { code: LimitExceededRpcError.code, message: 'limit exceeded' },
+      url: 'https://a.example',
+    });
+    expect(LimitExceededRpcError.code).toBe(-32005);
+    expect(isRpcQuotaError(limit)).toBe(true);
+  });
+
+  it('is TRUE for a "rate limit exceeded" message', () => {
+    expect(isRpcQuotaError(new Error('rate limit exceeded'))).toBe(true);
+  });
+
+  it('is TRUE for a "429 Too Many Requests" message', () => {
+    expect(isRpcQuotaError(new Error('429 Too Many Requests'))).toBe(true);
+  });
+
+  it('is TRUE for a "monthly quota reached" message', () => {
+    expect(isRpcQuotaError(new Error('monthly quota reached'))).toBe(true);
+  });
+
+  it('is FALSE for an HttpRequestError with status 503', () => {
+    expect(
+      isRpcQuotaError(
+        new HttpRequestError({
+          body: { method: 'eth_blockNumber', params: [] },
+          details: 'Service Unavailable',
+          status: 503,
+          url: 'https://a.example',
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('is FALSE for an ECONNRESET network error', () => {
+    expect(isRpcQuotaError(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))).toBe(
+      false,
+    );
+  });
+
+  it('is FALSE for an RpcRequestError revert (code 3)', () => {
+    const reverted = new RpcRequestError({
+      body: { method: 'eth_blockNumber', params: [] },
+      error: { code: ExecutionRevertedError.code, message: 'execution reverted' },
+      url: 'https://a.example',
+    });
+    expect(isRpcQuotaError(reverted)).toBe(false);
   });
 });
 

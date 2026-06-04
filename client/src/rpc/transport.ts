@@ -29,6 +29,7 @@ import {
   ExecutionRevertedError,
   fallback,
   http,
+  LimitExceededRpcError,
   TransactionRejectedRpcError,
   UserRejectedRequestError,
   type FallbackTransport,
@@ -163,6 +164,45 @@ export function isViemShouldThrowError(err: unknown): boolean {
     if (cursor.name === 'TransactionRejectedRpcError') return true;
     if (cursor.name === 'UserRejectedRequestError') return true;
     if (cursor.name === 'WalletConnectSessionSettlementError') return true;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Default cooldown applied to a slot that returns a quota / rate-limit error
+ * (#835). After this window the demoted slot becomes eligible again rather than
+ * being permanently disabled (AC2), so a transient 429 / monthly-quota blip
+ * never strands an operator on a degraded provider for the rest of the process.
+ */
+export const DEFAULT_RPC_COOLDOWN_MS = 60_000;
+
+/**
+ * Detect quota / rate-limit errors from an RPC provider (#835). Unlike
+ * {@link isViemShouldThrowError} (which marks EVM/wallet-level signals that must
+ * NOT trigger fallback), a quota error means the *slot* is temporarily unusable
+ * and should be demoted behind healthy slots for a cooldown window. Walks the
+ * cause chain (cycle-safe, mirroring `isViemShouldThrowError`) and matches on:
+ *  - HTTP `status === 429` (the `http()` transport's `HttpRequestError`);
+ *  - JSON-RPC `code === LimitExceededRpcError.code` (-32005);
+ *  - a message regex covering the common provider phrasings
+ *    ("rate limit", "too many requests", "quota", "exceeded … limit").
+ *
+ * Deliberately narrow: a 5xx / network error is NOT a quota error (it falls
+ * through via viem but does not cool the slot — AC3 keeps static order when no
+ * quota errors occur), and a contract revert (code 3) is never a quota error.
+ */
+export function isRpcQuotaError(err: unknown): boolean {
+  const quotaMessage = /rate limit|too many requests|quota|exceeded.*limit/i;
+  const seen = new Set<unknown>();
+  let cursor: unknown = err;
+  while (cursor instanceof Error && !seen.has(cursor)) {
+    seen.add(cursor);
+    const status = (cursor as { status?: unknown }).status;
+    if (typeof status === 'number' && status === 429) return true;
+    const code = (cursor as { code?: unknown }).code;
+    if (typeof code === 'number' && code === LimitExceededRpcError.code) return true;
+    if (quotaMessage.test(cursor.message)) return true;
     cursor = (cursor as { cause?: unknown }).cause;
   }
   return false;
