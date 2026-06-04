@@ -456,6 +456,37 @@ describe('buildFallbackTransport', () => {
     expect(calls[0]).toBe('primary');
     expect(calls[1]).toBe('secondary');
   });
+
+  it('AC3: no quota errors → static fallback order is unchanged across calls', async () => {
+    // Identity permutation: when only non-quota (network) errors occur, the
+    // chain walks the slots in the exact configured order p → s → t on every
+    // request, and the SAME order again on the next request. A network error
+    // must NOT cool a slot, so nothing gets demoted between calls.
+    const calls: string[] = [];
+    const primary = vi.fn(async () => {
+      calls.push('p');
+      throw new Error('primary network unreachable');
+    });
+    const secondary = vi.fn(async () => {
+      calls.push('s');
+      throw new Error('secondary network unreachable');
+    });
+    const tertiary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('t');
+      if (method === 'eth_blockNumber') return '0x1';
+      return null;
+    });
+
+    const transport = buildFallbackTransportFromMocks([primary, secondary, tertiary], [
+      'https://p.example',
+      'https://s.example',
+      'https://t.example',
+    ]);
+    const client = createPublicClient({ chain: mainnet, transport });
+    await client.getBlockNumber({ cacheTime: 0 });
+    await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['p', 's', 't', 'p', 's', 't']);
+  });
 });
 
 describe('describeFallbackChain', () => {
@@ -482,6 +513,7 @@ describe('describeFallbackChain', () => {
 function buildFallbackTransportFromMocks(
   requestFns: ReadonlyArray<(args: { method: string; params: unknown[] }) => Promise<unknown>>,
   urls: readonly string[],
+  options: { now?: () => number; cooldownMs?: number } = {},
 ) {
   if (requestFns.length !== urls.length) {
     throw new Error('buildFallbackTransportFromMocks: requestFns length must match urls');
@@ -494,5 +526,5 @@ function buildFallbackTransportFromMocks(
       { key: urls[i], name: urls[i] },
     ),
   );
-  return buildFallbackTransport.buildFromTransports(transports, urls);
+  return buildFallbackTransport.buildFromTransports(transports, urls, options);
 }

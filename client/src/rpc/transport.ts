@@ -228,6 +228,17 @@ export interface BuildFallbackTransportOptions {
    * "Tenderly stays in slot 3" constraint from the issue.
    */
   rank?: boolean;
+  /**
+   * Injectable clock for the quota-cooldown bookkeeping (#835). Defaults to
+   * {@link Date.now}. Tests pass a controllable stub so cooldown expiry (AC2)
+   * is deterministic without real timers.
+   */
+  now?: () => number;
+  /**
+   * How long a slot stays demoted after a quota / rate-limit error, in ms
+   * (#835). Defaults to {@link DEFAULT_RPC_COOLDOWN_MS}.
+   */
+  cooldownMs?: number;
 }
 
 /**
