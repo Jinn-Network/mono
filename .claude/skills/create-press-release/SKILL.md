@@ -34,6 +34,22 @@ Always read these before drafting. They override anything in this skill.
 
 Read in this order: `PRINCIPLES.md`, `BRAND.md`, `mono/CLAUDE.md` §External Communication. Do not skip — these rules override drafting choices.
 
+### Step 0.5 — Milestone status gate (check before anything else)
+
+Before intake, determine whether the milestone is **already achieved**.
+
+- Run the milestone's check script (e.g. `client/scripts/check-milestone-N.ts`) or query the indexer for the gate condition. State the result: HIT or NOT HIT, with the number.
+- **If achieved:** proceed normally — a standard announcement, written against live receipts.
+- **If NOT achieved:** stop and confirm with the user that this is a **proactive, Amazon-style "working-backwards" release** — *"what we will announce when the milestone is hit."* Do not draft a not-yet-true announcement without that explicit confirmation.
+
+Once proactive mode is confirmed, the release is written **as if the milestone is already hit** (achievement-framed), with these adjustments:
+
+- **Dateline** stays a placeholder — `**DD Month YYYY** —` — set at publish time, never invented now.
+- **Receipts** carry placeholder tx hashes / operator addresses marked `<filled at publish>`. The *structural* claims (contract addresses, the gate criterion, the methodology) are real and verified now; only the hit-state figures are deferred.
+- **Screenshots** are spec'd, not captured — the surface won't show the hit state yet. Step 9 defers to publish time.
+- The filename uses the expected publish slug; the Appendix opens with **`STATUS: HELD — not for publication until the gate reports HIT (current: N/target)`**.
+- `What this does not yet prove` additionally states the milestone is not yet reached at draft time.
+
 ### Step 1 — Brief intake (3 clarifying questions)
 
 Ask the user three things in a single `AskUserQuestion` block:
@@ -78,16 +94,18 @@ Spec the shots before drafting the body — the figure numbers help the body cro
 
 ### Step 5 — Draft v1 (full template)
 
-Apply this structure unless the milestone clearly demands otherwise:
+Apply this structure unless the milestone clearly demands otherwise.
+
+**The entire release body is plain English** — grade-11 vocabulary in every section, not just the summary. A 16-year-old who's seen percentages, controlled experiments, and the rough idea of a benchmark should follow the whole document without help. No protocol jargon anywhere — no "verdicts" / "envelopes" / "on-chain" / "indexer" / "harness" / "manifest CID" / "tx hash" without an immediate plain-English gloss on first use ("the wrapper that runs the AI", "a public ledger anyone can check"). The opening summary is the TL;DR; every section after it stays in the same register.
 
 ```
 # <Headline — one sentence, news-led, no slogans>
 
 **<Subheadline — one sentence expanding significance>**
 
-## In plain English
+## The short version
 
-<2-3 short paragraphs. Grade-11 vocabulary: a 16-year-old who's seen percentages, controlled experiments, and the rough idea of a benchmark can follow without help. State the milestone, the control variable, and the verification path in language a non-technical reader actually parses. No protocol jargon — no "verdicts" / "envelopes" / "on-chain" / "indexer" / "harness" / "manifest CID" / "tx hash" without immediate plain-English gloss. If a technical term must appear, gloss it on first use ("the wrapper that runs the AI", "a public ledger anyone can check"). End with the verification path in one sentence: anyone can check this, here's how.>
+<2-3 short paragraphs — the TL;DR. State the milestone, the control variable, and the verification path in language a non-technical reader actually parses. End with the verification path in one sentence: anyone can check this, here's how. This is the opening of a fully plain-English document, not a quarantine for the only readable section.>
 
 ---
 
@@ -97,7 +115,7 @@ Apply this structure unless the milestone clearly demands otherwise:
 
 ## How <the loop / the contract / the system> works
 
-<Technical explanation, structured as feature → enables → matters. Use bullets per moving part. Each bullet anchors on a contract address or canonical doc.>
+<Plain-English explanation, structured as feature → enables → matters. Same grade-11 register as the rest of the document — describe each moving part in words a non-technical reader parses, and gloss any unavoidable term on first use. Use bullets per moving part. Each bullet anchors on a contract address or canonical doc.>
 
 ## The receipts
 
@@ -200,7 +218,8 @@ Commit the file to `docs/press/YYYY-MM-DD-<slug>.md` with a `docs(press):` commi
 - Read `PRINCIPLES.md` and `BRAND.md` before drafting. Always.
 - Run `distil-writing` before claiming the draft is ready. Always.
 - Run Step 8 (Legibility) as a substantive claim-by-claim pass — never report it complete on the basis of Step 7's grep. Always.
-- Include an `In plain English` section between the subhead and the dateline opening. Grade-11 vocabulary; protocol jargon glossed on first use; ends with the verification path. Always.
+- Check milestone status before drafting (Step 0.5). If the milestone is not yet achieved, confirm with the user that this is a proactive, working-backwards writeup before drafting. Always.
+- Write the **entire release** in plain English — grade-11 vocabulary in every section, protocol jargon glossed on first use throughout, not quarantined to one block. Open with a short-version summary that ends with the verification path. Always.
 - Include a `What this does not yet prove` section. Always.
 - No dateline city. Ever.
 - No named attribution by default. Ever — until the contributor signs off explicitly.
