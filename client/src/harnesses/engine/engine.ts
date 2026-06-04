@@ -1165,7 +1165,17 @@ export class TaskEngine {
       throw new NotImplementedError('runImpl');
     }
     const runtimePlugins: RuntimePlugin[] = solverNet?.runtimePlugins ?? [];
-    this.runtimePluginsByRequest.set(task.requestId, runtimePlugins);
+    // #1035: merge harness self-attributed plugins (e.g. claude-code-learner)
+    // into the envelope carrier so they appear in executor.plugins. This is a
+    // SEPARATE array from `runtimePlugins`: the latter still feeds
+    // ctx.runtimePlugins / ctx.solverPluginRoots (which the harness uses to
+    // LOAD solver plugins), and the learner plugin is already loaded by the
+    // harness itself via its own plugin root — adding it there would double-load.
+    const attributedPlugins: RuntimePlugin[] = [
+      ...runtimePlugins,
+      ...(impl.attributionPlugins?.() ?? []),
+    ];
+    this.runtimePluginsByRequest.set(task.requestId, attributedPlugins);
 
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
     const kindSeg = solverType.replace(/[.:]/g, '_');
@@ -1258,7 +1268,7 @@ export class TaskEngine {
             informationalClaim: skippedOutput.informational ?? null,
             solutionOutputsJson: JSON.stringify(skippedOutput),
             implName: impl.name,
-            runtimePluginsJson: JSON.stringify(runtimePlugins),
+            runtimePluginsJson: JSON.stringify(attributedPlugins),
           });
           console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name} (skipped)`);
           return;
@@ -1310,7 +1320,7 @@ export class TaskEngine {
         informationalClaim: output.informational ?? null,
         solutionOutputsJson: JSON.stringify(output),
         implName: impl.name,
-        runtimePluginsJson: JSON.stringify(runtimePlugins),
+        runtimePluginsJson: JSON.stringify(attributedPlugins),
       });
     } finally {
       clearTimeout(endTimer);
