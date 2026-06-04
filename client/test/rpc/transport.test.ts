@@ -497,6 +497,56 @@ describe('buildFallbackTransport', () => {
     expect(primary).not.toHaveBeenCalled();
   });
 
+  it('AC2: after the cooldown expires, the demoted slot is tried first again', async () => {
+    // t=0: primary 429s → secondary serves; primary cooled until t=60_000.
+    // t=30_000: still cooling → secondary tried first, primary not re-called.
+    // t=60_001: cooldown elapsed (strict <) → primary healthy and tried FIRST.
+    const calls: string[] = [];
+    const primary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('primary');
+      if (clock < 60_000) {
+        throw new HttpRequestError({
+          body: { method, params: [] },
+          details: 'Too Many Requests',
+          status: 429,
+          url: 'https://a.example',
+        });
+      }
+      if (method === 'eth_blockNumber') return '0xaa';
+      return null;
+    });
+    const secondary = vi.fn(async ({ method }: { method: string }) => {
+      calls.push('secondary');
+      if (method === 'eth_blockNumber') return '0xbb';
+      return null;
+    });
+
+    let clock = 0;
+    const transport = buildFallbackTransportFromMocks(
+      [primary, secondary],
+      ['https://a.example', 'https://b.example'],
+      { now: () => clock, cooldownMs: 60_000 },
+    );
+    const client = createPublicClient({ chain: mainnet, transport });
+
+    // t=0 — primary 429 demotes it.
+    await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['primary', 'secondary']);
+
+    // t=30_000 — still inside cooldown, secondary-first, primary skipped.
+    clock = 30_000;
+    calls.length = 0;
+    await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['secondary']);
+
+    // t=60_001 — cooldown elapsed, primary restored to slot 0 and serves.
+    clock = 60_001;
+    calls.length = 0;
+    const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
+    expect(calls).toEqual(['primary']);
+    expect(blockNumber).toBe(0xaan);
+  });
+
   it('AC3: no quota errors → static fallback order is unchanged across calls', async () => {
     // Identity permutation: when only non-quota (network) errors occur, the
     // chain walks the slots in the exact configured order p → s → t on every
