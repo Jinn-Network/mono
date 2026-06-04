@@ -19,6 +19,7 @@ import type { FleetState } from '../earning/types.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 
 export interface RewardClaimLoopConfig {
   intervalMs: number;
@@ -123,6 +124,7 @@ export class RewardClaimLoop {
         }, 'reward-claim');
       }
       this.config.jinnStore?.setConfigValue('last_reward_claim_tick_at', new Date().toISOString());
+      if (this.config.jinnStore) recordLoopTick(this.config.jinnStore, 'reward-claim'); // #1043 loop watchdog
       await new Promise(r => setTimeout(r, this.config.intervalMs));
     }
   }

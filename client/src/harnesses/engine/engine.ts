@@ -74,6 +74,7 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
+import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { harnessStateDirName } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 
@@ -649,6 +650,7 @@ export class TaskEngine {
       } catch (err) {
         console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
       }
+      recordLoopTick(this.store, 'engine-tick'); // #1043 loop watchdog
       if (this.stopped) break;
       await Promise.race([
         new Promise((resolve) => setTimeout(resolve, intervalMs)),

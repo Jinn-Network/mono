@@ -46,6 +46,7 @@ import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import { viemSendTransactionWithRetry, waitForTransactionReceiptWithRetry } from '../tx-retry.js';
 import { CLAIM_TICKET_TOPIC0, JINN_CLAIM_EMITTER_ABI } from '../earning/contracts.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 import {
   fetchLatestClaimTicket,
   plantMockFixture,
@@ -465,6 +466,7 @@ export class JinnClaimLoop {
         'last_jinn_claim_tick_at',
         new Date().toISOString(),
       );
+      if (this.config.jinnStore) recordLoopTick(this.config.jinnStore, 'jinn-claim'); // #1043 loop watchdog
       await new Promise((r) => setTimeout(r, this.config.intervalMs));
     }
   }

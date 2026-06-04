@@ -63,6 +63,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
+import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -1138,6 +1139,9 @@ export class MechAdapter implements ExecutionAdapter {
         }));
       }
 
+      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
+      // nothing was yielded) so an idle-but-polling loop never looks stale.
+      if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
@@ -1545,6 +1549,9 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
+      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
+      // nothing was yielded) so an idle-but-polling loop never looks stale.
+      if (this.store) recordLoopTick(this.store, 'delivery-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
