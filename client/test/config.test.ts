@@ -28,8 +28,15 @@ describe('loadConfig RPC override handling', () => {
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
+  const originalWatchdogAutoRestart = process.env['JINN_WATCHDOG_AUTO_RESTART'];
 
   afterEach(async () => {
+    if (originalWatchdogAutoRestart === undefined) {
+      delete process.env['JINN_WATCHDOG_AUTO_RESTART'];
+    } else {
+      process.env['JINN_WATCHDOG_AUTO_RESTART'] = originalWatchdogAutoRestart;
+    }
+
     if (originalBaseRpcUrl === undefined) {
       delete process.env['BASE_RPC_URL'];
     } else {
@@ -632,6 +639,29 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.jinnClaimSubmissionMode).toBe('submit');
     expect(config.jinnClaimLoopEnabled).toBe(true);
+  });
+
+  it('defaults watchdogAutoRestart to false when unset', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_WATCHDOG_AUTO_RESTART'];
+
+    const config = loadConfig(configPath);
+    expect(config.watchdogAutoRestart).toBe(false);
+  });
+
+  it('enables watchdogAutoRestart from a truthy JINN_WATCHDOG_AUTO_RESTART env', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    process.env['JINN_WATCHDOG_AUTO_RESTART'] = '1';
+
+    expect(loadConfig(configPath).watchdogAutoRestart).toBe(true);
+  });
+
+  it('treats falsy JINN_WATCHDOG_AUTO_RESTART values as off', async () => {
+    for (const value of ['0', 'false', 'no']) {
+      const configPath = await writeConfigFile({ network: 'testnet' });
+      process.env['JINN_WATCHDOG_AUTO_RESTART'] = value;
+      expect(loadConfig(configPath).watchdogAutoRestart).toBe(false);
+    }
   });
 
   it('rejects mainnet partial L1 cross-chain config (distributor without ethereumRpcUrl)', async () => {

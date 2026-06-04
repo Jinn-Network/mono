@@ -359,6 +359,14 @@ export const JinnConfigSchema = z.object({
   jinnClaimLoopEnabled: z.boolean().default(false),
 
   /**
+   * Loop-watchdog auto-restart gate (#1043). Default OFF (the locked Option A
+   * decision): the watchdog always detects a stale loop and loud-logs + emits
+   * a `loop_watchdog_stale` event, but the non-zero process.exit recovery only
+   * fires when this is on. Env: JINN_WATCHDOG_AUTO_RESTART=1|true|yes.
+   */
+  watchdogAutoRestart: z.boolean().default(false),
+
+  /**
    * How often the daemon ticks the cross-chain JINN claim loop (ms). Default
    * 3 600 000 (1 hour) — well below mainnet challenge windows while
    * minimising RPC/gas churn. Set to 0 to disable when the address is set.
@@ -1005,6 +1013,10 @@ export function loadConfig(configPath?: string): JinnConfig {
     const v = env['JINN_CLAIM_LOOP_ENABLED'].trim().toLowerCase();
     merged.jinnClaimLoopEnabled = v === '1' || v === 'true' || v === 'yes';
   }
+  if (env['JINN_WATCHDOG_AUTO_RESTART'] !== undefined) {
+    const v = env['JINN_WATCHDOG_AUTO_RESTART'].trim().toLowerCase();
+    merged.watchdogAutoRestart = v === '1' || v === 'true' || v === 'yes';
+  }
   if (env['JINN_CLAIM_LOOP_INTERVAL_MS'] !== undefined) {
     merged.jinnClaimLoopIntervalMs = parseInt(env['JINN_CLAIM_LOOP_INTERVAL_MS'], 10);
   }
@@ -1388,6 +1400,7 @@ const TRACKED_ENV_VARS = [
   'JINN_CLAIM_SUBMISSION_MODE',
   'JINN_CLAIM_LOOP_ENABLED',
   'JINN_CLAIM_LOOP_INTERVAL_MS',
+  'JINN_WATCHDOG_AUTO_RESTART',
   'JINN_STAKING_MODE',
   'JINN_TARGET_SERVICES',
   'JINN_DEBUG',

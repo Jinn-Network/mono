@@ -16,6 +16,8 @@ import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-l
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
+import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
+import { recordLoopTick, type LoopName } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import {
@@ -230,6 +232,21 @@ export interface DaemonConfig {
    * Omitted only when no joined SolverNet resolves to a billed credential.
    */
   aiUnits?: AiUnitsDaemonConfig;
+
+  /**
+   * Loop watchdog (#1043). When supplied, the daemon seeds a heartbeat for
+   * every started loop and runs a supervisor that detects any loop whose last
+   * tick has gone stale. `autoRestart` is the flag-gated recovery (default OFF
+   * per the locked Option A decision): off → detect + loud-log + structured
+   * event only; on → non-zero process.exit so Railway's ON_FAILURE policy
+   * restarts the daemon through its existing idempotent boot path. Omitted in
+   * unit tests, so the watchdog is inert there.
+   */
+  watchdog?: {
+    autoRestart: boolean;
+    stalenessFactor?: number;
+    checkIntervalMs?: number;
+  };
 }
 
 export class Daemon {
@@ -252,6 +269,7 @@ export class Daemon {
   private evictionLoop?: EvictionLoop;
   private checkpointLoop?: CheckpointLoop;
   private jinnClaimLoop?: JinnClaimLoop;
+  private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
 
   constructor(private readonly config: DaemonConfig) {
@@ -485,6 +503,57 @@ export class Daemon {
       );
     }
 
+    // #1043 loop watchdog. Inert unless config.watchdog is supplied.
+    //
+    // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
+    // process.exit (see watchdog-loop.ts WATCHDOG_EXIT_CODE). It does NOT add a
+    // mid-flight re-execution path to any loop. A wedged daemon recovers by
+    // exiting → Railway ON_FAILURE restart (deploy/railway-*-operator/
+    // railway.toml, maxRetries=10) → the existing idempotent boot path:
+    // engine.recoverInFlight() above (daemon.ts) re-drives in-flight tasks and
+    // src/preflight/pidfile-liveness.ts clears a stale lock. Both are already
+    // idempotent, so a restart cannot double-claim / double-deliver / double-pay.
+    if (this.config.watchdog) {
+      const interval = this.config.pollIntervalMs ?? 5000;
+      const FOR_AWAIT_FLOOR_MS = 5 * 60_000; // the #1038 wedge lasted 4.5h
+      const registrations: WatchdogLoopRegistration[] = [
+        { name: 'creator', intervalMs: 5000 },
+        { name: 'engine-tick', intervalMs: interval },
+        { name: 'engine-watcher', intervalMs: interval, floorMs: FOR_AWAIT_FLOOR_MS },
+        { name: 'delivery-watcher', intervalMs: interval, floorMs: FOR_AWAIT_FLOOR_MS },
+      ];
+      if (this.rewardClaimLoop) registrations.push({ name: 'reward-claim', intervalMs: this.config.rewardClaim!.intervalMs });
+      if (this.balanceTopupLoop) registrations.push({ name: 'balance-topup', intervalMs: this.config.balanceTopup!.intervalMs });
+      if (this.jinnClaimLoop) registrations.push({ name: 'jinn-claim', intervalMs: this.config.jinnClaim!.intervalMs });
+      if (peers.length > 0) registrations.push({ name: 'peer-sync', intervalMs: 60_000 });
+
+      // Seed every started loop so the watchdog never trips on first boot
+      // before any loop has had a chance to tick.
+      for (const reg of registrations) {
+        recordLoopTick(this.store, reg.name as LoopName);
+      }
+
+      this.watchdogLoop = new WatchdogLoop({
+        store: this.store,
+        loops: registrations,
+        stalenessFactor: this.config.watchdog.stalenessFactor,
+        checkIntervalMs: this.config.watchdog.checkIntervalMs,
+        autoRestart: this.config.watchdog.autoRestart,
+        isActive: () => this.cachedShutdownState === 'running',
+      });
+      this.loopPromises.push(
+        this.watchdogLoop.run().catch(err => {
+          console.error('[daemon] watchdog crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'watchdog loop crashed',
+            errorCode: 'watchdog_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+
     emitStructured({ kind: 'system', message: 'daemon loops started' });
   }
 
@@ -509,6 +578,7 @@ export class Daemon {
     this.checkpointLoop?.stop();
     this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
+    this.watchdogLoop?.stop();
 
     // Stop the adapter to unblock any pending async iterators
     await this.adapter.stop();

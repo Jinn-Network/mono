@@ -2686,6 +2686,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             },
           }
         : undefined,
+    // #1043 loop watchdog. Always constructed in production so a stale loop is
+    // detected + surfaced; the process-exit recovery is flag-gated (default
+    // OFF) by config.watchdogAutoRestart.
+    watchdog: { autoRestart: config.watchdogAutoRestart },
   });
 
   // #1037: populate the join applier now that all four join-consuming
@@ -2700,6 +2704,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     registry: solverNetRegistry,
     config,
   });
+
+  if (config.watchdogAutoRestart) {
+    console.log('[watchdog] auto-restart ENABLED (stale loop → non-zero exit)');
+  }
 
   // Write pidfile so `jinn stop` can find us. First, refuse the run if another
   // daemon already owns this earning directory — see issue #649. The gate

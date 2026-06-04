@@ -298,6 +298,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
+| watchdogAutoRestart | JINN_WATCHDOG_AUTO_RESTART | false — loop watchdog (#1043). Off: a stale loop is detected, loud-logged, and emits a `loop_watchdog_stale` event. On: a stale loop also triggers a non-zero `process.exit` so Railway's ON_FAILURE policy restarts the daemon through its existing idempotent boot path. |
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 
 `JINN_PASSWORD` is env-only — never in config files.
