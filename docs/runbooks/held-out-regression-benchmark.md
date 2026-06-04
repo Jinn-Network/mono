@@ -46,8 +46,13 @@ a hosted operator) is the active poster. An attempted instance was executed → 
 learner trained on it → holding it out later would make a trained-checkpoint pass
 count as memorization, not generalization. If the indexer is unreachable the
 screen **aborts** (it must not screen against an unknown attempted set).
-(`--instance-id` is an explicit override: it screens exactly those, warning if any
-are already attempted/posted/held-out.) The prover (layer 3) is selectable:
+Candidates are further **restricted to the already-validated-scorable set** (the
+never-validated tail is ~90% not-gradeable, so base-screening it wastes inference):
+discovery of gradeability is `validate-pool`'s job; the screen selects held-out
+*from* the scorable set. So the workflow is **run `validate-pool` first to grow the
+scorable pool, then screen it.** (`--instance-id` is an explicit override: it screens
+exactly those, warning if any are already attempted/posted/held-out.) The prover
+(layer 3) is selectable:
 `--prover-harness codex` (default, GPT-5.5) or `--prover-harness claude-code
 --prover-model opus` (a stronger same-family prover via the Claude auth — useful
 when codex is rate-limited; Haiku→Opus is a clean capability ladder). Emits, next

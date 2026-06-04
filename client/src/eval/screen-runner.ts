@@ -174,7 +174,19 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
     if (opts.repo) pool = pool.filter((t) => t.instance_id.startsWith(`${opts.repo}__`));
     const before = pool.length;
     pool = pool.filter((t) => !excludeIds.has(t.instance_id));
-    log(`[screen] candidate pool ${before} → ${pool.length} (excluded ${excludeIds.size}: ${heldOutIds.size} held-out ∪ ${postedIds.size} posted ∪ ${attemptedIds.size} attempted → never-trained remainder)`);
+    // Restrict to ALREADY-VALIDATED-SCORABLE candidates (#986): the never-validated
+    // tail is mostly not-gradeable (~90% deeper in the pool), so base-screening it
+    // wastes inference. Discovery of gradeability is `validate-pool`'s job; the
+    // screen selects held-out FROM the scorable set. Falls back to the full
+    // remainder only when no validation data exists yet (and warns).
+    const scorableIds = await validatedStore.getScorableIds(EVAL_SEMANTICS_VERSION);
+    if (scorableIds) {
+      const beforeScorable = pool.length;
+      pool = pool.filter((t) => scorableIds.has(t.instance_id));
+      log(`[screen] candidate pool ${before} → ${beforeScorable} (excluded ${excludeIds.size}: ${heldOutIds.size} held-out ∪ ${postedIds.size} posted ∪ ${attemptedIds.size} attempted) → ${pool.length} validated-scorable (run validate-pool to grow this)`);
+    } else {
+      log(`[screen] WARNING: no validated-scorable data — screening the full ${pool.length}-task remainder (mostly not-gradeable; run validate-pool first for efficiency)`);
+    }
   }
   const candidates = stratifyByRepo(pool);
   log(`[screen] ${candidates.length} candidate(s) after stratification`);
