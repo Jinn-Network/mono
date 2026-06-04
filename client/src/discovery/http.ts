@@ -698,6 +698,13 @@ export interface HttpDiscoveryAPIOptions {
    * Exposed mostly for tests.
    */
   readyProbeTtlMs?: number;
+  /**
+   * Per-request timeout (ms) applied to every indexer fetch — the `/ready`
+   * probe and all GraphQL POSTs. Defaults to FETCH_TIMEOUT_MS. Bounds the fetch
+   * so an indexer whose socket goes half-open (e.g. mid-redeploy) cannot wedge
+   * a discovery loop forever (#1038). Exposed mostly for tests.
+   */
+  fetchTimeoutMs?: number;
 }
 
 /**
@@ -708,6 +715,18 @@ export interface HttpDiscoveryAPIOptions {
  * a sync stall low without hammering the endpoint.
  */
 const READY_PROBE_TTL_MS = 20_000;
+
+/**
+ * Per-request timeout for every indexer fetch (the `/ready` probe and all
+ * GraphQL POSTs). A healthy indexer answers in well under a second; 15s is
+ * generous headroom that still recovers quickly. Its purpose is to convert a
+ * never-settling fetch (half-open socket during an indexer redeploy) into a
+ * catchable `DiscoveryUnavailableError` so the discovery/generator/catalog
+ * loops skip the tick and retry on the next poll, rather than wedging forever
+ * with no self-recovery while the indexer-independent loops mask the outage
+ * (#1038).
+ */
+const FETCH_TIMEOUT_MS = 15_000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -780,11 +799,23 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // Ponder's `/ready` lives at the host root, not under `/graphql`.
   const readyUrl = `${opts.url.replace(/\/graphql\/?$/, '').replace(/\/$/, '')}/ready`;
   const readyTtlMs = opts.readyProbeTtlMs ?? READY_PROBE_TTL_MS;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchTimeoutMs = opts.fetchTimeoutMs ?? FETCH_TIMEOUT_MS;
+  const baseFetch = opts.fetchImpl ?? globalThis.fetch;
 
-  if (!fetchImpl) {
+  if (!baseFetch) {
     throw new Error('No fetch implementation available; pass fetchImpl in options');
   }
+
+  // Bound every indexer fetch with an AbortSignal timeout. Without it, a single
+  // fetch against an indexer whose socket went half-open (e.g. mid-redeploy)
+  // never resolves or rejects — and since the fetch is unbounded, the awaiting
+  // discovery/generator/catalog loop wedges forever with no self-recovery,
+  // while the indexer-independent loops keep running and mask the outage
+  // on-chain (#1038). A timeout turns the hang into the same
+  // DiscoveryUnavailableError those loops already catch and retry. A caller
+  // that supplies its own signal keeps it.
+  const fetchImpl: typeof fetch = (input, init) =>
+    baseFetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(fetchTimeoutMs) });
 
   // ── /ready probe (memoized with a short TTL) ──────────────────────────────
   // Ponder serves GraphQL with 200 + stale/empty data while still catching up;

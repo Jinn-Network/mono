@@ -1456,3 +1456,58 @@ describe('HttpDiscoveryAPI.getInstanceClaimCounts (#802)', () => {
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
   });
 });
+
+// ── indexer fetch timeout (regression: wedged discovery loop, #1038) ───────────
+
+describe('indexer fetch timeout', () => {
+  // Models a real fetch against an indexer whose socket went half-open during a
+  // redeploy: it never settles on its own. A correctly-wired AbortSignal.timeout
+  // aborts it and we reject the way undici does (via signal.reason). WITHOUT the
+  // timeout the promise hangs forever — exactly how the production discovery,
+  // generator, and solvernet-catalog loops wedged with no self-recovery while
+  // the indexer-independent jinn-claim loop masked the outage on-chain.
+  function hangUntilAborted(opts: { readyHangs?: boolean } = {}) {
+    return vi.fn((url: string, init?: RequestInit) => {
+      if (isReadyProbe(url) && !opts.readyHangs) {
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal) {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }
+        // No signal wired → never settles (the bug this test guards against).
+      });
+    });
+  }
+
+  const OPERATOR = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' as const;
+
+  it('rejects (does not hang) when the GraphQL fetch never settles', async () => {
+    const impl = hangUntilAborted();
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      fetchTimeoutMs: 50,
+    });
+    await expect(
+      client.findClaimableTasks({ solverNetManifestCids: ['bafyfakecid'], operatorAddress: OPERATOR }),
+    ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
+  }, 2000);
+
+  it('rejects (does not hang) when the /ready probe never settles', async () => {
+    const impl = hangUntilAborted({ readyHangs: true });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      fetchTimeoutMs: 50,
+    });
+    await expect(
+      client.findClaimableTasks({ solverNetManifestCids: ['bafyfakecid'], operatorAddress: OPERATOR }),
+    ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
+  }, 2000);
+});
