@@ -640,8 +640,8 @@ git commit -m "ci(environment-suite): non-gating real paired app smoke job (#101
 
 **Spec coverage (DR-2026-06-03):**
 - Mode 1 deterministic gating create→launch→join → `solvernet-flow` (existing) + `join.e2e` (Task 2), bundled by `e2e:app-flow` (Task 3), run in the hermetic gate (Task 4). ✓
-- Mode 2 non-gating real paired smoke → `real-paired-smoke.e2e.test.ts` (Task 5) + non-gating `continue-on-error` job (Task 6). ✓
-- No live-fork browser E2E in any blocking gate → join is fully mocked; smoke is real-testnet + non-gating. ✓
+- Mode 2 real paired flow → **dropped as an automated test; replaced by a manual runbook** (`testing-jinn-app/references/scenario-multi-op-spa-flow.md`). Tasks 5 & 6 superseded — see DR-2026-06-03 §Mode 2. ✓ (decision recorded, not an automated deliverable)
+- No live-fork browser E2E in any blocking gate → join is fully mocked; the paired flow is manual, not automated. ✓
 - Net-new join, extend nothing in `solvernet-flow` → Task 2 is net-new; `solvernet-flow` untouched. ✓
 - Scoped allowlist, not `e2e:dashboard` → Task 3 note. ✓
 
@@ -649,4 +649,4 @@ git commit -m "ci(environment-suite): non-gating real paired app smoke job (#101
 
 **Placeholder scan:** none — every step has concrete code/commands. The two `[after #960]` tasks edit files that exist only post-#960 by design (DR sequencing), with exact YAML given.
 
-**Sequencing caveat:** Tasks 4 and 6 are gated on PR #960. Tasks 1–3 and 5 are independent and land on `next` immediately.
+**Sequencing caveat:** Task 4 (hermetic-gate wiring) gated on PR #960 (now merged; shipped). Tasks 5 & 6 (the automated Mode 2 smoke) were dropped — the paired flow is a manual runbook, not a CI test.

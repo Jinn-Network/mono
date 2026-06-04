@@ -73,6 +73,9 @@ test.afterAll(async () => {
   if (daemon) {
     daemon.kill('SIGTERM');
     await new Promise((r) => setTimeout(r, 500));
+    // Escalate if it ignored SIGTERM, so it can't linger holding PORT 17337
+    // into a subsequent test run (matches solvernet-flow.e2e.test.ts).
+    if (!daemon.killed) daemon.kill('SIGKILL');
   }
   if (homeDir) {
     try {

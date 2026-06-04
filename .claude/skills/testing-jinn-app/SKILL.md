@@ -30,7 +30,7 @@ All commands assume cwd = `jinn-mono/client`.
    Env vars only matter when you're deviating from the default setup:
    - `HOME=<tmpdir>` — only set for a *fresh, clean-state* spawn (e.g. E2E test). Omit to attach to the bootstrapped fleet at `~/.jinn` (Base Sepolia master `0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF`, agent #5474, safe `0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC`).
    - `JINN_PASSWORD=<password>` — only set when HOME is a fresh tmpdir (no `~/.jinn-client/keystore-password` to auto-read), or to override the on-disk password.
-   - `JINN_API_PORT=<port>` — defaults to 7332; override only if 7332 is taken.
+   - `JINN_API_PORT=<port>` — defaults to 7331; override only if 7331 is taken.
    - `BASE_RPC_URL=<rpc>` — only set for fresh-bootstrap setup-mode spawns; existing fleets read it from stored config.
    - `JINN_NETWORK=testnet`, `JINN_DISABLE_TESTNET_FAUCET=1` — only for E2E tests.
 3. Capture the handshake URL from stdout/stderr — regex `UI handshake URL:\s+(\S+)`. The token in the URL is one-time per spawn; capture fresh after each restart.
