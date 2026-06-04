@@ -177,6 +177,39 @@ describe('isRpcQuotaError', () => {
     });
     expect(isRpcQuotaError(reverted)).toBe(false);
   });
+
+  // Regression (#835 M1): the message backstop must not match gas-limit /
+  // execution errors. These say "limit" / "exceeded" but are NOT quota errors;
+  // a healthy slot must stay healthy.
+  it('is FALSE for "execution reverted: exceeded block gas limit"', () => {
+    expect(isRpcQuotaError(new Error('execution reverted: exceeded block gas limit'))).toBe(false);
+  });
+
+  it('is FALSE for "gas limit exceeded"', () => {
+    expect(isRpcQuotaError(new Error('gas limit exceeded'))).toBe(false);
+  });
+
+  it('is FALSE for "gas required exceeds allowance"', () => {
+    expect(isRpcQuotaError(new Error('gas required exceeds allowance (10000000)'))).toBe(false);
+  });
+
+  it('is FALSE for a gas error carrying a non-shouldThrow code (-32000)', () => {
+    const gas = new RpcRequestError({
+      body: { method: 'eth_call', params: [] },
+      error: { code: -32000, message: 'exceeded block gas limit' },
+      url: 'https://a.example',
+    });
+    expect(isRpcQuotaError(gas)).toBe(false);
+  });
+
+  // Real provider quota phrasings the narrow backstop still catches.
+  it('is TRUE for the Alchemy CUPS message', () => {
+    expect(isRpcQuotaError(new Error('exceeded its compute units per second capacity'))).toBe(true);
+  });
+
+  it('is TRUE for the Infura "request rate exceeded" message', () => {
+    expect(isRpcQuotaError(new Error('project ID request rate exceeded'))).toBe(true);
+  });
 });
 
 describe('buildFallbackTransport', () => {

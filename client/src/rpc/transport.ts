@@ -185,15 +185,27 @@ export const DEFAULT_RPC_COOLDOWN_MS = 60_000;
  * cause chain (cycle-safe, mirroring `isViemShouldThrowError`) and matches on:
  *  - HTTP `status === 429` (the `http()` transport's `HttpRequestError`);
  *  - JSON-RPC `code === LimitExceededRpcError.code` (-32005);
- *  - a message regex covering the common provider phrasings
- *    ("rate limit", "too many requests", "quota", "exceeded … limit").
+ *  - a narrow message regex backstop covering unambiguous provider phrasings
+ *    ("rate limit", "too many requests", "429", "quota", "compute unit",
+ *    "request rate", "throughput") — deliberately excluding the ambiguous
+ *    "limit"/"exceeded" words that collide with gas-limit errors.
  *
  * Deliberately narrow: a 5xx / network error is NOT a quota error (it falls
  * through via viem but does not cool the slot — AC3 keeps static order when no
  * quota errors occur), and a contract revert (code 3) is never a quota error.
  */
 export function isRpcQuotaError(err: unknown): boolean {
-  const quotaMessage = /rate limit|too many requests|quota|exceeded.*limit/i;
+  // HTTP 429 (below) and JSON-RPC -32005 (LimitExceededRpcError) are the PRIMARY
+  // detectors. This message regex is only a backstop for providers that surface
+  // quota errors as plain text. It deliberately avoids the ambiguous "limit" /
+  // "exceeded" words: a bare `exceeded.*limit` alternative false-positives on
+  // gas errors like "exceeded block gas limit" / "gas limit exceeded", which can
+  // arrive with a non-shouldThrow code (e.g. -32000) and would wrongly cool a
+  // healthy slot. The phrases below are unambiguously quota/rate-limit and never
+  // appear in gas/execution errors; the only thing dropped is a text-only quota
+  // error carrying no 429 / -32005, which no major provider (Alchemy / Infura /
+  // publicnode / Tenderly) produces.
+  const quotaMessage = /rate.?limit|too many requests|429|quota|compute unit|request rate|throughput/i;
   const seen = new Set<unknown>();
   let cursor: unknown = err;
   while (cursor instanceof Error && !seen.has(cursor)) {
