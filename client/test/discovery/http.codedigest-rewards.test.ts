@@ -231,4 +231,40 @@ describe('getCodeDigestRewards', () => {
     expect(verdictCall).toBeDefined();
     expect(verdictCall!.variables.solverNetManifestCid).toBeUndefined();
   });
+
+  it('returns per-attempt gradedScores from v2 verdict counts', async () => {
+    // 2 attempts on digest 'sha256:d1', verdicts 18/20 and 10/20
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0xd1a', chainId: 8453, codeDigest: 'sha256:d1' },
+        { requestId: '0xd1b', chainId: 8453, codeDigest: 'sha256:d1' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0xd1a', chainId: 8453, actualPassed: true, actualScore: '0.9', passedCount: '18', totalCount: '20' },
+        { requestId: '0xd1b', chainId: 8453, actualPassed: false, actualScore: '0.5', passedCount: '10', totalCount: '20' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const [row] = await client.getCodeDigestRewards({ codeDigests: ['sha256:d1'] });
+    expect([...row!.gradedScores].sort()).toEqual([0.5, 0.9]);
+    expect(row!.avgScore).toBeCloseTo(0.7);
+  });
+
+  it('omits gradedScore for verdicts with totalCount 0 (v1 / non-gradeable)', async () => {
+    // one v2 18/20, one v1 with totalCount absent
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0xd2a', chainId: 8453, codeDigest: 'sha256:d2' },
+        { requestId: '0xd2b', chainId: 8453, codeDigest: 'sha256:d2' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0xd2a', chainId: 8453, actualPassed: true, actualScore: '0.9', passedCount: '18', totalCount: '20' },
+        { requestId: '0xd2b', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const [row] = await client.getCodeDigestRewards({ codeDigests: ['sha256:d2'] });
+    expect(row!.gradedScores).toEqual([0.9]);
+    expect(row!.attempts).toBe(2);
+  });
 });

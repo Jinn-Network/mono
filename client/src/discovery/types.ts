@@ -251,6 +251,12 @@ export interface CodeDigestRewardRow {
   passRate: number;
   /** Mean of numeric actualScore over verdicts that carried one; 0 when none. */
   avgScore: number;
+  /**
+   * Per-attempt graded score (passedCount/totalCount) for in-window verdicts
+   * that carried v2 counts (totalCount > 0). Empty / short when verdicts predate
+   * verdict.v2. Consumed by the learner's Mann-Whitney sensitivity tier (#1019).
+   */
+  gradedScores: number[];
 }
 
 export interface DiscoveryAPI {

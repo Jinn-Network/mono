@@ -578,7 +578,7 @@ query CodeDigestVerdicts($requestIds: [String!]!, $limit: Int!, $after: String${
     orderBy: "requestId",
     orderDirection: "asc"
   ) {
-    items { requestId chainId actualPassed actualScore }
+    items { requestId chainId actualPassed actualScore passedCount totalCount }
     pageInfo { hasNextPage endCursor }
   }
 }
@@ -609,7 +609,7 @@ interface CodeDigestAttemptsPage {
 }
 interface CodeDigestVerdictsPage {
   verdictEnvelopeMetas: {
-    items: Array<{ requestId: string; chainId: number; actualPassed: boolean; actualScore: string }>;
+    items: Array<{ requestId: string; chainId: number; actualPassed: boolean; actualScore: string; passedCount?: string | number | null; totalCount?: string | number | null }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -1432,7 +1432,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     // verdict are aggregated (step 4), so filtering here scopes the aggregate.
     const scopeBySolverNet = typeof args.solverNetManifestCid === 'string' && args.solverNetManifestCid.length > 0;
     const verdictsQuery = codeDigestVerdictsQuery(scopeBySolverNet);
-    const verdictByKey = new Map<string, { passed: boolean; score: number | null }>();
+    const verdictByKey = new Map<string, { passed: boolean; score: number | null; graded: number | null }>();
     cursor = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const variables: Record<string, unknown> = { requestIds, limit: PAGE_LIMIT, after: cursor };
@@ -1443,9 +1443,13 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       for (const row of data.verdictEnvelopeMetas?.items ?? []) {
         const key = `${row.requestId}|${row.chainId}`;
         const scoreNum = Number(row.actualScore);
+        const pc = Number(row.passedCount);
+        const tc = Number(row.totalCount);
+        const graded = Number.isFinite(tc) && tc > 0 ? pc / tc : null;
         verdictByKey.set(key, {
           passed: Boolean(row.actualPassed),
           score: Number.isFinite(scoreNum) && row.actualScore !== '' ? scoreNum : null,
+          graded,
         });
       }
       const pi = data.verdictEnvelopeMetas?.pageInfo;
@@ -1454,15 +1458,16 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     }
 
     // 4) Aggregate per codeDigest (only requests that HAVE a verdict count).
-    const agg = new Map<string, { attempts: number; passes: number; scoreSum: number; scoreN: number }>();
+    const agg = new Map<string, { attempts: number; passes: number; scoreSum: number; scoreN: number; gradedScores: number[] }>();
     for (const [key, digest] of requestKeyToDigest) {
       if (allowedKeys && !allowedKeys.has(key)) continue;
       const v = verdictByKey.get(key);
       if (!v) continue; // no verdict yet — not a completed attempt
-      const cur = agg.get(digest) ?? { attempts: 0, passes: 0, scoreSum: 0, scoreN: 0 };
+      const cur = agg.get(digest) ?? { attempts: 0, passes: 0, scoreSum: 0, scoreN: 0, gradedScores: [] };
       cur.attempts += 1;
       if (v.passed) cur.passes += 1;
       if (v.score !== null) { cur.scoreSum += v.score; cur.scoreN += 1; }
+      if (v.graded !== null) cur.gradedScores.push(v.graded);
       agg.set(digest, cur);
     }
 
@@ -1474,6 +1479,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         passes: a.passes,
         passRate: a.attempts > 0 ? a.passes / a.attempts : 0,
         avgScore: a.scoreN > 0 ? a.scoreSum / a.scoreN : 0,
+        gradedScores: a.gradedScores,
       });
     }
     return rows;
