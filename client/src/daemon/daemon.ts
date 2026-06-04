@@ -17,7 +17,7 @@ import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
-import { recordLoopTick, type LoopName } from './loop-heartbeat.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import {
@@ -530,7 +530,7 @@ export class Daemon {
       // Seed every started loop so the watchdog never trips on first boot
       // before any loop has had a chance to tick.
       for (const reg of registrations) {
-        recordLoopTick(this.store, reg.name as LoopName);
+        recordLoopTick(this.store, reg.name);
       }
 
       this.watchdogLoop = new WatchdogLoop({
