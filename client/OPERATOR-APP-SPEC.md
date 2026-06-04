@@ -195,9 +195,13 @@ A separate component because it is a finite, single-pass state machine with its 
 **Completion criterion.** Bootstrap is complete when the node is **running and eligible to claim tasks** — not merely when the earning state machine (wallet → Safe → service → stake → mech) reaches its terminal `complete` step. Eligibility means the operator has, by the end of the takeover:
 
 - at least one **joined SolverNet** (§2.4); and
-- for that SolverNet's solver role, a **ready harness** (§2.9, installed + authenticated) and a **selected model**.
+- for that SolverNet's **solver** role, a **ready solver harness** (§2.9, installed + authenticated) and a **selected model**.
 
-(Evaluator-only joins satisfy the criterion without a solver harness — see §2.9.) The earning state machine reaching `complete` is necessary but not sufficient; a node that finished the state machine with zero memberships is *live but idle* and has not finished onboarding.
+The earning state machine reaching `complete` is necessary but not sufficient; a node that finished the state machine with zero memberships is *live but idle* and has not finished onboarding.
+
+**Evaluator role is not gated in onboarding.** The node joins as solver **and** evaluator by default, but the evaluator harness is **manifest-bound and runs automatically** (§2.9) — it is not surfaced as an operator choice and its readiness does not gate onboarding completion. Onboarding gates only the solver harness + model.
+
+**Onboarding narrowing (#983).** During the takeover the SolverNet step presents a single launched SolverNet — `swe-rebench-v2` — preselected and joined ("pick your first SolverNet; you can add more later"). The full registry (§2.5) remains the post-onboarding surface for browsing and joining other nets.
 
 **No separate restart.** These onboarding-essential selections are part of the takeover and land config *before* the bootstrap→running flip. The first running-mode boot composes the readiness registry and generators from the resulting `joinedSolverNets`, so a successfully-onboarded node enters running mode already eligible to claim — without a separate operator-initiated restart. (Cross-ref §3.2; this is why onboarding sequences join + harness/model selection ahead of the flip rather than deferring them to the post-onboarding join flow.)
 
@@ -234,6 +238,8 @@ The surface for choosing an execution harness for a SolverNet's solver role and 
 
 **Not a standalone dashboard surface.** This component is *not* a first-class card on the overview. Its only useful moments are *while selecting or readying a harness*, so it renders in exactly two places, sharing one model: **(a) onboarding** (the harness + model step of the Bootstrap takeover, §2.8) and **(b) §2.11 Settings** (the canonical post-onboarding home, reached via §2.4 "change environment"). Harness readiness for a joined SolverNet still cross-cuts §2.4 Memberships — a single harness gates many SolverNets, so the operator fixes "harness not authenticated" once — but the operator reaches that fix *through* this selection surface, not via a buried readiness card.
 
+**Scope (#983).** The **onboarding rendering** (a) ships in #983. The **Settings home** (b) and the **removal of the legacy standalone overview readiness card** ship as a separate follow-up (the #983 split). Until that follow-up lands, the legacy overview card may persist; #983 itself only adds the onboarding rendering and clears the post-onboarding `no_solvernets_joined` residue for a freshly-onboarded node (§2.10).
+
 **Three-tier availability.** A harness an operator can actually pick is the intersection of three tiers; the surface makes the distinction legible so an operator understands *why* a harness is or isn't offered:
 
 1. **Available in the protocol** — declared solver-compatible by the SolverNet's manifest. Varies per SolverNet.
@@ -242,7 +248,9 @@ The surface for choosing an execution harness for a SolverNet's solver role and 
 
 The pickable set is tier 1 ∩ tier 2; selecting a pickable harness then drives it to tier 3 via the install/auth action below.
 
-**Evaluator harness.** The evaluator harness is **bound by the manifest**, not operator-chosen. An evaluator-only join requires no solver-harness selection on this surface; its readiness is still tracked (tier 3) and surfaced, and a "join now, set up later" affordance is permitted for the solver harness when the operator joins as evaluator-only.
+**Onboarding rendering (#983) — collapsed to one harness.** In the onboarding takeover the surface collapses to a **single solver harness + model** choice; the solver/evaluator split is **not** surfaced. The default is **Codex** with model **GPT-5.4 Mini** (`gpt-5.4-mini`); the Codex model set is GPT-5.4 Mini, GPT-5.5, GPT-5.4, GPT-5.3 Codex, GPT-5.3 Codex Spark (`client/src/dashboard/spa/src/pages/configuration/claudeModels.ts`). The three-tier model above still governs which solver harnesses are offered.
+
+**Evaluator harness.** The evaluator harness is **bound by the manifest**, not operator-chosen, and runs **automatically** — for `swe-rebench-v2` it is the manifest's Docker evaluator, distinct from the operator's solver harness. Onboarding does **not** surface it as a choice and does not gate completion on it (§2.8). The Settings rendering MAY surface its readiness for diagnostics; there is no operator evaluator-harness *selection* anywhere.
 
 - **Static (per harness)**
   - name
@@ -300,7 +308,7 @@ Components raise state messages locally. The Notifications component is the unio
 
 Operator-tunable configuration.
 
-**Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a membership's harness/model (§2.4 "change environment") or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once.
+**Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a membership's harness/model (§2.4 "change environment") or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once. **Scope:** this Settings home ships in the #983 follow-up (alongside removing the legacy overview readiness card), not in #983 itself — #983 delivers only the onboarding rendering.
 
 - **State** (read-only)
   - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.

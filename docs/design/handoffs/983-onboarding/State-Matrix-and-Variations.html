@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Onboarding completeness — states & variations</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="jinn-app.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="app/primitives.jsx"></script>
+<script type="text/babel" src="app/harness.jsx"></script>
+<script type="text/babel" src="app/solvernet.jsx"></script>
+<script type="text/babel" src="app/onboarding.jsx"></script>
+<script type="text/babel" src="app/operating.jsx"></script>
+<script type="text/babel" src="app/gallery.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const INK = '#0c1628';
+function Pad({ children }) {
+  return <div style={{ padding: 28, width: '100%', background: INK, minHeight: '100%' }}>{children}</div>;
+}
+const noop = () => {};
+const seededJoined = { 'bafy…swe2': ['solver', 'evaluator'] };
+const seededHarness = { harness: 'Claude Code', model: 'Claude Sonnet 4.6', evaluatorOnly: false };
+
+// NOTE: returns a DCArtboard *element* (called, not used as <Board/>) so it
+// stays a direct DCArtboard child that DCSection recognizes.
+function ab(id, label, w, h, content) {
+  return (
+    <window.DCArtboard key={id} id={id} label={label} width={w} height={h} style={{ background: INK, border: '1px solid #1f3a66' }}>
+      <Pad>{content}</Pad>
+    </window.DCArtboard>
+  );
+}
+
+function App() {
+  const H = window.HarnessSurface, S = window.SolverNetStep, F = window.FlowStoryboard;
+  return (
+    <window.DesignCanvas>
+      <window.DCSection id="approaches" title="Harness Selection — three-tier approaches"
+        subtitle="One surface, three ways to make protocol-available / node-supported / installed-authed legible at a glance. Same model, same states.">
+        {ab('a-column', 'A · Status column', 780, 1180, <H approach="column" context="onboarding" scenario="default" embedded={false} onReady={noop} />)}
+        {ab('a-badges', 'B · Tiered badge set', 620, 1320, <H approach="badges" context="onboarding" scenario="default" embedded={false} onReady={noop} />)}
+        {ab('a-grouped', 'C · Grouped by actionability', 680, 1320, <H approach="grouped" context="onboarding" scenario="default" embedded={false} onReady={noop} />)}
+      </window.DCSection>
+
+      <window.DCSection id="harness-states" title="Harness Selection — state set"
+        subtitle="Every state §3 demands. Status-column approach throughout. Not-supported-by-build is the Aider row (informational, not selectable) visible in the default + selected states.">
+        {ab('h-default', 'Default · ready', 780, 1180, <H approach="column" scenario="default" embedded={false} onReady={noop} />)}
+        {ab('h-loading', 'Loading · probing readiness', 780, 420, <H approach="column" scenario="loading" embedded={false} onReady={noop} />)}
+        {ab('h-error', 'Error · readiness check failed', 780, 300, <H approach="column" scenario="error" embedded={false} onReady={noop} />)}
+        {ab('h-empty', 'Empty · none supported on this build', 780, 420, <H approach="column" scenario="empty" embedded={false} onReady={noop} />)}
+        {ab('h-notready', 'Not-ready gating · Hermes not installed', 780, 1320, <H approach="column" scenario="not-ready" embedded={false} onReady={noop} />)}
+        {ab('h-auth', 'Auth expired · Codex', 780, 1320, <H approach="column" scenario="auth-expired" embedded={false} onReady={noop} />)}
+        {ab('h-version', 'Version mismatch · Claude Code', 780, 1320, <H approach="column" scenario="version-mismatch" embedded={false} onReady={noop} />)}
+        {ab('h-eval', 'Evaluator-only · set up solver later', 780, 1180, <H approach="column" scenario="evaluator-only" embedded={false} onReady={noop} />)}
+      </window.DCSection>
+
+      <window.DCSection id="solvernet-states" title="SolverNet selection — state set"
+        subtitle="The discovery + join step inside the takeover. Registry-unreachable is a clear retryable error, never a blank.">
+        {ab('s-default', 'Default · joinable', 720, 1280, <S scenario="default" joined={{}} onJoin={noop} onLeave={noop} embedded={false} />)}
+        {ab('s-loading', 'Loading · fetching registry', 720, 520, <S scenario="loading" joined={{}} embedded={false} />)}
+        {ab('s-error', 'Error · registry unreachable', 720, 300, <S scenario="error" joined={{}} embedded={false} />)}
+        {ab('s-empty', 'Empty · none launched', 720, 420, <S scenario="empty" joined={{}} embedded={false} />)}
+      </window.DCSection>
+
+      <window.DCSection id="flows" title="Onboarding flow — three variations"
+        subtitle="All three sequence the two new selection steps BEFORE the running flip — no operator-clicked restart. They differ in how the two new steps are grouped.">
+        {ab('flow-a', 'A · Guided sequential (recommended)', 520, 920, <F variant="A" />)}
+        {ab('flow-b', 'B · Join & run (combined)', 520, 840, <F variant="B" />)}
+        {ab('flow-c', 'C · Earning-first, finish-to-start card', 520, 840, <F variant="C" />)}
+      </window.DCSection>
+
+      <window.DCSection id="homes" title="One component, two homes — plus the happy-path entry"
+        subtitle="The §2.9 surface in Settings is the same model as onboarding. The Operating entry shows no residue.">
+        {ab('live', "Operating entry · you're live (no residue)", 1040, 780, <window.OperatingEntry joined={seededJoined} harness={seededHarness} setRoute={noop} />)}
+        {ab('settings', 'Settings · hosts the same harness surface', 1040, 900, <window.SettingsHome harnessApproach="column" joined={seededJoined} harness={seededHarness} />)}
+      </window.DCSection>
+    </window.DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Onboarding completeness — prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="jinn-app.css" />
+<style>
+  /* keep the tweaks panel readable against the dark app */
+  body { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="app/primitives.jsx"></script>
+<script type="text/babel" src="app/harness.jsx"></script>
+<script type="text/babel" src="app/solvernet.jsx"></script>
+<script type="text/babel" src="app/onboarding.jsx"></script>
+<script type="text/babel" src="app/operating.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "startAt": "Onboarding",
+  "flow": "Guided sequential",
+  "approach": "Status column"
+}/*EDITMODE-END*/;
+
+const APPROACH_KEY = { "Status column": "column", "Tiered badges": "badges", "Grouped sections": "grouped" };
+const FLOW_KEY = { "Guided sequential": "sequential", "Join & run (combined)": "combined" };
+const ROUTE_KEY = { "Onboarding": "onboarding", "You\u2019re live": "overview", "Settings": "settings" };
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const flow = FLOW_KEY[t.flow] || "sequential";
+  const approach = APPROACH_KEY[t.approach] || "column";
+  const route = ROUTE_KEY[t.startAt] || "onboarding";
+  // remount when any structural tweak changes so route/flow reset cleanly
+  const appKey = route + ":" + flow + ":" + approach;
+
+  return (
+    <React.Fragment>
+      <window.OperatorApp key={appKey} initialRoute={route} flow={flow} harnessApproach={approach}>
+</window.OperatorApp>
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="View" />
+        <TweakRadio label="Start at" value={t.startAt} options={["Onboarding", "You\u2019re live", "Settings"]}
+          onChange={(v) => setTweak("startAt", v)} />
+        <TweakSection label="Onboarding flow" />
+        <TweakRadio label="Flow" value={t.flow}
+        options={["Guided sequential", "Join & run (combined)"]}
+        onChange={(v) => setTweak("flow", v)} />
+        <TweakSection label="Harness legibility" />
+        <TweakSelect label="Three-tier approach" value={t.approach}
+        options={["Status column", "Tiered badges", "Grouped sections"]}
+        onChange={(v) => setTweak("approach", v)} />
+      </TweaksPanel>
+    </React.Fragment>);
+
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
