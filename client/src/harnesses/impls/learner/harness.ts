@@ -47,8 +47,8 @@ export class LearnerHarness implements Harness {
   private readonly codexPath: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
-  /** Memoized #1035 attribution descriptor (built lazily on first request). */
-  private attributionPlugin: RuntimePlugin | null | undefined;
+  /** Memoized #1035 attribution descriptors (built lazily on first request). */
+  private attributionPluginsCache: RuntimePlugin[] | undefined;
 
   constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
@@ -74,10 +74,11 @@ export class LearnerHarness implements Harness {
    * the SolverPlugin validator would reject it. Read name+version directly.
    */
   attributionPlugins(): RuntimePlugin[] {
-    if (this.attributionPlugin === undefined) {
-      this.attributionPlugin = this.buildAttributionPlugin();
+    if (this.attributionPluginsCache === undefined) {
+      const plugin = this.buildAttributionPlugin();
+      this.attributionPluginsCache = plugin ? [plugin] : [];
     }
-    return this.attributionPlugin ? [this.attributionPlugin] : [];
+    return this.attributionPluginsCache;
   }
 
   private buildAttributionPlugin(): RuntimePlugin | null {
