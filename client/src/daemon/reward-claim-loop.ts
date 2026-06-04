@@ -116,7 +116,7 @@ export class RewardClaimLoop {
       try {
         await this.runOnce();
       } catch (err) {
-        console.error('[reward-claim] Tick failed (non-fatal):', err instanceof Error ? err.message : err);
+        console.debug('[reward-claim] Tick failed (non-fatal):', err instanceof Error ? err.message : err);
         this.config.jinnStore && emitEvent(this.config.jinnStore, {
           kind: 'tick_error',
           outcome: 'failed',
