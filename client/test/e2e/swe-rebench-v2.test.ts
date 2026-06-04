@@ -186,7 +186,11 @@ async function runEvaluatorPassing(): Promise<void> {
   });
   assert(verdict.passed_match === true, `verdict.passed_match should be true, got ${verdict.passed_match}`);
   assert(verdict.score === 1, `passing verdict should have score=1, got ${verdict.score}`);
-  assert(verdict.schemaVersion === 'swe-rebench-v2-verdict.v1', 'schemaVersion mismatch');
+  // #1019: the harness publishes the GRADED v2 verdict (passedCount/totalCount),
+  // not the binary v1 — Tier 2 of the learner's two-tier gate consumes the counts.
+  assert(verdict.schemaVersion === 'swe-rebench-v2-verdict.v2', `schemaVersion should be v2, got ${verdict.schemaVersion}`);
+  assert(verdict.passedCount === 1, `passing verdict passedCount should be 1, got ${verdict.passedCount}`);
+  assert(verdict.totalCount === 1, `passing verdict totalCount should be 1, got ${verdict.totalCount}`);
 }
 
 async function runEvaluatorFailing(): Promise<void> {
@@ -197,6 +201,11 @@ async function runEvaluatorFailing(): Promise<void> {
   });
   assert(verdict.passed_match === false, `verdict.passed_match should be false, got ${verdict.passed_match}`);
   assert(verdict.score === 0, `failing verdict should have score=0, got ${verdict.score}`);
+  // #1019: a failing grade still emits v2 with real counts (0 of N passed), so a
+  // 0/N graded verdict is distinguishable from a v1/no-counts verdict on-chain.
+  assert(verdict.schemaVersion === 'swe-rebench-v2-verdict.v2', `schemaVersion should be v2, got ${verdict.schemaVersion}`);
+  assert(verdict.passedCount === 0, `failing verdict passedCount should be 0, got ${verdict.passedCount}`);
+  assert(verdict.totalCount === 1, `failing verdict totalCount should be 1, got ${verdict.totalCount}`);
 }
 
 async function runSaturationPolicy(stateDir: string): Promise<void> {
