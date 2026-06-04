@@ -102,12 +102,13 @@ Three method-pattern reference docs cover the mechanics:
 - [`references/multi-op-chrome-devtools.md`](references/multi-op-chrome-devtools.md) — multi-page chrome-devtools driving for cross-op manual smoke.
 - [`references/multi-op-playwright.md`](references/multi-op-playwright.md) — Playwright template for two-daemon automated tests.
 
-Four scenario reference docs are the contracts release-prep's gate runner consumes. Each describes one scenario at the level of detail an implementer needs:
+Scenario reference docs. The first three describe gated scenarios (consumed by
+the release pipeline); the last is a **manual** runbook (deliberately not gated):
 
 - [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) — T1.4: load every SPA route against a mocked daemon, assert clean.
 - [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) — T2.1: op-a produces corpus artifact, op-b consumes via x402.
 - [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) — T2.2: op-a solves task on Anvil-fork, op-b evaluates.
-- [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) — T2.3: op-a launches SolverNet via SPA, op-b joins via SPA, both observe each other.
+- [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) — **Paired (two-operator) SPA flow — manual runbook.** op-a launches a SolverNet, op-b discovers + joins. Driving two real daemons against real testnet is inherently flaky, so this is a **human-run spot check, not an automated/gating test** (#1014 — a flaky non-gating browser test re-creates the un-gateable T2.3 shape #960 deleted). The *deterministic* create→launch→join coverage that DOES gate lives in `client/test/dashboard/{solvernet-flow,join}.e2e.test.ts` (`yarn e2e:app-flow`, hermetic gate).
 
 ### Things to watch for (multi-op specific)
 
@@ -134,7 +135,8 @@ In addition to the single-op concerns listed earlier:
 | Test SPA route surface (T1.4) | [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) |
 | Test cross-op donation (T2.1) | [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) |
 | Test producer/evaluator on Anvil-fork (T2.2) | [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) |
-| Test multi-op SPA flow (T2.3) | [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) |
+| Eyeball the paired two-operator SPA flow (manual) | [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) |
+| Gate create→launch→join deterministically | `yarn e2e:app-flow` (`solvernet-flow` + `join` e2e, hermetic gate) |
 
 ## Common mistakes
 

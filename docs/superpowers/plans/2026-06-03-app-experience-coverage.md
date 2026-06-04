@@ -444,7 +444,18 @@ git commit -m "ci(hermetic-gate): run deterministic app-flow Playwright tests (#
 
 ---
 
-## Task 5: Author the non-gating real paired smoke
+## Task 5 & 6 — SUPERSEDED (Mode 2 automated smoke dropped)
+
+> **Superseded 2026-06-04 (see DR-2026-06-03 §Mode 2).** Tasks 5 and 6 (the
+> automated `real-paired-smoke` test + the `environment-suite.yml` non-gating
+> job) were built and validated on real testnet, then **dropped**: a real
+> two-operator browser flow is irreducibly flaky, and a flaky non-gating test
+> carries cost without trustworthy signal — the un-gateable shape #960 deleted
+> T2.3 to escape. The real paired flow is now a **manual runbook** in the
+> `testing-jinn-app` skill (`references/scenario-multi-op-spa-flow.md`). The
+> task text below is retained for history only; do not implement it.
+
+## Task 5 (historical): Author the non-gating real paired smoke
 
 **Files:**
 - Create: `client/test/dashboard/multi-op/real-paired-smoke.e2e.test.ts`

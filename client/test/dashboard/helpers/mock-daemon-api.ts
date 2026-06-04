@@ -282,7 +282,11 @@ export function makeRegistryManifestResponse(
           deterministic: true,
           inputs: ['solution.predictionPbool'],
           output: 'verdict.brierScore',
-          implementation: 'jinn-builtin/prediction-v1-eval@1.0',
+          // Match the real SDK manifest (packages/sdk/src/contracts.ts) so the
+          // JoinFlow evaluator-harness binding — which does
+          // implementation.includes('prediction-v1-evaluator') — resolves the
+          // same way against this mock as against a live daemon.
+          implementation: 'client/src/harnesses/impls/prediction-v1-evaluator',
         },
         aggregationFunction: {
           id: 'predictionV1Agg',

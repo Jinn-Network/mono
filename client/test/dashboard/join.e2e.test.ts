@@ -18,7 +18,7 @@ import {
   makeRegistryManifestResponse,
 } from './helpers/mock-daemon-api.js';
 
-const PORT = 17334;
+const PORT = 17337;
 const OP_A_CID = 'bafkreiopalaunchedsolvernet0000000000000000000000000000';
 
 let daemon: ChildProcess | null = null;
@@ -56,7 +56,11 @@ test.beforeAll(async () => {
       const res = await fetch(`http://127.0.0.1:${PORT}/v1/bootstrap`, {
         headers: { 'x-jinn-ui-token': 'unused-but-required' },
       });
-      if (res.status === 200 || res.status === 401) return;
+      // Only finish once BOTH the API answers and the handshake URL has been
+      // captured — the daemon may serve /v1/bootstrap (401) a beat before the
+      // handshake line is flushed, and returning then would leave handshakeUrl
+      // null and fail the test instantly.
+      if (handshakeUrl && (res.status === 200 || res.status === 401)) return;
     } catch {
       // not yet
     }

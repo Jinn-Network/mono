@@ -1,6 +1,6 @@
 ---
 id: DR-2026-06-03
-title: App-experience coverage — deterministic SPA flow tests (gating) + non-gating real paired smoke
+title: App-experience coverage — deterministic SPA flow tests (gating); real paired flow as a manual runbook (not an automated test)
 date: 2026-06-03
 verb: Steer
 status: ratified
@@ -113,66 +113,54 @@ app-flow red on that exact SHA. (b) Extending the publish guard to query a
 third context breaks the spec §7 "exactly two" contract and needs the
 publish-guard-change skill + waiver plumbing — overkill.
 
-### Mode 2 — Real paired smoke (non-gating)
+### Mode 2 — Real paired flow: a manual runbook, NOT an automated test
 
-A `continue-on-error` `real-paired-smoke` job in `environment-suite.yml`
-(`needs: environment-suite`, `if: always()`) that drives **two real testnet
-operators** through create → launch → join, posts **no check-run**, and uploads
-screenshots as artifacts for per-cut visibility.
+**Superseded 2026-06-04.** Mode 2 was first built as a `continue-on-error`
+`real-paired-smoke` CI job (local-spawn of two warm operators, evaluator join,
+neutral/no-check-run). It was validated end-to-end on real Base Sepolia
+(local-spawn → on-chain launch → cross-op discovery → JoinFlow IPFS fetch →
+evaluator join, including the secret→restore→per-operator-password path). **But
+the automated job is dropped** — replaced by a manual runbook in the
+`testing-jinn-app` skill (`references/scenario-multi-op-spa-flow.md`).
 
-- **Resolves open Q1 (human-run vs CI-dispatched): CI-dispatched, non-gating.**
-  "Visible on every cut" is a stated goal; only a CI leg on the candidate SHA
-  that `release-readiness` already dispatches delivers that automatically.
-- **Local-spawn, not hosted dashboards.** The job restores the SAME two
-  warm-operator state blobs the gating job uses (`JINN_WARM_OPERATOR_STATE` /
-  `_B_STATE`) into two HOME trees; the test then spawns a real `jinn run`
-  daemon from each (`spa.e2e.test.ts`'s spawn pattern, ×2), each serving its own
-  dashboard on a local port. **No externally-hosted dashboards, no new URL
-  secrets** — it reuses the warm-operator + `testnet-gate` secrets the env-suite
-  already holds.
-- **Singleton-safe.** `needs: environment-suite` orders the smoke after the
-  gating job releases the warm operators within a run; the **workflow-level**
-  `environment-suite-warm-operator` concurrency group makes the whole
-  gate+smoke run one critical section across runs, so no second run touches the
-  same keystore/nonce concurrently.
-- The T2.3-flake concern is fully defused by **classification**: the job's
-  outcome never feeds the gating verdict, so flake cannot block. A
-  browser-on-real-world run is legitimate *only* when non-gating.
-- It runs against **real testnet**, not an Anvil fork — so it is not a
-  resurrection of T2.3, and **no live-fork browser E2E enters any blocking
-  gate** (acceptance criterion satisfied).
-- Shares catalog/join selectors with the deterministic `join.e2e` test, so
-  there is one maintenance surface across the two modes.
-- **Self-skips** (clean no-op) whenever the two warm-operator HOME trees are
-  absent — every local run, and any CI run before the warm-operator secrets are
-  provisioned in the `testnet-gate` Environment.
-- **op-c joins as Evaluator**, not Solver. The smoke validates the
-  discover→join app flow, not solver-harness execution (T3.1 owns the real
-  claude-code loop). The Solver role gates Save & Join on a *ready* solver
-  harness (claude-code OAuth), an external-auth dependency the test operators may
-  not carry; the prediction evaluator is a deterministic built-in with no such
-  gate. The cross-operator match keys on the launch's **manifest CID** (read
-  from op-a's launched record), since the dashboard renders only a truncated CID
-  and the catalog name lags behind IPFS metadata resolution.
-- **Validated end-to-end on real Base Sepolia** (2026-06-04) against the two
-  isolated warm operators (`~/jinn-dev/operators/op-b` + `op-c`): local-spawn →
-  on-chain launch → cross-operator catalog discovery → JoinFlow manifest fetch →
-  evaluator join all pass. The launch-confirmation step showed real testnet
-  latency (one run needed >180s for the receipt), which is exactly the
-  non-determinism that keeps this leg non-gating.
+**Why dropped.** The exercise of trying to make it pass repeatedly *demonstrated*
+the problem: against real testnet + a shared rate-limited RPC + IPFS + the
+indexer, the flow's timing is irreducibly non-deterministic (launch confirmation
+latency, IPFS metadata lag, cross-op propagation, RPC 429s under concurrent
+boot). An automated test of it can only be flaky — and a flaky non-gating test is
+near-worthless: a red can't be told apart from a real bug, so it gets ignored,
+and an ignored test is pure cost (real gas, two warm operators, RPC load on
+shared infra). That is the **exact un-gateable shape #960 deleted T2.3 to
+escape**. Building another automated flaky browser test, even non-gating,
+re-creates the problem the release reconciliation set out to kill.
+
+**What replaces it.** The real-world *app* layer is checked by a **human-run spot
+check** — the runbook captures the hard-won mechanics (spawn two daemons
+sequentially to avoid RPC 429s; each daemon uses its own `keystore-password`;
+match op-b's catalog card by **manifest CID** not the lagging name; **join as
+Evaluator** since Solver gates on claude-code OAuth; budget 300s+ for launch
+confirmation). The real-world *protocol* layer remains covered at the API level
+by the environment-suite scenarios (T2.1/T2.2/T3.1). Nothing in the pipeline
+depends on the paired flow being green.
+
+This keeps the genuine deliverable — **Mode 1's deterministic gating coverage** —
+and refuses to put a flaky real-world browser test back near a gate.
 
 ### Lane discipline (unchanged)
 
 The protocol loop stays validated at the daemon/API level (T2.1 cross-op
 donation, T2.2 producer/evaluator, T3.1 real loop). The app layer is validated
-by Mode 1 (gating) + Mode 2 (non-gating). We do **not** weld a live browser
-onto the protocol scenarios.
+by **Mode 1 (deterministic, gating)**; the real paired flow is a **manual
+runbook**, not an automated test. We do **not** weld a live browser onto the
+protocol scenarios, and we do **not** put a flaky real-world browser test on
+(or beside) a gate.
 
 ## Open questions resolved
 
-1. **Real app smoke — human-run or CI-dispatched?** → **CI-dispatched,
-   non-gating**, a neutral `continue-on-error` job in `environment-suite.yml`,
-   visible per cut.
+1. **Real app smoke — human-run or CI-dispatched?** → **Human-run.** First
+   answered "CI-dispatched, non-gating"; revised 2026-06-04 to a manual runbook
+   after the real runs showed an automated version is irreducibly flaky and a
+   flaky non-gating test carries cost without trustworthy signal (see Mode 2).
 2. **Scope/granularity + where the deterministic flow tests run?** → **Two
    per-journey tests** (create→launch existing; discover→join→observe
    net-new), run in `hermetic-gate.yml` via a scoped `yarn e2e:app-flow`
@@ -187,35 +175,31 @@ onto the protocol scenarios.
 - Deterministic gating coverage of create→launch→join →
   `solvernet-flow` (repaired) + net-new `join.e2e`, bundled as `yarn e2e:app-flow`
   and run in `hermetic-gate.yml`. ✓ (wiring shipped in this branch)
-- Non-gating real paired smoke (real SPA + real testnet), classified so it
-  never blocks → `continue-on-error` `real-paired-smoke` job in
-  `environment-suite.yml` that posts no check-run; **local-spawn** (restores the
-  existing `JINN_WARM_OPERATOR_STATE` / `_B_STATE` blobs and spawns a daemon per
-  operator — no hosted dashboards, no new secrets). ✓ (job shipped; runs for real
-  on the next env-suite dispatch where the warm-operator secrets are present, and
-  self-skips otherwise)
+- Real paired (two-operator) app flow, never on a blocking gate → **manual
+  runbook** in `testing-jinn-app` (`references/scenario-multi-op-spa-flow.md`),
+  not an automated test. ✓ (the AC's "non-gating real paired smoke" is met by a
+  human-run check; the automated CI job was built, validated on real testnet,
+  then deliberately dropped — see Mode 2 for why a flaky automated version is the
+  wrong shape.)
 - No live-fork browser E2E reintroduced into any blocking gate → join is
-  fully mocked; the smoke is real-testnet **and** non-gating. ✓
+  fully mocked; the paired flow is manual, not automated. ✓
 - Design recorded → this DR. ✓
 
 ## Sequencing
 
 This DR targeted the two-gate world; **PR #960 merged 2026-06-03**, so that world
-is live and the CI wiring ships in this same branch (not a follow-up): Mode 1 adds
-a scoped Chromium + `yarn e2e:app-flow` step to `hermetic-gate.yml`; Mode 2 adds a
-non-gating `real-paired-smoke` job to `environment-suite.yml`. The smoke is
-**local-spawn** — it reuses the warm-operator state already provisioned for the
-gating job, so there is **no separate provisioning prerequisite**: it runs for
-real on the next env-suite dispatch where those secrets are present, and
-self-skips (green, no-op) anywhere they are absent (every local run; any future
-environment that has not provisioned the warm operators).
+is live and Mode 1's CI wiring ships in this same branch: a scoped Chromium +
+`yarn e2e:app-flow` step in `hermetic-gate.yml`. Mode 2 is **not** wired into CI
+— `environment-suite.yml` is left untouched; the real paired flow lives as a
+manual runbook in the `testing-jinn-app` skill.
 
 ## Consequences
 
 - `hermetic-gate.yml` gains its first browser step (scoped Chromium +
   `yarn e2e:app-flow`). It remains deterministic — mocked-daemon, no fork.
-- `environment-suite.yml` gains a non-gating browser job whose flake is
-  contained by neutral classification.
+- `environment-suite.yml` is unchanged: no automated real paired smoke. The
+  two-operator app flow is a human-run spot check
+  (`testing-jinn-app/references/scenario-multi-op-spa-flow.md`).
 - The quarantined stale dashboard E2Es (`spa`, `spa-config`, `HarnessSection`)
   are **out of scope** here — `e2e:app-flow` is deliberately narrow. Un-quarantining
   them (the `ci.yml` "swap to `yarn e2e:dashboard` when green" TODO) is separate.

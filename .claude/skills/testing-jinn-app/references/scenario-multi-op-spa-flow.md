@@ -1,167 +1,143 @@
-# Scenario T2.3 — Multi-op SPA flow
+# Paired (two-operator) SPA flow — manual runbook
 
-**Tier:** 2 (substrate-derived workspace, Anvil-fork, runs in release-prep)
-**Wall-clock budget:** 5 minutes
-**Catches:** cross-op UI flows that pass with mocks but break with real daemons; SPA-side state synchronization; Launcher → Operator catalog visibility.
+**Type:** human-run spot check, NOT an automated/gating test.
+**Why manual:** this flow drives two real daemons against real Base Sepolia + a
+shared rate-limited RPC + IPFS + the indexer. Its timing is inherently
+non-deterministic (launch confirmation, IPFS metadata resolution, cross-op
+indexer propagation, RPC throttling), so as an automated test it can only ever
+be flaky. A flaky red can't be distinguished from a real bug, so it would either
+block nothing (and be ignored) or block on infra — exactly the un-gateable shape
+the two-gate redesign (#960) deleted T2.3 to escape. Run it by hand when you want
+end-to-end confidence; read the screenshots; don't wire it onto a gate.
 
-> **Prerequisite: Plan A's `substrate-copy.ts`.** This scenario imports
-> `copyWorkspace` from `client/scripts/release/substrate-copy.ts`, a Plan A
-> artifact. It does not exist on the Plan B branch — this scenario is not
-> runnable until Plan A lands.
+**Gating coverage already exists, deterministically:** `join.e2e.test.ts`
+(discover→join, mocked daemon) + `solvernet-flow.e2e.test.ts` (create→launch)
+run in the hermetic gate via `yarn e2e:app-flow`. The real-world *protocol* layer
+is covered at the API level by the environment-suite scenarios (cross-op
+donation, producer/evaluator, real-harness loop). This runbook is the *manual*
+way to eyeball the real *app* layer end-to-end; nothing depends on it being green.
 
 ## Goal
 
-op-a launches a SolverNet via the SPA Launcher Create wizard. op-b sees it appear in the Operator catalog. op-b joins via the SPA. op-a's launched-SolverNet dashboard shows op-b's join.
+op-a launches a SolverNet via the Launcher Create wizard. op-b independently
+discovers it in the Operator catalog and joins it — the cross-operator handshake
+(one operator's on-chain launch propagating through chain + indexer + IPFS to a
+*second* operator) that a single operator can't exercise.
 
-This catches a class of bug invisible to single-op tests and to mocked multi-op tests: real-daemon state propagation through the SPA.
+## Two operators
 
-## Implementation location
+You need two **distinct, funded, bootstrapped** testnet operators — two separate
+on-chain identities (EOA / Safe / agentId), each a `.jinn-client` tree.
 
-`client/test/dashboard/multi-op/launcher-join-flow.e2e.test.ts`
+- The env-suite warm operators live at `~/jinn-dev/operators/op-b` and
+  `~/jinn-dev/operators/op-c` (each is a `<dir>/.jinn-client`). These are the
+  pair used below. **Do NOT use `~/.jinn-client`** — that's the Railway-hosted
+  production operator; running it locally double-spends its nonce.
+- To make a fresh pair, bootstrap two operators per the earning flow (CLAUDE.md
+  §Earning bootstrap), each in its own HOME, each funded with testnet ETH + OLAS.
 
-## Setup
+Each operator's keystore decrypts with its **own** `keystore-password` file.
+`JINN_PASSWORD` env takes precedence over that file (`client/src/main.ts`), so if
+the two operators have **different** passwords (they usually do), do NOT export a
+single `JINN_PASSWORD` — let each daemon read its own file. (This is why the
+env-suite's `spawnMultiOpDaemons` strips `JINN_PASSWORD`.)
 
-- substrate workspace via `copyWorkspace({ ops: ['op-a', 'op-b'] })`
-- both daemons spawned via `spawnMultiOpDaemons` against Anvil-fork RPC
-- Playwright with two contexts (one per operator) — see [multi-op-playwright.md](multi-op-playwright.md)
+## Spawn the two daemons (sequentially)
+
+```bash
+cd client && yarn build   # need dist/bin/jinn.js + dist/dashboard
+
+# op-a (launcher) — HOME points at the dir whose .jinn-client is the operator
+HOME=~/jinn-dev/operators/op-b JINN_API_PORT=17341 JINN_NETWORK=testnet \
+  node dist/bin/jinn.js run --no-ui
+#   → prints "[api] UI handshake URL: http://127.0.0.1:17341/?k=…"
+#   wait until it is fully up (the SPA's "Your SolverNets" loads, not "Failed to
+#   load") BEFORE starting op-b.
+
+# op-b (joiner) — separate terminal
+HOME=~/jinn-dev/operators/op-c JINN_API_PORT=17342 JINN_NETWORK=testnet \
+  node dist/bin/jinn.js run --no-ui
+```
+
+**Spawn them one at a time, not concurrently.** Both daemons hit the same
+rate-limited public RPC hard at startup (bootstrap resume + `getLogs`); booting
+them at once draws 429s that leave a daemon's data layer degraded ("Failed to
+load your SolverNets"). Let op-a finish coming up before starting op-b.
+
+Open each handshake URL in its own browser profile (or two `chrome-devtools` MCP
+pages / two Playwright contexts).
 
 ## Steps
 
-```typescript
-import { test, expect } from '@playwright/test';
-import { baseSepolia } from 'viem/chains';
-import { spawnMultiOpDaemons } from '../../helpers/multi-op-daemon';
-import { copyWorkspace } from '../../../scripts/release/substrate-copy';
-import { spawnAnvilFork } from '../../_support/chain/anvil';
+**op-a — create + launch (Launcher Create wizard).** Navigate directly to
+`<opAOrigin>/launcher` (the nav is tabs now; there is no top-level "Launcher"
+link to click from `/overview`). The "Create SolverNet" CTA renders as a **link**
+(`<Button asChild><Link>`), so target `getByRole('link', {name: /create
+solvernet/i})`, not a button.
 
-let workspace, daemons, anvil, opAUrl, opBUrl;
+1. **Define** — fill name (use a unique value, e.g. `smoke-<timestamp>`) +
+   description → Next.
+2. **Review Contract** → Next.
+3. **Configure Generator** — cadence (e.g. `60000`) → Next.
+4. **Pricing** — there are **two** price inputs; target them by test id
+   (`launcher-create-solutionPriceWei`, `launcher-create-verdictPriceWei`), not
+   `getByLabel(/price/i)` (ambiguous). At least one must be > 0.
+5. **Review + Launch** — click Launch.
 
-test.beforeAll(async () => {
-  workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-  anvil = await spawnAnvilFork({
-    forkUrl: process.env['BASE_SEPOLIA_RPC_URL']!,
-    chain: baseSepolia,
-    silent: true,
-  });
-  daemons = await spawnMultiOpDaemons({
-    ops: [
-      { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
-      { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
-    ],
-    // JINN_RPC_URL — config.ts gives it unconditional precedence over BASE_RPC_URL.
-    extraEnv: { JINN_RPC_URL: anvil.rpcUrl },
-  });
-  opAUrl = daemons.daemons['op-a'].handshakeUrl ?? `http://127.0.0.1:7732/`;
-  opBUrl = daemons.daemons['op-b'].handshakeUrl ?? `http://127.0.0.1:7733/`;
-});
+The dashboard sits on **"Broadcasting tx"** until the registry tx confirms — this
+can take **a few minutes** on a congested testnet (budget 300s+, not 120s).
+Success = the launched dashboard shows a **LAUNCHED** badge. Note the wizard sets
+**OPEN ROLES: solver + evaluator** by default.
 
-test.afterAll(async () => {
-  await daemons?.teardown();
-  await anvil?.teardown();
-  await workspace?.teardown();
-});
+**op-b — discover in the catalog.** Navigate to `<opBOrigin>/operator/registry`
+(bare `/operator` redirects to `/operator/memberships`; the catalog is the
+Registry tab). Reload until op-a's card appears.
 
-test('op-a launches → op-b sees → op-b joins → op-a sees join', async ({ browser }) => {
-  const opACtx = await browser.newContext();
-  const opBCtx = await browser.newContext();
-  const opAPage = await opACtx.newPage();
-  const opBPage = await opBCtx.newPage();
+> **Match by manifest CID, not by name.** The catalog card renders
+> **"Metadata pending"** (no name) until the IPFS manifest resolves, but its
+> `data-manifest-cid` attribute carries the **full** CID straight off the
+> on-chain anchor, immediately. The launched dashboard only shows a *truncated*
+> CID; the **full** CID is in op-a's launched record on disk at
+> `<opAHome>/.jinn-client/earning/solvernets/launched/<solverNetId>.json`
+> (`manifestCid` field). Key op-b's lookup on that full CID.
 
-  // === op-a: Launcher Create wizard ===
-  await opAPage.goto(opAUrl);
-  await opAPage.getByRole('link', { name: /launcher/i }).click();
-  await opAPage.getByRole('button', { name: /create solvernet/i }).click();
+**op-b — join.** Click the card's Join CTA → `/operator/join/<cid>`. Clicking
+Join is what triggers JoinFlow's full-manifest IPFS fetch, so the form may take a
+moment to render.
 
-  // Step 1: Define
-  const solverNetName = `t23-test-${Date.now()}`;
-  await opAPage.getByLabel(/name/i).fill(solverNetName);
-  await opAPage.getByLabel(/description/i).fill('T2.3 e2e test SolverNet');
-  await opAPage.getByRole('button', { name: /next/i }).click();
+> **Join as Evaluator, not Solver** (for this runbook). The Solver role gates
+> "Save & Join" on a *ready* solver harness (`claude-code`), which needs live
+> OAuth the test operators may not carry — the submit button stays disabled
+> otherwise. The prediction evaluator is a deterministic built-in
+> (`evaluationFunction.implementation` = `…/prediction-v1-evaluator`) with no such
+> gate, so an evaluator join exercises the same JoinFlow + config write without
+> an external-auth dependency. (Testing the real *solver* execution is T3.1's
+> job, not this runbook's.)
 
-  // Step 2: Review Contract
-  await opAPage.getByRole('button', { name: /next/i }).click();
+Select the **Evaluator** role → Save & Join. Success = the in-place
+`join-flow-success-card` (the SPA no longer redirects to the catalog; #333). The
+join writes `joinedSolverNets[<cid>]` to op-b's config (restart-required — the
+daemon does not hot-reload SolverNet config).
 
-  // Step 3: Configure Generator
-  await opAPage.getByLabel(/cadence/i).fill('60000');   // 60s
-  await opAPage.getByRole('button', { name: /next/i }).click();
+## What to look at
 
-  // Step 4: Configure Pricing
-  await opAPage.getByLabel(/price/i).fill('100');
-  await opAPage.getByRole('button', { name: /next/i }).click();
+Screenshots of op-a's launched dashboard (LAUNCHED, generator enabled) and op-b's
+catalog (op-a's card discoverable) + join success card. The point is human
+eyeballing, not an automated pass/fail.
 
-  // Step 5: Review and Launch
-  await opAPage.getByRole('button', { name: /launch/i }).click();
+## Real-world gotchas (each cost a debugging cycle)
 
-  // Wait for launch state machine to reach 'launched'
-  await expect(opAPage.getByText(/launched/i)).toBeVisible({ timeout: 120000 });
-  const manifestCid = await opAPage.getByTestId('manifest-cid').textContent();
-  expect(manifestCid).toMatch(/^bafkrei/);
-
-  // === op-b: Operator catalog sees op-a's SolverNet ===
-  await opBPage.goto(opBUrl);
-  await opBPage.getByRole('link', { name: /operator/i }).click();
-  await opBPage.getByRole('button', { name: /browse catalog/i }).click();
-  await expect(opBPage.getByText(solverNetName)).toBeVisible({ timeout: 30000 });
-
-  // === op-b joins via SPA ===
-  await opBPage.getByText(solverNetName).click();
-  await opBPage.getByRole('button', { name: /join/i }).click();
-  // Restart banner should appear (operator.join writes config; daemon doesn't hot-reload SolverNet config)
-  await expect(opBPage.getByText(/restart required/i)).toBeVisible({ timeout: 10000 });
-
-  // === op-a's launched dashboard reflects op-b's join ===
-  await opAPage.goto(opAUrl + '/launcher/launched');
-  await opAPage.getByText(solverNetName).click();
-  // Operator join is on-chain; SPA should poll and reflect within 30s
-  await expect(opAPage.getByText(/1 operator joined/i)).toBeVisible({ timeout: 30000 });
-
-  await opACtx.close();
-  await opBCtx.close();
-});
-```
-
-## Assertions (summary)
-
-| # | Assertion | Why |
+| Symptom | Cause | What it means |
 |---|---|---|
-| A1 | op-a wizard launch reaches `launched` state within 120s | Launcher state machine end-to-end |
-| A2 | manifest CID matches `bafkrei...` shape | pinning + on-chain registry write succeeded |
-| A3 | op-b's catalog shows the new SolverNet within 30s | global registry indexing works |
-| A4 | op-b's join writes operator-side config | operator.join RPC + restart banner |
-| A5 | op-a's launched dashboard shows "1 operator joined" within 30s | cross-op SPA polling correctness |
+| op-b never finds the card by name | catalog name lags ("Metadata pending") behind IPFS resolution | match by `data-manifest-cid`, not name |
+| Solver "Save & Join" stays disabled | solver harness (`claude-code`) reports `ready:false` (no OAuth) | join as Evaluator, or provision claude-code auth |
+| op-a stuck on "Broadcasting tx" >180s | real testnet tx-confirmation latency | wait longer (300s+); the launch usually did succeed on-chain |
+| "Failed to load your SolverNets" | RPC 429 / indexer lag | don't boot both daemons at once; retry when the network is healthy |
+| second daemon crashes at startup (exit 50) | wrong keystore password | each daemon must use its OWN `keystore-password`; don't share one `JINN_PASSWORD` |
 
-## Failure modes
+## Cleanup
 
-| Failure | Class | Triage |
-|---|---|---|
-| Wizard step doesn't advance | real-bug | BLOCKING — wizard UI regression |
-| Launch state machine times out before `launched` | could be: pinning hang, broadcast fail, indexer fail | inspect launch-progress record; flake on first |
-| op-b's catalog doesn't show within 30s | indexer slow OR catalog query broken | check Discovery API directly; if working, SPA-side bug |
-| op-b's join doesn't write config | real-bug | BLOCKING — operator.join broken |
-| Restart banner missing | real-bug | BLOCKING — restart semantics regression |
-| op-a's "1 operator joined" never appears | could be: on-chain operator-join missed, indexer lag, SPA polling broken | check on-chain first, then indexer, then SPA |
-
-## Wall-clock
-
-~5 minutes:
-- 30s daemon spawn + Anvil fork
-- 120s op-a launch
-- 30s op-b catalog lookup
-- 60s op-b join + restart banner
-- 30s op-a sees join
-- 30s setup/teardown
-
-## Dependencies
-
-- Substrate workspace from Plan A
-- `spawnAnvilFork` helper at `client/test/_support/chain/anvil.ts` (pass `forkUrl: BASE_SEPOLIA_RPC_URL` + `chain: baseSepolia` for a Base Sepolia fork)
-- The SPA Launcher Create wizard's data-testid attributes (`manifest-cid` etc.) — may need to be added to the SPA in Plan C/D if missing
-- The Operator catalog page at `/operator/...` (existing in v0.1.6)
-- The launched-SolverNet dashboard at `/launcher/launched/:id` (existing in v0.1.6)
-
-## What this scenario does NOT catch
-
-- UX paper cuts (Tier 3 manual walkthrough covers these)
-- Real-network economics
-- Visual regressions
-- Operator's actual claim/solve flow (T2.2 covers that)
+The launch is real on-chain state. Afterward, to stop op-a's generator from
+resuming on its next daemon start, remove the launched record
+(`…/earning/solvernets/launched/<id>.json`) and remove the joined entry you added
+from op-b's `config.json` `joinedSolverNets` (leave any pre-existing entries).
