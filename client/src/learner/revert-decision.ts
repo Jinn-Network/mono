@@ -13,9 +13,12 @@
  *   - recentAttemptsWindow: how many most-recent attempts per codeDigest the
  *     aggregate is computed over. Overridable via implStateDir/policy.json
  *     (`policy.revert.recentAttemptsWindow`), mirroring policy.maxNotesBytes.
+ *   - gradedMinSamplesPerArm: minimum per-arm graded scores before the graded
+ *     (Tier 2) sensitivity test runs. Below it, Tier 2 is skipped entirely.
+ *   - gradedAlpha: significance threshold for the Mann-Whitney graded test.
  */
 
-import { twoProportionZTest } from './revert-stats.js';
+import { twoProportionZTest, mannWhitneyU } from './revert-stats.js';
 
 export interface RevertPolicy {
   /** Minimum indexed attempts required per arm. Default 30. */
@@ -24,12 +27,18 @@ export interface RevertPolicy {
   alpha: number;
   /** Recent-attempts window per codeDigest. Default 200. */
   recentAttemptsWindow: number;
+  /** Minimum per-arm graded samples before the graded (Tier 2) test runs. Default 10. */
+  gradedMinSamplesPerArm: number;
+  /** Two-sided significance threshold for the graded test. Default 0.05. */
+  gradedAlpha: number;
 }
 
 export const DEFAULT_REVERT_POLICY: RevertPolicy = {
   minSamplesPerArm: 30,
   alpha: 0.05,
   recentAttemptsWindow: 200,
+  gradedMinSamplesPerArm: 10,
+  gradedAlpha: 0.05,
 };
 
 export interface CodeDigestAggregate {
@@ -40,13 +49,17 @@ export interface CodeDigestAggregate {
   passes: number;
   /** passes / attempts; 0 when attempts === 0. */
   passRate: number;
+  /** Per-attempt graded scores (passedCount/totalCount) within the window. May be empty (v1). */
+  gradedScores: number[];
 }
 
 export type RevertReason =
   | 'significant_regression'
   | 'insufficient_samples'
   | 'not_significant'
-  | 'no_regression';
+  | 'no_regression'
+  | 'graded_regression_provisional'
+  | 'binary_graded_disagree';
 
 export interface RevertDecisionInput {
   withCommit: CodeDigestAggregate;
@@ -73,27 +86,45 @@ export function decideRevert(
     atParent: { codeDigest: atParent.codeDigest, n: atParent.attempts, passRate: atParent.passRate },
   };
 
-  // Sample floor first — a zero-attempt codeDigest is "insufficient_samples",
-  // NOT pass-rate zero (a fresh promotion that has not run yet is not a regression).
-  if (withCommit.attempts < policy.minSamplesPerArm || atParent.attempts < policy.minSamplesPerArm) {
-    return { ...base, delta: withCommit.passRate - atParent.passRate, pValue: 1, significant: false, recommendRevert: false, reason: 'insufficient_samples' };
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0);
+  const gradedReady =
+    withCommit.gradedScores.length >= policy.gradedMinSamplesPerArm &&
+    atParent.gradedScores.length >= policy.gradedMinSamplesPerArm;
+  const gradedDelta = mean(withCommit.gradedScores) - mean(atParent.gradedScores);
+
+  // Tier 1 — binary objective.
+  const binaryUnderpowered =
+    withCommit.attempts < policy.minSamplesPerArm || atParent.attempts < policy.minSamplesPerArm;
+
+  if (!binaryUnderpowered) {
+    const stats = twoProportionZTest({
+      passesA: withCommit.passes, totalA: withCommit.attempts,
+      passesB: atParent.passes, totalB: atParent.attempts,
+    });
+    const significant = stats.pValue < policy.alpha;
+    if (stats.delta >= 0) {
+      return { ...base, delta: stats.delta, pValue: stats.pValue, significant, recommendRevert: false, reason: 'no_regression' };
+    }
+    if (!significant) {
+      return { ...base, delta: stats.delta, pValue: stats.pValue, significant, recommendRevert: false, reason: 'not_significant' };
+    }
+    // Binary says significant regression. Confirmation guardrail: if graded
+    // data exists and DISAGREES (graded improved), hold rather than revert.
+    if (gradedReady && gradedDelta > 0) {
+      return { ...base, delta: stats.delta, pValue: stats.pValue, significant: true, recommendRevert: false, reason: 'binary_graded_disagree' };
+    }
+    return { ...base, delta: stats.delta, pValue: stats.pValue, significant: true, recommendRevert: true, reason: 'significant_regression' };
   }
 
-  const stats = twoProportionZTest({
-    passesA: withCommit.passes,
-    totalA: withCommit.attempts,
-    passesB: atParent.passes,
-    totalB: atParent.attempts,
-  });
-  const significant = stats.pValue < policy.alpha;
+  // Tier 2 — graded sensitivity (only when binary is underpowered).
+  if (gradedReady) {
+    const mw = mannWhitneyU(withCommit.gradedScores, atParent.gradedScores);
+    if (mw.pValue < policy.gradedAlpha && gradedDelta < 0) {
+      return { ...base, delta: gradedDelta, pValue: mw.pValue, significant: true, recommendRevert: true, reason: 'graded_regression_provisional' };
+    }
+  }
 
-  if (stats.delta >= 0) {
-    return { ...base, delta: stats.delta, pValue: stats.pValue, significant, recommendRevert: false, reason: 'no_regression' };
-  }
-  if (!significant) {
-    return { ...base, delta: stats.delta, pValue: stats.pValue, significant, recommendRevert: false, reason: 'not_significant' };
-  }
-  return { ...base, delta: stats.delta, pValue: stats.pValue, significant: true, recommendRevert: true, reason: 'significant_regression' };
+  return { ...base, delta: withCommit.passRate - atParent.passRate, pValue: 1, significant: false, recommendRevert: false, reason: 'insufficient_samples' };
 }
 
 /** Merge a partial policy (e.g. from implStateDir/policy.json) over the defaults. */

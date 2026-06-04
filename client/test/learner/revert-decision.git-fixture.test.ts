@@ -65,9 +65,9 @@ describe('per-codeDigest revert selection over a synthetic git history (#764 AC5
       // Seeded aggregates: c1-with-commit is much worse than its parent c0;
       // c2-with-commit is marginally worse than its parent c1 (not significant).
       const seeded: Record<string, CodeDigestAggregate> = {
-        [d0]: { codeDigest: d0, attempts: 100, passes: 85, passRate: 0.85 },
-        [d1]: { codeDigest: d1, attempts: 100, passes: 45, passRate: 0.45 }, // big drop vs d0
-        [d2]: { codeDigest: d2, attempts: 100, passes: 42, passRate: 0.42 }, // ~same as d1
+        [d0]: { codeDigest: d0, attempts: 100, passes: 85, passRate: 0.85, gradedScores: [] },
+        [d1]: { codeDigest: d1, attempts: 100, passes: 45, passRate: 0.45, gradedScores: [] }, // big drop vs d0
+        [d2]: { codeDigest: d2, attempts: 100, passes: 42, passRate: 0.42, gradedScores: [] }, // ~same as d1
       };
 
       const decideForCommit = (childDigest: string, parentDigest: string) =>

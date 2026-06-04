@@ -10,6 +10,7 @@ const agg = (passes: number, attempts: number): CodeDigestAggregate => ({
   attempts,
   passRate: attempts > 0 ? passes / attempts : 0,
   passes,
+  gradedScores: [],
 });
 
 describe('decideRevert', () => {
@@ -65,5 +66,50 @@ describe('decideRevert', () => {
     expect(DEFAULT_REVERT_POLICY.minSamplesPerArm).toBe(30);
     expect(DEFAULT_REVERT_POLICY.alpha).toBe(0.05);
     expect(DEFAULT_REVERT_POLICY.recentAttemptsWindow).toBe(200);
+  });
+});
+
+const P = DEFAULT_REVERT_POLICY;
+const arm = (codeDigest: string, attempts: number, passes: number, gradedScores: number[]): CodeDigestAggregate =>
+  ({ codeDigest, attempts, passes, passRate: attempts ? passes / attempts : 0, gradedScores });
+
+describe('two-tier graded gate (#1019)', () => {
+  it('Tier 2 rescues an insufficient-binary case with a significant graded regression', () => {
+    const withCommit = arm('w', 5, 1, [0.1, 0.15, 0.2, 0.1, 0.05, 0.12, 0.08, 0.11, 0.09, 0.13]);
+    const atParent = arm('p', 5, 4, [0.85, 0.9, 0.8, 0.95, 0.88, 0.82, 0.91, 0.86, 0.89, 0.84]);
+    const d = decideRevert({ withCommit, atParent }, P);
+    expect(d.reason).toBe('graded_regression_provisional');
+    expect(d.recommendRevert).toBe(true);
+  });
+
+  it('holds (does not revert) when binary says regress but graded says improve', () => {
+    const withCommit = arm('w', 40, 18, Array(10).fill(0.9));
+    const atParent = arm('p', 40, 30, Array(10).fill(0.4));
+    const d = decideRevert({ withCommit, atParent }, P);
+    expect(d.reason).toBe('binary_graded_disagree');
+    expect(d.recommendRevert).toBe(false);
+  });
+
+  it('reverts on significant binary regression when graded agrees (or is absent)', () => {
+    const withCommit = arm('w', 40, 8, []);
+    const atParent = arm('p', 40, 34, []);
+    const d = decideRevert({ withCommit, atParent }, P);
+    expect(d.reason).toBe('significant_regression');
+    expect(d.recommendRevert).toBe(true);
+  });
+
+  it('abstains when both tiers are underpowered', () => {
+    const withCommit = arm('w', 3, 1, [0.5, 0.5, 0.5]);
+    const atParent = arm('p', 3, 2, [0.5, 0.5, 0.5]);
+    const d = decideRevert({ withCommit, atParent }, P);
+    expect(d.reason).toBe('insufficient_samples');
+    expect(d.recommendRevert).toBe(false);
+  });
+
+  it('degrades to binary-only when there are no graded scores (v1 window)', () => {
+    const withCommit = arm('w', 5, 1, []);
+    const atParent = arm('p', 5, 4, []);
+    const d = decideRevert({ withCommit, atParent }, P);
+    expect(d.reason).toBe('insufficient_samples');
   });
 });

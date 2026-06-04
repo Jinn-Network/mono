@@ -111,11 +111,11 @@ export function validateNumericFlags(flags: {
 
 function toAggregate(
   codeDigest: string,
-  rows: Array<{ codeDigest: string; attempts: number; passes: number; passRate: number }>,
+  rows: Array<{ codeDigest: string; attempts: number; passes: number; passRate: number; gradedScores: number[] }>,
 ): CodeDigestAggregate {
   const found = rows.find((r) => r.codeDigest === codeDigest);
-  if (!found) return { codeDigest, attempts: 0, passes: 0, passRate: 0 };
-  return { codeDigest, attempts: found.attempts, passes: found.passes, passRate: found.passRate };
+  if (!found) return { codeDigest, attempts: 0, passes: 0, passRate: 0, gradedScores: [] };
+  return { codeDigest, attempts: found.attempts, passes: found.passes, passRate: found.passRate, gradedScores: found.gradedScores };
 }
 
 export function createCodedigestRevertCheckCommand(
