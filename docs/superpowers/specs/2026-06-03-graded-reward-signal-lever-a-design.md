@@ -157,11 +157,17 @@ field). Invariant 2 means on-chain *visibility* never implies emissions *use*.
 
 ### 5.1 Reward production — additive `swe-rebench-v2-verdict.v2`
 
-- **Grader** (`swe-rebench-v2-evaluator/index.ts`): populate `passedCount` /
+- **Grader** (`swe-rebench-v2-evaluator/index.ts`, `grade()`): populate `passedCount` /
   `totalCount` from the `passed[]`/`failed[]` arrays already in hand
   (`totalCount = |passed| + |failed|`, the union of the task's required test sets as
   the runner reports them). Keep emitting `score`/`passed_match` unchanged. No new
   computation.
+- **Harness republication** (`swe-rebench-v2-evaluator/harness.ts`): the harness
+  re-wraps the grade result into the *published* verdict payload — it must also emit
+  `schemaVersion: 'swe-rebench-v2-verdict.v2'` and forward `passedCount`/`totalCount`.
+  This is a distinct layer from the grader; upgrading only `grade()` leaves the
+  on-chain envelope at v1 and severs the whole pipeline (the counts never reach the
+  indexer). A test asserts the *published* payload carries the counts.
 - **Payload schema** (`packages/sdk/src/payloads/swe-rebench-v2.ts`): new
   `swe-rebench-v2-verdict.v2`, **additive** — retains v1's `score ∈ {0,1}` and
   `passed_match`; adds `passedCount: number`, `totalCount: number` (and, optionally,
