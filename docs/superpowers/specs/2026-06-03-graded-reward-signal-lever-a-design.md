@@ -220,6 +220,33 @@ Augment, don't replace — mirroring PR #987.
   distribution code reads `gradedScore`. The withheld-test challenge is named as the
   prerequisite for ever sizing reward on a graded score.
 
+### 5.6 Run attribution for measurement (the Lever-A version boundary)
+
+The keep/revert gate logic lives in the learner **plugin/harness code**, not in
+`implStateDir` — so `codeDigest = hash(implStateDir)` does **not** change when the
+binary gate becomes the graded two-tier gate. Without a separate marker, a baseline
+run and a Lever-A run would be indistinguishable in the data, and the whole point of
+Lever A (a *measurable* improvement) would be unverifiable.
+
+The marker is the **learner plugin version**. Every run stamps `executor.plugins[]`
+(`{name, version, sha256}`) onto the envelope; the indexer materialises this as the
+queryable **`pluginsJson`** column on `attemptEnvelopeMeta`. The version flows:
+`client/plugins/learner/.claude-plugin/plugin.json` (+ the `.codex-plugin` twin) →
+`loadSolverPluginManifest` → `resolveSolverPlugin` (`resolvers.ts`,
+`version: manifest.version`) → `RuntimePlugin.version` → `executor.plugins[].version`
+→ `pluginsJson`. So we bump the learner plugin **0.1.0 → 0.2.0** to mark the
+graded-gate build.
+
+This is deliberately **not** `executor.implVersion` — that is the client *build*
+version (release-cadence controlled; a feature branch must not bump it). The plugin
+version is the correct, lower-risk axis and is already indexed end-to-end.
+
+**Measurement partition.** "Did Lever A help?" becomes a query over the indexer:
+compare `verdictEnvelopeMeta.actualPassed` for attempts whose `pluginsJson` contains
+`claude-code-learner@0.2.0` (graded gate) against `@0.1.0` (baseline), on the same
+SolverNet. The #766/#986 measurement infrastructure consumes this boundary; the
+primary signal to watch is the Tier-1-abstain → Tier-2-decision conversion rate (§10).
+
 ## 6. Data flow
 
 ```
@@ -303,4 +330,5 @@ evaluator runs every test → passed[]/failed[]            (already computed)
   the primary evidence Lever A worked. If Tier 2 still rarely reaches
   `gradedMinSamplesPerArm`, that is the empirical signal that **B** (not a richer
   technique) is the next move — consistent with Oak's "binding constraint is upstream
-  of the ladder."
+  of the ladder." This conversion rate is measured across the §5.6 plugin-version
+  boundary (`claude-code-learner@0.2.0` vs `@0.1.0`).

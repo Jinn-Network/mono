@@ -44,7 +44,7 @@ const ALL_INCLUDED_PLUGINS: PluginOption[] = [
   },
   {
     name: 'claude-code-learner',
-    version: '0.1.0',
+    version: '0.2.0',
     source: 'bundled',
     defaultIncluded: true,
     description: 'Learner loop',
