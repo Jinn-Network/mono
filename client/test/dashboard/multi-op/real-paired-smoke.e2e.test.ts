@@ -151,27 +151,27 @@ test.describe('real paired app smoke (non-gating)', () => {
       await opA.getByRole('button', { name: /launch/i }).click();
 
       await expect(opA.getByText(/launched/i).first()).toBeVisible({ timeout: 180_000 });
-      const manifestCid = (await opA.getByTestId('manifest-cid').textContent({ timeout: 15_000 }))?.trim();
-      expect(manifestCid).toMatch(/^bafk?rei/);
+      // NB: the launched dashboard's `manifest-cid` testid renders a TRUNCATED
+      // CID for display, so it is unusable as a cross-operator key. We discover
+      // op-a's SolverNet in op-b's catalog by its unique NAME (set in Step 1),
+      // which the registry card renders verbatim.
 
       // ===== op-b: discover in the catalog + join =====
       await opB.goto(opBDaemon.handshakeUrl);
 
       // op-b's substrate refreshes its catalog on its own cadence; reload until
-      // op-a's SolverNet appears (real cross-operator propagation via chain +
-      // indexer — the leg that made T2.3 flaky, here non-gating by design).
+      // op-a's SolverNet (matched by its unique name) appears — real
+      // cross-operator propagation via chain + indexer (the leg that made T2.3
+      // flaky, here non-gating by design).
+      const card = opB.getByTestId('registry-card').filter({ hasText: solverNetName });
       let found = false;
       for (let i = 0; i < 20 && !found; i++) {
         await opB.goto(`${opBDaemon.origin}/operator/registry`);
-        const card = opB.locator(`[data-testid="registry-card"] [data-manifest-cid="${manifestCid}"]`);
         if (await card.count()) found = true;
         else await opB.waitForTimeout(15_000);
       }
       expect(found, "op-b should discover op-a's SolverNet in the catalog").toBe(true);
 
-      const card = opB.getByTestId('registry-card').filter({
-        has: opB.locator(`[data-manifest-cid="${manifestCid}"]`),
-      });
       await card.first().getByTestId('registry-join-cta').click();
       await expect(opB.getByTestId('join-flow')).toBeVisible({ timeout: 30_000 });
       await opB.getByTestId('join-flow').getByLabel('Solver').check();
