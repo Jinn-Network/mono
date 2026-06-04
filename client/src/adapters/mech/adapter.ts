@@ -133,6 +133,20 @@ function isTerminalEvaluationReason(revertName: string | null | undefined): bool
 }
 const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
 /**
+ * Default rolling-window size for the on-chain TaskCreated backlog scan (#801).
+ *
+ * The scan is a *backstop* behind `DiscoveryAPI.findClaimableTasks` (the indexer
+ * on testnet, the newest-first RPC floor on mainnet), which is the primary
+ * discovery path on every chain. Without a bound the scan replays from the fixed
+ * admission floor to head on *every* restart, a range that grows monotonically
+ * with the chain — the startup-stall regression #801 documents. Bounding it to
+ * `head − N` makes restart cost fixed regardless of chain age while still
+ * re-observing a generous recent window (~28h on Base at ~2s/block) for tasks
+ * and SolutionDeliveryClaimed events the indexer might have lagged on. Operators
+ * who want a wider net pin an absolute start via `taskDiscoveryOnchainFromBlock`.
+ */
+const DEFAULT_ONCHAIN_SCAN_WINDOW_BLOCKS = 50_000n;
+/**
  * Floor block for the on-chain TaskCreated backlog scan, per chain.
  *
  * A daemon with no joined-SolverNet store cursor (fresh bootstrap) will scan
@@ -264,7 +278,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.loadPendingEvaluationSolutions();
       await this.recoverPendingState(blockNumber);
     } else {
-      const fromBlock = this.onchainTaskDiscoveryFromBlock();
+      const fromBlock = this.onchainScanFromBlock(blockNumber);
       if (fromBlock && fromBlock <= blockNumber) {
         this.requestBlockCursor = fromBlock - 1n;
       }
@@ -289,20 +303,30 @@ export class MechAdapter implements ExecutionAdapter {
       this.requestBlockCursor = routerFromBlock;
     }
 
-    const scanFromBlock = this.onchainTaskDiscoveryFromBlock();
+    const scanFromBlock = this.onchainScanFromBlock(currentBlock);
     if (scanFromBlock && scanFromBlock <= currentBlock) {
       const canonicalCursor = scanFromBlock - 1n;
       if (canonicalCursor < this.requestBlockCursor) {
         this.requestBlockCursor = canonicalCursor;
       }
       console.error(
-        `[mech] TaskCreated canonical backlog scan enabled from block ${scanFromBlock}; ` +
-        'subgraph discovery is optional acceleration only',
+        `[mech] TaskCreated backlog scan (bounded backstop) enabled from block ${scanFromBlock}; ` +
+        'DiscoveryAPI.findClaimableTasks is the primary discovery path',
       );
     }
   }
 
-  private onchainTaskDiscoveryFromBlock(): bigint | undefined {
+  /**
+   * The gh #300 scorability admission floor: tasks created before this block are
+   * "ghosts" from a prior eval-semantics regime and are rejected — including on
+   * the `DiscoveryAPI` (indexer) path. Fixed per chain; an explicit operator
+   * `onchainFromBlock` raises it. Returns `undefined` when no SolverNet is joined
+   * (the daemon claims nothing, so there is no floor to apply).
+   *
+   * This is deliberately NOT the on-chain scan start — see `onchainScanFromBlock`.
+   * Bounding the scan for RPC cost must never narrow which tasks are admitted.
+   */
+  private taskAdmissionFloorBlock(): bigint | undefined {
     const discovery = this.config.taskDiscovery;
     const hasJoinedSolverNet = (discovery?.solverNetManifestCids?.length ?? 0) > 0;
     if (!hasJoinedSolverNet) return undefined;
@@ -312,6 +336,23 @@ export class MechAdapter implements ExecutionAdapter {
       return value > 0n ? value : undefined;
     }
     return DEFAULT_TASK_DISCOVERY_FROM_BLOCK[this.config.chainId];
+  }
+
+  /**
+   * Start block for the on-chain TaskCreated backlog scan (the secondary backstop
+   * behind `DiscoveryAPI.findClaimableTasks`). Defaults to a bounded rolling
+   * window `head − DEFAULT_ONCHAIN_SCAN_WINDOW_BLOCKS`, never below the admission
+   * floor (scanning pre-floor blocks only surfaces rejected ghosts). An explicit
+   * `onchainFromBlock` override pins an absolute start, honored as the operator's
+   * choice. Returns `undefined` when no SolverNet is joined.
+   */
+  private onchainScanFromBlock(head: bigint): bigint | undefined {
+    const floor = this.taskAdmissionFloorBlock();
+    if (floor === undefined) return undefined;
+    // An explicit override is reflected verbatim in `floor`; honor it as the pin.
+    if (this.config.taskDiscovery?.onchainFromBlock !== undefined) return floor;
+    const window = head - DEFAULT_ONCHAIN_SCAN_WINDOW_BLOCKS;
+    return window > floor ? window : floor;
   }
 
   private joinedManifestDigestSet(): Set<string> {
@@ -802,7 +843,7 @@ export class MechAdapter implements ExecutionAdapter {
       return;
     }
 
-    const discoveryFloorBlock = this.onchainTaskDiscoveryFromBlock();
+    const discoveryFloorBlock = this.taskAdmissionFloorBlock();
 
     for (const candidate of candidates) {
       if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;

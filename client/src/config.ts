@@ -223,13 +223,14 @@ export const JinnConfigSchema = z.object({
   taskDiscoveryAllowedTaskIds: z.array(z.string()).optional(),
 
   /**
-   * Opt-in lower bound (L2 block number) for the mech adapter's canonical
-   * on-chain TaskCreated backlog scan. Unset → the adapter's per-chain default
-   * (DEFAULT_TASK_DISCOVERY_FROM_BLOCK) flows through (see gh #300). Set this to
-   * a recent block to bound the scan to a small recent window so the indexer
-   * (DiscoveryAPI.findClaimableTasks) carries the bulk of discovery — the
-   * canonical getLogs scan over a large/bloated history parses huge responses
-   * on the main thread and can stall the event loop. Env: JINN_TASK_DISCOVERY_FROM_BLOCK.
+   * Explicit absolute lower bound (L2 block number) for the mech adapter's
+   * on-chain TaskCreated backlog scan. Unset → the scan defaults to a bounded
+   * rolling window (`head − DEFAULT_ONCHAIN_SCAN_WINDOW_BLOCKS`, ~28h on Base),
+   * so a restart no longer replays full chain history every boot (#801); the
+   * indexer (DiscoveryAPI.findClaimableTasks) is the primary discovery path and
+   * the on-chain scan is a bounded backstop. Set this to widen the backstop to a
+   * specific block (the value pins both the scan start and the gh #300 admission
+   * floor). Env: JINN_TASK_DISCOVERY_FROM_BLOCK.
    */
   taskDiscoveryOnchainFromBlock: z.number().int().min(0).optional(),
 

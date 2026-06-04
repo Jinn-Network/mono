@@ -1492,6 +1492,56 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  // #801: the on-chain TaskCreated backlog scan must default to a bounded recent
+  // window (head − N) so a restart doesn't replay full chain history every boot.
+  // This is distinct from the #300 scorability admission floor, which stays fixed
+  // — bounding the *scan* must not narrow which tasks the indexer path will admit.
+  describe('on-chain scan window vs. admission floor (#801)', () => {
+    const joined = (extra: Record<string, unknown> = {}) => ({
+      ...TEST_CONFIG,
+      taskDiscovery: { solverNetManifestCids: ['bafyfixturecid'], ...extra },
+    });
+    // TEST_CONFIG.chainId === 8453 → DEFAULT_TASK_DISCOVERY_FROM_BLOCK = 25_000_000;
+    // DEFAULT_ONCHAIN_SCAN_WINDOW_BLOCKS === 50_000.
+
+    it('defaults the on-chain scan to a bounded recent window (head − N), not the fixed floor', async () => {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const adapter = new MechAdapter(joined() as any, makeConfigStore() as any);
+      expect((adapter as any).onchainScanFromBlock(25_100_000n)).toBe(25_050_000n);
+    });
+
+    it('clamps the scan up to the admission floor on an early chain (head − N < floor)', async () => {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const adapter = new MechAdapter(joined() as any, makeConfigStore() as any);
+      // 25_010_000 − 50_000 = 24_960_000, below the 25_000_000 floor → clamp to floor.
+      expect((adapter as any).onchainScanFromBlock(25_010_000n)).toBe(25_000_000n);
+    });
+
+    it('keeps the admission floor fixed while the scan window tracks head', async () => {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const adapter = new MechAdapter(joined() as any, makeConfigStore() as any);
+      // Scan window moves with head; the ghost-task admission floor does not.
+      expect((adapter as any).taskAdmissionFloorBlock()).toBe(25_000_000n);
+      expect((adapter as any).onchainScanFromBlock(99_000_000n)).toBe(98_950_000n);
+      expect((adapter as any).taskAdmissionFloorBlock()).toBe(25_000_000n);
+    });
+
+    it('lets an explicit onchainFromBlock override pin the scan start', async () => {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const adapter = new MechAdapter(joined({ onchainFromBlock: 24_000_000 }) as any, makeConfigStore() as any);
+      // Operator's explicit pin wins for the scan (and still sets the admission floor).
+      expect((adapter as any).onchainScanFromBlock(25_100_000n)).toBe(24_000_000n);
+      expect((adapter as any).taskAdmissionFloorBlock()).toBe(24_000_000n);
+    });
+
+    it('returns undefined for both scan and admission floor when no SolverNet is joined', async () => {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const adapter = new MechAdapter({ ...TEST_CONFIG } as any, makeConfigStore() as any);
+      expect((adapter as any).onchainScanFromBlock(25_100_000n)).toBeUndefined();
+      expect((adapter as any).taskAdmissionFloorBlock()).toBeUndefined();
+    });
+  });
+
   it('keeps pending evaluation solutions durable until claimTask creates a verdict request', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
