@@ -981,10 +981,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@prb/math@npm:^4.0.2":
-  version: 4.1.1
-  resolution: "@prb/math@npm:4.1.1"
-  checksum: 10c0/c338ac2d27585f25853c243cf99c356126c8ed8057bfeab7b3fd425c0fd4c903885d06f6879f8a6416a6639b338279c52e924deea6b6bff002adf02f8c1cc4b2
+"@prb/math@npm:^4.1.2":
+  version: 4.1.2
+  resolution: "@prb/math@npm:4.1.2"
+  checksum: 10c0/60b8062155e569f0dc776401b63c964b7050f3cc360c4267e62bdfc5ac580229a92a61e2a9f3eb9e49a5ea9ae86277f95d5275ad5fa5d4faa158aee9bcae222f
   languageName: node
   linkType: hard
 
@@ -2121,7 +2121,7 @@ __metadata:
     "@nomicfoundation/hardhat-verify": "npm:^3.0.18"
     "@nomicfoundation/ignition-core": "npm:^3.1.7"
     "@openzeppelin/contracts": "npm:^5.6.1"
-    "@prb/math": "npm:^4.0.2"
+    "@prb/math": "npm:^4.1.2"
     "@types/chai": "npm:^5.2.3"
     "@types/mocha": "npm:^10.0.10"
     chai: "npm:^5.3.3"
