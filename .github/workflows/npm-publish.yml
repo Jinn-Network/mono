@@ -166,7 +166,7 @@ jobs:
       # two-gate evidence — valid only during the very first transition).
       - name: Verify two-gate check-runs
         if: steps.meta.outputs.dist_tag == 'latest'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           HERMETIC_GATE_WAIVED: ${{ vars.JINN_HERMETIC_GATE_WAIVED }}
           ENVIRONMENT_SUITE_WAIVED: ${{ vars.JINN_ENVIRONMENT_SUITE_WAIVED }}
