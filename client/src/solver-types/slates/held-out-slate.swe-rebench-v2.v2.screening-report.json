@@ -1,21 +1,23 @@
 {
-  "generatedAt": "2026-06-03T19:02:25.890Z",
+  "generatedAt": "2026-06-04T23:03:42.179Z",
   "evalSemanticsVersion": "4",
   "baseCodeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "R": 3,
   "proverHarness": "claude-code",
   "proverModel": "opus",
-  "heldOut": [
-    {
-      "instance_id": "astropy__astropy-19438",
-      "repo": "astropy",
-      "baseRuns": 3
-    },
-    {
-      "instance_id": "con__nwb2bids-347_interface",
-      "repo": "con",
-      "baseRuns": 3
-    }
+  "heldOutTotal": 9,
+  "newThisRun": [
+    "deepset-ai__haystack-9322",
+    "gidgethub__gidgethub-225",
+    "iris-hep__func_adl-199",
+    "MatterMiners__tardis-361",
+    "modelcontextprotocol__python-sdk-222",
+    "twisted__towncrier-687",
+    "agronholm__anyio-1134"
+  ],
+  "carriedOver": [
+    "astropy__astropy-19438",
+    "con__nwb2bids-347_interface"
   ],
   "screened": [
     {
@@ -50,16 +52,6 @@
       "reason": "base-passes"
     },
     {
-      "instance_id": "alibaba__opensandbox-426",
-      "repo": "alibaba",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
       "instance_id": "apache__iceberg-python-3295",
       "repo": "apache",
       "basePasses": 1,
@@ -81,16 +73,6 @@
       "unscorableReason": "grade-error: swe-rebench-v2 eval could not grade the solution (patch_merge_conflict)"
     },
     {
-      "instance_id": "astropy__astropy-19438",
-      "repo": "astropy",
-      "basePasses": 0,
-      "proverPassed": true,
-      "baseRuns": 3,
-      "gradeable": true,
-      "heldOut": true,
-      "reason": "held-out"
-    },
-    {
       "instance_id": "beever-ai__beever-atlas-102",
       "repo": "beever-ai",
       "basePasses": 1,
@@ -99,56 +81,6 @@
       "gradeable": true,
       "heldOut": false,
       "reason": "base-passes"
-    },
-    {
-      "instance_id": "bvanelli__actualpy-120",
-      "repo": "bvanelli",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "Cambridge-ICCS__TCTrack-118",
-      "repo": "Cambridge-ICCS",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "canonical__charmcraft-2106",
-      "repo": "canonical",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "careamics__careamics-688",
-      "repo": "careamics",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "catalystneuro__neuroconv-1406",
-      "repo": "catalystneuro",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
     },
     {
       "instance_id": "cea-hpc__clustershell-592",
@@ -161,26 +93,6 @@
       "reason": "base-passes"
     },
     {
-      "instance_id": "celestoai__smolvm-172",
-      "repo": "celestoai",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "chaoss__augur-3512",
-      "repo": "chaoss",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
       "instance_id": "cneud__alto-tools-29",
       "repo": "cneud",
       "basePasses": 1,
@@ -189,46 +101,6 @@
       "gradeable": true,
       "heldOut": false,
       "reason": "base-passes"
-    },
-    {
-      "instance_id": "collective__icalendar-880",
-      "repo": "collective",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "con__nwb2bids-347_interface",
-      "repo": "con",
-      "basePasses": 0,
-      "proverPassed": true,
-      "baseRuns": 3,
-      "gradeable": true,
-      "heldOut": true,
-      "reason": "held-out"
-    },
-    {
-      "instance_id": "conan-io__conan-18005",
-      "repo": "conan-io",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "containers__ramalama-2487",
-      "repo": "containers",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
     },
     {
       "instance_id": "copier-org__copier-2646",
@@ -252,16 +124,6 @@
       "reason": "base-passes"
     },
     {
-      "instance_id": "CQCL__guppylang-1259",
-      "repo": "CQCL",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
       "instance_id": "cs-si__eodag-2176",
       "repo": "cs-si",
       "basePasses": 0,
@@ -270,26 +132,6 @@
       "gradeable": true,
       "heldOut": false,
       "reason": "no-headroom"
-    },
-    {
-      "instance_id": "CS-SI__eodag-1717",
-      "repo": "CS-SI",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "cubed-dev__cubed-799",
-      "repo": "cubed-dev",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
     },
     {
       "instance_id": "CWorthy-ocean__C-Star-227",
@@ -312,36 +154,6 @@
       "reason": "base-passes"
     },
     {
-      "instance_id": "dandi__dandi-cli-1584",
-      "repo": "dandi",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "DARMA-tasking__LB-analysis-framework-585",
-      "repo": "DARMA-tasking",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "dask__dask-11698",
-      "repo": "dask",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
       "instance_id": "databricks__dbt-databricks-1131",
       "repo": "databricks",
       "basePasses": 1,
@@ -352,224 +164,34 @@
       "reason": "base-passes"
     },
     {
-      "instance_id": "davep__braindrop-96",
-      "repo": "davep",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "Davidyz__VectorCode-27",
-      "repo": "Davidyz",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "deepset-ai__haystack-10029",
+      "instance_id": "deepset-ai__haystack-9322",
       "repo": "deepset-ai",
       "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
     },
     {
-      "instance_id": "delgan__loguru-1425",
-      "repo": "delgan",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "Delgan__loguru-1297",
-      "repo": "Delgan",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "deltares__hydrolib-core-1049_interface",
-      "repo": "deltares",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "destine-climate-dt__aqua-2768",
-      "repo": "destine-climate-dt",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "DiamondLightSource__mx-bluesky-1519",
-      "repo": "DiamondLightSource",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "discos__srt-single-dish-tools-268",
-      "repo": "discos",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "dpkp__kafka-python-2548",
-      "repo": "dpkp",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "DS4SD__docling-824",
-      "repo": "DS4SD",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "dstackai__gpuhunt-197",
-      "repo": "dstackai",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "dstl__Stone-Soup-1167",
-      "repo": "dstl",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "ej2__python-quickbooks-381",
-      "repo": "ej2",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "equinor__ert-11988",
-      "repo": "equinor",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "ethereum__eth-account-317",
-      "repo": "ethereum",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "ets-labs__python-dependency-injector-852",
+      "instance_id": "ets-labs__python-dependency-injector-886",
       "repo": "ets-labs",
-      "basePasses": 0,
+      "basePasses": 1,
       "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
+      "baseRuns": 1,
+      "gradeable": true,
       "heldOut": false,
-      "reason": "not-gradeable"
+      "reason": "base-passes"
     },
     {
-      "instance_id": "expectedparrot__edsl-2151",
-      "repo": "expectedparrot",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "fabfuel__circuitbreaker-67",
-      "repo": "fabfuel",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "facelessuser__pymdown-extensions-2576",
+      "instance_id": "facelessuser__pymdown-extensions-2651",
       "repo": "facelessuser",
-      "basePasses": 0,
+      "basePasses": 1,
       "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
+      "baseRuns": 1,
+      "gradeable": true,
       "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "feder-observatory__stellarphot-519",
-      "repo": "feder-observatory",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
-    },
-    {
-      "instance_id": "fox-it__dissect.cstruct-120",
-      "repo": "fox-it",
-      "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
+      "reason": "base-passes"
     },
     {
       "instance_id": "fsspec__universal_pathlib-395",
@@ -582,44 +204,425 @@
       "reason": "no-headroom"
     },
     {
-      "instance_id": "genericmappingtools__pygmt-4342",
-      "repo": "genericmappingtools",
+      "instance_id": "gidgethub__gidgethub-225",
+      "repo": "gidgethub",
       "basePasses": 0,
-      "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
-      "heldOut": false,
-      "reason": "not-gradeable"
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
     },
     {
-      "instance_id": "GenericMappingTools__pygmt-4104",
-      "repo": "GenericMappingTools",
-      "basePasses": 0,
+      "instance_id": "googleapis__python-api-core-821",
+      "repo": "googleapis",
+      "basePasses": 1,
       "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
+      "baseRuns": 1,
+      "gradeable": true,
       "heldOut": false,
-      "reason": "not-gradeable"
+      "reason": "base-passes"
     },
     {
-      "instance_id": "geopandas__geopandas-3591",
-      "repo": "geopandas",
+      "instance_id": "hgrecco__pint-pandas-287",
+      "repo": "hgrecco",
       "basePasses": 0,
       "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
+      "baseRuns": 1,
+      "gradeable": true,
       "heldOut": false,
-      "reason": "not-gradeable"
+      "reason": "base-unscorable",
+      "unscorableReason": "grade-error: swe-rebench-v2 eval could not grade the solution (patch_merge_conflict)"
     },
     {
-      "instance_id": "geopython__pygeoapi-1923",
-      "repo": "geopython",
+      "instance_id": "hiero-ledger__hiero-sdk-python-1914_interface",
+      "repo": "hiero-ledger",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "icloud-photos-downloader__icloud_photos_downloader-1060",
+      "repo": "icloud-photos-downloader",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "iluvcapra__pycmx-12",
+      "repo": "iluvcapra",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "instructlab__sdg-484",
+      "repo": "instructlab",
       "basePasses": 0,
       "proverPassed": null,
-      "baseRuns": 0,
-      "gradeable": false,
+      "baseRuns": 1,
+      "gradeable": true,
       "heldOut": false,
-      "reason": "not-gradeable"
+      "reason": "base-unscorable",
+      "unscorableReason": "grade-error: insufficient disk for swe-rebench eval: 39.9 GB free, need ≥ 40.0 GB"
+    },
+    {
+      "instance_id": "intel__code-base-investigator-178",
+      "repo": "intel",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "iris-hep__func_adl-199",
+      "repo": "iris-hep",
+      "basePasses": 0,
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
+    },
+    {
+      "instance_id": "isledecomp__reccmp-142",
+      "repo": "isledecomp",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "jawah__niquests-277",
+      "repo": "jawah",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "jlowin__fastmcp-1425",
+      "repo": "jlowin",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "grade-error: swe-rebench-v2 eval could not grade the solution (patch_does_not_apply)"
+    },
+    {
+      "instance_id": "JonathonReinhart__scuba-269",
+      "repo": "JonathonReinhart",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "MatterMiners__tardis-361",
+      "repo": "MatterMiners",
+      "basePasses": 0,
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
+    },
+    {
+      "instance_id": "mempalace__mempalace-1004",
+      "repo": "mempalace",
+      "basePasses": 0,
+      "proverPassed": false,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "no-headroom"
+    },
+    {
+      "instance_id": "modelcontextprotocol__python-sdk-222",
+      "repo": "modelcontextprotocol",
+      "basePasses": 0,
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
+    },
+    {
+      "instance_id": "movingpandas__movingpandas-444",
+      "repo": "movingpandas",
+      "basePasses": 0,
+      "proverPassed": false,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "no-headroom"
+    },
+    {
+      "instance_id": "nesquena__hermes-webui-1818",
+      "repo": "nesquena",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "harness-error: [claude-code-learner] harvestOutput: typed payload /var/folders/2y/y3bmqdw55kx2jhq804chv76m0000gn/T/jinn-eval-work-Fv5BLa/.execute/solution-payload.json failed swe-rebench-v2.v1/solution validation. U"
+    },
+    {
+      "instance_id": "networkx__networkx-7804",
+      "repo": "networkx",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "oemof__tespy-921",
+      "repo": "oemof",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "python-scim__scim2-models-139_interface",
+      "repo": "python-scim",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 2,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "python-wheel-build__fromager-1106",
+      "repo": "python-wheel-build",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "qBraid__pyqasm-120",
+      "repo": "qBraid",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 2,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "raullenchai__rapid-mlx-289",
+      "repo": "raullenchai",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 2,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "RDFLib__pySHACL-285",
+      "repo": "RDFLib",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "stanfordnlp__dspy-9478_interface",
+      "repo": "stanfordnlp",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "tobymao__sqlglot-4563",
+      "repo": "tobymao",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "Toloka__crowd-kit-128",
+      "repo": "Toloka",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "twisted__towncrier-687",
+      "repo": "twisted",
+      "basePasses": 0,
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
+    },
+    {
+      "instance_id": "ucfopen__canvasapi-716",
+      "repo": "ucfopen",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "unionai-oss__pandera-1898",
+      "repo": "unionai-oss",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "vprusso__toqito-1484_interface",
+      "repo": "vprusso",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "grade-error: swe-rebench-v2 eval could not grade the solution (patch_merge_conflict)"
+    },
+    {
+      "instance_id": "zopefoundation__Zope-1243",
+      "repo": "zopefoundation",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "agronholm__anyio-1134",
+      "repo": "agronholm",
+      "basePasses": 0,
+      "proverPassed": true,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": true,
+      "reason": "held-out"
+    },
+    {
+      "instance_id": "databricks__dbt-databricks-1428",
+      "repo": "databricks",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 2,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "grade-error: swe-rebench-v2 eval could not grade the solution (patch_does_not_apply)"
+    },
+    {
+      "instance_id": "hiero-ledger__hiero-sdk-python-2007_interface",
+      "repo": "hiero-ledger",
+      "basePasses": 1,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-passes"
+    },
+    {
+      "instance_id": "isledecomp__reccmp-166",
+      "repo": "isledecomp",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 3,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "no-headroom",
+      "unscorableReason": "harness: agent produced no patch"
+    },
+    {
+      "instance_id": "movingpandas__movingpandas-447",
+      "repo": "movingpandas",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "harness: agent produced no patch"
+    },
+    {
+      "instance_id": "tobymao__sqlglot-4618",
+      "repo": "tobymao",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "harness: agent produced no patch"
+    },
+    {
+      "instance_id": "tobymao__sqlglot-4643",
+      "repo": "tobymao",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "harness: agent produced no patch"
+    },
+    {
+      "instance_id": "tobymao__sqlglot-7479",
+      "repo": "tobymao",
+      "basePasses": 0,
+      "proverPassed": null,
+      "baseRuns": 1,
+      "gradeable": true,
+      "heldOut": false,
+      "reason": "base-unscorable",
+      "unscorableReason": "harness: agent produced no patch"
     }
   ]
 }

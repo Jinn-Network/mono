@@ -3,10 +3,17 @@
   "schemaVersion": "held-out-slate.v1",
   "solverType": "swe-rebench-v2.v1",
   "version": "v2",
-  "generatedAt": "2026-06-03T19:02:25.890Z",
+  "generatedAt": "2026-06-04T23:03:42.179Z",
   "instanceIds": [
+    "agronholm__anyio-1134",
     "astropy__astropy-19438",
-    "con__nwb2bids-347_interface"
+    "con__nwb2bids-347_interface",
+    "deepset-ai__haystack-9322",
+    "gidgethub__gidgethub-225",
+    "iris-hep__func_adl-199",
+    "MatterMiners__tardis-361",
+    "modelcontextprotocol__python-sdk-222",
+    "twisted__towncrier-687"
   ],
-  "hash": "sha256:ee4e5a0f783c481781c150f4e0308dc4e6aa47d2a9a192eaa6e618620e8a7d8b"
+  "hash": "sha256:34bb8bfa5e85933e38706551d4afaec3adf4a6ad1c1c0e4d2132f2c47d43d039"
 }
