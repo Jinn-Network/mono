@@ -19,7 +19,7 @@
     "serialize-javascript": "^7.0.3"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-ethers": "^4.0.12",
+    "@nomicfoundation/hardhat-ethers": "^4.0.13",
     "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.9",
     "@nomicfoundation/hardhat-ignition": "^3.1.6",
     "@nomicfoundation/hardhat-ignition-ethers": "^3.1.5",

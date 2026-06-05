@@ -630,17 +630,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-ethers@npm:^4.0.12":
-  version: 4.0.12
-  resolution: "@nomicfoundation/hardhat-ethers@npm:4.0.12"
+"@nomicfoundation/hardhat-ethers@npm:^4.0.13":
+  version: 4.0.13
+  resolution: "@nomicfoundation/hardhat-ethers@npm:4.0.13"
   dependencies:
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.13"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
     "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
     ethereum-cryptography: "npm:^2.2.1"
     ethers: "npm:^6.14.0"
   peerDependencies:
-    hardhat: ^3.4.0
-  checksum: 10c0/943834b816bf6e13cb199496af66641c8cc26fb83d1490b8a951f0054f2737a41a3d060e6b8e9ecab2b0ee07a025663f58acd20fbc94cbd9b9144d14ec5aff65
+    hardhat: ^3.8.0
+  checksum: 10c0/d8c76b46af08c70cb5dbadc237fa6417502a474860b36a2d7e49392d46d22f886d078aec8245d7eb5906d8b9897d6296e89afc4a14c19be979959ab1eb2b2a62
   languageName: node
   linkType: hard
 
@@ -2109,7 +2109,7 @@ __metadata:
   dependencies:
     "@account-abstraction/contracts": "npm:^0.8.0"
     "@gnosis.pm/safe-contracts": "npm:^1.3.0"
-    "@nomicfoundation/hardhat-ethers": "npm:^4.0.12"
+    "@nomicfoundation/hardhat-ethers": "npm:^4.0.13"
     "@nomicfoundation/hardhat-ethers-chai-matchers": "npm:^3.0.9"
     "@nomicfoundation/hardhat-ignition": "npm:^3.1.6"
     "@nomicfoundation/hardhat-ignition-ethers": "npm:^3.1.5"
