@@ -604,6 +604,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@nomicfoundation/hardhat-errors@npm:^3.0.15":
+  version: 3.0.15
+  resolution: "@nomicfoundation/hardhat-errors@npm:3.0.15"
+  dependencies:
+    "@nomicfoundation/hardhat-utils": "npm:^4.1.3"
+  checksum: 10c0/a9c488e00147ef1f70b57d8d890a185e13a9deafa2e219bd1272c728a61f189a8db216aa409a20be68e7ad3dff93349e52b63550cad0d6744eb28563d6545912
+  languageName: node
+  linkType: hard
+
 "@nomicfoundation/hardhat-ethers-chai-matchers@npm:^3.0.9":
   version: 3.0.9
   resolution: "@nomicfoundation/hardhat-ethers-chai-matchers@npm:3.0.9"
@@ -816,6 +825,23 @@ __metadata:
     lodash-es: "npm:4.17.21"
     ndjson: "npm:2.0.0"
   checksum: 10c0/5a484040f7e17f1b12f7d278e2f6ab50d8e5e26ef6be7979ac6d6f09581de9e8661454d5c3728ec082a68c6cf2ffd26413c40d6d3d83dba505c112778d9d3ce7
+  languageName: node
+  linkType: hard
+
+"@nomicfoundation/ignition-core@npm:^3.1.7":
+  version: 3.1.7
+  resolution: "@nomicfoundation/ignition-core@npm:3.1.7"
+  dependencies:
+    "@ethersproject/address": "npm:5.6.1"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
+    "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
+    "@nomicfoundation/solidity-analyzer": "npm:^0.1.1"
+    cbor2: "npm:^1.9.0"
+    ethers: "npm:^6.14.0"
+    immer: "npm:10.0.2"
+    lodash-es: "npm:4.17.21"
+    ndjson: "npm:2.0.0"
+  checksum: 10c0/814af6b9fe825cccb5175956532efb115e7586b9706502c36e13ed36bc5da1b101796de3ac292e8c064b2c9857ddc841544470dd41a0acd3d44919acf996f2f5
   languageName: node
   linkType: hard
 
@@ -2093,7 +2119,7 @@ __metadata:
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "npm:^3.0.6"
     "@nomicfoundation/hardhat-typechain": "npm:^3.1.0"
     "@nomicfoundation/hardhat-verify": "npm:^3.0.18"
-    "@nomicfoundation/ignition-core": "npm:^3.1.6"
+    "@nomicfoundation/ignition-core": "npm:^3.1.7"
     "@openzeppelin/contracts": "npm:^5.6.1"
     "@prb/math": "npm:^4.0.2"
     "@types/chai": "npm:^5.2.3"
