@@ -155,7 +155,7 @@
     "viem": "^2.0.0",
     "ws": "^8.20.0",
     "yaml": "^2.8.4",
-    "zod": "^3.22.0"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "@coinbase/cdp-sdk": "^1.48.2"
