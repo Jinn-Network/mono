@@ -654,6 +654,7 @@ describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
     const { probeCodexDoctor: probe } = await import(
       '../../src/api/codex-doctor-endpoint.js'
     );
+    vi.restoreAllMocks();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     execVersion('codex-cli 0.200.0\n');
