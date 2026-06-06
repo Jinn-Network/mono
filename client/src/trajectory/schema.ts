@@ -8,7 +8,7 @@
  * redactionManifest signed alongside the spans.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/);
 

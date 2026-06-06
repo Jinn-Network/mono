@@ -3,7 +3,7 @@
  * jinn.execution.v1 envelopes.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 const SnapshotSchema = z.object({
   capturedAt: z.number().int(),

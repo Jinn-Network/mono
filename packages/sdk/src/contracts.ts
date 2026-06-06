@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { OutputArtifact, RationaleEntry, Solution } from './types.js';
 import { PredictionV1TaskSchema, type PredictionV1Task } from './prediction-v1.js';
 import {

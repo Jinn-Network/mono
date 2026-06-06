@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const WindowSchema = z.object({
   startTs: z.number().int(),

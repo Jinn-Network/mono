@@ -23,7 +23,7 @@ import type { Hono } from 'hono';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { getChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
