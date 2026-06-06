@@ -240,7 +240,7 @@ __metadata:
     better-sqlite3: "npm:^11.0.0"
     tsx: "npm:^4.22.4"
     typescript: "npm:^6.0.3"
-    viem: "npm:^2.51.3"
+    viem: "npm:^2.52.2"
     vitest: "npm:^4.1.8"
   bin:
     jinn-claim-relayer: ./dist/index.js
@@ -1224,9 +1224,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.25":
-  version: 0.14.25
-  resolution: "ox@npm:0.14.25"
+"ox@npm:0.14.29":
+  version: 0.14.29
+  resolution: "ox@npm:0.14.29"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -1241,7 +1241,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/9e00a0528333915ac20bce2300eff77b3c782d67c93e533e4a075e0c4b2bbfea1851938240eeca518cb0eeca153575c593cd31aca83ced07b69ca25dba72953f
+  checksum: 10c0/bf36b2cd83d67bf43893b73876630554d0bd1748c7ad769607ceb8fe1aaf6afa6f9411a31e7e815de107a035811ebfa790c0af591aa403e363b83a1896acfc7b
   languageName: node
   linkType: hard
 
@@ -1635,9 +1635,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.51.3":
-  version: 2.51.3
-  resolution: "viem@npm:2.51.3"
+"viem@npm:^2.52.2":
+  version: 2.52.2
+  resolution: "viem@npm:2.52.2"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1645,14 +1645,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.25"
+    ox: "npm:0.14.29"
     ws: "npm:8.20.1"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/df7947adf57fe812a8937e420f6ba799f1ed09eccf6a3595c7139f4376bb91f5863d358e9d0252503158a08fd420e0ea1cc61fd9bf66e5a03909ac1bea43de05
+  checksum: 10c0/5a94c8170cce7f9dafd1b21da4e9dd6c7782600ada7b02db87cf721a2db5b81e8c13476a5e75fcbd4baf852dd9738254e015482076581cb7ce33059e04f57a02
   languageName: node
   linkType: hard
 
