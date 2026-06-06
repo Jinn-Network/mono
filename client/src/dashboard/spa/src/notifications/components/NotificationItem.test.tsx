@@ -74,12 +74,12 @@ describe('NotificationItem', () => {
   });
 
   it('tints the row per severity via a left-border colour token (closes #444)', () => {
-    const cases: Array<{ severity: OperatorNotification['severity']; expectedToken: string }> = [
-      { severity: 'blocking', expectedToken: '--severity-blocking-fg' },
-      { severity: 'warning', expectedToken: '--severity-warning-fg' },
-      { severity: 'info', expectedToken: '--severity-info-fg' },
+    const cases: Array<{ severity: OperatorNotification['severity']; expectedClass: string }> = [
+      { severity: 'blocking', expectedClass: 'border-l-[var(--severity-blocking-fg)]' },
+      { severity: 'warning', expectedClass: 'border-l-[var(--severity-warning-fg)]' },
+      { severity: 'info', expectedClass: 'border-l-[var(--severity-info-fg)]' },
     ];
-    for (const { severity, expectedToken } of cases) {
+    for (const { severity, expectedClass } of cases) {
       const notice: OperatorNotification = {
         kind: 'restart_required',
         severity,
@@ -91,7 +91,7 @@ describe('NotificationItem', () => {
       expect(li?.getAttribute('data-severity')).toBe(severity);
       // The shadcn-aligned implementation tints the left border with the
       // severity colour token via a Tailwind arbitrary value.
-      expect(li?.className).toContain(`border-l-[var(${expectedToken})]`);
+      expect(li?.className).toContain(expectedClass);
       unmount();
     }
   });
