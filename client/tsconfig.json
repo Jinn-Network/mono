@@ -11,6 +11,7 @@
     "declaration": true,
     "sourceMap": true,
     "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "paths": {
       "@test/*": ["test/_support/*"],
       "@/*": ["src/*"]
