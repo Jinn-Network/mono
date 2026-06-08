@@ -6,6 +6,7 @@ import {
   type PublicClient,
   type WalletClient,
   type Log,
+  type TransactionReceipt,
 } from 'viem';
 import {
   MECH_MARKETPLACE_ABI,
@@ -31,6 +32,8 @@ import {
 
 const EVICTED_STAKING_STATE = 2;
 const restakeLocks = new Map<string, Promise<void>>();
+const TASK_CREATED_RECOVERY_WINDOW_BLOCKS = 64n;
+const TASK_CREATED_SUBMIT_ATTEMPTS = 3;
 
 const TASK_COORDINATOR_ABI = [
   {
@@ -240,48 +243,108 @@ export async function submitTask(
     solutionMaxDeliveryRateWei * BigInt(policy.maxClaims) +
     verdictMaxDeliveryRateWei * BigInt(policy.maxClaims) * BigInt(policy.evaluationPolicy.requiredVerdicts || 1);
 
-  const txHash = await withEvictionRecovery(
-    publicClient,
-    evictionRecovery,
-    'createTask',
-    () => executeSafeTransaction(publicClient, walletClient, {
-      safeAddress,
-      to: routerAddress,
-      value: taskBudget,
-      data: calldata,
-    }),
-  );
-
-  const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
-    onRetry: ({ attempt, message }) => {
-      console.error(`[router] wait restoration receipt retry ${attempt}: ${message}`);
-    },
-  });
-
-  let taskId: string | undefined;
-  let blockNumber: number | undefined;
-  for (const log of receipt.logs) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < TASK_CREATED_SUBMIT_ATTEMPTS; attempt++) {
     try {
-      const decoded = decodeEventLog({
-        abi: JINN_ROUTER_ABI,
-        data: log.data,
-        topics: log.topics,
+      const txHash = await withEvictionRecovery(
+        publicClient,
+        evictionRecovery,
+        'createTask',
+        () => executeSafeTransaction(publicClient, walletClient, {
+          safeAddress,
+          to: routerAddress,
+          value: taskBudget,
+          data: calldata,
+        }),
+      );
+
+      const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
+        onRetry: ({ attempt: waitAttempt, message }) => {
+          console.error(`[router] wait restoration receipt retry ${waitAttempt}: ${message}`);
+        },
       });
-      if (decoded.eventName === 'TaskCreated') {
-        const args = decoded.args as { taskId: bigint };
-        taskId = String(args.taskId);
-        blockNumber = log.blockNumber != null ? Number(log.blockNumber) : undefined;
+
+      const created =
+        taskCreatedFromLogs(receipt.logs, safeAddress, taskCidDigest, manifestDigest) ??
+        await findTaskCreatedNearReceipt(
+          publicClient,
+          routerAddress,
+          safeAddress,
+          taskCidDigest,
+          manifestDigest,
+          receipt,
+        );
+      if (created) {
+        if (created.transactionHash && created.transactionHash.toLowerCase() !== txHash.toLowerCase()) {
+          console.error(
+            `[router] createTask recovered TaskCreated taskId=${created.taskId} ` +
+            `from tx=${created.transactionHash} after receipt tx=${txHash} had no matching event`,
+          );
+        }
+        return {
+          taskId: created.taskId,
+          txHash: (created.transactionHash ?? txHash) as Hex,
+          receiptLogCount: receipt.logs.length,
+          blockNumber: created.blockNumber,
+        };
       }
-    } catch {
-      // Not our event
+
+      throw new Error(`No TaskCreated event returned from router tx=${txHash}`);
+    } catch (err) {
+      lastError = err;
+      if (!isRecoverableTaskSubmitError(err) || attempt >= TASK_CREATED_SUBMIT_ATTEMPTS - 1) {
+        throw err;
+      }
+      console.error(`[router] createTask retry ${attempt + 1}: ${flattenErrorMessage(err)}`);
+      await backoffDelay(attempt, 1_000, 12_000);
     }
   }
 
-  if (!taskId) {
-    throw new Error(`No TaskCreated event returned from router tx=${txHash}`);
-  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
 
-  return { taskId, txHash, receiptLogCount: receipt.logs.length, blockNumber };
+function isRecoverableTaskSubmitError(err: unknown): boolean {
+  if (isRecoverableTransactionError(err)) return true;
+  return flattenErrorMessage(err).includes('No TaskCreated event returned from router tx=');
+}
+
+function sameHex(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+function taskCreatedFromLogs(
+  logs: Log[],
+  creator: Address,
+  taskCidDigest: Hex,
+  manifestDigest: Hex,
+): DecodedTaskCreated | null {
+  return decodeTaskCreatedLogs(logs).find((event) =>
+    sameHex(event.creator, creator) &&
+    sameHex(event.taskCidDigest, taskCidDigest) &&
+    sameHex(event.manifestDigest, manifestDigest)
+  ) ?? null;
+}
+
+async function findTaskCreatedNearReceipt(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  creator: Address,
+  taskCidDigest: Hex,
+  manifestDigest: Hex,
+  receipt: TransactionReceipt,
+): Promise<DecodedTaskCreated | null> {
+  const receiptBlock = receipt.blockNumber ?? await publicClient.getBlockNumber();
+  const toBlock = await publicClient.getBlockNumber();
+  const fromBlock = receiptBlock > TASK_CREATED_RECOVERY_WINDOW_BLOCKS
+    ? receiptBlock - TASK_CREATED_RECOVERY_WINDOW_BLOCKS
+    : 0n;
+  const logs = await publicClient.getLogs({
+    address: routerAddress,
+    fromBlock,
+    toBlock,
+  });
+
+  return taskCreatedFromLogs(logs, creator, taskCidDigest, manifestDigest);
 }
 
 export interface RouterTaskPolicy {
