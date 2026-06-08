@@ -305,23 +305,25 @@ jobs:
           # is needed; a gap the faucet can't keep up with is reported as
           # infra-blocked.
           #
-          # BOTH ops must be healthy+funded: op-b (solver) AND op-c (creator/
-          # evaluator). op-c posts the task + settles the verdict, so a dry op-c
-          # would stall the loop and misreport as a product-red. Preflight each;
-          # if EITHER is infra-blocked (exit 75) the whole suite is infra-blocked
-          # (not product) — the publish guard still blocks the cut, honestly.
+          # BOTH canonical tier ops must be healthy+funded: op-b (solver) AND
+          # op-a (creator/evaluator). Preflight the same gold names that T2/T3
+          # spawn, otherwise --repair fixes a throwaway substrate and the suite
+          # still runs with stale op-a/op-b state. op-a also needs evaluator
+          # substrate checks so T3 cannot spend 25 minutes before discovering
+          # swe-rebench-v2-evaluator was never enabled.
           INFRA=false
-          preflight_one() {  # $1=client dir, $2=op name, $3=preflight json path
+          preflight_one() {  # $1=client dir, $2=op name, $3=preflight json path, $4...=extra args
             yarn tsx scripts/release/warm-operator-preflight.ts \
               --op-name "$2" \
               --jinn-client-dir "$1" \
               --repair \
+              "${@:4}" \
               | tee "$3"
             return "${PIPESTATUS[0]}"
           }
-          preflight_one "${HOME}/.jinn-client" warm-operator "${RUNNER_TEMP}/preflight.json"
+          preflight_one "${HOME}/.jinn-client" op-b "${RUNNER_TEMP}/preflight.json"
           CODE_A=$?
-          preflight_one "${HOME}/.jinn-client-b" warm-operator-b "${RUNNER_TEMP}/preflight-b.json"
+          preflight_one "${HOME}/.jinn-client-b" op-a "${RUNNER_TEMP}/preflight-b.json" --evaluator
           CODE_B=$?
           set -e
           echo "preflight_exit_a=${CODE_A}" >> "${GITHUB_OUTPUT}"

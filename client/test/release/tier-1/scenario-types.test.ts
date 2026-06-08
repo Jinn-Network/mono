@@ -128,6 +128,12 @@ describe('classifyFailure', () => {
     expect(classifyFailure(new Error('running an install might help'))).toBe('flake-infra');
   });
 
+  it('classifies Tier 3 evaluator readiness drift as flake-infra', () => {
+    expect(classifyFailure(new Error(
+      'Tier 3 evaluator harness readiness infra-blocked on op-a: swe-rebench-v2 evaluator not enabled',
+    ))).toBe('flake-infra');
+  });
+
   it('#1018: does NOT mask a real contracts compile error as flake-infra', () => {
     // A genuine solc/Hardhat compile error (no install-missing signal) must stay
     // real-bug — the precision guard so the build-setup pattern is not a blanket

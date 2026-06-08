@@ -1,4 +1,6 @@
 import * as net from 'node:net';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon.js';
 import { goldPath } from '../../../scripts/release/substrate-paths.js';
 
@@ -80,6 +82,82 @@ export interface Tier3Handle {
   teardown: () => Promise<void>;
 }
 
+interface HarnessReadinessEntry {
+  harnessName?: string;
+  ready?: boolean;
+  reason?: string;
+  nextStep?: {
+    cli?: string;
+    description?: string;
+    url?: string;
+  };
+}
+
+export interface WaitForHarnessReadyOptions {
+  opName: string;
+  apiPort: number;
+  harnessName: string;
+  uiToken: string;
+  timeoutMs?: number;
+  intervalMs?: number;
+}
+
+async function readUiTokenForOp(opName: string): Promise<string> {
+  const tokenPath = path.join(resolveGoldDaemonHome(opName), '.jinn-client', 'ui-token');
+  try {
+    return (await fs.readFile(tokenPath, 'utf-8')).trim();
+  } catch (err) {
+    throw new Error(
+      `Tier 3 evaluator harness readiness infra-blocked on ${opName}: ` +
+        `cannot read UI token at ${tokenPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function readinessFailureMessage(opName: string, entry: HarnessReadinessEntry): string {
+  const next = entry.nextStep?.cli ?? entry.nextStep?.description ?? entry.nextStep?.url;
+  return [
+    `Tier 3 evaluator harness readiness infra-blocked on ${opName}: ${entry.reason ?? 'not ready'}`,
+    next ? `Next: ${next}` : null,
+  ].filter(Boolean).join('. ');
+}
+
+export async function waitForHarnessReady(opts: WaitForHarnessReadyOptions): Promise<HarnessReadinessEntry> {
+  const timeoutMs = opts.timeoutMs ?? 45_000;
+  const intervalMs = opts.intervalMs ?? 2_000;
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus = 'not checked';
+  let lastBody = '';
+
+  while (Date.now() < deadline) {
+    const res = await fetch(`http://127.0.0.1:${opts.apiPort}/v1/harnesses/${opts.harnessName}/readiness`, {
+      headers: { 'x-jinn-ui-token': opts.uiToken },
+    });
+    lastStatus = `${res.status}`;
+    lastBody = await res.text().catch(() => '');
+
+    if (res.status === 200) {
+      const entry = JSON.parse(lastBody) as HarnessReadinessEntry;
+      if (entry.ready === true) return entry;
+      throw new Error(readinessFailureMessage(opts.opName, entry));
+    }
+    if (res.status !== 404 && res.status !== 503) {
+      throw new Error(
+        `Tier 3 evaluator harness readiness infra-blocked on ${opts.opName}: ` +
+          `/v1/harnesses/${opts.harnessName}/readiness returned ${res.status}: ${lastBody.slice(0, 300)}`,
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+
+  throw new Error(
+    `Tier 3 evaluator harness readiness infra-blocked on ${opts.opName}: ` +
+      `readiness endpoint did not populate within ${timeoutMs}ms ` +
+      `(last status ${lastStatus}: ${lastBody.slice(0, 300)})`,
+  );
+}
+
 export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3Handle> {
   // 1. Daily-driver mutex check. Either mode refuses to run while the daily
   // driver holds a substrate-shared port — we never auto-SIGTERM from here
@@ -121,8 +199,18 @@ export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3
       readyTimeoutMs: 60000,           // real chain warm-up may be slower than fork
       logDir,
     });
+    const evaluatorOp = producer;
+    await waitForHarnessReady({
+      opName: evaluatorOp,
+      apiPort: daemons.daemons[evaluatorOp]!.apiPort,
+      harnessName: 'swe-rebench-v2-evaluator',
+      uiToken: await readUiTokenForOp(evaluatorOp),
+    });
   } catch (err) {
-    throw new Error(`Tier 3 daemon spawn failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (daemons) {
+      try { await daemons.teardown(); } catch { /* best-effort cleanup after setup failure */ }
+    }
+    throw new Error(`Tier 3 daemon setup failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   let torn = false;

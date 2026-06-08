@@ -74,6 +74,10 @@ const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
       /node_modules state file/i,
       /running an install might help/i,
       /findPackageLocation/i,
+      // ── release substrate readiness drift: T3 uses a persistent warm
+      // evaluator operator. A missing local harness setup is an environment
+      // blocker, not a candidate-code regression.
+      /Tier 3 evaluator harness readiness infra-blocked/i,
     ],
   },
   {
