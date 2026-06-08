@@ -35,5 +35,7 @@ jobs:
       # separate (deferred) job per the migration plan.
       # `compile`/`test` are stable script NAMES; their bodies change HH2->HH3.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn compile
       - run: yarn test

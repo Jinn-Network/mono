@@ -27,6 +27,8 @@ jobs:
       # fork to verify the helpers work. The test/e2e/* scripts that also need
       # anvil are excluded by vitest config and don't run under `yarn test`.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn typecheck
       # Late-mount lint: blocks app.METHOD(...) outside the startApiServer
       # call graph. Catches the Hono "matcher is already built" crash class

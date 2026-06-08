@@ -179,6 +179,8 @@ jobs:
       # by the top-up path. Required just like CI / npm-publish.
       - if: steps.resolve.outputs.skip != 'true'
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
 
       # The `claude-code` harness spawns the `claude` CLI as a subprocess (§8) —
       # install it globally so the daemon can find it on PATH.

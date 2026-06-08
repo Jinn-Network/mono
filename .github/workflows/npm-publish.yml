@@ -67,6 +67,8 @@ jobs:
       # tests spawn a local Anvil fork and fail with `spawn anvil ENOENT`
       # unless Foundry is installed.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
 
       - name: Resolve publish metadata
         id: meta
