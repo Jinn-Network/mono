@@ -11,6 +11,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
+  isNonceTooLowError,
   type TxSubmissionLedger,
   withNonceLedger,
   withRecoverableRetry,
@@ -150,6 +151,10 @@ async function executeSafeTransactionInner(
           ...feeResult.overrides,
         });
       } catch (writeErr) {
+        if (isNonceTooLowError(writeErr)) {
+          const refreshed = await nonceLedger.refreshNonce();
+          console.error(`[safe/viem] execTransaction refreshed pinned nonce -> ${refreshed}`);
+        }
         // viem pre-flight gas estimation may revert with GS013 when the inner
         // call would fail. Decode the inner reason so callers (and tx-retry)
         // can distinguish self-already-claimed from lost-race from transient.
