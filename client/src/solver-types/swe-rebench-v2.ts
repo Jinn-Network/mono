@@ -39,6 +39,8 @@ import {
   VETTED_POOL_REF_ELIGIBILITY_KEY,
   createVettedPoolArtifactRef,
   exportScorableVettedPoolArtifact,
+  excludeFromVettedPoolArtifact,
+  shouldRepublishVettedPool,
   hashVettedPoolArtifact,
   loadVettedPoolArtifactScorableEntries,
   readVettedPoolArtifactPublication,
@@ -319,6 +321,9 @@ async function resolvePublishedVettedPool(args: {
   nowIso: string;
   ipfsRegistryUrl: string;
   upload: typeof uploadToIpfs;
+  // Held-out exam instances (union of active slate versions). Excluded from the
+  // PUBLISHED artifact so the shared substrate never lists them (#986).
+  heldOutIds: ReadonlySet<string>;
 }): Promise<PublishedVettedPool> {
   if (!args.manifestCid) {
     return { scorableIds: null, artifactRef: null, mode: 'no-manifest' };
@@ -334,19 +339,19 @@ async function resolvePublishedVettedPool(args: {
   if (existing) {
     const scorable = await args.store.getScorableEntries(EVAL_SEMANTICS_VERSION);
     const validatedNewer = scorable !== null && scorable.updatedAt > existing.updatedAt;
-    if (!validatedNewer) {
-      return {
-        scorableIds: loadVettedPoolArtifactScorableEntries(existing.artifact).ids,
-        artifactRef: existing.ref,
-        mode: 'published',
-      };
+    const existingIds = loadVettedPoolArtifactScorableEntries(existing.artifact).ids;
+    if (!shouldRepublishVettedPool({ existingIds, heldOutIds: args.heldOutIds, validatedNewer })) {
+      return { scorableIds: existingIds, artifactRef: existing.ref, mode: 'published' };
     }
     priorSize = existing.artifact.entries.length;
   }
 
-  const artifact = await exportScorableVettedPoolArtifact(args.store, EVAL_SEMANTICS_VERSION, {
+  const fullArtifact = await exportScorableVettedPoolArtifact(args.store, EVAL_SEMANTICS_VERSION, {
     generatedAt: args.nowIso,
   });
+  // Drop the held-out exam from the artifact BEFORE hashing/uploading, so the
+  // published substrate (and anyone recovering their pool from it) can't post it.
+  const artifact = fullArtifact ? excludeFromVettedPoolArtifact(fullArtifact, args.heldOutIds) : null;
   if (!artifact || artifact.entries.length === 0) {
     return { scorableIds: null, artifactRef: null, mode: 'no-publication' };
   }
@@ -603,6 +608,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
           process.env['JINN_IPFS_REGISTRY_URL'] ??
           DEFAULT_IPFS_REGISTRY_URL,
         upload: uploadToIpfs,
+        heldOutIds: loadActiveHeldOutSlateIds(SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS),
       }).catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         lastError = {
