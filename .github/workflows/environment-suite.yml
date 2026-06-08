@@ -515,12 +515,17 @@ jobs:
         if: always()
         working-directory: ${{ github.workspace }}
         run: |
-          shopt -s nullglob
-          for f in "${RUNNER_TEMP}"/env-suite/*.log "${RUNNER_TEMP}"/preflight.json "${RUNNER_TEMP}"/preflight-b.json; do
+          shopt -s globstar nullglob
+          for f in \
+            "${RUNNER_TEMP}"/env-suite/*.log \
+            "${RUNNER_TEMP}"/preflight.json \
+            "${RUNNER_TEMP}"/preflight-b.json \
+            client/tier-2-evidence/**/* \
+            client/tier-3-evidence/**/*; do
             [ -f "$f" ] || continue
             sed -i -E 's#https?://[^[:space:]"'"'"']+#<redacted-url>#g' "$f"
           done
-          echo "scrubbed URLs from env-suite evidence logs"
+          echo "scrubbed URLs from env-suite evidence logs and detailed tier evidence"
 
       # Surface the raw (URL-scrubbed) scenario logs so a reviewer can step through a red.
       - name: Upload env-suite evidence
@@ -533,5 +538,7 @@ jobs:
             ${{ runner.temp }}/preflight.json
             ${{ runner.temp }}/preflight-b.json
             ${{ runner.temp }}/environment-suite-verdict.json
+            ${{ github.workspace }}/client/tier-2-evidence/
+            ${{ github.workspace }}/client/tier-3-evidence/
           retention-days: 14
           if-no-files-found: ignore
