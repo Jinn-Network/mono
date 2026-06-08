@@ -78,6 +78,13 @@ const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
       // evaluator operator. A missing local harness setup is an environment
       // blocker, not a candidate-code regression.
       /Tier 3 evaluator harness readiness infra-blocked/i,
+      // ── release substrate secret drift: a warm operator whose mnemonic
+      // keystore exists but whose runtime keystore-password file is missing or
+      // mismatched cannot start. That is a protected Environment / substrate
+      // state issue, not a product-loop regression.
+      /Existing mnemonic keystore could not be decrypted/i,
+      /possibly wrong passphrase/i,
+      /A keystore password was auto-generated/i,
     ],
   },
   {

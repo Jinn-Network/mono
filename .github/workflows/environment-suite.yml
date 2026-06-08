@@ -244,6 +244,11 @@ jobs:
       # JINN_PASSWORD secret if its tar omitted the file; the secondary's tar is
       # expected to embed its own (its password is not a separate secret). A gold
       # home with no readable keystore-password is fail-loud infra.
+      #
+      # NB: warm-operator-preflight below re-adopts the restored source homes
+      # into these same gold paths before running repairs. That can overwrite
+      # the op-b fallback password written here, so the workflow finalizes the
+      # runtime gold passwords again after preflight.
       - name: Bridge warm operators into substrate gold paths
         if: steps.resolve.outputs.skip != 'true'
         env:
@@ -339,6 +344,39 @@ jobs:
           if [ "${INFRA}" = "true" ]; then
             echo "infra_blocked=true" >> "${GITHUB_OUTPUT}"
           fi
+
+      # Preflight adopts + repairs the exact gold homes that T2/T3 spawn. For
+      # op-b, the restored source tar may intentionally omit keystore-password
+      # and rely on the protected JINN_PASSWORD secret instead. Since daemon
+      # spawning strips JINN_PASSWORD by design, re-apply that fallback to the
+      # post-preflight gold home. This must happen AFTER preflight; doing it
+      # only in the initial bridge step gets wiped by adoptOperator().
+      - name: Finalize gold operator runtime secrets
+        if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
+        env:
+          JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ensure_gold_password() {  # $1=gold op name, $2=password fallback (may be empty)
+            local name="$1" pw="${2:-}"
+            local dst="${HOME}/jinn-dev/operators/${name}/.jinn-client"
+            if [ ! -d "$dst" ]; then
+              echo "::error::gold op ${name} missing at ${dst}; preflight did not adopt it."
+              return 1
+            fi
+            if [ ! -s "$dst/keystore-password" ] && [ -n "$pw" ]; then
+              printf '%s' "$pw" > "$dst/keystore-password"
+            fi
+            if [ ! -s "$dst/keystore-password" ]; then
+              echo "::error::gold op ${name} has no keystore-password after preflight — spawned daemon would auto-generate the wrong password and fail to decrypt the mnemonic."
+              return 1
+            fi
+            chmod 600 "$dst/keystore-password"
+            chmod -R go-rwx "${HOME}/jinn-dev/operators/${name}"
+            echo "gold op ${name} runtime keystore-password ready"
+          }
+          ensure_gold_password op-b "${JINN_PASSWORD:-}"
+          ensure_gold_password op-a ""
 
       # Short-circuit verdict for an infra-blocked operator: post a NEUTRAL
       # `environment-suite` check-run (not failure — §10 keeps infra distinct

@@ -300,9 +300,10 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
           proc.stderr?.on('data', onStderrLogOnly);
         }
       };
-      collector.promise.then(detachHandshakeListeners, detachHandshakeListeners);
-
-      // Wait for bootstrap to be reachable
+      // Wait for bootstrap to be reachable before detaching the full stdout /
+      // stderr listeners. The handshake URL can appear before bootstrap
+      // completes; if the daemon then exits, the bounded error tail still needs
+      // the fatal envelope that follows the handshake line.
       await waitForBootstrap(
         op.apiPort,
         readyTimeoutMs,

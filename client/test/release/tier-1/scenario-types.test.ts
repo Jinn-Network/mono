@@ -134,6 +134,14 @@ describe('classifyFailure', () => {
     ))).toBe('flake-infra');
   });
 
+  it('classifies warm-operator keystore password drift as flake-infra', () => {
+    expect(classifyFailure(new Error(
+      'daemon on port 7361 exited before its API became reachable. ' +
+      'A keystore password was auto-generated for you. ' +
+      'Existing mnemonic keystore could not be decrypted: Key derivation failed - possibly wrong passphrase',
+    ))).toBe('flake-infra');
+  });
+
   it('#1018: does NOT mask a real contracts compile error as flake-infra', () => {
     // A genuine solc/Hardhat compile error (no install-missing signal) must stay
     // real-bug — the precision guard so the build-setup pattern is not a blanket
