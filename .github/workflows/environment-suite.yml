@@ -163,6 +163,14 @@ jobs:
       - if: steps.resolve.outputs.skip != 'true'
         run: yarn install --immutable
 
+      # warm-operator-preflight imports the production evaluator harness when
+      # repairing evaluator readiness. That harness imports @jinn-network/sdk
+      # through package exports, which resolve to packages/sdk/dist; build the
+      # SDK before preflight so tsx can load the harness on a clean runner.
+      - name: Build SDK package for preflight harness imports
+        if: steps.resolve.outputs.skip != 'true'
+        run: yarn build:sdk
+
       # The tier-2 daemon-harness deploys the JinnRouterV3 stack onto its Anvil
       # fork by compiling contracts at runtime (`yarn compile` in `contracts/` —
       # see test/e2e/task-first-helpers.ts). `contracts/` is a SEPARATE Yarn
