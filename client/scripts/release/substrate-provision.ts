@@ -111,6 +111,13 @@ export interface ProvisionOptions {
    * `~/.claude` / `~/.codex`. Defaults to a filesystem probe.
    */
   hasHarnessCreds?: (harness: string) => Promise<boolean>;
+  /**
+   * Idempotently enable the SWE-rebench v2 evaluator harness in the given impl
+   * state directory. Production uses the harness's real onEnable() path
+   * (Docker/Python validation + upstream git clone); tests inject a fake so the
+   * doctor stays unit-fast and offline.
+   */
+  enableEvaluatorHarness?: (implStateDir: string) => Promise<{ status: string; message?: string; details?: unknown; action?: { description?: string } }>;
 }
 
 interface OperatorConfig {
@@ -147,6 +154,25 @@ async function readJson<T>(p: string): Promise<T | null> {
 async function writeJson(p: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, JSON.stringify(value, null, 2) + '\n');
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function defaultEnableEvaluatorHarness(
+  implStateDir: string,
+): Promise<{ status: string; message?: string; details?: unknown; action?: { description?: string } }> {
+  const { SweRebenchV2EvaluatorHarness } = await import(
+    '../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js'
+  );
+  const harness = new SweRebenchV2EvaluatorHarness({ implStateDir });
+  return harness.onEnable({ runtimePlugins: [], args: {} });
 }
 
 /** The canonical testnet fallback chain, optionally with a paid key prepended. */
@@ -292,26 +318,60 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
     }
   }
 
-  // ── 4b. Evaluator harness state seed ───────────────────────────────────
+  // ── 4b. Evaluator harness enablement ───────────────────────────────────
   if (opts.isEvaluator) {
-    const statePath = path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME, EVALUATOR_STATE_FILE);
-    const existing = await readJson<{ enabled?: boolean }>(statePath);
-    if (existing?.enabled === true) {
-      checks.push({ id: 'evaluator-harness-state', status: 'ok', detail: 'evaluator harness enabled' });
-    } else if (repair) {
-      await writeJson(statePath, {
-        schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
-        enabled: true,
-        enabledAt: new Date().toISOString(),
-        upstreamRepoDir: path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME, 'upstream'),
+    const evaluatorStateDir = path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME);
+    const statePath = path.join(evaluatorStateDir, EVALUATOR_STATE_FILE);
+    const defaultUpstreamRepoDir = path.join(evaluatorStateDir, 'upstream');
+    const existing = await readJson<{ enabled?: boolean; upstreamRepoDir?: string }>(statePath);
+    const existingUpstreamRepoDir =
+      typeof existing?.upstreamRepoDir === 'string' ? existing.upstreamRepoDir : defaultUpstreamRepoDir;
+    const existingReady =
+      existing?.enabled === true && await pathExists(existingUpstreamRepoDir);
+
+    if (existingReady) {
+      checks.push({
+        id: 'evaluator-harness-state',
+        status: 'ok',
+        detail: `evaluator harness enabled; upstream=${existingUpstreamRepoDir}`,
       });
-      checks.push({ id: 'evaluator-harness-state', status: 'repaired', detail: 'seeded enabled state.json' });
+    } else if (repair) {
+      const enable = opts.enableEvaluatorHarness ?? defaultEnableEvaluatorHarness;
+      const result = await enable(evaluatorStateDir);
+      const refreshed = await readJson<{ enabled?: boolean; upstreamRepoDir?: string }>(statePath);
+      const refreshedUpstreamRepoDir =
+        typeof refreshed?.upstreamRepoDir === 'string' ? refreshed.upstreamRepoDir : defaultUpstreamRepoDir;
+      const refreshedReady =
+        refreshed?.enabled === true && await pathExists(refreshedUpstreamRepoDir);
+
+      if (result.status === 'ready' && refreshedReady) {
+        checks.push({
+          id: 'evaluator-harness-state',
+          status: 'repaired',
+          detail: `enabled evaluator harness; upstream=${refreshedUpstreamRepoDir}`,
+        });
+      } else {
+        const reason =
+          result.message ??
+          result.action?.description ??
+          (refreshed?.enabled === true
+            ? `upstream repo missing at ${refreshedUpstreamRepoDir}`
+            : 'evaluator harness state missing/not enabled');
+        checks.push({
+          id: 'evaluator-harness-state',
+          status: 'drift',
+          detail: `evaluator harness not ready after enable attempt: ${reason}`,
+        });
+      }
     } else {
-      checks.push({ id: 'evaluator-harness-state', status: 'drift', detail: 'evaluator harness state missing/not enabled' });
+      const detail = existing?.enabled === true
+        ? `evaluator harness state enabled but upstream repo missing at ${existingUpstreamRepoDir}`
+        : 'evaluator harness state missing/not enabled';
+      checks.push({ id: 'evaluator-harness-state', status: 'drift', detail });
     }
 
     // ── 4c. Admission pool (validated-pool.json must exist & be parseable) ─
-    const poolPath = path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME, ADMISSION_FILE);
+    const poolPath = path.join(evaluatorStateDir, ADMISSION_FILE);
     const pool = await readJson<{ schemaVersion?: string; evalSemanticsVersion?: string }>(poolPath);
     const poolValid = pool?.schemaVersion === ADMISSION_SCHEMA_VERSION && pool?.evalSemanticsVersion === EVAL_SEMANTICS_VERSION;
     if (poolValid) {
