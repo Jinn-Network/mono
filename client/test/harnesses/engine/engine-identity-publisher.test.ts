@@ -428,7 +428,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
       postSnapshotCapturedAt: now,
       postSnapshotPayload: { capturedAt: now, hlTime: 0 },
       fillsPayload: [],
-      gatingClaim: {},
+      gatingClaim: { verdict: 'PASS' },
     });
     const v2CodeDigestSha256 = `sha256:${'cd'.repeat(32)}`;
     p.transition(requestId, TaskRunState.PACKAGING, {

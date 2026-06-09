@@ -1319,7 +1319,11 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private verdictCodeFromEnvelopePayload(solverType: string, payload: unknown): VerdictCode {
-    if (payload == null || typeof payload !== 'object') return VerdictCode.Invalid;
+    if (payload == null || typeof payload !== 'object') {
+      throw new Error(
+        `missing verdict payload for solverType=${solverType}; refusing to claim Invalid(3) without an explicit evaluator verdict`,
+      );
+    }
     const record = payload as Record<string, unknown>;
     const rawVerdict = record['verdict'];
     if (rawVerdict !== undefined) return verdictCodeFromValue(rawVerdict);
@@ -1331,7 +1335,9 @@ export class MechAdapter implements ExecutionAdapter {
       }
     }
 
-    return VerdictCode.Invalid;
+    throw new Error(
+      `missing verdict signal for solverType=${solverType}; refusing to claim Invalid(3) without an explicit evaluator verdict`,
+    );
   }
 
   private async ensureDeliveryClaimed(

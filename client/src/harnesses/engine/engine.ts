@@ -2000,12 +2000,9 @@ export class TaskEngine {
       case 'UNRESOLVED':
         return VerdictCode.Unresolved;
       default:
-        // gatingClaim is null, verdict is absent, or the string is unrecognized.
-        // Return Invalid(3) — not Pass(1). Pass must come from an explicit PASS/SCORED verdict.
-        console.warn(
-          `[harness-engine] verdictCodeForTask: unrecognized gatingClaim.verdict (got=${String(raw)}); defaulting to Invalid(3) — should never happen, indicates the evaluator harness didn't set gatingClaim.verdict before submission`,
+        throw new Error(
+          `[harness-engine] verdictCodeForTask: missing or unrecognized gatingClaim.verdict (got=${String(raw)}); refusing to claim Invalid(3) on-chain without an explicit evaluator verdict`,
         );
-        return VerdictCode.Invalid;
     }
   }
 

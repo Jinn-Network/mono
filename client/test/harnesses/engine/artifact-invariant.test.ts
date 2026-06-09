@@ -140,6 +140,9 @@ function advanceToDelivering(
     manifestCid: 'bafymanifest123',
     evidenceHash: TEST_EVIDENCE_HASH,
     implName,
+    ...(roleForImpl(implName) === 'evaluation'
+      ? { gatingClaim: { verdict: 'PASS', score: 1 } }
+      : {}),
   });
 }
 
