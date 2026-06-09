@@ -2105,6 +2105,49 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('does not claim Invalid(3) for verdict envelopes without an explicit verdict signal', async () => {
+    const { keccak256 } = await import('viem');
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+
+    const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
+    const fakeEnvelope = {
+      schemaVersion: 'jinn.execution.v1',
+      solverType: 'prediction.v1',
+      role: 'verdict',
+      payload: {
+        score: 1,
+      },
+      signature: {
+        algo: 'secp256k1',
+        signer: '0xabc',
+        hash: expectedHash,
+        sig: '0xsig',
+      },
+    };
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v3' });
+    await adapter.initialize();
+    (adapter as any).requestKinds.set(REQUEST_ID, 'verdict');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect((adapter as any).ensureDeliveryClaimed(REQUEST_ID, TASK_CID_DIGEST)).resolves.toBe('retry');
+      expect(claimDelivery).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('delivery claim metadata derivation failed'),
+        expect.any(Error),
+      );
+    } finally {
+      errorSpy.mockRestore();
+      await adapter.stop();
+    }
+  });
+
   // ── issue #552: watchForDeliveries chunked log scan ─────────────────────────
   // The mech adapter's delivery-polling loop must paginate `getLogs` so a
   // multi-100k-block cursor → head gap can drain without hitting RPC block-range

@@ -34,6 +34,8 @@ export function verdictCodeFromValue(raw: unknown): VerdictCode {
     case 'UNRESOLVED':
       return VerdictCode.Unresolved;
     default:
-      return VerdictCode.Invalid;
+      throw new Error(
+        `missing or unrecognized verdict value (got=${String(raw)}); refusing to claim Invalid(3) without an explicit evaluator verdict`,
+      );
   }
 }

@@ -699,48 +699,49 @@ describe('verdictCodeForTask (fix: uy6v7 — no Pass-by-default)', () => {
     expect(code).toBe(VerdictCode.Unresolved);
   });
 
-  it('undefined verdict → VerdictCode.Invalid (3) AND emits console.warn', () => {
+  it('undefined verdict → throws before claiming Invalid(3)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const code = (eng as any).verdictCodeForTask(makeTask({ /* no verdict field */ }));
-      expect(code).toBe(VerdictCode.Invalid);
-      expect(warnSpy).toHaveBeenCalledOnce();
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/unrecognized gatingClaim\.verdict/);
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/Invalid\(3\)/);
+      expect(() => (eng as any).verdictCodeForTask(makeTask({ /* no verdict field */ }))).toThrow(
+        /missing or unrecognized gatingClaim\.verdict/,
+      );
+      expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it('null gatingClaim → VerdictCode.Invalid (3) AND emits console.warn', () => {
+  it('null gatingClaim → throws before claiming Invalid(3)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const code = (eng as any).verdictCodeForTask(makeTask(null));
-      expect(code).toBe(VerdictCode.Invalid);
-      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(() => (eng as any).verdictCodeForTask(makeTask(null))).toThrow(
+        /missing or unrecognized gatingClaim\.verdict/,
+      );
+      expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it('empty string verdict → VerdictCode.Invalid (3) AND emits console.warn', () => {
+  it('empty string verdict → throws before claiming Invalid(3)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const code = (eng as any).verdictCodeForTask(makeTask({ verdict: '' }));
-      expect(code).toBe(VerdictCode.Invalid);
-      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(() => (eng as any).verdictCodeForTask(makeTask({ verdict: '' }))).toThrow(
+        /missing or unrecognized gatingClaim\.verdict/,
+      );
+      expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it('garbage verdict string → VerdictCode.Invalid (3) AND emits console.warn', () => {
+  it('garbage verdict string → throws before claiming Invalid(3)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'TOTALLY_MADE_UP' }));
-      expect(code).toBe(VerdictCode.Invalid);
-      expect(warnSpy).toHaveBeenCalledOnce();
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/TOTALLY_MADE_UP/);
+      expect(() => (eng as any).verdictCodeForTask(makeTask({ verdict: 'TOTALLY_MADE_UP' }))).toThrow(
+        /missing or unrecognized gatingClaim\.verdict/,
+      );
+      expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
