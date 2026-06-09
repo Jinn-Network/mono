@@ -114,6 +114,9 @@ export default defineConfig({
       type: "http",
       url: process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545",
       chainId: process.env.LOCAL_CHAIN_ID ? Number(process.env.LOCAL_CHAIN_ID) : 31337,
+      accounts: process.env.LOCAL_PRIVATE_KEY
+        ? [process.env.LOCAL_PRIVATE_KEY]
+        : [],
     },
     sepolia: {
       type: "http",
