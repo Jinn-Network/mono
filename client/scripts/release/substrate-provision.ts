@@ -51,6 +51,9 @@ import { chainForNetwork } from './substrate-verify.js';
 import { DEFAULT_TESTNET_RPC_URLS } from '../../src/config.js';
 import { canonicalHarnessName } from '../../src/harnesses/names.js';
 import { EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+// The instance the T3.1 real-harness loop actually submits — single source of
+// truth shared with the gate's evaluator preflight (admission-pool-fixture check).
+import { KNOWN_INSTANCE_ID } from '../../test/release/tier-2/fixtures/known-instance.js';
 
 const IDENTITY_REGISTRY_ABI = parseAbi([
   'function getAgentWallet(uint256 agentId) view returns (address)',
@@ -79,6 +82,7 @@ export interface CheckResult {
     | 'evaluator-role'
     | 'evaluator-harness-state'
     | 'admission-pool'
+    | 'admission-pool-fixture'
     | 'harness-creds';
   status: CheckStatus;
   detail: string;
@@ -372,7 +376,11 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
 
     // ── 4c. Admission pool (validated-pool.json must exist & be parseable) ─
     const poolPath = path.join(evaluatorStateDir, ADMISSION_FILE);
-    const pool = await readJson<{ schemaVersion?: string; evalSemanticsVersion?: string }>(poolPath);
+    const pool = await readJson<{
+      schemaVersion?: string;
+      evalSemanticsVersion?: string;
+      entries?: Record<string, { scorable?: boolean; reason?: string }>;
+    }>(poolPath);
     const poolValid = pool?.schemaVersion === ADMISSION_SCHEMA_VERSION && pool?.evalSemanticsVersion === EVAL_SEMANTICS_VERSION;
     if (poolValid) {
       checks.push({ id: 'admission-pool', status: 'ok', detail: `pool present (semantics v${EVAL_SEMANTICS_VERSION})` });
@@ -390,6 +398,29 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
       checks.push({ id: 'admission-pool', status: 'repaired', detail: `seeded empty pool (semantics v${EVAL_SEMANTICS_VERSION}) — run validate-pool to populate` });
     } else {
       checks.push({ id: 'admission-pool', status: 'drift', detail: 'validated-pool.json missing or wrong semantics version' });
+    }
+
+    // ── 4d. Gate fixture admission (fast-fail) ─────────────────────────────
+    // The shared T2.2/T3.1 fixture instance MUST be scorable under the current
+    // semantics, or the evaluator throws admission_missing_or_unscorable and the
+    // real-harness loop burns its full ~23-min budget before failing — surfaced
+    // as a mystery flake-timing rather than the real cause (2026-06-08 cut). A
+    // scorable admission can't be synthesised (it needs a real gold-patch grade
+    // via `jinn solver-nets validate-pool`), so — like harness-creds — this is
+    // ALWAYS drift when missing, even under --repair (the empty seeded pool above
+    // still can't grade the fixture). Caught here, it's an instant infra-blocked
+    // verdict naming the fix, not a 23-minute silent timeout.
+    const fixtureEntry =
+      pool?.evalSemanticsVersion === EVAL_SEMANTICS_VERSION ? pool?.entries?.[KNOWN_INSTANCE_ID] : undefined;
+    if (fixtureEntry?.scorable === true) {
+      checks.push({ id: 'admission-pool-fixture', status: 'ok', detail: `gate fixture ${KNOWN_INSTANCE_ID} scorable (semantics v${EVAL_SEMANTICS_VERSION})` });
+    } else {
+      const why = fixtureEntry ? `recorded unscorable (${fixtureEntry.reason ?? 'no reason'})` : 'no scorable entry';
+      checks.push({
+        id: 'admission-pool-fixture',
+        status: 'drift',
+        detail: `gate fixture ${KNOWN_INSTANCE_ID}: ${why} under semantics v${EVAL_SEMANTICS_VERSION} — run \`jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad\` on the warm operator and refresh its state; cannot auto-repair`,
+      });
     }
   }
 
