@@ -32,6 +32,10 @@
       "import": "./dist/solvernets/swe-rebench-v2.js",
       "types": "./dist/solvernets/swe-rebench-v2.d.ts"
     },
+    "./solvernets/jinn-repo": {
+      "import": "./dist/solvernets/jinn-repo.js",
+      "types": "./dist/solvernets/jinn-repo.d.ts"
+    },
     "./solvernets/swe-rebench-v2-held-out-slate": {
       "import": "./dist/solvernets/swe-rebench-v2-held-out-slate.js",
       "types": "./dist/solvernets/swe-rebench-v2-held-out-slate.d.ts"
