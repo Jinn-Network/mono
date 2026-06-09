@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { JinnRepoTaskSchema } from './jinn-repo.js';
 
@@ -24,4 +26,14 @@ export function solverView(item: JinnRepoPoolItem): JinnRepoSolverView {
     base_commit: item.base_commit,
     problem_statement: item.problem_statement,
   };
+}
+
+export function loadJinnRepoPool(opts: { path?: string } = {}): JinnRepoPoolItem[] {
+  const path = opts.path ?? fileURLToPath(new URL('./jinn-repo-pool.json', import.meta.url));
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown[];
+  return raw.map((r) => JinnRepoPoolItemSchema.parse(r));
+}
+
+export function resolveJinnRepoSlate(pool: JinnRepoPoolItem[], ids: Set<string>): JinnRepoPoolItem[] {
+  return pool.filter((p) => ids.has(p.instance_id));
 }
