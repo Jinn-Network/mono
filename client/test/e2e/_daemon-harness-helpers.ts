@@ -63,6 +63,7 @@ import {
 } from '../../src/harnesses/engine/registry.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
+import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -847,6 +848,31 @@ export async function startDaemon(
    *   so the evaluator/verdict leg is deterministic and needs no network.
    */
   opts?: { polymarketGammaBaseUrl?: string; instanceLabel?: string },
+  /**
+   * Extra SolverType→harness-name dispatch entries merged into
+   * `solverTypeHarnesses` on top of the prediction.v1 mapping derived from
+   * `harnessSelector`. Used by the jinn-repo loop driver to force
+   * `jinn-repo.v1` restoration onto the claude-code learner. Honored only when
+   * the named harness `supports(ctx)` (see HarnessRegistry.findFor) — so an
+   * entry mapping jinn-repo.v1 → claude-code does NOT capture the evaluation
+   * leg (claude-code returns false for evaluation), which still first-matches
+   * the JinnRepoEvaluatorHarness. Defaults to `{}` → no behavioural change for
+   * the prediction consumer.
+   */
+  extraSolverTypeHarnesses?: Record<string, string>,
+  /**
+   * Optional SolverNetRegistry-like object passed straight through to the
+   * TaskEngine. The engine consults it to (a) gate claims on an enabled
+   * SolverNet for the task's solverType and (b) resolve the SolverNet's
+   * runtime plugins so the solver harness loads the SolverType's bundled
+   * runtime SKILL (e.g. jinn-repo-runtime → checkout-mono-at-base_commit).
+   *
+   * MUST stay undefined for the prediction consumer (daemon-harness-cycle.ts):
+   * when set, the engine REJECTS any task whose solverType has no enabled net,
+   * which would break the prediction flow that relies on the no-registry path.
+   * Defaults to undefined → no behavioural change.
+   */
+  solverNetRegistry?: SolverNetRegistry,
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const chainCfg = getChainConfig('base');
@@ -946,10 +972,12 @@ export async function startDaemon(
   //    The selected harness name is the canonical name from names.ts —
   //    see `selectorToHarnessName` above.
   const selectedHarnessName = selectorToHarnessName(harnessSelector);
-  const solverTypeHarnesses: Record<string, string> =
-    harnessSelector === 'prediction-v1-baseline'
+  const solverTypeHarnesses: Record<string, string> = {
+    ...(harnessSelector === 'prediction-v1-baseline'
       ? {}
-      : { 'prediction.v1': selectedHarnessName };
+      : { 'prediction.v1': selectedHarnessName }),
+    ...(extraSolverTypeHarnesses ?? {}),
+  };
 
   const implRegistry = new HarnessRegistry({
     default: DEFAULT_HARNESS,
@@ -1075,6 +1103,11 @@ export async function startDaemon(
         implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
       },
       implRegistry,
+      // Optional registry: undefined for the prediction consumer (no change);
+      // the jinn-repo driver passes one so the engine resolves the
+      // jinn-repo-runtime bundled plugin into solverPluginRoots and the solver
+      // agent receives the checkout-mono SKILL.
+      ...(solverNetRegistry ? { solverNetRegistry } : {}),
       packagingDeps,
       envelopeDeps,
       deliveryDeps,

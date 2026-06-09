@@ -148,9 +148,18 @@ async function main(): Promise<void> {
   const heldOutK = Number(
     process.argv.find((a) => a.startsWith('--held-out='))?.slice('--held-out='.length) ?? '10',
   );
+  // Early-stop: stop scanning candidates once this many are admitted. Defaults
+  // to Infinity (scan every candidate, the original behaviour). Bounds wall-clock
+  // when only a small admitted pool is needed (each candidate runs two slow evals).
+  const maxAdmitted = Number(
+    process.argv.find((a) => a.startsWith('--max-admitted='))?.slice('--max-admitted='.length) ?? 'Infinity',
+  );
   // Local clone of the mono repo against which `git show` / `git diff` run.
   // Operator points this at a checkout (env override, defaults to cwd's repo).
   const repoDir = process.env.JINN_MONO_DIR ?? process.cwd();
+  // Clone source the admission evals fetch base_commit from. A local `file://`
+  // checkout is far faster than GitHub https for the shallow per-commit fetch.
+  const monoRepoUrl = process.env.JINN_MONO_REPO_URL ?? 'https://github.com/Jinn-Network/mono.git';
   const generatedAt = new Date().toISOString();
 
   const log = (s: string) => process.stderr.write(`${s}\n`);
@@ -171,10 +180,14 @@ async function main(): Promise<void> {
         fetchIssue: ghFetchIssue,
         mergeCommit,
       });
-      const verdict = await validateAdmissible(item, { run: runJinnRepoEval });
+      const verdict = await validateAdmissible(item, { run: runJinnRepoEval, monoRepoUrl });
       if (verdict.admitted) {
         admitted.push(item);
-        log(`[pool] ADMIT  ${item.instance_id}: ${verdict.reason}`);
+        log(`[pool] ADMIT  ${item.instance_id}: ${verdict.reason} (${admitted.length}${Number.isFinite(maxAdmitted) ? `/${maxAdmitted}` : ''})`);
+        if (admitted.length >= maxAdmitted) {
+          log(`[pool] reached --max-admitted=${maxAdmitted}; stopping candidate scan early`);
+          break;
+        }
       } else {
         rejected++;
         // Bucket by a coarse reason key so the summary stays readable even
@@ -200,9 +213,11 @@ async function main(): Promise<void> {
 
   const here = dirname(fileURLToPath(import.meta.url));
   const solverTypesDir = join(here, '..', 'src', 'solver-types');
-  const poolPath = join(solverTypesDir, 'jinn-repo-pool.json');
+  // Output overrides let a build run to a scratch path without clobbering the
+  // bundled pool/slate (e.g. while another process is reading the live pool).
+  const poolPath = process.env.JINN_POOL_OUT ?? join(solverTypesDir, 'jinn-repo-pool.json');
   const slatesDir = join(solverTypesDir, 'slates');
-  const slatePath = join(slatesDir, 'held-out-slate.jinn-repo.v1.json');
+  const slatePath = process.env.JINN_SLATE_OUT ?? join(slatesDir, 'held-out-slate.jinn-repo.v1.json');
 
   writeFileSync(poolPath, `${JSON.stringify(admitted, null, 2)}\n`);
   mkdirSync(slatesDir, { recursive: true });
