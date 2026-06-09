@@ -9,6 +9,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log() { printf '[up] %s\n' "$*"; }
 
+# --- 0. reuse an already-serving devnet (e.g. across stacked worktrees) ---
+# If the right chain is already up, skip build/init/start entirely — no rebuild.
+if [ "$(cast chain-id --rpc-url "$RPC_URL" 2>/dev/null || echo "")" = "$EVM_CHAIN_ID_DEC" ]; then
+  log "reusing running node on $RPC_URL (chain $EVM_CHAIN_ID_DEC)"
+  exit 0
+fi
+
 # --- 1. toolchain gate ---
 command -v go  >/dev/null || { echo "[up] FATAL: go not on PATH"  >&2; exit 1; }
 command -v jq  >/dev/null || { echo "[up] FATAL: jq not on PATH"  >&2; exit 1; }
