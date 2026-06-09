@@ -19,6 +19,7 @@ import {
 } from './learner/index.js';
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
+import { JinnRepoEvaluatorHarness } from './jinn-repo-evaluator/harness.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
 import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
@@ -218,6 +219,14 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
         ? `${env.implStateDirRoot}/swe-rebench-v2-evaluator`
         : undefined,
       ipfsRegistryUrl: env.ipfsRegistryUrl,
+    }),
+  );
+  out.push(
+    new JinnRepoEvaluatorHarness({
+      stub: isStub,
+      implStateDir: env.implStateDirRoot
+        ? `${env.implStateDirRoot}/jinn-repo-evaluator`
+        : undefined,
     }),
   );
 
