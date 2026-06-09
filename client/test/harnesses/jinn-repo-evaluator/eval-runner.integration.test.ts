@@ -5,6 +5,7 @@ import { JinnRepoTaskSchema } from '../../../src/solver-types/jinn-repo.js';
 import { runJinnRepoEval } from '../../../src/harnesses/impls/jinn-repo-evaluator/eval-runner.js';
 
 const FIXTURE = join(__dirname, '../../fixtures/jinn-repo/Jinn-Network__mono-1108');
+process.env.JINN_REPO_FIXTURE_DIR = FIXTURE;
 const RUN = process.env.JINN_E2E_JINN_REPO === '1';
 
 describe.runIf(RUN)('runJinnRepoEval', () => {
