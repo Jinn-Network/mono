@@ -9,9 +9,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log() { printf '[up] %s\n' "$*"; }
 
-# --- 0. reuse an already-serving devnet (e.g. across stacked worktrees) ---
-# If the right chain is already up, skip build/init/start entirely — no rebuild.
-if [ "$(cast chain-id --rpc-url "$RPC_URL" 2>/dev/null || echo "")" = "$EVM_CHAIN_ID_DEC" ]; then
+# --- 0. reuse an already-serving devnet, UNLESS FRESH ---
+# Non-FRESH: if the right chain is already up, skip build/init/start (no rebuild).
+# FRESH: a from-scratch re-init must REPLACE any running node, not reuse it — so
+# stop it first and fall through. (Reusing on FRESH would silently keep the old
+# chain/genesis.)
+if [ "${FRESH:-0}" = "1" ]; then
+  pkill -f "evmd start" 2>/dev/null || true
+  for _ in $(seq 1 15); do cast chain-id --rpc-url "$RPC_URL" >/dev/null 2>&1 || break; sleep 1; done
+elif [ "$(cast chain-id --rpc-url "$RPC_URL" 2>/dev/null || echo "")" = "$EVM_CHAIN_ID_DEC" ]; then
   log "reusing running node on $RPC_URL (chain $EVM_CHAIN_ID_DEC)"
   exit 0
 fi
@@ -61,6 +67,10 @@ if [ ! -f "$G" ] || [ "${FRESH:-0}" = "1" ]; then
   # native coin exposed to the EVM as a standard ERC-20 (x/erc20 token pair)
   setg ".app_state.erc20.native_precompiles=[\"$NATIVE_ERC20\"]"
   setg ".app_state.erc20.token_pairs=[{contract_owner:1,erc20_address:\"$NATIVE_ERC20\",denom:\"$BASE_DENOM\",enabled:true}]"
+
+  # enable the static precompiles (staking 0x..0800, gov, distribution, bank, etc.)
+  # — matches upstream local_node.sh. Without this the list is empty.
+  setg '.app_state.evm.params.active_static_precompiles=["0x0000000000000000000000000000000000000100","0x0000000000000000000000000000000000000400","0x0000000000000000000000000000000000000800","0x0000000000000000000000000000000000000801","0x0000000000000000000000000000000000000802","0x0000000000000000000000000000000000000803","0x0000000000000000000000000000000000000804","0x0000000000000000000000000000000000000805","0x0000000000000000000000000000000000000806","0x0000000000000000000000000000000000000807"]'
 
   setg '.consensus.params.block.max_gas="10000000"'
 
