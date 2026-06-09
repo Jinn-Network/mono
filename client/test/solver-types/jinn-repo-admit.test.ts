@@ -18,4 +18,13 @@ describe('validateAdmissible', () => {
     const run = async () => ({ passed: null, unscorable: true, logExcerpt: 'install-failed' });
     expect((await validateAdmissible(item, { run })).admitted).toBe(false);
   });
+  it('rejects when the solution run is unscorable (infra failure on the with-fix run)', async () => {
+    const run = async ({ patch }: any) =>
+      patch.trim() === ''
+        ? { passed: false, unscorable: false, logExcerpt: '' }            // empty FAILs (good)
+        : { passed: null, unscorable: true, logExcerpt: 'install-failed' }; // solution run can't grade
+    const r = await validateAdmissible(item, { run });
+    expect(r.admitted).toBe(false);
+    expect(r.reason).toMatch(/unscorable.*with fix/i);
+  });
 });
