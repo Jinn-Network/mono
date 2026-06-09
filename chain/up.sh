@@ -9,9 +9,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log() { printf '[up] %s\n' "$*"; }
 
-# --- 0. reuse an already-serving devnet (e.g. across stacked worktrees) ---
-# If the right chain is already up, skip build/init/start entirely — no rebuild.
-if [ "$(cast chain-id --rpc-url "$RPC_URL" 2>/dev/null || echo "")" = "$EVM_CHAIN_ID_DEC" ]; then
+# --- 0. reuse an already-serving devnet, UNLESS FRESH ---
+# Non-FRESH: if the right chain is already up, skip build/init/start (no rebuild).
+# FRESH: a from-scratch re-init must REPLACE any running node, not reuse it — so
+# stop it first and fall through. (Reusing on FRESH would silently keep the old
+# chain/genesis.)
+if [ "${FRESH:-0}" = "1" ]; then
+  pkill -f "evmd start" 2>/dev/null || true
+  for _ in $(seq 1 15); do cast chain-id --rpc-url "$RPC_URL" >/dev/null 2>&1 || break; sleep 1; done
+elif [ "$(cast chain-id --rpc-url "$RPC_URL" 2>/dev/null || echo "")" = "$EVM_CHAIN_ID_DEC" ]; then
   log "reusing running node on $RPC_URL (chain $EVM_CHAIN_ID_DEC)"
   exit 0
 fi
