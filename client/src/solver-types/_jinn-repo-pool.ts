@@ -1,0 +1,27 @@
+import { z } from 'zod';
+import { JinnRepoTaskSchema } from './jinn-repo.js';
+
+// Pool item = the solver-visible task + evaluator-side secrets (gold tests, reference solution).
+export const JinnRepoPoolItemSchema = JinnRepoTaskSchema.extend({
+  gold_tests: z.record(z.string(), z.string()),  // relpath -> file contents (evaluator-side)
+  solution_patch: z.string(),                     // reference fix (admission only; never shown to solver)
+});
+export type JinnRepoPoolItem = z.infer<typeof JinnRepoPoolItemSchema>;
+
+// What the solver harness is allowed to see. Leak-control: no gold tests, no solution.
+export interface JinnRepoSolverView {
+  schemaVersion: 'jinn-repo.v1';
+  instance_id: string;
+  repo: 'Jinn-Network/mono';
+  base_commit: string;
+  problem_statement: string;
+}
+export function solverView(item: JinnRepoPoolItem): JinnRepoSolverView {
+  return {
+    schemaVersion: item.schemaVersion,
+    instance_id: item.instance_id,
+    repo: item.repo,
+    base_commit: item.base_commit,
+    problem_statement: item.problem_statement,
+  };
+}
