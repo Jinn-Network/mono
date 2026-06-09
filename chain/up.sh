@@ -62,6 +62,10 @@ if [ ! -f "$G" ] || [ "${FRESH:-0}" = "1" ]; then
   setg ".app_state.erc20.native_precompiles=[\"$NATIVE_ERC20\"]"
   setg ".app_state.erc20.token_pairs=[{contract_owner:1,erc20_address:\"$NATIVE_ERC20\",denom:\"$BASE_DENOM\",enabled:true}]"
 
+  # enable the static precompiles (staking 0x..0800, gov, distribution, bank, etc.)
+  # — matches upstream local_node.sh. Without this the list is empty.
+  setg '.app_state.evm.params.active_static_precompiles=["0x0000000000000000000000000000000000000100","0x0000000000000000000000000000000000000400","0x0000000000000000000000000000000000000800","0x0000000000000000000000000000000000000801","0x0000000000000000000000000000000000000802","0x0000000000000000000000000000000000000803","0x0000000000000000000000000000000000000804","0x0000000000000000000000000000000000000805","0x0000000000000000000000000000000000000806","0x0000000000000000000000000000000000000807"]'
+
   setg '.consensus.params.block.max_gas="10000000"'
 
   # fund validator + dev0 (dev0 is the EVM sender in check.sh)
