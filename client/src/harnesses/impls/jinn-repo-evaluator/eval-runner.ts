@@ -87,7 +87,14 @@ export async function runJinnRepoEval(args: {
   const clientDir = join(repro.dir, 'client');
 
   try {
-    await sh('corepack', ['enable'], { cwd: clientDir });
+    // corepack is usually already enabled at the user / container level.
+    // A failure here (e.g. read-only global shim dir) must NOT block the
+    // eval — yarn install is the real gate. Swallow any corepack error.
+    try {
+      await sh('corepack', ['enable'], { cwd: clientDir });
+    } catch {
+      // non-fatal: proceed to yarn install regardless
+    }
     await sh('yarn', ['install', '--immutable'], { cwd: clientDir, maxBuffer: MAX_BUFFER });
   } catch (e) {
     await repro.cleanup();

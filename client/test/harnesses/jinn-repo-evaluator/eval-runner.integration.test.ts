@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { JinnRepoTaskSchema } from '../../../src/solver-types/jinn-repo.js';
 import { runJinnRepoEval } from '../../../src/harnesses/impls/jinn-repo-evaluator/eval-runner.js';
+
+// __dirname is not defined in ESM; derive it from import.meta.url instead.
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 const FIXTURE = join(__dirname, '../../fixtures/jinn-repo/Jinn-Network__mono-1108');
 process.env.JINN_REPO_FIXTURE_DIR = FIXTURE;
