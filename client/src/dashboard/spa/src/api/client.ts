@@ -241,9 +241,9 @@ export const api = {
     ),
 
   /**
-   * Codex CLI install + auth + version snapshot. Used by HarnessStatusPanel
-   * to show a yellow untested-version hint when the operator's installed
-   * codex CLI falls outside the harness's tested range (#675).
+   * Codex CLI install + auth + version snapshot. Surfaces a yellow
+   * untested-version hint when the operator's installed codex CLI falls
+   * outside the harness's tested range (#675).
    */
   codexDoctor: () => jfetch<CodexDoctorResponse>('/api/codex/doctor'),
 
