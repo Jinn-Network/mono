@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SOLVER_TYPES } from '../../src/solver-types/index.js';
 import { SOLVER_TYPE_PAYLOADS } from '../../src/types/payloads/index.js';
 
@@ -26,11 +29,16 @@ describe('jinn-repo SolverTypeDefinition registration', () => {
     expect(overlay.spec).toMatchObject({ instance_id: 'jinn-network__mono-1109' });
   });
 
-  it('buildGenerator yields a stub generator that produces no tasks', async () => {
+  it('buildGenerator yields a real generator (G4); empty train split yields no tasks', async () => {
     const def = SOLVER_TYPES['jinn-repo.v1'];
     expect(def.buildGenerator).toBeDefined();
-    const gen = def.buildGenerator!({});
-    await expect(gen()).resolves.toBeNull();
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-repo-def-'));
+    try {
+      const gen = def.buildGenerator!({ stateDir, loadPool: () => [] });
+      await expect(gen()).resolves.toBeNull();
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
   });
 
   it('SOLVER_TYPE_PAYLOADS["jinn-repo.v1"].solution parses a valid solution payload', () => {

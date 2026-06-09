@@ -6,24 +6,19 @@
  * recognise `jinn-repo.v1` across the SolverType registry. The generator is a
  * stub until G4.
  *
- * The bare task schema stays in `./jinn-repo.ts`; the definition lives here so
- * the generator/slate wiring it will gain in later tasks does not create an
+ * The bare task schema stays in `./jinn-repo.ts`; the generator lives in
+ * `./jinn-repo-auto.ts` (G4) so the generator/slate wiring does not create an
  * import cycle with those supporting modules.
  */
 
-import type { TaskGenerator } from '../tasks/sources.js';
 import { JinnRepoTaskSchema } from './jinn-repo.js';
 import { loadHeldOutSlate } from './_swe-rebench-v2-held-out-slate.js';
+import { makeJinnRepoGenerator, type JinnRepoGeneratorConfig } from './jinn-repo-auto.js';
 import type { SolverTypeDefinition } from './solver-type.js';
 
 const SOLVER_TYPE = 'jinn-repo.v1';
 
-// TODO(G4): replace stub with real generator.
-function makeJinnRepoGenerator(_config: unknown): TaskGenerator {
-  return async () => null;
-}
-
-export const jinnRepo: SolverTypeDefinition = {
+export const jinnRepo: SolverTypeDefinition<JinnRepoGeneratorConfig> = {
   solverType: SOLVER_TYPE,
   async parseSpec(raw) {
     const task = JinnRepoTaskSchema.parse(raw);
