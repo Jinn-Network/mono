@@ -65,7 +65,15 @@ defaults:
 
 jobs:
   environment-suite:
-    name: environment-suite
+    # Display name MUST differ from the verdict check-run context
+    # ("environment-suite", posted by scripts/release/post-check-run-verdict.mjs).
+    # GitHub auto-creates an implicit job-level check-run named after this `name:`;
+    # if it matched the verdict context the two collide on the same SHA, and the
+    # publish guard's "newest completed_at wins" tie-break can let this job's
+    # exit-0 success MASK an honest `neutral`/infra-blocked verdict (2026-06-08 cut).
+    # Keep the job *key* (`environment-suite`) for dispatch/needs/concurrency; only
+    # the display name differs.
+    name: environment-suite-runner
     runs-on: ubuntu-latest
     # The protected, HUMAN-CREATED Environment that holds the testnet-gate
     # secrets (§9). If it does not exist yet, the run fails fast at secret
@@ -449,6 +457,13 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           JINN_E2E_HARNESS: claude-code
           CANDIDATE_SHA: ${{ steps.resolve.outputs.candidate_sha }}
+          # Raise the AI-units block cap for the warm operator's subscription
+          # credential. The default ($0.50 / 6h-block) starves the real-harness
+          # solver mid-run when warm-operator state carries prior same-block spend
+          # (2026-06-08 cut: $1.04 already spent in-block → claims paused → T3.1
+          # timed out). Tunable via repo var; default = $5/block, $140/week. The
+          # gate stays armed — this widens the ceiling, it does not disable it.
+          JINN_AI_UNITS_CEILING_OVERRIDE: ${{ vars.JINN_ENV_SUITE_AI_UNITS_CEILING || '1000:28000' }}
         run: |
           set -euo pipefail
           # §8 discipline: the subscription OAuth token is the only Claude cred.
