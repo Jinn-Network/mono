@@ -1,0 +1,29 @@
+commit 627e1eb727d29ed2132232c5e834b15abf62b23a
+Author: Claude <noreply@anthropic.com>
+Date:   Mon Jun 8 11:48:41 2026 +0200
+
+    fix: refresh mech safe nonce on retry
+
+diff --git a/client/src/adapters/mech/safe.ts b/client/src/adapters/mech/safe.ts
+index 525b5b26a..33b16d12c 100644
+--- a/client/src/adapters/mech/safe.ts
++++ b/client/src/adapters/mech/safe.ts
+@@ -11,6 +11,7 @@ import { privateKeyToAccount } from 'viem/accounts';
+ import { base } from 'viem/chains';
+ import { SAFE_ABI } from './types.js';
+ import {
++  isNonceTooLowError,
+   type TxSubmissionLedger,
+   withNonceLedger,
+   withRecoverableRetry,
+@@ -150,6 +151,10 @@ async function executeSafeTransactionInner(
+           ...feeResult.overrides,
+         });
+       } catch (writeErr) {
++        if (isNonceTooLowError(writeErr)) {
++          const refreshed = await nonceLedger.refreshNonce();
++          console.error(`[safe/viem] execTransaction refreshed pinned nonce -> ${refreshed}`);
++        }
+         // viem pre-flight gas estimation may revert with GS013 when the inner
+         // call would fail. Decode the inner reason so callers (and tx-retry)
+         // can distinguish self-already-claimed from lost-race from transient.
