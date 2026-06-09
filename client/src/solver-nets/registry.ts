@@ -121,6 +121,9 @@ function defaultRuntimePluginsForSolverType(solverType: string): SolverPluginEnt
   if (solverType === 'swe-rebench-v2.v1') {
     return ['bundled:swe-rebench-v2-runtime'];
   }
+  if (solverType === 'jinn-repo.v1') {
+    return ['bundled:jinn-repo-runtime'];
+  }
   return [];
 }
 
