@@ -1307,15 +1307,31 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const kind = role === 'verdict' ? 'verdict' : 'solution';
     const payload = rawSigned['payload'];
-    const rawVerdict = payload != null && typeof payload === 'object'
-      ? (payload as Record<string, unknown>)['verdict']
+    const verdictCode = kind === 'verdict'
+      ? this.verdictCodeFromEnvelopePayload(parsed.solverType, payload)
       : undefined;
 
     return {
       evidenceHash: recomputed as Hex,
       kind,
-      verdictCode: kind === 'verdict' ? verdictCodeFromValue(rawVerdict) : undefined,
+      verdictCode,
     };
+  }
+
+  private verdictCodeFromEnvelopePayload(solverType: string, payload: unknown): VerdictCode {
+    if (payload == null || typeof payload !== 'object') return VerdictCode.Invalid;
+    const record = payload as Record<string, unknown>;
+    const rawVerdict = record['verdict'];
+    if (rawVerdict !== undefined) return verdictCodeFromValue(rawVerdict);
+
+    if (solverType === 'swe-rebench-v2.v1') {
+      const passedMatch = record['passed_match'];
+      if (typeof passedMatch === 'boolean') {
+        return passedMatch ? VerdictCode.Pass : VerdictCode.Fail;
+      }
+    }
+
+    return VerdictCode.Invalid;
   }
 
   private async ensureDeliveryClaimed(
