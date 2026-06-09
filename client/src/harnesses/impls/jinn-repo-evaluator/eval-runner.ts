@@ -21,7 +21,6 @@
  * args so they resolve correctly from inside `client/`.
  */
 
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -49,30 +48,15 @@ export async function runJinnRepoEval(args: {
   task: JinnRepoTask;
   patch: string;
   monoRepoUrl: string;
+  goldTests: Record<string, string>;
 }): Promise<JinnRepoEvalResult> {
-  // Read the gold (FAIL_TO_PASS) test files from the fixture. relpaths come
-  // from the task; the fixture stores them under `gold-test/<relpath>`.
-  const fixtureDir = process.env.JINN_REPO_FIXTURE_DIR ?? '.';
-  const goldTestFiles: Record<string, string> = {};
-  try {
-    for (const rel of args.task.test_files) {
-      goldTestFiles[rel] = readFileSync(join(fixtureDir, 'gold-test', rel), 'utf8');
-    }
-  } catch (e) {
-    return {
-      passed: null,
-      unscorable: true,
-      logExcerpt: `gold-test-read-failed: ${String(e).slice(0, LOG_LIMIT)}`,
-    };
-  }
-
   let repro;
   try {
     repro = await prepareRepro({
       monoRepoUrl: args.monoRepoUrl,
       baseCommit: args.task.base_commit,
       patch: args.patch,
-      goldTestFiles,
+      goldTestFiles: args.goldTests,
     });
   } catch (e) {
     // Clone / fetch / checkout / patch-apply failure is infra, not a graded
