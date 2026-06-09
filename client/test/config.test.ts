@@ -24,6 +24,7 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnEthereumRpcUrl = process.env['JINN_ETHEREUM_RPC_URL'];
   const originalJinnClaimSubmissionMode = process.env['JINN_CLAIM_SUBMISSION_MODE'];
   const originalJinnClaimLoopEnabled = process.env['JINN_CLAIM_LOOP_ENABLED'];
+  const originalJinnTaskDiscoveryAllowedTaskIds = process.env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
@@ -99,6 +100,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_CLAIM_LOOP_ENABLED'];
     } else {
       process.env['JINN_CLAIM_LOOP_ENABLED'] = originalJinnClaimLoopEnabled;
+    }
+
+    if (originalJinnTaskDiscoveryAllowedTaskIds === undefined) {
+      delete process.env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'];
+    } else {
+      process.env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'] = originalJinnTaskDiscoveryAllowedTaskIds;
     }
 
     if (originalTestnetL2Deployment === undefined) {
@@ -198,6 +205,16 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.network).toBe('testnet');
     expect(config.rpcUrl).toBe('https://universal.env.example');
+  });
+
+  it('parses JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS for live gate task narrowing', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+
+    process.env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'] = '4249, 4250 , ,4251';
+
+    const config = loadConfig(configPath);
+
+    expect(config.taskDiscoveryAllowedTaskIds).toEqual(['4249', '4250', '4251']);
   });
 
   it('defaults stakingMode to standard', () => {

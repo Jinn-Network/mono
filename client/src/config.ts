@@ -219,6 +219,7 @@ export const JinnConfigSchema = z.object({
    * Narrow task discovery to specific on-chain task ids. This is primarily
    * for live acceptance gates that must avoid claiming unrelated public
    * backlog while proving one fresh task path.
+   * Env: JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS (comma-separated).
    */
   taskDiscoveryAllowedTaskIds: z.array(z.string()).optional(),
 
@@ -919,6 +920,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TASK_DISCOVERY_FROM_BLOCK'] !== undefined) {
     merged.taskDiscoveryOnchainFromBlock = Number.parseInt(env['JINN_TASK_DISCOVERY_FROM_BLOCK'], 10);
   }
+  if (env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'] !== undefined) {
+    merged.taskDiscoveryAllowedTaskIds = env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS']
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
@@ -1348,6 +1355,7 @@ const TRACKED_ENV_VARS = [
   'JINN_DISCOVERY_MODE',
   'JINN_DISCOVERY_URL',
   'JINN_DISCOVERY_FALLBACK',
+  'JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS',
   'JINN_NODE_ENDPOINT',
   'JINN_IPFS_REGISTRY_URL',
   'JINN_IPFS_GATEWAY_URL',

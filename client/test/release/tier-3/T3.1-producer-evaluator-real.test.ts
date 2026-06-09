@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { runT31ProducerEvaluatorReal } from './T3.1-producer-evaluator-real.js';
+import {
+  buildT31DaemonEnv,
+  runT31ProducerEvaluatorReal,
+} from './T3.1-producer-evaluator-real.js';
 
 describe('T3.1 producer-evaluator-real', () => {
   // Gated: this test spends real testnet ETH + real OpenRouter $. Only runs when
@@ -30,5 +33,16 @@ describe('T3.1 producer-evaluator-real', () => {
   it('callable shape matches ScenarioVerdict', () => {
     // Static type check at compile time; this test just asserts the export exists.
     expect(typeof runT31ProducerEvaluatorReal).toBe('function');
+  });
+
+  it('narrows daemon discovery to the freshly posted on-chain task id', () => {
+    expect(buildT31DaemonEnv({
+      hermesModel: 'deepseek/test-model',
+      onchainTaskId: '4249',
+    })).toMatchObject({
+      JINN_HERMES_MODEL: 'deepseek/test-model',
+      JINN_TIER3_COST_CAP_USD: '0.25',
+      JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS: '4249',
+    });
   });
 });
