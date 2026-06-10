@@ -457,6 +457,11 @@ export const api = {
           }
         >;
       }>('/v1/operator/joined'),
+    completeOnboarding: () =>
+      jfetch<{ ok: boolean; onboardingComplete: boolean }>(
+        '/v1/operator/onboarding-complete',
+        { method: 'POST' },
+      ),
   },
   captures: {
     listPending: () => jfetch<CapturesListResponse>('/api/captures/pending'),

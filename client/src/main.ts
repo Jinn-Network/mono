@@ -83,7 +83,8 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
-import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
+import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
+import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
@@ -1066,6 +1067,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
+  // #1037: same eager-register / late-populate pattern for the join applier.
+  // The join endpoint registers eagerly inside startApiServer; the applier is
+  // built only after the latest join-consuming subsystem (the engine view,
+  // wired in the Daemon ctor). The endpoint tolerates an empty holder in the
+  // gap between server-start and populate by falling back to
+  // restartRequired:true.
+  const joinApplierHolder: {
+    current: import('./daemon/join-applier.js').JoinApplier | undefined;
+  } = { current: undefined };
+
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
   // timeout), main() waits on this promise instead of returning, so the setup
@@ -1175,6 +1186,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
+          onboardingComplete: config.onboardingComplete,
         }),
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
@@ -1320,6 +1332,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             prevResolve();
             resolve();
           });
+        },
+        // #1037: hot-apply a join to the running daemon. Populated after the
+        // join-consuming subsystems are built (see joinApplierHolder). Empty
+        // until then → the endpoint returns restartRequired:true.
+        joinApplier: joinApplierHolder,
+        // #983: mutate the in-memory config so GET /v1/bootstrap reflects the
+        // completion flag live (the endpoint persists to disk; this keeps the
+        // configReader's in-memory read consistent — same pattern as the
+        // join-applier's config write). Cast: JinnConfig has the optional field.
+        markOnboardingComplete: () => {
+          (config as { onboardingComplete?: boolean }).onboardingComplete = true;
         },
       },
       status: {
@@ -1794,6 +1817,29 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // the /build page rendered "Discovery unavailable" permanently.
   discoveryApiHolder.current = sharedDiscoveryApi;
 
+  // #1037: the live task-discovery descriptor. Always present with a mutable
+  // `solverNetManifestCids` array (`taskDiscoveryManifestCids` is a fresh
+  // `.map` result, safe to push onto). The join applier holds this same object
+  // reference and pushes a newly-joined cid onto it live.
+  const taskDiscovery = {
+    discoveryApi: sharedDiscoveryApi,
+    solverNetManifestCids: taskDiscoveryManifestCids,
+    // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
+    // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow through.
+    // Hardcoding here shadowed the adapter's default and re-introduced the
+    // ghost-task floor every release; removing the shadow makes `adapter.ts`
+    // the single source of truth. See gh #300. An operator MAY opt in to a
+    // recent floor via `taskDiscoveryOnchainFromBlock` to bound the canonical
+    // getLogs scan (which otherwise parses a large history on the main thread
+    // and can stall the loop) and lean on the indexer DiscoveryAPI.
+    ...(config.taskDiscoveryOnchainFromBlock !== undefined
+      ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
+      : {}),
+    ...(config.taskDiscoveryAllowedTaskIds?.length
+      ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
+      : {}),
+  };
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1807,27 +1853,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
-    taskDiscovery: taskDiscoveryManifestCids.length > 0
-      ? {
-          discoveryApi: sharedDiscoveryApi,
-          solverNetManifestCids: taskDiscoveryManifestCids,
-          // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
-          // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow
-          // through. Hardcoding here shadowed the adapter's default and
-          // re-introduced the ghost-task floor every release; removing the
-          // shadow makes `adapter.ts` the single source of truth. See gh
-          // #300. An operator MAY opt in to a recent floor via
-          // `taskDiscoveryOnchainFromBlock` to bound the canonical getLogs
-          // scan (which otherwise parses a large history on the main thread
-          // and can stall the loop) and lean on the indexer DiscoveryAPI.
-          ...(config.taskDiscoveryOnchainFromBlock !== undefined
-            ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
-            : {}),
-          ...(config.taskDiscoveryAllowedTaskIds?.length
-            ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
-            : {}),
-        }
-      : undefined,
+    taskDiscovery,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -2038,6 +2064,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // is no longer needed and would throw on Hono's locked matcher.
   harnessReadinessRegistryHolder.current = harnessReadinessRegistry;
   console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
+
+  // #1037: always construct the engine eligibility view (mutable) so a
+  // hot-applied join can inject its cid live. Previously this was wired only
+  // when config.joinedSolverNets was truthy; a zero-join daemon then ran the
+  // legacy solverType gate. With an always-present empty view, a zero-join
+  // daemon rejects cid-bearing tasks (its discovery cid set is empty so it
+  // discovers none) and still passes legacy no-cid tasks. See plan §behaviour-change.
+  const joinedSolverNetsView = createMutableJoinedSolverNetsView(config.joinedSolverNets);
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
@@ -2567,9 +2601,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // doesn't match a joined entry (plus a role gate). Absent when the
       // operator hasn't joined any nets yet — the engine then falls back to
       // the legacy solverType-keyed gate.
-      ...(config.joinedSolverNets
-        ? { joinedSolverNets: joinedSolverNetsViewFromConfig(config.joinedSolverNets) }
-        : {}),
+      // #1037: always wire the (mutable) view so a hot-applied join is live.
+      joinedSolverNets: joinedSolverNetsView,
       // Spec §14: task validation resolves manifest → contract → schemas.
       // Threaded only when the SolverNet registry client was constructed
       // (testnet branch above). The engine treats absence as "schema
@@ -2653,6 +2686,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             },
           }
         : undefined,
+  });
+
+  // #1037: populate the join applier now that all four join-consuming
+  // subsystems exist — the live task-discovery descriptor (`taskDiscovery`),
+  // the mutable engine view (`joinedSolverNetsView`), the readiness registry,
+  // and the SolverNet registry. The join endpoint registered eagerly at
+  // server-start; before this point it returns restartRequired:true.
+  joinApplierHolder.current = createJoinApplier({
+    taskDiscovery,
+    view: joinedSolverNetsView,
+    readiness: harnessReadinessRegistry,
+    registry: solverNetRegistry,
+    config,
   });
 
   // Write pidfile so `jinn stop` can find us. First, refuse the run if another

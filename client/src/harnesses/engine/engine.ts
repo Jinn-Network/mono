@@ -136,6 +136,8 @@ export interface JoinedSolverNetsView {
   get(manifestCid: string): { roles: Array<'solver' | 'evaluator'> } | undefined;
   /** Enumerate all joined manifest CIDs (used for digest-based filtering). */
   manifestCids(): string[];
+  /** Add/replace one joined entry live (used by the hot-apply join applier, #1037). */
+  set(manifestCid: string, entry: { roles: Array<'solver' | 'evaluator'> }): void;
 }
 
 /** Map task role to the operator role it requires in `joinedSolverNets`. */
@@ -164,6 +166,28 @@ export function joinedSolverNetsViewFromConfig(
   return {
     get: (cid: string) => map.get(cid),
     manifestCids: () => [...map.keys()],
+    set: (cid, entry) => { map.set(cid, entry); },
+  };
+}
+
+/**
+ * Mutable `JoinedSolverNetsView` for the running daemon. Unlike
+ * `joinedSolverNetsViewFromConfig` (boot snapshot), the applier
+ * (`daemon/join-applier.ts`, #1037) keeps a handle and calls `set()` when a
+ * join is hot-applied, so the engine's per-task eligibility check sees the new
+ * cid on its next call without a restart.
+ */
+export function createMutableJoinedSolverNetsView(
+  initial: Record<string, { manifestCid: string; roles: Array<'solver' | 'evaluator'> }> | undefined,
+): JoinedSolverNetsView {
+  const map = new Map<string, { roles: Array<'solver' | 'evaluator'> }>();
+  for (const [key, entry] of Object.entries(initial ?? {})) {
+    map.set(entry.manifestCid ?? key, { roles: entry.roles });
+  }
+  return {
+    get: (cid: string) => map.get(cid),
+    manifestCids: () => [...map.keys()],
+    set: (cid, entry) => { map.set(cid, entry); },
   };
 }
 

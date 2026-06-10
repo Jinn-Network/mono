@@ -967,6 +967,103 @@ describe('POST /v1/operator/join/:cid', () => {
       version: 'v1',
     });
   });
+
+  // #983: the Enter-dashboard step re-joins with only roles+harness+model (no
+  // `name`). The applier keys the in-memory SolverNet registry by `name`, so a
+  // dropped name inserts a phantom duplicate that shadows the new harness/model.
+  // A partial upsert must preserve the prior `name`.
+  it('preserves a prior name on a partial re-join that omits name', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-name-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {
+      joinedSolverNets: {
+        bafybeiname: {
+          manifestCid: 'bafybeiname',
+          name: 'SWE-rebench v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: ['solver'],
+        },
+      },
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiname', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver'], harness: 'codex', model: 'gpt-5.4-mini' }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeiname.name).toBe('SWE-rebench v2');
+    expect(persisted.joinedSolverNets.bafybeiname.harness).toBe('codex');
+    expect(persisted.joinedSolverNets.bafybeiname.model).toBe('gpt-5.4-mini');
+  });
+
+  // #1037: hot-apply the join to the running daemon.
+  it('returns restartRequired:false when the applier succeeds', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-live-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const applied: unknown[] = [];
+    const joinApplier = { current: async (entry: unknown) => { applied.push(entry); } };
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath, joinApplier });
+
+    const res = await app.request('/v1/operator/join/bafyX', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver'], harness: 'codex', contract: { id: 'swe-rebench-v2', version: 'v1' } }),
+    });
+    const json = (await res.json()) as { ok: boolean; restartRequired: boolean };
+    expect(json.restartRequired).toBe(false);
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toMatchObject({ manifestCid: 'bafyX', roles: ['solver'] });
+  });
+
+  it('falls back to restartRequired:true when the applier holder is empty', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-empty-holder-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const joinApplier = { current: undefined };
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath, joinApplier });
+
+    const res = await app.request('/v1/operator/join/bafyX', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver'], contract: { id: 'swe-rebench-v2', version: 'v1' } }),
+    });
+    const json = (await res.json()) as { restartRequired: boolean };
+    expect(json.restartRequired).toBe(true);
+  });
+
+  it('falls back to restartRequired:true when the applier throws', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-throws-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const joinApplier = { current: async () => { throw new Error('boom'); } };
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath, joinApplier });
+
+    const res = await app.request('/v1/operator/join/bafyX', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver'], contract: { id: 'swe-rebench-v2', version: 'v1' } }),
+    });
+    const json = (await res.json()) as { ok: boolean; restartRequired: boolean };
+    // config write still succeeded; only the live apply failed → restart picks it up
+    expect(json.ok).toBe(true);
+    expect(json.restartRequired).toBe(true);
+  });
 });
 
 describe('DELETE /v1/operator/join/:cid', () => {
@@ -1032,5 +1129,49 @@ describe('DELETE /v1/operator/join/:cid', () => {
     });
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /v1/operator/onboarding-complete', () => {
+  const writeConfig = (path: string, body: unknown): void => {
+    require('node:fs').writeFileSync(path, JSON.stringify(body, null, 2) + '\n');
+  };
+
+  it('persists onboardingComplete:true and preserves other keys', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-onboarding-complete-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, { network: 'testnet' });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/onboarding-complete', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; onboardingComplete: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.onboardingComplete).toBe(true);
+
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.onboardingComplete).toBe(true);
+    expect(persisted.network).toBe('testnet');
+  });
+
+  it('invokes the in-memory markOnboardingComplete callback when supplied', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-onboarding-complete-cb-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+    const markOnboardingComplete = vi.fn();
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath, markOnboardingComplete });
+
+    const res = await app.request('/v1/operator/onboarding-complete', {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    expect(markOnboardingComplete).toHaveBeenCalledTimes(1);
   });
 });

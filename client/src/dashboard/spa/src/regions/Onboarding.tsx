@@ -23,7 +23,7 @@
  * PhaseStatusTag, NetworkBadge, SubStateLine, BootstrapErrorCard — to
  * keep this file a thin composition (shadcn C.7).
  */
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import type { BootstrapState } from '../api/types.js';
 import { AwaitingFundingCard } from './AwaitingFundingCard.js';
@@ -31,14 +31,30 @@ import { Agent } from './Agent.js';
 import { getFeatures } from '../lib/features.js';
 import { Progress } from '../components/ui/progress.js';
 import { Card } from '../components/ui/card.js';
+import { Button } from '../components/ui/button.js';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { cn } from '../lib/utils.js';
 import { BootstrapErrorCard } from './onboarding/BootstrapErrorCard.js';
 import { NetworkBadge } from './onboarding/NetworkBadge.js';
 import { PhaseRow, type Phase } from './onboarding/PhaseRow.js';
 import { type PhaseStatus } from './onboarding/PhaseStatusTag.js';
 import { SubStateLine } from './onboarding/SubStateLine.js';
+import { SolverNetStep } from './onboarding/SolverNetStep.js';
+import { HarnessSelectStep, type HarnessSelection } from './onboarding/HarnessSelectStep.js';
 
-import type { JSX } from 'react';
+import { useCallback, useState, type JSX } from 'react';
+
+/** Bootstrap steps that mean the earning state machine has reached terminal. */
+const TERMINAL_STEPS = new Set(['complete', 'safe_binding_pending']);
+
+/**
+ * The 2 action steps (SolverNet + harness/model) render once the bootstrap
+ * state machine reaches terminal OR the daemon has already flipped to running.
+ * Until then the takeover shows only the 3 status phases.
+ */
+function bootstrapIsTerminal(bootstrap: BootstrapState): boolean {
+  return bootstrap.mode === 'running' || TERMINAL_STEPS.has(bootstrap.currentStep);
+}
 
 interface BootstrapPhaseDescriptor {
   /** The bootstrap-specific phase (1, 2, or 3). */
@@ -95,11 +111,48 @@ const eyebrow =
   'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--accent-gold)]';
 
 export function Onboarding(): JSX.Element {
+  const queryClient = useQueryClient();
   const { data: bootstrap, isLoading } = useQuery<BootstrapState>({
     queryKey: ['bootstrap'],
     queryFn: () => api.getBootstrap(),
     refetchInterval: 2000,
   });
+
+  // #983 action-step selection state. `harnessSel` is captured from
+  // HarnessSelectStep; the completion gate reads it alongside the joined set.
+  const [harnessSel, setHarnessSel] = useState<HarnessSelection | null>(null);
+  const onSelectionChange = useCallback((sel: HarnessSelection) => setHarnessSel(sel), []);
+
+  const joinedCids = Object.keys(bootstrap?.joinedSolverNets ?? {});
+  const primaryCid = joinedCids[0];
+
+  // Persist harness+model onto the joined membership (second upsert join keyed
+  // by the real manifest cid), then mark onboarding complete so App.tsx drops
+  // the takeover for <Operating>. PR A hot-applies the join live, so no restart.
+  // The App-level overlay (App.tsx) closes the takeover once mode===running
+  // AND onboardingComplete — set by completeOnboarding() below.
+  const enterMutation = useMutation({
+    mutationFn: async () => {
+      if (primaryCid && harnessSel) {
+        await api.operator.join(primaryCid, {
+          roles: ['solver'],
+          harness: harnessSel.harness,
+          model: harnessSel.model,
+        });
+      }
+      await api.operator.completeOnboarding();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+    },
+  });
+
+  const onJoined = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+  }, [queryClient]);
+
+  const completionReady =
+    joinedCids.length > 0 && harnessSel?.ready === true && Boolean(harnessSel?.model);
 
   if (isLoading || !bootstrap) {
     return (
@@ -116,8 +169,13 @@ export function Onboarding(): JSX.Element {
   const masterAddress = bootstrap.master_address ?? '';
   const { phase: currentPhase, subState } = bootstrapPhaseFor(bootstrap.currentStep);
   const bootstrapError = bootstrap.error;
+  // #983: the App-level completion overlay now keeps Onboarding mounted in
+  // running mode (until ≥1 SolverNet is joined). A running-mode bootstrap
+  // response may omit `services`, so default to an empty array rather than
+  // crashing on `.find`.
+  const services = bootstrap.services ?? [];
   const activeService =
-    bootstrap.services.find((svc) => svc.step === bootstrap.currentStep) ?? bootstrap.services[0];
+    services.find((svc) => svc.step === bootstrap.currentStep) ?? services[0];
   // hjex.7: explicit `false` means the funding gate is still open; absent
   // (undefined) means the bootstrapper has cleared funding. The statusFor()
   // helper keeps Phase 3 (Fund your wallet) 'active' until this clears, so a
@@ -204,6 +262,35 @@ export function Onboarding(): JSX.Element {
               );
             })}
           </ol>
+
+          {bootstrapIsTerminal(bootstrap) && (
+            <div
+              className="flex flex-col gap-6"
+              data-testid="onboarding-action-steps"
+            >
+              <SolverNetStep onJoined={onJoined} joinedCids={joinedCids} />
+              {joinedCids.length > 0 && (
+                <HarnessSelectStep onSelectionChange={onSelectionChange} />
+              )}
+              {enterMutation.isError && (
+                <Alert variant="blocking" data-testid="onboarding-enter-error">
+                  <AlertTitle>Could not enter the dashboard.</AlertTitle>
+                  <AlertDescription>
+                    Saving your harness selection or completing onboarding
+                    failed. Try again; check daemon logs if it keeps failing.
+                  </AlertDescription>
+                </Alert>
+              )}
+              <Button
+                data-testid="onboarding-enter-dashboard"
+                disabled={!completionReady || enterMutation.isPending}
+                onClick={() => enterMutation.mutate()}
+                className="self-start"
+              >
+                {enterMutation.isPending ? 'Starting…' : 'Enter dashboard'}
+              </Button>
+            </div>
+          )}
         </section>
 
         {embeddedAgentEnabled && (

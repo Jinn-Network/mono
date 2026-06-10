@@ -496,6 +496,19 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
+   * Set true once the operator clicks "Enter dashboard" at the end of the
+   * #983 guided onboarding takeover. Distinct from `joinedSolverNets` being
+   * non-empty: a node can have a membership mid-onboarding (the first join
+   * populates the map) yet not have finished harness/model selection. The SPA
+   * gates the bootstrap→dashboard hand-off on this flag (see App.tsx), so the
+   * first join no longer ejects the operator before the harness step.
+   *
+   * Written by POST /v1/operator/onboarding-complete (persisted to disk AND
+   * mutated in-memory so GET /v1/bootstrap reflects it without a restart).
+   */
+  onboardingComplete: z.boolean().optional(),
+
+  /**
    * Trusted ed25519 publishers for external harness impls. The daemon
    * refuses to load any external impl whose manifest signature is not
    * verifiable against one of these public keys.
