@@ -19,18 +19,21 @@ cd chain
 ./rung2.sh     # verify JINN can be locked for governance
 ./rung3.sh     # verify the work loop end to end: lock → vote → record work
 ./rung4.sh     # verify JINN secures consensus (staking)
+./rung5.sh     # verify Cosmos-native surfaces (CometBFT RPC, SDK REST, SDK tx)
 ./down.sh      # stop the node
 ```
 
 Run them in order. The first `./up.sh` compiles the node from source (a few
-minutes, cached afterwards). `./rung4.sh` re-initialises a fresh chain, so run it
-last. `FRESH=1 ./up.sh` resets chain state. Each check exits `0` on success.
+minutes, cached afterwards). `./rung5.sh` reuses the running devnet and reads
+over CometBFT RPC and the SDK REST API. `./rung4.sh` re-initialises a fresh
+chain, so run it last. `FRESH=1 ./up.sh` resets chain state. Each check exits
+`0` on success.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
 | `up.sh` / `down.sh` | start / stop the node |
-| `check.sh`, `rung2.sh`, `rung3.sh`, `rung4.sh` | verification checks |
+| `check.sh`, `rung2.sh`, `rung3.sh`, `rung4.sh`, `rung5.sh` | verification checks |
 | `lib.sh` | shared configuration |
 | `.build/` | node source, binary, and chain data (not committed) |
