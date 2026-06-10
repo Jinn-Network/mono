@@ -252,7 +252,8 @@ test('post-flip onboarding: join under the real cid, complete, drop the takeover
 
   // 1. Takeover is held: onboarding progress shows, the operating shell does not.
   await expect(page.getByTestId('onboarding-progress')).toBeVisible();
-  await expect(page.getByTestId('onboarding-action-steps')).toBeVisible();
+  // The SolverNet step (rail step 4) is active once the bootstrap is terminal.
+  await expect(page.getByTestId('onboarding-phase-4')).toHaveAttribute('data-status', 'active');
   await expect(page.getByTestId('overview-page-grid')).toHaveCount(0);
 
   // 2. Registry self-heals from the 503 window to the swe-rebench-v2 card,

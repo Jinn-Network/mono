@@ -1,19 +1,30 @@
 /**
  * Onboarding — full-screen takeover while the fleet bootstraps.
  *
- * Three operator-meaningful phases displayed as an always-visible list:
+ * Five operator-meaningful steps displayed as a single always-visible list:
  *
  *   01 · Provisioning your wallet      (wallet, safe_predicted)
  *   02 · Fund your wallet              (awaiting_funding)
  *   03 · Joining Jinn                  (everything else through mech_deployed)
+ *   04 · Pick your first SolverNet     (post-terminal; SolverNetStep)
+ *   05 · Set up harness + model        (post-join; HarnessSelectStep)
  *
  * Each row shows status (done · active · queued). The active row expands
  * inline with whatever the operator needs at that moment — the funding
- * address card in phase 2, a current sub-state line in phase 3. Done rows
- * collapse to a thin checkmark line. Queued rows are dim.
+ * address card in step 2, a current sub-state line in step 3, the SolverNet
+ * card in step 4, the harness picker in step 5. Done rows collapse to a thin
+ * checkmark line. Queued rows are dim.
  *
- * Once bootstrap reaches 'complete' the daemon flips mode to 'running' and
- * App.tsx routes to <Operating>. Silent transition, no Phase 4.
+ * Steps 4 & 5 stay `queued` (label-only) while the bootstrap state machine is
+ * still running. They must NOT mount SolverNetStep / HarnessSelectStep before
+ * `bootstrapIsTerminal()` — those steps fetch the live registry / harness
+ * readiness, which 503 before the running flip. Step 4 becomes active once the
+ * bootstrap is terminal and no SolverNet is joined; step 5 becomes active once
+ * ≥1 SolverNet is joined.
+ *
+ * Once bootstrap reaches 'complete' the daemon flips mode to 'running'; the
+ * App-level overlay keeps the takeover mounted until onboarding is marked
+ * complete, then routes to <Operating>.
  *
  * Per-harness auth (formerly Phase 1 "Sign in to Claude") moved to the
  * /operator join flow in Stage B (vh74.2). Onboarding now covers only the
@@ -48,9 +59,9 @@ import { useCallback, useState, type JSX } from 'react';
 const TERMINAL_STEPS = new Set(['complete', 'safe_binding_pending']);
 
 /**
- * The 2 action steps (SolverNet + harness/model) render once the bootstrap
- * state machine reaches terminal OR the daemon has already flipped to running.
- * Until then the takeover shows only the 3 status phases.
+ * The 2 action steps (SolverNet + harness/model) mount their live cards once
+ * the bootstrap state machine reaches terminal OR the daemon has already
+ * flipped to running. Until then those rows render label-only (queued).
  */
 function bootstrapIsTerminal(bootstrap: BootstrapState): boolean {
   return bootstrap.mode === 'running' || TERMINAL_STEPS.has(bootstrap.currentStep);
@@ -168,6 +179,14 @@ export function Onboarding(): JSX.Element {
     bootstrap.chain === 'base' ? 'https://basescan.org' : 'https://sepolia.basescan.org';
   const masterAddress = bootstrap.master_address ?? '';
   const { phase: currentPhase, subState } = bootstrapPhaseFor(bootstrap.currentStep);
+  const isTerminal = bootstrapIsTerminal(bootstrap);
+  // Current step across the full 5-step rail. Steps 1-3 follow the bootstrap
+  // phase; step 4 is active once terminal with no join; step 5 once ≥1 joined.
+  const currentStep: Phase = !isTerminal
+    ? currentPhase
+    : joinedCids.length > 0
+      ? 5
+      : 4;
   const bootstrapError = bootstrap.error;
   // #983: the App-level completion overlay now keeps Onboarding mounted in
   // running mode (until ≥1 SolverNet is joined). A running-mode bootstrap
@@ -207,7 +226,7 @@ export function Onboarding(): JSX.Element {
           </h1>
 
           {/* Bootstrap progress — visualises overall completion across the
-              three phases. The PhaseRow list below is the source of truth
+              five steps. The PhaseRow list below is the source of truth
               for state; this bar is a glance-level cue so the operator
               knows roughly how far they are. */}
           <div
@@ -215,21 +234,16 @@ export function Onboarding(): JSX.Element {
             data-testid="onboarding-progress"
             aria-label="Onboarding progress"
           >
-            <Progress
-              value={Math.min(
-                100,
-                ((currentPhase - 1) / 2) * 100 + (currentPhase === 3 ? 33 : 0),
-              )}
-            />
+            <Progress value={Math.min(100, ((currentStep - 1) / 4) * 100)} />
             <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]">
-              Phase {currentPhase} of 3
+              Phase {currentStep} of 5
             </span>
           </div>
 
           <ol className="flex flex-col">
-            {([1, 2, 3] as Phase[]).map((p) => {
-              const status = statusFor(p, currentPhase, fundingTargetMet);
-              const showError = bootstrapError && p === currentPhase;
+            {([1, 2, 3, 4, 5] as Phase[]).map((p) => {
+              const status = statusFor(p, currentStep, fundingTargetMet);
+              const showError = bootstrapError && p === currentStep && p <= 3;
               return (
                 <PhaseRow key={p} phase={p} status={showError ? 'error' : status}>
                   {showError && (
@@ -258,39 +272,41 @@ export function Onboarding(): JSX.Element {
                       contractRevertReason={activeService?.error_revert_reason ?? null}
                     />
                   )}
+                  {/* Step 4 — SolverNet. Mounts the live registry card only once
+                      the bootstrap is terminal (queued rows are label-only; the
+                      registry endpoint 503s before the running flip). */}
+                  {p === 4 && status === 'active' && (
+                    <SolverNetStep onJoined={onJoined} joinedCids={joinedCids} />
+                  )}
+                  {/* Step 5 — harness + model. Active once ≥1 SolverNet joined;
+                      hosts the completion gate (Enter dashboard) as the last
+                      step's content. */}
+                  {p === 5 && status === 'active' && (
+                    <div className="flex flex-col gap-6">
+                      <HarnessSelectStep onSelectionChange={onSelectionChange} />
+                      {enterMutation.isError && (
+                        <Alert variant="blocking" data-testid="onboarding-enter-error">
+                          <AlertTitle>Could not enter the dashboard.</AlertTitle>
+                          <AlertDescription>
+                            Saving your harness selection or completing onboarding
+                            failed. Try again; check daemon logs if it keeps failing.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      <Button
+                        data-testid="onboarding-enter-dashboard"
+                        disabled={!completionReady || enterMutation.isPending}
+                        onClick={() => enterMutation.mutate()}
+                        className="self-start"
+                      >
+                        {enterMutation.isPending ? 'Starting…' : 'Enter dashboard'}
+                      </Button>
+                    </div>
+                  )}
                 </PhaseRow>
               );
             })}
           </ol>
-
-          {bootstrapIsTerminal(bootstrap) && (
-            <div
-              className="flex flex-col gap-6"
-              data-testid="onboarding-action-steps"
-            >
-              <SolverNetStep onJoined={onJoined} joinedCids={joinedCids} />
-              {joinedCids.length > 0 && (
-                <HarnessSelectStep onSelectionChange={onSelectionChange} />
-              )}
-              {enterMutation.isError && (
-                <Alert variant="blocking" data-testid="onboarding-enter-error">
-                  <AlertTitle>Could not enter the dashboard.</AlertTitle>
-                  <AlertDescription>
-                    Saving your harness selection or completing onboarding
-                    failed. Try again; check daemon logs if it keeps failing.
-                  </AlertDescription>
-                </Alert>
-              )}
-              <Button
-                data-testid="onboarding-enter-dashboard"
-                disabled={!completionReady || enterMutation.isPending}
-                onClick={() => enterMutation.mutate()}
-                className="self-start"
-              >
-                {enterMutation.isPending ? 'Starting…' : 'Enter dashboard'}
-              </Button>
-            </div>
-          )}
         </section>
 
         {embeddedAgentEnabled && (

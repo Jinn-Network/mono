@@ -90,8 +90,8 @@ function withQueryClient(node: JSX.Element): JSX.Element {
   return <QueryClientProvider client={qc}>{node}</QueryClientProvider>;
 }
 
-describe('Onboarding (3-phase post-vh74.2)', () => {
-  it('renders exactly three phases', async () => {
+describe('Onboarding (5-step rail)', () => {
+  it('renders all five steps, with 4 & 5 queued during bootstrap', async () => {
     render(withQueryClient(<Onboarding />));
 
     // Wait for bootstrap data to load (queries are async)
@@ -100,7 +100,22 @@ describe('Onboarding (3-phase post-vh74.2)', () => {
     expect(screen.getByText(/Provisioning your wallet/i)).toBeTruthy();
     expect(screen.getByText(/Fund your wallet/i)).toBeTruthy();
     expect(screen.getByText(/Joining Jinn/i)).toBeTruthy();
+    expect(screen.getByText(/Pick your first SolverNet/i)).toBeTruthy();
+    expect(screen.getByText(/Set up harness \+ model/i)).toBeTruthy();
     expect(screen.queryByText(/Sign in to Claude/i)).toBeNull();
+
+    // Header reads "of 5".
+    expect(screen.getByText(/Phase \d+ of 5/i)).toBeTruthy();
+
+    // Steps 4 & 5 are queued: labels present but no live registry / readiness
+    // fetch (their cards must NOT mount before the bootstrap flips terminal).
+    expect(screen.getByTestId('onboarding-phase-4').getAttribute('data-status')).toBe('queued');
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('queued');
+    expect(screen.queryByTestId('onboarding-solvernet-card')).toBeNull();
+    expect(screen.queryByTestId('onboarding-solvernet-loading')).toBeNull();
+    expect(screen.queryByTestId('onboarding-harness-card')).toBeNull();
+    expect(listRegistry).not.toHaveBeenCalled();
+    expect(harnessReadiness).not.toHaveBeenCalled();
   });
 
   it('does not render a Sign in to Claude phase', async () => {
@@ -250,14 +265,20 @@ describe('Onboarding action steps (#983)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('onboarding-solvernet-card')).toBeTruthy(),
     );
+    // Step 4 becomes active (mounts SolverNetStep); step 5 stays queued until join.
+    expect(screen.getByTestId('onboarding-phase-4').getAttribute('data-status')).toBe('active');
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('queued');
+    expect(screen.queryByTestId('onboarding-harness-card')).toBeNull();
   });
 
-  it('keeps Enter dashboard disabled until a SolverNet is joined', async () => {
+  it('does not show Enter dashboard until a SolverNet is joined (step 5 queued)', async () => {
     bootstrapOverride = { ...terminal };
     render(withQueryClient(<Onboarding />));
     await waitFor(() => screen.getByTestId('onboarding-solvernet-join'));
-    const enter = screen.getByTestId('onboarding-enter-dashboard') as HTMLButtonElement;
-    expect(enter.disabled).toBe(true);
+    // Step 5 is queued (label-only) before any join — its content, including
+    // the Enter-dashboard button, is not mounted yet.
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('queued');
+    expect(screen.queryByTestId('onboarding-enter-dashboard')).toBeNull();
   });
 
   it('reveals the harness step after joining and shows Codex / gpt-5.4-mini default', async () => {
@@ -273,6 +294,8 @@ describe('Onboarding action steps (#983)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('onboarding-harness-card')).toBeTruthy(),
     );
+    // With a join present, step 5 is active and mounts the harness card.
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('active');
     const select = screen.getByTestId('onboarding-model-select') as HTMLSelectElement;
     expect(select.value).toBe('gpt-5.4-mini');
   });
