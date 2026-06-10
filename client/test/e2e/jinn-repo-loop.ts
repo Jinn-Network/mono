@@ -47,17 +47,23 @@ import {
 import { JinnRepoSolutionPayloadSchema } from '@jinn-network/sdk/solvernets/jinn-repo';
 import { loadSolverNets } from '../../src/solver-nets/registry.js';
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
+import { writeFileSync } from 'node:fs';
 
-const LEG_TIMEOUT_MS = 15 * 60_000; // 15 min — clone + agent session / clone + yarn install
+const LEG_TIMEOUT_MS = 40 * 60_000; // 40 min — headroom over the observed solve range
+// (12–26 min). With non-applying patches now graded FAIL fast (no eval hang), the
+// daemon never backs up, so a generous solve window does not cascade.
 
 interface LoopRecord {
   instanceId: string;
+  baseCommit: string;
   taskTx: string;
   claimTx: string;
   solutionTx: string;
   verdictTx: string;
+  verdictCode: number | 'n/a';
   passed: boolean | 'n/a';
   patchNonEmpty: boolean | 'n/a';
+  patch: string; // full delivered patch — for independent verdict sense-check
 }
 
 function firstLines(text: string, n: number): string {
@@ -150,12 +156,15 @@ async function main(): Promise<void> {
         console.log(`\n--- instance ${item.instance_id} ---`);
         const rec: LoopRecord = {
           instanceId: item.instance_id,
+          baseCommit: item.base_commit,
           taskTx: '-',
           claimTx: '-',
           solutionTx: '-',
           verdictTx: '-',
+          verdictCode: 'n/a',
           passed: 'n/a',
           patchNonEmpty: 'n/a',
+          patch: '',
         };
 
         try {
@@ -197,6 +206,7 @@ async function main(): Promise<void> {
           } catch (e) {
             console.log(`  [warn] could not parse jinn-repo-solution payload: ${String(e).slice(0, 200)}`);
           }
+          rec.patch = patch;
           rec.patchNonEmpty = patch.trim().length > 0;
           console.log(`  patch non-empty: ${rec.patchNonEmpty}`);
           if (patch.trim().length > 0) {
@@ -212,6 +222,7 @@ async function main(): Promise<void> {
           const evalMs = Date.now() - evalStart;
           rec.verdictTx = verdict.verdictTxHash;
           // verdictCode: 1=Pass, 2=Fail, 3=Invalid, 4=Unresolved.
+          rec.verdictCode = verdict.verdictCode;
           rec.passed = verdict.verdictCode === 1;
           console.log(
             `verdict: tx=${verdict.verdictTxHash} code=${verdict.verdictCode} passed=${rec.passed} (eval leg ${(evalMs / 1000).toFixed(1)}s)`,
@@ -249,6 +260,12 @@ async function main(): Promise<void> {
       ].join(' | '),
     );
   }
+
+  // Evidence bundle: full delivered patches + verdicts per instance, for the
+  // independent verdict sense-check (reproduce each grade off-loop).
+  const evidenceOut = process.env['JINN_RUN_EVIDENCE_OUT'] ?? '/tmp/jinnrepo_run_evidence.json';
+  writeFileSync(evidenceOut, `${JSON.stringify(records, null, 2)}\n`);
+  console.log(`\nwrote run evidence → ${evidenceOut}`);
 
   // Success criterion: every driven item delivered a non-empty patch on-chain
   // AND settled a verdict (PASS or FAIL — an honest FAIL still proves the loop).

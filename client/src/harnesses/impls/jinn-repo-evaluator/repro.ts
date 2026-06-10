@@ -24,6 +24,20 @@ export interface PreparedRepro {
   cleanup: () => Promise<void>;
 }
 
+/**
+ * Thrown when the *candidate* patch fails to apply to a clean base_commit
+ * checkout. This is a property of the candidate (a bad / conflicting patch),
+ * NOT a grader-infra failure — so the eval-runner scores it FAIL, not
+ * unscorable. (Reserve `unscorable` for clone / fetch / install / test-spawn
+ * failures, which are the grader's environment breaking.)
+ */
+export class PatchDoesNotApplyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PatchDoesNotApplyError';
+  }
+}
+
 export async function prepareRepro(args: {
   monoRepoUrl: string;
   baseCommit: string;
@@ -46,7 +60,15 @@ export async function prepareRepro(args: {
     if (args.patch.trim().length > 0) {
       const patchPath = join(dir, '.candidate.patch');
       await writeFile(patchPath, args.patch);
-      await sh('git', ['-C', dir, 'apply', '--3way', patchPath]);
+      try {
+        await sh('git', ['-C', dir, 'apply', '--3way', patchPath]);
+      } catch (e) {
+        // A candidate patch that does not apply is a FAIL, not infra breakage.
+        // Surface a typed error so the eval-runner classifies it as a graded
+        // FAIL rather than silently skipping it (unscorable → no verdict).
+        const detail = String((e as { stderr?: string })?.stderr ?? e).slice(0, 2000);
+        throw new PatchDoesNotApplyError(`candidate patch does not apply: ${detail}`);
+      }
     }
 
     // Overwrite the gold tests last so a candidate patch can never weaken

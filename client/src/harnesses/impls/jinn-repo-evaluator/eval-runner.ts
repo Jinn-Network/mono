@@ -24,7 +24,7 @@
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { prepareRepro } from './repro.js';
+import { prepareRepro, PatchDoesNotApplyError } from './repro.js';
 import type { JinnRepoTask } from '../../../solver-types/jinn-repo.js';
 
 const sh = promisify(execFile);
@@ -59,8 +59,16 @@ export async function runJinnRepoEval(args: {
       goldTestFiles: args.goldTests,
     });
   } catch (e) {
-    // Clone / fetch / checkout / patch-apply failure is infra, not a graded
-    // FAIL. (A patch that does not apply is unscorable by construction here.)
+    // A candidate patch that does not apply is a graded FAIL — the candidate
+    // produced a broken/conflicting diff (SWE-bench convention). Only true
+    // grader-infra failure (clone / fetch / checkout) is unscorable.
+    if (e instanceof PatchDoesNotApplyError) {
+      return {
+        passed: false,
+        unscorable: false,
+        logExcerpt: String(e).slice(0, LOG_LIMIT),
+      };
+    }
     return {
       passed: null,
       unscorable: true,
