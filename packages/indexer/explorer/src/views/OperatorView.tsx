@@ -331,7 +331,7 @@ export function OperatorView() {
               accent
             />
             <Kpi
-              label="JINN earned"
+              label="Testnet JINN earned"
               value={
                 data.meta.jinnAttribution === 'pending' ? (
                   <span

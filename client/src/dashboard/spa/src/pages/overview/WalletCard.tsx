@@ -141,7 +141,7 @@ export function WalletCard({
             aria-atomic="true"
           >
             <p className="text-sm font-medium text-muted-foreground">
-              JINN earned last 24hrs
+              Testnet JINN earned last 24hrs
             </p>
             <div className="flex items-baseline gap-2">
               <span

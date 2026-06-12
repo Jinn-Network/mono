@@ -276,7 +276,7 @@ export function OperatorsView() {
                   </span>
                 </th>
                 <th style={th}>Attempts</th>
-                <th style={th}>JINN earned</th>
+                <th style={th}>Testnet JINN earned</th>
               </tr>
             </thead>
             <tbody>

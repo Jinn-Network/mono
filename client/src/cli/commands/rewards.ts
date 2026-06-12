@@ -44,7 +44,7 @@ function humanRewards(payload: RewardsV1Response): string {
     for (const s of payload.services) {
       lines.push(`  Service #${s.index}: ${formatRewardAmount(s.pending)} pending · ${formatRewardAmount(s.claimed)} claimed`);
     }
-    lines.push('Operator tJINN/JINN earnings are reported from the Sepolia tJINN Safe balance, not this collector queue.');
+    lines.push('Operator testnet JINN (tJINN) earnings are reported from the Sepolia tJINN Safe balance, not this collector queue.');
   }
   lines.push(
     `Last claim tick: ${payload.lastClaimAt ?? 'never (daemon not yet run the claim loop)'}`,
@@ -62,8 +62,8 @@ export function createRewardsCommand(deps: RewardsDeps = PRODUCTION_DEPS): Comma
     helpText: `Usage: jinn rewards [--human]
 
 Returns the current staking collector claim queue per service. This is
-the OLAS-style distributor maintenance path; operator tJINN/JINN earnings
-are the Sepolia tJINN Safe balance shown in status / the app.
+the OLAS-style distributor maintenance path; operator testnet JINN (tJINN)
+earnings are the Sepolia tJINN Safe balance shown in status / the app.
 
 Examples:
   jinn rewards

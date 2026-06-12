@@ -161,7 +161,7 @@ describe('OperatorView', () => {
 
     await waitFor(() => {
       // 1.5 JINN
-      expect(screen.getByText('1.50 JINN')).toBeInTheDocument();
+      expect(screen.getByText('1.50 tJINN')).toBeInTheDocument();
     });
   });
 

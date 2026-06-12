@@ -190,9 +190,9 @@ describe('NetworkView', () => {
     await waitFor(() => {
       expect(screen.getByText('Economy')).toBeInTheDocument();
     });
-    expect(screen.getByText('JINN distributed')).toBeInTheDocument();
-    expect(screen.getByText(/100\.50 JINN to operators/)).toBeInTheDocument();
-    expect(screen.getByText(/50\.00 JINN to DAO/)).toBeInTheDocument();
+    expect(screen.getByText('Testnet JINN distributed')).toBeInTheDocument();
+    expect(screen.getByText(/100\.50 tJINN to operators/)).toBeInTheDocument();
+    expect(screen.getByText(/50\.00 tJINN to DAO/)).toBeInTheDocument();
   });
 
   it('renders the NETWORK COMPOSITION eyebrow on the composition card (#610)', async () => {

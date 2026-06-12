@@ -60,21 +60,21 @@ export function block(s: string | number | null | undefined): string {
  * @param weiStr  decimal string e.g. "100500000000000000044"
  * @param decimals token decimals (default 18)
  * @param digits  display decimal places (default 2)
- * @returns e.g. `"100.50 JINN"` or `"0 JINN"` for zero/null/empty
+ * @returns e.g. `"100.50 tJINN"` or `"0 tJINN"` for zero/null/empty
  */
 export function jinn(
   weiStr: string | null | undefined,
   decimals = 18,
   digits = 2,
 ): string {
-  if (!weiStr || weiStr === '0') return '0 JINN';
+  if (!weiStr || weiStr === '0') return '0 tJINN';
   let raw: bigint;
   try {
     raw = BigInt(weiStr);
   } catch {
     return '—';
   }
-  if (raw === 0n) return '0 JINN';
+  if (raw === 0n) return '0 tJINN';
 
   const divisor = 10n ** BigInt(decimals);
   const wholePart = raw / divisor;
@@ -84,7 +84,7 @@ export function jinn(
   const fracStr = fracRaw.toString().padStart(decimals, '0').slice(0, digits);
 
   const wholeFormatted = intFmt.format(wholePart);
-  return `${wholeFormatted}.${fracStr} JINN`;
+  return `${wholeFormatted}.${fracStr} tJINN`;
 }
 
 // ── shortAddr ─────────────────────────────────────────────────────────────────
