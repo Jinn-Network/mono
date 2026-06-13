@@ -19,6 +19,13 @@ interface Props {
    * option before they bounce off a rate-limit failure later. See jinn-mono #325.
    */
   onSharedDefaultRpc?: boolean;
+  /**
+   * Live master-EOA balance in wei, sourced from the daemon's already-persisted
+   * funding gate (`bootstrap.funding.eth_balance`, rewritten each drip and
+   * polled by Onboarding every 2s). Drives a REAL progress bar during a drip
+   * request instead of a fabricated elapsed-time curve. Issue #979.
+   */
+  currentBalanceWei?: string;
 }
 
 const CHAIN_DISPLAY_NAME: Record<string, string> = {
@@ -29,12 +36,18 @@ const CHAIN_DISPLAY_NAME: Record<string, string> = {
 const eyebrow =
   'font-mono text-[11px] font-medium uppercase tracking-[0.14em]';
 
+// Client-side drip deadline. Slightly exceeds the server loop cap
+// (DEFAULT_FAUCET_LOOP_TIMEOUT_MS = 5 min) so a stalled request always
+// resolves to a surfaced state instead of hanging the button forever. #979.
+const DRIP_DEADLINE_MS = 5.5 * 60 * 1000;
+
 export function AwaitingFundingCard({
   address,
   minimumWei,
   chainExplorerBase,
   chain,
   onSharedDefaultRpc = false,
+  currentBalanceWei,
 }: Props): JSX.Element {
   const [copied, setCopied] = useState(false);
   const [fundingStartedAt, setFundingStartedAt] = useState<number | null>(null);
@@ -60,6 +73,7 @@ export function AwaitingFundingCard({
       }
     | { state: 'rate_limited'; reason: string }
     | { state: 'failed'; reason: string }
+    | { state: 'timed_out' }
   >({ state: 'idle' });
 
   useEffect(() => {
@@ -82,8 +96,11 @@ export function AwaitingFundingCard({
     setFundingStartedAt(Date.now());
     setElapsedSeconds(0);
     setDripStatus({ state: 'requesting' });
+    const controller = new AbortController();
+    const deadline = window.setTimeout(() => controller.abort(), DRIP_DEADLINE_MS);
     try {
-      const r = await api.triggerDrip();
+      const r = await api.triggerDrip({ signal: controller.signal });
+      window.clearTimeout(deadline);
       setFundingStartedAt(null);
       if (r.ok) {
         setDripStatus({
@@ -100,11 +117,16 @@ export function AwaitingFundingCard({
         setDripStatus({ state: 'failed', reason: r.reason ?? 'faucet funding failed' });
       }
     } catch (err) {
+      window.clearTimeout(deadline);
       setFundingStartedAt(null);
-      setDripStatus({
-        state: 'failed',
-        reason: err instanceof Error ? err.message : 'drip failed',
-      });
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        setDripStatus({ state: 'timed_out' });
+      } else {
+        setDripStatus({
+          state: 'failed',
+          reason: err instanceof Error ? err.message : 'drip failed',
+        });
+      }
     }
   };
 
@@ -136,10 +158,23 @@ export function AwaitingFundingCard({
   const minimumEth = formatEth(minimumWei);
   const fundingProgress = useMemo(() => {
     if (dripStatus.state !== 'requesting') return 0;
-    // The Base Sepolia CDP faucet sends tiny drips and may require many calls.
-    // This is a time-based progress cue; the precise drip count arrives in the response.
-    return Math.min(92, Math.max(8, Math.round((elapsedSeconds / 60) * 92)));
-  }, [dripStatus.state, elapsedSeconds]);
+    // Real progress: live balance vs target, sourced from the daemon's funding
+    // gate via the Onboarding poll. Falls back to a small indeterminate floor
+    // until the first balance reading lands. #979.
+    try {
+      if (currentBalanceWei !== undefined && minimumWei) {
+        const target = BigInt(minimumWei);
+        if (target > 0n) {
+          const balance = BigInt(currentBalanceWei);
+          const pct = Number((balance * 100n) / target);
+          return Math.min(99, Math.max(5, pct));
+        }
+      }
+    } catch {
+      // fall through to floor
+    }
+    return 8;
+  }, [dripStatus.state, currentBalanceWei, minimumWei]);
 
   const sentTxCount =
     dripStatus.state === 'sent'
@@ -239,12 +274,18 @@ export function AwaitingFundingCard({
       {dripStatus.state === 'requesting' && (
         <div className="flex flex-col gap-2">
           <Progress
+            data-testid="drip-progress"
+            data-value={fundingProgress}
             value={fundingProgress}
             className="h-1.5 rounded-full [&>div]:bg-[var(--accent-gold)]"
           />
           <p className="font-mono text-[11px] text-[var(--fg-muted)]">
-            Requesting faucet drips for {trunc(address)}. Elapsed {elapsedSeconds}s; this can take
-            about a minute on a fresh wallet.
+            Requesting faucet drips for {trunc(address)}. Faucet drips are small
+            and rate-limited; this can take a few minutes.
+            {currentBalanceWei !== undefined
+              ? ` Balance ${formatEth(currentBalanceWei)} / target ${minimumEth}.`
+              : ''}{' '}
+            Elapsed {elapsedSeconds}s.
           </p>
         </div>
       )}
@@ -255,6 +296,34 @@ export function AwaitingFundingCard({
       )}
       {dripStatus.state === 'failed' && (
         <p className="font-mono text-[11px] text-[var(--break-red)]">{dripStatus.reason}</p>
+      )}
+      {dripStatus.state === 'timed_out' && (
+        <div data-testid="drip-timed-out" className="flex flex-col gap-2">
+          <p className="font-mono text-[11px] text-[var(--accent-gold)]">
+            Funds are still arriving. The faucet is slow and rate-limited; this
+            can take several minutes. You can retry, or send ETH manually to the
+            address above.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              onClick={requestDrip}
+              className="bg-[var(--accent-gold)] text-[var(--bg)] hover:bg-[var(--accent-gold-hover)]"
+            >
+              Try again
+            </Button>
+            <Button asChild variant="ghost">
+              <a
+                href={`${chainExplorerBase}/address/${address}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalLink />
+                Check balance on explorer
+              </a>
+            </Button>
+          </div>
+        </div>
       )}
       {onSharedDefaultRpc && (
         <p
