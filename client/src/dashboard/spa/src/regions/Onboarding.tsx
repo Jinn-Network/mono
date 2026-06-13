@@ -256,6 +256,7 @@ export function Onboarding(): JSX.Element {
                     <AwaitingFundingCard
                       address={masterAddress}
                       minimumWei={bootstrap.funding?.targetWei ?? '10000000000000000'}
+                      currentBalanceWei={bootstrap.funding?.eth_balance}
                       chainExplorerBase={explorer}
                       chain={bootstrap.chain}
                       onSharedDefaultRpc={bootstrap.rpcUrl === bootstrap.defaultRpcUrl}

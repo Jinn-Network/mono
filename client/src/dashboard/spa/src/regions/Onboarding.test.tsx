@@ -27,6 +27,10 @@ vi.mock('../api/client.js', () => ({
       chain: 'base-sepolia',
       ...bootstrapOverride,
     }),
+    // A hanging drip keeps AwaitingFundingCard in the `requesting` state so the
+    // balance-vs-target readout (which only renders while requesting) is
+    // assertable. Issue #979.
+    triggerDrip: () => new Promise<never>(() => {}),
     solvernets: { listRegistry: () => listRegistry() },
     operator: {
       join: (...a: unknown[]) => operatorJoin(...a),
@@ -244,6 +248,31 @@ describe('statusFor phase machine', () => {
     expect(statusFor(2, 2, false)).toBe('active');
     expect(statusFor(2, 2, undefined)).toBe('active');
     expect(statusFor(2, 2, true)).toBe('active');
+  });
+});
+
+// Issue #979: the funding card must receive the live balance from the
+// bootstrap poll so its progress bar reflects real funds climbing, not a
+// fabricated time curve.
+describe('Onboarding — funding card live balance (issue #979)', () => {
+  it('passes funding.eth_balance into AwaitingFundingCard', async () => {
+    bootstrapOverride = {
+      mode: 'setup',
+      currentStep: 'awaiting_funding',
+      steps: ['wallet', 'safe_predicted', 'awaiting_funding'],
+      master_address: '0x2222222222222222222222222222222222222222',
+      funding: {
+        eth_balance: '5000000000000000',
+        eth_required: '5000000000000000',
+        targetWei: '10000000000000000',
+        targetMet: false,
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await screen.findByText(/Fund your wallet/i);
+    fireEvent.click(screen.getByRole('button', { name: /fund from faucet/i }));
+    // Balance-vs-target readout proves the live balance reached the card.
+    expect(await screen.findByText(/balance .* \/ target/i)).toBeTruthy();
   });
 });
 
