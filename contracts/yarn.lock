@@ -709,15 +709,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-network-helpers@npm:^3.0.9":
-  version: 3.0.9
-  resolution: "@nomicfoundation/hardhat-network-helpers@npm:3.0.9"
+"@nomicfoundation/hardhat-network-helpers@npm:^3.0.10":
+  version: 3.0.10
+  resolution: "@nomicfoundation/hardhat-network-helpers@npm:3.0.10"
   dependencies:
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.13"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
     "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
   peerDependencies:
-    hardhat: ^3.4.0
-  checksum: 10c0/ebc941a5cbbe32db4dabbceb01615b42cffacc3b54559d53a16818fbeebd13582e4a0037f81146e2c24b37d121af8662c399ccec2258aa4fbe6a80d2fa51fc58
+    hardhat: ^3.8.0
+  checksum: 10c0/3837fd5be7c791ffaece7fd687feb7b3e372f0f1144c165db8349e6f742a8eb4f080b1c987aa4ff66730765f1d17203dbac9af503c91bee1654a5c809d977ed7
   languageName: node
   linkType: hard
 
@@ -2115,7 +2115,7 @@ __metadata:
     "@nomicfoundation/hardhat-ignition-ethers": "npm:^3.1.6"
     "@nomicfoundation/hardhat-keystore": "npm:^3.0.12"
     "@nomicfoundation/hardhat-mocha": "npm:^3.0.20"
-    "@nomicfoundation/hardhat-network-helpers": "npm:^3.0.9"
+    "@nomicfoundation/hardhat-network-helpers": "npm:^3.0.10"
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "npm:^3.0.7"
     "@nomicfoundation/hardhat-typechain": "npm:^3.1.0"
     "@nomicfoundation/hardhat-verify": "npm:^3.0.18"
