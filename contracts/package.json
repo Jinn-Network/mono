@@ -27,7 +27,7 @@
     "@nomicfoundation/hardhat-mocha": "^3.0.20",
     "@nomicfoundation/hardhat-network-helpers": "^3.0.10",
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
-    "@nomicfoundation/hardhat-typechain": "^3.1.0",
+    "@nomicfoundation/hardhat-typechain": "^3.1.1",
     "@nomicfoundation/hardhat-verify": "^3.0.18",
     "@nomicfoundation/ignition-core": "^3.1.7",
     "@types/chai": "^5.2.3",
