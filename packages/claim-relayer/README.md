@@ -35,11 +35,30 @@ Local run:
 yarn install --immutable
 yarn build
 JINN_CLAIM_RELAYER_PRIVATE_KEY=0x... \
-JINN_CLAIM_RELAYER_L1_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com \
-JINN_CLAIM_RELAYER_L2_RPC_URL=https://sepolia.base.org \
+JINN_CLAIM_RELAYER_L1_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com,https://sepolia.drpc.org,https://sepolia.gateway.tenderly.co \
+JINN_CLAIM_RELAYER_L2_RPC_URL=https://base-sepolia.publicnode.com,https://sepolia.base.org \
 JINN_CLAIM_RELAYER_START_BLOCK=41761151 \
 node dist/index.js
 ```
+
+## Recommended RPC fallback chains
+
+Both `JINN_CLAIM_RELAYER_L1_RPC_URL` and `JINN_CLAIM_RELAYER_L2_RPC_URL` accept a
+comma-separated list of providers. The loader builds a viem `fallback({ rank: false })`
+transport that preserves slot order — the primary is tried first and the next slot is
+used on a network error or HTTP 429/5xx — capped at 4 providers. Ship a multi-provider
+chain in every deploy so a single endpoint blip does not wedge the relayer (the
+single-provider L1 regression that #1068 fixed live on Railway; durability pinned in #1071).
+
+- **L1 (Ethereum Sepolia)** — 3 providers, slot order publicnode → drpc → tenderly-public:
+  `https://ethereum-sepolia-rpc.publicnode.com,https://sepolia.drpc.org,https://sepolia.gateway.tenderly.co`
+- **L2 (Base Sepolia)** — 2 providers, slot order publicnode → base.org (mirrors the daemon
+  default in `client/src/config.ts`): `https://base-sepolia.publicnode.com,https://sepolia.base.org`
+
+This mirrors the daemon's RPC slot-order convention (#592/#835). Operators with a paid key
+(Alchemy / Tenderly) should **prepend** their URL, keeping the public chain as automatic
+backup. Use no spaces inside the comma-separated value — under Docker `--env-file` a trailing
+space or inline comment is folded into the URL.
 
 Container:
 
