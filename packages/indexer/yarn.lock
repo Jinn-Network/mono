@@ -480,7 +480,7 @@ __metadata:
     "@jinn-network/sdk": "portal:../sdk"
     "@types/node": "npm:^25.9.3"
     drizzle-orm: "npm:^0.45.2"
-    hono: "npm:^4.12.23"
+    hono: "npm:^4.12.25"
     ponder: "npm:^0.16.6"
     typescript: "npm:^5.4.0"
     viem: "npm:^2.52.2"
@@ -1890,10 +1890,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.23":
-  version: 4.12.23
-  resolution: "hono@npm:4.12.23"
-  checksum: 10c0/58945bb3aeb16d710b4a6c2809ba02b86b7269f6a3a67e126fc81cee5e9ae8ad2d9aa553db03c4f1a104ec03e423072e33932cb23eb3bbc48774acc72fc9c346
+"hono@npm:^4.12.25":
+  version: 4.12.25
+  resolution: "hono@npm:4.12.25"
+  checksum: 10c0/9216d647fe2f39b17855b0e74913688b837e3fa9519d367c7beeec399265b36608a820928cc33ab926eee58fe2daf7e33296235b52e56dbfac0fbcd51a5e818e
   languageName: node
   linkType: hard
 
