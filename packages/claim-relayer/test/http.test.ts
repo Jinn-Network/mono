@@ -146,6 +146,41 @@ describe('claim-relayer HTTP status', () => {
     expect(payload.stats.lastError).not.toBeNull();
   });
 
+  it('GET /ready returns HTTP 200 over the wire when degraded-but-alive', async () => {
+    const config = makeConfig();
+    const store = makeStore();
+
+    // Degraded-but-alive: ready, yet staleCheckpoint and a non-null lastError.
+    // /ready is pure liveness, so the transport layer must still answer 200.
+    const degraded = {
+      getStatus: () => ({
+        scannedTickets: 0,
+        claimedTickets: 0,
+        skippedTickets: 0,
+        failedTickets: 1,
+        lastError: 'HTTP request failed. URL: [redacted-url]',
+        startedAt: new Date().toISOString(),
+        ready: true,
+        consecutivePollsWithoutProgress: 9,
+        staleCheckpoint: true,
+      }),
+    } as unknown as ClaimRelayer;
+    const server = createStatusServer({ config, store, relayer: degraded });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('missing test server address');
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const res = await fetch(`${baseUrl}/ready`);
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ ok: true, ready: true });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('serves /health, /ready, and /status', async () => {
     const config = makeConfig();
     const store = makeStore();

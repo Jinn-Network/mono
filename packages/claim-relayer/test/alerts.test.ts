@@ -119,4 +119,42 @@ describe('AlertNotifier', () => {
     ).resolves.toBeUndefined();
     errSpy.mockRestore();
   });
+
+  it('bounds a hung webhook via the AbortSignal timeout and never wedges the caller', async () => {
+    // fire() bounds the webhook with a setTimeout-driven AbortController, so
+    // advanceTimersByTimeAsync drives the abort instead of a real 10s wait.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // A webhook that accepts the connection but never replies on its own. It
+    // only settles when the AbortSignal passed by fire() aborts — i.e. the
+    // fetch hangs forever unless the timeout interrupts it. Without the timeout
+    // this promise never resolves and evaluate() wedges the poll loop forever.
+    const fetchFn = vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return; // never settles -> exposes a missing timeout
+        signal.addEventListener('abort', () => {
+          reject(signal.reason ?? new DOMException('aborted', 'AbortError'));
+        });
+      });
+    }) as unknown as typeof fetch;
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const notifier = new AlertNotifier({ webhookUrl: WEBHOOK, signerAddress: SIGNER, fetchFn });
+
+    const evaluatePromise = notifier.evaluate(
+      { ...ALL_FALSE, staleCheckpoint: true },
+      ctx({ consecutivePollsWithoutProgress: 3 }),
+    );
+
+    // Advance past the webhook timeout; the AbortSignal.timeout must fire,
+    // abort the hung fetch, and let evaluate() resolve without rejecting.
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    await expect(evaluatePromise).resolves.toBeUndefined();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+
+    errSpy.mockRestore();
+    vi.useRealTimers();
+  });
 });

@@ -3,6 +3,15 @@ import { errorToLogMessage, redactSecrets } from './redact.js';
 
 export type AlertCondition = 'not-ready' | 'lastError' | 'staleCheckpoint';
 
+/**
+ * Hard cap on a single webhook POST. A hung webhook (server accepts the
+ * connection but never replies) would otherwise wedge the poll loop forever,
+ * since fire() is awaited through notify() -> runScheduledTick()'s finally.
+ * A timed AbortController interrupts the hung fetch so the poll schedule
+ * advances.
+ */
+const ALERT_WEBHOOK_TIMEOUT_MS = 10_000;
+
 export interface AlertEvent {
   condition: AlertCondition;
   message: string;
@@ -98,15 +107,26 @@ export class AlertNotifier {
       return;
     }
 
+    // Bound a hung webhook so it can never wedge the poll loop. An
+    // AbortController driven by a setTimeout (rather than AbortSignal.timeout)
+    // keeps the abort on the standard timer queue, so it stays interruptible
+    // and testable. The abort surfaces below as an AbortError, which the catch
+    // logs and swallows.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ALERT_WEBHOOK_TIMEOUT_MS);
+    timer.unref?.();
     try {
       await this.fetchFn(this.webhookUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(event),
+        signal: controller.signal,
       });
     } catch (error: unknown) {
-      // A failing webhook must never throw into the poll loop.
+      // A failing (or timed-out) webhook must never throw into the poll loop.
       console.error(`[claim-relayer] alert webhook POST failed: ${errorToLogMessage(error)}`);
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

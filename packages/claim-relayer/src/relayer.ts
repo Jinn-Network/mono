@@ -16,7 +16,7 @@ import {
 import type { AlertNotifier } from './alerts.js';
 import type { ClaimRelayerConfig } from './config.js';
 import { ClaimRelayerStore } from './db.js';
-import { errorToMessage } from './redact.js';
+import { errorToLogMessage, errorToMessage } from './redact.js';
 import type { ClaimSnapshot, MessengerFixture, RelayerStats } from './types.js';
 
 type PublicClientLike = {
@@ -432,7 +432,9 @@ export class ClaimRelayer {
         },
       );
     } catch (error: unknown) {
-      // The notifier must never block the poll schedule.
+      // The notifier must never block the poll schedule. Log (redacted) so a
+      // broken notifier is observable, mirroring alerts.ts fire()'s convention.
+      console.error(`[claim-relayer] alert notifier failed: ${errorToLogMessage(error)}`);
       this.stats.lastError = errorToMessage(error);
     }
   }
