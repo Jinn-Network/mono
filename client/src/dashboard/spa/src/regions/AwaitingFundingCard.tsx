@@ -100,8 +100,6 @@ export function AwaitingFundingCard({
     const deadline = window.setTimeout(() => controller.abort(), DRIP_DEADLINE_MS);
     try {
       const r = await api.triggerDrip({ signal: controller.signal });
-      window.clearTimeout(deadline);
-      setFundingStartedAt(null);
       if (r.ok) {
         setDripStatus({
           state: 'sent',
@@ -117,8 +115,6 @@ export function AwaitingFundingCard({
         setDripStatus({ state: 'failed', reason: r.reason ?? 'faucet funding failed' });
       }
     } catch (err) {
-      window.clearTimeout(deadline);
-      setFundingStartedAt(null);
       if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
         setDripStatus({ state: 'timed_out' });
       } else {
@@ -127,6 +123,9 @@ export function AwaitingFundingCard({
           reason: err instanceof Error ? err.message : 'drip failed',
         });
       }
+    } finally {
+      window.clearTimeout(deadline);
+      setFundingStartedAt(null);
     }
   };
 
