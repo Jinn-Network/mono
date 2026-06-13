@@ -53,4 +53,47 @@ describe('claim-relayer config', () => {
     void _omit;
     expect(() => loadConfig(rest)).toThrow(/JINN_CLAIM_RELAYER_L2_RPC_URL/);
   });
+
+  it('defaults staleThreshold to 3 and alertWebhookUrl to undefined', () => {
+    const config = loadConfig(BASE_ENV);
+
+    expect(config.staleThreshold).toBe(3);
+    expect(config.alertWebhookUrl).toBeUndefined();
+  });
+
+  it('parses JINN_CLAIM_RELAYER_STALE_POLL_THRESHOLD', () => {
+    const config = loadConfig({
+      ...BASE_ENV,
+      JINN_CLAIM_RELAYER_STALE_POLL_THRESHOLD: '5',
+    });
+
+    expect(config.staleThreshold).toBe(5);
+  });
+
+  it('throws when JINN_CLAIM_RELAYER_STALE_POLL_THRESHOLD is not a number', () => {
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        JINN_CLAIM_RELAYER_STALE_POLL_THRESHOLD: 'abc',
+      }),
+    ).toThrow(/STALE_POLL_THRESHOLD/);
+  });
+
+  it('parses JINN_CLAIM_RELAYER_ALERT_WEBHOOK_URL', () => {
+    const config = loadConfig({
+      ...BASE_ENV,
+      JINN_CLAIM_RELAYER_ALERT_WEBHOOK_URL: 'https://hooks.example/webhook/secret',
+    });
+
+    expect(config.alertWebhookUrl).toBe('https://hooks.example/webhook/secret');
+  });
+
+  it('treats an empty alert webhook env as undefined', () => {
+    const config = loadConfig({
+      ...BASE_ENV,
+      JINN_CLAIM_RELAYER_ALERT_WEBHOOK_URL: '',
+    });
+
+    expect(config.alertWebhookUrl).toBeUndefined();
+  });
 });

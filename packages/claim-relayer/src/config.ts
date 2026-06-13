@@ -28,6 +28,10 @@ export interface ClaimRelayerConfig {
   port: number;
   pollIntervalMs: number;
   batchBlocks: bigint;
+  /** Consecutive retryable-blocked polls before staleCheckpoint flips true. */
+  staleThreshold: number;
+  /** Optional outbound webhook for edge-triggered health alerts. */
+  alertWebhookUrl: string | undefined;
   artifacts: ArtifactAddresses;
 }
 
@@ -102,6 +106,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ClaimRelayerCo
     port: parseNumber(env.JINN_CLAIM_RELAYER_PORT, 8737, 'JINN_CLAIM_RELAYER_PORT'),
     pollIntervalMs: parseNumber(env.JINN_CLAIM_RELAYER_POLL_INTERVAL_MS, 60_000, 'JINN_CLAIM_RELAYER_POLL_INTERVAL_MS'),
     batchBlocks: parseInteger(env.JINN_CLAIM_RELAYER_BATCH_BLOCKS ?? '2000', 'JINN_CLAIM_RELAYER_BATCH_BLOCKS'),
+    staleThreshold: parseNumber(env.JINN_CLAIM_RELAYER_STALE_POLL_THRESHOLD, 3, 'JINN_CLAIM_RELAYER_STALE_POLL_THRESHOLD'),
+    alertWebhookUrl: env.JINN_CLAIM_RELAYER_ALERT_WEBHOOK_URL || undefined,
     artifacts,
   };
 }
@@ -127,6 +133,8 @@ export function redactConfig(config: ClaimRelayerConfig): Record<string, unknown
     port: config.port,
     pollIntervalMs: config.pollIntervalMs,
     batchBlocks: config.batchBlocks.toString(),
+    staleThreshold: config.staleThreshold,
+    hasAlertWebhook: config.alertWebhookUrl !== undefined,
     artifacts: {
       l1ArtifactPath: config.artifacts.l1ArtifactPath,
       l2ArtifactPath: config.artifacts.l2ArtifactPath,

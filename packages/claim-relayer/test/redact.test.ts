@@ -46,4 +46,20 @@ describe('redactConfig (AC3 fallback-chain summary)', () => {
     expect(JSON.stringify(redacted)).not.toContain('https://a.example');
     expect(JSON.stringify(redacted)).not.toContain('https://l1-a.example');
   });
+
+  it('exposes hasAlertWebhook presence but never the webhook URL', () => {
+    const withWebhook = loadConfig({
+      ...env,
+      JINN_CLAIM_RELAYER_ALERT_WEBHOOK_URL: 'https://hooks.example/webhook/super-secret-token',
+    });
+    const redacted = redactConfig(withWebhook);
+    expect(redacted.hasAlertWebhook).toBe(true);
+    expect(JSON.stringify(redacted)).not.toContain('hooks.example');
+    expect(JSON.stringify(redacted)).not.toContain('super-secret-token');
+  });
+
+  it('reports hasAlertWebhook false when no webhook is configured', () => {
+    const redacted = redactConfig(loadConfig(env));
+    expect(redacted.hasAlertWebhook).toBe(false);
+  });
 });

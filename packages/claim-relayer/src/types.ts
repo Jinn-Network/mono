@@ -29,4 +29,6 @@ export interface RelayerStats {
   lastError: string | null;
   startedAt: string;
   ready: boolean;
+  consecutivePollsWithoutProgress: number;
+  staleCheckpoint: boolean;
 }
