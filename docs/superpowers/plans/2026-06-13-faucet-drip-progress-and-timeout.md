@@ -564,7 +564,7 @@ Expected: build succeeds, no type/bundle errors.
 
 ## Self-review
 
-- **Spec coverage:** Both ACs map to concrete tasks above. ✔
-- **Placeholder scan:** No TBD/"handle edge cases"/"similar to" — every code step shows full code. ✔
-- **Type consistency:** `triggerDrip({ signal })` signature in Task 2 matches the call site in Task 3 Step 3; `currentBalanceWei` prop name is identical across the card (Task 3), Onboarding (Task 4), and tests (Tasks 1, 4); `timed_out` state string is consistent across the union, the setter, and the render block. ✔
-- **Correction noted:** Onboarding did not previously pass live balance to the card — Task 4 adds it (folded into the plan, not assumed). ✔
+- **Spec coverage:** Both ACs map to concrete tasks above. PASS
+- **Placeholder scan:** No TBD/"handle edge cases"/"similar to" — every code step shows full code. PASS
+- **Type consistency:** `triggerDrip({ signal })` signature in Task 2 matches the call site in Task 3 Step 3; `currentBalanceWei` prop name is identical across the card (Task 3), Onboarding (Task 4), and tests (Tasks 1, 4); `timed_out` state string is consistent across the union, the setter, and the render block. PASS
+- **Correction noted:** Onboarding did not previously pass live balance to the card — Task 4 adds it (folded into the plan, not assumed). PASS

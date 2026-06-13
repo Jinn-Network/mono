@@ -82,7 +82,7 @@ describe('AwaitingFundingCard — drip deadline (issue #979)', () => {
     });
 
     const timeout = screen.getByTestId('drip-timed-out');
-    expect(timeout.textContent).toMatch(/still arriving|taking longer|hasn't arrived/i);
+    expect(timeout.textContent).toMatch(/still arriving/i);
     // Retry affordance is present and the faucet button is clickable again.
     expect(
       screen.getAllByRole('button', { name: /try again|retry|fund from faucet/i }).length,
