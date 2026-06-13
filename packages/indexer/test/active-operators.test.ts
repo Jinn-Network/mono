@@ -16,8 +16,10 @@ import {
   BLOCK_SECONDS,
   BLOCK_COUNT,
   REQUIRED_TJINN_PER_BLOCK,
+  MILESTONE_3_TJINN_FLOOR,
   computeActiveWindow,
   computeActiveOperators,
+  countOperatorsAtMilestone3,
 } from '../src/api/active-operators.js';
 
 const HOUR = 3600;
@@ -302,5 +304,51 @@ describe('computeActiveOperators', () => {
     expect(r.active.has(OP_A)).toBe(true);
     expect(r.sustained.has(OP_A)).toBe(false);
     expect(r.perOperator.get(OP_A)?.blocksQualified).toBe(BLOCK_COUNT - 1);
+  });
+});
+
+// ── Milestone 3: ≥25 tJINN lifetime per operator (issue #1029) ────────────────
+
+describe('countOperatorsAtMilestone3', () => {
+  const TJINN = 10n ** 18n;
+
+  it('exposes the 25 tJINN floor in wei', () => {
+    expect(MILESTONE_3_TJINN_FLOOR).toBe(25n * 10n ** 18n);
+  });
+
+  it('counts an operator whose summed operatorMinted is exactly the floor (>= inclusive)', () => {
+    const n = countOperatorsAtMilestone3([
+      { multisig: OP_A, operatorMinted: 25n * TJINN },
+    ]);
+    expect(n).toBe(1);
+  });
+
+  it('does not count an operator one wei below the floor', () => {
+    const n = countOperatorsAtMilestone3([
+      { multisig: OP_A, operatorMinted: 25n * TJINN - 1n },
+    ]);
+    expect(n).toBe(0);
+  });
+
+  it('sums multiple rows for the same multisig before applying the threshold', () => {
+    const n = countOperatorsAtMilestone3([
+      { multisig: OP_A, operatorMinted: 13n * TJINN },
+      { multisig: OP_A, operatorMinted: 13n * TJINN },
+    ]);
+    expect(n).toBe(1);
+  });
+
+  it('counts distinct multisigs independently and returns an integer count', () => {
+    const n = countOperatorsAtMilestone3([
+      { multisig: OP_A, operatorMinted: 25n * TJINN },
+      { multisig: OP_B, operatorMinted: 24n * TJINN },
+      { multisig: OP_B, operatorMinted: 1n * TJINN },
+    ]);
+    expect(n).toBe(2);
+    expect(Number.isInteger(n)).toBe(true);
+  });
+
+  it('empty input → 0', () => {
+    expect(countOperatorsAtMilestone3([])).toBe(0);
   });
 });

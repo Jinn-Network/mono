@@ -16,6 +16,7 @@ import { InfoTooltip } from '../components/InfoTooltip';
 import {
   ActiveOperatorTooltipBody,
   SustainedOperatorTooltipBody,
+  Milestone3TooltipBody,
   formatBlockWindow,
 } from '../components/ActiveOperatorTooltip';
 import { shortAddr, int, jinn } from '../lib/format';
@@ -241,6 +242,17 @@ export function OperatorsView() {
               </span>
             }
             value={int(data.sustainedOperators)}
+          />
+          <Kpi
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                Milestone 3 (≥25 tJINN)
+                <InfoTooltip label="Milestone 3 definition">
+                  <Milestone3TooltipBody />
+                </InfoTooltip>
+              </span>
+            }
+            value={int(data.operatorsAtMilestone3)}
           />
         </KpiRow>
       )}

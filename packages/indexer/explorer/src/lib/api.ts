@@ -270,6 +270,8 @@ export interface OperatorsResponse extends FreshnessMeta {
   activeOperators: number;
   /** Milestone-1 count — multisigs that qualified on EVERY bucket of `activeWindow`. */
   sustainedOperators: number;
+  /** Milestone-3 count — distinct recipient Safes with ≥25 tJINN earned ever (lifetime). */
+  operatorsAtMilestone3: number;
   activeWindow: ActiveWindow;
   appliedFilters?: {
     mode?: string;

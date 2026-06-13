@@ -70,3 +70,19 @@ export function SustainedOperatorTooltipBody({ window }: { window: ActiveWindow 
     </>
   );
 }
+
+/**
+ * Milestone-3 body (issue #1029) — distinct recipient Safes that have earned
+ * ≥25 tJINN ever (lifetime, all blocks, all chains). Counted per recipient
+ * Safe (the multisig that received the emission), matching
+ * `client/scripts/check-milestone-3.ts`. No window prop — this is a lifetime
+ * total, not a rolling-window signal.
+ */
+export function Milestone3TooltipBody() {
+  return (
+    <div>
+      Distinct recipient Safes that have earned ≥25 tJINN ever (lifetime, all
+      blocks). Counted per recipient Safe.
+    </div>
+  );
+}

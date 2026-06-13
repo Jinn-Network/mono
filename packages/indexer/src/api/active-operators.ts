@@ -34,6 +34,14 @@ export const BLOCK_COUNT = 8;
  */
 export const REQUIRED_TJINN_PER_BLOCK = 3n * 10n ** 18n;
 
+/**
+ * Lifetime tJINN floor for the Milestone-3 count. `25 × 10^18` wei mirrors the
+ * `REQUIRED_TJINN_PER_OPERATOR` literal in `client/scripts/check-milestone-3.ts:37`;
+ * that script intentionally is not refactored to consume this constant (out of
+ * scope, same posture as `REQUIRED_TJINN_PER_BLOCK` above).
+ */
+export const MILESTONE_3_TJINN_FLOOR = 25n * 10n ** 18n;
+
 export interface ActiveWindow {
   /** UTC seconds — inclusive lower bound of the window. */
   startTs: number;
@@ -142,4 +150,27 @@ export function computeActiveOperators(
   }
 
   return { window, active, sustained, perOperator };
+}
+
+/**
+ * Milestone 3 (issue #1029): count distinct operators (Safe multisigs) whose
+ * lifetime summed `operatorMinted` is `>= MILESTONE_3_TJINN_FLOOR`. Pure — sums
+ * `operatorMinted` per multisig, then counts entries clearing the floor.
+ * Mirrors the aggregation in `client/scripts/check-milestone-3.ts` (lifetime,
+ * no time window, no chain filter — `rewardDistribution` is JinnDistributor-only
+ * on Sepolia L1). Multisig strings are compared verbatim — no case
+ * normalisation; `rewardDistribution.multisig` is `t.hex()` (lowercase-canonical).
+ */
+export function countOperatorsAtMilestone3(
+  rows: { multisig: string; operatorMinted: bigint }[],
+): number {
+  const perOperator = new Map<string, bigint>();
+  for (const r of rows) {
+    perOperator.set(r.multisig, (perOperator.get(r.multisig) ?? 0n) + r.operatorMinted);
+  }
+  let count = 0;
+  for (const total of perOperator.values()) {
+    if (total >= MILESTONE_3_TJINN_FLOOR) count += 1;
+  }
+  return count;
 }

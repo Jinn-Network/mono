@@ -47,6 +47,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
   minVerdicts: 5,
   activeOperators: 1,
   sustainedOperators: 0,
+  operatorsAtMilestone3: 2,
   activeWindow: {
     startTs: 1_700_000_000,
     endTs: 1_700_000_000 + 48 * 3600,
@@ -410,6 +411,37 @@ describe('OperatorsView', () => {
     expect(
       screen.getByText(/each of the last 8 completed UTC 6-hour blocks/i),
     ).toBeInTheDocument();
+  });
+
+  it('renders a Milestone 3 (≥25 tJINN) KPI from data.operatorsAtMilestone3 (issue #1029)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // Separate from "Active operators" / "Sustained (48h)" — the lifetime count.
+    expect(screen.getByText(/milestone 3/i)).toBeInTheDocument();
+    // operatorsAtMilestone3 === 2 in the fixture.
+    expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
+  it('the Milestone 3 KPI carries an InfoTooltip stating ≥25 tJINN earned ever, per recipient Safe (issue #1029)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    const trigger = screen.getByRole('button', {
+      name: /milestone 3 definition/i,
+    });
+    fireEvent.click(trigger);
+    // The KPI label also contains "≥25 tJINN"; assert on the tooltip body text,
+    // which carries both required phrases verbatim.
+    const body = screen.getByText(/earned ≥25 tJINN ever/i);
+    expect(body).toBeInTheDocument();
+    expect(body.textContent ?? '').toMatch(/per recipient Safe/i);
   });
 
   it('does not pass mode/harness/minVerdicts to useOperators (no filter UI)', async () => {

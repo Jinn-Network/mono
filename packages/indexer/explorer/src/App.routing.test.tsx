@@ -86,6 +86,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
   minVerdicts: 5,
   activeOperators: 0,
   sustainedOperators: 0,
+  operatorsAtMilestone3: 0,
   activeWindow: {
     startTs: 0,
     endTs: 48 * 3600,

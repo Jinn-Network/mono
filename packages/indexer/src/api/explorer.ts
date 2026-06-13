@@ -46,6 +46,7 @@ import {
 import {
   computeActiveOperators,
   computeActiveWindow,
+  countOperatorsAtMilestone3,
   type ActiveWindow as ActiveWindowDomain,
 } from './active-operators.js';
 import {
@@ -1239,6 +1240,27 @@ app.get('/operators', async (c) => {
   // protocol-wide signal (multisig ↔ attempt.operator via the same raw
   // `t.hex()` representation `jinnEarned` uses; no case normalisation).
   const activeResult = await loadActiveOperators(Math.floor(Date.now() / 1000));
+
+  // Milestone-3 count (issue #1029): distinct operators (Safe multisigs) with
+  // ≥25 tJINN earned ever. The aggregate is lifetime — NO time window and NO
+  // chain filter — because `rewardDistribution` is JinnDistributor-only on
+  // Sepolia L1; this matches `client/scripts/check-milestone-3.ts`'s lifetime
+  // per-multisig sum. `sum()` returns string|null; coerce to BigInt (mirrors
+  // the `?? '0'` posture on the other `sum()` aggregates above).
+  const lifetimeRewardRows = await db
+    .select({
+      multisig: schema.rewardDistribution.multisig,
+      operatorMinted: sum(schema.rewardDistribution.operatorMinted),
+    })
+    .from(schema.rewardDistribution)
+    .groupBy(schema.rewardDistribution.multisig);
+  const operatorsAtMilestone3 = countOperatorsAtMilestone3(
+    lifetimeRewardRows.map((r) => ({
+      multisig: r.multisig,
+      operatorMinted: BigInt(r.operatorMinted ?? 0),
+    })),
+  );
+
   const isActive = (op: string) => activeResult.active.has(op);
   const recentBlocksFor = (op: string): boolean[] =>
     activeResult.perOperator.get(op)?.blocks ??
@@ -1286,6 +1308,9 @@ app.get('/operators', async (c) => {
     // per-block history the SPA renders as the X/8 progress. See issue #926.
     activeOperators: activeResult.active.size,
     sustainedOperators: activeResult.sustained.size,
+    // Milestone-3 (issue #1029): distinct operators with ≥25 tJINN lifetime.
+    // Lifetime / chain-unfiltered to mirror client/scripts/check-milestone-3.ts.
+    operatorsAtMilestone3,
     activeWindow: serialiseActiveWindow(activeResult.window),
     ...(hasFilter ? { appliedFilters } : {}),
     meta: { jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok' },
