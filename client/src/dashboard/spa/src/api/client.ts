@@ -131,7 +131,7 @@ export const api = {
    *   Gas top-up an explicit, one-shot action with no re-firing loop
    *   (jinn-mono #336).
    */
-  triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean }) =>
+  triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean; signal?: AbortSignal }) =>
     jfetch<{
       ok: boolean;
       address?: string;
@@ -153,7 +153,7 @@ export const api = {
         : opts?.batch
           ? '/v1/setup/drip?batch=true'
           : '/v1/setup/drip',
-      { method: 'POST' },
+      { method: 'POST', signal: opts?.signal },
     ),
   /**
    * Read the operator's batched faucet top-up quota for today (issue #560):
