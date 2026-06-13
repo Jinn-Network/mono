@@ -4,11 +4,52 @@ import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TESTNET_DISCOVERY_URL,
-  DEFAULT_TESTNET_ETHEREUM_RPC_URL,
+  DEFAULT_TESTNET_ETHEREUM_RPC_URLS,
+  DEFAULT_TESTNET_RPC_URLS,
+  DEFAULT_MAINNET_RPC_URLS,
+  DEFAULT_MAINNET_ETHEREUM_RPC_URLS,
   loadConfig,
   buildConfigProvenance,
   migrateLegacySolverNets,
 } from '../src/config.js';
+
+/**
+ * Issue #911 — ≥5 distinct free RPC providers default per supported chain.
+ * Structural invariants: every default list ships ≥5 distinct, parseable URLs,
+ * with the no-auth publicnode endpoint pinned to slot 0 (the #835 slot-0 guard).
+ */
+describe('default RPC provider lists (#911)', () => {
+  const assertChain = (list: readonly string[], slot0Substr: string) => {
+    expect(list.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(list).size).toBe(list.length); // distinct
+    for (const u of list) {
+      expect(new URL(u).host.length).toBeGreaterThan(0); // parseable
+    }
+    expect(list[0]).toContain(slot0Substr);
+  };
+
+  it('Base Sepolia (84532) ships ≥5 distinct free providers, publicnode at slot 0', () => {
+    assertChain(DEFAULT_TESTNET_RPC_URLS, 'base-sepolia.publicnode.com');
+  });
+
+  it('Ethereum Sepolia (11155111) ships ≥5 distinct free providers, publicnode at slot 0', () => {
+    assertChain(DEFAULT_TESTNET_ETHEREUM_RPC_URLS, 'ethereum-sepolia-rpc.publicnode.com');
+  });
+
+  it('Base mainnet (8453) ships ≥5 distinct free providers, mainnet.base.org at slot 0', () => {
+    assertChain(DEFAULT_MAINNET_RPC_URLS, 'mainnet.base.org');
+  });
+
+  it('Ethereum mainnet (1) ships ≥5 distinct free providers', () => {
+    expect(DEFAULT_MAINNET_ETHEREUM_RPC_URLS.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(DEFAULT_MAINNET_ETHEREUM_RPC_URLS).size).toBe(
+      DEFAULT_MAINNET_ETHEREUM_RPC_URLS.length,
+    );
+    for (const u of DEFAULT_MAINNET_ETHEREUM_RPC_URLS) {
+      expect(new URL(u).host.length).toBeGreaterThan(0);
+    }
+  });
+});
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -245,10 +286,11 @@ describe('loadConfig RPC override handling', () => {
     // `config.rpcUrl` is the head URL for display continuity; `config.rpcUrls`
     // is the full chain used by buildFallbackTransport().
     expect(config.rpcUrl).toBe('https://base-sepolia.publicnode.com');
-    expect(config.rpcUrls).toEqual([
-      'https://base-sepolia.publicnode.com',
-      'https://sepolia.base.org',
-    ]);
+    // #911: ≥5 distinct free providers, publicnode slot 0, base.org last.
+    expect(config.rpcUrls.length).toBeGreaterThanOrEqual(5);
+    expect(config.rpcUrls[0]).toBe('https://base-sepolia.publicnode.com');
+    expect(config.rpcUrls[config.rpcUrls.length - 1]).toBe('https://sepolia.base.org');
+    expect(config.rpcUrls).toEqual([...DEFAULT_TESTNET_RPC_URLS]);
   });
 
   it('accepts rpcUrl as an array in the config file (AC1)', async () => {
@@ -596,9 +638,28 @@ describe('loadConfig RPC override handling', () => {
 
     const config = loadConfig(configPath);
 
-    expect(config.ethereumRpcUrl).toBe(DEFAULT_TESTNET_ETHEREUM_RPC_URL);
+    // #911: L1 default is now a ≥5-provider fallback chain; head URL = slot 0.
+    expect(config.ethereumRpcUrl).toBe(DEFAULT_TESTNET_ETHEREUM_RPC_URLS[0]);
+    expect(config.ethereumRpcUrls).toBeDefined();
+    expect(config.ethereumRpcUrls!.length).toBeGreaterThanOrEqual(5);
+    expect(config.ethereumRpcUrls).toEqual([...DEFAULT_TESTNET_ETHEREUM_RPC_URLS]);
     expect(config.jinnClaimSubmissionMode).toBe('emit-only');
     expect(config.jinnClaimLoopEnabled).toBe(true);
+  });
+
+  it('defaults Base mainnet L2 RPC to the ≥5-provider free chain (#911)', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.rpcUrl).toBe('https://mainnet.base.org');
+    expect(config.rpcUrls.length).toBeGreaterThanOrEqual(5);
+    expect(config.rpcUrls).toEqual([...DEFAULT_MAINNET_RPC_URLS]);
   });
 
   it('preserves an explicit testnet claim-loop opt-out', async () => {

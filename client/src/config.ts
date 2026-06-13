@@ -748,21 +748,78 @@ export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
  */
 export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
 
-export const DEFAULT_TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
+/**
+ * Default fallback chain for the L1 settlement chain (Ethereum Sepolia,
+ * chain-id 11155111) on testnet. Per AC of issue #911 we ship ≥5 distinct
+ * free providers so a default-config daemon survives single-provider quota
+ * cliffs without an operator-supplied key:
+ *   slot 0 — `https://ethereum-sepolia-rpc.publicnode.com` (no-auth primary,
+ *     keeps the #835 no-shared-quota property symmetric with the L2 default).
+ *   slot 1 — `https://sepolia.drpc.org`
+ *   slot 2 — `https://1rpc.io/sepolia`
+ *   slot 3 — `https://rpc.sepolia.org`
+ *   slot 4 — `https://rpc2.sepolia.org`
+ * Operators may prepend a paid primary via `ethereumRpcUrl` / `JINN_ETHEREUM_RPC_URL`.
+ */
+export const DEFAULT_TESTNET_ETHEREUM_RPC_URLS: readonly string[] = [
+  'https://ethereum-sepolia-rpc.publicnode.com',
+  'https://sepolia.drpc.org',
+  'https://1rpc.io/sepolia',
+  'https://rpc.sepolia.org',
+  'https://rpc2.sepolia.org',
+];
 
 /**
- * Default fallback chain for the L2 measurement chain (Base Sepolia) on
- * testnet. Per AC2 of issue #592:
- *   slot 0 — `https://base-sepolia.publicnode.com` (no-auth, 50k-block
- *     getLogs cap, no shared-quota cliff).
- *   slot 1 — `https://sepolia.base.org` (free public Coinbase endpoint,
- *     2k-block cap; last-resort backup).
+ * Default fallback chain for the L2 measurement chain (Base Sepolia, chain-id
+ * 84532) on testnet. Originally a two-provider chain (AC2 of issue #592);
+ * widened to ≥5 distinct free providers per issue #911 so a default-config
+ * daemon tolerates a single-provider quota cliff (the Tenderly shared-quota
+ * cliff of 2026-05-24) without an operator key.
+ *   slot 0 — `https://base-sepolia.publicnode.com` (#835 no-auth primary,
+ *     50k-block getLogs cap, no shared-quota cliff).
+ *   slot 1 — `https://base-sepolia-rpc.publicnode.com`
+ *   slot 2 — `https://base-sepolia.drpc.org`
+ *   slot 3 — `https://1rpc.io/base-sepolia`
+ *   slot 4 — `https://sepolia.base.org` (free public Coinbase endpoint,
+ *     2k-block cap; last-resort backup, stays last).
  * Operators are encouraged to prepend a paid primary key (Alchemy, Tenderly,
  * etc.) via `rpcUrl` config or `JINN_RPC_URL` / `BASE_SEPOLIA_RPC_URL` env.
  */
 export const DEFAULT_TESTNET_RPC_URLS: readonly string[] = [
   'https://base-sepolia.publicnode.com',
+  'https://base-sepolia-rpc.publicnode.com',
+  'https://base-sepolia.drpc.org',
+  'https://1rpc.io/base-sepolia',
   'https://sepolia.base.org',
+];
+
+/**
+ * Default fallback chain for the L2 measurement chain (Base mainnet, chain-id
+ * 8453). ≥5 distinct free providers per issue #911.
+ *   slot 0 — `https://mainnet.base.org` (free public Coinbase endpoint).
+ */
+export const DEFAULT_MAINNET_RPC_URLS: readonly string[] = [
+  'https://mainnet.base.org',
+  'https://base.publicnode.com',
+  'https://base.drpc.org',
+  'https://1rpc.io/base',
+  'https://base.meowrpc.com',
+];
+
+/**
+ * Default fallback chain for the L1 settlement chain (Ethereum mainnet,
+ * chain-id 1). ≥5 distinct free providers per issue #911. NOTE: this is a
+ * named, addressable default only — it is intentionally NOT wired into
+ * `loadConfig`, because the daemon has no mainnet-L1 default path (Ethereum L1
+ * defaulting is testnet-only; see the consumer below). It exists so the chain-1
+ * AC is satisfied by an importable default operators / future code can adopt.
+ */
+export const DEFAULT_MAINNET_ETHEREUM_RPC_URLS: readonly string[] = [
+  'https://ethereum-rpc.publicnode.com',
+  'https://cloudflare-eth.com',
+  'https://eth.llamarpc.com',
+  'https://eth.drpc.org',
+  'https://1rpc.io/eth',
 ];
 
 
@@ -1174,7 +1231,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   if (resolvedNetwork === 'testnet' && !merged.ethereumRpcUrl) {
-    merged.ethereumRpcUrl = DEFAULT_TESTNET_ETHEREUM_RPC_URL;
+    merged.ethereumRpcUrl = [...DEFAULT_TESTNET_ETHEREUM_RPC_URLS];
   }
 
   if (resolvedNetwork === 'testnet' && merged.jinnClaimLoopEnabled === undefined) {
@@ -1257,12 +1314,13 @@ export function loadConfig(configPath?: string): JinnConfig {
   // shared-quota cliff of 2026-05-24 that took out every default-config
   // daemon at once). See #554 + the NetworkSection.tsx "shared RPC" panel for
   // the operator-facing pitch to bring their own key. The sibling Ethereum L1
-  // default (DEFAULT_TESTNET_ETHEREUM_RPC_URL above) is already publicnode —
-  // this keeps the two L1/L2 defaults symmetric.
+  // default (DEFAULT_TESTNET_ETHEREUM_RPC_URLS above) is publicnode-headed —
+  // this keeps the two L1/L2 defaults symmetric. Both chains ship ≥5 free
+  // providers per issue #911.
   const parsed = result.data;
   const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
     ? DEFAULT_TESTNET_RPC_URLS
-    : ['https://mainnet.base.org'];
+    : DEFAULT_MAINNET_RPC_URLS;
 
   const rpcUrlsResolved = parsed.rpcUrl !== undefined
     ? parseRpcUrls(parsed.rpcUrl)
