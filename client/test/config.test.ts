@@ -19,13 +19,15 @@ import {
  * with the no-auth publicnode endpoint pinned to slot 0 (the #835 slot-0 guard).
  */
 describe('default RPC provider lists (#911)', () => {
-  const assertChain = (list: readonly string[], slot0Substr: string) => {
+  const assertChain = (list: readonly string[], slot0Substr?: string) => {
     expect(list.length).toBeGreaterThanOrEqual(5);
     expect(new Set(list).size).toBe(list.length); // distinct
     for (const u of list) {
       expect(new URL(u).host.length).toBeGreaterThan(0); // parseable
     }
-    expect(list[0]).toContain(slot0Substr);
+    if (slot0Substr !== undefined) {
+      expect(list[0]).toContain(slot0Substr);
+    }
   };
 
   it('Base Sepolia (84532) ships ≥5 distinct free providers, publicnode at slot 0', () => {
@@ -41,13 +43,7 @@ describe('default RPC provider lists (#911)', () => {
   });
 
   it('Ethereum mainnet (1) ships ≥5 distinct free providers', () => {
-    expect(DEFAULT_MAINNET_ETHEREUM_RPC_URLS.length).toBeGreaterThanOrEqual(5);
-    expect(new Set(DEFAULT_MAINNET_ETHEREUM_RPC_URLS).size).toBe(
-      DEFAULT_MAINNET_ETHEREUM_RPC_URLS.length,
-    );
-    for (const u of DEFAULT_MAINNET_ETHEREUM_RPC_URLS) {
-      expect(new URL(u).host.length).toBeGreaterThan(0);
-    }
+    assertChain(DEFAULT_MAINNET_ETHEREUM_RPC_URLS);
   });
 });
 
