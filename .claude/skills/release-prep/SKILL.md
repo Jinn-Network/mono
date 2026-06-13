@@ -94,10 +94,9 @@ Detailed contracts: [`references/tier-1-scenarios.md`](references/tier-1-scenari
 |---|---|---|
 | T1.1 | bootstrap-fresh-anvil | 90s |
 | T1.2 | harness-readiness-contract | 30s |
-| T1.3 | indexer-round-trip | 60s |
 | T1.4 | SPA route smoke | 30s |
 
-All four run in parallel. Wall-clock for the tier ≈ max of the budgets (~90s).
+All three run in parallel. Wall-clock for the tier ≈ max of the budgets (~90s).
 
 ## Tier 2 scenarios
 

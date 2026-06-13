@@ -98,7 +98,8 @@ const baseSepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_84532'], 'http
 const sepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_11155111'], 'https://ethereum-sepolia-rpc.publicnode.com');
 
 /**
- * Hermetic snapshot mode (the T1.3 indexer round-trip, spec §3.1 / #341).
+ * Hermetic snapshot mode (the hermetic snapshot indexer round-trip test,
+ * client/test/hermetic/indexer-roundtrip.test.ts, spec §3.1 / #341).
  *
  * When `JINN_INDEXER_SNAPSHOT_ROUTER` is set, the indexer targets a single,
  * locally-loaded Anvil snapshot chain instead of the live testnet: it indexes
