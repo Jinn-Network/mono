@@ -757,16 +757,17 @@ export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up
  *     keeps the #835 no-shared-quota property symmetric with the L2 default).
  *   slot 1 — `https://sepolia.drpc.org`
  *   slot 2 — `https://1rpc.io/sepolia`
- *   slot 3 — `https://rpc.sepolia.org`
- *   slot 4 — `https://rpc2.sepolia.org`
+ *   slot 3 — `https://sepolia.gateway.tenderly.co`
+ *   slot 4 — `https://rpc.sepolia.ethpandaops.io`
  * Operators may prepend a paid primary via `ethereumRpcUrl` / `JINN_ETHEREUM_RPC_URL`.
+ * All five endpoints live-verified to return chain-id 11155111 (#911).
  */
 export const DEFAULT_TESTNET_ETHEREUM_RPC_URLS: readonly string[] = [
   'https://ethereum-sepolia-rpc.publicnode.com',
   'https://sepolia.drpc.org',
   'https://1rpc.io/sepolia',
-  'https://rpc.sepolia.org',
-  'https://rpc2.sepolia.org',
+  'https://sepolia.gateway.tenderly.co',
+  'https://rpc.sepolia.ethpandaops.io',
 ];
 
 /**
@@ -779,17 +780,18 @@ export const DEFAULT_TESTNET_ETHEREUM_RPC_URLS: readonly string[] = [
  *     50k-block getLogs cap, no shared-quota cliff).
  *   slot 1 — `https://base-sepolia-rpc.publicnode.com`
  *   slot 2 — `https://base-sepolia.drpc.org`
- *   slot 3 — `https://1rpc.io/base-sepolia`
+ *   slot 3 — `https://base-sepolia.gateway.tenderly.co`
  *   slot 4 — `https://sepolia.base.org` (free public Coinbase endpoint,
  *     2k-block cap; last-resort backup, stays last).
  * Operators are encouraged to prepend a paid primary key (Alchemy, Tenderly,
  * etc.) via `rpcUrl` config or `JINN_RPC_URL` / `BASE_SEPOLIA_RPC_URL` env.
+ * All five endpoints live-verified to return chain-id 84532 (#911).
  */
 export const DEFAULT_TESTNET_RPC_URLS: readonly string[] = [
   'https://base-sepolia.publicnode.com',
   'https://base-sepolia-rpc.publicnode.com',
   'https://base-sepolia.drpc.org',
-  'https://1rpc.io/base-sepolia',
+  'https://base-sepolia.gateway.tenderly.co',
   'https://sepolia.base.org',
 ];
 
@@ -817,7 +819,7 @@ export const DEFAULT_MAINNET_RPC_URLS: readonly string[] = [
 export const DEFAULT_MAINNET_ETHEREUM_RPC_URLS: readonly string[] = [
   'https://ethereum-rpc.publicnode.com',
   'https://cloudflare-eth.com',
-  'https://eth.llamarpc.com',
+  'https://eth.merkle.io',
   'https://eth.drpc.org',
   'https://1rpc.io/eth',
 ];

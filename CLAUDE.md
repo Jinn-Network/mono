@@ -282,7 +282,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 
 | Config key       | Env override             | Default                           |
 |------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet: `https://mainnet.base.org` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", "https://sepolia.base.org"]` |
+| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet (default fallback chain): `["https://mainnet.base.org", …4 more]` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", …3 more, "https://sepolia.base.org"]` (≥5 free providers per chain, #911) |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
@@ -311,15 +311,20 @@ an array of URLs**. Comma-separated env values (`BASE_SEPOLIA_RPC_URL=a,b`,
 `JINN_RPC_URL=a,b`, `JINN_ETHEREUM_RPC_URL=a,b`) are split on commas. The
 loader builds a viem `fallback({ rank: false })` transport under the hood:
 primary is tried first, secondary on network error or HTTP 429 / 5xx,
-chain capped at 4 providers. `rank: false` is deliberate — operator slot
-order is preserved (the issue's "Tenderly stays in slot 3" constraint).
-When every slot fails the daemon throws `AllRpcsFailedError`.
+capped at 6 providers (5 vetted free defaults + 1 operator-prepended paid
+primary). `rank: false` is deliberate — operator slot order is preserved
+(the issue's "Tenderly stays in slot 3" constraint). When every slot fails
+the daemon throws `AllRpcsFailedError`.
 
-Testnet default is a two-provider chain: `https://base-sepolia.publicnode.com`
-(no-auth, 50k-block `getLogs` cap) followed by `https://sepolia.base.org`
-(free public Coinbase endpoint, 2k-block cap, last-resort backup). Operators
-with paid keys (Alchemy / Tenderly) should **prepend** their URL to keep
-the public chain as automatic backup:
+Each supported chain ships a default of ≥5 distinct free RPC providers
+(issue #911): Base Sepolia (84532) and Ethereum Sepolia (11155111) on
+testnet, Base mainnet (8453) and Ethereum mainnet (1) on mainnet. The Base
+Sepolia default leads with `https://base-sepolia.publicnode.com` (no-auth,
+50k-block `getLogs` cap) and ends with `https://sepolia.base.org` (free
+public Coinbase endpoint, 2k-block cap, last-resort backup). Operators with
+paid keys (Alchemy / Tenderly) should **prepend** their URL to keep the free
+chain as automatic backup (the prepended primary plus the 5 defaults fit
+inside the 6-slot cap after dedup):
 
 ```json
 {
