@@ -58,7 +58,6 @@ export class ClaimRelayer {
   private stopped = true;
   private runInFlight: Promise<RunOnceResult> | null = null;
   private startupChecked = false;
-  private consecutivePollsWithoutProgress = 0;
   private readonly stats: RelayerStats;
 
   constructor(
@@ -152,12 +151,11 @@ export class ClaimRelayer {
       // share the same in-flight promise, so this branch runs only for the
       // owning call. A retryable-blocked advance increments; any other outcome
       // (clean advance OR quiet-chain no-op) resets to 0.
-      this.consecutivePollsWithoutProgress = result.blockedByRetryable
-        ? this.consecutivePollsWithoutProgress + 1
+      this.stats.consecutivePollsWithoutProgress = result.blockedByRetryable
+        ? this.stats.consecutivePollsWithoutProgress + 1
         : 0;
-      this.stats.consecutivePollsWithoutProgress = this.consecutivePollsWithoutProgress;
       this.stats.staleCheckpoint =
-        this.consecutivePollsWithoutProgress >= this.config.staleThreshold;
+        this.stats.consecutivePollsWithoutProgress >= this.config.staleThreshold;
       return result;
     } finally {
       if (this.runInFlight === run) {
