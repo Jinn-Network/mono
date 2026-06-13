@@ -55,6 +55,8 @@ function makeConfig(overrides: Partial<ClaimRelayerConfig> = {}): ClaimRelayerCo
     port: 8737,
     pollIntervalMs: 60_000,
     batchBlocks: 5000n,
+    staleThreshold: 3,
+    alertWebhookUrl: undefined,
     artifacts: {
       l1ArtifactPath: '/tmp/l1.json',
       l2ArtifactPath: '/tmp/l2.json',
@@ -496,6 +498,177 @@ describe('ClaimRelayer', () => {
     expect(clients.l2Public.getLogs).toHaveBeenCalledTimes(1);
     expect(clients.l1Wallet.writeContract).toHaveBeenCalledTimes(2);
     expect(store.getCheckpoint(10n)).toBe(12n);
+  });
+
+  it('surfaces blockedByRetryable=false on a clean claim', async () => {
+    const store = makeStore();
+    const clients = makeClients();
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    const result = await relayer.runOnce();
+
+    expect(result).toMatchObject({ claimed: 1, failed: 0, blockedByRetryable: false });
+  });
+
+  it('surfaces blockedByRetryable=true when a retryable failure suppresses the checkpoint', async () => {
+    const store = makeStore();
+    const clients = makeClients({
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: 'HTTP request failed. URL: https://key.example/rpc',
+        times: 5,
+      },
+    });
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    const result = await relayer.runOnce();
+
+    expect(result).toMatchObject({ claimed: 0, failed: 1, blockedByRetryable: true });
+    expect(store.getCheckpoint(10n)).toBe(9n);
+  });
+
+  it('increments consecutivePollsWithoutProgress over consecutive retryable polls', async () => {
+    const store = makeStore();
+    const clients = makeClients({
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: 'HTTP request failed. URL: https://key.example/rpc',
+        times: 5,
+      },
+    });
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(1);
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(2);
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(3);
+  });
+
+  it('resets consecutivePollsWithoutProgress to 0 on a successful advance', async () => {
+    const store = makeStore();
+    const clients = makeClients({
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: 'HTTP request failed. URL: https://key.example/rpc',
+        times: 2,
+      },
+    });
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(1);
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(2);
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(0);
+  });
+
+  it('resets the counter to 0 on a quiet-chain no-op poll (load-bearing)', async () => {
+    const store = makeStore();
+    // Seed the counter with a retryable-blocked poll first.
+    const clients = makeClients({
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: 'HTTP request failed. URL: https://key.example/rpc',
+        times: 1,
+      },
+    });
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(1);
+
+    // Quiet chain: latest block < fromBlock, so toBlock < fromBlock (no-op).
+    clients.l2Public.getBlockNumber.mockResolvedValue(5n);
+    clients.l2Public.getLogs.mockResolvedValue([]);
+
+    const result = await relayer.runOnce();
+    expect(result.blockedByRetryable).toBe(false);
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(0);
+    expect(relayer.getStatus().staleCheckpoint).toBe(false);
+  });
+
+  it('flips staleCheckpoint true once the counter reaches staleThreshold', async () => {
+    const store = makeStore();
+    const clients = makeClients({
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: 'HTTP request failed. URL: https://key.example/rpc',
+        times: 5,
+      },
+    });
+    const relayer = new ClaimRelayer(makeConfig({ staleThreshold: 2 }), store, clients);
+
+    await relayer.runOnce();
+    expect(relayer.getStatus().staleCheckpoint).toBe(false);
+    await relayer.runOnce();
+    expect(relayer.getStatus().consecutivePollsWithoutProgress).toBe(2);
+    expect(relayer.getStatus().staleCheckpoint).toBe(true);
+  });
+
+  it('notifies the notifier with derived conditions at the end of a scheduled tick', async () => {
+    const store = makeStore();
+    const clients = makeClients();
+    const notifier = { evaluate: vi.fn(async () => {}) };
+    const relayer = new ClaimRelayer(
+      makeConfig({ pollIntervalMs: 10_000 }),
+      store,
+      clients,
+      notifier as unknown as import('../src/alerts.js').AlertNotifier,
+    );
+    await relayer.startupCheck();
+
+    await (relayer as unknown as { runScheduledTick: () => Promise<void> }).runScheduledTick();
+    relayer.stop();
+
+    expect(notifier.evaluate).toHaveBeenCalledTimes(1);
+    expect(notifier.evaluate.mock.calls[0][0]).toEqual({
+      notReady: false,
+      lastError: false,
+      staleCheckpoint: false,
+    });
+  });
+
+  it('still notifies and reschedules when the run throws (catch path)', async () => {
+    const store = makeStore();
+    const clients = makeClients();
+    clients.l2Public.getBlockNumber.mockRejectedValueOnce(
+      new Error('HTTP request failed. URL: https://key.example/rpc'),
+    );
+    const notifier = { evaluate: vi.fn(async () => {}) };
+    const relayer = new ClaimRelayer(
+      makeConfig({ pollIntervalMs: 10_000 }),
+      store,
+      clients,
+      notifier as unknown as import('../src/alerts.js').AlertNotifier,
+    );
+    await relayer.startupCheck();
+
+    await (relayer as unknown as { runScheduledTick: () => Promise<void> }).runScheduledTick();
+    relayer.stop();
+
+    expect(notifier.evaluate).toHaveBeenCalledTimes(1);
+    // lastError populated by the catch path => lastError condition true.
+    expect(notifier.evaluate.mock.calls[0][0]).toMatchObject({ lastError: true });
+    expect(JSON.stringify(notifier.evaluate.mock.calls)).not.toContain('key.example');
+  });
+
+  it('does not invoke the notifier from runOnce', async () => {
+    const store = makeStore();
+    const clients = makeClients();
+    const notifier = { evaluate: vi.fn(async () => {}) };
+    const relayer = new ClaimRelayer(
+      makeConfig(),
+      store,
+      clients,
+      notifier as unknown as import('../src/alerts.js').AlertNotifier,
+    );
+
+    await relayer.runOnce();
+
+    expect(notifier.evaluate).not.toHaveBeenCalled();
   });
 
   it('scopes checkpoints and tickets to the deployment identity', async () => {

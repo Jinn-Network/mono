@@ -13,6 +13,7 @@ import {
   MOCK_MESSENGER_ABI,
   TASK_CLAIM_EMITTER_ABI,
 } from './abis.js';
+import type { AlertNotifier } from './alerts.js';
 import type { ClaimRelayerConfig } from './config.js';
 import { ClaimRelayerStore } from './db.js';
 import { errorToMessage } from './redact.js';
@@ -44,6 +45,12 @@ export interface RunOnceResult {
   claimed: number;
   skipped: number;
   failed: number;
+  /**
+   * True when an advance was DUE (toBlock >= fromBlock) but a retryable
+   * failure suppressed the checkpoint write. A quiet chain (no advance due)
+   * is NOT blocked — it returns false so the stale counter resets.
+   */
+  blockedByRetryable: boolean;
 }
 
 export class ClaimRelayer {
@@ -51,12 +58,14 @@ export class ClaimRelayer {
   private stopped = true;
   private runInFlight: Promise<RunOnceResult> | null = null;
   private startupChecked = false;
+  private consecutivePollsWithoutProgress = 0;
   private readonly stats: RelayerStats;
 
   constructor(
     private readonly config: ClaimRelayerConfig,
     private readonly store: ClaimRelayerStore,
     private readonly clients: ClaimRelayerClients,
+    private readonly notifier?: AlertNotifier,
   ) {
     this.store.setDeploymentIdentity({
       l1Network: config.l1Chain.network,
@@ -75,6 +84,8 @@ export class ClaimRelayer {
       lastError: null,
       startedAt: new Date().toISOString(),
       ready: false,
+      consecutivePollsWithoutProgress: 0,
+      staleCheckpoint: false,
     };
   }
 
@@ -136,7 +147,18 @@ export class ClaimRelayer {
     const run = this.runOnceInternal();
     this.runInFlight = run;
     try {
-      return await run;
+      const result = await run;
+      // Update the stale counter exactly once per real run: coalesced callers
+      // share the same in-flight promise, so this branch runs only for the
+      // owning call. A retryable-blocked advance increments; any other outcome
+      // (clean advance OR quiet-chain no-op) resets to 0.
+      this.consecutivePollsWithoutProgress = result.blockedByRetryable
+        ? this.consecutivePollsWithoutProgress + 1
+        : 0;
+      this.stats.consecutivePollsWithoutProgress = this.consecutivePollsWithoutProgress;
+      this.stats.staleCheckpoint =
+        this.consecutivePollsWithoutProgress >= this.config.staleThreshold;
+      return result;
     } finally {
       if (this.runInFlight === run) {
         this.runInFlight = null;
@@ -161,7 +183,7 @@ export class ClaimRelayer {
       : minBigInt(latest, fromBlock + this.config.batchBlocks - 1n);
 
     if (toBlock < fromBlock) {
-      return { fromBlock, toBlock, scanned: 0, claimed: 0, skipped: 0, failed: 0 };
+      return { fromBlock, toBlock, scanned: 0, claimed: 0, skipped: 0, failed: 0, blockedByRetryable: false };
     }
 
     const logs = await this.clients.l2Public.getLogs({
@@ -217,7 +239,8 @@ export class ClaimRelayer {
     if (!hasRetryableFailure) {
       this.store.setCheckpoint(toBlock);
     }
-    return { fromBlock, toBlock, scanned, claimed, skipped, failed };
+    const blockedByRetryable = toBlock >= fromBlock && hasRetryableFailure;
+    return { fromBlock, toBlock, scanned, claimed, skipped, failed, blockedByRetryable };
   }
 
   async processSnapshot(snapshot: ClaimSnapshot): Promise<boolean> {
@@ -389,7 +412,30 @@ export class ClaimRelayer {
     } catch (error: unknown) {
       this.stats.lastError = errorToMessage(error);
     } finally {
+      await this.notify();
       this.scheduleNext();
+    }
+  }
+
+  private async notify(): Promise<void> {
+    if (!this.notifier) return;
+    const status = this.getStatus();
+    try {
+      await this.notifier.evaluate(
+        {
+          notReady: !status.ready,
+          lastError: status.lastError !== null,
+          staleCheckpoint: status.staleCheckpoint,
+        },
+        {
+          checkpoint: this.store.getCheckpoint(this.config.startBlock).toString(),
+          consecutivePollsWithoutProgress: status.consecutivePollsWithoutProgress,
+          lastErrorMessage: status.lastError,
+        },
+      );
+    } catch (error: unknown) {
+      // The notifier must never block the poll schedule.
+      this.stats.lastError = errorToMessage(error);
     }
   }
 }

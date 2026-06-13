@@ -42,6 +42,8 @@ function makeConfig(): ClaimRelayerConfig {
     port: 0,
     pollIntervalMs: 60_000,
     batchBlocks: 5000n,
+    staleThreshold: 3,
+    alertWebhookUrl: undefined,
     artifacts: {
       l1ArtifactPath: '/tmp/l1.json',
       l2ArtifactPath: '/tmp/l2.json',
@@ -101,6 +103,47 @@ describe('claim-relayer HTTP status', () => {
     // masked) instead of an opaque `[redacted]` blob.
     expect(String(payload.config.l1RpcUrl)).toMatch(/fallback chain \(1 providers\): primary host=l1-secret\.example/);
     expect(String(payload.config.l2RpcUrl)).toMatch(/fallback chain \(1 providers\): primary host=l2-secret\.example/);
+  });
+
+  it('exposes consecutivePollsWithoutProgress and staleCheckpoint on /status stats', async () => {
+    const config = makeConfig();
+    const store = makeStore();
+    const relayer = makeRelayer(config, store);
+    await relayer.startupCheck();
+
+    const payload = buildStatusPayload({ config, store, relayer, startedAtMs: Date.now() });
+
+    expect(payload.stats.consecutivePollsWithoutProgress).toBe(0);
+    expect(payload.stats.staleCheckpoint).toBe(false);
+  });
+
+  it('/ready stays 200 when degraded-but-alive (stale + lastError but ready)', () => {
+    const config = makeConfig();
+    const store = makeStore();
+    const relayer = makeRelayer(config, store);
+
+    // Fake a degraded-but-alive relayer: ready, yet staleCheckpoint and a
+    // non-null lastError. /ready must stay pure liveness and return 200.
+    const degraded = {
+      getStatus: () => ({
+        scannedTickets: 0,
+        claimedTickets: 0,
+        skippedTickets: 0,
+        failedTickets: 1,
+        lastError: 'HTTP request failed. URL: [redacted-url]',
+        startedAt: new Date().toISOString(),
+        ready: true,
+        consecutivePollsWithoutProgress: 9,
+        staleCheckpoint: true,
+      }),
+    } as unknown as ClaimRelayer;
+
+    const payload = buildStatusPayload({ config, store, relayer: degraded, startedAtMs: Date.now() });
+
+    expect(payload.ready).toBe(true);
+    expect(payload.ok).toBe(true);
+    expect(payload.stats.staleCheckpoint).toBe(true);
+    expect(payload.stats.lastError).not.toBeNull();
   });
 
   it('serves /health, /ready, and /status', async () => {

@@ -2,6 +2,7 @@
 import { createPublicClient, createWalletClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia, baseSepolia } from 'viem/chains';
+import { AlertNotifier } from './alerts.js';
 import { loadConfig } from './config.js';
 import { ClaimRelayerStore } from './db.js';
 import { createStatusServer } from './http.js';
@@ -36,7 +37,12 @@ async function main(): Promise<void> {
     transport: l1Transport,
   });
 
-  const relayer = new ClaimRelayer(config, store, { l1Public, l2Public, l1Wallet });
+  const notifier = new AlertNotifier({
+    webhookUrl: config.alertWebhookUrl,
+    signerAddress: config.signerAddress,
+  });
+
+  const relayer = new ClaimRelayer(config, store, { l1Public, l2Public, l1Wallet }, notifier);
 
   await relayer.start();
   const server = createStatusServer({ config, store, relayer });
