@@ -1328,6 +1328,9 @@ export async function gatherStatusForApi(
           // active = this credential has spend in the current 7d window, so it
           // is the one actually being worked against (distinguishes a
           // configured-but-idle credential from the live one — issue #891).
+          // Cold-start caveat: a working harness reads active=false until its
+          // first cost row lands in the window (fresh node or just-reset 7d
+          // window), so this can transiently under-report the live credential.
           active: week.usdMicros > 0,
           blockResetsAt,
           weekResetsAt,
