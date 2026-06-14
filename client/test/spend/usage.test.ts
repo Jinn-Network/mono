@@ -9,6 +9,9 @@ import {
   UNKNOWN_MODEL_FALLBACK_USD,
 } from '../../src/spend/usage.js';
 
+/** Mirrors the parser's acceptance condition — used to exercise NaN rejection (JSON cannot encode NaN). */
+const isValidNonNeg = (x: number) => Number.isFinite(x) && x >= 0;
+
 describe('parseClaudeCodeUsage', () => {
   it('extracts total_cost_usd from the result line', () => {
     const jsonl = [
@@ -37,10 +40,8 @@ describe('parseClaudeCodeUsage', () => {
   });
 
   it('rejects a NaN total_cost_usd via the Number.isFinite guard', () => {
-    // JSON cannot encode NaN, so the guard is exercised directly: the parser's
-    // acceptance condition is `Number.isFinite(x) && x >= 0`, which rejects NaN.
-    const guard = (x: number) => Number.isFinite(x) && x >= 0;
-    expect(guard(NaN)).toBe(false);
+    // JSON cannot encode NaN, so the guard is exercised directly.
+    expect(isValidNonNeg(NaN)).toBe(false);
   });
 
   it('drops an invalid input_tokens field but keeps a valid cost', () => {
@@ -77,9 +78,8 @@ describe('parseCodexUsage', () => {
   });
 
   it('rejects a NaN input_tokens via the Number.isFinite guard', () => {
-    // JSON cannot encode NaN; the guard `Number.isFinite(x) && x >= 0` rejects it.
-    const guard = (x: number) => Number.isFinite(x) && x >= 0;
-    expect(guard(NaN)).toBe(false);
+    // JSON cannot encode NaN; the guard is exercised directly.
+    expect(isValidNonNeg(NaN)).toBe(false);
   });
 });
 
