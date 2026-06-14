@@ -247,6 +247,18 @@ export interface Harness {
    */
   attributionPlugins?(): RuntimePlugin[];
   /**
+   * Optional self-declaration of WHERE this harness's credential lives, so the
+   * operator dashboard can surface auth-source + a masked last-4 suffix + the
+   * credential file's mtime + a loaded/missing/unknown badge — never the full
+   * key (#564). Harnesses with no credential (e.g. prediction baselines) omit
+   * this method; the endpoint reports them as "no auth required".
+   *
+   * The returned descriptor names the file/env/session; the daemon's shared
+   * `resolveHarnessAuthStatus` helper owns the unsafe read (stat + slice(-4) +
+   * discard). Implementers MUST NOT read or return the full credential here.
+   */
+  getAuthSource?(): Promise<import('./auth-source.js').HarnessAuthSource>;
+  /**
    * Return true if this Harness should handle the given (solverType, role) pair.
    *
    * `role` reflects Task.role:
