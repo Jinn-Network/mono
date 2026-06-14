@@ -121,7 +121,7 @@ export const CLAIM_TX_GAS = 175000n;
 export const CLAIM_GAS_PRICE_WEI = 11_500_000n;
 export const DEFAULT_CLAIM_GAS_WEI = CLAIM_TX_GAS * CLAIM_GAS_PRICE_WEI;
 
-/** Runway at or below this many Tasks surfaces a low-runway state message (#573). */
+/** Runway below this many Tasks surfaces a low-runway state message (#573). */
 export const LOW_RUNWAY_TASKS = 100;
 
 /**
