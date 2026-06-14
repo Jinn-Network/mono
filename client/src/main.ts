@@ -1302,6 +1302,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // targetServices DOES need to flow through so the faucet drips enough
         // ETH to cover ALL services for the operator's chosen targetServices.
         targetServices: config.targetServices,
+        // Issue #560: batched daily-cap top-up knobs — single source of truth
+        // in JinnConfig, surfaced to the SPA via GET /v1/setup/drip/quota.
+        faucetDailyTopupCap: config.faucetDailyTopupCap,
+        faucetTopupCooldownMs: config.faucetTopupCooldownMs,
         claudePath: activeClaudePath,
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,

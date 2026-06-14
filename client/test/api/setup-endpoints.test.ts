@@ -659,6 +659,284 @@ describe('POST /v1/setup/drip', () => {
     // ~ceil(20/5) cadence reads + pre-loop + final, with headroom.
     expect(balanceReads).toBeLessThanOrEqual(Math.ceil(20 / 5) + 2);
   });
+
+  // ── Batched daily-cap top-up (issue #560) ───────────────────────────────
+  //
+  // The running-mode Dashboard "Top up from faucet" button issues a BATCH of
+  // drips up to a project-set daily cap in one click, then disables itself
+  // until a 24h cooldown elapses since the first call of that batch.
+  it('batch mode drips exactly up to the daily cap and persists the sidecar (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-cap-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    const master = '0xAAAA000000000000000000000000000000000001';
+    await store.save({ ...state, master_address: master });
+
+    const requestFunding = vi.fn(async () => ({ ok: true, txHash: '0x' + 'ba'.repeat(32) }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 3,
+      faucetTopupCooldownMs: 24 * 60 * 60 * 1000,
+      now: () => 1_000,
+    });
+
+    const res = await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    expect(res.status).toBe(202);
+    expect(requestFunding).toHaveBeenCalledTimes(3);
+    const body = (await res.json()) as {
+      ok: boolean;
+      txHashes: string[];
+      callsRemaining: number;
+      dailyCap: number;
+      cooldownExpiresAt: number;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.txHashes).toHaveLength(3);
+    expect(body.callsRemaining).toBe(0);
+    expect(body.dailyCap).toBe(3);
+    expect(body.cooldownExpiresAt).toBe(1_000 + 24 * 60 * 60 * 1000);
+
+    const sidecar = JSON.parse(readFileSync(join(earningDir, 'faucet-topup.json'), 'utf-8')) as {
+      byAddress: Record<string, { callsToday: number; batchStartedAt: number }>;
+    };
+    expect(sidecar.byAddress[master.toLowerCase()]).toEqual({
+      callsToday: 3,
+      batchStartedAt: 1_000,
+    });
+  });
+
+  it('returns topup_cooldown and does not call the faucet once the cap is reached (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-cooldown-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    const master = '0xAAAA000000000000000000000000000000000002';
+    await store.save({ ...state, master_address: master });
+
+    const requestFunding = vi.fn(async () => ({ ok: true, txHash: '0x' + 'cc'.repeat(32) }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 2,
+      faucetTopupCooldownMs: 24 * 60 * 60 * 1000,
+      now: () => 5_000,
+    });
+
+    // First batch exhausts the cap.
+    const first = await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    expect(first.status).toBe(202);
+    expect(requestFunding).toHaveBeenCalledTimes(2);
+
+    // Immediate second batch at the same `now` → cooldown, no faucet calls.
+    const second = await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    expect(second.status).toBe(200);
+    expect(requestFunding).toHaveBeenCalledTimes(2);
+    const body = (await second.json()) as {
+      ok: boolean;
+      reason?: string;
+      callsRemaining: number;
+      cooldownExpiresAt: number;
+    };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe('topup_cooldown');
+    expect(body.callsRemaining).toBe(0);
+    expect(body.cooldownExpiresAt).toBe(5_000 + 24 * 60 * 60 * 1000);
+  });
+
+  it('resets the batch once the cooldown window has elapsed (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-reset-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    const master = '0xAAAA000000000000000000000000000000000003';
+    await store.save({ ...state, master_address: master });
+
+    const requestFunding = vi.fn(async () => ({ ok: true, txHash: '0x' + 'dd'.repeat(32) }));
+    const cooldownMs = 24 * 60 * 60 * 1000;
+    let now = 1_000;
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 2,
+      faucetTopupCooldownMs: cooldownMs,
+      now: () => now,
+    });
+
+    await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    expect(requestFunding).toHaveBeenCalledTimes(2);
+
+    // Advance past the cooldown — a fresh batch is granted.
+    now = 1_000 + cooldownMs + 1;
+    const res = await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    expect(res.status).toBe(202);
+    expect(requestFunding).toHaveBeenCalledTimes(4);
+    const body = (await res.json()) as { callsRemaining: number; cooldownExpiresAt: number };
+    expect(body.callsRemaining).toBe(0);
+    expect(body.cooldownExpiresAt).toBe(now + cooldownMs);
+  });
+
+  it('stops the batch early when the faucet rate-limits and persists progress (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-rl-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    const master = '0xAAAA000000000000000000000000000000000004';
+    await store.save({ ...state, master_address: master });
+
+    let call = 0;
+    const requestFunding = vi.fn(async () => {
+      call++;
+      if (call === 1) return { ok: true, txHash: '0x' + 'ee'.repeat(32) };
+      return { ok: false, rateLimited: true, reason: 'Faucet rate limited.' };
+    });
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 5,
+      faucetTopupCooldownMs: 24 * 60 * 60 * 1000,
+      now: () => 2_000,
+    });
+
+    const res = await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    expect(res.status).toBe(202);
+    expect(requestFunding).toHaveBeenCalledTimes(2);
+    const body = (await res.json()) as {
+      ok: boolean;
+      txHashes: string[];
+      callsRemaining: number;
+      rateLimited?: boolean;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.txHashes).toHaveLength(1);
+    expect(body.rateLimited).toBe(true);
+    expect(body.callsRemaining).toBe(4);
+
+    const sidecar = JSON.parse(readFileSync(join(earningDir, 'faucet-topup.json'), 'utf-8')) as {
+      byAddress: Record<string, { callsToday: number; batchStartedAt: number }>;
+    };
+    expect(sidecar.byAddress[master.toLowerCase()]).toEqual({
+      callsToday: 1,
+      batchStartedAt: 2_000,
+    });
+  });
+
+  it('singleDrip still wins when both batch and singleDrip are present (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-single-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0xAAAA000000000000000000000000000000000005',
+    });
+
+    const requestFunding = vi.fn(async () => ({ ok: true, txHash: '0x' + 'ff'.repeat(32) }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 5,
+      minEoaGasWei: '10000000000000000',
+    });
+
+    const res = await app.request('/v1/setup/drip?batch=true&singleDrip=true', {
+      method: 'POST',
+    });
+    expect(res.status).toBe(202);
+    expect(requestFunding).toHaveBeenCalledTimes(1);
+  });
+
+  // ── GET /v1/setup/drip/quota (issue #560) ───────────────────────────────
+  it('GET quota reports the full cap for a fresh wallet (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-quota-fresh-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0xBBBB000000000000000000000000000000000001',
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      faucetDailyTopupCap: 7,
+      now: () => 1_000,
+    });
+
+    const res = await app.request('/v1/setup/drip/quota');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      dailyCap: number;
+      callsRemaining: number;
+      cooldownExpiresAt: number | null;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.dailyCap).toBe(7);
+    expect(body.callsRemaining).toBe(7);
+    expect(body.cooldownExpiresAt).toBeNull();
+  });
+
+  it('GET quota reflects a drained batch after a top-up (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-quota-after-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0xBBBB000000000000000000000000000000000002',
+    });
+
+    const requestFunding = vi.fn(async () => ({ ok: true, txHash: '0x' + '1a'.repeat(32) }));
+    const cooldownMs = 24 * 60 * 60 * 1000;
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 2,
+      faucetTopupCooldownMs: cooldownMs,
+      now: () => 9_000,
+    });
+
+    await app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    const res = await app.request('/v1/setup/drip/quota');
+    const body = (await res.json()) as {
+      callsRemaining: number;
+      cooldownExpiresAt: number | null;
+    };
+    expect(body.callsRemaining).toBe(0);
+    expect(body.cooldownExpiresAt).toBe(9_000 + cooldownMs);
+  });
+
+  it('GET quota soft-renders full cap when no fleet state exists (issue #560)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-quota-nostate-'));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      faucetDailyTopupCap: 4,
+    });
+
+    const res = await app.request('/v1/setup/drip/quota');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      dailyCap: number;
+      callsRemaining: number;
+      cooldownExpiresAt: number | null;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.dailyCap).toBe(4);
+    expect(body.callsRemaining).toBe(4);
+    expect(body.cooldownExpiresAt).toBeNull();
+  });
 });
 
 describe('POST /v1/setup/solvernets/:name (retired in issue #421)', () => {
