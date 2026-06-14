@@ -972,6 +972,25 @@ export interface HarnessReadinessEntry {
   nextStep?: HarnessReadinessNextStep;
 }
 
+// ── Harness auth status (`/v1/harnesses/auth-status`) — #564 ─────────────────
+export type HarnessAuthSourceKind = 'file' | 'env' | 'session' | 'none';
+export type HarnessAuthState = 'loaded' | 'missing' | 'unknown';
+
+export interface HarnessAuthStatusEntry {
+  harnessName: string;
+  sourceKind: HarnessAuthSourceKind;
+  sourcePath?: string;
+  envKey?: string;
+  keySuffix: string | null;
+  lastModified: string | null;
+  state: HarnessAuthState;
+  docAnchor?: string;
+}
+
+export interface HarnessAuthStatusResponse {
+  harnesses: HarnessAuthStatusEntry[];
+}
+
 // ── Codex CLI doctor (`/api/codex/doctor`) ───────────────────────────────────
 // Mirrors the daemon's `CodexDoctorResponse` so the SPA can render a yellow
 // untested-version hint without re-running the version comparison client-side

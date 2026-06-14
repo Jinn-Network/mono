@@ -32,6 +32,7 @@ import type {
   DiscoverySolverNetOperatorCountResponse,
   DiscoveryTaskPostCountsResponse,
   HarnessReadinessEntry,
+  HarnessAuthStatusResponse,
   CodexDoctorResponse,
   DebugReportManifest,
 } from './types.js';
@@ -280,6 +281,14 @@ export const api = {
     jfetch<HarnessReadinessEntry>(
       `/v1/harnesses/${encodeURIComponent(name)}/readiness`,
     ),
+
+  /**
+   * Per-harness auth-source status (#564) — auth source path, masked last-4
+   * key suffix, credential mtime, and a loaded/missing/unknown badge. The
+   * endpoint NEVER returns full key bytes.
+   */
+  harnessAuthStatus: () =>
+    jfetch<HarnessAuthStatusResponse>('/v1/harnesses/auth-status'),
 
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
   // Operator mode never calls these — Operator-mode UI shows zero launcher
