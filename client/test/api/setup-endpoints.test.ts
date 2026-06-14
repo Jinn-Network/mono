@@ -1036,7 +1036,10 @@ describe('POST /v1/setup/network', () => {
     writeConfig(configPath, { network: 'testnet', rpcUrl: 'https://default.example' });
 
     const app = new Hono();
-    addSetupRoutes(app, { configPath });
+    addSetupRoutes(app, {
+      configPath,
+      defaultRpcUrlsForChain: () => ['https://default.example'],
+    });
 
     const res = await app.request('/v1/setup/network', {
       method: 'POST',
@@ -1045,13 +1048,13 @@ describe('POST /v1/setup/network', () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { ok: boolean; restartRequired: boolean; rpcUrl: string };
+    const body = await res.json() as { ok: boolean; restartRequired: boolean; rpcUrl: string | string[] };
     expect(body.ok).toBe(true);
     expect(body.restartRequired).toBe(true);
-    expect(body.rpcUrl).toBe('https://my-tenderly.example.com/abc');
+    expect(body.rpcUrl).toEqual(['https://my-tenderly.example.com/abc', 'https://default.example']);
 
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.rpcUrl).toBe('https://my-tenderly.example.com/abc');
+    expect(persisted.rpcUrl).toEqual(['https://my-tenderly.example.com/abc', 'https://default.example']);
     expect(persisted.network).toBe('testnet');
   });
 
@@ -1063,7 +1066,7 @@ describe('POST /v1/setup/network', () => {
     const app = new Hono();
     addSetupRoutes(app, {
       configPath,
-      defaultRpcUrlForChain: () => 'https://sepolia.base.org',
+      defaultRpcUrlsForChain: () => ['https://sepolia.base.org'],
     });
 
     const res = await app.request('/v1/setup/network', {
@@ -1074,7 +1077,7 @@ describe('POST /v1/setup/network', () => {
 
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.rpcUrl).toBe('https://sepolia.base.org');
+    expect(persisted.rpcUrl).toEqual(['https://sepolia.base.org']);
   });
 
   it('rejects a non-URL string', async () => {
@@ -1109,7 +1112,13 @@ describe('POST /v1/setup/network', () => {
     // CRITICAL: do NOT pre-write the file.
 
     const app = new Hono();
-    addSetupRoutes(app, { configPath });
+    addSetupRoutes(app, {
+      configPath,
+      defaultRpcUrlsForChain: () => [
+        'https://base-sepolia.publicnode.com',
+        'https://sepolia.base.org',
+      ],
+    });
 
     const res = await app.request('/v1/setup/network', {
       method: 'POST',
@@ -1118,14 +1127,82 @@ describe('POST /v1/setup/network', () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { ok: boolean; restartRequired: boolean; rpcUrl: string };
+    const body = await res.json() as { ok: boolean; restartRequired: boolean; rpcUrl: string | string[] };
     expect(body.ok).toBe(true);
     expect(body.restartRequired).toBe(true);
-    expect(body.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co/abc123');
+    expect(body.rpcUrl).toEqual([
+      'https://base-sepolia.gateway.tenderly.co/abc123',
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
 
     // The file was created with the new rpcUrl.
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co/abc123');
+    expect(persisted.rpcUrl).toEqual([
+      'https://base-sepolia.gateway.tenderly.co/abc123',
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
+  });
+
+  it('persists [primary, ...publicDefaults] when a primary URL is given (#913)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-network-primary-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, { network: 'testnet' });
+
+    const app = new Hono();
+    addSetupRoutes(app, {
+      configPath,
+      defaultRpcUrlsForChain: () => [
+        'https://base-sepolia.publicnode.com',
+        'https://sepolia.base.org',
+      ],
+    });
+
+    const res = await app.request('/v1/setup/network', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rpcUrl: 'https://my-alchemy.example/key' }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.rpcUrl).toEqual([
+      'https://my-alchemy.example/key',
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
+  });
+
+  it('persists [...publicDefaults] when the primary is cleared to null (#913)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-network-clear-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {
+      network: 'testnet',
+      rpcUrl: ['https://old-primary.example/k', 'https://base-sepolia.publicnode.com'],
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, {
+      configPath,
+      defaultRpcUrlsForChain: () => [
+        'https://base-sepolia.publicnode.com',
+        'https://sepolia.base.org',
+      ],
+    });
+
+    const res = await app.request('/v1/setup/network', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rpcUrl: null }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.rpcUrl).toEqual([
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
   });
 });
 

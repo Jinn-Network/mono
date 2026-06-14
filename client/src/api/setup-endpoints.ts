@@ -117,6 +117,10 @@ export interface SetupRoutesConfig {
   /** Returns the chain default RPC URL — used by POST /v1/setup/network when
    *  the operator clears the field to revert to the default. */
   defaultRpcUrlForChain?: () => string;
+  /** #913: returns the chain's bundled public RPC fallback chain. The network
+   *  endpoint persists `[primary, ...defaults]` (or `[...defaults]` when the
+   *  primary is cleared) so the operator never loses the public backup chain. */
+  defaultRpcUrlsForChain?: () => readonly string[];
   /**
    * When set, POST /v1/setup/bootstrap/retry is enabled.
    * Re-enters the bootstrap state machine in-process — no daemon restart
@@ -952,27 +956,35 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     // principle. See jinn-mono-u34i.
     const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
 
-    let nextRpcUrl: string;
+    const publicDefaults: readonly string[] =
+      config.defaultRpcUrlsForChain?.() ??
+      (config.defaultRpcUrlForChain
+        ? [config.defaultRpcUrlForChain()]
+        : ['https://base-sepolia.publicnode.com', 'https://sepolia.base.org']);
+
+    let nextRpcUrls: string[];
     if (body.rpcUrl === null || body.rpcUrl === '') {
-      nextRpcUrl =
-        config.defaultRpcUrlForChain?.() ??
-        'https://base-sepolia-rpc.publicnode.com';
+      nextRpcUrls = [...publicDefaults];
     } else if (typeof body.rpcUrl === 'string') {
       try {
         const parsed = new URL(body.rpcUrl);
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
           return c.json({ error: 'invalid_body', detail: '`rpcUrl` must use http or https' }, 400);
         }
-        nextRpcUrl = body.rpcUrl;
       } catch {
         return c.json({ error: 'invalid_body', detail: '`rpcUrl` is not a valid URL' }, 400);
       }
+      // De-dupe: if the operator pastes a URL that is already the first public
+      // default, don't double it — the input drives a single Primary slot.
+      nextRpcUrls = publicDefaults[0] === body.rpcUrl
+        ? [...publicDefaults]
+        : [body.rpcUrl, ...publicDefaults];
     } else {
       return c.json({ error: 'invalid_body', detail: '`rpcUrl` must be a string or null' }, 400);
     }
 
     try {
-      persistConfigValue('rpcUrl', nextRpcUrl, cfgPath);
+      persistConfigValue('rpcUrl', nextRpcUrls, cfgPath);
     } catch (err) {
       return c.json({
         error: 'config_write_failed',
@@ -983,7 +995,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     return c.json({
       ok: true,
       restartRequired: true,
-      rpcUrl: nextRpcUrl,
+      rpcUrl: nextRpcUrls,
     });
   });
 
