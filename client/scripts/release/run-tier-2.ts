@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { runT21CrossOpDonation } from '../../test/release/tier-2/T2.1-cross-op-donation.js';
 import { runT22ProducerEvaluator } from '../../test/release/tier-2/T2.2-producer-evaluator.js';
+import { runT24ProducerEvaluatorSweRebench } from '../../test/release/tier-2/T2.4-producer-evaluator-swe-rebench.js';
 import { type ScenarioVerdict, ScenarioVerdictSchema, exitCodeForVerdicts } from './scenario-types.js';
 
 export interface RunTier2Options {
@@ -26,8 +27,11 @@ export interface RunTier2Result {
 // state-machine unit test, the discovery + JoinFlow + StatusHeader tests). The
 // app-experience coverage is being rebuilt in the right shape — deterministic
 // mocked-daemon Playwright flow tests (hermetic gate) + a non-gating real paired
-// app smoke — tracked in the follow-up issue. Tier 2 here gates on the two
-// protocol-level callables (T2.1 cross-op donation, T2.2 producer/evaluator).
+// app smoke — tracked in the follow-up issue. Tier 2 here gates on the
+// protocol-level callables: T2.1 (cross-op donation), T2.2 (prediction.v1
+// producer/evaluator — fully hermetic through the verdict), and T2.4
+// (swe-rebench-v2 producer/evaluator — hermetic stub solve + the real Docker
+// evaluator, skip-clean when Docker/upstream-repo absent; #898).
 
 export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Result> {
   const outputDir = opts.outputDir ?? path.join(
@@ -41,9 +45,11 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
   // evidence path so the crash-fallback verdict needs no positional bookkeeping.
   const T21_WALL_CLOCK_BUDGET_MS = 5 * 60 * 1000;
   const T22_WALL_CLOCK_BUDGET_MS = 18 * 60 * 1000;
+  const T24_WALL_CLOCK_BUDGET_MS = 18 * 60 * 1000;
   const callables = [
     { id: 'T2.1', run: runT21CrossOpDonation, wallClockBudgetMs: T21_WALL_CLOCK_BUDGET_MS },
     { id: 'T2.2', run: runT22ProducerEvaluator, wallClockBudgetMs: T22_WALL_CLOCK_BUDGET_MS },
+    { id: 'T2.4', run: runT24ProducerEvaluatorSweRebench, wallClockBudgetMs: T24_WALL_CLOCK_BUDGET_MS },
   ].map((s) => ({
     id: s.id,
     evidencePath: path.join(outputDir, `${s.id}.log`),
