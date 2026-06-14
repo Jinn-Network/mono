@@ -299,6 +299,8 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
 | watchdogAutoRestart | JINN_WATCHDOG_AUTO_RESTART | false — loop watchdog (#1043). Off: a stale loop is detected, loud-logged, and emits a `loop_watchdog_stale` event. On: a stale loop also triggers a non-zero `process.exit` so Railway's ON_FAILURE policy restarts the daemon through its existing idempotent boot path. |
+| faucetDailyTopupCap | JINN_FAUCET_DAILY_TOPUP_CAP | 10 — max faucet drips one "Top up from faucet" click issues in a batch, and the per-24h ceiling per wallet (#560) |
+| faucetTopupCooldownMs | JINN_FAUCET_TOPUP_COOLDOWN_MS | 86400000 (24h) — once the daily cap is reached, the top-up action stays disabled until this window elapses since the first call of that batch (#560) |
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 
 `JINN_PASSWORD` is env-only — never in config files.
