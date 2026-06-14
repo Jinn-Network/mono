@@ -694,8 +694,30 @@ export const verdictEnvelopeMeta = onchainTable(
      * 'UNKNOWN' when the envelope body lacks a recognizable verdict field.
      */
     evaluatorVerdict: t.text().notNull().default('UNKNOWN'),
-    /** 'pending' | 'ok' | 'failed'. */
+    /**
+     * 'pending' | 'retry' | 'ok' | 'failed'.
+     *  - 'pending': anchor written, not yet enriched (the enrichment worker's
+     *    discovery target, #779). Default.
+     *  - 'retry': the off-chain verdict body parsed (so we have the requestId PK)
+     *    but a follow-up step (task-body fetch / write) failed; the worker backs
+     *    off until `nextAttemptAt` and retries. Transient.
+     *  - 'ok': fully enriched. Excluded from the worker's discovery left-anti-join.
+     *  - 'failed': terminal give-up after `retryCount` reaches the worker's max.
+     */
     enrichmentStatus: t.text().notNull().default('pending'),
+    /**
+     * Worker-owned retry counter (#779). Incremented by the enrichment worker on
+     * each `retry`; once it reaches the worker's max-retries the row goes to
+     * `failed`. 0 for handler-written (in-process) enrichment.
+     */
+    retryCount: t.integer().notNull().default(0),
+    /**
+     * Epoch-ms of the next eligible enrichment attempt (#779), nullable. NULL =
+     * eligible now. Set by the worker to `now + backoff(retryCount)` when a row
+     * goes to `retry`. bigint (not timestamp) to match this schema's bigint
+     * convention and keep the worker's comparison arithmetic simple.
+     */
+    nextAttemptAt: t.bigint(),
     /** Block number of the MetadataSet event that triggered enrichment. */
     enrichedAtBlock: t.bigint().notNull(),
     /** Chain ID. */
@@ -708,6 +730,10 @@ export const verdictEnvelopeMeta = onchainTable(
     actualPassedIdx: index().on(table.actualPassed),
     evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
     taskIdIdx: index().on(table.taskId),
+    // Supports the enrichment worker's discovery scan predicate (#779):
+    // enrichmentStatus IN ('pending','retry') AND (nextAttemptAt IS NULL OR
+    // nextAttemptAt <= now).
+    dueIdx: index().on(table.enrichmentStatus, table.nextAttemptAt),
     instanceIdIdx: index().on(table.manifestCid, table.actualPassed, table.instanceId),
     // Filter shape used by getInstanceSuccessCounts (#669 Finding 2): scope
     // success counts to a single SolverNet so multi-SolverNet operators don't
