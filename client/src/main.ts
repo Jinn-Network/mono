@@ -1374,6 +1374,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         engine: config.engine,
         config,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        passwordRotation: {
+          source: passwordResolution.source,
+          filePath: passwordResolution.filePath,
+        },
       },
       // Launcher mode (Tasks 6 + 7). Deps are resolved lazily because the
       // generator and Safe address are constructed after bootstrap, after
@@ -2579,6 +2583,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       engine: config.engine,
       config,
       configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+      passwordRotation: {
+        source: passwordResolution.source,
+        filePath: passwordResolution.filePath,
+      },
       spendCaps: spendCap?.caps,
       aiUnits,
     },
