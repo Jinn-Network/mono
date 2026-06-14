@@ -19,6 +19,7 @@ import type { JSX } from 'react';
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
 const triggerDripMock = vi.fn();
+const getDripQuotaMock = vi.fn();
 const restartDaemonMock = vi.fn();
 const stopDaemonMock = vi.fn();
 const retryAgentBindingMock = vi.fn();
@@ -27,7 +28,8 @@ vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
-    triggerDrip: (opts?: { singleDrip?: boolean }) => triggerDripMock(opts),
+    triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean }) => triggerDripMock(opts),
+    getDripQuota: () => getDripQuotaMock(),
     restartDaemon: (opts?: { forceRespawn?: boolean }) => restartDaemonMock(opts),
     stopDaemon: () => stopDaemonMock(),
     retryAgentBinding: (opts: { serviceIndex: number }) => retryAgentBindingMock(opts),
@@ -41,10 +43,17 @@ beforeEach(() => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
   triggerDripMock.mockReset();
+  getDripQuotaMock.mockReset();
   restartDaemonMock.mockReset();
   stopDaemonMock.mockReset();
   retryAgentBindingMock.mockReset();
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
+  getDripQuotaMock.mockResolvedValue({
+    ok: true,
+    dailyCap: 10,
+    callsRemaining: 10,
+    cooldownExpiresAt: null,
+  });
   restartDaemonMock.mockResolvedValue({ ok: true });
   stopDaemonMock.mockResolvedValue({ ok: true });
 });
@@ -253,19 +262,51 @@ describe('OverviewPage Wallet wiring', () => {
     predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
   };
 
-  it('wires the Top up button on the Wallet card to api.triggerDrip with singleDrip', async () => {
+  it('wires the Top up button on the Wallet card to api.triggerDrip with batch (issue #560)', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});
     triggerDripMock.mockResolvedValue({
       ok: true,
-      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
-      deltaWei: '5000000000000000',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      dailyCap: 10,
+      callsRemaining: 9,
     });
     render(withProviders(<OverviewPage />));
 
     fireEvent.click(await screen.findByTestId('wallet-topup'));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
-    expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
+    expect(triggerDripMock).toHaveBeenCalledWith({ batch: true });
+  });
+
+  it('passes the drip quota into the Wallet card (issue #560)', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    getDripQuotaMock.mockResolvedValue({
+      ok: true,
+      dailyCap: 10,
+      callsRemaining: 4,
+      cooldownExpiresAt: null,
+    });
+    render(withProviders(<OverviewPage />));
+
+    const quota = await screen.findByTestId('wallet-topup-quota');
+    expect(quota.textContent).toMatch(/4 of 10 top-ups left today/i);
+  });
+
+  it('surfaces a cap-reached message when the daemon returns topup_cooldown (issue #560)', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    triggerDripMock.mockResolvedValue({
+      ok: false,
+      reason: 'topup_cooldown',
+      dailyCap: 10,
+      callsRemaining: 0,
+      cooldownExpiresAt: Date.now() + 60_000,
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
+    expect(await screen.findByText(/daily faucet cap reached/i)).toBeTruthy();
   });
 
   it('wires the tJINN-earned value from status.tJinn.safeBalanceWei', async () => {
@@ -338,22 +379,24 @@ describe('OverviewPage Wallet wiring', () => {
     );
   });
 
-  it('surfaces a one-line gas top-up confirmation with the tx hash + amount', async () => {
+  it('surfaces a one-line gas top-up confirmation reporting the drip count + last tx (issue #560)', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});
     triggerDripMock.mockResolvedValue({
       ok: true,
-      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
-      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
-      deltaWei: '5000000000000000', // 0.005 ETH
+      txHashes: [
+        '0x1110000000000000000000000000000000000000000000000000000000001111',
+        '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      ],
+      dailyCap: 10,
+      callsRemaining: 8,
     });
     render(withProviders(<OverviewPage />));
 
     fireEvent.click(await screen.findByTestId('wallet-topup'));
-    // Toast surface: amount + truncated tx hash both rendered in the
-    // sonner portal, queried by text rather than testid (sonner doesn't
-    // surface testids on individual toasts).
-    expect(await screen.findByText(/0\.005000 ETH/)).toBeTruthy();
+    // Toast surface: drip count + truncated last tx hash, queried by text
+    // rather than testid (sonner doesn't surface testids on individual toasts).
+    expect(await screen.findByText(/2 drips/)).toBeTruthy();
     expect(screen.getByText(/0xabc0…1234/)).toBeTruthy();
   });
 
@@ -376,10 +419,17 @@ describe('OverviewPage Wallet wiring', () => {
     try {
       getStatusMock.mockResolvedValue(baseStatus);
       getBootstrapMock.mockResolvedValue({});
+      getDripQuotaMock.mockResolvedValue({
+        ok: true,
+        dailyCap: 10,
+        callsRemaining: 10,
+        cooldownExpiresAt: null,
+      });
       triggerDripMock.mockResolvedValue({
         ok: true,
-        txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
-        deltaWei: '5000000000000000',
+        txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+        dailyCap: 10,
+        callsRemaining: 9,
       });
       render(withProviders(<OverviewPage />));
 

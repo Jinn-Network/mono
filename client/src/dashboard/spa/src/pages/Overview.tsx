@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type JSX } from 'react';
 import { toast } from 'sonner';
 import { api } from '../api/client.js';
@@ -184,21 +184,6 @@ function formatEth(wei?: string): string {
   }
 }
 
-/**
- * Format a wei amount for a one-line top-up confirmation. Drips are tiny, so
- * show enough precision to be meaningful (6 dp) without a trailing wall of
- * zeros.
- */
-function formatDripEth(wei?: string): string | null {
-  if (!wei || !/^\d+$/.test(wei)) return null;
-  try {
-    const eth = Number(BigInt(wei)) / 1e18;
-    return `${eth.toFixed(6)} ETH`;
-  } catch {
-    return null;
-  }
-}
-
 /** Shorten a tx hash for inline display (0x1234…abcd). */
 function truncTx(hash?: string): string | null {
   if (!hash || hash.length < 12) return hash ?? null;
@@ -207,6 +192,14 @@ function truncTx(hash?: string): string | null {
 
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  // Issue #560 — batched faucet top-up quota for the WalletCard. Refetched
+  // after a batch top-up so the remaining-count + cooldown copy stays live.
+  const { data: dripQuota } = useQuery({
+    queryKey: ['dripQuota'],
+    queryFn: () => api.getDripQuota(),
+    refetchInterval: 30_000,
+  });
   const { data: status, isError: statusIsError } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -465,28 +458,37 @@ export function OverviewPage(): JSX.Element {
           tjinnState={tjinnState}
           tjinnError={tjinnError}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
+          topupDailyCap={dripQuota?.dailyCap}
+          topupCallsRemaining={dripQuota?.callsRemaining}
+          topupCooldownExpiresAt={dripQuota?.cooldownExpiresAt ?? null}
           onTopUp={() =>
             runAction(
               'Top up gas',
               async () => {
-                // Issue #336: one explicit click → exactly one faucet drip.
-                // `singleDrip: true` makes the daemon fire the faucet once and
-                // return immediately — no server-side loop, so the gas number
-                // never "magically" keeps climbing while the Dashboard is open.
-                const res = await api.triggerDrip({ singleDrip: true });
+                // Issue #560: one click → a BATCH of drips up to the daily cap.
+                // The daemon caps the batch and enters a 24h cooldown once the
+                // cap is reached, so the operator gets the full day's allowance
+                // in one action instead of clicking once per 0.0001 ETH drip.
+                const res = await api.triggerDrip({ batch: true });
+                // Refresh the quota so the remaining-count + cooldown copy
+                // reflect this batch immediately.
+                void queryClient.invalidateQueries({ queryKey: ['dripQuota'] });
                 if (!res.ok) {
+                  if (res.reason === 'topup_cooldown') {
+                    throw new Error('Daily faucet cap reached. Try again after the cooldown.');
+                  }
                   throw new Error(res.reason ?? 'Gas top-up failed.');
                 }
-                const txHash = res.txHash ?? res.txHashes?.at(-1);
-                if (!txHash) {
+                const count = res.txHashes?.length ?? 0;
+                if (count === 0) {
                   return { message: 'Gas top-up checked; the faucet sent no funds.' };
                 }
-                const amount = formatDripEth(res.deltaWei);
-                const txLabel = truncTx(txHash);
+                const txLabel = truncTx(res.txHashes!.at(-1)!);
                 return {
-                  message: amount
-                    ? `Gas topped up: +${amount} · tx ${txLabel}`
-                    : `Gas top-up sent · tx ${txLabel}`,
+                  message:
+                    count === 1
+                      ? `Gas topped up · tx ${txLabel}`
+                      : `Gas topped up: ${count} drips · last tx ${txLabel}`,
                 };
               },
               // Confirmation is transient — surface it, then fade after ~5s.
