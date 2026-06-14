@@ -105,15 +105,38 @@ export function formatWeiAmount(wei: string | undefined): string {
 }
 
 /**
- * Compute the projected number of Tasks the Safe can fund given
- * `solutionPriceWei + verdictPriceWei` per Task. Returns `null` when inputs
- * are missing or non-numeric. SpendPanel uses this to render runway.
+ * Expected gas cost of an average Safe `execTransaction` claim tx, folded into
+ * the per-Task runway so the projection is not wildly optimistic (#573).
+ *
+ * There is no live gas-price feed in the SPA, so these are honest-conservative
+ * named constants rather than a plumbed estimate. They err toward a SHORTER
+ * runway. The daemon's real fee estimation lives in
+ * `client/src/adapters/mech/safe.ts`; revisit these if that path changes.
+ *
+ *   CLAIM_TX_GAS        — 175,000 gas, mid of the 150k–200k execTransaction range.
+ *   CLAIM_GAS_PRICE_WEI — 0.0115 gwei, chosen so claim gas ≈ 2,000 gwei/claim
+ *                         (175,000 × 11,500,000 = 2,012,500,000,000 wei).
+ */
+export const CLAIM_TX_GAS = 175000n;
+export const CLAIM_GAS_PRICE_WEI = 11_500_000n;
+export const DEFAULT_CLAIM_GAS_WEI = CLAIM_TX_GAS * CLAIM_GAS_PRICE_WEI;
+
+/** Runway at or below this many Tasks surfaces a low-runway state message (#573). */
+export const LOW_RUNWAY_TASKS = 100;
+
+/**
+ * Compute the projected number of Tasks the Safe can fund. Per-Task cost is
+ * `solutionPriceWei + verdictPriceWei + claimGasWei`, where `claimGasWei`
+ * defaults to the expected claim-tx gas (`DEFAULT_CLAIM_GAS_WEI`). Excluding
+ * the gas term was the #573 bug. Returns `null` when inputs are missing or
+ * non-numeric. `lowRunway` is true when `tasks < LOW_RUNWAY_TASKS`.
  */
 export function projectRunwayTasks(
   safeBalanceWei: string | null | undefined,
   solutionPriceWei: string | undefined,
   verdictPriceWei: string | undefined,
-): { tasks: number; perTaskWei: bigint } | null {
+  claimGasWei: bigint = DEFAULT_CLAIM_GAS_WEI,
+): { tasks: number; perTaskWei: bigint; lowRunway: boolean } | null {
   if (
     !safeBalanceWei ||
     !/^\d+$/.test(safeBalanceWei) ||
@@ -130,10 +153,11 @@ export function projectRunwayTasks(
   } catch {
     return null;
   }
-  const perTaskWei = BigInt(solutionPriceWei) + BigInt(verdictPriceWei);
+  const perTaskWei =
+    BigInt(solutionPriceWei) + BigInt(verdictPriceWei) + claimGasWei;
   if (perTaskWei <= 0n) return null;
   const tasks = Number(bal / perTaskWei);
-  return { tasks, perTaskWei };
+  return { tasks, perTaskWei, lowRunway: tasks < LOW_RUNWAY_TASKS };
 }
 
 /**
