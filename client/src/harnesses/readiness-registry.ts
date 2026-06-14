@@ -86,6 +86,15 @@ export class HarnessReadinessRegistry {
   }
 
   /**
+   * The by-name harness instance map seeded at construction. Exposed so the
+   * `/v1/harnesses/auth-status` endpoint (#564) can call each harness's
+   * `getAuthSource()` without re-deriving the harness set.
+   */
+  getHarnesses(): Record<string, Harness> {
+    return this.opts.harnessesByName;
+  }
+
+  /**
    * Hot-apply a single joined SolverNet entry (#1037). Mutates the live
    * `joinedHarnessesByCid` map and re-runs the refresh so the snapshot's
    * `manifestCids` and `isReadyForClaim(cid)` reflect the new entry without a

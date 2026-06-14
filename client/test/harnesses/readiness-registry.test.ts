@@ -171,3 +171,19 @@ describe('HarnessReadinessRegistry.setJoined (hot-apply, #1037)', () => {
     });
   });
 });
+
+describe('HarnessReadinessRegistry.getHarnesses (#564)', () => {
+  it('returns the by-name harness instance map seeded at construction', () => {
+    const h = {
+      name: 'hermes-agent', version: '0.0.0',
+      supports: () => true, run: async () => { throw new Error('x'); },
+    };
+    const reg = new HarnessReadinessRegistry({
+      harnessesByName: { 'hermes-agent': h as never },
+      joinedHarnessesByCid: {},
+    });
+    const map = reg.getHarnesses();
+    expect(Object.keys(map)).toEqual(['hermes-agent']);
+    expect(map['hermes-agent']).toBe(h);
+  });
+});
