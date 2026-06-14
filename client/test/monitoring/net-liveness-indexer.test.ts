@@ -1,0 +1,119 @@
+/**
+ * Tests for the indexer readers used by the net-liveness probe. Both read
+ * on-chain truth through the Ponder indexer and tolerate any failure by
+ * returning null (never throwing) — the probe classifies a null as
+ * indexer-down / indexer-lagging rather than crashing.
+ *
+ * Request shapes are mocked the same way as test/discovery/http.test.ts: a
+ * vi.fn fetchImpl returning Response stubs.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import {
+  fetchIndexerHeadBlock,
+  fetchLatestActivityBlock,
+} from '../../src/monitoring/net-liveness.js';
+
+const BASE_URL = 'http://localhost:42069';
+
+describe('fetchIndexerHeadBlock', () => {
+  it('parses the per-chain block.number from /status into a bigint', async () => {
+    const fetchImpl = vi.fn(async (_url: string) =>
+      new Response(
+        JSON.stringify({ 'base-sepolia': { id: 84532, block: { number: 12345, timestamp: 1 } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    expect(head).toBe(12345n);
+    // /status is served at the host root
+    expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+      `${BASE_URL}/status`,
+    );
+  });
+
+  it('returns null when /status responds 503', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 503 })) as unknown as typeof fetch;
+    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    expect(head).toBeNull();
+  });
+
+  it('returns null when the shape is unexpected', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ unexpected: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    expect(head).toBeNull();
+  });
+
+  it('returns null when the fetch throws', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('connection refused');
+    }) as unknown as typeof fetch;
+    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    expect(head).toBeNull();
+  });
+});
+
+describe('fetchLatestActivityBlock', () => {
+  /** Build a mock that returns distinct verdict/attempt blocks based on the query body. */
+  function gqlMock(verdictBlock: number | null, attemptBlock: number | null) {
+    return vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as { query: string };
+      const isVerdict = body.query.includes('verdicts');
+      const block = isVerdict ? verdictBlock : attemptBlock;
+      const items = block === null ? [] : [{ createdAtBlock: String(block) }];
+      const key = isVerdict ? 'verdicts' : 'attempts';
+      return new Response(JSON.stringify({ data: { [key]: { items } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it('returns the verdict block when it is newer than the attempt block', async () => {
+    const fetchImpl = gqlMock(9_000, 8_000);
+    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
+    expect(block).toBe(9_000n);
+  });
+
+  it('returns the attempt block when it is newer than the verdict block', async () => {
+    const fetchImpl = gqlMock(7_000, 8_500);
+    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
+    expect(block).toBe(8_500n);
+  });
+
+  it('returns null when both verdicts and attempts are empty', async () => {
+    const fetchImpl = gqlMock(null, null);
+    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
+    expect(block).toBeNull();
+  });
+
+  it('returns the present leg when only one of the two has rows', async () => {
+    const fetchImpl = gqlMock(null, 4_242);
+    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
+    expect(block).toBe(4_242n);
+  });
+
+  it('returns null when the GraphQL response is an error envelope (no throw)', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
+    expect(block).toBeNull();
+  });
+
+  it('returns null when the fetch throws', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('connection refused');
+    }) as unknown as typeof fetch;
+    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
+    expect(block).toBeNull();
+  });
+});

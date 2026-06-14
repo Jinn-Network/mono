@@ -84,6 +84,7 @@
     "release:testnet-acceptance:host": "node scripts/testnet-acceptance.mjs",
     "status": "tsx scripts/status.ts",
     "audit:failures": "tsx scripts/audit-task-run-failures.ts",
+    "net-liveness": "tsx scripts/net-liveness-probe.ts",
     "cleanup:engine-work": "tsx scripts/cleanup-engine-work.ts",
     "e2e": "tsx test/e2e/validate.ts",
     "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",
