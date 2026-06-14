@@ -1325,6 +1325,10 @@ export async function gatherStatusForApi(
           // contributing row is harvested actual telemetry (issue #1004 AC4).
           estimated: block.estimated || week.estimated,
           paused,
+          // active = this credential has spend in the current 7d window, so it
+          // is the one actually being worked against (distinguishes a
+          // configured-but-idle credential from the live one — issue #891).
+          active: week.usdMicros > 0,
           blockResetsAt,
           weekResetsAt,
         };

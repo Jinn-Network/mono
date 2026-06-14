@@ -110,6 +110,13 @@ export interface AiUnitsCredentialRow {
   estimated: boolean;
   /** True when block or week sum has reached its cap and claims are paused. */
   paused: boolean;
+  /**
+   * True when this credential has recorded spend in the current 7d window —
+   * i.e. it is the credential the daemon is actually working against, not a
+   * configured-but-idle one. Distinguishes an active harness from a merely
+   * enrolled one in the /v1/status footprint (issue #891).
+   */
+  active: boolean;
   /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
   blockResetsAt: string;
   /** ISO timestamp of the next 7d window reset. */

@@ -89,6 +89,55 @@ describe('/v1/status aiUnits block', () => {
     expect(row?.paused).toBe(false);
   });
 
+  it('marks a credential with recorded weekly spend as active (#891)', async () => {
+    store = freshStore();
+    const now = new Date();
+    store.recordActivityEvent({
+      ts: now.toISOString(),
+      kind: 'claimed',
+      requestId: 'active-1',
+      credentialId: 'anthropic:api-key',
+      aiUnits: 10,
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 50_000,
+    });
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 100,
+        capPerWeek: 2800,
+        capPerBlockUsdMicros: 500_000,
+        capPerWeekUsdMicros: 14_000_000,
+        manifestCredentials: { 'cid-1': 'anthropic:api-key' },
+        manifestProjectedAiUnits: { 'cid-1': 5 },
+        manifestProjectedUsdMicros: { 'cid-1': 25_000 },
+        manifestModels: { 'cid-1': 'claude-opus-4-7' },
+      },
+    });
+    const row = body.aiUnits?.credentials.find((c) => c.credentialId === 'anthropic:api-key');
+    expect(row?.active).toBe(true);
+  });
+
+  it('marks a joined-but-idle credential as not active without disturbing other fields (#891)', async () => {
+    store = freshStore();
+    // No recorded spend for this credential — it is configured but idle.
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 100,
+        capPerWeek: 2800,
+        capPerBlockUsdMicros: 500_000,
+        capPerWeekUsdMicros: 14_000_000,
+        manifestCredentials: { 'cid-1': 'anthropic:api-key' },
+        manifestProjectedAiUnits: { 'cid-1': 5 },
+        manifestProjectedUsdMicros: { 'cid-1': 25_000 },
+        manifestModels: { 'cid-1': 'claude-opus-4-7' },
+      },
+    });
+    const row = body.aiUnits?.credentials.find((c) => c.credentialId === 'anthropic:api-key');
+    expect(row?.active).toBe(false);
+    expect(row?.usdMicrosThisWeek).toBe(0);
+    expect(row?.paused).toBe(false);
+  });
+
   it('adds USD spend fields + an estimated flag while keeping the unit fields (issue #1004)', async () => {
     store = freshStore();
     const now = new Date();
