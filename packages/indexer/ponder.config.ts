@@ -25,10 +25,17 @@
  *   PONDER_RPC_URL_11155111       — RPC URL for Sepolia L1 (for JinnDistributor;
  *                                   defaults to a public endpoint, set a real RPC in
  *                                   production).
- *   JINN_INDEXER_ENRICH_ENVELOPES — set false/0 to skip per-envelope IPFS fetch;
- *                                   the explorer's harness/mode/plugin/model facets
- *                                   and freeze integrity won't populate. Default: enabled.
- *   JINN_IPFS_GATEWAY_URL         — IPFS gateway for envelope enrichment.
+ *   JINN_INDEXER_ENRICH_ENVELOPES — dual meaning since #779. EXECUTION-envelope
+ *                                   enrichment (attemptEnvelopeMeta + manifest +
+ *                                   checkpoint) defaults ENABLED; set false/0 to
+ *                                   skip (harness/mode/plugin/model facets + freeze
+ *                                   integrity won't populate). The EVALUATION
+ *                                   (verdict) path defaults OFF in-handler and is
+ *                                   owned by the standalone enrichment worker
+ *                                   (packages/indexer-enrichment); set true/1 to
+ *                                   restore in-handler verdict enrichment (rollback).
+ *   JINN_IPFS_GATEWAY_URL         — IPFS gateway for envelope enrichment (shared
+ *                                   with the enrichment worker).
  *                                   Default: https://gateway.autonolas.tech.
  *
  * Database:

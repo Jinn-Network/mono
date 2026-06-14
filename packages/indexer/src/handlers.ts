@@ -723,6 +723,7 @@ export async function handleMetadataSet({
   attemptEnvelopeMeta,
   verdictEnvelopeMeta,
   enrichEnvelopes = false,
+  enrichVerdicts = false,
   ipfsGateway = '',
   fetchImpl,
 }: {
@@ -734,7 +735,22 @@ export async function handleMetadataSet({
   harnessCheckpoint?: unknown;
   attemptEnvelopeMeta?: unknown;
   verdictEnvelopeMeta?: unknown;
+  /**
+   * Governs in-handler IPFS enrichment of the execution-envelope
+   * (attemptEnvelopeMeta), solverNetManifest, and harnessCheckpoint paths.
+   * Unchanged by #779.
+   */
   enrichEnvelopes?: boolean;
+  /**
+   * Governs in-handler IPFS enrichment of the EVALUATION (verdict) path →
+   * verdictEnvelopeMeta. Split out from enrichEnvelopes by #779 so the verdict
+   * path can default OFF (the enrichment worker owns it) while leaving the
+   * execution path's behaviour unchanged. `true` restores in-handler verdict
+   * enrichment (the AC5 rollback lever); default `false` writes verdict anchors
+   * only. index.ts wires this from the SAME JINN_INDEXER_ENRICH_ENVELOPES env
+   * but defaulting off.
+   */
+  enrichVerdicts?: boolean;
   ipfsGateway?: string;
   fetchImpl?: FetchLike;
 }): Promise<void> {
@@ -1089,7 +1105,7 @@ export async function handleMetadataSet({
     // appear as Pass on-chain. The envelope is the source of truth.
     // verdictEnvelopeMeta is optional for backward compat with callers/tests
     // that don't pass it.
-    if (envelopeKey.kind === 'evaluation' && enrichEnvelopes && verdictEnvelopeMeta) {
+    if (envelopeKey.kind === 'evaluation' && enrichVerdicts && verdictEnvelopeMeta) {
       try {
         const body = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
           timeoutMs: 5000,

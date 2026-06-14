@@ -9,9 +9,13 @@
  *   JinnRouter:VerdictDeliveryClaimed  → verdict (+ recompute task.finalized when delivered verdicts reach requiredVerdicts)
  *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
  *   IdentityRegistry:MetadataSet       → solverNetManifest OR harnessCheckpoint OR envelope (routed by key)
- *                                        the `envelope:` handler also does an IPFS enrichment fetch
+ *                                        the `envelope:` (execution) handler does an IPFS enrichment fetch
  *                                        → attemptEnvelopeMeta (config-gated by JINN_INDEXER_ENRICH_ENVELOPES,
- *                                        IPFS gateway from JINN_IPFS_GATEWAY_URL)
+ *                                        IPFS gateway from JINN_IPFS_GATEWAY_URL). The `evaluation:`
+ *                                        (verdict) path → verdictEnvelopeMeta is, since #779, OFF by
+ *                                        default in-handler and owned by the standalone enrichment worker
+ *                                        (packages/indexer-enrichment); set JINN_INDEXER_ENRICH_ENVELOPES=true
+ *                                        to restore in-handler verdict enrichment (rollback).
  *   JinnDistributor:Claimed            → rewardDistribution
  *
  * Handlers are pure event-to-row mappings with no business logic. The
@@ -36,12 +40,30 @@ import { and, count, eq } from 'ponder';
 import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
 
 // ── Enrichment config (read once at module scope) ─────────────────────────────
-// JINN_INDEXER_ENRICH_ENVELOPES: set false/0 to skip per-envelope IPFS fetch
-// and sync faster — the explorer's harness/mode/plugin/model facets, checkpoint
-// timeline, and freeze integrity won't populate. Default: enabled.
+// JINN_INDEXER_ENRICH_ENVELOPES governs in-handler IPFS enrichment. Since #779
+// it has a dual meaning split by enrichment path:
+//
+//   - EXECUTION envelopes (attemptEnvelopeMeta), solverNetManifest, and
+//     harnessCheckpoint: gated by `enrichEnvelopes` below — DEFAULT ENABLED
+//     (set false/0 to skip and sync faster; the explorer's harness/mode/plugin/
+//     model facets, checkpoint timeline, and freeze integrity won't populate).
+//     #779 did NOT change this path.
+//
+//   - EVALUATION (verdict) envelopes → verdictEnvelopeMeta: gated by
+//     `enrichVerdicts` below — DEFAULT DISABLED. Unset/false → the handler
+//     writes the evaluation `envelope` anchor only and the standalone enrichment
+//     worker (packages/indexer-enrichment) owns the IPFS-bound verdict
+//     enrichment, so an enrichment backlog can't starve `/graphql` (#779).
+//     Set JINN_INDEXER_ENRICH_ENVELOPES=true/1 to restore in-handler verdict
+//     enrichment (the AC5 rollback lever).
 const enrichEnvelopes =
   process.env['JINN_INDEXER_ENRICH_ENVELOPES'] !== 'false' &&
   process.env['JINN_INDEXER_ENRICH_ENVELOPES'] !== '0';
+// Verdict path defaults OFF (worker-owned). Only the explicit opt-in restores
+// in-handler verdict enrichment.
+const enrichVerdicts =
+  process.env['JINN_INDEXER_ENRICH_ENVELOPES'] === 'true' ||
+  process.env['JINN_INDEXER_ENRICH_ENVELOPES'] === '1';
 // JINN_IPFS_GATEWAY_URL: IPFS gateway for envelope enrichment.
 // Empty → fetchIpfsJson falls back to https://gateway.autonolas.tech.
 const ipfsGateway = process.env['JINN_IPFS_GATEWAY_URL'] ?? '';
@@ -138,6 +160,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     attemptEnvelopeMeta,
     verdictEnvelopeMeta,
     enrichEnvelopes,
+    enrichVerdicts,
     ipfsGateway,
   });
 });

@@ -1673,6 +1673,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1713,6 +1714,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
         attemptEnvelopeMeta,
         verdictEnvelopeMeta,
         enrichEnvelopes: true,
+        enrichVerdicts: true,
         ipfsGateway: 'https://stub',
         fetchImpl: stubFetch,
       })
@@ -1801,6 +1803,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1818,6 +1821,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1845,6 +1849,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1864,6 +1869,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1916,6 +1922,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1953,6 +1960,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
+      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1963,5 +1971,76 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     expect(row?.solverNetManifestCid).toBe('');
     expect(row?.actualPassed).toBe(false);  // verdict row still written
     expect(calls).toBeGreaterThanOrEqual(2); // verdict + task body attempt
+  });
+});
+
+// ─── AC5 (#779): verdict cutover reversibility via enrichVerdicts ──────────────
+// After the cutover, the evaluation (verdict) enrichment branch is gated by a
+// NEW enrichVerdicts param (default OFF), wired in index.ts from the SAME
+// JINN_INDEXER_ENRICH_ENVELOPES env but defaulting off. enrichEnvelopes still
+// governs the execution/manifest/checkpoint paths (out of #779 scope). This
+// proves the flag is a clean rollback lever AND that the new default is
+// anchor-only for verdicts.
+
+describe('AC5: verdict cutover reversibility (enrichVerdicts)', () => {
+  const EVAL_CID = 'bafyevaluation';
+  const REQUEST_ID = `0x${'aa'.repeat(32)}` as `0x${string}`;
+  const EVALUATOR = `0x${'bb'.repeat(20)}` as `0x${string}`;
+  const evalKey = `evaluation:${EVAL_CID}`;
+  const SWE_BODY = {
+    schemaVersion: 'jinn.execution.v1',
+    role: 'verdict',
+    solverType: 'swe-rebench-v2.v1',
+    task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1 },
+    verdictIndex: 0,
+    participant: { safeAddress: EVALUATOR, agentEoa: '0x' },
+    evidenceTier: 'committed',
+    payload: { passed_match: false, score: 0 },
+  };
+
+  it.each([
+    { enrichVerdicts: false as const, label: 'OFF (new default → worker owns enrichment)' },
+    { enrichVerdicts: true as const, label: 'ON (rollback → in-handler enrichment)' },
+  ])('enrichVerdicts=$enrichVerdicts $label', async ({ enrichVerdicts }) => {
+    let called = false;
+    const stubFetch: FetchLike = async () => {
+      called = true;
+      return { ok: true, status: 200, json: async () => SWE_BODY };
+    };
+    const start = performance.now();
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      // Execution-path flag stays on (proving #779 scopes ONLY the verdict
+      // path) — the verdict gate is the separate enrichVerdicts.
+      enrichEnvelopes: true,
+      enrichVerdicts,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    const elapsedMs = performance.now() - start;
+
+    // The evaluation envelope anchor is ALWAYS written (the skeleton).
+    const anchor = db.rows(envelope).find((e) => e.metadataKey === evalKey);
+    expect(anchor?.kind).toBe('evaluation');
+
+    if (enrichVerdicts) {
+      // Rollback path: in-handler enrichment runs, verdict row written.
+      expect(called).toBe(true);
+      const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+      expect(row).toBeDefined();
+      expect(row?.enrichmentStatus).toBe('ok');
+      expect(row?.evaluatorVerdict).toBe('FAIL');
+    } else {
+      // New default: anchor-only, no IPFS fetch, no verdict row, fast.
+      expect(called).toBe(false);
+      expect(db.count(verdictEnvelopeMeta)).toBe(0);
+      expect(elapsedMs).toBeLessThan(10);
+    }
   });
 });

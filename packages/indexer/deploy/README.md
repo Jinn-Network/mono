@@ -130,10 +130,17 @@ Configuration:
 
 The harness/mode/plugin/model facets, the train/frozen leaderboard split, the checkpoint timeline, and freeze integrity come from an **IPFS-enrichment step**: for each indexed `envelope:<cid>` (execution evidence), the `MetadataSet` handler fetches the envelope body from an IPFS gateway and projects its `executor` block into the `attemptEnvelopeMeta` table (joined to attempts by `requestId`). It's resilient — a fetch/parse failure for one envelope is logged and skipped (Ponder reprocesses on the next sync), never crashes the indexer.
 
-- `JINN_INDEXER_ENRICH_ENVELOPES` — default `true`. Set to `false` (or `0`) to skip the per-envelope IPFS fetch and sync faster; the enriched facets above won't populate (the rest of the explorer still works).
-- `JINN_IPFS_GATEWAY_URL` — default `https://gateway.autonolas.tech`. The gateway used for envelope fetches; the base is normalized to end with `/ipfs/`.
+**The verdict (evaluation) path was split off in-handler by #779.** `JINN_INDEXER_ENRICH_ENVELOPES` now has a dual meaning:
 
-The historical sync is noticeably slower with enrichment on (one IPFS round-trip per execution envelope). If that's a problem, either run a faster (HyperSync-backed) RPC, or set `JINN_INDEXER_ENRICH_ENVELOPES=false` and accept that the enriched facets won't populate — note that Ponder won't backfill enrichment after the fact, so flipping it on later requires a re-sync (`DATABASE_SCHEMA` bump). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
+- The **execution** path (`envelope:<cid>` → `attemptEnvelopeMeta`), the `solverNetManifest` body, and the `harnessCheckpoint` manifest still enrich **in-handler, default ON** — `false`/`0` skips them.
+- The **evaluation** path (`evaluation:<cid>` → `verdictEnvelopeMeta`) now defaults to **anchor-only in-handler** (the `MetadataSet` handler writes the `envelope` anchor and returns — no verdict IPFS fetch). The IPFS-bound verdict enrichment is owned by the standalone **enrichment worker** (`packages/indexer-enrichment`), so a verdict-enrichment backlog can no longer starve `/graphql` (the 502 incident). Set `JINN_INDEXER_ENRICH_ENVELOPES=true` (or `1`) to restore in-handler verdict enrichment — the documented rollback lever.
+
+- `JINN_INDEXER_ENRICH_ENVELOPES` — default `true` for the execution/manifest/checkpoint paths; the verdict path is OFF unless this is explicitly `true`/`1`.
+- `JINN_IPFS_GATEWAY_URL` — default `https://gateway.autonolas.tech`. The gateway used for envelope fetches; the base is normalized to end with `/ipfs/`. **Shared with the enrichment worker.**
+
+The historical sync is noticeably slower with execution enrichment on (one IPFS round-trip per execution envelope). If that's a problem, either run a faster (HyperSync-backed) RPC, or set `JINN_INDEXER_ENRICH_ENVELOPES=false` and accept that the enriched facets won't populate — note that Ponder won't backfill enrichment after the fact, so flipping it on later requires a re-sync (`DATABASE_SCHEMA` bump). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
+
+**Deploy sequencing with the enrichment worker (#779):** the verdict path is enriched by `packages/indexer-enrichment`, a separate Railway service on the **same** `DATABASE_URL` + `DATABASE_SCHEMA`. Because adding the worker's `retryCount`/`nextAttemptAt` columns to `verdict_envelope_meta` is an `onchainTable` change (Ponder does not online-migrate), a `DATABASE_SCHEMA` bump + re-sync is required when this version first deploys; repoint **both** the indexer and the worker to the new schema together. See `packages/indexer-enrichment/README.md` for the worker's env, the O2/O3/O4 caveats, and the backfill-drain note.
 
 ### Sepolia L1 RPC (`PONDER_RPC_URL_11155111`)
 
