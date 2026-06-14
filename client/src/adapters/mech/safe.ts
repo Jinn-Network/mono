@@ -167,6 +167,10 @@ async function executeSafeTransactionInner(
         // against the fresh value and detects a mid-retry mine on the following
         // pass.
         if (nonceTooLow || replacementUnderpriced) {
+          // The ledger lookup MUST use the ORIGINAL pinned nonce
+          // (nonceLedger.nonce) — read it here, before refreshNonce() below
+          // advances it. Moving refreshNonce() earlier would break
+          // reconciliation by looking up the wrong (advanced) nonce key.
           const existing = await nonceLedger.ledger.getTxSubmission({
             chainId: nonceLedger.chainId,
             from: nonceLedger.from,
@@ -183,9 +187,16 @@ async function executeSafeTransactionInner(
                 await nonceLedger.markResolved();
                 return existing.hash;
               }
-            } catch {
-              // TransactionReceiptNotFoundError (or any lookup failure): the
-              // original is not yet mined. Fall through to refresh + re-sign.
+            } catch (receiptErr) {
+              // TransactionReceiptNotFoundError: the original is not yet mined.
+              // Any other failure (transient RPC fault) is also tolerated —
+              // we fall through to refresh + re-sign rather than rethrow — but
+              // log it so a persistent fault is observable, not masked.
+              const reason = receiptErr instanceof Error ? receiptErr.message : String(receiptErr);
+              console.error(
+                `[safe/viem] execTransaction reconcile receipt lookup for ${existing.hash} ` +
+                  `failed (${reason}) — treating as not-yet-mined, refreshing nonce`,
+              );
             }
           }
 
