@@ -133,7 +133,7 @@ export function useNotifications(): OperatorNotification[] {
     queryFn: () => api.getBootstrap(),
   });
 
-  // Event-driven source for the 12th notification kind (`claim_failed`, per
+  // Event-driven source for the `claim_failed` notification kind (per
   // OPERATOR-APP-SPEC §2.10 + issue #442). Subscribes to `kind: 'intent'` only
   // so the hook does not re-render on every `log` event the daemon emits.
   // SSE backfill replays the last 50 events on connect, so a page reload that
