@@ -262,7 +262,7 @@ The pickable set is tier 1 ∩ tier 2; selecting a pickable harness then drives 
   - role — solver (operator-selected) or evaluator (manifest-bound)
 - **Actions (per harness)**
   - select — choose this harness for the solver role of the SolverNet in context (writes to the §2.4 environment)
-  - install / authenticate — the per-harness setup action that drives the harness to ready; generalises the existing precheck pattern (install command / auth step, then re-check). Optional per harness: pure-compute harnesses are ready with no action.
+  - install / authenticate — the per-harness setup action that drives the harness to ready; generalises the existing precheck pattern (install command / auth step, then re-check). Optional per harness: pure-compute harnesses are ready with no action. For the auth store and rotate command/file behind each harness's auth step (and why `client/.env` is not it), see [`docs/operator/rotating-harness-keys.md`](../docs/operator/rotating-harness-keys.md).
   - re-check
 - **State messages**
   - harness not installed
