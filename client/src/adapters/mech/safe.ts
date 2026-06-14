@@ -162,7 +162,10 @@ async function executeSafeTransactionInner(
         // may mine before the next attempt). Re-signing a NEW Safe
         // execTransaction at the advanced Safe nonce is NOT idempotent — it
         // re-attempts the delivery and reverts as already-claimed. So if the
-        // original receipt is already a success, short-circuit and return it.
+        // original receipt is already a success, short-circuit and return it;
+        // otherwise refresh the pinned nonce so the next attempt bumps fees
+        // against the fresh value and detects a mid-retry mine on the following
+        // pass.
         if (nonceTooLow || replacementUnderpriced) {
           const existing = await nonceLedger.ledger.getTxSubmission({
             chainId: nonceLedger.chainId,
@@ -185,13 +188,7 @@ async function executeSafeTransactionInner(
               // original is not yet mined. Fall through to refresh + re-sign.
             }
           }
-        }
 
-        // Both nonce-too-low and replacement-underpriced advance the pinned
-        // nonce: nonce-too-low means the original mined; replacement-underpriced
-        // means the next attempt must bump fees against the fresh nonce so a
-        // mid-retry mine of the original is detected on the following pass.
-        if (nonceTooLow || replacementUnderpriced) {
           const refreshed = await nonceLedger.refreshNonce();
           console.error(`[safe/viem] execTransaction refreshed pinned nonce -> ${refreshed}`);
         }
