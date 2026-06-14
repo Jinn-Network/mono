@@ -176,7 +176,22 @@ async function executeSafeTransactionInner(
             from: nonceLedger.from,
             nonce: nonceLedger.nonce,
           });
-          if (existing?.hash) {
+          // The tx-submission ledger is SHARED across every logical Safe tx the
+          // daemon broadcasts from this one agent EOA (claim, deliver,
+          // setMetadata, reStake) and is keyed only on the EOA nonce. A
+          // stuck-then-mined UNRELATED tx at the same nonce would otherwise let
+          // us return a foreign tx's hash and false-mark THIS delivery as
+          // landed. Gate the reconcile on the ledger entry actually being this
+          // call's own transaction: recordSubmitted stores `to: safeAddress`
+          // and `data: params.data`, so require both to match before trusting
+          // existing.hash. On mismatch, fall through to refresh + re-sign
+          // exactly as if no success receipt were found. (`to`/safeAddress are
+          // addresses — compare case-insensitively; data is calldata hex —
+          // normalize both to be safe.)
+          const entryMatchesThisTx =
+            existing?.to?.toLowerCase() === params.safeAddress.toLowerCase() &&
+            existing?.data?.toLowerCase() === params.data.toLowerCase();
+          if (existing?.hash && entryMatchesThisTx) {
             try {
               const reconciled = await publicClient.getTransactionReceipt({ hash: existing.hash });
               if (reconciled.status === 'success') {
