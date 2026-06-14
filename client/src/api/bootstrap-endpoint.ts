@@ -15,14 +15,26 @@ import { join } from 'node:path';
 import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
 import { MIGRATIONS_FILE } from '../earning/store.js';
 
+/** Per-slot boot-probe health (#913). Host masked by the daemon before this point. */
+export interface RpcSlotHealthEntry {
+  ok: boolean;
+  host: string;
+  latencyMs?: number;
+  code?: number;
+}
+
 export interface BootstrapEndpointConfig {
   earningDir: string;
-  /** Reads operator-tunable runtime fields (rpcUrl, defaultRpcUrl,
-   *  joinedSolverNets) and merges them into the response so the SPA's
-   *  Configuration page can render them without a separate fetch. */
+  /** Reads operator-tunable runtime fields (rpcUrl, defaultRpcUrl, rpcUrls,
+   *  publicDefaults, rpcSlotHealth, joinedSolverNets) and merges them into the
+   *  response so the SPA's Configuration page can render them without a
+   *  separate fetch. */
   configReader?: () => {
     rpcUrl?: string;
     defaultRpcUrl?: string;
+    rpcUrls?: readonly string[];
+    publicDefaults?: readonly string[];
+    rpcSlotHealth?: readonly RpcSlotHealthEntry[];
     joinedSolverNets?: Record<string, unknown>;
     onboardingComplete?: boolean;
   };
@@ -248,6 +260,9 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       ...(parsed.fleet_safe_address ? { fleet_safe_address: parsed.fleet_safe_address } : {}),
       ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
       ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
+      ...(cfg.rpcUrls !== undefined ? { rpcUrls: cfg.rpcUrls } : {}),
+      ...(cfg.publicDefaults !== undefined ? { publicDefaults: cfg.publicDefaults } : {}),
+      ...(cfg.rpcSlotHealth !== undefined ? { rpcSlotHealth: cfg.rpcSlotHealth } : {}),
       ...(cfg.joinedSolverNets !== undefined ? { joinedSolverNets: cfg.joinedSolverNets } : {}),
       ...(cfg.onboardingComplete !== undefined ? { onboardingComplete: cfg.onboardingComplete } : {}),
       ...(fundingGateActive && fundingGate ? { funding: fundingResponse(fundingGate) } : {}),

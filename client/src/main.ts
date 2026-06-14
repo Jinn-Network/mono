@@ -25,7 +25,7 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
+import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger } from './tx-retry.js';
@@ -127,6 +127,7 @@ import {
   checkRpcNetwork,
   logRpcLocalDevToStderr,
   probeFallbackChain,
+  type ProbeResult,
   rpcNetworkFailureHint,
   summarizeFallbackChain,
 } from './preflight/rpc-network.js';
@@ -237,6 +238,30 @@ const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
 });
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
+
+/** #913: the bundled public RPC fallback chain for the current network. The
+ *  setup/network endpoint persists `[primary, ...RPC_PUBLIC_DEFAULTS]` so the
+ *  operator keeps the public backup chain when they set a primary, and the
+ *  Settings → Network UI renders these as the trailing read-only slots. */
+const RPC_PUBLIC_DEFAULTS: readonly string[] =
+  NETWORK_CHAIN === 'base-sepolia' ? DEFAULT_TESTNET_RPC_URLS : [CHAIN_CONFIG.rpcUrl];
+
+/** #913: last L2 boot-probe result per RPC slot. Captured at boot, surfaced
+ *  via /v1/bootstrap so Settings → Network can render per-slot health. Hosts
+ *  are already masked by probeFallbackChain. The RPC chain is restart-required,
+ *  so this never drifts without a re-probing restart. */
+let lastL2Probe: ProbeResult[] = [];
+
+function configFileHasTopLevelKey(configPath: string | undefined, key: string): boolean {
+  const filePath = configPath ?? join(process.env['HOME'] ?? '', '.jinn-client', 'config.json');
+  if (!filePath || !existsSync(filePath)) return false;
+  try {
+    const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+    return !!raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
+  } catch {
+    return false;
+  }
+}
 
 class EnsurePendingCaptureProcessor implements SpanProcessor {
   constructor(private readonly captures: CapturesStore) {}
@@ -856,7 +881,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Boot-time RPC fallback-chain probe (issue #592, AC7 + AC9). Log-only —
   // per-slot 429s/5xx never gate startup. checkRpcNetwork above already
   // fail-loud on chain-id mismatch against the head provider.
-  await probeFallbackChain(config.rpcUrls, config.network, 'L2');
+  lastL2Probe = await probeFallbackChain(config.rpcUrls, config.network, 'L2');
   console.error(summarizeFallbackChain('L2', config.rpcUrls));
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
@@ -1165,6 +1190,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         configReader: () => ({
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
+          rpcUrls: config.rpcUrls,
+          publicDefaults: RPC_PUBLIC_DEFAULTS,
+          rpcSlotHealth: lastL2Probe.map((p) =>
+            p.ok
+              ? { ok: true as const, host: p.host, latencyMs: p.latencyMs }
+              : { ok: false as const, host: p.host, code: p.code },
+          ),
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
           onboardingComplete: config.onboardingComplete,
         }),
