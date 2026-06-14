@@ -48,23 +48,6 @@ export interface UpsertVerdictArgs {
   chainId: number;
 }
 
-export interface MarkRetryArgs {
-  requestId: string;
-  manifestCid: string;
-  enrichedAtBlock: bigint;
-  chainId: number;
-  /** epoch-ms now. */
-  now: number | bigint;
-  maxRetries: number;
-}
-
-/** Capped exponential backoff in ms: 30s, 60s, 120s, … capped at 1h. */
-export function backoffMs(retryCount: number): number {
-  const base = 30_000;
-  const ms = base * 2 ** Math.max(0, retryCount - 1);
-  return Math.min(ms, 3_600_000);
-}
-
 export class EnrichmentStore {
   constructor(
     private readonly db: DrizzleLike,
@@ -94,11 +77,15 @@ export class EnrichmentStore {
    * Discover un-enriched, due evaluation anchors. An anchor is due when it is an
    * `evaluation` envelope and has NO `ok` verdict_envelope_meta row joined by
    * manifest_cid, AND (for any existing verdict row) the row is in
-   * ('pending','retry') with nextAttemptAt null-or-past.
+   * ('pending','retry') with nextAttemptAt null-or-past. The worker no longer
+   * WRITES 'retry' rows (it graceful-degrades to 'ok' like the handler), but the
+   * 'retry'/'pending' branch is kept so any such pre-existing rows still get
+   * re-discovered — it is cheap and harmless.
    *
    * `now` is epoch-ms (matches nextAttemptAt's unit). Bounded by `batchSize`.
-   * The select is `FOR UPDATE SKIP LOCKED` on the verdict row side so two workers
-   * claim disjoint sets.
+   * The select is `FOR UPDATE OF e SKIP LOCKED` — it locks the `envelope` (anchor)
+   * side, NOT the nullable verdict side (Postgres rejects FOR UPDATE on the
+   * LEFT JOIN's nullable side). Two workers therefore claim disjoint anchor sets.
    */
   async discoverDue(batchSize: number, now: number | bigint): Promise<DueAnchor[]> {
     return this.runDiscover(this.db, batchSize, now);
@@ -187,38 +174,6 @@ export class EnrichmentStore {
         "next_attempt_at" = NULL,
         "enriched_at_block" = EXCLUDED."enriched_at_block"
       WHERE EXCLUDED."enriched_at_block" >= ${this.q('verdict_envelope_meta')}."enriched_at_block"
-    `);
-  }
-
-  /**
-   * Mark a partially-enriched verdict row for backoff retry. We have request_id
-   * (the verdict body parsed) but a follow-up step failed. Increments retry_count
-   * and sets next_attempt_at = now + backoff; once retry_count reaches maxRetries
-   * the row is terminal 'failed'. Inserts a minimal row if none exists yet.
-   */
-  async markRetry(args: MarkRetryArgs): Promise<void> {
-    const nowMs = BigInt(args.now);
-    await this.db.execute(sql`
-      INSERT INTO ${this.q('verdict_envelope_meta')}
-        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
-      VALUES (
-        ${args.requestId}, 0, 0, '', '0x', ${args.manifestCid}, '', '', false, '', 0, 0, '', '', 'UNKNOWN',
-        'retry', 1, ${nowMs + BigInt(backoffMs(1))}, ${args.enrichedAtBlock}, ${args.chainId}
-      )
-      ON CONFLICT ("request_id","chain_id") DO UPDATE SET
-        "retry_count" = ${this.q('verdict_envelope_meta')}."retry_count" + 1,
-        "enrichment_status" = CASE
-          WHEN ${this.q('verdict_envelope_meta')}."retry_count" + 1 >= ${args.maxRetries} THEN 'failed'
-          ELSE 'retry'
-        END,
-        "next_attempt_at" = ${nowMs} + (CASE
-          WHEN ${this.q('verdict_envelope_meta')}."retry_count" + 1 = 1 THEN 30000
-          WHEN ${this.q('verdict_envelope_meta')}."retry_count" + 1 = 2 THEN 60000
-          WHEN ${this.q('verdict_envelope_meta')}."retry_count" + 1 = 3 THEN 120000
-          WHEN ${this.q('verdict_envelope_meta')}."retry_count" + 1 = 4 THEN 240000
-          WHEN ${this.q('verdict_envelope_meta')}."retry_count" + 1 = 5 THEN 480000
-          ELSE 3600000
-        END)
     `);
   }
 }

@@ -19,7 +19,6 @@ export interface RunnerStats {
   ticks: number;
   discovered: number;
   enriched: number;
-  retried: number;
   failedFetch: number;
 }
 
@@ -45,14 +44,15 @@ export class EnrichmentRunner {
       ticks: 0,
       discovered: 0,
       enriched: 0,
-      retried: 0,
       failedFetch: 0,
     };
   }
 
-  /** First poll + schedule. Throws to the caller if the DB is unreachable so the
-   *  boot path can exit non-zero (the #1068 lesson — fail loud, let Railway
-   *  restart). */
+  /** First poll + schedule. Does NOT itself fail loud on a dead DB: store.ready()
+   *  swallows connection errors and returns false (so a schema-not-yet-present DB
+   *  is "not ready", not a crash). The actual fail-loud boot guard is the
+   *  pool.connect() probe in index.ts, which exits non-zero before this runs
+   *  (the #1068 lesson — fail loud at boot, let Railway restart). */
   async start(): Promise<void> {
     this.stopped = false;
     // A first ready() probe surfaces a dead/missing DB at boot instead of
@@ -92,14 +92,13 @@ export class EnrichmentRunner {
       // Schema not present yet (fresh deploy / mid rolling cutover). Back off;
       // /ready stays false until the schema resolves.
       this.stats.ready = false;
-      return { discovered: 0, enriched: 0, retried: 0, failedFetch: 0 };
+      return { discovered: 0, enriched: 0, failedFetch: 0 };
     }
     this.stats.ready = true;
     const result = await enrichBatch(this.store, this.deps);
     this.stats.ticks += 1;
     this.stats.discovered += result.discovered;
     this.stats.enriched += result.enriched;
-    this.stats.retried += result.retried;
     this.stats.failedFetch += result.failedFetch;
     return result;
   }

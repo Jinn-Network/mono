@@ -203,40 +203,6 @@ describe('upsertVerdict', () => {
   });
 });
 
-// ── markRetry ─────────────────────────────────────────────────────────────────
-
-describe('markRetry', () => {
-  it('inserts a retry row with incremented retryCount + a future nextAttemptAt', async () => {
-    await store.markRetry({
-      requestId: '0xcc',
-      manifestCid: 'cidC',
-      enrichedAtBlock: 100n,
-      chainId: CHAIN_ID,
-      now: 1_000n,
-      maxRetries: 5,
-    });
-    const row = await readVerdict('0xcc');
-    expect(row?.enrichment_status).toBe('retry');
-    expect(row?.retry_count).toBe(1);
-    expect(Number(row?.next_attempt_at)).toBeGreaterThan(1_000);
-  });
-
-  it('escalates to failed once retryCount reaches maxRetries', async () => {
-    await seedVerdict({ requestId: '0xcc', manifestCid: 'cidC', enrichmentStatus: 'retry', enrichedAtBlock: 100n, retryCount: 4 });
-    await store.markRetry({
-      requestId: '0xcc',
-      manifestCid: 'cidC',
-      enrichedAtBlock: 100n,
-      chainId: CHAIN_ID,
-      now: 1_000n,
-      maxRetries: 5,
-    });
-    const row = await readVerdict('0xcc');
-    expect(row?.retry_count).toBe(5);
-    expect(row?.enrichment_status).toBe('failed');
-  });
-});
-
 /** Capture the SQL the store emits for discovery by spying on a one-shot exec. */
 async function captureDiscoverSql(): Promise<string> {
   let captured = '';

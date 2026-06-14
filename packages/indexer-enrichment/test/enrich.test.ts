@@ -40,7 +40,6 @@ function depsWith(fetchImpl: FetchLike): EnrichDeps {
     ipfsGateway: 'https://stub',
     ipfsTimeoutMs: 5000,
     batchSize: 25,
-    maxRetries: 5,
     chainId: CHAIN_ID,
     fetchImpl,
     now: () => 1_000_000,
@@ -134,19 +133,27 @@ describe('enrichBatch', () => {
     expect(due.map((d) => d.manifestCid)).toContain('bafyeval');
   });
 
-  it('writes a retry row when the verdict parses but the task-body fetch fails', async () => {
+  it('graceful-degrades to ok + instanceId="" when the verdict parses but the task-body fetch fails (matches the handler)', async () => {
     await seedEvalAnchor('bafyeval', 41_500_000n);
     const fetchImpl: FetchLike = async (url) => {
       if (String(url).includes('bafytask')) throw new Error('task body offline');
       return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
     };
     const result = await enrichBatch(store, depsWith(fetchImpl));
-    expect(result.retried).toBe(1);
+    // The handler catches the task-fetch error, warns, leaves instanceId='' /
+    // solverNetManifestCid='', and writes the verdict row with status 'ok'. The
+    // worker must do the SAME (behaviour-preserving refactor, #779). NOT a retry row.
+    expect(result.enriched).toBe(1);
 
     const row = await readVerdict(REQUEST_ID);
-    expect(row?.enrichment_status).toBe('retry');
-    expect(row?.retry_count).toBe(1);
-    expect(Number(row?.next_attempt_at)).toBeGreaterThan(1_000_000);
+    expect(row?.enrichment_status).toBe('ok');
+    expect(row?.instance_id).toBe('');
+    expect(row?.solver_net_manifest_cid).toBe('');
+    // The verdict fields still land (we had the verdict body).
+    expect(row?.evaluator_verdict).toBe('PASS');
+    // instanceId='' → the launcher's `instanceId_not:""` filter shape excludes
+    // this partial row from success counts, exactly as today.
+    expect(row?.instance_id).toBe('');
   });
 });
 

@@ -68,7 +68,6 @@ describe('AC3: read path is not starved by an enrichment backlog', () => {
       ipfsGateway: 'https://stub',
       ipfsTimeoutMs: 5000,
       batchSize: 25,
-      maxRetries: 5,
       chainId: CHAIN_ID,
       fetchImpl: slowFetch,
       now: () => Date.now(),

@@ -21,7 +21,13 @@ export interface EnrichmentWorkerConfig {
   batchSize: number;
   /** Per-IPFS-fetch timeout, ms. */
   ipfsTimeoutMs: number;
-  /** Retries before a partially-enriched row goes terminal 'failed'. */
+  /**
+   * RESERVED — currently inert. The worker graceful-degrades on a task-fetch
+   * failure (writes 'ok' with instanceId='', matching the handler) rather than
+   * marking rows for backoff retry, so nothing consumes this today. Kept as a
+   * parsed knob for a future genuine-transient retry path and so the schema's
+   * retry_count/next_attempt_at columns have a documented ceiling.
+   */
   maxRetries: number;
 }
 

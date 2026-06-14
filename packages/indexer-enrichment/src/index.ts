@@ -50,9 +50,9 @@ async function main(): Promise<void> {
     ipfsGateway: config.ipfsGateway,
     ipfsTimeoutMs: config.ipfsTimeoutMs,
     batchSize: config.batchSize,
-    maxRetries: config.maxRetries,
-    // The indexer is single-chain Base-Sepolia testnet; chainId is fixed at the
-    // worker's deploy. Wired from the same convention the indexer uses.
+    // TESTNET CONFIG GAP: chainId hardcoded to Base-Sepolia. The indexer is
+    // single-chain testnet today; wire this from env (e.g. JINN_ENRICHMENT_CHAIN_ID)
+    // before any mainnet / multi-chain deploy.
     chainId: 84532,
     now: () => Date.now(),
   };

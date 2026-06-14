@@ -7,14 +7,17 @@
  * @jinn-network/indexer/enrichment-parse) — that shared module is the anti-drift
  * contract between the in-handler path and this worker.
  *
- * Failure modes mirror the handler's graceful-degrade behaviour:
+ * Failure modes mirror the handler's graceful-degrade behaviour EXACTLY
+ * (behaviour-preserving refactor — see plan T2.6 / §9 R3):
  *  - verdict-body fetch throws → NO row (no requestId without the body); the
  *    anchor stays un-enriched and reappears in discovery next tick (natural retry).
- *  - swe-rebench-v2 task-body fetch throws AFTER the verdict parsed → the verdict
- *    row is written with enrichmentStatus='retry' (we have requestId by then) and
- *    a backoff. NOT 'ok' with a populated-but-wrong instanceId — but matching the
- *    handler, a task body that simply LACKS instance_id yields ok/instanceId=''
- *    (graceful degrade; the launcher's instanceId_not:"" filter excludes it, #669).
+ *  - swe-rebench-v2 task-body fetch throws AFTER the verdict parsed → the worker
+ *    warns and falls through to write enrichmentStatus='ok' with instanceId='' and
+ *    solverNetManifestCid='' — identical to handlers.ts (the task-fetch catch there
+ *    leaves both empty and writes 'ok'). The launcher's instanceId_not:"" filter then
+ *    excludes that partial row from success counts (#669). We do NOT mark it for
+ *    retry: that would invent stricter behaviour than the handler.
+ *  - a task body that simply LACKS instance_id yields the same ok/instanceId='' row.
  */
 import { fetchIpfsJson, type FetchLike } from '@jinn-network/indexer/ipfs';
 import {
@@ -27,7 +30,6 @@ export interface EnrichDeps {
   ipfsGateway: string;
   ipfsTimeoutMs: number;
   batchSize: number;
-  maxRetries: number;
   chainId: number;
   /** Injected for tests; defaults to global fetch in production wiring. */
   fetchImpl?: FetchLike;
@@ -38,7 +40,6 @@ export interface EnrichDeps {
 export interface EnrichBatchResult {
   discovered: number;
   enriched: number;
-  retried: number;
   failedFetch: number;
 }
 
@@ -51,7 +52,6 @@ export async function enrichBatch(
   const result: EnrichBatchResult = {
     discovered: due.length,
     enriched: 0,
-    retried: 0,
     failedFetch: 0,
   };
 
@@ -91,21 +91,16 @@ export async function enrichBatch(
         instanceId = resolved.instanceId;
         solverNetManifestCid = resolved.solverNetManifestCid;
       } catch (err) {
-        // We have the requestId (verdict parsed) but the task body is
-        // unfetchable → backoff retry rather than write a partial 'ok'.
+        // Graceful degrade, matching handlers.ts EXACTLY: we have the requestId
+        // (verdict parsed) but the task body is unfetchable. The handler catches,
+        // warns, and falls through — leaving instanceId='' and
+        // solverNetManifestCid='' — then writes the verdict row with
+        // enrichmentStatus='ok'. The launcher's instanceId_not:"" filter excludes
+        // the partial row from success counts (#669). Do NOT mark for retry.
         console.warn(
-          `[indexer-enrichment] task body fetch failed for verdict ${meta.requestId.slice(0, 10)}... cid=${meta.taskCid}: ${String(err)}`,
+          `[indexer-enrichment] task body fetch failed for verdict ${meta.requestId.slice(0, 10)}... cid=${meta.taskCid}: ${String(err)} (writing ok with instanceId='')`,
         );
-        await store.markRetry({
-          requestId: meta.requestId,
-          manifestCid: anchor.manifestCid,
-          enrichedAtBlock: anchor.publishedAtBlock,
-          chainId: deps.chainId,
-          now: nowMs,
-          maxRetries: deps.maxRetries,
-        });
-        result.retried += 1;
-        continue;
+        // instanceId / solverNetManifestCid stay '' — fall through to upsert.
       }
     }
 

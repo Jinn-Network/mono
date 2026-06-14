@@ -18,7 +18,6 @@ function fakeRunner(ready: boolean): EnrichmentRunner {
       ticks: 3,
       discovered: 10,
       enriched: 8,
-      retried: 1,
       failedFetch: 1,
     }),
   } as unknown as EnrichmentRunner;
