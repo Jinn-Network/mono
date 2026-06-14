@@ -75,9 +75,17 @@ describe('NetworkTab', () => {
 
   it('renders one ordered read-only row per slot with masked host + health (AC1/AC4)', async () => {
     render(withProviders(<NetworkTab />));
-    const list = await screen.findByTestId('network-rpc-slots');
-    const rows = list.querySelectorAll('[data-testid="network-rpc-slot"]');
-    expect(rows).toHaveLength(3);
+    await screen.findByTestId('network-rpc-slots');
+    await waitFor(() =>
+      expect(
+        screen
+          .getByTestId('network-rpc-slots')
+          .querySelectorAll('[data-testid="network-rpc-slot"]'),
+      ).toHaveLength(3),
+    );
+    const rows = screen
+      .getByTestId('network-rpc-slots')
+      .querySelectorAll('[data-testid="network-rpc-slot"]');
     // Ordered by slot index; hosts are masked (no path / key segment).
     expect(rows[0]!.textContent).toMatch(/my-alchemy\.example/);
     expect(rows[0]!.textContent).not.toMatch(/\/key/);
@@ -89,8 +97,12 @@ describe('NetworkTab', () => {
 
   it('shows the Primary RPC input prefilled with the current primary (AC2)', async () => {
     render(withProviders(<NetworkTab />));
-    const input = await screen.findByLabelText(/primary rpc/i);
-    expect((input as HTMLInputElement).value).toBe('https://my-alchemy.example/key');
+    await screen.findByLabelText(/primary rpc/i);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText(/primary rpc/i) as HTMLInputElement).value,
+      ).toBe('https://my-alchemy.example/key'),
+    );
   });
 
   it('renders the "tried first — falls back to public chain on failure" copy (AC4)', async () => {
