@@ -12,7 +12,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '../../components/ui/tooltip.js';
-import { formatWeiAmount, projectRunwayTasks, truncateAddress } from './helpers.js';
+import {
+  formatWeiAmount,
+  projectRunwayTasks,
+  truncateAddress,
+  LOW_RUNWAY_TASKS,
+} from './helpers.js';
 
 import type { JSX } from 'react';
 
@@ -160,9 +165,20 @@ export function SpendPanel({
           </span>
         )}
 
+        {projection?.lowRunway && (
+          <span
+            data-testid="launcher-launched-spend-low-runway"
+            className="font-mono text-[12px] text-[var(--wane)]"
+          >
+            Runway low — under {LOW_RUNWAY_TASKS.toLocaleString()} Tasks remain
+            at current prices. Top up the Safe from the Overview wallet faucet;
+            this panel has no local top-up action.
+          </span>
+        )}
+
         <p className="m-0 font-mono text-[11px] leading-relaxed text-[var(--fg-dim)]">
           Runway projects how many Tasks the Safe can fund at the current
-          manifest prices, before any operator participation cost adjustments.
+          manifest prices, including the expected claim-tx gas per Task.
         </p>
       </Card>
     </TooltipProvider>
