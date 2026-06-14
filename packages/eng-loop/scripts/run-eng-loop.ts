@@ -37,6 +37,7 @@ import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
 import type { ProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
 import { gateOrRun, isSkipped } from '../src/dispatcher/rate-limit-guard.js';
+import { classifyRateLimitError } from '../src/dispatcher/rate-limit-error.js';
 import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
@@ -644,6 +645,16 @@ async function main(): Promise<void> {
       }
       return intervalMs;
     } catch (err) {
+      // #539: a cycle that tripped the GitHub API rate limit (despite the #585
+      // proactive guard) backs off to just past the limit's reset instead of
+      // re-polling at normal cadence and re-throwing the same error each tick.
+      const rl = classifyRateLimitError(err);
+      if (rl.isRateLimit) {
+        console.warn(
+          `[eng:loop] rate-limited; resuming at ${rl.resetAt ?? new Date(Date.now() + rl.sleepMs).toISOString()}`,
+        );
+        return rl.sleepMs;
+      }
       console.error('[eng:loop] Cycle error:', err);
       return intervalMs;
     }
