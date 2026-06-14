@@ -1,5 +1,8 @@
 // client/src/harnesses/impls/hermes-agent/harness.ts
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
+import type { HarnessAuthSource } from '../../auth-source.js';
 import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { HERMES_AGENT_HARNESS } from '../../names.js';
@@ -196,6 +199,28 @@ export class HermesHarness implements Harness {
       };
     }
     return { ready: true };
+  }
+
+  /**
+   * #564 — declare the operator's Hermes credential location: the
+   * `OPENROUTER_API_KEY` line in `$HERMES_HOME/.env` (default `~/.hermes/.env`).
+   * The daemon's resolver reads only the last-4 suffix; this method never reads
+   * the key itself.
+   */
+  async getAuthSource(): Promise<HarnessAuthSource> {
+    const home = process.env['HERMES_HOME']?.trim() || join(homedir(), '.hermes');
+    const absolutePath = join(home, '.env');
+    // Tilde-abbreviate the display path when it's under the real home dir.
+    const sourcePath = absolutePath.startsWith(homedir())
+      ? absolutePath.replace(homedir(), '~')
+      : absolutePath;
+    return {
+      sourceKind: 'file',
+      sourcePath,
+      absolutePath,
+      envKey: 'OPENROUTER_API_KEY',
+      docAnchor: 'hermes-agent',
+    };
   }
 
   private async probeLocalHermesProvider(baseUrl: string): Promise<ReadyStatus> {
