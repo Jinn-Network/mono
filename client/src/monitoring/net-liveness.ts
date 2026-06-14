@@ -264,8 +264,10 @@ export async function fetchLatestActivityBlock(args: {
   gqlUrl: string;
   fetchImpl?: typeof fetch;
 }): Promise<bigint | null> {
-  const verdict = await latestBlockFor(args, 'verdicts');
-  const attempt = await latestBlockFor(args, 'attempts');
+  const [verdict, attempt] = await Promise.all([
+    latestBlockFor(args, 'verdicts'),
+    latestBlockFor(args, 'attempts'),
+  ]);
   if (verdict === null && attempt === null) return null;
   return maxNullable(verdict, attempt);
 }

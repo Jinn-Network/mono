@@ -34,6 +34,7 @@ import {
   fetchIndexerHeadBlock,
   fetchLatestActivityBlock,
   postNetLivenessWebhook,
+  BASE_BLOCKS_PER_MINUTE,
 } from '../src/monitoring/net-liveness.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
     now: () => new Date(),
   });
 
-  const staleForMinutes = Number(result.staleForBlocks) / 30;
+  const staleForMinutes = Number(result.staleForBlocks) / BASE_BLOCKS_PER_MINUTE;
   console.log(
     `[net-liveness] state=${result.state} staleForBlocks=${result.staleForBlocks} ` +
       `(~${staleForMinutes} min) — ${result.reason}` +
