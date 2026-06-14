@@ -450,4 +450,67 @@ describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
     const body = (await res.json()) as { onboardingComplete?: boolean };
     expect(body.onboardingComplete).toBeUndefined();
   });
+
+  it('surfaces rpcUrls, publicDefaults and rpcSlotHealth from configReader (#913)', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, {
+      earningDir,
+      configReader: () => ({
+        rpcUrl: 'https://my-alchemy.example/key',
+        defaultRpcUrl: 'https://base-sepolia.publicnode.com',
+        rpcUrls: [
+          'https://my-alchemy.example/key',
+          'https://base-sepolia.publicnode.com',
+          'https://sepolia.base.org',
+        ],
+        publicDefaults: [
+          'https://base-sepolia.publicnode.com',
+          'https://sepolia.base.org',
+        ],
+        rpcSlotHealth: [
+          { ok: true, host: 'my-alchemy.example', latencyMs: 12 },
+          { ok: true, host: 'base-sepolia.publicnode.com', latencyMs: 40 },
+          { ok: false, host: 'sepolia.base.org', code: 429 },
+        ],
+      }),
+    });
+    const res = await app.request('/v1/bootstrap');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      rpcUrls: string[];
+      publicDefaults: string[];
+      rpcSlotHealth: Array<{ ok: boolean; host: string; latencyMs?: number; code?: number }>;
+    };
+    expect(body.rpcUrls).toEqual([
+      'https://my-alchemy.example/key',
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
+    expect(body.publicDefaults).toEqual([
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
+    expect(body.rpcSlotHealth).toHaveLength(3);
+    expect(body.rpcSlotHealth[2]).toEqual({ ok: false, host: 'sepolia.base.org', code: 429 });
+  });
+
+  it('omits the new RPC fields when no configReader is supplied (back-compat)', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).not.toHaveProperty('rpcUrls');
+    expect(body).not.toHaveProperty('publicDefaults');
+    expect(body).not.toHaveProperty('rpcSlotHealth');
+  });
 });
