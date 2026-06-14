@@ -35,6 +35,17 @@ function passVerdict(scenarioId: string, evidencePath: string): ScenarioVerdict 
   };
 }
 
+function skipVerdict(scenarioId: string, evidencePath: string, reason: string): ScenarioVerdict {
+  return {
+    scenarioId,
+    verdict: 'skip',
+    wallClockMs: 1,
+    evidencePath,
+    failClass: null,
+    failNotes: reason,
+  };
+}
+
 describe('runTier2', () => {
   let outputDir: string;
 
@@ -72,5 +83,19 @@ describe('runTier2', () => {
       evidencePath: path.join(outputDir, 'T2.4.log'),
       wallClockBudgetMs: 18 * 60 * 1000,
     });
+  });
+
+  it('treats a T2.4 skip as non-blocking — allPassed stays true and the marker is not failed', async () => {
+    runners.runT24ProducerEvaluatorSweRebench.mockImplementation(async (opts: { evidencePath: string }) =>
+      skipVerdict('T2.4', opts.evidencePath, 'docker-absent'),
+    );
+
+    const result = await runTier2({ outputDir, candidateVersion: 'test-sha' });
+
+    expect(result.allPassed).toBe(true);
+
+    const marker = await fs.readFile(path.join(outputDir, 'marker.txt'), 'utf8');
+    expect(marker).toContain('tier-2-t2-4=skipped:docker-absent');
+    expect(marker).toContain('tier-2-overall=passed');
   });
 });

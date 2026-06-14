@@ -78,7 +78,12 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
   // Validate every verdict against the schema (catches contract drift).
   for (const v of verdicts) ScenarioVerdictSchema.parse(v);
 
-  const allPassed = verdicts.every((v) => v.verdict === 'pass');
+  // `fail` is the only blocking verdict — `skip` is non-blocking, mirroring
+  // exitCodeForVerdicts (which returns 0 unless some verdict is 'fail'). T2.4 is
+  // the first Tier-2 scenario that can legitimately skip (Docker/upstream-repo/
+  // admission/HF absent), so a clean Dockerless run must not write
+  // tier-2-overall=failed (#898).
+  const allPassed = verdicts.every((v) => v.verdict !== 'fail');
 
   // Write summary.json
   const summary = {
