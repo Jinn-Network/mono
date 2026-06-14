@@ -42,6 +42,7 @@ import {
   parseVerdictEnvelopeLite,
   type HandlerContext,
 } from '../src/handlers.js';
+import { resolveInstanceFields } from '../src/enrichment-parse.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
 import type { FetchLike } from '../src/ipfs.js';
 import {
@@ -1596,6 +1597,49 @@ describe('parseVerdictEnvelopeLite', () => {
   });
 });
 
+// ─── resolveInstanceFields (pure, shared module #779) ─────────────────────────
+// The swe-rebench-v2 task-body → instance_id + solverNetManifestCid resolver
+// the enrichment worker relies on. Extracted from the inlined handler block so
+// the worker and the legacy in-handler path cannot drift.
+
+describe('resolveInstanceFields', () => {
+  it('reads spec.instance_id and top-level solverNetManifestCid from a task.v1 body', () => {
+    const taskBody = {
+      schemaVersion: 'task.v1',
+      solverNetManifestCid: 'bafyManifestSweA',
+      spec: { instance_id: 'sympy__sympy-27510' },
+    };
+    expect(resolveInstanceFields(taskBody)).toEqual({
+      instanceId: 'sympy__sympy-27510',
+      solverNetManifestCid: 'bafyManifestSweA',
+    });
+  });
+
+  it('returns empty strings when the body lacks the fields', () => {
+    expect(resolveInstanceFields({ spec: {} })).toEqual({
+      instanceId: '',
+      solverNetManifestCid: '',
+    });
+  });
+
+  it('returns empty strings for a non-object body', () => {
+    expect(resolveInstanceFields(null)).toEqual({ instanceId: '', solverNetManifestCid: '' });
+    expect(resolveInstanceFields('nope')).toEqual({ instanceId: '', solverNetManifestCid: '' });
+    expect(resolveInstanceFields(undefined)).toEqual({ instanceId: '', solverNetManifestCid: '' });
+  });
+
+  it('ignores a non-string / empty instance_id', () => {
+    expect(resolveInstanceFields({ spec: { instance_id: '' }, solverNetManifestCid: 'cid' })).toEqual({
+      instanceId: '',
+      solverNetManifestCid: 'cid',
+    });
+    expect(resolveInstanceFields({ spec: { instance_id: 123 } })).toEqual({
+      instanceId: '',
+      solverNetManifestCid: '',
+    });
+  });
+});
+
 // ─── MetadataSet evaluation: enrichment → verdictEnvelopeMeta ─────────────────
 
 describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
@@ -1695,6 +1739,51 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     });
     expect(called).toBe(false);
     expect(db.count(verdictEnvelopeMeta)).toBe(0);
+  });
+
+  // ── AC1 (#779): anchor-only path does no IPFS I/O, writes the CID-keyed
+  // evaluation `envelope` skeleton, and returns fast. The `envelope` anchor IS
+  // the discovery skeleton the worker's left-anti-join keys on — an `evaluation`
+  // envelope with no `ok` verdict_envelope_meta row presents as un-enriched.
+  it('AC1: anchor-only path writes the evaluation envelope skeleton, does no IPFS I/O, and is fast', async () => {
+    let called = false;
+    const stubFetch: FetchLike = async () => {
+      called = true;
+      return { ok: true, status: 200, json: async () => SWE_REBENCH_FAIL_BODY };
+    };
+    const start = performance.now();
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: false,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    const elapsedMs = performance.now() - start;
+
+    // No IPFS fetch on the anchor-only path.
+    expect(called).toBe(false);
+
+    // The CID-keyed evaluation envelope anchor (the worker's discovery skeleton)
+    // IS written, even with enrichment off.
+    const anchor = db.rows(envelope).find((e) => e.metadataKey === evalKey);
+    expect(anchor).toBeDefined();
+    expect(anchor?.kind).toBe('evaluation');
+    expect(anchor?.manifestCid).toBe(EVAL_CID);
+
+    // It presents as un-enriched to the worker's left-anti-join: no
+    // verdict_envelope_meta row exists for it yet.
+    expect(db.count(verdictEnvelopeMeta)).toBe(0);
+
+    // Sub-10ms guard: the anchor-only path is a single in-memory upsert + early
+    // return. Loose enough not to flake, tight enough to catch a re-introduced
+    // synchronous IPFS fetch.
+    expect(elapsedMs).toBeLessThan(10);
   });
 
   it('does NOT write a row when the body has no task.requestId', async () => {
