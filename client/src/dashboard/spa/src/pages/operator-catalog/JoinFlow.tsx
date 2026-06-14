@@ -315,9 +315,9 @@ export function JoinFlow({
           : {}),
       }),
     onSuccess: (result) => {
-      // Invalidate so the catalog's joined-indicator badge and the Operator
-      // page's joined list / LiveNow banner pick the new entry up on the
-      // next tick instead of waiting up to 30s for the next refetch.
+      // Invalidate so the catalog's joined-indicator badge and the Overview
+      // page's joined list pick the new entry up on the next tick instead of
+      // waiting up to 30s for the next refetch.
       void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
       void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
       // Render an explicit success state on this page rather than a silent

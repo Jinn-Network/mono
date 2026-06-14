@@ -41,8 +41,8 @@ import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.j
  *
  * Compatibility warning: when the chosen harness isn't in
  * `catalogEntry.compatibleHarnesses` the picker surfaces the same
- * mismatch the LiveNowBand's `prediction_harness_unsupported` diagnostic
- * uses, with the list of compatible alternatives.
+ * `prediction_harness_unsupported` mismatch diagnostic, with the list
+ * of compatible alternatives.
  */
 
 export interface JoinedNetEntry {

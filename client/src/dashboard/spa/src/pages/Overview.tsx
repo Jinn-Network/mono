@@ -348,8 +348,8 @@ export function OverviewPage(): JSX.Element {
   // backend ships it (currently hardcoded `rpcHealthy={true}` in App.tsx).
   const daemonStatus: DaemonStatus = statusIsError && status === undefined ? 'stopped' : 'running';
   const rpcStatus: RpcStatus = 'healthy';
-  // No daemon state-message line under "Running" — the prior `liveNow.line`
-  // text was idle copy like "waiting for next task" that added nothing.
+  // No daemon state-message line under "Running" — the prior state-message
+  // line was idle copy like "waiting for next task" that added nothing.
   // Attention-worthy state (harness mismatch, etc.) surfaces through the
   // notifications row (spec §2.10). Node Health stays a glance-level health card.
   const daemonStateMessage: string | undefined = undefined;
