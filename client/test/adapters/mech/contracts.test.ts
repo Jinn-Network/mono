@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData } from 'viem';
 import {
   JINN_ROUTER_ABI,
@@ -9,6 +9,7 @@ import {
   ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
   ROUTER_DISCOVERY_EVENTS,
   MECH_DELIVER_EVENT,
+  scanLatestDeliveryDataByRid,
 } from '../../../src/adapters/mech/contracts.js';
 
 describe('JinnRouter contract encoding', () => {
@@ -217,5 +218,20 @@ describe('event-specific router log filters (#116)', () => {
   it('MECH_DELIVER_EVENT is the mech Deliver event', () => {
     expect(MECH_DELIVER_EVENT.type).toBe('event');
     expect(MECH_DELIVER_EVENT.name).toBe('Deliver');
+  });
+
+  it('scanLatestDeliveryDataByRid filters getLogs by the Deliver topic (not address-only)', async () => {
+    const getLogs = vi.fn().mockResolvedValue([]);
+    const mech = ('0x' + 'ab'.repeat(20)) as `0x${string}`;
+    await scanLatestDeliveryDataByRid(
+      { getLogs } as any,
+      mech,
+      0n,
+      0n,
+    );
+    expect(getLogs).toHaveBeenCalledTimes(1);
+    const arg = getLogs.mock.calls[0][0];
+    expect(arg.address).toBe(mech);
+    expect(arg.event).toBe(MECH_DELIVER_EVENT);
   });
 });

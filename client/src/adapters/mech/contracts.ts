@@ -1075,6 +1075,7 @@ export async function scanLatestDeliveryDataByRid(
     const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
     const logs = await publicClient.getLogs({
       address: mechContractAddress,
+      event: MECH_DELIVER_EVENT,
       fromBlock: start,
       toBlock: end,
     });
