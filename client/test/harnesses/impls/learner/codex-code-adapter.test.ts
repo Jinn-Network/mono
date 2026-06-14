@@ -30,13 +30,29 @@ type FakeCodexChild = EventEmitter & {
   stdin: PassThrough & { end: ReturnType<typeof vi.fn> };
   /** Chunks captured from the stdin stream as utf8 strings. */
   stdinChunks: string[];
+  pid: number;
   killed: boolean;
   kill: ReturnType<typeof vi.fn>;
 };
 
 function fakeCodexChild(
   onSpawn?: (options: { env?: NodeJS.ProcessEnv; cwd?: string }) => void,
-  opts: { emitErrorOnSpawn?: boolean } = {},
+  opts: {
+    emitErrorOnSpawn?: boolean;
+    /**
+     * Terminal-marker behaviour (#895). Default 'configured-then-exit'
+     * preserves the legacy emit: {"type":"session_configured"} then exit 0.
+     * - 'turn-completed-then-hang': emit {"type":"turn.completed",...} and
+     *   then NEVER emit exit (reproduces the #883/#895 hang).
+     * - 'turn-completed-then-exit': emit the marker then a clean exit 0.
+     * - 'turn-failed-then-hang': emit {"type":"turn.failed",...} then NEVER exit.
+     */
+    mode?:
+      | 'configured-then-exit'
+      | 'turn-completed-then-hang'
+      | 'turn-completed-then-exit'
+      | 'turn-failed-then-hang';
+  } = {},
 ): FakeCodexChild {
   const child = new EventEmitter() as FakeCodexChild;
   child.stdout = new EventEmitter();
@@ -54,17 +70,49 @@ function fakeCodexChild(
   (stdin as unknown as { end: typeof endMock }).end = endMock;
   child.stdin = stdin as FakeCodexChild['stdin'];
   child.stdinChunks = stdinChunks;
+  child.pid = 5151;
   child.killed = false;
   child.kill = vi.fn(() => {
     child.killed = true;
     return true;
   });
+  const mode = opts.mode ?? 'configured-then-exit';
   setImmediate(() => {
     onSpawn?.({});
     if (opts.emitErrorOnSpawn) {
       child.emit('error', new Error('spawn codex ENOENT'));
       return;
     }
+    if (mode === 'turn-completed-then-hang') {
+      child.stdout.emit('data', Buffer.from('{"type":"session_configured"}\n'));
+      child.stdout.emit(
+        'data',
+        Buffer.from('{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":20}}\n'),
+      );
+      // intentionally NEVER emits exit — reproduces #883/#895 (codex emits its
+      // terminal turn marker but the process lingers, held open by a leaked
+      // tool subprocess keeping the event loop alive).
+      return;
+    }
+    if (mode === 'turn-completed-then-exit') {
+      child.stdout.emit('data', Buffer.from('{"type":"session_configured"}\n'));
+      child.stdout.emit(
+        'data',
+        Buffer.from('{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":20}}\n'),
+      );
+      child.emit('exit', 0, null);
+      return;
+    }
+    if (mode === 'turn-failed-then-hang') {
+      child.stdout.emit('data', Buffer.from('{"type":"session_configured"}\n'));
+      child.stdout.emit(
+        'data',
+        Buffer.from('{"type":"turn.failed","error":{"message":"model refused the task"}}\n'),
+      );
+      // never exits — settle must come from the failure marker, not exit.
+      return;
+    }
+    // 'configured-then-exit' (legacy default): preserve existing test behaviour.
     child.stdout.emit('data', Buffer.from('{"type":"session_configured"}\n'));
     child.emit('exit', 0, null);
   });
@@ -120,6 +168,38 @@ function writeTypedPayload(workingDir: string): void {
     schemaVersion: 'swe-rebench-v2-solution.v1',
     patch: '--- a/src/example.c\n+++ b/src/example.c\n@@ -1 +1 @@\n-old\n+new\n',
   }, null, 2));
+}
+
+function runInputs(workingDir: string, implStateDir: string, abort: AbortSignal) {
+  return {
+    taskId: 'swe-rebench-task-restoration',
+    requestId: '0x' + '7'.repeat(64),
+    solverType: 'swe-rebench-v2.v1',
+    taskBody: sweTask() as never,
+    implStateDir,
+    workingDir,
+    pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+    windowStartTs: 1,
+    windowEndTs: 2,
+    msUntilEndTs: 3_600_000,
+    mode: 'train' as const,
+    abort,
+  };
+}
+
+function makeReapAdapter(
+  spawnFn: unknown,
+  killProcessGroup: (pid: number, sig: NodeJS.Signals) => void = () => {},
+): CodexCodeHarnessAdapter {
+  return new CodexCodeHarnessAdapter({
+    codexPath: 'codex-test',
+    clientRoot: '/client/root',
+    _spawnFn: spawnFn as never,
+    _runSessionStartHook: false,
+    // Inject a no-op group-kill so tests never fire a real signal at a real
+    // process group (the fake child's pid is arbitrary).
+    _killProcessGroup: killProcessGroup,
+  });
 }
 
 describe('CodexCodeHarnessAdapter', () => {
@@ -440,4 +520,77 @@ describe('CodexCodeHarnessAdapter', () => {
       rmSync(implStateDir, { recursive: true, force: true });
     }
   });
+});
+
+describe('CodexCodeHarnessAdapter — completion + subprocess reaping (#895)', () => {
+  it('resolves on the terminal turn.completed marker even when the child never exits, and reaps it', async () => {
+    let captured: FakeCodexChild | undefined;
+    const spawnFn = vi.fn(() => {
+      captured = fakeCodexChild(undefined, { mode: 'turn-completed-then-hang' });
+      return captured;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hang-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hang-state-'));
+    try {
+      const adapter = makeReapAdapter(spawnFn, killGroup);
+      // Pre-fix this never resolves (adapter waits on child 'exit', which never
+      // fires) and the test times out. Post-fix it resolves on the
+      // turn.completed line.
+      await adapter.runTask(
+        runInputs(workingDir, implStateDir, new AbortController().signal),
+        learnerPluginRoot,
+      );
+      expect(captured).toBeDefined();
+      // The lingering child AND its process group must be reaped, not leaked.
+      expect(captured!.kill).toHaveBeenCalled();
+      expect(killGroup).toHaveBeenCalledWith(captured!.pid, expect.any(String));
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('rejects on the terminal turn.failed marker even when the child never exits', async () => {
+    let captured: FakeCodexChild | undefined;
+    const spawnFn = vi.fn(() => {
+      captured = fakeCodexChild(undefined, { mode: 'turn-failed-then-hang' });
+      return captured;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-fail-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-fail-state-'));
+    try {
+      const adapter = makeReapAdapter(spawnFn, killGroup);
+      await expect(
+        adapter.runTask(
+          runInputs(workingDir, implStateDir, new AbortController().signal),
+          learnerPluginRoot,
+        ),
+      ).rejects.toThrow(/turn\.failed/);
+      // Failure path still reaps the group so the lingering child is not leaked.
+      expect(killGroup).toHaveBeenCalledWith(captured!.pid, expect.any(String));
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('resolves on the normal path (turn.completed then clean exit)', async () => {
+    const spawnFn = vi.fn(() => fakeCodexChild(undefined, { mode: 'turn-completed-then-exit' }));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-ok-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-ok-state-'));
+    try {
+      const adapter = makeReapAdapter(spawnFn);
+      await expect(
+        adapter.runTask(
+          runInputs(workingDir, implStateDir, new AbortController().signal),
+          learnerPluginRoot,
+        ),
+      ).resolves.toBeUndefined();
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
 });
