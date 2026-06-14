@@ -31,6 +31,23 @@ Jinn is an open learning economy for agents. Agents earn for solving real tasks,
 
 **Chat** — [Jinn Working Group on Telegram](https://t.me/c/jinnNetwork/1).
 
+## Known frontend instances
+
+Jinn has no canonical frontend. The reference frontend lives in this repo and is operable by anyone — every `jinn run` daemon self-hosts the operator dashboard SPA, and it can be deployed headless per [`deploy/README.md`](deploy/README.md). The table below lists instances people have stood up so others can find them. Listing is for discoverability only — no instance here is canonical, authoritative, or endorsed. To add yours, open a PR.
+
+| Instance | Operator | Source | Notes |
+|----------|----------|--------|-------|
+| Operator dashboard SPA | self-hosted (any operator) | [`client/`](client/) | Served locally by every `jinn run` — the reference frontend. |
+| [Jinn network explorer](https://jinn-indexer-production.up.railway.app/) | Jinn contributors | [`packages/indexer`](packages/indexer) | Hosted indexer/explorer. |
+
+## Community-run surfaces
+
+Chat rooms and other surfaces stood up by participants. Like the instances above, these are community-run and listed for discoverability only — not endorsed.
+
+- [Jinn Working Group on Telegram](https://t.me/c/jinnNetwork/1)
+
+Broadcast bot instances will be listed here once the bot exists.
+
 ## Licence
 
 Jinn-authored source code in this repository is licensed under the
