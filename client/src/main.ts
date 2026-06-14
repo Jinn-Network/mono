@@ -52,6 +52,7 @@ import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { applyPidfileLivenessGate } from './preflight/pidfile-liveness.js';
 import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.js';
+import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
@@ -795,6 +796,13 @@ function emitProgress(envelope: ProgressEnvelope): void {
 }
 
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
+  // Issue #909: chdir to a stable directory before spawning any child process.
+  // `jinn run` inherits the launch shell's CWD; when daemonised from an
+  // ephemeral dir that is later deleted, the CWD becomes a dangling inode and
+  // child processes (the `claude` CLI harness probe) crash on getcwd() ENOENT.
+  // Must run first — before getFileLogger() and any subprocess spawn.
+  ensureStableCwd({ earningDir: config.earningDir });
+
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
   // Issue #420: initialise the rotating daemon file logger early so lifecycle
