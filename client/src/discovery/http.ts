@@ -707,7 +707,7 @@ export interface HttpDiscoveryAPIOptions {
    * RETRY_DELAYS_MS. Tests pass `[0, 0]` to retry instantly. An empty array
    * disables retry entirely. Exposed mostly for tests.
    */
-  retryDelaysMs?: number[];
+  retryDelaysMs?: readonly number[];
   /**
    * Per-request timeout (ms) applied to every indexer fetch — the `/ready`
    * probe and all GraphQL POSTs. Defaults to FETCH_TIMEOUT_MS. Bounds the fetch
