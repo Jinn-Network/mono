@@ -172,8 +172,7 @@ export function deriveOnchainStatus(
   nowSeconds: number,
 ): TaskOnchainStatus {
   if (!snapshot) return 'unknown';
-  if (snapshot.finalized) return 'finalized';
-  if (snapshot.refunded) return 'finalized';
+  if (snapshot.finalized || snapshot.refunded) return 'finalized';
   if (snapshot.claimWindowEnd != null && snapshot.claimWindowEnd <= nowSeconds) {
     return 'expired';
   }
@@ -252,8 +251,7 @@ export async function gatherLauncherTasks(
   const statusMap = new Map<string, TaskStatusSnapshot>();
   const fetchTaskStatuses = deps.fetchTaskStatuses;
   if (fetchTaskStatuses) {
-    const cids = Array.from(new Set(Object.keys(deps.config.joinedSolverNets ?? {})));
-    for (const cid of cids) {
+    for (const cid of Object.keys(deps.config.joinedSolverNets ?? {})) {
       try {
         const snapshots = await fetchTaskStatuses(cid);
         for (const [taskId, snapshot] of snapshots) statusMap.set(taskId, snapshot);
