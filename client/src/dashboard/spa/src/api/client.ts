@@ -130,7 +130,7 @@ export const api = {
    *   Gas top-up an explicit, one-shot action with no re-firing loop
    *   (jinn-mono #336).
    */
-  triggerDrip: (opts?: { singleDrip?: boolean }) =>
+  triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean }) =>
     jfetch<{
       ok: boolean;
       address?: string;
@@ -142,10 +142,32 @@ export const api = {
       deltaWei?: string;
       reason?: string;
       rateLimited?: boolean;
+      // Issue #560 — batched daily-cap top-up fields.
+      dailyCap?: number;
+      callsRemaining?: number;
+      cooldownExpiresAt?: number | null;
     }>(
-      opts?.singleDrip ? '/v1/setup/drip?singleDrip=true' : '/v1/setup/drip',
+      opts?.singleDrip
+        ? '/v1/setup/drip?singleDrip=true'
+        : opts?.batch
+          ? '/v1/setup/drip?batch=true'
+          : '/v1/setup/drip',
       { method: 'POST' },
     ),
+  /**
+   * Read the operator's batched faucet top-up quota for today (issue #560):
+   * how many drips remain and when the 24h cooldown expires. Soft-renders the
+   * full cap pre-bootstrap so the WalletCard always has something to show.
+   */
+  getDripQuota: () =>
+    jfetch<{
+      ok: boolean;
+      address?: string;
+      dailyCap?: number;
+      callsRemaining?: number;
+      cooldownExpiresAt?: number | null;
+      reason?: string;
+    }>('/v1/setup/drip/quota'),
   changeKeystorePassword: (current: string, next: string) =>
     jfetch<{ ok: boolean }>('/v1/setup/change-password', {
       method: 'POST',

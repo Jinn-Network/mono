@@ -163,4 +163,45 @@ describe('WalletCard', () => {
     expect(onTopUp).toHaveBeenCalledOnce();
   });
 
+  // ── Batched top-up quota (issue #560) ──────────────────────────────────
+  it('surfaces remaining top-ups for today when quota is partially used (issue #560)', () => {
+    const { ui } = wrap(
+      <WalletCard
+        {...defaultProps()}
+        topupDailyCap={10}
+        topupCallsRemaining={4}
+        topupCooldownExpiresAt={null}
+      />,
+    );
+    render(ui);
+    const gas = screen.getByTestId('wallet-section-gas');
+    expect(gas.textContent).toMatch(/4 of 10 top-ups left today/i);
+    expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('disables the button and shows cap-reached copy when no top-ups remain (issue #560)', () => {
+    const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+    const { ui } = wrap(
+      <WalletCard
+        {...defaultProps()}
+        topupDailyCap={10}
+        topupCallsRemaining={0}
+        topupCooldownExpiresAt={expiresAt}
+      />,
+    );
+    render(ui);
+    expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(true);
+    const gas = screen.getByTestId('wallet-section-gas');
+    expect(gas.textContent).toMatch(/daily faucet cap reached/i);
+  });
+
+  it('keeps the button enabled and shows no quota copy when quota props are undefined (back-compat)', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} />);
+    render(ui);
+    expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(false);
+    const gas = screen.getByTestId('wallet-section-gas');
+    expect(gas.textContent).not.toMatch(/top-ups left today/i);
+    expect(gas.textContent).not.toMatch(/daily faucet cap reached/i);
+  });
+
 });

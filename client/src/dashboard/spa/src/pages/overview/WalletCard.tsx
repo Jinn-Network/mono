@@ -65,6 +65,32 @@ export interface WalletCardProps {
   onTopUp: () => void;
   /** When true, action buttons are disabled (e.g. another action is in flight). */
   actionsDisabled?: boolean;
+  /**
+   * Batched faucet top-up quota (issue #560). When provided, the card surfaces
+   * how many top-ups remain today and disables the button once the daily cap is
+   * reached, showing when the 24h cooldown resets. All optional for
+   * back-compat: when undefined the button stays enabled with no quota copy.
+   */
+  topupDailyCap?: number;
+  topupCallsRemaining?: number;
+  topupCooldownExpiresAt?: number | null;
+}
+
+/**
+ * Human-readable "resets in …" using Intl.RelativeTimeFormat. Picks the
+ * coarsest sensible unit (days → hours → minutes). Returns null when the
+ * expiry is unknown or already past.
+ */
+function formatResetIn(cooldownExpiresAt: number | null | undefined): string | null {
+  if (cooldownExpiresAt == null) return null;
+  const deltaMs = cooldownExpiresAt - Date.now();
+  if (deltaMs <= 0) return null;
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  const minutes = Math.round(deltaMs / 60_000);
+  if (minutes < 60) return rtf.format(minutes, 'minute');
+  const hours = Math.round(deltaMs / 3_600_000);
+  if (hours < 24) return rtf.format(hours, 'hour');
+  return rtf.format(Math.round(deltaMs / 86_400_000), 'day');
 }
 
 const eyebrow = 'font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-muted)]';
@@ -107,6 +133,9 @@ export function WalletCard({
   lastPasswordRotationAt,
   onTopUp,
   actionsDisabled = false,
+  topupDailyCap,
+  topupCallsRemaining,
+  topupCooldownExpiresAt,
 }: WalletCardProps): JSX.Element {
   const [, navigate] = useLocation();
   const { value: tjinnValue, copy: tjinnStateCopy } = tjinnDisplay(
@@ -114,6 +143,20 @@ export function WalletCard({
     tjinnEarned,
     tjinnError,
   );
+
+  // Issue #560: quota copy + disable. When the cap is reached the button is
+  // disabled until the cooldown resets; while quota remains we show how many
+  // top-ups are left today. Quota props undefined → no copy, button enabled.
+  const quotaKnown = topupCallsRemaining !== undefined && topupDailyCap !== undefined;
+  const capReached = quotaKnown && topupCallsRemaining === 0;
+  const resetIn = formatResetIn(topupCooldownExpiresAt);
+  const topupCopy = !quotaKnown
+    ? null
+    : capReached
+      ? resetIn
+        ? `Daily faucet cap reached · resets ${resetIn}`
+        : 'Daily faucet cap reached'
+      : `${topupCallsRemaining} of ${topupDailyCap} top-ups left today`;
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -203,12 +246,17 @@ export function WalletCard({
             size="sm"
             aria-label="Top up from faucet"
             onClick={onTopUp}
-            disabled={actionsDisabled}
+            disabled={actionsDisabled || capReached}
             data-testid="wallet-topup"
             className="self-start"
           >
             Top up from faucet (free)
           </Button>
+          {topupCopy && (
+            <span className={statAux} data-testid="wallet-topup-quota">
+              {topupCopy}
+            </span>
+          )}
         </div>
 
         <Separator />
