@@ -76,13 +76,9 @@ function makeDelivery(resultData: string, requestId = 'req-001'): DeliveredResul
  * across restart, so `task.role` is undefined (issue #575).
  */
 function makeRolelessDelivery(resultData: string, requestId = 'req-001'): DeliveredResult {
-  const job: Task = { id: requestId, description: 'test' };
-  return {
-    requestId,
-    task: job,
-    result: { data: resultData },
-    deliveryMechAddress: '0xmech',
-  };
+  const d = makeDelivery(resultData, requestId);
+  delete d.task.role;
+  return d;
 }
 
 /**
