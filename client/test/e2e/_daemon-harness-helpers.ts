@@ -1209,6 +1209,104 @@ export async function startSweRebenchSolverDaemon(
 // ── Task posting + claim detection ────────────────────────────────────────────
 
 /**
+ * Sign an unsigned task document, register it with the mock IPFS server, and
+ * post it on the locally-deployed V3 JinnRouter. Shared by `postPredictionV1Task`
+ * and `postSweRebenchV2Task` — everything except the task-document body is
+ * identical between solver types, so the per-solverType helpers build only the
+ * `unsignedTaskDoc` + `manifestCid` and delegate the rest here.
+ */
+async function postSignedTaskOnChain(
+  fixture: DaemonHarnessFixture,
+  creatorPrivKey: `0x${string}`,
+  unsignedTaskDoc: Record<string, unknown>,
+  manifestCid: string,
+  mockIpfs: MockIpfsServer,
+  v3Env: TaskV3Env,
+  opts: { disallowSolverSelfEvaluation?: boolean } = {},
+): Promise<PostedPredictionTask> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const routerAddress = v3Env.routerAddress;
+  const marketplaceAddress = v3Env.mockMarketplaceAddress;
+  const creator = privateKeyToAccount(creatorPrivKey);
+
+  // Sign the task document with the creator's key (any secp256k1 key works;
+  // the daemon does not validate the creator signature at claim time).
+  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
+  const signedTaskDoc = {
+    ...unsignedTaskDoc,
+    signature: {
+      algo: 'secp256k1' as const,
+      signer: creator.address,
+      hash: signed.hash,
+      sig: signed.sig,
+    },
+  };
+
+  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)). The daemon
+  // derives the IPFS CID as `f01551220${digest.slice(2)}` from the on-chain
+  // event and fetches from the mock gateway at that path.
+  const taskJson = JSON.stringify(signedTaskDoc);
+  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  mockIpfs.register(taskCidDigest, signedTaskDoc);
+
+  const manifestDigest = keccak256(toBytes(manifestCid)) as `0x${string}`;
+
+  // Use the mock mech's maxDeliveryRate so the V3 router's budget check passes.
+  const deliveryRate = await getMechDeliveryRate(
+    fixture.publicClient,
+    v3Env.mockMechAddress as Address,
+  );
+  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
+  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
+
+  const latestBlock = await fixture.publicClient.getBlock();
+  const chainNowSec = Number(latestBlock.timestamp);
+  const onchainPolicy = {
+    claimWindowStart: BigInt(chainNowSec - 5),
+    claimWindowEnd: BigInt(chainNowSec + 300),
+    submissionDeadline: BigInt(chainNowSec + 900),
+    claimLeaseTtlSeconds: 600,
+    maxClaims: 10,
+    maxClaimsPerOperator: 1,
+    policyHook: zeroAddress,
+    evaluationPolicy: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      evaluationDeadline: BigInt(chainNowSec + 1_200),
+      maxVerdictsPerEvaluator: 1,
+      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
+    },
+  };
+
+  // The V3 router's createTask requires msg.value == solutionBudget + verdictBudget
+  // where solutionBudget = rate * maxClaims and verdictBudget = rate * maxClaims * requiredVerdicts.
+  // With maxClaims=10 and requiredVerdicts=1: value = rate * 10 + rate * 10 * 1 = rate * 20.
+  const MAX_CLAIMS = 10n;
+  const REQUIRED_VERDICTS = 1n;
+  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
+  const solutionBudget = rateArg * MAX_CLAIMS;
+  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
+  const value = solutionBudget + verdictBudget;
+
+  const created = await writeContractTx({
+    publicClient: fixture.publicClient,
+    rpcUrl,
+    account: creator,
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createTask',
+    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
+    value,
+  });
+
+  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
+  const taskId = BigInt(String(taskCreated['taskId']));
+  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
+
+  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+}
+
+/**
  * Build, sign, and register a prediction.v1 task with the mock IPFS server,
  * then post it on the locally-deployed V3 JinnRouter.
  *
@@ -1247,11 +1345,6 @@ export async function postPredictionV1Task(
    */
   opts: { disallowSolverSelfEvaluation?: boolean } = {},
 ): Promise<PostedPredictionTask> {
-  const rpcUrl = fixture.anvil.rpcUrl;
-  const routerAddress = v3Env.routerAddress;
-  const marketplaceAddress = v3Env.mockMarketplaceAddress;
-
-  const creator = privateKeyToAccount(creatorPrivKey);
   const now = Date.now();
   const nowSec = Math.floor(now / 1000);
 
@@ -1331,86 +1424,15 @@ export async function postPredictionV1Task(
     createdAt: now,
   };
 
-  // Sign the task document with the creator's key (any secp256k1 key works;
-  // the daemon does not validate the creator signature at claim time).
-  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
-  const signedTaskDoc = {
-    ...unsignedTaskDoc,
-    signature: {
-      algo: 'secp256k1' as const,
-      signer: creator.address,
-      hash: signed.hash,
-      sig: signed.sig,
-    },
-  };
-
-  // ── Step 2: Compute on-chain digest and register with mock IPFS ────────────
-  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)).
-  // The daemon derives the IPFS CID as `f01551220${digest.slice(2)}` from the
-  // on-chain event and fetches from the mock gateway at that path.
-  const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
-  mockIpfs.register(taskCidDigest, signedTaskDoc);
-
-  // ── Step 3: Compute manifestDigest ────────────────────────────────────────
-  const manifestDigest = keccak256(toBytes(MANIFEST_CID)) as `0x${string}`;
-
-  // ── Step 4: Get delivery rate + timeout from the mock mech/marketplace ──────
-  // Use the mock mech's maxDeliveryRate so the V3 router's budget check passes.
-  const deliveryRate = await getMechDeliveryRate(
-    fixture.publicClient,
-    v3Env.mockMechAddress as Address,
+  return postSignedTaskOnChain(
+    fixture,
+    creatorPrivKey,
+    unsignedTaskDoc,
+    MANIFEST_CID,
+    mockIpfs,
+    v3Env,
+    opts,
   );
-  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
-  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
-
-  // ── Step 5: Build claim policy matching the task doc ──────────────────────
-  const latestBlock = await fixture.publicClient.getBlock();
-  const chainNowSec = Number(latestBlock.timestamp);
-  const onchainPolicy = {
-    claimWindowStart: BigInt(chainNowSec - 5),
-    claimWindowEnd: BigInt(chainNowSec + 300),
-    submissionDeadline: BigInt(chainNowSec + 900),
-    claimLeaseTtlSeconds: 600,
-    maxClaims: 10,
-    maxClaimsPerOperator: 1,
-    policyHook: zeroAddress,
-    evaluationPolicy: {
-      requiredVerdicts: 1,
-      passThreshold: 1,
-      evaluationDeadline: BigInt(chainNowSec + 1_200),
-      maxVerdictsPerEvaluator: 1,
-      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
-    },
-  };
-
-  // ── Step 6: Post task on-chain via the locally-deployed V3 JinnRouter ───────
-  // The V3 router's createTask requires: msg.value == solutionBudget + verdictBudget
-  // where solutionBudget = rate * maxClaims and verdictBudget = rate * maxClaims * requiredVerdicts.
-  // With maxClaims=10 and requiredVerdicts=1: value = rate * 10 + rate * 10 * 1 = rate * 20.
-  const MAX_CLAIMS = 10n;
-  const REQUIRED_VERDICTS = 1n;
-  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
-  const solutionBudget = rateArg * MAX_CLAIMS;
-  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
-  const value = solutionBudget + verdictBudget;
-
-  const created = await writeContractTx({
-    publicClient: fixture.publicClient,
-    rpcUrl,
-    account: creator,
-    address: routerAddress,
-    abi: JINN_ROUTER_ABI,
-    functionName: 'createTask',
-    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
-    value,
-  });
-
-  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
-  const taskId = BigInt(String(taskCreated['taskId']));
-  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
-
-  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
 }
 
 /**
@@ -1432,11 +1454,6 @@ export async function postSweRebenchV2Task(
   v3Env: TaskV3Env,
   opts: { disallowSolverSelfEvaluation?: boolean } = {},
 ): Promise<PostedPredictionTask> {
-  const rpcUrl = fixture.anvil.rpcUrl;
-  const routerAddress = v3Env.routerAddress;
-  const marketplaceAddress = v3Env.mockMarketplaceAddress;
-
-  const creator = privateKeyToAccount(creatorPrivKey);
   const now = Date.now();
   const nowSec = Math.floor(now / 1000);
 
@@ -1489,72 +1506,15 @@ export async function postSweRebenchV2Task(
     createdAt: now,
   };
 
-  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
-  const signedTaskDoc = {
-    ...unsignedTaskDoc,
-    signature: {
-      algo: 'secp256k1' as const,
-      signer: creator.address,
-      hash: signed.hash,
-      sig: signed.sig,
-    },
-  };
-
-  const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
-  mockIpfs.register(taskCidDigest, signedTaskDoc);
-
-  const manifestDigest = keccak256(toBytes(MANIFEST_CID)) as `0x${string}`;
-
-  const deliveryRate = await getMechDeliveryRate(
-    fixture.publicClient,
-    v3Env.mockMechAddress as Address,
+  return postSignedTaskOnChain(
+    fixture,
+    creatorPrivKey,
+    unsignedTaskDoc,
+    MANIFEST_CID,
+    mockIpfs,
+    v3Env,
+    opts,
   );
-  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
-  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
-
-  const latestBlock = await fixture.publicClient.getBlock();
-  const chainNowSec = Number(latestBlock.timestamp);
-  const onchainPolicy = {
-    claimWindowStart: BigInt(chainNowSec - 5),
-    claimWindowEnd: BigInt(chainNowSec + 300),
-    submissionDeadline: BigInt(chainNowSec + 900),
-    claimLeaseTtlSeconds: 600,
-    maxClaims: 10,
-    maxClaimsPerOperator: 1,
-    policyHook: zeroAddress,
-    evaluationPolicy: {
-      requiredVerdicts: 1,
-      passThreshold: 1,
-      evaluationDeadline: BigInt(chainNowSec + 1_200),
-      maxVerdictsPerEvaluator: 1,
-      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
-    },
-  };
-
-  const MAX_CLAIMS = 10n;
-  const REQUIRED_VERDICTS = 1n;
-  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
-  const solutionBudget = rateArg * MAX_CLAIMS;
-  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
-  const value = solutionBudget + verdictBudget;
-
-  const created = await writeContractTx({
-    publicClient: fixture.publicClient,
-    rpcUrl,
-    account: creator,
-    address: routerAddress,
-    abi: JINN_ROUTER_ABI,
-    functionName: 'createTask',
-    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
-    value,
-  });
-
-  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
-  const taskId = BigInt(String(taskCreated['taskId']));
-  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
-
-  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
 }
 
 // ── Deliver event ABI for MockTaskMechWithDelivery ───────────────────────────
