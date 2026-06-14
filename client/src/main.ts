@@ -1322,6 +1322,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
         defaultRpcUrlForChain: () => CHAIN_CONFIG.rpcUrl,
+        defaultRpcUrlsForChain: () => RPC_PUBLIC_DEFAULTS,
         onClaudePathSelected: selectClaudePath,
         // Issue #421 retired the legacy `solverNets` write target. Setup
         // endpoints no longer call back into the daemon to mutate operator
