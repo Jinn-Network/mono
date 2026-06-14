@@ -3,7 +3,7 @@
  */
 
 import { createPublicClient, getAddress, http, parseAbiItem, type PublicClient } from 'viem';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
@@ -202,6 +202,22 @@ function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['d
   }
 }
 
+/**
+ * Resolve `security.lastPasswordRotationAt` from the password provenance
+ * descriptor. File mtime is read at request time. Never throws: a missing,
+ * unreadable, or env-sourced password yields `null` (issue #441).
+ */
+function resolvePasswordRotationAt(
+  cfg: PasswordRotationConfig | undefined,
+): string | null {
+  if (!cfg || cfg.source === 'env' || !cfg.filePath) return null;
+  try {
+    return statSync(cfg.filePath).mtime.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
 /**
@@ -217,6 +233,18 @@ const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promis
  */
 export function invalidatePredictionOperatorStatusCache(config: JinnConfig): void {
   predictionOperatorStatusCache.delete(config);
+}
+
+/**
+ * Keystore-password provenance descriptor threaded from `main.ts`'s
+ * `resolveOrGenerateKeystorePassword()` (issue #441). `gatherGatheredStatusRaw`
+ * uses it to resolve `security.lastPasswordRotationAt`:
+ *   - `source: 'file' | 'generated'` with a `filePath` → statSync(filePath).mtime ISO
+ *   - `source: 'env'` (or no `filePath`) → null
+ */
+export interface PasswordRotationConfig {
+  source: 'env' | 'file' | 'generated';
+  filePath?: string;
 }
 
 export interface StatusGatherConfig {
@@ -274,6 +302,12 @@ export interface StatusGatherConfig {
     snapshot: HarnessReadinessSnapshot;
     joinedHarnessesByCid: Record<string, JoinedHarnessSpec>;
   } | null;
+  /**
+   * Keystore-password provenance — threaded from `main.ts`. Drives
+   * `security.lastPasswordRotationAt` on `/v1/status`. Optional: test callers
+   * and sqlite-only contexts omit it ⇒ `null` (issue #441).
+   */
+  passwordRotation?: PasswordRotationConfig;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -1098,6 +1132,7 @@ export async function gatherGatheredStatusRaw(
     shutdownState,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
+    passwordRotationAt: resolvePasswordRotationAt(status?.passwordRotation),
     dbPath: store.path,
     earningDir: status?.earningDir,
     activityCounts,
