@@ -344,7 +344,10 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
               ok: false,
               address,
               txHashes,
-              attempts: 0,
+              // One funding attempt was made (requestFunding ran once above),
+              // even though it failed — report 1 to stay consistent with the
+              // success path's `attempts: txHashes.length`.
+              attempts: 1,
               balanceWei: balanceWei?.toString(),
               targetWei: targetWei?.toString(),
               reason: result.reason,

@@ -271,7 +271,13 @@ export function JoinFlow({
   // canonical name `form.harness` carries.
   const evaluatorHarnessName = evaluatorHarnessNameForManifest(manifest);
   const readinessProbeNames = [
-    ...solverCompatibleHarnesses.map((h) => h.name),
+    // Solver-harness probes only when the solver picker is shown (#374): an
+    // evaluator-only join hides the picker, so probing those — and the 5s
+    // refetch that drives it — has nothing to act on. The evaluator-harness
+    // probe below stays independent so the evaluator gate works on its own.
+    ...(form.roles.includes('solver')
+      ? solverCompatibleHarnesses.map((h) => h.name)
+      : []),
     ...(form.roles.includes('evaluator') && evaluatorHarnessName
       ? [evaluatorHarnessName]
       : []),

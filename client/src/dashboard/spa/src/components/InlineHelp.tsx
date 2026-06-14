@@ -34,11 +34,13 @@ export function InlineHelp({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      {/* Radix `<PopoverTrigger>` auto-wires aria-controls / aria-expanded /
+          aria-haspopup to the panel — no manual useId()/aria-controls needed. */}
       <PopoverTrigger
         type="button"
         data-testid="inline-help-trigger"
         aria-label={label}
-        className="inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded-md border border-muted-foreground bg-card p-0 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+        className="inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded-md border border-muted-foreground bg-card p-0 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <Info className="h-2.5 w-2.5" aria-hidden="true" />
       </PopoverTrigger>

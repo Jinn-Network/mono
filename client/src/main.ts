@@ -218,6 +218,10 @@ let activeClaudePath = config.claudePath ?? 'claude';
 const selectClaudePath = (claudePath: string): void => {
   activeClaudePath = claudePath;
   config.claudePath = claudePath;
+  // Harmless no-op when the embedded agent is disabled (`embeddedAgentEnabled`
+  // false): the agent surface that consumes this path isn't mounted, so the
+  // update has nothing to propagate to. Called unconditionally to keep the
+  // path in sync whenever the agent IS enabled.
   updateAgentClaudePath(claudePath);
 };
 
