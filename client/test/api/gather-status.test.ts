@@ -212,6 +212,137 @@ describe('gatherStatusForApi', () => {
     ]);
   });
 
+  it('falls back operatorClaimedWei to null when a totalClaimedOperator read fails but the Safe balance succeeds', async () => {
+    const safeA = '0x3333333333333333333333333333333333333333';
+    const safeB = '0x4444444444444444444444444444444444444444';
+    const stakingProxy = '0x5555555555555555555555555555555555555555';
+    const distributor = '0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6';
+    const balanceOf = (_token: string, safe: string): bigint =>
+      safe.toLowerCase() === safeA.toLowerCase()
+        ? 1500000000000000000n
+        : 2000000000000000000n;
+    const totalClaimedOperator = (_address: string, serviceId: bigint): bigint => {
+      switch (serviceId) {
+        case 42n:
+          return 20000000000000000000n;
+        case 43n:
+          return 30000000000000000000n;
+        default:
+          return 0n;
+      }
+    };
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          multicall: async (req: {
+            contracts: ReadonlyArray<{
+              address: string;
+              functionName: string;
+              args?: readonly [`0x${string}`] | readonly [bigint];
+            }>;
+          }) =>
+            req.contracts.map((c) => {
+              if (chain.id === 11155111 && c.functionName === 'balanceOf') {
+                return {
+                  status: 'success' as const,
+                  result: balanceOf(c.address, (c.args?.[0] as string | undefined) ?? '0x'),
+                };
+              }
+              if (chain.id === 11155111 && c.functionName === 'totalClaimedOperator') {
+                const serviceId = (c.args?.[0] as bigint | undefined) ?? 0n;
+                if (serviceId === 41n) {
+                  return {
+                    status: 'failure' as const,
+                    error: new Error(
+                      'HTTP request failed for http://sepolia.example?apikey=secret',
+                    ),
+                  };
+                }
+                return {
+                  status: 'success' as const,
+                  result: totalClaimedOperator(c.address, serviceId),
+                };
+              }
+              return { status: 'success' as const, result: 0n };
+            }),
+          readContract: async (_req: {
+            address: string;
+            functionName: string;
+            args?: readonly [`0x${string}`] | readonly [bigint];
+          }) => {
+            return 0n;
+          },
+          getLogs: async () => [],
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: safeA,
+            service_id: 41,
+            mech_address: null,
+            staking_address: stakingProxy,
+            step: 'complete',
+            error: null,
+          },
+          {
+            index: 2,
+            agent_address: '0x6666666666666666666666666666666666666666',
+            safe_address: safeA,
+            service_id: 42,
+            mech_address: null,
+            staking_address: stakingProxy,
+            step: 'complete',
+            error: null,
+          },
+          {
+            index: 3,
+            agent_address: '0x7777777777777777777777777777777777777777',
+            safe_address: safeB,
+            service_id: 43,
+            mech_address: null,
+            staking_address: stakingProxy,
+            step: 'complete',
+            error: null,
+          },
+        ],
+      });
+
+      const apiStatus = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
+        network: 'testnet',
+        tjinnDistributorAddress: distributor,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      // A single failed totalClaimedOperator read collapses the aggregate to
+      // null (allClaimedReadsAvailable requires zero claimed-read errors)...
+      expect(apiStatus.tJinn.operatorClaimedWei).toBeNull();
+      // ...while the independent Safe balanceOf reads still populate the total.
+      expect(apiStatus.tJinn.safeBalanceWei).toBe('3500000000000000000');
+    });
+  });
+
   it('marks tJINN balance pending when the Sepolia RPC URL is unavailable', async () => {
     mockStatusRpc();
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
