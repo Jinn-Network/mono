@@ -12,6 +12,7 @@ import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
   isNonceTooLowError,
+  isReplacementUnderpricedError,
   type TxSubmissionLedger,
   withNonceLedger,
   withRecoverableRetry,
@@ -151,7 +152,46 @@ async function executeSafeTransactionInner(
           ...feeResult.overrides,
         });
       } catch (writeErr) {
-        if (isNonceTooLowError(writeErr)) {
+        const nonceTooLow = isNonceTooLowError(writeErr);
+        const replacementUnderpriced = isReplacementUnderpricedError(writeErr);
+
+        // Issue #897: before re-signing at a fresh nonce, reconcile against the
+        // tx already submitted at the currently-pinned nonce. The original EOA
+        // tx may have mined mid-retry (nonce-too-low = it mined; replacement-
+        // underpriced = it is still pending but the bump was too small and it
+        // may mine before the next attempt). Re-signing a NEW Safe
+        // execTransaction at the advanced Safe nonce is NOT idempotent — it
+        // re-attempts the delivery and reverts as already-claimed. So if the
+        // original receipt is already a success, short-circuit and return it.
+        if (nonceTooLow || replacementUnderpriced) {
+          const existing = await nonceLedger.ledger.getTxSubmission({
+            chainId: nonceLedger.chainId,
+            from: nonceLedger.from,
+            nonce: nonceLedger.nonce,
+          });
+          if (existing?.hash) {
+            try {
+              const reconciled = await publicClient.getTransactionReceipt({ hash: existing.hash });
+              if (reconciled.status === 'success') {
+                console.error(
+                  `[safe/viem] execTransaction reconciled: original tx ${existing.hash} mined ` +
+                    `at pinned nonce ${nonceLedger.nonce} — delivery already landed`,
+                );
+                await nonceLedger.markResolved();
+                return existing.hash;
+              }
+            } catch {
+              // TransactionReceiptNotFoundError (or any lookup failure): the
+              // original is not yet mined. Fall through to refresh + re-sign.
+            }
+          }
+        }
+
+        // Both nonce-too-low and replacement-underpriced advance the pinned
+        // nonce: nonce-too-low means the original mined; replacement-underpriced
+        // means the next attempt must bump fees against the fresh nonce so a
+        // mid-retry mine of the original is detected on the following pass.
+        if (nonceTooLow || replacementUnderpriced) {
           const refreshed = await nonceLedger.refreshNonce();
           console.error(`[safe/viem] execTransaction refreshed pinned nonce -> ${refreshed}`);
         }
