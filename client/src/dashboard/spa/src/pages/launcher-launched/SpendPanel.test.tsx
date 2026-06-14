@@ -159,24 +159,30 @@ describe('SpendPanel', () => {
     expect(screen.getByTestId('launcher-launched-spend-safe-address').textContent).toMatch(/0xE64b…B5CF/);
   });
 
-  it('projects runway as Safe balance / per-Task cost', async () => {
+  it('projects runway from a claim-gas-inclusive per-Task cost', async () => {
     const fetchLauncherStatus = vi.fn().mockResolvedValue(
-      buildStatusResponse('Polymarket', '1500'),
+      // balance = 4 × per-Task cost (3_512_500_000_000 wei).
+      buildStatusResponse('Polymarket', '14050000000000'),
     );
     wrap(
       <SpendPanel
         record={buildRecord()}
-        manifest={buildManifest({ solutionPriceWei: '100', verdictPriceWei: '50' })}
+        manifest={buildManifest({
+          solutionPriceWei: '1000000000000', // 1000 gwei
+          verdictPriceWei: '500000000000', // 500 gwei
+        })}
         fetchLauncherStatus={fetchLauncherStatus}
       />,
     );
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-runway').textContent,
-      ).toContain('10 Tasks'),
+      ).toContain('4 Tasks'),
     );
-    // Per-Task cost = 100 + 50 = 150 wei.
-    expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).toContain('150 wei');
+    // Per-Task cost = 1000 gwei + 500 gwei + 2012.5 gwei claim gas = 3512.5 gwei.
+    expect(
+      screen.getByTestId('launcher-launched-spend-per-task').textContent,
+    ).toContain('3512.5 gwei');
   });
 
   it('matches launcher status by manifest solver type when names differ', async () => {
@@ -233,8 +239,9 @@ describe('SpendPanel', () => {
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-per-task').textContent,
-      ).toBe('15 gwei'),
+      ).toBe('2027.5 gwei'),
     );
+    // Per-Task = 10 gwei + 5 gwei + 2012.5 gwei claim gas = 2027.5 gwei.
     expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('10 gwei');
     expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('5 gwei');
     expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).not.toContain('e-');
@@ -254,8 +261,9 @@ describe('SpendPanel', () => {
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-per-task').textContent,
-      ).toBe('15 gwei'),
+      ).toBe('2027.5 gwei'),
     );
+    // Per-Task = 10 gwei + 5 gwei + 2012.5 gwei claim gas = 2027.5 gwei.
     expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('10 gwei');
     expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('5 gwei');
   });
