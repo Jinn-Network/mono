@@ -92,5 +92,5 @@ export function classifyRateLimitError(
     return { isRateLimit: true, sleepMs, resetAt: new Date(resetMs).toISOString() };
   }
 
-  return { isRateLimit: true, sleepMs: Math.min(DEFAULT_SLEEP_MS, MAX_SLEEP_MS) };
+  return { isRateLimit: true, sleepMs: DEFAULT_SLEEP_MS };
 }
