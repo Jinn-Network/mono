@@ -96,6 +96,15 @@ export interface BootstrapErrorEnvelope {
   details?: Record<string, unknown>;
 }
 
+/** Per-slot boot-probe health for one RPC fallback slot (#913). Host masked. */
+export interface RpcSlotHealth {
+  ok: boolean;
+  host: string;
+  latencyMs?: number;
+  /** HTTP status when the slot failed with one (e.g. 429, 503). */
+  code?: number;
+}
+
 export interface BootstrapState {
   schemaVersion: 1;
   mode: DaemonMode;
@@ -120,6 +129,12 @@ export interface BootstrapState {
   rpcUrl?: string;
   /** Chain default RPC URL — the shared, rate-limited trial endpoint. */
   defaultRpcUrl?: string;
+  /** #913: the live ordered RPC fallback chain (slot 0 = head/primary). */
+  rpcUrls?: string[];
+  /** #913: the bundled public RPC chain for the current network. */
+  publicDefaults?: string[];
+  /** #913: boot-probe health per slot, index-aligned to `rpcUrls`. */
+  rpcSlotHealth?: RpcSlotHealth[];
   fleet_agent_id?: string;
   fleet_safe_address?: string;
   funding?: {

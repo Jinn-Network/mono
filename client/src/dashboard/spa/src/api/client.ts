@@ -233,7 +233,7 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   updateNetwork: (patch: { rpcUrl: string | null }) =>
-    jfetch<{ ok: boolean; restartRequired: boolean; rpcUrl: string }>(
+    jfetch<{ ok: boolean; restartRequired: boolean; rpcUrl: string | string[] }>(
       '/v1/setup/network',
       {
         method: 'POST',
