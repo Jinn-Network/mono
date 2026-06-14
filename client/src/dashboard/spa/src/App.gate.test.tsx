@@ -226,19 +226,4 @@ describe('App gate — issue #110', () => {
     expect(screen.queryByText(/Daemon offline/i)).toBeTruthy();
     expect(screen.queryByTestId('daemon-offline-screen')).toBeNull();
   });
-
-  it('#443 — LoadingScreen branch mounts the OfflineNotice without breaking the connected loading state', async () => {
-    // The LoadingScreen branch (`isLoading || !data`) is only reachable while
-    // CONNECTED — a disconnected+no-data state is intercepted by the cold-start
-    // DaemonOfflineScreen branch first. So we cannot land in LoadingScreen with
-    // a live offline signal. This case instead guards that mounting an
-    // OfflineNotice in the LoadingScreen branch does not regress the connected
-    // loading state: the notice renders nothing (no disconnected notice) and the
-    // "Starting jinn" screen still appears.
-    _connectionState = { status: 'connected', lastConnectedAt: Date.now() };
-    await renderApp();
-    // Bootstrap never resolves → isLoading + connected → LoadingScreen branch.
-    expect(screen.getByTestId('loading-screen')).toBeTruthy();
-    expect(screen.queryByText(/Daemon offline/i)).toBeNull();
-  });
 });

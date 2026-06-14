@@ -109,7 +109,6 @@ export default function App(): JSX.Element {
   if (isLoading || !data) {
     return (
       <TooltipProvider delayDuration={150}>
-        <OfflineNotice />
         <LoadingScreen headline="Starting jinn" />
         <Toaster />
       </TooltipProvider>

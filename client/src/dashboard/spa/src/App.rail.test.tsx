@@ -36,13 +36,6 @@ vi.mock('./regions/LoadingScreen.js', () => ({
   LoadingScreen: () => <div data-testid="loading-screen" />,
 }));
 
-// The LoadingScreen/Onboarding branches now mount <OfflineNotice>, whose
-// useNotifications chain subscribes to the SSE stream. jsdom has no
-// EventSource, so stub the hook (mirrors App.gate.test.tsx / useNotifications.test.tsx).
-vi.mock('./api/events.js', () => ({
-  useEventStream: () => ({ events: [], connected: false }),
-}));
-
 // Stub AppShell down to a marker that just renders whatever `rail` it was
 // handed — App.tsx passes `<AgentRail />` or `undefined` depending on the
 // flag, so this is the precise gating behaviour under test. Stubbing here
