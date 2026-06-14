@@ -579,6 +579,32 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
+  it('defaults faucet topup cap to 10 and cooldown to 24h (issue #560)', () => {
+    delete process.env['JINN_FAUCET_DAILY_TOPUP_CAP'];
+    delete process.env['JINN_FAUCET_TOPUP_COOLDOWN_MS'];
+    const config = loadConfig();
+    expect(config.faucetDailyTopupCap).toBe(10);
+    expect(config.faucetTopupCooldownMs).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('overrides faucet topup cap and cooldown from env (issue #560)', () => {
+    process.env['JINN_FAUCET_DAILY_TOPUP_CAP'] = '3';
+    process.env['JINN_FAUCET_TOPUP_COOLDOWN_MS'] = '60000';
+    try {
+      const config = loadConfig();
+      expect(config.faucetDailyTopupCap).toBe(3);
+      expect(config.faucetTopupCooldownMs).toBe(60000);
+    } finally {
+      delete process.env['JINN_FAUCET_DAILY_TOPUP_CAP'];
+      delete process.env['JINN_FAUCET_TOPUP_COOLDOWN_MS'];
+    }
+  });
+
+  it('rejects a non-positive faucet topup cap (issue #560)', async () => {
+    const configPath = await writeConfigFile({ faucetDailyTopupCap: 0 });
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+
   it('defaults tasks to an empty list', () => {
     return writeConfigFile({}).then((configPath) => {
       const config = loadConfig(configPath);

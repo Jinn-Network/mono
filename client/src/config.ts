@@ -415,6 +415,26 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
+   * Faucet top-up daily cap + cooldown (issue #560). Single source of truth
+   * for the running-mode Dashboard "Top up from faucet" batch action, shared
+   * by the daemon endpoint and surfaced to the SPA via GET /v1/setup/drip/quota.
+   *
+   * `faucetDailyTopupCap` — number of faucet drips a single operator click may
+   * issue in one batch (and the per-24h ceiling per wallet). Env:
+   * JINN_FAUCET_DAILY_TOPUP_CAP.
+   *
+   * `faucetTopupCooldownMs` — once the cap is reached, the top-up action is
+   * disabled until this window elapses since the first call of that batch.
+   * Env: JINN_FAUCET_TOPUP_COOLDOWN_MS.
+   */
+  faucetDailyTopupCap: z.number().int().positive().default(10),
+  faucetTopupCooldownMs: z
+    .number()
+    .int()
+    .min(0)
+    .default(24 * 60 * 60 * 1000),
+
+  /**
    * Operator-controlled Harness inventory.
    */
   harnesses: z
@@ -1102,6 +1122,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_MIN_SAFE_ETH_WEI']) {
     merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
   }
+  if (env['JINN_FAUCET_DAILY_TOPUP_CAP'] !== undefined) {
+    merged.faucetDailyTopupCap = parseInt(env['JINN_FAUCET_DAILY_TOPUP_CAP'], 10);
+  }
+  if (env['JINN_FAUCET_TOPUP_COOLDOWN_MS'] !== undefined) {
+    merged.faucetTopupCooldownMs = parseInt(env['JINN_FAUCET_TOPUP_COOLDOWN_MS'], 10);
+  }
   // Legacy `JINN_PREDICTION_V1_*` env vars are no longer recognised. Their
   // values now live in the launched-record's generator-config block per
   // spec/2026-05-05-solvernet-creation-and-launch.md (Decision 5 + Task 14)
@@ -1468,6 +1494,8 @@ const TRACKED_ENV_VARS = [
   'JINN_MASTER_ETH_DAILY_WEI',
   'JINN_MIN_EOA_GAS_WEI',
   'JINN_MIN_SAFE_ETH_WEI',
+  'JINN_FAUCET_DAILY_TOPUP_CAP',
+  'JINN_FAUCET_TOPUP_COOLDOWN_MS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',
