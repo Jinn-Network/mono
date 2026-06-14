@@ -314,6 +314,22 @@ If the PR does not exist, dispatch a fix subagent.
 
 **Move the issue to `In Review`.** Once the draft PR is confirmed, set the issue's Project `Status` to `In Review` — the pipeline's work is done and the issue now awaits the human's batch-merge. This also removes the issue from the dispatcher's in-flight set (`deriveInFlight` keys on `In Progress`), freeing the concurrency slot; without it a completed session lingers as in-flight. `Status` is single-select — discover the `In Review` option id via `gh project field-list` (Step 2), then `gh project item-edit ... --single-select-option-id <in-review-option-id>`.
 
+**Remove the worktree (final step).** The per-issue worktree is ephemeral scratch — the branch on `origin` is the durable artifact, so once the PR is open the worktree buys nothing and only produces dispatcher drift noise (`packages/eng-loop/src/dispatcher/state.ts` flags every "worktree exists but issue not In Progress" pair as drift, which would otherwise fire on this entirely-legitimate post-PR-open state). Remove it as the **last action of the run**.
+
+`git worktree remove` refuses to remove the worktree you are standing in, and pulling the CWD out from under the shell breaks every subsequent command — so run the removal **from outside the worktree**, from the primary checkout. The primary checkout is the first entry of `git worktree list --porcelain` whose path is *not* under `jinn-mono_worktrees`. Use `--force` because the worktree carries untracked build output (`dist/`, `node_modules`, etc.) that would otherwise block removal:
+
+```bash
+# PRIMARY = first `worktree ` line in `git worktree list --porcelain`
+# whose path is NOT under jinn-mono_worktrees.
+git -C "$PRIMARY" worktree remove --force "$WORKTREE_PATH"
+```
+
+This is the **final action** of the run — do not read, write, or `cd` into the worktree afterward; it no longer exists. If a later review cycle requests changes, recreate it in one command (the branch persists on `origin`):
+
+```bash
+git worktree add jinn-mono_worktrees/<N> <branch>
+```
+
 ---
 
 ## Step 4 — Subagent-dispatch discipline
