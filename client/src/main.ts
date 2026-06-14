@@ -1485,6 +1485,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             const rows = sharedStore.listPostedTasksByCreator(opts);
             return rows.map((r) => ({
               taskId: r.taskId,
+              // On-chain decimal id (#579) — the launcher status chip keys its
+              // indexer lookup on this, not the off-chain display taskId. Empty
+              // string (no on-chain id recorded) maps to undefined so the
+              // gatherer falls back to taskId.
+              ...(r.protocolTaskId ? { protocolTaskId: r.protocolTaskId } : {}),
               taskCid: r.taskCid,
               solverType: r.solverType ?? undefined,
               postedAt: r.postedAt,

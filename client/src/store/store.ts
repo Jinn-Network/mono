@@ -976,6 +976,13 @@ export class Store {
     before?: string;
   }): Array<{
     taskId: string;
+    /**
+     * On-chain decimal taskId (#579), decoded from the `TaskCreated` event.
+     * DISTINCT from `taskId`, which is the off-chain task-document id. The
+     * launcher's on-chain status chip keys its indexer lookup on this. Empty
+     * string when no on-chain id was recorded (pre-migration / lost event).
+     */
+    protocolTaskId: string;
     taskCid: string;
     solverType: string | null;
     requestId: string;
@@ -1065,6 +1072,7 @@ export class Store {
       });
       return {
         taskId,
+        protocolTaskId,
         taskCid,
         solverType: r.solver_type,
         requestId: r.request_id,

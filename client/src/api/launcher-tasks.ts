@@ -67,6 +67,14 @@ export interface LauncherTasksResponse {
 /** A single posted-Task row as surfaced by the daemon's store accessor. */
 export interface PostedTaskRecord {
   taskId: string;
+  /**
+   * On-chain decimal taskId (#579). DISTINCT from `taskId`, which is the
+   * off-chain task-document id (UUID / solver-type slug). The indexer status
+   * map is keyed by this on-chain id, so `mapRecordToEntry` looks the chip up
+   * by `protocolTaskId` (falling back to `taskId` for older/test rows that
+   * don't carry it). Optional: pre-migration rows omit it.
+   */
+  protocolTaskId?: string;
   taskCid: string;
   /** Optional — if present, used to derive `solverNet` via config lookup. */
   solverType?: string;
@@ -200,7 +208,12 @@ function mapRecordToEntry(
     ...(record.solverType ? { solverType: record.solverType } : {}),
     postedAt: record.postedAt,
     state: record.state ?? 'open',
-    onchainStatus: deriveOnchainStatus(statusMap.get(record.taskId), nowSeconds),
+    onchainStatus: deriveOnchainStatus(
+      // The status map is keyed by the on-chain decimal taskId; prefer it. Fall
+      // back to the off-chain display id for older/test rows lacking it (#579).
+      statusMap.get(record.protocolTaskId ?? record.taskId),
+      nowSeconds,
+    ),
     claims: { current: claimsCurrent, max: claimsMax },
     budget: { totalWei, remainingWei },
   };

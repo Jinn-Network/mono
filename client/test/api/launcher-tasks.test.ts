@@ -157,6 +157,53 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     expect(response.tasks[0]?.onchainStatus).toBe('unknown');
   });
 
+  it('keys the status lookup by protocolTaskId, not the off-chain display taskId (#579)', async () => {
+    // Production keyspace mismatch: the posted record's display `taskId` is an
+    // off-chain UUID/slug, while the indexer status map is keyed by the on-chain
+    // decimal taskId. The record carries that on-chain id as `protocolTaskId`.
+    const ONCHAIN_ID = '12345678901234567890';
+    const deps = {
+      config,
+      creatorAddress: '0xabc',
+      now: () => NOW_MS,
+      fetchPostedTasks: () => [
+        {
+          taskId: 'b3f1c2a4-0000-4000-8000-000000000000', // off-chain UUID
+          protocolTaskId: ONCHAIN_ID, // on-chain decimal id
+          taskCid: 'cid1',
+          postedAt: '2026-05-25T00:00:00Z',
+          budget: { totalWei: '0' },
+        },
+      ],
+      // Status map keyed by the on-chain id, as the live indexer keys it.
+      fetchTaskStatuses: async () =>
+        new Map<string, TaskStatusSnapshot>([
+          [ONCHAIN_ID, { taskId: ONCHAIN_ID, finalized: true, refunded: false }],
+        ]),
+    };
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
+  });
+
+  it('falls back to the display taskId when protocolTaskId is absent (older/test rows)', async () => {
+    // No protocolTaskId on the record; the status map is keyed by the display
+    // taskId. The fallback keeps these rows resolving correctly.
+    const deps = {
+      config,
+      creatorAddress: '0xabc',
+      now: () => NOW_MS,
+      fetchPostedTasks: () => [
+        { taskId: 't1', taskCid: 'cid1', postedAt: '2026-05-25T00:00:00Z', budget: { totalWei: '0' } },
+      ],
+      fetchTaskStatuses: async () =>
+        new Map<string, TaskStatusSnapshot>([
+          ['t1', { taskId: 't1', finalized: true, refunded: false }],
+        ]),
+    };
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
+  });
+
   it('dedupes manifest cids and calls fetchTaskStatuses once per cid', async () => {
     const fetchTaskStatuses = vi.fn(
       async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),
