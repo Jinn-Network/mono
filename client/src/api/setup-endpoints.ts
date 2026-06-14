@@ -154,6 +154,13 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     process.env['JINN_EARNING_DIR'] ??
     join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
 
+  // Issue #560 batched-topup defaults. Resolved once so the POST /drip batch
+  // branch and GET /drip/quota route can't drift. Production callers always
+  // pass these (JinnConfig schema defaults); the `??` covers tests that build
+  // addSetupRoutes directly.
+  const faucetDailyTopupCap = config.faucetDailyTopupCap ?? 10;
+  const faucetTopupCooldownMs = config.faucetTopupCooldownMs ?? 24 * 60 * 60 * 1000;
+
   /**
    * Shared master-address + chain resolution for the faucet drip + quota
    * routes. Returns either the resolved address/earningDir/chain or a ready
@@ -372,8 +379,8 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // survives a restart. Distinct from the bootstrap loop below (which
       // chases the Stage-1 ETH target); this branch caps by COUNT, not balance.
       if (batch) {
-        const dailyCap = config.faucetDailyTopupCap ?? 10;
-        const cooldownMs = config.faucetTopupCooldownMs ?? 24 * 60 * 60 * 1000;
+        const dailyCap = faucetDailyTopupCap;
+        const cooldownMs = faucetTopupCooldownMs;
         const nowMs = now();
         const existing = readFaucetTopupState(earningDir).byAddress[address.toLowerCase()];
         const quota = computeTopupQuota({ record: existing, dailyCap, cooldownMs, now: nowMs });
@@ -557,8 +564,8 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   // the cap is reached. Soft-renders the full cap when no fleet state exists
   // yet (pre-bootstrap SPA) so the card still has something to show.
   app.get('/v1/setup/drip/quota', async (c) => {
-    const dailyCap = config.faucetDailyTopupCap ?? 10;
-    const cooldownMs = config.faucetTopupCooldownMs ?? 24 * 60 * 60 * 1000;
+    const dailyCap = faucetDailyTopupCap;
+    const cooldownMs = faucetTopupCooldownMs;
     const now = config.now ?? Date.now;
 
     const resolved = resolveFaucetTarget();
