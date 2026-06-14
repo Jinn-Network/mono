@@ -139,6 +139,14 @@ export interface GatheredStatusRaw {
     stale: boolean;
   };
   daemonStartedAt?: string | null;
+  /**
+   * Resolved ISO mtime of the keystore-password file, or `null` when the
+   * password is env-sourced or the file is missing/unreadable. Computed at
+   * request time in `gatherGatheredStatusRaw` from the threaded
+   * `passwordRotation` descriptor; projected into `security.lastPasswordRotationAt`
+   * by `assembleStatusV1`. Absent on `raw` ⇒ assembler emits `null` (issue #441).
+   */
+  passwordRotationAt?: string | null;
   dbPath: string;
   earningDir?: string;
   activityCounts: Record<string, number>;
@@ -335,6 +343,15 @@ export interface StatusV1Response {
    * SolverNet's harness is unready. See `status-harness-rollup.ts`.
    */
   harness: HarnessRollup;
+  /**
+   * Security posture sub-object — always present. `lastPasswordRotationAt`
+   * is the ISO mtime of the on-disk keystore-password file (the proxy for
+   * "when the password was last set/rotated"), or `null` when the password
+   * is env-sourced (`JINN_PASSWORD`, no file) or the file is missing /
+   * unreadable. Consumed by the operator-app `password_rotation_due`
+   * notification (issue #441).
+   */
+  security: { lastPasswordRotationAt: string | null };
 }
 
 /**
@@ -632,6 +649,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     nextActions: buildNextActions(raw, fleetSum),
     costSurface: buildCostSurfaceStatus(process.env),
     harness: raw.harnessRollup ?? DEFAULT_HARNESS_ROLLUP,
+    security: { lastPasswordRotationAt: raw.passwordRotationAt ?? null },
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),

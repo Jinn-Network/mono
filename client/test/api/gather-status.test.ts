@@ -1099,6 +1099,14 @@ describe('gatherStatusForApi', () => {
       expect(status.implStateCadence!.repos).toEqual([]);
     });
   });
+
+  it('always emits security.lastPasswordRotationAt (null when no rotation config)', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, undefined);
+      expect(status.security).toEqual({ lastPasswordRotationAt: null });
+    });
+  });
 });
 
 describe('gatherStatusForApi — no staking reads on the hot path (#992)', () => {
