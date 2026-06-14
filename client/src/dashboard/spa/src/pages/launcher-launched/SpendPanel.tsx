@@ -171,8 +171,9 @@ export function SpendPanel({
             className="font-mono text-[12px] text-[var(--wane)]"
           >
             Runway low — under {LOW_RUNWAY_TASKS.toLocaleString()} Tasks remain
-            at current prices. Top up the Safe from the Overview wallet faucet;
-            this panel has no local top-up action.
+            at current prices. Top up your wallet from the Overview faucet — the
+            daemon forwards ETH to the Safe automatically. This panel has no
+            local top-up action.
           </span>
         )}
 

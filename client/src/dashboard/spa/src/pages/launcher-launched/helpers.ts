@@ -108,10 +108,11 @@ export function formatWeiAmount(wei: string | undefined): string {
  * Expected gas cost of an average Safe `execTransaction` claim tx, folded into
  * the per-Task runway so the projection is not wildly optimistic (#573).
  *
- * There is no live gas-price feed in the SPA, so these are honest-conservative
- * named constants rather than a plumbed estimate. They err toward a SHORTER
- * runway. The daemon's real fee estimation lives in
- * `client/src/adapters/mech/safe.ts`; revisit these if that path changes.
+ * No live gas feed reaches the SPA, so these are deliberately conservative
+ * SPA-side constants rather than a plumbed estimate — they err toward a SHORTER
+ * runway. At submit-time the daemon estimates the real claim fee dynamically
+ * (viem gas estimation in `client/src/adapters/mech/safe.ts`, which holds no
+ * such magnitudes); revisit these constants if that path's behaviour changes.
  *
  *   CLAIM_TX_GAS        — 175,000 gas, mid of the 150k–200k execTransaction range.
  *   CLAIM_GAS_PRICE_WEI — 0.0115 gwei, chosen so claim gas ≈ 2,000 gwei/claim
