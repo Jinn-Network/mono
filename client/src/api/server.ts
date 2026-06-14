@@ -44,6 +44,7 @@ import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
+import { addHarnessAuthStatusRoutes } from './harness-auth-status-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addCodexDoctorRoutes, type CodexDoctorConfig } from './codex-doctor-endpoint.js';
@@ -592,8 +593,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       addHarnessReadinessRoutes(app, {
         getRegistry: () => reg.holder.current ?? null,
       });
+      addHarnessAuthStatusRoutes(app, {
+        getRegistry: () => reg.holder.current ?? null,
+      });
     } else {
       addHarnessReadinessRoutes(app, { registry: reg });
+      addHarnessAuthStatusRoutes(app, { registry: reg });
     }
   }
 
