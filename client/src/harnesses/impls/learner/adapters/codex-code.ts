@@ -342,10 +342,11 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
           if (type === 'turn.completed') {
             resolvePromise();
           } else {
-            const errObj = obj['error'];
+            const errObj = obj['error'] as Record<string, unknown> | undefined;
+            const errMessage = errObj?.['message'];
             const msg =
-              errObj && typeof errObj === 'object' && typeof (errObj as Record<string, unknown>)['message'] === 'string'
-                ? (errObj as Record<string, unknown>)['message'] as string
+              typeof errMessage === 'string'
+                ? errMessage
                 : JSON.stringify(errObj ?? {});
             reject(new Error(`codex-code adapter: turn.failed: ${msg.slice(0, 500)}`));
           }
