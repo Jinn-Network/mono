@@ -138,11 +138,9 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (msg.includes('GS026')) return true;
 
   if (
-    lower.includes('replacement transaction underpriced') ||
-    lower.includes('replacement fee too low') ||
+    isReplacementUnderpricedError(error) ||
     lower.includes('fee cap less than block base fee') ||
-    lower.includes('max fee per gas less than block base fee') ||
-    lower.includes('transaction underpriced')
+    lower.includes('max fee per gas less than block base fee')
   ) {
     return true;
   }
@@ -217,6 +215,26 @@ export function isRecoverableTransactionError(error: unknown): boolean {
  */
 export function isNonceTooLowError(error: unknown): boolean {
   return flattenErrorMessage(error).toLowerCase().includes('nonce too low');
+}
+
+/**
+ * True when the RPC rejected an `eth_sendRawTransaction` because a tx already
+ * occupies the target nonce and the resubmission's fee bump was insufficient to
+ * replace it ("replacement underpriced"). Distinct from `nonce too low`: the
+ * original tx is still PENDING at this nonce, not yet mined.
+ *
+ * Issue #897: the Safe execTransaction retry uses this to refresh the pinned
+ * nonce before the next fee bump and to trigger a reconcile against the
+ * pending original tx (it may mine mid-retry). The substrings mirror the
+ * replacement branch of `isRecoverableTransactionError`.
+ */
+export function isReplacementUnderpricedError(error: unknown): boolean {
+  const lower = flattenErrorMessage(error).toLowerCase();
+  return (
+    lower.includes('replacement transaction underpriced') ||
+    lower.includes('replacement fee too low') ||
+    lower.includes('transaction underpriced')
+  );
 }
 
 export function sleep(ms: number): Promise<void> {

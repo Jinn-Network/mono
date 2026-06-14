@@ -3,6 +3,7 @@ import {
   createMemoryTxSubmissionLedger,
   flattenErrorMessage,
   isRecoverableTransactionError,
+  isReplacementUnderpricedError,
   recoverStuckNonceIfNeeded,
   viemSendTransactionWithRetry,
   withEoaBroadcastLock,
@@ -682,6 +683,19 @@ describe('tx-retry', () => {
       await expect(
         withEoaBroadcastLock(key, async () => 'ok'),
       ).resolves.toBe('ok');
+    });
+  });
+
+  describe('isReplacementUnderpricedError', () => {
+    it('matches replacement-underpriced RPC messages', () => {
+      expect(isReplacementUnderpricedError(new Error('replacement transaction underpriced'))).toBe(true);
+      expect(isReplacementUnderpricedError(new Error('replacement fee too low'))).toBe(true);
+      expect(isReplacementUnderpricedError(new Error('transaction underpriced'))).toBe(true);
+    });
+
+    it('does not match nonce-too-low or unrelated errors', () => {
+      expect(isReplacementUnderpricedError(new Error('nonce too low'))).toBe(false);
+      expect(isReplacementUnderpricedError(new Error('insufficient funds'))).toBe(false);
     });
   });
 });
