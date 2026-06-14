@@ -70,7 +70,9 @@ ETH actually lives across three roles — the **agent address** (gas float for t
   - eth amount (rolled-up; drill-down per role: master / agent / Safe)
   - runway
     - **Actions**
-      - request funds from faucet
+      - request funds from faucet — issues a *batch* of faucet drips up to the daily cap in one click (issue #560). Action states: `idle → batching → complete | cooldown_blocked`. A concurrent batch for the same wallet is rejected (`batch_in_progress`, HTTP 409); the in-flight click owns the cap until it settles.
+  - faucet top-ups remaining today (`callsRemaining: number`) — how many batched faucet top-ups the wallet may still issue before the daily cap (issue #560)
+  - faucet cap reset (`cooldownExpiresAt: number | null`) — epoch-ms when the daily cap resets, or null when the cap has not been hit
   - last password cycle
     - **Actions**
       - change password
@@ -85,6 +87,7 @@ ETH actually lives across three roles — the **agent address** (gas float for t
   - runway low
   - password rotation due
   - faucet rate-limited
+  - daily cap reached · resets in &lt;T&gt; — informational; the daily faucet top-up cap is spent and the "request funds from faucet" action is disabled until the cooldown elapses (issue #560)
 
 ### 2.4 Network Memberships
 

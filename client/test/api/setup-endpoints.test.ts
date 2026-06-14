@@ -826,6 +826,71 @@ describe('POST /v1/setup/drip', () => {
     });
   });
 
+  // H1: two concurrent batch POSTs for the same wallet must not both read
+  // `callsRemaining` before either persists and double-spend the cap. The
+  // second concurrent call gets a 409 `batch_in_progress`; the combined
+  // successful drips never exceed dailyCap.
+  it('rejects a concurrent batch for the same wallet with 409 and never exceeds the cap (issue #560 H1)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-concurrent-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    const master = '0xAAAA000000000000000000000000000000000006';
+    await store.save({ ...state, master_address: master });
+
+    // Gate the first faucet call so the second batch POST arrives while the
+    // first is still mid-loop (holding the lock).
+    let releaseFirstDrip: (() => void) | null = null;
+    const firstDripGate = new Promise<void>((resolve) => {
+      releaseFirstDrip = resolve;
+    });
+    let calls = 0;
+    const requestFunding = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) await firstDripGate;
+      return { ok: true, txHash: '0x' + 'a6'.repeat(32) };
+    });
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      faucetDailyTopupCap: 3,
+      faucetTopupCooldownMs: 24 * 60 * 60 * 1000,
+      now: () => 1_000,
+    });
+
+    const first = app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    // Let the first request enter the loop and acquire the lock before the
+    // second arrives.
+    await new Promise((r) => setTimeout(r, 0));
+    const second = app.request('/v1/setup/drip?batch=true', { method: 'POST' });
+    // Second should reject quickly (lock held) without touching the faucet.
+    const res2 = await second;
+    expect(res2.status).toBe(409);
+    const body2 = (await res2.json()) as { ok: boolean; reason?: string };
+    expect(body2.ok).toBe(false);
+    expect(body2.reason).toBe('batch_in_progress');
+
+    // Now let the first batch finish.
+    releaseFirstDrip?.();
+    const res1 = await first;
+    expect(res1.status).toBe(202);
+    const body1 = (await res1.json()) as { txHashes: string[]; callsRemaining: number };
+    expect(body1.txHashes).toHaveLength(3);
+    expect(body1.callsRemaining).toBe(0);
+
+    // Combined faucet calls never exceeded the cap.
+    expect(requestFunding).toHaveBeenCalledTimes(3);
+
+    const sidecar = JSON.parse(readFileSync(join(earningDir, 'faucet-topup.json'), 'utf-8')) as {
+      byAddress: Record<string, { callsToday: number; batchStartedAt: number }>;
+    };
+    expect(sidecar.byAddress[master.toLowerCase()]).toEqual({
+      callsToday: 3,
+      batchStartedAt: 1_000,
+    });
+  });
+
   it('singleDrip still wins when both batch and singleDrip are present (issue #560)', async () => {
     const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-batch-single-'));
     const store = new FleetStateStore(earningDir);

@@ -193,6 +193,10 @@ describe('WalletCard', () => {
     expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(true);
     const gas = screen.getByTestId('wallet-section-gas');
     expect(gas.textContent).toMatch(/daily faucet cap reached/i);
+    // AC3: surface the cooldown expiry, not just the quota. The
+    // Intl.RelativeTimeFormat output for a ~12h delta is "in 12 hours".
+    expect(gas.textContent).toMatch(/resets in/i);
+    expect(gas.textContent).toMatch(/12 hours/i);
   });
 
   it('keeps the button enabled and shows no quota copy when quota props are undefined (back-compat)', () => {

@@ -148,6 +148,10 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   const persistConfigValue = config.persistConfigValue ?? persistTopLevelConfigValue;
   const currentClaudePath = (): string => config.getClaudePath?.() ?? config.claudePath ?? 'claude';
   let installInFlight: Promise<InstallClaudeCodeResponse> | null = null;
+  // Issue #560 H1: per-address guard so two concurrent batch POSTs for the
+  // same wallet can't both read `callsRemaining` before either persists and
+  // run up to 2 × dailyCap drips. Mirrors the `installInFlight` dedupe idiom.
+  const batchDripInFlight = new Set<string>();
 
   const resolveEarningDir = (): string =>
     config.earningDir ??
@@ -379,80 +383,92 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // survives a restart. Distinct from the bootstrap loop below (which
       // chases the Stage-1 ETH target); this branch caps by COUNT, not balance.
       if (batch) {
-        const dailyCap = faucetDailyTopupCap;
-        const cooldownMs = faucetTopupCooldownMs;
-        const nowMs = now();
-        const existing = readFaucetTopupState(earningDir).byAddress[address.toLowerCase()];
-        const quota = computeTopupQuota({ record: existing, dailyCap, cooldownMs, now: nowMs });
+        const lockKey = address.toLowerCase();
+        // H1: reject a concurrent batch for the same wallet rather than letting
+        // both read `callsRemaining` and double-spend the cap. The lock is
+        // released in the `finally` below.
+        if (batchDripInFlight.has(lockKey)) {
+          return c.json({ ok: false, address, reason: 'batch_in_progress' }, 409);
+        }
+        batchDripInFlight.add(lockKey);
+        try {
+          const dailyCap = faucetDailyTopupCap;
+          const cooldownMs = faucetTopupCooldownMs;
+          const nowMs = now();
+          const existing = readFaucetTopupState(earningDir).byAddress[address.toLowerCase()];
+          const quota = computeTopupQuota({ record: existing, dailyCap, cooldownMs, now: nowMs });
 
-        // Cap reached and the window is still active → cooldown; do not call
-        // the faucet.
-        if (quota.callsRemaining === 0) {
+          // Cap reached and the window is still active → cooldown; do not call
+          // the faucet.
+          if (quota.callsRemaining === 0) {
+            return c.json(
+              {
+                ok: false,
+                address,
+                reason: 'topup_cooldown',
+                dailyCap,
+                callsRemaining: 0,
+                cooldownExpiresAt: quota.cooldownExpiresAt,
+              },
+              200,
+            );
+          }
+
+          // Window elapsed (or no record) → fresh batch starting now. Otherwise
+          // continue the active batch from its recorded start.
+          const startingFresh = !quota.windowActive;
+          let callsToday = startingFresh ? 0 : existing?.callsToday ?? 0;
+          const batchStartedAt = startingFresh ? nowMs : existing?.batchStartedAt ?? nowMs;
+
+          let rateLimited = false;
+          for (let i = 0; i < quota.callsRemaining; i++) {
+            const result = await requestFunding(address, 'base-sepolia');
+            if (!result.ok) {
+              // A rate-limit stops the batch but is not an error (operator can
+              // retry after the CDP per-address window). Any other failure also
+              // stops the batch and surfaces its reason.
+              if (result.rateLimited) rateLimited = true;
+              if (txHashes.length === 0) {
+                return c.json(
+                  {
+                    ok: false,
+                    address,
+                    txHashes,
+                    attempts: 0,
+                    dailyCap,
+                    callsRemaining: dailyCap - callsToday,
+                    cooldownExpiresAt: batchStartedAt + cooldownMs,
+                    reason: result.reason,
+                    rateLimited: result.rateLimited,
+                  },
+                  200,
+                );
+              }
+              break;
+            }
+            if (result.txHash) txHashes.push(result.txHash);
+            callsToday += 1;
+            // Persist write-through after each success so a crash mid-batch does
+            // not re-grant the whole cap.
+            writeFaucetTopupRecord(earningDir, address, { callsToday, batchStartedAt });
+          }
+
           return c.json(
             {
-              ok: false,
+              ok: txHashes.length > 0,
               address,
-              reason: 'topup_cooldown',
+              txHashes,
+              attempts: txHashes.length,
               dailyCap,
-              callsRemaining: 0,
-              cooldownExpiresAt: quota.cooldownExpiresAt,
+              callsRemaining: Math.max(0, dailyCap - callsToday),
+              cooldownExpiresAt: batchStartedAt + cooldownMs,
+              ...(rateLimited ? { rateLimited: true } : {}),
             },
-            200,
+            txHashes.length > 0 ? 202 : 200,
           );
+        } finally {
+          batchDripInFlight.delete(lockKey);
         }
-
-        // Window elapsed (or no record) → fresh batch starting now. Otherwise
-        // continue the active batch from its recorded start.
-        const startingFresh = !quota.windowActive;
-        let callsToday = startingFresh ? 0 : existing?.callsToday ?? 0;
-        const batchStartedAt = startingFresh ? nowMs : existing?.batchStartedAt ?? nowMs;
-
-        let rateLimited = false;
-        for (let i = 0; i < quota.callsRemaining; i++) {
-          const result = await requestFunding(address, 'base-sepolia');
-          if (!result.ok) {
-            // A rate-limit stops the batch but is not an error (operator can
-            // retry after the CDP per-address window). Any other failure also
-            // stops the batch and surfaces its reason.
-            if (result.rateLimited) rateLimited = true;
-            if (txHashes.length === 0) {
-              return c.json(
-                {
-                  ok: false,
-                  address,
-                  txHashes,
-                  attempts: 0,
-                  dailyCap,
-                  callsRemaining: dailyCap - callsToday,
-                  cooldownExpiresAt: batchStartedAt + cooldownMs,
-                  reason: result.reason,
-                  rateLimited: result.rateLimited,
-                },
-                200,
-              );
-            }
-            break;
-          }
-          if (result.txHash) txHashes.push(result.txHash);
-          callsToday += 1;
-          // Persist write-through after each success so a crash mid-batch does
-          // not re-grant the whole cap.
-          writeFaucetTopupRecord(earningDir, address, { callsToday, batchStartedAt });
-        }
-
-        return c.json(
-          {
-            ok: txHashes.length > 0,
-            address,
-            txHashes,
-            attempts: txHashes.length,
-            dailyCap,
-            callsRemaining: Math.max(0, dailyCap - callsToday),
-            cooldownExpiresAt: batchStartedAt + cooldownMs,
-            ...(rateLimited ? { rateLimited: true } : {}),
-          },
-          txHashes.length > 0 ? 202 : 200,
-        );
       }
 
       const maxFaucetIters = computeFaucetDripCap({
