@@ -1511,3 +1511,231 @@ describe('indexer fetch timeout', () => {
     ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
   }, 2000);
 });
+
+// ── transparent retry on 502/503/network errors (#782) ─────────────────────────
+
+describe('transparent retry on 502/503/network errors (#782)', () => {
+  const EMPTY_ENVELOPES = { data: { envelopes: { items: [] } } };
+
+  /** True for the GraphQL POST (vs the /ready GET probe). */
+  function isGqlPost(url: string): boolean {
+    return url.endsWith('/graphql');
+  }
+
+  /**
+   * GraphQL POST returns `failStatus` for the first `failTimes` calls, then a
+   * valid 200. `/ready` always 200. Tracks POST call count.
+   */
+  function failStatusThenSucceed(failTimes: number, failStatus: number) {
+    const post = { count: 0 };
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      post.count += 1;
+      if (post.count <= failTimes) {
+        return new Response('upstream error', { status: failStatus });
+      }
+      return new Response(JSON.stringify(EMPTY_ENVELOPES), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    return { impl, post };
+  }
+
+  /** GraphQL POST always returns `status`. `/ready` always 200. */
+  function alwaysFailStatus(status: number) {
+    const post = { count: 0 };
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      post.count += 1;
+      return new Response('upstream error', { status });
+    });
+    return { impl, post };
+  }
+
+  /**
+   * GraphQL POST throws a network error for the first `throwTimes` calls, then
+   * succeeds. `/ready` always 200. Tracks POST call count.
+   */
+  function throwThenSucceed(throwTimes: number) {
+    const post = { count: 0 };
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      post.count += 1;
+      if (post.count <= throwTimes) {
+        throw new TypeError('fetch failed');
+      }
+      return new Response(JSON.stringify(EMPTY_ENVELOPES), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    return { impl, post };
+  }
+
+  /** GraphQL POST always throws a network error. `/ready` always 200. */
+  function alwaysThrow() {
+    const post = { count: 0 };
+    const cause = new TypeError('fetch failed: ECONNRESET');
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      post.count += 1;
+      throw cause;
+    });
+    return { impl, post, cause };
+  }
+
+  it('succeeds on first try (no retry needed)', async () => {
+    const { impl, post } = failStatusThenSucceed(0, 502);
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+    expect(post.count).toBe(1);
+  });
+
+  it('retries a 502 then succeeds', async () => {
+    const { impl, post } = failStatusThenSucceed(1, 502);
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+    expect(post.count).toBe(2);
+  });
+
+  it('retries a 503 then succeeds', async () => {
+    const { impl, post } = failStatusThenSucceed(1, 503);
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+    expect(post.count).toBe(2);
+  });
+
+  it('retries a thrown network error then succeeds', async () => {
+    const { impl, post } = throwThenSucceed(1);
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+    expect(post.count).toBe(2);
+  });
+
+  it('throws DiscoveryUnavailableError after retries exhausted on persistent 503', async () => {
+    const { impl, post } = alwaysFailStatus(503);
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+    // 1 initial + 2 retries.
+    expect(post.count).toBe(3);
+    // Original status preserved in the error message.
+    await expect(client.queryEnvelopes({})).rejects.toThrow(/503/);
+  });
+
+  it('throws DiscoveryUnavailableError after retries exhausted on persistent network error', async () => {
+    const { impl, post, cause } = alwaysThrow();
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    let caught: unknown;
+    await client.queryEnvelopes({}).catch((e) => { caught = e; });
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    // Original error preserved as the cause.
+    expect((caught as DiscoveryUnavailableError).cause).toBe(cause);
+    // 1 initial + 2 retries.
+    expect(post.count).toBe(3);
+  });
+
+  it('does NOT retry a non-retryable non-2xx (500)', async () => {
+    const { impl, post } = alwaysFailStatus(500);
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+    expect(post.count).toBe(1);
+  });
+
+  it('does NOT retry GraphQL errors[] in a 200 response', async () => {
+    const post = { count: 0 };
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      post.count += 1;
+      return new Response(JSON.stringify({ errors: [{ message: 'x' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+    });
+    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+    expect(post.count).toBe(1);
+  });
+
+  it('retries a 503 on the /ready probe then succeeds (probe cache not poisoned, AC#4)', async () => {
+    // The /ready GET 503s on its first probe-call, then 200s. The retry happens
+    // BEFORE the bad-state cache is written, so the method must resolve.
+    const ready = { count: 0 };
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) {
+        ready.count += 1;
+        if (ready.count === 1) return new Response(null, { status: 503 });
+        return new Response(null, { status: 200 });
+      }
+      return new Response(JSON.stringify(EMPTY_ENVELOPES), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+      readyProbeTtlMs: 60_000,
+    });
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+    expect(ready.count).toBe(2);
+  });
+
+  it('re-probes successfully after a sustained-outage TTL window (AC#5)', async () => {
+    // First call: /ready is persistently 503 (rejects after retries exhausted).
+    // Second call (TTL=0 so the bad cache is expired immediately): /ready 200,
+    // GraphQL valid → resolves. Proves the next probe overwrites the bad cache.
+    let readyOutage = true;
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) {
+        return new Response(null, { status: readyOutage ? 503 : 200 });
+      }
+      return new Response(JSON.stringify(EMPTY_ENVELOPES), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [0, 0],
+      readyProbeTtlMs: 0,
+    });
+    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+    readyOutage = false;
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+  });
+});
