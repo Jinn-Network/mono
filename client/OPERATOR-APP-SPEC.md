@@ -313,18 +313,26 @@ Operator-tunable configuration.
 
 - **State** (read-only)
   - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.
+  - current chain — read-only chain identity (`base` chain id 8453 / `base-sepolia` chain id 84532). Switching chains is a separate fleet-reset flow, not editable here.
+  - RPC fallback chain — the live ordered `rpcUrls` chain (slot 0 = primary/head). Each slot renders **slot index + masked host + per-slot health**. Health comes from the boot-time `probeFallbackChain` probe (`rpcSlotHealth`, index-aligned to `rpcUrls`): `healthy` (+ latency) / `degraded · <http-status>` (e.g. 429) / `unreachable`. The probe is boot-time only — the RPC chain is restart-required, so health cannot drift without a re-probing restart. Hosts are masked (path + api-key query strings never render); only hostnames appear.
 - **Static**
   - RPC URL — single URL OR an ordered list of URLs (the fallback chain). On testnet the default is a two-provider chain (publicnode + sepolia.base.org). When a list is configured, the daemon builds a viem fallback transport: primary → secondary on network error / HTTP 429 / 5xx; capped at 4 providers. Surface format: provider count + primary host (e.g. `fallback chain (3 providers) — primary=my-alchemy-key.example`). The full chain stays masked in any operator-visible artifact (paths and api-key query strings never appear); only hostnames do. See `CLAUDE.md` "RPC fallback chain" for the full contract.
   - peer list
   - default harness
   - faucet endpoint
   - other operator-tunable values
+- **Collections**
+  - RPC slots — the ordered `rpcUrls` chain. Item shape: `{ slot: number; host: string (masked); health: 'healthy' | 'degraded' | 'unreachable'; latencyMs?: number; code?: number }`. Ordering: by slot index (0 = primary). No pagination (capped at 4 slots). Read-only.
 - **Actions**
   - edit setting
   - reset to default
+  - Set Primary — write a single Primary RPC URL via the labeled input. Prepends to the runtime chain: persisted shape becomes `[primary, ...publicDefaults]`. Lifecycle: `idle → saving → saved (restart pending)`; terminal `failed` on write error. Restart-required to apply.
+  - Clear Primary — clear the Primary RPC input. Persisted shape reverts to `[...publicDefaults]` (the bundled public backup chain). Same lifecycle and restart semantics as Set Primary.
 - **State messages**
   - invalid value
   - restart required to apply
+  - Primary RPC missing — informational: no operator-provided primary is configured; the node is on the shared public chain (fine for setup, not reliable under load). Maps to the optional Set Primary action; links to free-key providers.
+  - Primary RPC unhealthy — the boot probe saw slot 0 fail (HTTP 429 / 5xx / unreachable). Informational; a secondary slot served. Operators with a paid primary may want to inspect the key's quota; no forced action.
   - RPC fallback chain (N providers) — informational; no action required when every slot is healthy.
   - RPC primary degraded — the boot-time probe (or steady-state traffic) saw HTTP 429 or 5xx from slot 0 but a secondary slot served. Informational; no action required, but operators with a paid primary may want to inspect their key's quota.
   - All RPCs failed — `AllRpcsFailedError` raised on a recent call. Action: check internet, then either confirm the chain hosts are up or update the `rpcUrl` chain in Settings. The masked host list is included for diagnostics.
