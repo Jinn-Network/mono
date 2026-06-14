@@ -47,8 +47,7 @@ export function NetworkTab({
 
   const chain = data?.chain ?? 'base-sepolia';
   const publicDefaults = data?.publicDefaults ?? [];
-  const rpcUrls =
-    data?.rpcUrls ?? (publicDefaults.length > 0 ? publicDefaults : []);
+  const rpcUrls = data?.rpcUrls ?? publicDefaults;
   const slotHealth = data?.rpcSlotHealth ?? [];
 
   return (
