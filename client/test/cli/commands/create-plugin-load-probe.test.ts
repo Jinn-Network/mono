@@ -33,53 +33,49 @@ afterEach(() => {
   if (VENDOR) rmSync(VENDOR, { recursive: true, force: true });
 });
 
-describe('create-plugin load probe (solver-type-plugin)', () => {
-  it('scaffolds and resolves via forSolverType for the target SolverType', async () => {
-    const targetRoot = await runCreate({
-      target: 'plugin',
-      pattern: 'solver-type-plugin',
-      packageName: '@jinn-test/probe-st',
-      solverTypeString: 'demo.v1',
-      outDir: OUT,
+// Both patterns drive the identical mechanism — scaffold, load via a bare
+// `file:` source (the same entry shape references/load-probe.mjs uses, so the
+// loader takes the name from the manifest), then assert the registry resolves
+// the plug-in for its target key and nothing else. Only the pattern and the
+// target/non-target keys differ.
+const cases = [
+  {
+    pattern: 'solver-type-plugin' as const,
+    packageName: '@jinn-test/probe-st',
+    target: 'demo.v1', // the declared SolverType
+    nonTarget: 'not-a-real.v9',
+  },
+  {
+    pattern: 'runtime-plugin' as const,
+    packageName: '@jinn-test/probe-rt',
+    target: 'jinn.runtime', // runtime plug-ins resolve under this key only
+    nonTarget: 'demo.v1',
+  },
+];
+
+describe('create-plugin load probe', () => {
+  for (const { pattern, packageName, target, nonTarget } of cases) {
+    it(`scaffolds and resolves via forSolverType for ${pattern}`, async () => {
+      const targetRoot = await runCreate({
+        target: 'plugin',
+        pattern,
+        packageName,
+        solverTypeString: target,
+        outDir: OUT,
+      });
+
+      const reg = await loadSolverPlugins(
+        [{ source: 'file:' + targetRoot }],
+        { vendorRoot: VENDOR },
+      );
+
+      // Positive: the scaffolded plug-in resolves for its target key.
+      expect(reg.forSolverType(target).map((p) => p.name)).toEqual([
+        packageName,
+      ]);
+
+      // Negative control: an unrelated key resolves nothing.
+      expect(reg.forSolverType(nonTarget)).toEqual([]);
     });
-
-    // Same entry shape the references/load-probe.mjs script uses: a bare
-    // `file:` source, no `name` (so the loader takes the name from the
-    // manifest, and the vendor dir name is a slash-free basename).
-    const reg = await loadSolverPlugins(
-      [{ source: 'file:' + targetRoot }],
-      { vendorRoot: VENDOR },
-    );
-
-    // Positive: the scaffolded plug-in resolves for its declared SolverType.
-    const matches = reg.forSolverType('demo.v1');
-    expect(matches.map((p) => p.name)).toEqual(['@jinn-test/probe-st']);
-
-    // Negative control: an unrelated SolverType resolves nothing.
-    expect(reg.forSolverType('not-a-real.v9')).toEqual([]);
-  });
-});
-
-describe('create-plugin load probe (runtime-plugin)', () => {
-  it('scaffolds and resolves via forSolverType for jinn.runtime', async () => {
-    const targetRoot = await runCreate({
-      target: 'plugin',
-      pattern: 'runtime-plugin',
-      packageName: '@jinn-test/probe-rt',
-      solverTypeString: 'jinn.runtime',
-      outDir: OUT,
-    });
-
-    const reg = await loadSolverPlugins(
-      [{ source: 'file:' + targetRoot }],
-      { vendorRoot: VENDOR },
-    );
-
-    // Positive: a runtime plug-in resolves under the 'jinn.runtime' key.
-    const matches = reg.forSolverType('jinn.runtime');
-    expect(matches.map((p) => p.name)).toEqual(['@jinn-test/probe-rt']);
-
-    // Negative control: a runtime plug-in does NOT resolve for a SolverType.
-    expect(reg.forSolverType('demo.v1')).toEqual([]);
-  });
+  }
 });
