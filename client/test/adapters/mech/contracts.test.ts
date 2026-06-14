@@ -4,6 +4,12 @@ import {
   JINN_ROUTER_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
 } from '../../../src/adapters/mech/types.js';
+import {
+  ROUTER_TASK_CREATED_EVENT,
+  ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
+  ROUTER_DISCOVERY_EVENTS,
+  MECH_DELIVER_EVENT,
+} from '../../../src/adapters/mech/contracts.js';
 
 describe('JinnRouter contract encoding', () => {
   const taskCidDigest = ('0x' + '11'.repeat(32)) as `0x${string}`;
@@ -186,5 +192,30 @@ describe('JinnRouter contract encoding', () => {
     expect(decoded.args.taskId).toBe(1n);
     expect(decoded.args.attemptIndex).toBe(0);
     expect(decoded.args.requestId).toBe(requestId);
+  });
+});
+
+// #116: the Task-native polling path filters getLogs by topic0 using these ABI
+// event items. Pin their names/shape so a future ABI rename can't silently empty
+// a filter (getAbiItem throws on an absent name — these consts surface that loud).
+describe('event-specific router log filters (#116)', () => {
+  it('exposes the two router discovery events with the right names', () => {
+    expect(ROUTER_TASK_CREATED_EVENT.type).toBe('event');
+    expect(ROUTER_TASK_CREATED_EVENT.name).toBe('TaskCreated');
+    expect(ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT.type).toBe('event');
+    expect(ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT.name).toBe('SolutionDeliveryClaimed');
+  });
+
+  it('ROUTER_DISCOVERY_EVENTS is exactly [TaskCreated, SolutionDeliveryClaimed]', () => {
+    expect(ROUTER_DISCOVERY_EVENTS).toHaveLength(2);
+    expect(ROUTER_DISCOVERY_EVENTS.map((e) => e.name)).toEqual([
+      'TaskCreated',
+      'SolutionDeliveryClaimed',
+    ]);
+  });
+
+  it('MECH_DELIVER_EVENT is the mech Deliver event', () => {
+    expect(MECH_DELIVER_EVENT.type).toBe('event');
+    expect(MECH_DELIVER_EVENT.name).toBe('Deliver');
   });
 });

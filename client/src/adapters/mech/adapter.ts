@@ -45,6 +45,8 @@ import {
   decodeTaskCreatedLogs,
   decodeSolutionDeliveryClaimedLogs,
   decodeDeliverLogs,
+  ROUTER_DISCOVERY_EVENTS,
+  MECH_DELIVER_EVENT,
   findLatestDeliveryDataHexForRequest,
   getMarketplaceRequestDeliveryMech,
   getTaskCidDigest,
@@ -382,11 +384,19 @@ export class MechAdapter implements ExecutionAdapter {
       const end = start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > toBlock
         ? toBlock
         : start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      // #116: filter to the two router events the poll loop decodes
+      // (TaskCreated + SolutionDeliveryClaimed) via an OR-of-topic0 server-side,
+      // instead of an address-only scan that decode-discards the rest. The block
+      // range stays chunked as before — a topic filter shrinks the result set,
+      // not the permitted range. Fallback if a provider ever rejects the OR-topic
+      // (`events`) form: issue two single-`event` getLogs over this same bounded
+      // range and concatenate — never revert to an address-only broad scan.
       logs.push(...await this.publicClient.getLogs({
         address: this.config.routerAddress,
+        events: ROUTER_DISCOVERY_EVENTS,
         fromBlock: start,
         toBlock: end,
-      }));
+      }) as Log[]);
     }
     return logs;
   }
@@ -1426,8 +1436,11 @@ export class MechAdapter implements ExecutionAdapter {
       const chunkEnd = chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > currentBlock
         ? currentBlock
         : chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      // #116: pin the mech `Deliver` topic server-side rather than fetching the
+      // whole address and decode-discarding. Range/chunking unchanged.
       const logs = await this.publicClient.getLogs({
         address: this.config.mechContractAddress,
+        event: MECH_DELIVER_EVENT,
         fromBlock: chunkStart,
         toBlock: chunkEnd,
       });

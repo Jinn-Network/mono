@@ -1,6 +1,7 @@
 import {
   encodeFunctionData,
   decodeEventLog,
+  getAbiItem,
   type Address,
   type Hex,
   type PublicClient,
@@ -793,6 +794,24 @@ export interface TaskRecord {
   blockNumber?: number;
 }
 
+// ── Event-specific log filters (#116) ───────────────────────────────────────
+// The Task-native polling path fetches only the router/mech events it actually
+// decodes, instead of scanning the address and decode-discarding the rest. These
+// ABI event items are passed as viem `getLogs({ event })` / `getLogs({ events })`
+// so the provider filters by topic0 server-side. `getAbiItem` throws if a name is
+// absent, so a future ABI rename fails loud rather than silently emptying a filter.
+export const ROUTER_TASK_CREATED_EVENT = getAbiItem({ abi: JINN_ROUTER_ABI, name: 'TaskCreated' });
+export const ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'SolutionDeliveryClaimed',
+});
+export const MECH_DELIVER_EVENT = getAbiItem({ abi: MECH_ABI, name: 'Deliver' });
+/** The two router events the Task-native poll loop needs per pass. */
+export const ROUTER_DISCOVERY_EVENTS = [
+  ROUTER_TASK_CREATED_EVENT,
+  ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
+] as const;
+
 export async function scanTasks(
   publicClient: PublicClient,
   routerAddress: Address,
@@ -807,6 +826,7 @@ export async function scanTasks(
     const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
     const logs = await publicClient.getLogs({
       address: routerAddress,
+      event: ROUTER_TASK_CREATED_EVENT,
       fromBlock: start,
       toBlock: end,
     });
