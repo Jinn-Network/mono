@@ -43,10 +43,10 @@ const INTENT_KINDS: ['intent'] = ['intent'];
  * - `harness` readiness is now populated by the daemon on `/v1/status.harness`
  *   (#440) — a single boolean + name + reason rollup over the joined SolverNets'
  *   harnesses. Older daemons / partial responses default to ready.
- * - `password_rotation_due` has no `/v1/status` field today; the default below
- *   keeps it silent until the daemon surfaces the input.
+ * - `password_rotation_due` reads `s.security.lastPasswordRotationAt` (#441) —
+ *   the keystore-password file's ISO mtime, or null when env-sourced/missing.
  */
-function mapStatusToDeriveInput(
+export function mapStatusToDeriveInput(
   rawStatus: unknown,
   rawBootstrap: unknown,
   restartPending: boolean,
@@ -110,9 +110,12 @@ function mapStatusToDeriveInput(
       safeBound: svc?.safeBoundToAgent !== false,
     })),
     joinedSolverNets,
-    // No /v1/status field for last password rotation today; follow-up Issue
-    // tracks adding it. Until then, password_rotation_due never fires.
-    passwordRotatedAt: undefined,
+    // `security.lastPasswordRotationAt` is the ISO mtime of the keystore-password
+    // file (issue #441); null/absent ⇒ password_rotation_due stays silent.
+    passwordRotatedAt:
+      typeof s.security?.lastPasswordRotationAt === 'string'
+        ? s.security.lastPasswordRotationAt
+        : undefined,
   };
 }
 
