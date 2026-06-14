@@ -23,7 +23,7 @@ export interface AiUnitsStatusRow {
    * True when this credential has spend in the current 7d window — i.e. it is
    * the one actually being worked against, not a configured-but-idle one
    * (issue #891). Optional for backward-compat with daemons that predate the
-   * field; a paused row is always active, so it defaults to true.
+   * field (see the `?? true` default at the use site).
    */
   active?: boolean;
   blockResetsAt: string;
