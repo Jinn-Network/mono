@@ -263,6 +263,12 @@ The pickable set is tier 1 ∩ tier 2; selecting a pickable harness then drives 
   - authenticated (tier 3)
   - ready (tier 3 — installed ∧ authenticated ∧ passing its check)
   - role — solver (operator-selected) or evaluator (manifest-bound)
+- **State (per harness, auth source — read-only) (#564)**
+  - auth source — the credential location: a file path (e.g. `~/.hermes/.env`), an env var, a CLI session, or "no auth required"
+  - key suffix — last 4 chars of the credential, masked to `—` when absent or shorter than 8 chars; the full key is never shown
+  - last modified — mtime of the credential file (`—` for session/env sources)
+  - auth state — `loaded` (credential present & non-empty), `missing` (file/key absent), or `unknown` (CLI-session auth, e.g. claude-code, or probe error)
+  - Rendered in §2.11 Settings → Security as a read-only table; each row deep-links to `docs/runbooks/rotating-harness-keys.md`. Data source: `GET /v1/harnesses/auth-status` (suffix + metadata only).
 - **Actions (per harness)**
   - select — choose this harness for the solver role of the SolverNet in context (writes to the §2.4 environment)
   - install / authenticate — the per-harness setup action that drives the harness to ready; generalises the existing precheck pattern (install command / auth step, then re-check). Optional per harness: pure-compute harnesses are ready with no action. For the auth store and rotate command/file behind each harness's auth step (and why `client/.env` is not it), see [`docs/operator/rotating-harness-keys.md`](../docs/operator/rotating-harness-keys.md).
@@ -311,6 +317,8 @@ Components raise state messages locally. The Notifications component is the unio
 Operator-tunable configuration.
 
 **Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a membership's harness/model (§2.4 "change environment") or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once. **Scope:** this Settings home ships in the #983 follow-up (alongside removing the legacy overview readiness card), not in #983 itself — #983 delivers only the onboarding rendering.
+
+**Harness auth status (#564).** Settings → Security also hosts a read-only **Harness auth status** table — per-harness auth source, masked key suffix, credential mtime, and a `loaded`/`missing`/`unknown` state — sourced from `GET /v1/harnesses/auth-status` (suffix + metadata only, never full keys). See §2.9's "State (per harness, auth source)" sub-group and `docs/runbooks/rotating-harness-keys.md`.
 
 - **State** (read-only)
   - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.
