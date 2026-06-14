@@ -316,11 +316,12 @@ If the PR does not exist, dispatch a fix subagent.
 
 **Remove the worktree (final step).** The per-issue worktree is ephemeral scratch — the branch on `origin` is the durable artifact, so once the PR is open the worktree buys nothing and only produces dispatcher drift noise (`packages/eng-loop/src/dispatcher/state.ts` flags every "worktree exists but issue not In Progress" pair as drift, which would otherwise fire on this entirely-legitimate post-PR-open state). Remove it as the **last action of the run**.
 
-`git worktree remove` refuses to remove the worktree you are standing in, and pulling the CWD out from under the shell breaks every subsequent command — so run the removal **from outside the worktree**, from the primary checkout. The primary checkout is the first entry of `git worktree list --porcelain` whose path is *not* under `jinn-mono_worktrees`. Use `--force` because the worktree carries untracked build output (`dist/`, `node_modules`, etc.) that would otherwise block removal:
+`git worktree remove` refuses to remove the worktree you are standing in, and pulling the CWD out from under the shell breaks every subsequent command — so run the removal **from outside the worktree**, from the primary checkout. Git always lists the main working tree first, so the primary checkout is the path on the **first `worktree ` line** of `git worktree list --porcelain`. Use `--force` because the worktree carries untracked build output (`dist/`, `node_modules`, etc.) that would otherwise block removal. `WORKTREE_PATH` is the value from Step 2, or the absolute worktree path from the dispatcher prompt if the worktree was pre-created:
 
 ```bash
-# PRIMARY = first `worktree ` line in `git worktree list --porcelain`
-# whose path is NOT under jinn-mono_worktrees.
+# PRIMARY = path on the first `worktree ` line of `git worktree list --porcelain`
+# (git always lists the main working tree first).
+PRIMARY="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
 git -C "$PRIMARY" worktree remove --force "$WORKTREE_PATH"
 ```
 
