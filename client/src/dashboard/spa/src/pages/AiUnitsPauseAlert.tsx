@@ -19,6 +19,13 @@ export interface AiUnitsStatusRow {
   capPerBlock: number;
   capPerWeek: number;
   paused: boolean;
+  /**
+   * True when this credential has spend in the current 7d window — i.e. it is
+   * the one actually being worked against, not a configured-but-idle one
+   * (issue #891). Optional for backward-compat with daemons that predate the
+   * field; a paused row is always active, so it defaults to true.
+   */
+  active?: boolean;
   blockResetsAt: string;
   weekResetsAt: string;
 }
@@ -52,6 +59,9 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
         const window: 'block' | 'week' = blockHit ? 'block' : 'week';
         const resumeAt = window === 'block' ? row.blockResetsAt : row.weekResetsAt;
         const windowLabel = window === 'block' ? '6h' : '7d';
+        // A paused credential is by definition the active one; default to active
+        // for daemons predating the `active` field (issue #891).
+        const isActive = row.active ?? true;
         return (
           <Alert
             key={row.credentialId}
@@ -61,6 +71,14 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
             <PauseCircle className="h-4 w-4" aria-hidden="true" />
             <AlertTitle className="font-mono text-[13px]">
               Paused — {windowLabel} AI-unit cap reached
+              {isActive ? (
+                <span
+                  className="ml-2 text-foreground"
+                  data-testid={`ai-units-credential-state-${row.credentialId}`}
+                >
+                  (Active)
+                </span>
+              ) : null}
             </AlertTitle>
             <AlertDescription className="font-mono text-[12px] text-muted-foreground">
               <span>

@@ -133,6 +133,8 @@ interface OverviewStatusV1 {
       capPerBlock: number;
       capPerWeek: number;
       paused: boolean;
+      /** True when the credential has spend this 7d window (issue #891). Optional for backward-compat. */
+      active?: boolean;
       blockResetsAt: string;
       weekResetsAt: string;
     }>;
