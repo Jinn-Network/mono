@@ -10,8 +10,22 @@ vi.mock('../../api/client.js', () => ({
   api: {
     getBootstrap: vi.fn(async () => ({
       chain: 'base-sepolia',
-      rpcUrl: 'https://my-tenderly.example/abc',
-      defaultRpcUrl: 'https://sepolia.base.org',
+      rpcUrl: 'https://my-alchemy.example/key',
+      defaultRpcUrl: 'https://base-sepolia.publicnode.com',
+      rpcUrls: [
+        'https://my-alchemy.example/key',
+        'https://base-sepolia.publicnode.com',
+        'https://sepolia.base.org',
+      ],
+      publicDefaults: [
+        'https://base-sepolia.publicnode.com',
+        'https://sepolia.base.org',
+      ],
+      rpcSlotHealth: [
+        { ok: true, host: 'my-alchemy.example', latencyMs: 12 },
+        { ok: true, host: 'base-sepolia.publicnode.com', latencyMs: 40 },
+        { ok: false, host: 'sepolia.base.org', code: 429 },
+      ],
     })),
     updateNetwork: vi.fn(async () => ({ restartRequired: true })),
     discovery: {
@@ -54,10 +68,38 @@ describe('NetworkTab', () => {
     expect(heading).toBeTruthy();
   });
 
-  it('renders the chain locked chip + RPC URL input', () => {
+  it('renders the chain locked chip', async () => {
     render(withProviders(<NetworkTab />));
-    expect(screen.getByText(/locked/i)).toBeTruthy();
-    expect(screen.getByLabelText(/rpc url/i)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/locked/i)).toBeTruthy());
+  });
+
+  it('renders one ordered read-only row per slot with masked host + health (AC1/AC4)', async () => {
+    render(withProviders(<NetworkTab />));
+    const list = await screen.findByTestId('network-rpc-slots');
+    const rows = list.querySelectorAll('[data-testid="network-rpc-slot"]');
+    expect(rows).toHaveLength(3);
+    // Ordered by slot index; hosts are masked (no path / key segment).
+    expect(rows[0]!.textContent).toMatch(/my-alchemy\.example/);
+    expect(rows[0]!.textContent).not.toMatch(/\/key/);
+    expect(rows[1]!.textContent).toMatch(/base-sepolia\.publicnode\.com/);
+    expect(rows[2]!.textContent).toMatch(/sepolia\.base\.org/);
+    // The 429 slot renders a degraded badge.
+    expect(rows[2]!.textContent).toMatch(/429|unhealthy|degraded/i);
+  });
+
+  it('shows the Primary RPC input prefilled with the current primary (AC2)', async () => {
+    render(withProviders(<NetworkTab />));
+    const input = await screen.findByLabelText(/primary rpc/i);
+    expect((input as HTMLInputElement).value).toBe('https://my-alchemy.example/key');
+  });
+
+  it('renders the "tried first — falls back to public chain on failure" copy (AC4)', async () => {
+    render(withProviders(<NetworkTab />));
+    await waitFor(() =>
+      expect(screen.getByTestId('network-tab').textContent).toMatch(
+        /tried first.*falls back to public chain on failure/i,
+      ),
+    );
   });
 });
 
