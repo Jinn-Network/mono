@@ -28,6 +28,12 @@ import {
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
+import {
+  KNOWN_INSTANCE_ID,
+  KNOWN_REPO,
+  KNOWN_COMMIT,
+  KNOWN_MANIFEST_CID,
+} from '../release/tier-2/fixtures/known-instance.js';
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const CONTRACTS_DIR = resolve(E2E_DIR, '..', '..', '..', 'contracts');
@@ -1143,6 +1149,63 @@ export async function startDaemon(
   return { daemon, store, stop };
 }
 
+/**
+ * Start a producer/solver daemon whose `swe-rebench-v2.v1` solve leg is served
+ * by the hermetic env-gated StubHarness (returns the canned known-good patch;
+ * never calls an LLM). Sets JINN_HARNESS_STUB_INSTANCE + JINN_TEST_MODE +
+ * JINN_HARNESS_STUB_FIXTURES_DIR before `startDaemon` (which builds harnesses
+ * in-process via `buildHarnesses`, registering the stub by `solverType`
+ * first-match) and restores the prior env once `startDaemon` returns so a
+ * sibling evaluator daemon started afterwards does not pick the stub up. The
+ * evaluation role is never handled by the stub (StubHarness.supports() returns
+ * false for role === 'evaluation').
+ */
+export async function startSweRebenchSolverDaemon(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  ipfsGatewayUrl: string,
+  v3Env: TaskV3Env,
+  ipfsRegistryUrl: string,
+  opts: { instanceLabel?: string; fixturesDir: string; instanceMatcher: string },
+): Promise<RunningDaemon> {
+  const prev = {
+    instance: process.env['JINN_HARNESS_STUB_INSTANCE'],
+    testMode: process.env['JINN_TEST_MODE'],
+    fixturesDir: process.env['JINN_HARNESS_STUB_FIXTURES_DIR'],
+  };
+  process.env['JINN_HARNESS_STUB_INSTANCE'] = opts.instanceMatcher;
+  process.env['JINN_TEST_MODE'] = '1';
+  process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] = opts.fixturesDir;
+
+  const restore = (): void => {
+    if (prev.instance === undefined) delete process.env['JINN_HARNESS_STUB_INSTANCE'];
+    else process.env['JINN_HARNESS_STUB_INSTANCE'] = prev.instance;
+    if (prev.testMode === undefined) delete process.env['JINN_TEST_MODE'];
+    else process.env['JINN_TEST_MODE'] = prev.testMode;
+    if (prev.fixturesDir === undefined) delete process.env['JINN_HARNESS_STUB_FIXTURES_DIR'];
+    else process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] = prev.fixturesDir;
+  };
+
+  let daemon: RunningDaemon;
+  try {
+    daemon = await startDaemon(
+      fixture,
+      operator,
+      'prediction-v1-baseline',
+      ipfsGatewayUrl,
+      v3Env,
+      ipfsRegistryUrl,
+      { instanceLabel: opts.instanceLabel ?? 'op-a' },
+    );
+  } finally {
+    // The stub harness is captured inside buildHarnesses synchronously during
+    // startDaemon; once startDaemon returns it is safe to restore the env so a
+    // sibling evaluator daemon started afterwards does not pick the stub up.
+    restore();
+  }
+  return daemon;
+}
+
 // ── Task posting + claim detection ────────────────────────────────────────────
 
 /**
@@ -1325,6 +1388,150 @@ export async function postPredictionV1Task(
   // The V3 router's createTask requires: msg.value == solutionBudget + verdictBudget
   // where solutionBudget = rate * maxClaims and verdictBudget = rate * maxClaims * requiredVerdicts.
   // With maxClaims=10 and requiredVerdicts=1: value = rate * 10 + rate * 10 * 1 = rate * 20.
+  const MAX_CLAIMS = 10n;
+  const REQUIRED_VERDICTS = 1n;
+  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
+  const solutionBudget = rateArg * MAX_CLAIMS;
+  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
+  const value = solutionBudget + verdictBudget;
+
+  const created = await writeContractTx({
+    publicClient: fixture.publicClient,
+    rpcUrl,
+    account: creator,
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createTask',
+    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
+    value,
+  });
+
+  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
+  const taskId = BigInt(String(taskCreated['taskId']));
+  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
+
+  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+}
+
+/**
+ * Build, sign, and register a `swe-rebench-v2.v1` task with the mock IPFS server,
+ * then post it on the locally-deployed V3 JinnRouter. The returned shape matches
+ * `postPredictionV1Task` so `waitForDaemonClaim` / `waitForDelivery` /
+ * `waitForVerdict` consume it unchanged.
+ *
+ * The task's `spec` carries the SweRebenchV2TaskSchema fields for the
+ * known-solvable instance `sympy__sympy-27510` (fixtures/known-instance.ts) —
+ * the same field set T3.1 writes (T3.1-producer-evaluator-real.ts:648-663). The
+ * producer daemon's StubHarness injects the canned patch for the solve leg.
+ */
+export async function postSweRebenchV2Task(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  creatorPrivKey: `0x${string}`,
+  mockIpfs: MockIpfsServer,
+  v3Env: TaskV3Env,
+  opts: { disallowSolverSelfEvaluation?: boolean } = {},
+): Promise<PostedPredictionTask> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const routerAddress = v3Env.routerAddress;
+  const marketplaceAddress = v3Env.mockMarketplaceAddress;
+
+  const creator = privateKeyToAccount(creatorPrivKey);
+  const now = Date.now();
+  const nowSec = Math.floor(now / 1000);
+
+  // SWE-rebench v2 task document. spec fields mirror the schema T3.1 writes
+  // (T3.1-producer-evaluator-real.ts:648-663). manifestDigest uses the
+  // SWE-rebench v2 mainline manifest CID so the on-chain manifest cross-check
+  // is consistent.
+  const MANIFEST_CID = KNOWN_MANIFEST_CID;
+  const unsignedTaskDoc = {
+    schemaVersion: 'task.v1' as const,
+    id: 'daemon-harness-e2e-swe-rebench-v2-1',
+    solverType: 'swe-rebench-v2.v1',
+    solverNetManifestCid: MANIFEST_CID,
+    contractId: 'swe-rebench-v2',
+    contractVersion: 'v1',
+    role: 'restoration' as const,
+    description: `SWE-rebench v2 instance ${KNOWN_INSTANCE_ID}`,
+    window: {
+      startTs: now - 5_000,
+      endTs: now + 600_000,
+    },
+    spec: {
+      schemaVersion: 'swe-rebench-v2.v1',
+      solverType: 'swe-rebench-v2.v1',
+      instance_id: KNOWN_INSTANCE_ID,
+      repo: KNOWN_REPO,
+      base_commit: KNOWN_COMMIT,
+      language: 'python',
+      problem_statement: `SWE-rebench v2 instance: ${KNOWN_INSTANCE_ID}`,
+      interface: '',
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: '2025_01',
+      deadline_unix: nowSec + 60 * 60,
+      round_month: '2025-01',
+    },
+    eligibility: {},
+    claimPolicy: {
+      mode: 'parallel' as const,
+      maxClaims: 10,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 600,
+      claimWindowStartTs: nowSec - 5,
+      claimWindowEndTs: nowSec + 300,
+      submissionDeadlineTs: nowSec + 900,
+    },
+    creator: {
+      safeAddress: operator.safeAddress as `0x${string}`,
+      agentEoa: operator.agentAddress as `0x${string}`,
+    },
+    createdAt: now,
+  };
+
+  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
+  const signedTaskDoc = {
+    ...unsignedTaskDoc,
+    signature: {
+      algo: 'secp256k1' as const,
+      signer: creator.address,
+      hash: signed.hash,
+      sig: signed.sig,
+    },
+  };
+
+  const taskJson = JSON.stringify(signedTaskDoc);
+  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  mockIpfs.register(taskCidDigest, signedTaskDoc);
+
+  const manifestDigest = keccak256(toBytes(MANIFEST_CID)) as `0x${string}`;
+
+  const deliveryRate = await getMechDeliveryRate(
+    fixture.publicClient,
+    v3Env.mockMechAddress as Address,
+  );
+  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
+  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
+
+  const latestBlock = await fixture.publicClient.getBlock();
+  const chainNowSec = Number(latestBlock.timestamp);
+  const onchainPolicy = {
+    claimWindowStart: BigInt(chainNowSec - 5),
+    claimWindowEnd: BigInt(chainNowSec + 300),
+    submissionDeadline: BigInt(chainNowSec + 900),
+    claimLeaseTtlSeconds: 600,
+    maxClaims: 10,
+    maxClaimsPerOperator: 1,
+    policyHook: zeroAddress,
+    evaluationPolicy: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      evaluationDeadline: BigInt(chainNowSec + 1_200),
+      maxVerdictsPerEvaluator: 1,
+      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
+    },
+  };
+
   const MAX_CLAIMS = 10n;
   const REQUIRED_VERDICTS = 1n;
   const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
