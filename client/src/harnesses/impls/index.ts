@@ -230,7 +230,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     }),
   );
 
-  // Env-gated stub harness for T2.2 release gate. Active only when
+  // Env-gated stub harness for T2.4 release gate. Active only when
   // JINN_HARNESS_STUB_INSTANCE is set; no-op otherwise.
   const stub = maybeCreateStubHarnessFromEnv();
   if (stub) {
