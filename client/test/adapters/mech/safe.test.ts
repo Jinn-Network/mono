@@ -96,3 +96,87 @@ describe('executeSafeTransaction nonce refresh', () => {
     expect(writeContract.mock.calls[1]![0]).toMatchObject({ nonce: 2302 });
   });
 });
+
+describe('executeSafeTransaction reconcile-first (issue #897)', () => {
+  const ORIGINAL_HASH = `0x${'11'.repeat(32)}` as Hex;
+  const CHAIN_ID = baseSepolia.id;
+  const PINNED_NONCE = 2301;
+
+  it('reconciles to the mined original tx on replacement-underpriced instead of re-signing (AC3)', async () => {
+    // Seed the ledger so the entry for the pinned nonce already carries the
+    // hash of the original delivery tx submitted on a prior attempt.
+    const ledger = createMemoryTxSubmissionLedger();
+    await ledger.recordTxSubmission({
+      chainId: CHAIN_ID,
+      from: TEST_SIGNER_ADDRESS,
+      nonce: PINNED_NONCE,
+      hash: ORIGINAL_HASH,
+      logicalTx: 'safe.execTransaction',
+      submittedAtMs: Date.now(),
+      fees: { maxFeePerGas: 100n, maxPriorityFeePerGas: 10n },
+      to: TEST_SAFE_ADDRESS,
+      value: 0n,
+      data: TEST_CALL_DATA,
+    });
+
+    // Attempt 0 (the bump) fails replacement-underpriced; the original tx
+    // mined mid-bump. The loop must reconcile, NOT re-sign.
+    const writeContract = vi
+      .fn()
+      .mockRejectedValue(new Error('replacement transaction underpriced'));
+    const signMessage = vi.fn().mockResolvedValue(TEST_SAFE_SIGNATURE);
+    // The original tx is now mined and successful.
+    const getTransactionReceipt = vi.fn(async (args: { hash: Hex }) => {
+      if (args.hash === ORIGINAL_HASH) return { status: 'success' };
+      throw new Error(`unexpected getTransactionReceipt: ${args.hash}`);
+    });
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+    const readContract = vi.fn(async (args: { functionName: string }) => {
+      if (args.functionName === 'nonce') return 0n;
+      if (args.functionName === 'getTransactionHash') return TEST_SAFE_TX_HASH;
+      throw new Error(`unexpected readContract call: ${args.functionName}`);
+    });
+    const estimateFeesPerGas = vi.fn().mockResolvedValue({
+      maxFeePerGas: 100n,
+      maxPriorityFeePerGas: 10n,
+    });
+    const getGasPrice = vi.fn();
+    const getChainId = vi.fn().mockResolvedValue(CHAIN_ID);
+    const getTransactionCount = vi.fn(async (args: { blockTag?: string }) => {
+      if (args.blockTag === 'latest') return PINNED_NONCE;
+      return PINNED_NONCE;
+    });
+
+    const hash = await executeSafeTransaction(
+      {
+        getChainId,
+        getTransactionCount,
+        readContract,
+        estimateFeesPerGas,
+        getGasPrice,
+        getTransactionReceipt,
+        waitForTransactionReceipt,
+      } as never,
+      {
+        account: { address: TEST_SIGNER_ADDRESS },
+        chain: baseSepolia,
+        signMessage,
+        writeContract,
+      } as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      { ledger },
+    );
+
+    // Reconciled to the original tx — returned its hash, did NOT loop 5×.
+    expect(hash).toBe(ORIGINAL_HASH);
+    expect(getTransactionReceipt).toHaveBeenCalledWith({ hash: ORIGINAL_HASH });
+    // Exactly one write attempt happened (the one that failed underpriced);
+    // the loop did not re-sign a fresh execTransaction at the advanced nonce.
+    expect(writeContract).toHaveBeenCalledTimes(1);
+  });
+});
