@@ -42,7 +42,7 @@ if (!absPath || !target) {
 
 // Resolve the built loader. This file lives at
 //   <repo>/.claude/skills/create-plugin/references/load-probe.mjs
-// so five levels up is the repo root; the loader is at
+// so four levels up is the repo root; the loader is at
 //   <repo>/client/dist/plugins/index.js
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../../../');
