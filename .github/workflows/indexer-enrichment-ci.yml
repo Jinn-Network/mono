@@ -1,0 +1,75 @@
+name: Indexer Enrichment CI
+
+on:
+  pull_request:
+    branches: [main, next]
+    paths:
+      - '.github/workflows/indexer-enrichment-ci.yml'
+      - 'packages/indexer-enrichment/**'
+      - 'packages/indexer/**'
+      - 'packages/sdk/**'
+  push:
+    branches: [main, next]
+    paths:
+      - '.github/workflows/indexer-enrichment-ci.yml'
+      - 'packages/indexer-enrichment/**'
+      - 'packages/indexer/**'
+      - 'packages/sdk/**'
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Enrichment Worker Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/indexer-enrichment
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - run: corepack enable
+
+      # The worker portal-links @jinn-network/indexer, which portal-links
+      # @jinn-network/sdk. The SDK's exports map points at compiled dist/*.js
+      # (dist/ is gitignored), so the SDK must be built before any worker step
+      # resolves the indexer portal chain.
+      - name: Build @jinn-network/sdk
+        working-directory: packages/sdk
+        run: |
+          yarn install --immutable
+          yarn build
+
+      # The indexer install resolves its own `portal:../sdk`; the worker imports
+      # the indexer's TS source via its exports map (no indexer build needed).
+      - name: Install @jinn-network/indexer (portal target)
+        working-directory: packages/indexer
+        run: yarn install --immutable
+
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+
+  docker:
+    name: Enrichment Worker Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Build context is packages/ (not packages/indexer-enrichment/) so the
+      # Dockerfile can COPY + build the @jinn-network/sdk and @jinn-network/indexer
+      # portal siblings.
+      - name: Build enrichment worker image
+        working-directory: packages
+        run: |
+          docker build \
+            --build-arg JINN_ENRICHMENT_COMMIT=${{ github.sha }} \
+            -f indexer-enrichment/deploy/Dockerfile \
+            -t jinn-enrichment-worker:ci \
+            .
