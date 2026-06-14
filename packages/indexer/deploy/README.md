@@ -153,7 +153,9 @@ Ponder's canonical approach for re-deploys without operator-visible downtime:
 4. Run `ponder db create-views --schema=jinn_indexer_v2 --views-schema=jinn_indexer` to swap the public-facing views over to `v2`'s tables.
 5. Decommission the `v1` instance and drop its schema.
 
-Or use `ponder start --views-schema=jinn_indexer` on the new deployment to automate the views swap on `/ready`.
+The Dockerfile CMD now runs `ponder start --views-schema=jinn_indexer`, so step 4 happens automatically: each deployment swaps the public-facing `jinn_indexer` views to its own data schema once `/ready` is 200. (Invariant: `DATABASE_SCHEMA` must stay a different, versioned name — `jinn_indexer_vN` — or the data schema and the views schema collide and the deploy fails; see `.env.example`.)
+
+**Scope — what the auto-swap does and does not deliver.** The auto-swap benefits **external SQL consumers** (psql, the recovery procedure below, future read-replicas / BI) and removes the manual `ponder db create-views` footgun (the partial-swap hazard in §The all-entities-atomic view swap). It does **not** itself deliver operator-facing zero-downtime for `/explorer` + `/graphql` — those routes read through Ponder's runtime `db` bound to the running process's own `DATABASE_SCHEMA`, not through the public `jinn_indexer` views. Operator-facing zero-downtime is delivered by `railway.toml`'s `/ready` healthcheck cutover (#998): the old container keeps serving until the new one is `/ready`.
 
 This is the recommended pattern when shipping schema changes that would otherwise require a re-sync. See Ponder's "Self-hosting" docs §"Production deployment" for the canonical recipe.
 
