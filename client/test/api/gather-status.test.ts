@@ -1107,6 +1107,66 @@ describe('gatherStatusForApi', () => {
       expect(status.security).toEqual({ lastPasswordRotationAt: null });
     });
   });
+
+  it('security.lastPasswordRotationAt is the keystore-password file mtime (file source)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const { writeFileSync, utimesSync } = await import('node:fs');
+    await withTempStore(async (store) => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-pw-'));
+      const pwPath = join(dir, 'keystore-password');
+      writeFileSync(pwPath, 'deadbeef\n', { mode: 0o600 });
+      // Pin mtime to a known instant (2024-01-02T03:04:05Z).
+      const when = new Date('2024-01-02T03:04:05.000Z');
+      utimesSync(pwPath, when, when);
+
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-earn-')),
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: { source: 'file', filePath: pwPath },
+      });
+
+      expect(status.security.lastPasswordRotationAt).toBe('2024-01-02T03:04:05.000Z');
+    });
+  });
+
+  it('security.lastPasswordRotationAt is null when the password is env-sourced', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-earn-')),
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: { source: 'env' },
+      });
+      expect(status.security.lastPasswordRotationAt).toBeNull();
+    });
+  });
+
+  it('security.lastPasswordRotationAt is null when the keystore-password file is missing', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-earn-')),
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: {
+          source: 'file',
+          filePath: join(tmpdir(), 'definitely-absent-jinn-keystore-password'),
+        },
+      });
+      expect(status.security.lastPasswordRotationAt).toBeNull();
+    });
+  });
 });
 
 describe('gatherStatusForApi — no staking reads on the hot path (#992)', () => {
