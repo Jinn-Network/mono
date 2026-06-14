@@ -5,6 +5,7 @@ import { z } from 'zod/v3';
 import { KeyRound, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client.js';
+import { HarnessAuthStatusCard } from './HarnessAuthStatusCard.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
@@ -60,7 +61,7 @@ export function SecurityTab(): JSX.Element {
   };
 
   return (
-    <div data-testid="security-tab">
+    <div data-testid="security-tab" className="flex flex-col gap-6">
       <Card className="border-[var(--severity-blocking-border)]">
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div className="flex flex-col gap-1.5">
@@ -121,6 +122,7 @@ export function SecurityTab(): JSX.Element {
           </Form>
         </CardContent>
       </Card>
+      <HarnessAuthStatusCard />
     </div>
   );
 }
