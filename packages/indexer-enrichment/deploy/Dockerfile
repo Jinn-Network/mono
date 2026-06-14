@@ -8,10 +8,12 @@
 # Dockerfile (the portal-sibling pattern), not claim-relayer's (which is
 # fully standalone).
 #
-# Unlike the indexer, the worker consumes the indexer's TS SOURCE through the
-# indexer's `exports` map (./schema, ./enrichment-parse, ./ipfs) — those files
-# are not built to dist, so the indexer source tree must survive into the
-# runtime stage alongside the worker's compiled dist/.
+# The worker consumes the indexer's TS SOURCE through the indexer's `exports`
+# map (./enrichment-parse, ./ipfs) at BUILD time. esbuild INLINES those modules
+# into dist/index.js (#779 FIX 2), so the RUNTIME stage carries only the bundle
+# + the worker's external node_modules (pg, drizzle-orm) — it depends on neither
+# Node's experimental `.ts` type-stripping nor the indexer source tree. The
+# indexer src tree therefore stays in the build stage only.
 #
 # Build (from packages/):
 #   docker build -t jinn-enrichment-worker:latest -f indexer-enrichment/deploy/Dockerfile .
@@ -41,10 +43,10 @@ COPY sdk/src ./src
 RUN yarn build
 
 # The worker portal-links @jinn-network/indexer and consumes its TS source via
-# the indexer's exports map (./schema, ./enrichment-parse, ./ipfs). The indexer
-# install resolves its own `portal:../sdk`, so copy the indexer's manifest +
-# the source files the worker imports. No indexer build is needed — the worker's
-# tsc (Bundler resolution) reads the .ts sources directly through the portal.
+# the indexer's exports map (./enrichment-parse, ./ipfs). The indexer install
+# resolves its own `portal:../sdk`, so copy the indexer's manifest + the source
+# files the worker imports. No indexer build is needed — esbuild (Bundler
+# resolution) reads the .ts sources directly through the portal and inlines them.
 WORKDIR /app/indexer
 COPY indexer/package.json indexer/yarn.lock ./
 RUN corepack enable && yarn install --immutable
@@ -58,8 +60,10 @@ WORKDIR /app/indexer-enrichment
 COPY indexer-enrichment/package.json indexer-enrichment/yarn.lock indexer-enrichment/.yarnrc.yml ./
 RUN corepack enable && yarn install --immutable
 
-# Compile the worker to dist/.
+# Bundle the worker to dist/index.js (esbuild inlines the @jinn-network/* portal
+# .ts sources — see scripts/build.mjs).
 COPY indexer-enrichment/tsconfig.json ./
+COPY indexer-enrichment/scripts ./scripts
 COPY indexer-enrichment/src ./src
 RUN yarn build
 
@@ -73,16 +77,12 @@ ENV YARN_NODE_LINKER=node-modules
 
 WORKDIR /app/indexer-enrichment
 
-# The portal symlinks are followed at runtime, so the sibling trees must be
-# present. sdk → its built dist; indexer → its manifest + the TS sources the
-# worker imports via the exports map.
-COPY --from=build /app/sdk /app/sdk
-COPY --from=build /app/indexer/package.json /app/indexer/yarn.lock /app/indexer/ponder.schema.ts /app/indexer/tsconfig.json /app/indexer/
-COPY --from=build /app/indexer/src /app/indexer/src
-COPY --from=build /app/indexer/node_modules /app/indexer/node_modules
-
-# Worker's built tree + resolved node_modules (which contains the portal symlink
-# node_modules/@jinn-network/indexer → ../indexer).
+# The runtime needs ONLY the bundle + the worker's external node_modules (pg,
+# drizzle-orm). The `@jinn-network/*` source is already inlined into dist/index.js
+# by esbuild, so the indexer/sdk sibling trees are NOT copied into runtime. The
+# worker's node_modules still carries a portal symlink to ../indexer, but nothing
+# resolves it at runtime (the bundle is self-contained), so a dangling symlink is
+# harmless.
 COPY --from=build /app/indexer-enrichment/node_modules ./node_modules
 COPY --from=build /app/indexer-enrichment/package.json /app/indexer-enrichment/yarn.lock ./
 COPY --from=build /app/indexer-enrichment/dist ./dist

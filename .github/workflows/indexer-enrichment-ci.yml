@@ -73,3 +73,35 @@ jobs:
             -f indexer-enrichment/deploy/Dockerfile \
             -t jinn-enrichment-worker:ci \
             .
+
+      # Boot smoke test (#779 FIX 2): docker BUILD alone never proved the image
+      # actually RUNS — a broken import chain (e.g. if the bundle ever regressed
+      # to verbatim `.ts` imports + a base image without type-stripping) would
+      # ship undetected. Run the image against an unreachable DB and assert it
+      # exits NON-ZERO with the fail-loud FATAL DB log (#1068 boot guarantee).
+      # The bundle is self-contained, so reaching the DB probe also proves the
+      # whole import/portal chain resolved at runtime.
+      - name: Boot smoke test (fail-loud on unreachable DB)
+        run: |
+          set -euo pipefail
+          # 127.0.0.1:1 is closed → pool.connect() throws at boot.
+          OUT="$(timeout 30s docker run --rm \
+            -e DATABASE_URL=postgres://nope:nope@127.0.0.1:1/none \
+            -e DATABASE_SCHEMA=none \
+            jinn-enrichment-worker:ci 2>&1)" && CODE=0 || CODE=$?
+          echo "--- container output ---"
+          echo "$OUT"
+          echo "--- exit code: $CODE ---"
+          if [ "$CODE" -eq 0 ]; then
+            echo "FAIL: worker exited 0 against an unreachable DB (expected non-zero fail-loud)"
+            exit 1
+          fi
+          if [ "$CODE" -eq 124 ]; then
+            echo "FAIL: worker hung (timeout) instead of failing loud at boot"
+            exit 1
+          fi
+          if ! echo "$OUT" | grep -q "FATAL: cannot connect to Postgres at boot"; then
+            echo "FAIL: missing the fail-loud FATAL DB boot log"
+            exit 1
+          fi
+          echo "PASS: image boots and fails loud on unreachable DB (exit $CODE)"

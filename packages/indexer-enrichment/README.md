@@ -32,9 +32,18 @@ its own event loop, and writes the result back into `verdict_envelope_meta`.
 3. **Write** (`src/db.ts` `upsertVerdict`) — upsert the full field set keyed
    `(request_id, chain_id)`, guarded by `enriched_at_block` most-recent-wins
    (mirrors the handler's `onConflictDoUpdate`), with `enrichment_status='ok'`.
-4. **Retry** (`markRetry`) — when the verdict parsed but a follow-up step failed,
-   set `enrichment_status='retry'`, bump `retry_count`, and back off via
-   `next_attempt_at` (capped exponential); terminal `failed` at `maxRetries`.
+   On a `swe-rebench-v2` **task-body** fetch failure the worker
+   **graceful-degrades exactly like the handler**: it warns, leaves
+   `instance_id=''` / `solver_net_manifest_cid=''`, and still writes the verdict
+   row with `enrichment_status='ok'`. The launcher's `instanceId_not:""` filter
+   then excludes that partial row from success counts (#669). It does **not**
+   mark such rows for retry — that would be stricter than the handler, and #779
+   is a behaviour-preserving refactor.
+
+The schema keeps `retry_count` / `next_attempt_at` columns and discovery still
+honours any pre-existing `pending`/`retry` rows, but the worker no longer writes
+them (no real transient path reaches a retry after the graceful-degrade above).
+`JINN_ENRICHMENT_MAX_RETRIES` is therefore reserved/inert today.
 
 The poll loop (`src/runner.ts`) is `setTimeout`-scheduled with a re-entrancy
 guard. The boot path (`src/index.ts`) **fails loud** — a DB-connect failure
@@ -59,7 +68,7 @@ Worker-specific knobs:
 | `JINN_ENRICHMENT_POLL_INTERVAL_MS` | `10000` | Between ticks. |
 | `JINN_ENRICHMENT_BATCH_SIZE` | `25` | Anchors per tick (the O4 drain knob). |
 | `JINN_ENRICHMENT_IPFS_TIMEOUT_MS` | `5000` | Per-fetch timeout. |
-| `JINN_ENRICHMENT_MAX_RETRIES` | `5` | Before terminal `failed`. |
+| `JINN_ENRICHMENT_MAX_RETRIES` | `5` | Reserved/inert — the worker graceful-degrades instead of marking retries (see How it works). |
 
 ## Cutover / rollback
 
@@ -111,7 +120,17 @@ healthcheck, `ON_FAILURE` restart). The Dockerfile build context is `packages/`.
 
 ```bash
 yarn install          # standalone package (own yarn.lock)
-yarn typecheck
+yarn typecheck        # tsc --noEmit (type safety)
 yarn test             # vitest; DB tests run against PGlite (a real Postgres engine)
-yarn build            # tsc → dist/
+yarn build            # esbuild → single self-contained dist/index.js
 ```
+
+`yarn build` (esbuild, `scripts/build.mjs`) **inlines** the shared
+`@jinn-network/indexer/{ipfs,enrichment-parse}` `.ts` sources into
+`dist/index.js`, keeping `pg` / `drizzle-orm` external. The production runtime
+therefore depends on **neither** Node's experimental `.ts` type-stripping **nor**
+the indexer source tree (#779 FIX 2). Tests still import the `.ts` modules
+through the portal directly, so dev ergonomics are unchanged. The
+`indexer-enrichment-ci.yml` docker job `docker run`s the built image against an
+unreachable DB and asserts the fail-loud FATAL boot — locking both the runtime
+import chain and the #1068 boot guarantee.

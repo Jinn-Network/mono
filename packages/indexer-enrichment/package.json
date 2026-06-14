@@ -6,7 +6,6 @@
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "bin": {
     "jinn-indexer-enrichment": "./dist/index.js"
   },
@@ -15,7 +14,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "dev": "tsx src/index.ts"
@@ -29,6 +28,7 @@
     "@electric-sql/pglite": "^0.5.2",
     "@types/node": "^25.9.3",
     "@types/pg": "^8.15.0",
+    "esbuild": "^0.25.0",
     "tsx": "^4.22.4",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"
