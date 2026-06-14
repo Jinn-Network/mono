@@ -2,7 +2,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
-import type { HarnessAuthSource } from '../../auth-source.js';
+import { displayPath, type HarnessAuthSource } from '../../auth-source.js';
 import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { HERMES_AGENT_HARNESS } from '../../names.js';
@@ -210,13 +210,9 @@ export class HermesHarness implements Harness {
   async getAuthSource(): Promise<HarnessAuthSource> {
     const home = process.env['HERMES_HOME']?.trim() || join(homedir(), '.hermes');
     const absolutePath = join(home, '.env');
-    // Tilde-abbreviate the display path when it's under the real home dir.
-    const sourcePath = absolutePath.startsWith(homedir())
-      ? absolutePath.replace(homedir(), '~')
-      : absolutePath;
     return {
       sourceKind: 'file',
-      sourcePath,
+      sourcePath: displayPath(absolutePath),
       absolutePath,
       envKey: 'OPENROUTER_API_KEY',
       docAnchor: 'hermes-agent',

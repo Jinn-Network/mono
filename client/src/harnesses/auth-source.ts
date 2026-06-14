@@ -7,7 +7,19 @@
  * key bytes. See docs/runbooks/rotating-harness-keys.md.
  */
 import { stat, readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import type { Harness } from './types.js';
+
+/**
+ * Tilde-abbreviate an absolute path for operator display when it sits under the
+ * real home dir; otherwise return it unchanged. Used by harness `getAuthSource`
+ * implementations so the dashboard shows `~/.hermes/.env` rather than a full
+ * `/Users/...` path.
+ */
+export function displayPath(absolutePath: string): string {
+  const home = homedir();
+  return absolutePath.startsWith(home) ? absolutePath.replace(home, '~') : absolutePath;
+}
 
 export type HarnessAuthSource =
   | {
@@ -132,7 +144,7 @@ export async function resolveHarnessAuthStatus(
       harnessName: harness.name,
       sourceKind: 'env',
       envKey: source.envKey,
-      keySuffix: value.length > 0 ? safeSuffix(value) : null,
+      keySuffix: safeSuffix(value),
       lastModified: null,
       state: value.length > 0 ? 'loaded' : 'missing',
       docAnchor: source.docAnchor,

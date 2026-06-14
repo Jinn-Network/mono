@@ -8,7 +8,7 @@ import type {
   RuntimePlugin,
   Solution,
 } from '../../types.js';
-import type { HarnessAuthSource } from '../../auth-source.js';
+import { displayPath, type HarnessAuthSource } from '../../auth-source.js';
 import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
@@ -153,12 +153,9 @@ export class LearnerHarness implements Harness {
       const absolutePath = codexHome
         ? join(codexHome, 'auth.json')
         : join(homedir(), '.codex', 'auth.json');
-      const sourcePath = absolutePath.startsWith(homedir())
-        ? absolutePath.replace(homedir(), '~')
-        : absolutePath;
       return {
         sourceKind: 'file',
-        sourcePath,
+        sourcePath: displayPath(absolutePath),
         absolutePath,
         envKey: 'OPENAI_API_KEY',
         docAnchor: 'codex',
