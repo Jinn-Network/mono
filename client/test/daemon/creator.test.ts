@@ -234,6 +234,61 @@ describe('CreatorLoop', () => {
     consoleSpy.mockRestore();
   });
 
+  it('retries a recoverable-looking unknown error next tick without writing a backoff key', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const states: Task[] = [{ id: 'recov', description: 'recoverable hiccup' }];
+    const postSpy = vi
+      .spyOn(adapter, 'postTask')
+      .mockRejectedValue(new Error('fetch failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store, SAFE);
+
+    await loop.tick();
+    await loop.tick();
+
+    expect(postSpy).toHaveBeenCalledTimes(2);
+    expect(store.getConfigValue(`create_failed:${SAFE}:recov`)).toBeFalsy();
+    expect(store.getConfigValue(`create_failed_unknown:${SAFE}:recov`)).toBeFalsy();
+    const warnMsg = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(warnMsg).toContain('[creator]');
+    expect(warnMsg).toContain('recov');
+
+    warnSpy.mockRestore();
+    store.close();
+    await adapter.stop();
+  });
+
+  it('writes the short-backoff distinct key (not the permanent key) for a genuinely-unknown error', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const states: Task[] = [{ id: 'weird', description: 'unclassifiable' }];
+    const postSpy = vi
+      .spyOn(adapter, 'postTask')
+      .mockRejectedValue(new Error('something totally unclassifiable xyz'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store, SAFE);
+
+    await loop.tick();
+    await loop.tick();
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(store.getConfigValue(`create_failed_unknown:${SAFE}:weird`)).toBeTruthy();
+    expect(store.getConfigValue(`create_failed:${SAFE}:weird`)).toBeFalsy();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[creator] Create failure for weird'),
+      expect.any(Error),
+    );
+
+    errorSpy.mockRestore();
+    store.close();
+    await adapter.stop();
+  });
+
   it('posts generated tasks once per bucket and again in a new bucket', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
