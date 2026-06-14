@@ -67,13 +67,11 @@ export function enumerateStacks(prs: PrDescriptor[], baseBranch = 'next'): Stack
 
   const childrenOf = new Map<number, PrDescriptor[]>();
   const roots: PrDescriptor[] = [];
-  const numberOfHead = new Map<string, number>();
-  for (const pr of rooted) numberOfHead.set(pr.headRefName, pr.number);
   for (const pr of rooted) {
     if (pr.baseRefName === baseBranch) {
       roots.push(pr);
     } else {
-      const parentNumber = numberOfHead.get(pr.baseRefName)!;
+      const parentNumber = headToPr.get(pr.baseRefName)!.number;
       const list = childrenOf.get(parentNumber) ?? [];
       list.push(pr);
       childrenOf.set(parentNumber, list);
@@ -94,7 +92,7 @@ export function enumerateStacks(prs: PrDescriptor[], baseBranch = 'next'): Stack
           headRefName: pr.headRefName,
           baseRefName: pr.baseRefName,
           tier: depth === 0 ? 'root' : 'stacked',
-          parentNumber: depth === 0 ? null : numberOfHead.get(pr.baseRefName)!,
+          parentNumber: depth === 0 ? null : headToPr.get(pr.baseRefName)!.number,
           stackRootNumber: root.number,
           depth,
         });
