@@ -185,6 +185,56 @@ describe('SpendPanel', () => {
     ).toContain('3512.5 gwei');
   });
 
+  it('surfaces a low-runway state message below 100 Tasks', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      // 99 × per-Task cost (3_512_500_000_000) = 347_737_500_000_000.
+      buildStatusResponse('Polymarket', '347737500000000'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({
+          solutionPriceWei: '1000000000000',
+          verdictPriceWei: '500000000000',
+        })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-low-runway'),
+      ).toBeTruthy(),
+    );
+    expect(
+      screen.getByTestId('launcher-launched-spend-low-runway').textContent,
+    ).toMatch(/runway low/i);
+  });
+
+  it('hides the low-runway message at or above 100 Tasks', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      // 100 × per-Task cost = 351_250_000_000_000.
+      buildStatusResponse('Polymarket', '351250000000000'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({
+          solutionPriceWei: '1000000000000',
+          verdictPriceWei: '500000000000',
+        })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-runway').textContent,
+      ).toContain('100 Tasks'),
+    );
+    expect(
+      screen.queryByTestId('launcher-launched-spend-low-runway'),
+    ).toBeNull();
+  });
+
   it('matches launcher status by manifest solver type when names differ', async () => {
     const fetchLauncherStatus = vi.fn().mockResolvedValue(
       buildStatusResponse('swe-rebench-v2', '1500', 'swe-rebench-v2.v1'),
