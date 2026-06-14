@@ -198,6 +198,7 @@ function main(): void {
     const counts: Record<string, number> = Object.fromEntries(ALL_BUCKETS.map((b) => [b, 0]));
     for (const r of rows) counts[r.bucket] += 1;
     const windowDesc = windowDescription(args, sinceMs, total);
+    const inBucket = (r: ClassifiedRow): boolean => !args.bucket || r.bucket === args.bucket;
 
     if (args.json) {
       const out = {
@@ -211,9 +212,7 @@ function main(): void {
         },
         total,
         counts,
-        rows: args.drilldown
-          ? rows.filter((r) => !args.bucket || r.bucket === args.bucket)
-          : undefined,
+        rows: args.drilldown ? rows.filter(inBucket) : undefined,
       };
       console.log(JSON.stringify(out, null, 2));
       return;
@@ -237,7 +236,7 @@ function main(): void {
     console.log(`  ${'TOTAL'.padEnd(widest)}  ${String(total).padStart(5)}  100.0%`);
 
     if (args.drilldown) {
-      const drill = rows.filter((r) => !args.bucket || r.bucket === args.bucket);
+      const drill = rows.filter(inBucket);
       console.log('');
       console.log(
         args.bucket
