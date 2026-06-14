@@ -143,6 +143,9 @@ describe('runNetLivenessProbe', () => {
       fetchIndexerHeadBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(9_999n),
       postWebhook: null as ((p: NetLivenessAlertPayload) => Promise<void>) | null,
       thresholdMinutes: 30,
+      // no-op sleep keeps orchestrator tests fast (real delay is injected only by the script)
+      sleep: vi.fn<[number], Promise<void>>().mockResolvedValue(),
+      headSampleDelayMs: 4_000,
       now,
       ...overrides,
     };
@@ -152,6 +155,52 @@ describe('runNetLivenessProbe', () => {
     const deps = baseDeps();
     await runNetLivenessProbe(deps);
     expect(deps.fetchChainHead).toHaveBeenCalledTimes(2);
+  });
+
+  it('sleeps headSampleDelayMs BETWEEN the two chain-head reads', async () => {
+    // Drive advancement off the passage of time, NOT off two pre-baked distinct
+    // values: the head only advances when `sleep` is awaited. A future refactor
+    // that drops the delay leaves both reads on the same block → chain-halted.
+    let head = 1_000n;
+    const order: string[] = [];
+    const fetchChainHead = vi.fn<[], Promise<bigint>>().mockImplementation(async () => {
+      order.push(`head:${head}`);
+      return head;
+    });
+    const sleep = vi.fn<[number], Promise<void>>().mockImplementation(async (ms) => {
+      order.push(`sleep:${ms}`);
+      head += 1n; // a healthy chain produces a new block while we wait
+    });
+    const deps = baseDeps({
+      fetchChainHead,
+      sleep,
+      headSampleDelayMs: 4_000,
+      fetchLatestActivityBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(999n),
+      fetchIndexerHeadBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(1_000n),
+    });
+    const r = await runNetLivenessProbe(deps);
+    // sleep must land strictly between the two reads
+    expect(order).toEqual(['head:1000', 'sleep:4000', 'head:1001']);
+    expect(sleep).toHaveBeenCalledWith(4_000);
+    // advancement was observed (1000 → 1001) so this is NOT chain-halted
+    expect(r.state).not.toBe('chain-halted');
+  });
+
+  it('regression: identical head both reads → chain-halted, no alert (no fabricated advancement)', async () => {
+    // The real-world hazard: a single block (or a cached read) yields the SAME
+    // value twice. Without genuine advancement between samples the probe must
+    // report chain-halted and never page. This is the exact failure mode the
+    // back-to-back uncached reads produced before the delay seam existed.
+    const postWebhook = vi.fn<[NetLivenessAlertPayload], Promise<void>>().mockResolvedValue();
+    const deps = baseDeps({
+      fetchChainHead: vi.fn<[], Promise<bigint>>().mockResolvedValue(10_000n), // SAME both calls
+      fetchLatestActivityBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(1_000n), // would-be stale
+      fetchIndexerHeadBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(9_999n),
+      postWebhook,
+    });
+    const r = await runNetLivenessProbe(deps);
+    expect(r.state).toBe('chain-halted');
+    expect(postWebhook).not.toHaveBeenCalled();
   });
 
   it('stale + no webhook (null): classifies stale, does NOT throw, no POST', async () => {

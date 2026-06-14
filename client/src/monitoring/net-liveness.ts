@@ -149,8 +149,23 @@ export interface NetLivenessProbeDeps {
   /** POST an alert, or null to disable alerting (NO-OP). */
   postWebhook: ((payload: NetLivenessAlertPayload) => Promise<void>) | null;
   thresholdMinutes: number;
+  /**
+   * Sleep between the two chain-head reads so a healthy chain has time to mint
+   * a new block. Injected (no-op in tests) so the orchestrator is testable
+   * without a real wall-clock wait.
+   */
+  sleep: (ms: number) => Promise<void>;
+  /**
+   * Delay between the two head samples. Default ~4s — above Base's ~2s blocktime
+   * so a live chain advances at least one block between reads, and above viem's
+   * 4s default cache window so even a cached read can't alias the two samples.
+   */
+  headSampleDelayMs?: number;
   now: () => Date;
 }
+
+/** Default delay between the two chain-head samples (ms). See headSampleDelayMs. */
+export const DEFAULT_HEAD_SAMPLE_DELAY_MS = 4_000;
 
 /**
  * Run one probe: read chain head twice (to detect advancement within the run),
@@ -162,7 +177,13 @@ export interface NetLivenessProbeDeps {
 export async function runNetLivenessProbe(
   deps: NetLivenessProbeDeps,
 ): Promise<NetLivenessResult> {
+  // Sample the chain head twice, separated by a real delay, so a healthy chain
+  // has time to mint a new block between reads. Without the gap both reads land
+  // in the same block (and viem caches getBlockNumber for ~4s), making the two
+  // samples identical → the classifier would always read `chain-halted` and the
+  // alert branch would be unreachable.
   const prevChainHeadBlock = await deps.fetchChainHead();
+  await deps.sleep(deps.headSampleDelayMs ?? DEFAULT_HEAD_SAMPLE_DELAY_MS);
   const chainHeadBlock = await deps.fetchChainHead();
 
   // A throw on either indexer read means the indexer is unhealthy — we cannot
@@ -187,7 +208,7 @@ export async function runNetLivenessProbe(
   });
 
   if (result.state === 'stale' && deps.postWebhook) {
-    const staleForMinutes = Number(result.staleForBlocks) / BASE_BLOCKS_PER_MINUTE;
+    const staleForMinutes = Math.round(Number(result.staleForBlocks) / BASE_BLOCKS_PER_MINUTE);
     const runAt = deps.now().toISOString();
     const payload: NetLivenessAlertPayload = {
       text:

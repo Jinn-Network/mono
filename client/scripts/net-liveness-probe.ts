@@ -21,11 +21,15 @@
  * Env:
  *   JINN_NET_LIVENESS_WEBHOOK_URL       unset → NO-OP (classify + log only)
  *   JINN_NET_LIVENESS_THRESHOLD_MINUTES default 30
+ *   JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS default 4000 (gap between the two
+ *     chain-head reads; must exceed Base's ~2s blocktime so a live chain
+ *     advances at least one block between samples)
  *   (RPC + indexer URL inherited from the daemon config / its env overrides)
  */
 
 import { config as dotenvConfig } from 'dotenv';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_TESTNET_DISCOVERY_URL } from '../src/config.js';
 import { createJinnPublicClient } from '../src/earning/viem-clients.js';
@@ -35,6 +39,7 @@ import {
   fetchLatestActivityBlock,
   postNetLivenessWebhook,
   BASE_BLOCKS_PER_MINUTE,
+  DEFAULT_HEAD_SAMPLE_DELAY_MS,
 } from '../src/monitoring/net-liveness.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -57,15 +62,22 @@ async function main(): Promise<void> {
 
   const thresholdMinutes = Number(process.env['JINN_NET_LIVENESS_THRESHOLD_MINUTES'] ?? 30);
   const webhookUrl = process.env['JINN_NET_LIVENESS_WEBHOOK_URL'];
+  const headSampleDelayMs = Number(
+    process.env['JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS'] ?? DEFAULT_HEAD_SAMPLE_DELAY_MS,
+  );
 
   const client = createJinnPublicClient(config.rpcUrls, network);
 
   const result = await runNetLivenessProbe({
-    fetchChainHead: () => client.getBlockNumber(),
+    // cacheTime:0 bypasses viem's getBlockNumber cache (default ~4s) so the two
+    // samples reflect real chain state, not a memoized first read.
+    fetchChainHead: () => client.getBlockNumber({ cacheTime: 0 }),
     fetchLatestActivityBlock: () => fetchLatestActivityBlock({ gqlUrl }),
     fetchIndexerHeadBlock: () => fetchIndexerHeadBlock({ baseUrl: indexerBaseUrl }),
     postWebhook: postNetLivenessWebhook(webhookUrl),
     thresholdMinutes,
+    sleep,
+    headSampleDelayMs,
     now: () => new Date(),
   });
 
