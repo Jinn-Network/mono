@@ -5,6 +5,11 @@
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
+  "exports": {
+    "./schema": "./ponder.schema.ts",
+    "./enrichment-parse": "./src/enrichment-parse.ts",
+    "./ipfs": "./src/ipfs.ts"
+  },
   "scripts": {
     "dev": "ponder dev",
     "build:explorer": "cd explorer && yarn install && yarn build",
