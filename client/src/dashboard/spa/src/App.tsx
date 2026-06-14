@@ -27,6 +27,7 @@ import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
 import { BuildPage } from './pages/Build.js';
 import { getFeatures } from './lib/features.js';
+import { OfflineNotice } from './notifications/components/OfflineNotice.js';
 import { TooltipProvider } from './components/ui/tooltip.js';
 import { Toaster } from './components/ui/sonner.js';
 
@@ -98,6 +99,7 @@ export default function App(): JSX.Element {
   if (data && (data.mode !== 'running' || !onboardingComplete)) {
     return (
       <TooltipProvider delayDuration={150}>
+        <OfflineNotice />
         <Onboarding />
         <Toaster />
       </TooltipProvider>
@@ -107,6 +109,7 @@ export default function App(): JSX.Element {
   if (isLoading || !data) {
     return (
       <TooltipProvider delayDuration={150}>
+        <OfflineNotice />
         <LoadingScreen headline="Starting jinn" />
         <Toaster />
       </TooltipProvider>

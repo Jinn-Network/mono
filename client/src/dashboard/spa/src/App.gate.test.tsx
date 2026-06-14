@@ -39,7 +39,14 @@ vi.mock('./api/client.js', () => ({
         _bootstrapResolver = res as (v: unknown) => void;
         _bootstrapRejecter = rej;
       }),
+    getStatus: () => Promise.resolve({}),
   },
+}));
+
+// jsdom has no EventSource — stub the SSE hook the OfflineNotice→useNotifications
+// chain depends on (mirrors notifications/useNotifications.test.tsx).
+vi.mock('./api/events.js', () => ({
+  useEventStream: () => ({ events: [], connected: false }),
 }));
 
 // Stub regions as marker divs.
@@ -77,6 +84,7 @@ vi.mock('./shell/RestartPendingContext.js', () => ({
   RestartPendingContext: {
     Provider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   },
+  useRestartPending: () => ({ restartPending: false, setRestartPending: () => {} }),
 }));
 vi.mock('./pages/Overview.js', () => ({ OverviewPage: () => null }));
 vi.mock('./pages/Launcher.js', () => ({ LauncherPage: () => null }));
@@ -198,5 +206,39 @@ describe('App gate — issue #110', () => {
     });
     await waitFor(() => expect(screen.queryByTestId('onboarding')).toBeTruthy());
     expect(screen.queryByTestId('daemon-offline-screen')).toBeNull();
+  });
+
+  it('#443 — Onboarding branch surfaces the offline signal when daemon dies after first poll', async () => {
+    // Daemon died after a successful first poll: react-query serves cached
+    // setup-mode data, connection flips to disconnected. The gate lands in the
+    // Onboarding branch — which must still render the blocking offline notice.
+    _connectionState = { status: 'disconnected', attempts: 2, lastError: 'fetch failed', since: Date.now() };
+    await renderApp();
+    _bootstrapResolver?.({
+      schemaVersion: 1,
+      mode: 'setup',
+      steps: [],
+      currentStep: 'wallet',
+      services: [],
+      chain: 'base-sepolia',
+    });
+    await waitFor(() => expect(screen.queryByTestId('onboarding')).toBeTruthy());
+    expect(screen.queryByText(/Daemon offline/i)).toBeTruthy();
+    expect(screen.queryByTestId('daemon-offline-screen')).toBeNull();
+  });
+
+  it('#443 — LoadingScreen branch mounts the OfflineNotice without breaking the connected loading state', async () => {
+    // The LoadingScreen branch (`isLoading || !data`) is only reachable while
+    // CONNECTED — a disconnected+no-data state is intercepted by the cold-start
+    // DaemonOfflineScreen branch first. So we cannot land in LoadingScreen with
+    // a live offline signal. This case instead guards that mounting an
+    // OfflineNotice in the LoadingScreen branch does not regress the connected
+    // loading state: the notice renders nothing (no disconnected notice) and the
+    // "Starting jinn" screen still appears.
+    _connectionState = { status: 'connected', lastConnectedAt: Date.now() };
+    await renderApp();
+    // Bootstrap never resolves → isLoading + connected → LoadingScreen branch.
+    expect(screen.getByTestId('loading-screen')).toBeTruthy();
+    expect(screen.queryByText(/Daemon offline/i)).toBeNull();
   });
 });
