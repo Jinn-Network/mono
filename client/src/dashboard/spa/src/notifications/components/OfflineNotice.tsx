@@ -9,9 +9,10 @@ import { NotificationsList } from './NotificationsList.js';
  * connection-state probe flips to `disconnected`. AppShell already renders the
  * full notice list, but the pre-running gate (App.tsx) mounts AppShell only on
  * the `running` branch. A daemon that dies after a successful first poll leaves
- * react-query serving cached data, so the gate lands in the Onboarding or
- * LoadingScreen branch — neither of which surfaced the offline signal. Mounting
- * this filtered notice in those branches keeps a dying daemon from going silent.
+ * react-query serving cached data, so the gate lands in the Onboarding
+ * (pre-running / bootstrap takeover) branch, which previously surfaced nothing
+ * for the offline signal. Mounting this filtered notice there keeps a dying
+ * daemon from going silent.
  */
 export function OfflineNotice(): JSX.Element | null {
   const notices = useNotifications().filter((n) => n.kind === 'rpc_unreachable');
