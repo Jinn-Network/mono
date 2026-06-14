@@ -763,11 +763,8 @@ const RETRY_DELAYS_MS = [200, 500] as const;
  * first attempt (NOT retried); GraphQL-level `errors[]` are not visible here
  * (they arrive in a 200 body) so they are likewise never retried.
  */
-function fetchWithRetry(
-  baseFetch: typeof fetch,
-  retryDelaysMs: number[],
-  sleep: (ms: number) => Promise<void> = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
-): typeof fetch {
+function fetchWithRetry(baseFetch: typeof fetch, retryDelaysMs: readonly number[]): typeof fetch {
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   return async (input, init) => {
     for (let attempt = 0; ; attempt++) {
       try {
@@ -883,7 +880,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // settles, so a transient probe blip cannot poison the cache (#782 AC#4).
   const timeoutFetch: typeof fetch = (input, init) =>
     baseFetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(fetchTimeoutMs) });
-  const fetchImpl: typeof fetch = fetchWithRetry(timeoutFetch, [...retryDelaysMs]);
+  const fetchImpl: typeof fetch = fetchWithRetry(timeoutFetch, retryDelaysMs);
 
   // ── /ready probe (memoized with a short TTL) ──────────────────────────────
   // Ponder serves GraphQL with 200 + stale/empty data while still catching up;
