@@ -46,12 +46,15 @@ function fakeCodexChild(
      *   then NEVER emit exit (reproduces the #883/#895 hang).
      * - 'turn-completed-then-exit': emit the marker then a clean exit 0.
      * - 'turn-failed-then-hang': emit {"type":"turn.failed",...} then NEVER exit.
+     * - 'crash-no-marker': emit some stderr then exit(1) with NO terminal
+     *   marker (exercises the child.on('exit') fallback: code!==0, not aborted).
      */
     mode?:
       | 'configured-then-exit'
       | 'turn-completed-then-hang'
       | 'turn-completed-then-exit'
-      | 'turn-failed-then-hang';
+      | 'turn-failed-then-hang'
+      | 'crash-no-marker';
   } = {},
 ): FakeCodexChild {
   const child = new EventEmitter() as FakeCodexChild;
@@ -110,6 +113,13 @@ function fakeCodexChild(
         Buffer.from('{"type":"turn.failed","error":{"message":"model refused the task"}}\n'),
       );
       // never exits — settle must come from the failure marker, not exit.
+      return;
+    }
+    if (mode === 'crash-no-marker') {
+      // No terminal marker at all — codex crashes mid-turn. Settle must come
+      // from the child.on('exit') fallback (code=1, not aborted → reject).
+      child.stderr.emit('data', Buffer.from('boom\n'));
+      child.emit('exit', 1, null);
       return;
     }
     // 'configured-then-exit' (legacy default): preserve existing test behaviour.
@@ -568,7 +578,8 @@ describe('CodexCodeHarnessAdapter — completion + subprocess reaping (#895)', (
           learnerPluginRoot,
         ),
       ).rejects.toThrow(/turn\.failed/);
-      // Failure path still reaps the group so the lingering child is not leaked.
+      // Failure path still reaps the child AND its group so neither is leaked.
+      expect(captured!.kill).toHaveBeenCalled();
       expect(killGroup).toHaveBeenCalledWith(captured!.pid, expect.any(String));
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
@@ -588,6 +599,26 @@ describe('CodexCodeHarnessAdapter — completion + subprocess reaping (#895)', (
           learnerPluginRoot,
         ),
       ).resolves.toBeUndefined();
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('rejects when the child crashes without a terminal marker (non-zero exit, not aborted)', async () => {
+    const spawnFn = vi.fn(() => fakeCodexChild(undefined, { mode: 'crash-no-marker' }));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-crash-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-crash-state-'));
+    try {
+      const adapter = makeReapAdapter(spawnFn);
+      // No marker fires; settle must come from the child.on('exit') fallback,
+      // which rejects on code!==0 when not aborted.
+      await expect(
+        adapter.runTask(
+          runInputs(workingDir, implStateDir, new AbortController().signal),
+          learnerPluginRoot,
+        ),
+      ).rejects.toThrow(/code=1/);
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });
