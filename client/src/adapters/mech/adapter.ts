@@ -384,13 +384,10 @@ export class MechAdapter implements ExecutionAdapter {
       const end = start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > toBlock
         ? toBlock
         : start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
-      // #116: filter to the two router events the poll loop decodes
-      // (TaskCreated + SolutionDeliveryClaimed) via an OR-of-topic0 server-side,
-      // instead of an address-only scan that decode-discards the rest. The block
-      // range stays chunked as before — a topic filter shrinks the result set,
-      // not the permitted range. Fallback if a provider ever rejects the OR-topic
-      // (`events`) form: issue two single-`event` getLogs over this same bounded
-      // range and concatenate — never revert to an address-only broad scan.
+      // #116: filter server-side to the two router events the poll loop decodes
+      // (TaskCreated + SolutionDeliveryClaimed) via an OR-of-topic0, instead of an
+      // address-only scan that decode-discards the rest. Chunking is unchanged —
+      // a topic filter shrinks the result set, not the permitted block range.
       logs.push(...await this.publicClient.getLogs({
         address: this.config.routerAddress,
         events: ROUTER_DISCOVERY_EVENTS,
