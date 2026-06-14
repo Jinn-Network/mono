@@ -208,6 +208,13 @@ describe('SpendPanel', () => {
     expect(
       screen.getByTestId('launcher-launched-spend-low-runway').textContent,
     ).toMatch(/runway low/i);
+    // AC3: the message must point the operator at the Overview faucet and the
+    // daemon's auto-forward behaviour (#573).
+    expect(
+      screen.getByTestId('launcher-launched-spend-low-runway').textContent,
+    ).toMatch(
+      /top up your wallet from the overview faucet — the daemon forwards eth to the safe automatically\./i,
+    );
   });
 
   it('hides the low-runway message at or above 100 Tasks', async () => {
