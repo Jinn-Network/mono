@@ -295,5 +295,19 @@ export function withFallback(
         () => floor.getMostRecentTaskCidDigest(manifestCid),
       );
     },
+
+    getTaskStatuses(args) {
+      // DISPLAY/advisory signal (not a correctness gate): fall through to the
+      // floor on an indexer outage — the OPPOSITE of getInstanceClaimCounts.
+      // The floor's empty Map is the intended degraded result: the caller maps
+      // absence to 'unknown' (never guesses 'open'), so a tolerant fall-through
+      // is honest, not masking. Propagating the error here would needlessly
+      // break the launcher table's status column on a transient indexer blip
+      // (#579).
+      return dispatch(
+        () => primary.getTaskStatuses(args),
+        () => floor.getTaskStatuses(args),
+      );
+    },
   };
 }

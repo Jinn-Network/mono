@@ -50,6 +50,30 @@ export interface ClaimableTaskCandidate {
 }
 
 /**
+ * On-chain finalization status for a posted Task, as rendered in the Launcher
+ * "Recent posted Tasks" table. This is a DISPLAY/advisory signal — distinct
+ * from the generator-side local `LauncherTaskState` — sourced from the indexer
+ * `task` table. `'unknown'` is the safe degraded default whenever the status
+ * cannot be resolved (floor outage, not-yet-indexed task); callers MUST map
+ * absence to `'unknown'` and never guess `'open'`.
+ */
+export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
+
+/**
+ * Per-task on-chain finalization snapshot, returned by `getTaskStatuses` keyed
+ * by on-chain taskId (decimal string). `claimWindowEnd` is unix seconds and MAY
+ * be null/undefined in the live indexer today (its call-trace decode is
+ * pending), so an 'expired' derivation degrades to 'open' when the window is
+ * unknown.
+ */
+export interface TaskStatusSnapshot {
+  taskId: string;
+  finalized: boolean;
+  refunded: boolean;
+  claimWindowEnd?: number;
+}
+
+/**
  * Per-on-chain-task claim-budget snapshot for a launched SolverNet. Returned by
  * `getInstanceClaimCounts`, keyed by **on-chain taskId** (decimal string) — NOT
  * by instance_id, because the on-chain `task`/`attempt` tables carry no
@@ -524,6 +548,26 @@ export interface DiscoveryAPI {
     taskCidDigest: `0x${string}`;
     taskId: string;
   } | undefined>;
+
+  /**
+   * Returns the on-chain finalization snapshot for every task posted on the
+   * SolverNet identified by `manifestCid`, keyed by on-chain taskId (decimal
+   * string). Backed by the indexer `task` table (`finalized`, `refunded`,
+   * `claimWindowEnd`), joined via `manifestDigest === keccak256(manifestCid)`.
+   *
+   * This is a DISPLAY/advisory signal (the Launcher "Recent posted Tasks"
+   * status chip), NOT a correctness gate, so it is *tolerant*: like
+   * `getTaskPostCounts`, the `withFallback` wrapper routes it to the on-chain
+   * floor on an indexer outage rather than propagating
+   * `DiscoveryUnavailableError`. The on-chain floor returns an empty Map (it
+   * cannot cheaply reconstruct finalized state); callers map absence /
+   * floor-empty to `'unknown'` and MUST NEVER guess `'open'`.
+   *
+   * `claimWindowEnd` (unix seconds) may be null/undefined in the live indexer
+   * today (call-trace decode pending), so an `'expired'` derivation degrades to
+   * `'open'` when the window is unknown.
+   */
+  getTaskStatuses(args: { manifestCid: string }): Promise<Map<string, TaskStatusSnapshot>>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────

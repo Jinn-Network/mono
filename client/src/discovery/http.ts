@@ -17,6 +17,7 @@ import type {
   DiscoveryAPI,
   ClaimableTaskCandidate,
   InstanceClaimCount,
+  TaskStatusSnapshot,
   SolverNetManifestSummary,
   SolverNetLifecycleStatus,
   EnvelopeRef,
@@ -330,6 +331,35 @@ query ClaimCountTasks($manifestDigest: String!, $limit: Int!, $after: String) {
 `;
 
 /**
+ * Per-task on-chain finalization snapshot (#579). Pages every task id +
+ * finalized/refunded/claimWindowEnd for a SolverNet's manifestDigest, capped at
+ * MAX_OPERATOR_COUNT_TASK_PAGES like CLAIM_COUNT_TASKS_QUERY. Backs the Launcher
+ * "Recent posted Tasks" status chip — a DISPLAY signal, not a correctness gate.
+ */
+const TASK_STATUSES_QUERY = `
+query TaskStatuses($manifestDigest: String!, $limit: Int!, $after: String) {
+  tasks(
+    where: { manifestDigest: $manifestDigest },
+    limit: $limit,
+    after: $after,
+    orderBy: "id",
+    orderDirection: "asc"
+  ) {
+    items {
+      id
+      finalized
+      refunded
+      claimWindowEnd
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
+/**
  * Task-post-rate query (#918). Pages the most-recent tasks ordered by
  * createdAtBlock desc; the daemon reads the top row's block as the window head
  * and buckets the three windows (1h / 6h / 24h) AND the per-cid totals
@@ -518,6 +548,18 @@ interface OperatorCountAttemptsPage {
 interface ClaimCountTasksPage {
   tasks: {
     items: Array<{ id: string; maxClaims: number; chainId: number }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface TaskStatusesPage {
+  tasks: {
+    items: Array<{
+      id: string;
+      finalized: boolean;
+      refunded: boolean;
+      claimWindowEnd?: string | number | null;
+    }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -1700,6 +1742,41 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return { taskCidDigest: row.taskCidDigest, taskId: row.id };
   }
 
+  // ── getTaskStatuses (#579) ─────────────────────────────────────────────────
+  // Per-task finalized/refunded/claimWindowEnd for a SolverNet, keyed by taskId.
+  // Single leg, mirroring getInstanceClaimCounts leg 1: page tasks for the
+  // manifestDigest, capped at MAX_OPERATOR_COUNT_TASK_PAGES.
+  async function getTaskStatuses(args: {
+    manifestCid: string;
+  }): Promise<Map<string, TaskStatusSnapshot>> {
+    await ensureReady();
+
+    const manifestDigest = manifestDigestForCid(args.manifestCid).toLowerCase();
+
+    const out = new Map<string, TaskStatusSnapshot>();
+    let taskCursor: string | null = null;
+    for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
+      const data: TaskStatusesPage = await postGql<TaskStatusesPage>(
+        gqlUrl,
+        fetchImpl,
+        TASK_STATUSES_QUERY,
+        { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
+      );
+      for (const row of data.tasks?.items ?? []) {
+        out.set(row.id, {
+          taskId: row.id,
+          finalized: Boolean(row.finalized),
+          refunded: Boolean(row.refunded),
+          claimWindowEnd: row.claimWindowEnd != null ? Number(row.claimWindowEnd) : undefined,
+        });
+      }
+      const pageInfo = data.tasks?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      taskCursor = pageInfo.endCursor;
+    }
+    return out;
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1714,5 +1791,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     getInstanceClaimCounts,
     getTaskPostCounts,
     getMostRecentTaskCidDigest,
+    getTaskStatuses,
   };
 }

@@ -1492,6 +1492,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               ...(r.claims ? { claims: r.claims } : {}),
             }));
           },
+          // #579: on-chain finalized/open/expired status for the Recent posted
+          // Tasks chip. discoveryApiHolder is populated post-bootstrap; before
+          // that (or with no discovery API) we return an empty Map → all chips
+          // render 'unknown', the safe degraded default.
+          fetchTaskStatuses: async (manifestCid: string) => {
+            const api = discoveryApiHolder.current;
+            if (!api) return new Map();
+            return api.getTaskStatuses({ manifestCid });
+          },
         },
       },
     });

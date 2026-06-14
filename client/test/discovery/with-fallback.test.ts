@@ -467,6 +467,41 @@ describe('withFallback — all four methods', () => {
     expect(result).toBe(floorResult);
     expect(floor.getMostRecentTaskCidDigest).toHaveBeenCalledOnce();
   });
+
+  it('getTaskStatuses delegates to the primary on success (#579)', async () => {
+    const primaryResult = new Map([
+      ['100', { taskId: '100', finalized: true, refunded: false }],
+    ]);
+    const primary = {
+      getTaskStatuses: vi.fn(async () => primaryResult),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getTaskStatuses: vi.fn(async () => new Map()),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getTaskStatuses({ manifestCid: 'bafy' });
+    expect(result).toBe(primaryResult);
+    expect(floor.getTaskStatuses).not.toHaveBeenCalled();
+  });
+
+  it('getTaskStatuses routes to floor (empty Map) on DiscoveryUnavailableError — display signal, never rethrows (#579)', async () => {
+    // The inverse of the getInstanceClaimCounts assertion above: this is a
+    // tolerant DISPLAY signal, so an indexer outage must degrade to the floor's
+    // empty Map (caller renders all-'unknown' chips), NOT propagate the error.
+    const floorResult = new Map();
+    const primary = {
+      getTaskStatuses: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getTaskStatuses: vi.fn(async () => floorResult),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getTaskStatuses({ manifestCid: 'bafy' });
+    expect(result).toBe(floorResult);
+    expect(floor.getTaskStatuses).toHaveBeenCalledOnce();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {

@@ -1,9 +1,10 @@
 /**
  * @vitest-environment node
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { gatherLauncherTasks } from '../../src/api/launcher-tasks.js';
 import type { JinnConfig } from '../../src/config.js';
+import type { TaskStatusSnapshot } from '../../src/discovery/types.js';
 
 describe('gatherLauncherTasks', () => {
   it('labels posted tasks by joinedSolverNets display name when no solverNet is recorded', async () => {
@@ -53,5 +54,124 @@ describe('gatherLauncherTasks', () => {
       ],
     });
     expect(response.tasks[0]?.solverNet).toBe('unknown');
+  });
+});
+
+describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
+  // now() returns ms; claimWindowEnd is unix seconds. 2026-06-14 ≈ 1_780_000_000s.
+  const NOW_MS = 1_780_000_000_000;
+  const config = {
+    joinedSolverNets: {
+      'bafymanifest': {
+        manifestCid: 'bafymanifest',
+        name: 'swe-rebench-v2',
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver'],
+        plugins: [],
+        disabledDefaultPlugins: [],
+      },
+    },
+  } as unknown as JinnConfig;
+
+  function makeDeps(
+    statusByTaskId: Record<string, TaskStatusSnapshot>,
+    fetchTaskStatuses?: (cid: string) => Promise<Map<string, TaskStatusSnapshot>>,
+  ) {
+    return {
+      config,
+      creatorAddress: '0xabc',
+      now: () => NOW_MS,
+      fetchPostedTasks: () =>
+        Object.keys(statusByTaskId).length === 0
+          ? [{ taskId: 'tabsent', taskCid: 'cidA', postedAt: '2026-05-25T00:00:00Z', budget: { totalWei: '0' } }]
+          : Object.keys(statusByTaskId).map((taskId) => ({
+              taskId,
+              taskCid: `cid-${taskId}`,
+              postedAt: '2026-05-25T00:00:00Z',
+              budget: { totalWei: '0' },
+            })),
+      fetchTaskStatuses:
+        fetchTaskStatuses ??
+        (async () => new Map(Object.entries(statusByTaskId))),
+    };
+  }
+
+  it('renders finalized when the snapshot is finalized', async () => {
+    const deps = makeDeps({ t1: { taskId: 't1', finalized: true, refunded: false } });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
+  });
+
+  it('renders finalized when the snapshot is refunded (on-chain-closed)', async () => {
+    const deps = makeDeps({ t1: { taskId: 't1', finalized: false, refunded: true } });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
+  });
+
+  it('renders expired when not finalized and the claim window is in the past', async () => {
+    const deps = makeDeps({
+      t1: { taskId: 't1', finalized: false, refunded: false, claimWindowEnd: 1_700_000_000 },
+    });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('expired');
+  });
+
+  it('renders open when not finalized and the claim window is in the future', async () => {
+    const deps = makeDeps({
+      t1: { taskId: 't1', finalized: false, refunded: false, claimWindowEnd: 1_790_000_000 },
+    });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('open');
+  });
+
+  it('renders open when the claim window is unknown (degrades, not expired)', async () => {
+    const deps = makeDeps({ t1: { taskId: 't1', finalized: false, refunded: false } });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('open');
+  });
+
+  it('renders unknown when no snapshot exists for the taskId', async () => {
+    const deps = makeDeps({}); // fetchPostedTasks yields 'tabsent', statuses empty
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('unknown');
+  });
+
+  it('renders unknown for every task when fetchTaskStatuses throws (graceful degradation)', async () => {
+    const deps = makeDeps(
+      { t1: { taskId: 't1', finalized: true, refunded: false } },
+      async () => { throw new Error('indexer down'); },
+    );
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('unknown');
+  });
+
+  it('renders unknown for every task when no fetchTaskStatuses dep is supplied', async () => {
+    const response = await gatherLauncherTasks({
+      config,
+      creatorAddress: '0xabc',
+      now: () => NOW_MS,
+      fetchPostedTasks: () => [
+        { taskId: 't1', taskCid: 'cid1', postedAt: '2026-05-25T00:00:00Z', budget: { totalWei: '0' } },
+      ],
+    });
+    expect(response.tasks[0]?.onchainStatus).toBe('unknown');
+  });
+
+  it('dedupes manifest cids and calls fetchTaskStatuses once per cid', async () => {
+    const fetchTaskStatuses = vi.fn(
+      async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),
+    );
+    const deps = {
+      config,
+      creatorAddress: '0xabc',
+      now: () => NOW_MS,
+      fetchPostedTasks: () => [
+        { taskId: 't1', taskCid: 'cid1', postedAt: '2026-05-25T00:00:00Z', budget: { totalWei: '0' } },
+      ],
+      fetchTaskStatuses,
+    };
+    await gatherLauncherTasks(deps);
+    expect(fetchTaskStatuses).toHaveBeenCalledTimes(1);
+    expect(fetchTaskStatuses).toHaveBeenCalledWith('bafymanifest');
   });
 });

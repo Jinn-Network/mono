@@ -41,6 +41,7 @@ function buildTask(
     solverNet: 'Polymarket',
     postedAt: '2026-05-05T16:00:00Z',
     state: 'open',
+    onchainStatus: 'unknown',
     claims: { current: 0, max: 1 },
     budget: { totalWei: '150', remainingWei: '150' },
     ...overrides,
@@ -110,6 +111,29 @@ describe('TasksPanel', () => {
     expect(screen.getByText('Failed')).toBeTruthy();
     expect(screen.getByText('swe-rebench-v2.v1')).toBeTruthy();
     expect(screen.getByText('3 / 3')).toBeTruthy();
+  });
+
+  it('renders the on-chain status chip per task and a muted dash for unknown (#579)', async () => {
+    const fetchTasks = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '',
+      tasks: [
+        buildTask({ taskId: 't1', onchainStatus: 'finalized' }),
+        buildTask({ taskId: 't2', onchainStatus: 'expired' }),
+        buildTask({ taskId: 't3', onchainStatus: 'open' }),
+        buildTask({ taskId: 't4', onchainStatus: 'unknown' }),
+      ],
+    } satisfies LauncherTasksResponse);
+    wrap(<TasksPanel record={buildRecord()} fetchTasks={fetchTasks} />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId('launcher-launched-task-row').length).toBe(4),
+    );
+    expect(screen.getByText('Finalized')).toBeTruthy();
+    expect(screen.getByText('Expired')).toBeTruthy();
+    // The 'open' on-chain chip is labelled "Open"; the 'unknown' renders a dash.
+    const chips = screen.getAllByTestId('launcher-launched-task-onchain');
+    expect(chips.length).toBe(4);
+    expect(chips.some((c) => c.textContent === '—')).toBe(true);
   });
 
   it('renders error state when the query rejects', async () => {

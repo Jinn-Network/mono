@@ -285,6 +285,13 @@ export type LauncherTaskState =
   | 'settled'
   | 'failed';
 
+/**
+ * Mirror of the daemon-side `TaskOnchainStatus` (client/src/discovery/types.ts).
+ * On-chain finalization status for the Recent posted Tasks chip — DISTINCT from
+ * the local generator-side `state`. `'unknown'` is the safe degraded default.
+ */
+export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
+
 export interface LauncherTaskEntry {
   taskId: string;
   taskCid: string;
@@ -292,6 +299,7 @@ export interface LauncherTaskEntry {
   solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
+  onchainStatus: TaskOnchainStatus;
   claims: { current: number; max: number };
   budget: { totalWei: string; remainingWei: string; reclaimableAt?: string };
   summary?: { title?: string; resolutionTime?: string };

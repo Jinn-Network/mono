@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
@@ -1340,6 +1340,18 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return new Map();
   }
 
+  // ── getTaskStatuses (#579) — empty Map stub ────────────────────────────────
+  // The floor cannot cheaply reconstruct finalized/refunded state (the indexer
+  // tracks it via the task lifecycle; the floor would need a per-task call-trace
+  // scan + IPFS hop). Returning an empty Map is the documented contract: the
+  // caller maps absence to 'unknown', the safe degraded default. This is a
+  // DISPLAY signal, so withFallback DOES route here on an indexer outage (unlike
+  // the abort-on-outage getInstanceClaimCounts) — an empty Map → all-'unknown'
+  // chips, which is honest rather than guessing 'open'.
+  async function getTaskStatuses(): Promise<Map<string, TaskStatusSnapshot>> {
+    return new Map();
+  }
+
   // ── getTaskPostCounts (#918) ───────────────────────────────────────────────
   // Windowed count of TaskCreated events (last 1h / 6h / 24h) sourced directly
   // from the JinnRouter logs. Block-window approximation; capped at
@@ -1538,5 +1550,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getInstanceClaimCounts,
     getTaskPostCounts,
     getMostRecentTaskCidDigest,
+    getTaskStatuses,
   };
 }

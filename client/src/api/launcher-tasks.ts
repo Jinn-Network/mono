@@ -28,6 +28,7 @@
  */
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { JinnConfig } from '../config.js';
+import type { TaskOnchainStatus, TaskStatusSnapshot } from '../discovery/types.js';
 import { joinedDisplayName, solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 
 export type LauncherTaskState =
@@ -44,6 +45,13 @@ export interface LauncherTaskEntry {
   solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
+  /**
+   * On-chain finalization status (#579), sourced from the indexer `task` table
+   * (`finalized`/`refunded`/`claimWindowEnd`) — DISTINCT from the local,
+   * generator-side `state`. `'unknown'` is the safe degraded default (no
+   * snapshot / indexer outage); never guessed as `'open'`.
+   */
+  onchainStatus: TaskOnchainStatus;
   claims: { current: number; max: number };
   budget: { totalWei: string; remainingWei: string; reclaimableAt?: string };
   summary?: { title?: string; resolutionTime?: string };
@@ -86,6 +94,13 @@ export interface GatherLauncherTasksDeps {
   fetchPostedTasks: (
     opts: FetchPostedTasksOptions,
   ) => Promise<PostedTaskRecord[]> | PostedTaskRecord[];
+  /**
+   * Optional on-chain status fetcher (#579), keyed by SolverNet manifest CID.
+   * Optional so existing call-sites/tests compile and degrade to 'unknown'.
+   * Each call is wrapped in try/catch by the gatherer — a throw yields the
+   * graceful all-'unknown' default rather than failing the whole response.
+   */
+  fetchTaskStatuses?: (manifestCid: string) => Promise<Map<string, TaskStatusSnapshot>>;
   now?: () => number;
 }
 
@@ -135,9 +150,41 @@ function buildSolverTypeToNetIndex(
   return index;
 }
 
+/**
+ * Derive the on-chain status chip (#579) from a task's finalization snapshot.
+ *
+ * - `undefined` snapshot → 'unknown' (no on-chain data; the safe default — we
+ *   never guess 'open').
+ * - `finalized === true` → 'finalized'.
+ * - `refunded === true` → 'finalized': a refunded task is on-chain-closed (the
+ *   creator reclaimed budget), so it is terminal just like a finalized one. We
+ *   collapse both into the 'finalized' chip rather than adding a 'refunded'
+ *   tone — the launcher table only distinguishes open / closed / expired.
+ * - not finalized, `claimWindowEnd <= now` → 'expired'.
+ * - otherwise (incl. unknown `claimWindowEnd`) → 'open'. `claimWindowEnd` may be
+ *   null/undefined in the live indexer today, so 'expired' degrades to 'open'
+ *   when the window is unknown.
+ *
+ * `nowSeconds` is unix seconds, matching the indexer's `claimWindowEnd`.
+ */
+export function deriveOnchainStatus(
+  snapshot: TaskStatusSnapshot | undefined,
+  nowSeconds: number,
+): TaskOnchainStatus {
+  if (!snapshot) return 'unknown';
+  if (snapshot.finalized) return 'finalized';
+  if (snapshot.refunded) return 'finalized';
+  if (snapshot.claimWindowEnd != null && snapshot.claimWindowEnd <= nowSeconds) {
+    return 'expired';
+  }
+  return 'open';
+}
+
 function mapRecordToEntry(
   record: PostedTaskRecord,
   solverTypeIndex: Map<string, string>,
+  statusMap: Map<string, TaskStatusSnapshot>,
+  nowSeconds: number,
 ): LauncherTaskEntry {
   const solverNet =
     record.solverNet
@@ -154,6 +201,7 @@ function mapRecordToEntry(
     ...(record.solverType ? { solverType: record.solverType } : {}),
     postedAt: record.postedAt,
     state: record.state ?? 'open',
+    onchainStatus: deriveOnchainStatus(statusMap.get(record.taskId), nowSeconds),
     claims: { current: claimsCurrent, max: claimsMax },
     budget: { totalWei, remainingWei },
   };
@@ -194,14 +242,36 @@ export async function gatherLauncherTasks(
   });
 
   const solverTypeIndex = buildSolverTypeToNetIndex(deps.config.joinedSolverNets);
-  const tasks = sorted.slice(0, limit).map((record) => mapRecordToEntry(record, solverTypeIndex));
+
+  // Build a merged on-chain status map keyed by taskId, one fetch per joined
+  // SolverNet manifest CID. Each call is guarded so the store-only / offline /
+  // indexer-outage path degrades to all-'unknown' rather than erroring the
+  // whole response (#579 graceful-degradation guard).
+  const generatedAtMs = deps.now?.() ?? Date.now();
+  const nowSeconds = Math.floor(generatedAtMs / 1000);
+  const statusMap = new Map<string, TaskStatusSnapshot>();
+  const fetchTaskStatuses = deps.fetchTaskStatuses;
+  if (fetchTaskStatuses) {
+    const cids = Array.from(new Set(Object.keys(deps.config.joinedSolverNets ?? {})));
+    for (const cid of cids) {
+      try {
+        const snapshots = await fetchTaskStatuses(cid);
+        for (const [taskId, snapshot] of snapshots) statusMap.set(taskId, snapshot);
+      } catch {
+        // Tolerant: skip this SolverNet's statuses; its tasks render 'unknown'.
+      }
+    }
+  }
+
+  const tasks = sorted
+    .slice(0, limit)
+    .map((record) => mapRecordToEntry(record, solverTypeIndex, statusMap, nowSeconds));
 
   const cursor =
     tasks.length === limit && tasks.length > 0
       ? { before: tasks[tasks.length - 1]!.postedAt }
       : undefined;
 
-  const generatedAtMs = deps.now?.() ?? Date.now();
   const response: LauncherTasksResponse = {
     schemaVersion: 1,
     generatedAt: new Date(generatedAtMs).toISOString(),

@@ -6,6 +6,7 @@ import type {
   LauncherTaskEntry,
   LauncherTaskState,
   LauncherTasksResponse,
+  TaskOnchainStatus,
 } from '../../api/types.js';
 import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
@@ -51,6 +52,18 @@ const STATE_TONE: Record<LauncherTaskState, { variant: BadgeVariant; label: stri
   'fully-claimed': { variant: 'success', label: 'Claimed' },
   settled: { variant: 'success', label: 'Settled' },
   failed: { variant: 'destructive', label: 'Failed' },
+};
+
+// On-chain finalization chip (#579). Sourced from the indexer `task` table
+// (finalized/refunded/claimWindowEnd), DISTINCT from the local `state` above.
+// 'unknown' has no entry here — it renders a muted dash, never a guessed Open.
+const ONCHAIN_TONE: Record<
+  Exclude<TaskOnchainStatus, 'unknown'>,
+  { variant: BadgeVariant; label: string }
+> = {
+  finalized: { variant: 'success', label: 'Finalized' },
+  open: { variant: 'outline', label: 'Open' },
+  expired: { variant: 'warning', label: 'Expired' },
 };
 
 export interface TasksPanelProps {
@@ -233,7 +246,28 @@ function TaskRow({ task }: { task: LauncherTaskEntry }): JSX.Element {
         </Badge>
       </TableCell>
       <TableCell className="text-right font-mono text-[12px] text-[var(--fg-muted)]">
-        {task.claims.current} / {task.claims.max}
+        <span className="inline-flex items-center justify-end gap-2">
+          <span>
+            {task.claims.current} / {task.claims.max}
+          </span>
+          {task.onchainStatus === 'unknown' ? (
+            <span
+              data-testid="launcher-launched-task-onchain"
+              aria-label="On-chain status unknown"
+              className="text-[var(--fg-muted)]"
+            >
+              —
+            </span>
+          ) : (
+            <Badge
+              data-testid="launcher-launched-task-onchain"
+              variant={ONCHAIN_TONE[task.onchainStatus].variant}
+              className="rounded-sm normal-case tracking-[0.1em]"
+            >
+              {ONCHAIN_TONE[task.onchainStatus].label}
+            </Badge>
+          )}
+        </span>
       </TableCell>
     </TableRow>
   );
