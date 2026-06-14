@@ -138,6 +138,33 @@ describe('classify — the four ordering invariants (must never be reshuffled)',
     expect(c.ruleId).toBe('r01');
   });
 
+  // Finding 1 (#577 review): r05 must match ONLY the precise `Error code: 5xx` form. A real provider
+  // 5xx still lands in provider_api_error via r05 …
+  it('a precise `Error code: 502` is provider_api_error via r05', () => {
+    const c = classify(
+      "hermes-agent: child exited code=1 signal=null: Error: Error code: 502 - {'error': {'message': 'Bad gateway'}}",
+    );
+    expect(c.bucket).toBe<Bucket>('provider_api_error');
+    expect(c.ruleId).toBe('r05');
+  });
+
+  // … but a harness crash that merely carries a standalone 50x token before the word "error"
+  // (the dropped loose `\b50[023]\b.*error` alternative) must NOT be skimmed into provider — it is
+  // a real subprocess crash and belongs in r10.
+  it('a child-exit crash with a stray 502 token before "error" is harness_subprocess_crash (r10), NOT provider', () => {
+    const c = classify('claude-code adapter: child exited code=1 signal=null: 502 tokens, fatal error');
+    expect(c.bucket).toBe<Bucket>('harness_subprocess_crash');
+    expect(c.ruleId).toBe('r10');
+  });
+
+  // Finding 2 (#577 review): a supersede reason that happens to carry a bare 429 token must NOT be
+  // pre-empted by r02 (provider 429); the `superseded`/`single-flight` guard lets it reach r19.
+  it('a superseded supersede reason carrying a stray 429 is race_loss_misclassified (r19), NOT provider', () => {
+    const c = classify('operator cleanup after swe generator burst; superseded by single-flight retry (queue depth 429)');
+    expect(c.bucket).toBe<Bucket>('race_loss_misclassified');
+    expect(c.ruleId).toBe('r19');
+  });
+
   // Invariant 2: claim-expiry (r06) beats recovery (r07/r08) and the Safe-revert catch (r18).
   it('claim-expiry inside a recovery / Safe inner-revert envelope is lease_expired_no_delivery, NOT restart or rpc', () => {
     const c = classify('recovery: Safe execTransaction inner revert (estimate): TCAttemptClaimExpired(126, 0)');

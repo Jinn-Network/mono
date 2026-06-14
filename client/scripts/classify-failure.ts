@@ -73,11 +73,17 @@ const RULES: Rule[] = [
     bucket: 'provider_api_error',
     test: (raw, lower) => /error code:\s*403/i.test(raw) || (/\b403\b/.test(raw) && has(lower, 'budget limit')),
   },
-  // r02 — provider rate-limit (429), incl. nested inside a subprocess exit.
+  // r02 — provider rate-limit (429), incl. nested inside a subprocess exit. Guarded post-review
+  //       (#577) so a `superseded`/`single-flight` supersede reason carrying a stray `429` token
+  //       does not pre-empt the race-loss reclassification (r19) — latent gap, 0 such rows in the
+  //       live corpus, but the cascade must stay correct.
   {
     id: 'r02',
     bucket: 'provider_api_error',
-    test: (raw) => /error code:\s*429/i.test(raw) || /\b429\b/.test(raw),
+    test: (raw, lower) =>
+      !has(lower, 'superseded') &&
+      !has(lower, 'single-flight') &&
+      (/error code:\s*429/i.test(raw) || /\b429\b/.test(raw)),
   },
   // r03 — IPFS registry (Autonolas) rejected the upload — provider/gateway error.
   {
@@ -92,11 +98,15 @@ const RULES: Rule[] = [
     test: (_raw, lower) =>
       has(lower, 'hf_fetch_failed') || has(lower, 'substrate_pool_load_failed') || has(lower, 'datasets-server'),
   },
-  // r05 — provider 5xx (incl. nested in a child-exit), distinct from chain RPC.
+  // r05 — provider 5xx (incl. nested in a child-exit), distinct from chain RPC. Matches ONLY the
+  //       precise `Error code: 5xx` form (mirrors the 403/429 rules); the loose
+  //       `\b50[023]\b.*error` alternative was dropped post-review (#577) because it greedily
+  //       claimed any child-exit crash carrying a standalone 500/502/503 token before "error"
+  //       (e.g. `…: 502 tokens, fatal error`), masking real harness crashes that belong in r10.
   {
     id: 'r05',
     bucket: 'provider_api_error',
-    test: (raw) => /error code:\s*5\d\d/i.test(raw) || /\b50[023]\b.*error/i.test(raw),
+    test: (raw) => /error code:\s*5\d\d/i.test(raw),
   },
   // r06 — on-chain claim/verdict lease expired before delivery, true even when wrapped
   //       in a `recovery:` or Safe inner-revert envelope. MUST beat r07/r08 and r18.

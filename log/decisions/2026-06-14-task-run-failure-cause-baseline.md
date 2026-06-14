@@ -145,6 +145,20 @@ window total.
   most-specific-first ordering and is locked by a test; it shifts at most a handful
   of rows and does not change the headline picture.
 
+- **Matcher tightening post-review (no count change).** Two low-severity review
+  findings against `classify-failure.ts` were applied after this run and the audit
+  re-run to confirm the numbers are unchanged: r05 (provider 5xx) dropped its loose
+  `\b50[023]\b.*error` alternative — which would have greedily claimed a child-exit
+  crash carrying a stray `50x` token before "error" (e.g. `…: 502 tokens, fatal
+  error`) into `provider_api_error`, masking a real r10 harness crash — and now
+  matches only the precise `Error code: 5xx` form; r02 (provider 429) gained a
+  `superseded`/`single-flight` guard so a supersede reason carrying a stray `429`
+  token reaches the race-loss reclassification (r19) instead of being skimmed into
+  `provider_api_error`. The live corpus contained **zero** rows matching either
+  pattern, so every bucket count above is identical before and after the tightening;
+  the fix is a latent-gap correction, and the cited table reflects the final
+  classifier.
+
 ## Highest-leverage follow-up
 
 **Persist a structured `failure_category` enum at `markFailed()`-time.** The engine
