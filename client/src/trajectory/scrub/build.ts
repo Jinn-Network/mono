@@ -5,12 +5,26 @@ import { secretlintStage } from './secretlint-stage.js';
 import { mlPiiStage, type PiiDetector } from './ml-pii-stage.js';
 
 /**
- * Default key policy: `jinn.*` identity/chain attributes are structural and pass
- * raw; everything else is `content` and flows through the value-scrubbing stages.
+ * Default key policy. `jinn.*` identity/chain attributes are structural and pass
+ * raw. The `drop` tier deletes the spec's stage-1 high-confidence keys outright
+ * (auth headers, cookies, env dumps — see `spec/2026-06-15-ts-trajectory-scrub-stack.md`):
+ * these never carry sellable content and are never safe to publish. Globs use the
+ * trailing-`*` prefix form `classifyKey` supports; the HTTP header keys are listed
+ * per request/response direction (a leading `*.header.…` glob is not matched, so
+ * we enumerate the concrete keys). Everything else is `content` and flows through
+ * the value-scrubbing stages.
  */
 export const DEFAULT_KEY_POLICY: KeyPolicy = {
   safe: ['jinn.*'],
-  drop: [],
+  drop: [
+    'http.request.header.authorization',
+    'http.response.header.authorization',
+    'http.request.header.cookie',
+    'http.response.header.cookie',
+    'http.request.header.set-cookie',
+    'http.response.header.set-cookie',
+    'env.*',
+  ],
 };
 
 export interface BuildScrubPipelineOptions {

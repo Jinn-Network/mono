@@ -42,7 +42,9 @@ export interface LiveCapturePublisherOptions {
   /**
    * Seller-side scrub pipeline applied to capture spans before publish. Wired
    * from main.ts so captures and task trajectories share one pipeline (and the
-   * same optional ML PII detector). Absent → captures publish raw.
+   * same optional ML PII detector). Absent → the publish path defaults to the
+   * non-ML safety floor (buildScrubPipeline()), so captures are never published
+   * raw by omission.
    */
   scrubPipeline?: ScrubPipeline;
 }

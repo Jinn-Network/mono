@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { classifyKey, keyPolicyStage, type KeyPolicy } from '../../../src/trajectory/scrub/key-policy.js';
+import { DEFAULT_KEY_POLICY } from '../../../src/trajectory/scrub/build.js';
 
 const policy: KeyPolicy = {
   safe: ['llm.model', 'duration.ms', 'jinn.span.*'],
@@ -30,6 +31,25 @@ describe('classifyKey', () => {
 
   test('unknown key → content', () => {
     expect(classifyKey('tool.output', policy)).toBe('content');
+  });
+});
+
+describe('DEFAULT_KEY_POLICY', () => {
+  // The production default must drop the spec stage-1 high-confidence keys
+  // (auth headers, cookies, env dumps) — not ship an inert empty drop list.
+  test.each([
+    'http.request.header.authorization',
+    'http.response.header.authorization',
+    'http.request.header.cookie',
+    'http.response.header.set-cookie',
+    'env.OPENAI_API_KEY',
+    'env.AWS_SECRET_ACCESS_KEY',
+  ])('drops %s', (key) => {
+    expect(classifyKey(key, DEFAULT_KEY_POLICY)).toBe('drop');
+  });
+
+  test('keeps jinn.* attributes safe', () => {
+    expect(classifyKey('jinn.span.kind', DEFAULT_KEY_POLICY)).toBe('safe');
   });
 });
 

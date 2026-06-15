@@ -9,9 +9,17 @@ export interface PiiDetectionConfig {
 
 /**
  * Builds the ML PII detector (Transformers.js NER, in-process) when enabled,
- * warming up the model. Returns `undefined` — degrading the scrub pipeline to
- * secretlint + openredaction + entropy — if disabled OR if the model fails to
- * load, so a model-download failure never breaks publishing.
+ * warming up the model.
+ *
+ * - Disabled (the default): returns `undefined` — the scrub pipeline runs the
+ *   structural key policy + openredaction + secretlint/entropy stages only, with
+ *   no ML PII tier and no error.
+ * - Enabled but the model fails to load: **fails closed** by rethrowing. The
+ *   spec's failure posture (`spec/2026-06-15-ts-trajectory-scrub-stack.md`,
+ *   §"Failure posture") requires that if a stage errors or the model fails to
+ *   load, the trajectory is not published. An operator who explicitly turned ML
+ *   PII on must not silently degrade to a weaker scrub — that would publish
+ *   under-redacted traces while believing NER was running.
  */
 export async function maybeBuildPiiDetector(
   cfg: PiiDetectionConfig,
@@ -24,10 +32,11 @@ export async function maybeBuildPiiDetector(
     log('[scrub] ML PII detection (Transformers.js NER) enabled.');
     return detector;
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     log(
-      '[scrub] ML PII detection unavailable; degrading to secretlint + openredaction: ' +
-        `${err instanceof Error ? err.message : String(err)}`,
+      '[scrub] ML PII detection is enabled but the model failed to load; failing closed ' +
+        `(no trajectories will publish until this is resolved or piiDetection is disabled): ${message}`,
     );
-    return undefined;
+    throw err instanceof Error ? err : new Error(message);
   }
 }

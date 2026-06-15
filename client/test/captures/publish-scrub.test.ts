@@ -3,6 +3,7 @@ import { Store } from '../../src/store/store.js';
 import { CapturesStore } from '../../src/store/captures.js';
 import { publishCaptureEnvelope, type CapturePublishDeps } from '../../src/captures/publish.js';
 import { buildScrubPipeline } from '../../src/trajectory/scrub/build.js';
+import { ScrubPipeline } from '../../src/trajectory/scrub/pipeline.js';
 
 const SAFE = `0x${'1'.repeat(40)}` as const;
 const AGENT = `0x${'2'.repeat(40)}` as const;
@@ -104,13 +105,40 @@ describe('publishCaptureEnvelope in-process scrub', () => {
     );
   });
 
-  it('leaves the secret in place when no scrub pipeline is configured', async () => {
-    // Characterises the gap: without a pipeline, captures publish raw. (The
-    // daemon always wires one in main.ts; this guards the opt-out branch.)
+  it('scrubs by default when no pipeline is injected (absent → safe floor)', async () => {
+    // The publish path is symmetric with the engine: a missing wire defaults to
+    // buildScrubPipeline() (the non-ML safety floor), so a capture never leaks
+    // raw just because no pipeline was passed.
     const publishedArtifacts: Array<{ artifactType: string; payload: unknown }> = [];
     await publishCaptureEnvelope(
       'sess-1',
       depsWith({
+        publishArtifact: async ({ artifactType, payload }) => {
+          publishedArtifacts.push({ artifactType, payload });
+          return {
+            cid: `bafy${artifactType.replace(/[^a-z0-9]/gi, '')}`,
+            sha256: 'd'.repeat(64),
+            endpoint: 'https://operator.example/artifacts',
+            priceUsdc: '0',
+          };
+        },
+      }),
+    );
+    const trajectory = publishedArtifacts.find(
+      (a) => a.artifactType === 'jinn.capture-trajectory.v1',
+    );
+    expect(JSON.stringify(trajectory!.payload)).not.toContain(GH);
+  });
+
+  it('leaves the secret in place only with an explicit no-op pipeline (opt-out)', async () => {
+    // The sole way to publish raw is to opt out *explicitly* by injecting an
+    // empty (identity) pipeline — there is no operator config to disable scrub,
+    // so absence is safe and only an explicit no-op pipeline is raw.
+    const publishedArtifacts: Array<{ artifactType: string; payload: unknown }> = [];
+    await publishCaptureEnvelope(
+      'sess-1',
+      depsWith({
+        scrubPipeline: new ScrubPipeline([]),
         publishArtifact: async ({ artifactType, payload }) => {
           publishedArtifacts.push({ artifactType, payload });
           return {
