@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { buildScrubPipeline } from '../../../src/trajectory/scrub/build.js';
-import { scrubSpansForEmit } from '../../../src/trajectory/scrub/emit-scrub.js';
+import { scrubSpansForEmit, scrubCaptureSpans } from '../../../src/trajectory/scrub/emit-scrub.js';
 import type { Span } from '../../../src/trajectory/schema.js';
 
 const GH = 'ghp_016C7e0aBcDeFgHiJkLmNoPqRsTuVwXyZ012';
@@ -51,5 +51,43 @@ describe('scrubSpansForEmit', () => {
     ];
     const result = await scrubSpansForEmit(spans, pipeline, 'task-cid');
     expect(JSON.stringify(result.spans[0].events)).not.toContain(GH);
+  });
+});
+
+describe('scrubCaptureSpans', () => {
+  // Capture spans (jinn.capture-trajectory.v1) are flat: attributes + an existing
+  // redactedKeys list, NO events and NO hash chain. scrubCaptureSpans must scrub
+  // attribute values, union the pipeline's redactions into redactedKeys, and leave
+  // the capture-span shape otherwise untouched (no jinn.prevSpanHash injection).
+  test('scrubs content attributes, merges redactedKeys, preserves jinn.*, adds no hash chain', async () => {
+    const pipeline = buildScrubPipeline();
+    const spans = [
+      {
+        sessionId: 'sess-1',
+        spanId: 'b'.repeat(16),
+        traceId: 'c'.repeat(32),
+        parentSpanId: null,
+        name: 'tool',
+        startTimeUnixNano: '1',
+        endTimeUnixNano: '2',
+        attributes: { 'jinn.span.kind': 'tool', 'tool.output': `leaked ${GH}` } as Record<string, unknown>,
+        redactedKeys: ['preexisting'],
+      },
+    ];
+
+    const out = await scrubCaptureSpans(spans, pipeline);
+    const s = out[0];
+
+    expect(s.attributes['tool.output']).not.toContain(GH);
+    // jinn.* structural key passes through untouched
+    expect(s.attributes['jinn.span.kind']).toBe('tool');
+    // captures carry no in-run hash chain — scrub must not invent one
+    expect(s.attributes).not.toHaveProperty('jinn.prevSpanHash');
+    // redactedKeys = stored ∪ newly-redacted
+    expect(s.redactedKeys).toContain('preexisting');
+    expect(s.redactedKeys).toContain('tool.output');
+    // unrelated fields preserved
+    expect(s.spanId).toBe('b'.repeat(16));
+    expect(s.name).toBe('tool');
   });
 });

@@ -55,6 +55,41 @@ export async function scrubSpansForEmit(
 }
 
 /**
+ * Minimal structural shape of a capture span (jinn.capture-trajectory.v1): a
+ * flat attribute bag plus the keys already redacted at ingest. Captures have no
+ * events array and no in-run hash chain, so they cannot go through
+ * {@link scrubSpansForEmit}; this is their dedicated seller-side scrub.
+ */
+export interface ScrubbableCaptureSpan {
+  attributes: Record<string, unknown>;
+  redactedKeys: string[];
+}
+
+/**
+ * Seller-side scrub for capture spans, applied at publish time before the
+ * capture trajectory is uploaded. Runs each span's attributes through the
+ * pipeline, replacing them with the scrubbed values, and unions the pipeline's
+ * redactions into the span's existing `redactedKeys`. Unlike
+ * {@link scrubSpansForEmit} it does NOT touch events or inject a hash chain —
+ * capture spans carry neither. Generic over the span type so the concrete
+ * `SpanRow` (with its extra columns) is returned unchanged apart from
+ * `attributes` and `redactedKeys`.
+ */
+export async function scrubCaptureSpans<T extends ScrubbableCaptureSpan>(
+  spans: T[],
+  pipeline: ScrubPipeline,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (const span of spans) {
+    const result = await pipeline.run(span.attributes ?? {});
+    const redactedKeys = new Set(span.redactedKeys);
+    for (const r of result.redactions) redactedKeys.add(r.key);
+    out.push({ ...span, attributes: result.attributes, redactedKeys: [...redactedKeys] });
+  }
+  return out;
+}
+
+/**
  * Unions two redaction manifests by spanId (dedup redactedKeys per span). Used
  * when an ingestion-time manifest (e.g. a capture's stored redactedKeys) is
  * combined with the emit-time pipeline manifest. Keeps the

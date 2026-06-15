@@ -108,6 +108,8 @@ import { CredentialScrubProcessor } from './trajectory/processors/credential-scr
 import { TranscriptContentScrubProcessor } from './trajectory/processors/transcript-content-scrub.js';
 import { IdentityScrubProcessor } from './trajectory/processors/identity-scrub.js';
 import { PathScrubProcessor } from './trajectory/processors/path-scrub.js';
+import { buildScrubPipeline } from './trajectory/scrub/build.js';
+import { maybeBuildPiiDetector } from './trajectory/scrub/pii-build.js';
 import { SqliteExporterProcessor } from './trajectory/processors/sqlite-exporter.js';
 import { ClaudeCodeJsonlParser } from './trajectory/transcript-parsers/claude-code-jsonl.js';
 import { CodexSessionParser } from './trajectory/transcript-parsers/codex-session.js';
@@ -2184,6 +2186,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  // ── Seller-side scrub pipeline (publish-time) ─────────────────────────────
+  // One pipeline shared by the task engine and the live capture publisher so
+  // every published trajectory passes through the same maintained scrub stack
+  // (structural key policy → openredaction → secretlint/entropy → optional ML
+  // PII). The OTLP receiver above runs best-effort ingest-time scrubbers; this
+  // is the authoritative final gate before a trajectory becomes public/sellable.
+  const sellerPiiDetector = await maybeBuildPiiDetector(config.captures.piiDetection);
+  const sellerScrubPipeline = buildScrubPipeline(
+    sellerPiiDetector ? { piiDetector: sellerPiiDetector } : {},
+  );
+
   const liveCapturePublisher = createLiveCapturePublisher({
     store: sharedStore,
     captures: capturesStore,
@@ -2196,6 +2209,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     clientGitSha: buildInfo.clientGitSha,
     identityPublisher,
     harnessMode: config.harness.mode,
+    scrubPipeline: sellerScrubPipeline,
   });
   capturePublishRef.current = liveCapturePublisher.publishCapture;
 
@@ -2631,6 +2645,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       reputationFeedback,
       operatorConfig,
       harnessMode: config.harness.mode,
+      // Share the one maintained scrub pipeline (incl. optional ML PII) so task
+      // trajectories and captures are scrubbed by the same stack before publish.
+      scrubPipeline: sellerScrubPipeline,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

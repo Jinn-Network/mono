@@ -627,8 +627,24 @@ export const JinnConfigSchema = z.object({
           port: z.number().int().positive().default(7342),
         })
         .default({ enabled: false, port: 7342 }),
+      /**
+       * Seller-side ML PII detection (Transformers.js NER, in-process) applied
+       * before captures (and task trajectories) are published. Off by default:
+       * the structural key policy + openredaction + secretlint/entropy stages
+       * always scrub; this adds person/org/location NER at the cost of a
+       * one-time model download. Degrades silently to the non-ML stages if the
+       * model fails to load.
+       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=1|true|yes,
+       *      JINN_CAPTURES_PII_DETECTION_MODEL=<hf-model-id>
+       */
+      piiDetection: z
+        .object({
+          enabled: z.boolean().default(false),
+          model: z.string().optional(),
+        })
+        .default({ enabled: false }),
     })
-    .default({ llmProxy: { enabled: false, port: 7342 } }),
+    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: false } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
@@ -1170,7 +1186,9 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (
     env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined ||
-    env['JINN_CAPTURES_LLM_PROXY_PORT'] !== undefined
+    env['JINN_CAPTURES_LLM_PROXY_PORT'] !== undefined ||
+    env['JINN_CAPTURES_PII_DETECTION_ENABLED'] !== undefined ||
+    env['JINN_CAPTURES_PII_DETECTION_MODEL'] !== undefined
   ) {
     const prevCaptures = typeof merged['captures'] === 'object' && merged['captures'] !== null
       ? (merged['captures'] as Record<string, unknown>)
@@ -1178,8 +1196,14 @@ export function loadConfig(configPath?: string): JinnConfig {
     const prevProxy = typeof prevCaptures['llmProxy'] === 'object' && prevCaptures['llmProxy'] !== null
       ? (prevCaptures['llmProxy'] as Record<string, unknown>)
       : {};
+    const prevPii = typeof prevCaptures['piiDetection'] === 'object' && prevCaptures['piiDetection'] !== null
+      ? (prevCaptures['piiDetection'] as Record<string, unknown>)
+      : {};
     const enabled = env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined
       ? ['1', 'true', 'yes'].includes(env['JINN_CAPTURES_LLM_PROXY_ENABLED'].trim().toLowerCase())
+      : undefined;
+    const piiEnabled = env['JINN_CAPTURES_PII_DETECTION_ENABLED'] !== undefined
+      ? ['1', 'true', 'yes'].includes(env['JINN_CAPTURES_PII_DETECTION_ENABLED'].trim().toLowerCase())
       : undefined;
     merged['captures'] = {
       ...prevCaptures,
@@ -1188,6 +1212,13 @@ export function loadConfig(configPath?: string): JinnConfig {
         ...(enabled !== undefined ? { enabled } : {}),
         ...(env['JINN_CAPTURES_LLM_PROXY_PORT']
           ? { port: Number.parseInt(env['JINN_CAPTURES_LLM_PROXY_PORT'], 10) }
+          : {}),
+      },
+      piiDetection: {
+        ...prevPii,
+        ...(piiEnabled !== undefined ? { enabled: piiEnabled } : {}),
+        ...(env['JINN_CAPTURES_PII_DETECTION_MODEL']
+          ? { model: env['JINN_CAPTURES_PII_DETECTION_MODEL'] }
           : {}),
       },
     };

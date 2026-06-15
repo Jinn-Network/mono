@@ -11,6 +11,8 @@ import {
   HarnessBundleManifestSchema,
   type HarnessBundleManifest,
 } from '../trajectory/harness-bundle-schema.js';
+import type { ScrubPipeline } from '../trajectory/scrub/pipeline.js';
+import { scrubCaptureSpans } from '../trajectory/scrub/emit-scrub.js';
 
 const ZERO_MEASUREMENT = `0x${'0'.repeat(64)}` as const;
 const DEFAULT_PRICE_USDC = '0';
@@ -53,6 +55,13 @@ export interface CapturePublishDeps {
   defaultArtifactEndpoint?: string;
   defaultPriceUsdc?: string;
   executor?: Partial<UnsignedEnvelope['executor']>;
+  /**
+   * Seller-side scrub pipeline (secretlint + openredaction + optional ML PII).
+   * When provided, every capture span's attributes are scrubbed through it
+   * before the trajectory is uploaded. The daemon always wires one in main.ts;
+   * absence means captures publish raw (only used by unit tests / opt-out).
+   */
+  scrubPipeline?: ScrubPipeline;
 }
 
 export interface CaptureEnvelopeAnchorInput {
@@ -96,7 +105,7 @@ export async function publishCaptureEnvelope(
 
   const spans = deps.captures.getSpansBySession(sessionId);
   const now = deps.now?.() ?? new Date();
-  const trajectoryPayload = buildCaptureTrajectoryPayload(capture, spans, now);
+  const trajectoryPayload = await buildCaptureTrajectoryPayload(capture, spans, now, deps.scrubPipeline);
   const trajectoryBlob = await deps.publishArtifact({
     sessionId,
     artifactType: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
@@ -246,20 +255,26 @@ export function buildUnsignedCaptureEnvelope(args: BuildUnsignedCaptureEnvelopeA
   });
 }
 
-function buildCaptureTrajectoryPayload(
+async function buildCaptureTrajectoryPayload(
   capture: PendingCaptureRow,
   spans: SpanRow[],
   now: Date,
-): Record<string, unknown> {
+  scrubPipeline?: ScrubPipeline,
+): Promise<Record<string, unknown>> {
+  // Seller-side scrub: captures are stored raw at ingest, so the publish path is
+  // the last gate before a trajectory becomes public/sellable. Scrubbing here
+  // both sanitises the span attributes and grows each span's redactedKeys, which
+  // the manifest below is derived from.
+  const scrubbed = scrubPipeline ? await scrubCaptureSpans(spans, scrubPipeline) : spans;
   const unsigned = {
     schemaVersion: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
     sessionId: capture.sessionId,
     capturedAt: capture.capturedAt,
     exportedAt: now.toISOString(),
-    spans,
+    spans: scrubbed,
     redactionManifest: {
-      spans: spans.map((span) => ({ spanId: span.spanId, redactedKeys: span.redactedKeys })),
-      totalRedactions: spans.reduce((sum, span) => sum + span.redactedKeys.length, 0),
+      spans: scrubbed.map((span) => ({ spanId: span.spanId, redactedKeys: span.redactedKeys })),
+      totalRedactions: scrubbed.reduce((sum, span) => sum + span.redactedKeys.length, 0),
     },
   };
   return unsigned;
