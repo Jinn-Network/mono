@@ -9,6 +9,7 @@ const CFG: DispatcherConfig = {
   // tests exercise dispatch (the review-side author gate, DR-2026-06-15, drops
   // non-allowlisted authors — covered directly in review-ready-filter.test.ts).
   authorAllowlist: ['a'], reviewCap: 2, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
+  implGhToken: '', reviewGhToken: '',
 };
 function pr(n: number, over: Partial<PolledPr> = {}): PolledPr {
   return { number: n, title: `t${n}`, headRefName: `b/${n}`, headRefOid: 's', isDraft: false, author: 'a', hasReviewLabel: true, needsReview: true, ...over };

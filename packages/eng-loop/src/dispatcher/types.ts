@@ -113,6 +113,20 @@ export interface DispatcherConfig {
    * `authorAllowlist`. Source: `JINN_REVIEW_BOT_LOGIN` (runner-read).
    */
   reviewBotLogin: string;
+  /**
+   * GH token (fine-grained PAT / installation token) that *implement* sessions
+   * authenticate as when authoring PRs. Injected per session via `GH_TOKEN`
+   * (DR-2026-06-15). Empty = sessions inherit the runner's ambient `gh` account
+   * (single-identity / legacy behaviour). Source: `JINN_IMPL_GH_TOKEN`.
+   */
+  implGhToken: string;
+  /**
+   * GH token that *review* sessions authenticate as when posting reviews. Must
+   * resolve to a different account than `implGhToken` (GitHub forbids approving
+   * your own PR) and to `reviewBotLogin` (else review-detection never matches).
+   * Both are checked fail-loud at boot. Source: `JINN_REVIEW_GH_TOKEN`.
+   */
+  reviewGhToken: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -128,6 +142,8 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
   reviewBotLogin: '',
+  implGhToken: '',
+  reviewGhToken: '',
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */

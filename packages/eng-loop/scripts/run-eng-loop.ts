@@ -22,6 +22,7 @@ import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
+import { assertReviewIdentities } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
 import {
@@ -75,6 +76,8 @@ const REPO = 'Jinn-Network/mono';
  */
 const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
 const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
+const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
+const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
@@ -415,6 +418,8 @@ async function main(): Promise<void> {
     ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
     authorAllowlist,
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
+    implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
+    reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
   };
 
   if (cfg.authorAllowlist.length === 0) {
@@ -439,6 +444,12 @@ async function main(): Promise<void> {
   } else {
     console.log(`[eng:loop] review-pr enabled (bot=${cfg.reviewBotLogin}, label=${cfg.engineReviewLabel}, cap=${cfg.reviewCap})`);
   }
+
+  // Fail-loud dual-identity check (DR-2026-06-15 gate 5): refuse to start a
+  // misconfigured review loop — reviewer == author, a token whose account does
+  // not match reviewBotLogin, or missing tokens — rather than spinning silently
+  // or posting self-approvals that GitHub rejects. No-op when review is off.
+  await assertReviewIdentities(cfg, realRunner);
 
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
