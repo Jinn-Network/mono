@@ -32,7 +32,12 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
   ]);
 
   const inFlightSet = new Set<number>(inFlight.map((s) => s.prNumber));
-  const reviewable = selectReviewable(polled, inFlightSet);
+  // Gate 2 (DR-2026-06-15): only review PRs authored by a trusted login — the
+  // review session checks out and RUNS the PR branch, so an untrusted fork PR
+  // must never reach dispatch. Reuses the dispatcher's author allowlist (which
+  // must include the implementer bot so the engine reviews its own PRs).
+  const authorAllowlist = new Set(cfg.authorAllowlist.map((s) => s.toLowerCase()));
+  const reviewable = selectReviewable(polled, inFlightSet, authorAllowlist);
 
   const budget = Math.max(0, cfg.reviewCap - inFlight.length);
   const toDispatch = reviewable.slice(0, budget);
