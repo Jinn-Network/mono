@@ -30,6 +30,7 @@ import {
   resetFieldCache,
 } from '../src/dispatcher/field-cache.js';
 import { makePauseSession } from '../src/dispatcher/pause-session.js';
+import { syncHumanLane } from '../src/dispatcher/human-lane.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
@@ -306,6 +307,9 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
   };
   const firstDelay = await runOnce();
   scheduleNext(firstDelay);
+}
+
+// ---------------------------------------------------------------------------
 // makeCollectCompletions — the concrete finished-session classifier (#489)
 //
 // `loop.ts` stays gh/git-free: it hands the previous + current in-flight sets
@@ -514,6 +518,25 @@ async function main(): Promise<void> {
         );
       }
 
+      // Keep the `Human` Status lane mirroring "blocked on a human": promote
+      // Todo/In-Progress + `Blocked on: Human` issues into it (the operator's
+      // single "needs my eyes" view), and demote unblocked items back to Todo so
+      // clearing the block re-readies them. Infra-side — covers wall-clock and
+      // in-session escalations uniformly; idempotent. Best-effort: failures are
+      // logged, not fatal (the leak fix already frees slots via the `Blocked on`
+      // marker, so a missed move only delays the visual sync, never wedges).
+      try {
+        const { promoted, demoted } = await syncHumanLane(snapshot, cycleFieldCache, realRunner);
+        if (promoted.length > 0) {
+          console.log(`[eng:loop] → Status: Human (blocked on human) → #${promoted.join(', #')}`);
+        }
+        if (demoted.length > 0) {
+          console.log(`[eng:loop] Status: Human → Todo (unblocked) → #${demoted.join(', #')}`);
+        }
+      } catch (err) {
+        console.error('[eng:loop] Human-lane sync error (cycle unaffected):', err);
+      }
+
       // Build a per-cycle pause closure that resolves the project item id
       // from the snapshot already in scope (jinn-mono#599) — no extra
       // `gh project item-list` call per pause.
@@ -645,6 +668,21 @@ async function main(): Promise<void> {
 // so a relative invocation (e.g. `tsx ./scripts/run-eng-loop.ts`) matches the
 // absolute path returned by `fileURLToPath`.
 if (argv[1] != null && resolve(argv[1]) === fileURLToPath(import.meta.url)) {
+  // Capture async faults that escape the awaited chain — notably a rejection
+  // from a setTimeout-scheduled cycle, whose promise is voided and never caught
+  // by `main().catch` below. Without these handlers Node terminates with a bare
+  // "Node.js v<ver>" footer and no stack, leaving the respawn supervisor nothing
+  // to diagnose. Log the full reason, then exit non-zero so the supervisor
+  // restarts a clean process. Registered only on direct invocation so importing
+  // this module (regression test) does not install process-global handlers.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[eng:loop] FATAL unhandledRejection — exiting for supervisor respawn:', reason);
+    process.exit(1);
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('[eng:loop] FATAL uncaughtException — exiting for supervisor respawn:', err);
+    process.exit(1);
+  });
   main().catch((err) => {
     console.error('[eng:loop] Fatal error:', err);
     process.exit(1);

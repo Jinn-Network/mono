@@ -38,6 +38,7 @@ function makeSession(issueNumber: number): InFlightSession {
     worktreePath: `/tmp/jinn-mono_worktrees/${issueNumber}`,
     pid: null,
     startedAt: 1,
+    logPath: `/tmp/eng-loop/sessions/${issueNumber}.log`,
   };
 }
 

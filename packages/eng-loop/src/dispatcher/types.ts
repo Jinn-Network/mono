@@ -6,7 +6,11 @@ export type IssueShape =
 export type BlockedOn = 'Nothing' | 'Human' | 'Another issue';
 export type Effort = 'Low' | 'Medium' | 'High';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
-export type ProjectStatus = 'Todo' | 'In Progress' | 'In Review' | 'Done';
+// 'Human' is a parked lane: the dispatcher promotes escalated (Blocked on:
+// Human) sessions into it so they leave the active "In Progress" column and
+// are visible at a glance as "needs a human". It is never a dispatchable state
+// (selectReady requires 'Todo') nor an in-flight state.
+export type ProjectStatus = 'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Done';
 
 /** An issue as polled from the source, with its taxonomy fields. */
 export interface PolledIssue {

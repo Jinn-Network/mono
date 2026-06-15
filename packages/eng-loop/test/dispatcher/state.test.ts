@@ -209,3 +209,112 @@ describe('deriveInFlight', () => {
     expect(drift.some((d) => d.includes('418'))).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Escalated (Blocked on: Human) sessions must not hold a concurrency slot.
+//
+// Regression for the slot-leak: an escalated session keeps Status "In Progress"
+// (there is no parked Status) and retains its worktree so a human can resume
+// it. Before the fix, deriveInFlight counted it as in-flight, so N escalations
+// permanently consumed N concurrency slots and eventually froze the dispatcher
+// (observed live 2026-06-13: 5 escalations wedged a cap-5 loop). An escalated
+// issue is a *parked* session: NOT in-flight (its slot is free) and NOT drift
+// (its worktree is expected, retained for resume).
+// ---------------------------------------------------------------------------
+
+const ESCALATED_ISSUE = 777; // In Progress + Blocked on: Human + worktree → parked
+const ACTIVE_ISSUE = 778; // In Progress + Blocked on: Nothing + worktree → in-flight
+
+const ESCALATION_SNAPSHOT: ProjectSnapshot = {
+  items: [
+    snapshotItem({
+      id: 'PVTI_esc',
+      number: ESCALATED_ISSUE,
+      contentType: 'Issue',
+      status: 'In Progress',
+      blockedOn: 'Human',
+      issueType: 'feat',
+    }),
+    snapshotItem({
+      id: 'PVTI_act',
+      number: ACTIVE_ISSUE,
+      contentType: 'Issue',
+      status: 'In Progress',
+      blockedOn: 'Nothing',
+      issueType: 'fix',
+    }),
+  ],
+  rateLimit: { remaining: 4999, used: 1, resetAt: '2026-06-13T16:00:00Z' },
+  currentSprintIterationId: null,
+};
+
+const ESCALATION_PORCELAIN = [
+  `worktree ${WORKTREES_BASE}/${ESCALATED_ISSUE}`,
+  'HEAD aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111',
+  `branch refs/heads/feat/${ESCALATED_ISSUE}-escalated-thing`,
+  '',
+  `worktree ${WORKTREES_BASE}/${ACTIVE_ISSUE}`,
+  'HEAD bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222',
+  `branch refs/heads/fix/${ACTIVE_ISSUE}-active-thing`,
+  '',
+].join('\n');
+
+function makeEscalationRunner(): CommandRunner {
+  return async (cmd: string, args: string[]): Promise<string> => {
+    if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+      return ESCALATION_PORCELAIN;
+    }
+    throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+  };
+}
+
+describe('deriveInFlight — escalated (Blocked on: Human) sessions', () => {
+  it('does not count an escalated issue as in-flight (frees its concurrency slot)', async () => {
+    const { inFlight } = await deriveInFlight(ESCALATION_SNAPSHOT, makeEscalationRunner());
+    expect(inFlight.some((s) => s.issueNumber === ESCALATED_ISSUE)).toBe(false);
+  });
+
+  it('still counts a non-escalated In Progress issue as in-flight', async () => {
+    const { inFlight } = await deriveInFlight(ESCALATION_SNAPSHOT, makeEscalationRunner());
+    expect(inFlight.some((s) => s.issueNumber === ACTIVE_ISSUE)).toBe(true);
+    expect(inFlight).toHaveLength(1);
+  });
+
+  it('does not flag an escalated session\'s retained worktree as drift', async () => {
+    const { drift } = await deriveInFlight(ESCALATION_SNAPSHOT, makeEscalationRunner());
+    expect(drift.some((d) => d.includes(String(ESCALATED_ISSUE)))).toBe(false);
+  });
+
+  it('parks an issue promoted into the Human Status lane (not in-flight, not drift)', async () => {
+    // After promotion the issue sits at Status "Human"; it must stay parked
+    // (slot free, worktree retained without drift) just like a Blocked on:
+    // Human item, even if "Blocked on" were later cleared.
+    const snap: ProjectSnapshot = {
+      items: [
+        snapshotItem({
+          id: 'PVTI_human',
+          number: ESCALATED_ISSUE,
+          contentType: 'Issue',
+          status: 'Human',
+          blockedOn: 'Nothing',
+          issueType: 'feat',
+        }),
+        snapshotItem({
+          id: 'PVTI_act2',
+          number: ACTIVE_ISSUE,
+          contentType: 'Issue',
+          status: 'In Progress',
+          blockedOn: 'Nothing',
+          issueType: 'fix',
+        }),
+      ],
+      rateLimit: { remaining: 4999, used: 1, resetAt: '2026-06-14T16:00:00Z' },
+      currentSprintIterationId: null,
+    };
+    const { inFlight, drift } = await deriveInFlight(snap, makeEscalationRunner());
+    expect(inFlight.some((s) => s.issueNumber === ESCALATED_ISSUE)).toBe(false);
+    expect(drift.some((d) => d.includes(String(ESCALATED_ISSUE)))).toBe(false);
+    // The active issue is still in-flight.
+    expect(inFlight.some((s) => s.issueNumber === ACTIVE_ISSUE)).toBe(true);
+  });
+});
