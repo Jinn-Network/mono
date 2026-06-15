@@ -18,6 +18,8 @@ import {
   type ArtifactScrubConfig,
 } from '../harnesses/engine/artifact-scrub.js';
 import type { TrajectoryCollector } from './collector.js';
+import type { ScrubPipeline } from './scrub/pipeline.js';
+import { scrubSpansForEmit } from './scrub/emit-scrub.js';
 import type { JinnTrajectoryV1, Span, RedactionManifest } from './schema.js';
 
 export interface EmitTrajectoryParams {
@@ -29,6 +31,11 @@ export interface EmitTrajectoryParams {
   signerAddress: `0x${string}`;
   ipfsRegistryUrl: string;
   scrub?: ArtifactScrubConfig;
+  /**
+   * Seller-side scrub pipeline (secretlint + openredaction + optional ML PII).
+   * When provided, every span is scrubbed through it before signing.
+   */
+  scrubPipeline?: ScrubPipeline;
 }
 
 export interface EmitTrajectoryResult {
@@ -87,7 +94,14 @@ export async function emitTrajectory(
   p: EmitTrajectoryParams,
 ): Promise<EmitTrajectoryResult> {
   const snap = p.collector.snapshot();
-  const scrubbed = scrubSnapshot(snap.spans, snap.redactionManifest, p.scrub);
+  let spans = snap.spans;
+  let manifest = snap.redactionManifest;
+  if (p.scrubPipeline) {
+    const piped = await scrubSpansForEmit(spans, p.scrubPipeline, p.collector.taskCid);
+    spans = piped.spans;
+    manifest = piped.redactionManifest;
+  }
+  const scrubbed = scrubSnapshot(spans, manifest, p.scrub);
   const unsigned = {
     schemaVersion: 'jinn.trajectory.v1' as const,
     runId: p.runId,

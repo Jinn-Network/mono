@@ -65,6 +65,8 @@ import {
 import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
+import { buildScrubPipeline } from '../../trajectory/scrub/build.js';
+import type { ScrubPipeline } from '../../trajectory/scrub/pipeline.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
@@ -250,6 +252,12 @@ export interface TaskEngineOptions {
   implRegistry?: ImplRegistry;
   solverNetRegistry?: SolverNetRegistryLike;
   /**
+   * Seller-side scrub pipeline applied to trajectory spans at emit time. When
+   * absent, the engine builds the default (openredaction + secretlint); supply
+   * one to add the ML PII detector.
+   */
+  scrubPipeline?: ScrubPipeline;
+  /**
    * Per-launch operator eligibility filter (Task 28 of
    * `spec/2026-05-05-solvernet-creation-and-launch.md`).
    *
@@ -407,6 +415,7 @@ export class TaskEngine {
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
+  protected readonly scrubPipeline: ScrubPipeline;
   protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
@@ -467,6 +476,7 @@ export class TaskEngine {
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
+    this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
     this.joinedSolverNets = opts.joinedSolverNets;
     this.manifestResolver = opts.manifestResolver;
     this.identityPublisher = opts.identityPublisher;
@@ -1455,6 +1465,7 @@ export class TaskEngine {
           signerAddress: account.address as `0x${string}`,
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
           scrub: packagingDepsWithReq.donation?.scrub,
+          scrubPipeline: this.scrubPipeline,
         });
         const sources: ArtifactSource[] = [];
         if (packagingDepsWithReq.donation?.enabled) {
