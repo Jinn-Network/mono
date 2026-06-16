@@ -29,14 +29,31 @@ describe('maybeBuildPiiDetector', () => {
     expect(initMock).not.toHaveBeenCalled();
   });
 
-  test('fails closed (throws) when explicitly enabled and the model fails to load', async () => {
+  // B1: failure altitude is publish-time, not boot-time. When enabled and the
+  // model fails to load, construction does NOT throw (so the daemon's other
+  // loops keep running) — instead a detector is returned that hard-throws on
+  // every scrub call, so each affected publish aborts (fails closed). A loud
+  // one-time boot warning is emitted so the degraded posture is visible.
+  test('does not throw at construction when enabled and the model fails to load (boot survives)', async () => {
     initMock.mockRejectedValue(new Error('model download failed'));
-    await expect(maybeBuildPiiDetector({ enabled: true }, () => {})).rejects.toThrow(
-      /model download failed/,
-    );
+    const logs: string[] = [];
+    const detector = await maybeBuildPiiDetector({ enabled: true }, (m) => logs.push(m));
+    // construction resolved with a detector rather than throwing
+    expect(detector).toBeDefined();
+    // loud, visible boot warning naming the fail-closed posture
+    expect(logs.join('\n')).toMatch(/ML PII detection is enabled but the model failed to load/);
+    expect(logs.join('\n')).toMatch(/failing closed/i);
   });
 
-  test('returns the detector when enabled and the model loads', async () => {
+  test('returned fail-closed detector hard-throws on every scrub call (per-publish abort)', async () => {
+    initMock.mockRejectedValue(new Error('model download failed'));
+    const detector = await maybeBuildPiiDetector({ enabled: true }, () => {});
+    // each detect() call rejects with a clear, non-silent error
+    await expect(detector!.detect('any text')).rejects.toThrow(/failing closed/i);
+    await expect(detector!.detect('more text')).rejects.toThrow(/NOT published/);
+  });
+
+  test('returns the real detector when enabled and the model loads', async () => {
     initMock.mockResolvedValue(undefined);
     const detector = await maybeBuildPiiDetector({ enabled: true }, () => {});
     expect(detector).toBeDefined();
