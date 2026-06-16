@@ -7,6 +7,7 @@ import type {
   MakeSweRebenchV2GeneratorForLaunchedRecordOpts,
   SweRebenchV2GeneratorRuntimeConfig,
 } from '../solver-types/swe-rebench-v2.js';
+import type { MakeJinnRepoGeneratorForLaunchedRecordOpts } from '../solver-types/jinn-repo-auto.js';
 import type { PendingGeneratorSpawn } from './daemon-init.js';
 import type { LaunchedSolverNetRecord } from './store.js';
 
@@ -37,6 +38,7 @@ export interface LaunchedRecordGeneratorFactories {
     staticConfig?: LaunchedRecordGeneratorStaticConfig;
   }) => TaskGenerator;
   sweRebenchV2: (opts: MakeSweRebenchV2GeneratorForLaunchedRecordOpts) => TaskGenerator;
+  jinnRepo: (opts: MakeJinnRepoGeneratorForLaunchedRecordOpts) => TaskGenerator;
 }
 
 export interface LaunchedRecordGeneratorLogger {
@@ -131,13 +133,16 @@ async function defaultFactories(): Promise<LaunchedRecordGeneratorFactories> {
   const [
     { makePredictionV1GeneratorForLaunchedRecord },
     { makeSweRebenchV2GeneratorForLaunchedRecord },
+    { makeJinnRepoGeneratorForLaunchedRecord },
   ] = await Promise.all([
     import('../solver-types/prediction-v1-auto.js'),
     import('../solver-types/swe-rebench-v2.js'),
+    import('../solver-types/jinn-repo-auto.js'),
   ]);
   return {
     predictionV1: makePredictionV1GeneratorForLaunchedRecord,
     sweRebenchV2: makeSweRebenchV2GeneratorForLaunchedRecord,
+    jinnRepo: makeJinnRepoGeneratorForLaunchedRecord,
   };
 }
 
@@ -271,6 +276,10 @@ export async function wireLaunchedRecordGenerators(
         recordRef: pending.recordRef,
         configRef: pending.configRef as { current: SweRebenchV2GeneratorRuntimeConfig },
         staticConfig: opts.staticConfig,
+      });
+    } else if (contract.id === 'jinn-repo' && contract.version === 'v1') {
+      generator = factories.jinnRepo({
+        recordRef: pending.recordRef,
       });
     } else {
       logger.warn?.(

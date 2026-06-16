@@ -22,6 +22,11 @@ const exclude = [
   'test/e2e/**',
   'test/**/*.e2e.test.ts',
   'node_modules/**',
+  // Fixtures are data, not tests. The jinn-repo corpus fixtures embed real
+  // gold-test files (e.g. .../gold-test/client/test/.../safe.test.ts) that the
+  // default glob would otherwise collect and fail to resolve (their imports are
+  // repo-root-relative to a checkout, not to this tree).
+  'test/fixtures/**',
   // Heavy Tier 1 release scenarios need external prerequisites — T1.1 forks
   // real Base mainnet RPC (~1min), T1.2 needs a built `dist/bin/jinn.js`,
   // T1.3 forks Base Sepolia + spawns a real Ponder. They break a

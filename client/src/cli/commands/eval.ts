@@ -22,7 +22,13 @@ import {
   HarnessCheckpointManifestSchema,
   type HarnessCheckpointManifest,
 } from '@jinn-network/sdk/checkpoint';
-import { runEval, type EvalRunResult, type RunHarnessOnceForEval } from '../../eval/orchestrator.js';
+import {
+  runEval,
+  type EvalRunResult,
+  type RunHarnessOnceForEval,
+  type EvalSlateInstance,
+  type SolutionEvaluator,
+} from '../../eval/orchestrator.js';
 import { resolveSlateTasks } from '../../eval/resolve-slate-tasks.js';
 import type { RateComparison } from '../../eval/wilson.js';
 import { loadConfig } from '../../config.js';
@@ -49,8 +55,28 @@ import { SweRebenchV2Evaluator } from '../../harnesses/impls/swe-rebench-v2-eval
 import { HttpHfFetcher } from '../../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner } from '../../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 import { readEnabledState } from '../../harnesses/impls/swe-rebench-v2-evaluator/harness.js';
+import { JinnRepoEvaluator } from '../../harnesses/impls/jinn-repo-evaluator/evaluator.js';
+import {
+  loadJinnRepoPool,
+  resolveJinnRepoSlate,
+  solverView,
+  type JinnRepoPoolItem,
+} from '../../solver-types/_jinn-repo-pool.js';
 import type { Task } from '../../types/task.js';
 import type { Harness } from '../../harnesses/types.js';
+
+/**
+ * Which evaluation backend a solverType dispatches to. `jinn-repo` grades
+ * candidate patches against real merged-PR fixtures in this repo (repo-native);
+ * everything else uses the swe-rebench-v2 Docker grading path (production).
+ */
+export type EvalBackend =
+  | { kind: 'swe-rebench-v2' }
+  | { kind: 'jinn-repo' };
+
+export function selectEvalBackend(solverType: string): EvalBackend {
+  return solverType === 'jinn-repo' ? { kind: 'jinn-repo' } : { kind: 'swe-rebench-v2' };
+}
 
 export interface RunPipelineArgs {
   checkpointCid: string;
@@ -408,6 +434,63 @@ async function resolveSlateAgainstPool(args: {
   return out;
 }
 
+/**
+ * Adapt {@link JinnRepoEvaluator} onto the orchestrator's {@link SolutionEvaluator}.
+ * The orchestrator calls `grade({ task, solutionPayload, row })` and consumes a
+ * `{ passed_match, test_log }` verdict, signalling unscorable by THROWING (its
+ * catch records `unscorable`). The repo-native evaluator instead RETURNS
+ * `{ passed, unscorable, logExcerpt }`, so this adapter:
+ *   - feeds the full pool item (`task`, which carries `gold_tests`) + the patch,
+ *   - throws when the run is unscorable (preserving the orchestrator's contract:
+ *     unscorable is never a graded FAIL — #476),
+ *   - otherwise maps `passed` → `passed_match` and `logExcerpt` → `test_log`.
+ * `row` is unused (repo-native grading has no HF row).
+ */
+function jinnRepoEvaluatorAdapter(evaluator: JinnRepoEvaluator): SolutionEvaluator {
+  return {
+    async grade({ task, solutionPayload }): Promise<{ passed_match: boolean; test_log: string }> {
+      const verdict = await evaluator.grade({
+        task: task as unknown as JinnRepoPoolItem,
+        solution: { patch: solutionPayload.patch },
+      });
+      if (verdict.unscorable || verdict.passed === null) {
+        // Unscorable: the orchestrator records this instance as excluded, never
+        // as a graded fail. Throwing routes it through the orchestrator's
+        // unscorable catch (matches the swe-rebench evaluator's throw contract).
+        throw new Error(`jinn-repo eval unscorable: ${verdict.logExcerpt}`);
+      }
+      return { passed_match: verdict.passed, test_log: verdict.logExcerpt };
+    },
+  };
+}
+
+/**
+ * Build the jinn-repo `slateInstances` for the orchestrator. LEAK-CONTROL: the
+ * solver harness receives ONLY `solverView(item)` (no `gold_tests`, no
+ * `solution_patch`); the evaluator receives the full pool item via `gradeTask`.
+ */
+function jinnRepoSlateInstances(items: JinnRepoPoolItem[]): EvalSlateInstance[] {
+  return items.map((item) => {
+    const view = solverView(item);
+    return {
+      instance_id: item.instance_id,
+      // Solver-visible task: solverView ONLY — gold tests + reference solution
+      // never cross this boundary.
+      harnessTask: {
+        id: item.instance_id,
+        description: item.problem_statement,
+        role: 'restoration',
+        solverType: 'jinn-repo.v1',
+        spec: view as unknown as Record<string, unknown>,
+        window: { startTs: 0, endTs: Date.now() + 3_600_000 },
+      },
+      // Grade-side: the FULL pool item (the evaluator needs gold_tests).
+      gradeTask: item,
+      solutionSchemaVersion: 'jinn-repo-solution.v1',
+    };
+  });
+}
+
 const PRODUCTION_DEPS: EvalCommandDeps = {
   async fetchManifest(cid: string): Promise<HarnessCheckpointManifest> {
     const config = loadConfig(DEFAULT_CONFIG_PATH);
@@ -428,33 +511,54 @@ const PRODUCTION_DEPS: EvalCommandDeps = {
       );
     }
 
-    // Slate → tasks (real HF fetcher; per-instance dataset/split from the pool).
+    // Slate (instance ids) is backend-agnostic; how those ids resolve to
+    // run/grade payloads and which evaluator grades them is backend-specific.
     const slate = loadHeldOutSlate(`${args.solverType}.v1`, args.slateVersion);
-    const stateDir =
-      process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir();
-    const fetcher = new HttpHfFetcher();
-    const tasksWithRows = await resolveSlateAgainstPool({
-      instanceIds: slate.instanceIds,
-      fetcher,
-      stateDir,
-    });
+    const backend = selectEvalBackend(args.solverType);
 
-    // Evaluator: the SWE-rebench v2 grading library — same construction the
-    // evaluator harness uses internally (HttpHfFetcher + PythonEvalRunner over
-    // the cloned upstream repo). Requires `jinn harnesses enable
-    // swe-rebench-v2-evaluator` to have cloned upstream + validated Docker.
-    const evaluatorImplStateDir = join(implStateDirRoot(config), 'swe-rebench-v2-evaluator');
-    const enabled = readEnabledState(evaluatorImplStateDir);
-    if (!enabled) {
-      throw new Error(
-        `swe-rebench-v2 evaluator not enabled (no state at ${evaluatorImplStateDir}). ` +
-          `Run \`jinn harnesses enable swe-rebench-v2-evaluator\` first.`,
-      );
+    // Resolve the per-backend run/grade inputs:
+    //   - tasksWithRows  → swe-rebench-v2 default mapping (HF rows, Docker grade)
+    //   - slateInstances → repo-native leak-controlled instances (solverView only)
+    let tasksWithRows: Awaited<ReturnType<typeof resolveSlateAgainstPool>> | undefined;
+    let slateInstances: EvalSlateInstance[] | undefined;
+    let evaluator: SolutionEvaluator;
+
+    if (backend.kind === 'jinn-repo') {
+      // Repo-native: resolve the slate ids against the LOCAL jinn-repo pool. The
+      // evaluator (JinnRepoEvaluator) clones this repo @ base_commit, applies the
+      // candidate patch, overwrites gold tests, and runs the PR's own test.
+      const items = resolveJinnRepoSlate(loadJinnRepoPool(), slate.instanceIds);
+      slateInstances = jinnRepoSlateInstances(items);
+      evaluator = jinnRepoEvaluatorAdapter(new JinnRepoEvaluator());
+    } else {
+      // swe-rebench-v2 (production): real HF fetcher; per-instance dataset/split
+      // from the pool.
+      const stateDir =
+        process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir();
+      const fetcher = new HttpHfFetcher();
+      tasksWithRows = await resolveSlateAgainstPool({
+        instanceIds: slate.instanceIds,
+        fetcher,
+        stateDir,
+      });
+
+      // Evaluator: the SWE-rebench v2 grading library — same construction the
+      // evaluator harness uses internally (HttpHfFetcher + PythonEvalRunner over
+      // the cloned upstream repo). Requires `jinn harnesses enable
+      // swe-rebench-v2-evaluator` to have cloned upstream + validated Docker.
+      const evaluatorImplStateDir = join(implStateDirRoot(config), 'swe-rebench-v2-evaluator');
+      const enabled = readEnabledState(evaluatorImplStateDir);
+      if (!enabled) {
+        throw new Error(
+          `swe-rebench-v2 evaluator not enabled (no state at ${evaluatorImplStateDir}). ` +
+            `Run \`jinn harnesses enable swe-rebench-v2-evaluator\` first.`,
+        );
+      }
+      evaluator = new SweRebenchV2Evaluator({
+        fetcher,
+        runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
+      });
     }
-    const evaluator = new SweRebenchV2Evaluator({
-      fetcher,
-      runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
-    });
 
     // The orchestrator runs each slate task under the full dispatch solverType
     // (`<solver-type>.v1`). Resolve the SAME SolverNet runtime plugins the
@@ -477,7 +581,7 @@ const PRODUCTION_DEPS: EvalCommandDeps = {
         checkpointManifest: manifest,
         checkpointCid: args.checkpointCid,
         slate,
-        tasksWithRows,
+        ...(slateInstances ? { slateInstances } : { tasksWithRows: tasksWithRows ?? [] }),
         parentCheckpointCid: args.parentCheckpointCid,
         implStateDir,
         deps: {

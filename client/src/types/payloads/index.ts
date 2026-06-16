@@ -19,6 +19,10 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
+import {
+  JinnRepoSolutionPayloadSchema,
+  JinnRepoVerdictPayloadSchema,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
 import { normalizeEnvelopeRole, type LegacyEnvelopeRole, type Role } from '../envelope.js';
 
 /**
@@ -53,6 +57,11 @@ export const SOLVER_TYPE_PAYLOADS: Record<string, Partial<Record<Role, z.ZodSche
   'swe-rebench-v2.v1': {
     solution: SweRebenchV2SolutionPayloadSchema,
     verdict: SweRebenchV2VerdictPayloadSchema,
+  },
+  // jinn-repo SolverNet — real merged Jinn-Network/mono PRs.
+  'jinn-repo.v1': {
+    solution: JinnRepoSolutionPayloadSchema,
+    verdict: JinnRepoVerdictPayloadSchema,
   },
   // Passthrough SolverType for legacy / untyped tasks.
   // Produced by the legacy-claude impl; no structural validation on payload.
