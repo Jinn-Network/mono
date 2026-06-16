@@ -631,9 +631,10 @@ export const JinnConfigSchema = z.object({
        * Seller-side ML PII detection (Transformers.js NER, in-process) applied
        * before captures (and task trajectories) are published. Off by default:
        * the structural key policy + openredaction + secretlint/entropy stages
-       * always scrub; this adds person/org/location NER at the cost of a
-       * one-time model download. Degrades silently to the non-ML stages if the
-       * model fails to load.
+       * always scrub (the non-ML guarantee); this adds person/org/location NER
+       * at the cost of a one-time model download. When enabled, a model-load
+       * failure fails closed at the publish altitude — the trajectory is not
+       * published — while the daemon's other loops keep running.
        * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=1|true|yes,
        *      JINN_CAPTURES_PII_DETECTION_MODEL=<hf-model-id>
        */
