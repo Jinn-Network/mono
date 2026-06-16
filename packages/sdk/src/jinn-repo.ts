@@ -9,7 +9,7 @@
  * it without the SDK importing from the client.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const JINN_REPO_SCHEMA_VERSION = 'jinn-repo.v1' as const;
 

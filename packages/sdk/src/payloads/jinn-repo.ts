@@ -11,7 +11,7 @@
  * envelope's `artifacts[]` rather than as a typed payload field.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const JinnRepoSolutionPayloadSchema = z.object({
   schemaVersion: z.literal('jinn-repo-solution.v1'),
