@@ -23,7 +23,7 @@ import type { Hono } from 'hono';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { getChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
@@ -44,6 +44,7 @@ import {
   type ExecFileAsync,
 } from '../setup/claude-code-install.js';
 import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
+import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -109,6 +110,22 @@ export interface SetupRoutesConfig {
    * bootstrap() again. jinn-mono-hjex.6
    */
   retryBootstrap?: () => Promise<void>;
+  /**
+   * #1037: hot-apply a join to the running daemon. The route registers
+   * eagerly (Hono freezes its matcher), so the applier is passed via a holder
+   * populated by main.ts after the join-consuming subsystems are built. When
+   * `current` is undefined (pre-running) or the apply throws, the endpoint
+   * returns restartRequired:true so the operator restarts to pick up the
+   * on-disk write.
+   */
+  joinApplier?: { current?: (entry: JoinedSolverNetConfig) => Promise<void> };
+  /**
+   * #983: called after POST /v1/operator/onboarding-complete persists the flag
+   * to disk, so the daemon's in-memory config reflects it and GET /v1/bootstrap
+   * (which reads the in-memory config) returns onboardingComplete:true without
+   * a restart. Mirrors the join-applier's in-memory mutation (join-applier.ts).
+   */
+  markOnboardingComplete?: () => void;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -560,6 +577,8 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const previous = joinedSolverNets[cid];
+    const previousName =
+      typeof previous?.['name'] === 'string' ? (previous['name'] as string) : undefined;
     const previousContractRecord = isRecord(previous?.['contract'])
       ? previous?.['contract']
       : undefined;
@@ -577,12 +596,28 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       manifestCid: cid,
       roles,
     };
-    if (typeof body.name === 'string') entry['name'] = body.name;
+    // A partial upsert (e.g. #983's Enter-dashboard second join, which sends
+    // only roles+harness+model) must not drop a `name` a prior join wrote:
+    // the live join applier (daemon/join-applier.ts) keys the in-memory
+    // SolverNet registry by `name`, so dropping it here makes the applier's
+    // `unregister(entry.name ?? cid)` miss the prior registration and insert a
+    // phantom duplicate keyed by cid — `forSolverType` then resolves the stale
+    // first entry, silently running the wrong harness/model live. Mirror the
+    // `previousContract` fallback below.
+    const nextName = typeof body.name === 'string' ? body.name : previousName;
+    if (nextName !== undefined) entry['name'] = nextName;
     if (contract ?? previousContract) entry['contract'] = contract ?? previousContract;
     // `harness` / `model` / `plugins` are solver-side. Persist whatever the
     // SPA sent; the daemon-side runtime ignores them when only the
     // `evaluator` role is selected (evaluator harness comes from
     // `manifest.contract.evaluationFunction.implementation`).
+    //
+    // Unlike `name` / `contract` above, these are intentionally taken from the
+    // request body WITHOUT a previous-value fallback: the #983 onboarding
+    // Enter-dashboard step always sends harness+model, so this is correct for
+    // that flow. Callers doing a PARTIAL re-join that omits these fields will
+    // drop the prior values — any caller wanting them preserved must include
+    // them in the body.
     if (typeof body.harness === 'string') entry['harness'] = canonicalHarnessName(body.harness);
     if (typeof body.model === 'string') entry['model'] = body.model;
     if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
@@ -601,12 +636,49 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }, 500);
     }
 
+    // #1037: hot-apply to the running daemon if the applier is wired and the
+    // daemon has reached running mode. The on-disk write above already
+    // succeeded, so any live-apply failure (holder empty pre-running, or the
+    // applier throwing) degrades gracefully to restartRequired:true.
+    let restartRequired = true;
+    const applier = config.joinApplier?.current;
+    if (applier) {
+      try {
+        await applier(entry as unknown as JoinedSolverNetConfig);
+        restartRequired = false;
+      } catch (err) {
+        console.error(
+          '[join] live apply failed; operator must restart to pick up the join:',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     return c.json({
       ok: true,
-      restartRequired: true,
+      restartRequired,
       manifestCid: cid,
       config: entry,
     });
+  });
+
+  // POST /v1/operator/onboarding-complete — #983. The operator clicked
+  // "Enter dashboard" at the end of the guided onboarding takeover (gated SPA-
+  // side on ≥1 join AND a ready solver harness AND a selected model). Persists
+  // the flag to disk and mutates the in-memory config so GET /v1/bootstrap
+  // reflects it live; App.tsx then drops the takeover for <Operating>.
+  app.post('/v1/operator/onboarding-complete', (c) => {
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    try {
+      persistConfigValue('onboardingComplete', true, cfgPath);
+    } catch (err) {
+      return c.json({
+        error: 'config_write_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+    config.markOnboardingComplete?.();
+    return c.json({ ok: true, onboardingComplete: true });
   });
 
   // DELETE /v1/operator/join/:cid — operator leaves a joined SolverNet.

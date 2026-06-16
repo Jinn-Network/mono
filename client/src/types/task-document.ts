@@ -6,7 +6,7 @@
  * is the SolverType-specific payload.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { WindowSchema } from './window.js';
 
 const HexStringSchema = z

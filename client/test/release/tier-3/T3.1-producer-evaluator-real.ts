@@ -61,7 +61,13 @@ import {
   type Log,
 } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { setupTier3Scenario, resolveGoldDaemonHome, tierOpNames, type Tier3Handle } from './tier-3-helpers.js';
+import {
+  isDailyDriverRunning,
+  setupTier3Scenario,
+  resolveGoldDaemonHome,
+  tierOpNames,
+  type Tier3Handle,
+} from './tier-3-helpers.js';
 import {
   classifyFailure,
   type ScenarioVerdict,
@@ -132,6 +138,17 @@ const PORT_BASE = 7360;
 interface ScenarioOptionsT3 extends ScenarioOptions {
   mode?: 'human-invoked' | 'autonomous';
   hermesModel?: string;
+}
+
+export function buildT31DaemonEnv(args: {
+  hermesModel: string;
+  onchainTaskId: string;
+}): NodeJS.ProcessEnv {
+  return {
+    JINN_HERMES_MODEL: args.hermesModel,
+    JINN_TIER3_COST_CAP_USD: COST_CAP_USD.toString(),
+    JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS: args.onchainTaskId,
+  };
 }
 
 // ── Generic poll helper ──────────────────────────────────────────────────────
@@ -558,37 +575,17 @@ export async function runT31ProducerEvaluatorReal(
   const setupReserveMs = 90 * 1000;
 
   try {
-    log(
-      `1. setup Tier 3 scenario (mode=${opts.mode ?? 'human-invoked'}, hermesModel=${hermesModel}, budgetMs=${budgetMs})`,
-    );
-    handle = await setupTier3Scenario({
-      scenarioId: 'T3.1',
-      mode: opts.mode ?? 'human-invoked',
-      portBase: PORT_BASE,
-      extraEnv: {
-        JINN_HERMES_MODEL: hermesModel,
-        JINN_TIER3_COST_CAP_USD: COST_CAP_USD.toString(),
-      },
-      // The Tier-3 helper appends `${scenarioId}-daemons/` so each spawned
-      // daemon's stdout/stderr lands in a sibling subdir of the evidence file.
-      // T3.1's failures land 5-23 minutes into the run; without these logs the
-      // post-mortem has to spelunk chain + db + harness-specific logs.
-      evidenceDir: path.dirname(opts.evidencePath),
-    });
-    // Producer/evaluator and solver op names are resolved from the env
-    // (JINN_TIER_PRODUCER_OP / JINN_TIER_SOLVER_OP, defaults op-a/op-b) so the
-    // env suite can run as ops that are NOT the live daily-driver identity.
+    const mode = opts.mode ?? 'human-invoked';
     const { producer: producerOp, solver: solverOp } = tierOpNames();
-    const opAPort = handle.daemons.daemons[producerOp]!.apiPort;
-    const opBPort = handle.daemons.daemons[solverOp]!.apiPort;
-    log(`   daemons up against real Base Sepolia (${producerOp} :${opAPort}, ${solverOp} :${opBPort})`);
-    // Surface the daemon log paths up front so a timeout failure has an
-    // immediate breadcrumb to the per-daemon stdio capture instead of forcing
-    // an investigator to spelunk chain + db + harness-specific logs.
-    const opALogPath = handle.daemons.daemons[producerOp]!.logPath;
-    const opBLogPath = handle.daemons.daemons[solverOp]!.logPath;
-    if (opALogPath || opBLogPath) {
-      log(`   daemon logs: ${producerOp} → ${opALogPath ?? '(disabled)'}, ${solverOp} → ${opBLogPath ?? '(disabled)'}`);
+    log(
+      `1. prepare Tier 3 task (mode=${mode}, hermesModel=${hermesModel}, budgetMs=${budgetMs})`,
+    );
+    if (await isDailyDriverRunning()) {
+      throw new Error(
+        mode === 'autonomous'
+          ? 'daily driver appears to be running on one of the substrate-shared ports. Autonomous mode refuses to post a task it cannot safely process.'
+          : 'daily driver is running on a substrate-shared port. Stop it before invoking Tier 3 so the fresh task is not orphaned.',
+      );
     }
 
     // ── Resolve the deployed JinnRouter for the on-chain observation reads ────
@@ -710,6 +707,33 @@ export async function runT31ProducerEvaluatorReal(
       `   scan anchor: TaskCreated block=${taskCreated.blockNumber} postTx=${taskCreated.txHash}`,
     );
 
+    log(`3. setup Tier 3 daemons scoped to on-chain taskId=${onchainTaskId}`);
+    handle = await setupTier3Scenario({
+      scenarioId: 'T3.1',
+      mode,
+      portBase: PORT_BASE,
+      extraEnv: buildT31DaemonEnv({
+        hermesModel,
+        onchainTaskId,
+      }),
+      // The Tier-3 helper appends `${scenarioId}-daemons/` so each spawned
+      // daemon's stdout/stderr lands in a sibling subdir of the evidence file.
+      // T3.1's failures land 5-23 minutes into the run; without these logs the
+      // post-mortem has to spelunk chain + db + harness-specific logs.
+      evidenceDir: path.dirname(opts.evidencePath),
+    });
+    const opAPort = handle.daemons.daemons[producerOp]!.apiPort;
+    const opBPort = handle.daemons.daemons[solverOp]!.apiPort;
+    log(`   daemons up against real Base Sepolia (${producerOp} :${opAPort}, ${solverOp} :${opBPort})`);
+    // Surface the daemon log paths up front so a timeout failure has an
+    // immediate breadcrumb to the per-daemon stdio capture instead of forcing
+    // an investigator to spelunk chain + db + harness-specific logs.
+    const opALogPath = handle.daemons.daemons[producerOp]!.logPath;
+    const opBLogPath = handle.daemons.daemons[solverOp]!.logPath;
+    if (opALogPath || opBLogPath) {
+      log(`   daemon logs: ${producerOp} → ${opALogPath ?? '(disabled)'}, ${solverOp} → ${opBLogPath ?? '(disabled)'}`);
+    }
+
     // ── Steps 3+4: observe the Solution + Verdict settle on-chain ────────────
     //
     // Both events are polled under ONE shared deadline (the whole remaining
@@ -725,7 +749,7 @@ export async function runT31ProducerEvaluatorReal(
     const observeDeadlineMs = started + budgetMs - setupReserveMs;
     const observeTimeoutMs = Math.max(60_000, observeDeadlineMs - Date.now());
     log(
-      `3. observe Solution + Verdict on-chain under a shared deadline ` +
+      `4. observe Solution + Verdict on-chain under a shared deadline ` +
         `(timeout=${Math.round(observeTimeoutMs / 1000)}s)`,
     );
     let solution: SolutionDelivery | null = null;

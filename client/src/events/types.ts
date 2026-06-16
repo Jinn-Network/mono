@@ -5,7 +5,7 @@
  * markers) and consumed by /v1/events SSE + /v1/events/recent JSON endpoints
  * served to the operator SPA. See docs/superpowers/specs/2026-05-01-operator-local-app-design.md.
  */
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const StructuredEventKindSchema = z.enum([
   'intent',

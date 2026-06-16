@@ -17,7 +17,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
 import { createHttpDiscoveryAPI } from '../discovery/http.js';

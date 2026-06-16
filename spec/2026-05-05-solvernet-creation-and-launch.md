@@ -698,7 +698,7 @@ The full plan with ordering, dependencies, and per-step verification lives at `d
 12. **Launcher SPA replacement** — Create flow (§10); post-launch dashboard; Pause / Retire / Resume actions. Replaces predecessor `LauncherPage` + `SetupFlow`.
 13. **Operator SPA refactor** — catalog page reads from registry; participation flow uses new keying.
 14. **Tests** — manifest sign/verify; registry publish/discover/lifecycle; launch state machine crash recovery; generator-ownership gate; operator catalog excludes templates; operator join never starts generator; solver vs evaluator harness dispatch; integration / e2e (real-daemon Playwright) for the launch happy path.
-15. **Testnet redeploy + clean break** — after the new contracts are live, document the testnet task-data discontinuity, communicate to any external testers (currently none).
+15. **Testnet redeploy + clean break** — after the new contracts are live, document the testnet task-data discontinuity, communicate to external operators (enumerate the current set from on-chain state — claim events / ERC-8004 IdentityRegistry registrations — rather than assuming there are none).
 16. **Spec + skill update** — `testing-jinn-app/SKILL.md` updated with new launcher walk and registry-mock recipe.
 
 ## 17. Locked decisions (from 2026-05-06 design session)

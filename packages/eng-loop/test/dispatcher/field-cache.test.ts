@@ -34,6 +34,7 @@ const FIELD_LIST_JSON = JSON.stringify({
       options: [
         { id: 'opt_todo', name: 'Todo' },
         { id: 'opt_in_progress', name: 'In Progress' },
+        { id: 'opt_human', name: 'Human' },
         { id: 'opt_in_review', name: 'In Review' },
         { id: 'opt_done', name: 'Done' },
       ],
@@ -294,6 +295,7 @@ describe('field-cache', () => {
           options: [
             { id: 'opt_todo_new', name: 'Todo' },
             { id: 'opt_in_progress_NEW', name: 'In Progress' },
+            { id: 'opt_human_new', name: 'Human' },
             { id: 'opt_in_review_new', name: 'In Review' },
             { id: 'opt_done_new', name: 'Done' },
           ],
@@ -330,6 +332,7 @@ describe('field-cache', () => {
           options: [
             { id: 'opt_todo_new', name: 'Todo' },
             { id: 'opt_in_progress_NEW', name: 'In Progress' },
+            { id: 'opt_human_new', name: 'Human' },
             { id: 'opt_in_review_new', name: 'In Review' },
             { id: 'opt_done_new', name: 'Done' },
           ],

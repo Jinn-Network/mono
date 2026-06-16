@@ -174,7 +174,7 @@ export function Leaderboard({
     { key: 'attempts', label: 'Attempts', numeric: true },
     { key: 'settledContribution', label: 'Settled', numeric: true },
     { key: 'verdicts', label: 'Pass / Total', numeric: true },
-    { key: 'jinnEarned', label: 'JINN', numeric: true },
+    { key: 'jinnEarned', label: 'tJINN', numeric: true },
     ...(hasMode && !compact ? [{ key: 'mode', label: 'Mode', sortable: false }] : []),
     ...(hasHarness && !compact ? [{ key: 'harness', label: 'Harness', sortable: false }] : []),
     ...(onOperatorClick ? [{ key: 'opLink', label: '', sortable: false, width: 24 }] : []),

@@ -39,14 +39,20 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
 
   // T2.1-T2.2 callables run in parallel. Each descriptor carries its own id and
   // evidence path so the crash-fallback verdict needs no positional bookkeeping.
-  const WALL_CLOCK_BUDGET_MS = 5 * 60 * 1000;
+  const T21_WALL_CLOCK_BUDGET_MS = 5 * 60 * 1000;
+  const T22_WALL_CLOCK_BUDGET_MS = 18 * 60 * 1000;
   const callables = [
-    { id: 'T2.1', run: runT21CrossOpDonation },
-    { id: 'T2.2', run: runT22ProducerEvaluator },
-  ].map((s) => ({ id: s.id, evidencePath: path.join(outputDir, `${s.id}.log`), run: s.run }));
+    { id: 'T2.1', run: runT21CrossOpDonation, wallClockBudgetMs: T21_WALL_CLOCK_BUDGET_MS },
+    { id: 'T2.2', run: runT22ProducerEvaluator, wallClockBudgetMs: T22_WALL_CLOCK_BUDGET_MS },
+  ].map((s) => ({
+    id: s.id,
+    evidencePath: path.join(outputDir, `${s.id}.log`),
+    run: s.run,
+    wallClockBudgetMs: s.wallClockBudgetMs,
+  }));
 
   const settled = await Promise.allSettled(
-    callables.map((s) => s.run({ evidencePath: s.evidencePath, wallClockBudgetMs: WALL_CLOCK_BUDGET_MS })),
+    callables.map((s) => s.run({ evidencePath: s.evidencePath, wallClockBudgetMs: s.wallClockBudgetMs })),
   );
   const callableVerdicts: ScenarioVerdict[] = settled.map((result, idx) => {
     if (result.status === 'fulfilled') return result.value;

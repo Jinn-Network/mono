@@ -1,7 +1,8 @@
 {
-  "comment": "Real Python instance IDs that exist in the current nebius/SWE-rebench-leaderboard pool (split 2025_01). validate-pool --seed-positive runs gold-eval against each. Not every entry is guaranteed to record scorable:true — some leaderboard rows have nondeterministic gold patches or upstream-substrate issues. The team prunes this list over time as empirical admit-rates surface. See DR 2026-05-14-swe-rebench-eval-admission.",
+  "comment": "Real Python instance IDs that exist in the current nebius/SWE-rebench-leaderboard pool (split 2025_01). validate-pool --seed-positive runs gold-eval against each. Not every entry is guaranteed to record scorable:true — some leaderboard rows have nondeterministic gold patches or upstream-substrate issues. The team prunes this list over time as empirical admit-rates surface. See DR 2026-05-14-swe-rebench-eval-admission. NOTE: sympy__sympy-27510 is the shared T2.2/T3.1 release-gate fixture (client/test/release/tier-2/fixtures/known-instance.ts) — it MUST stay in this list so `validate-pool --seed-positive` keeps it admitted across each EVAL_SEMANTICS_VERSION bump; without a v4 admission the env-suite real-harness loop times out on admission_missing_or_unscorable (2026-06-08 cut).",
   "source": "spike jinn-mono-fufn — initial set sampled from loadSweRebenchV2Pool() on 2026-05-14",
   "instance_ids": [
+    "sympy__sympy-27510",
     "tobymao__sqlglot-4661",
     "Blaizzy__mlx-vlm-179",
     "pydata__xarray-9974",

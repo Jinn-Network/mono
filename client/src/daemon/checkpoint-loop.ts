@@ -72,7 +72,7 @@ export class CheckpointLoop {
           `[checkpoint-loop] Service ${displayIndex} (proxy ${proxy}): checkpoint() submitted tx=${txHash}`,
         );
       } catch (err) {
-        console.error(
+        console.debug(
           `[checkpoint-loop] Service ${displayIndex} (proxy ${proxy}): checkpoint() failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
@@ -88,7 +88,7 @@ export class CheckpointLoop {
       try {
         await this.runOnce();
       } catch (err) {
-        console.error(
+        console.debug(
           '[checkpoint-loop] Tick failed (non-fatal):',
           err instanceof Error ? err.message : err,
         );

@@ -350,7 +350,7 @@ const VALID_SHAPES = new Set<string>([
 const VALID_BLOCKED_ON = new Set<string>(['Nothing', 'Human', 'Another issue']);
 const VALID_EFFORT = new Set<string>(['Low', 'Medium', 'High']);
 const VALID_PRIORITY = new Set<string>(['P0', 'P1', 'P2', 'P3', 'P4']);
-const VALID_STATUS = new Set<string>(['Todo', 'In Progress', 'In Review', 'Done']);
+const VALID_STATUS = new Set<string>(['Todo', 'In Progress', 'Human', 'In Review', 'Done']);
 
 function parseShape(name: string | null | undefined): IssueShape | null {
   if (name == null) return null;

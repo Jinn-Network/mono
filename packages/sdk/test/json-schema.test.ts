@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { zodToJsonSchema, jsonSchemaToZod, type JsonSchema } from '../src/json-schema.js';
 
 describe('json-schema serialization helpers', () => {

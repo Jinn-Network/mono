@@ -153,6 +153,14 @@ export interface BootstrapState {
     plugins?: string[];
     disabledDefaultPlugins?: string[];
   }>;
+  /**
+   * #983: true once the operator clicked "Enter dashboard" at the end of the
+   * guided onboarding takeover. App.tsx gates the bootstrap→dashboard hand-off
+   * on `mode==='running' && onboardingComplete` so the first SolverNet join no
+   * longer ejects the operator before the harness/model step. Sourced from the
+   * daemon's in-memory config (POST /v1/operator/onboarding-complete writes it).
+   */
+  onboardingComplete?: boolean;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
   // Issue #367: the embedded-agent feature flag is no longer carried in this

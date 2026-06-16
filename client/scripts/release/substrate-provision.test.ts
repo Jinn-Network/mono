@@ -13,8 +13,33 @@ import {
   type CheckResult,
 } from './substrate-provision.js';
 import { DEFAULT_TESTNET_RPC_URLS } from '../../src/config.js';
+import { EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+import { KNOWN_INSTANCE_ID } from '../../test/release/tier-2/fixtures/known-instance.js';
 
 const ADDR = (n: number): string => `0x${n.toString(16).padStart(40, '0')}`;
+
+// Write a validated-pool.json at the evaluator state dir holding a (un)scorable
+// admission for the T3.1 gate fixture — simulates the operator having run
+// `jinn solver-nets validate-pool` so the admission-pool-fixture check passes.
+async function seedFixturePool(opDir: string, scorable = true): Promise<void> {
+  const stateDir = path.join(opDir, '.jinn-client', 'engine', 'impl-state', EVALUATOR_STATE_DIR_NAME);
+  await fs.mkdir(stateDir, { recursive: true });
+  await fs.writeFile(
+    path.join(stateDir, 'validated-pool.json'),
+    JSON.stringify({
+      schemaVersion: 'swe-rebench-v2-validated-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      updatedAt: new Date().toISOString(),
+      entries: {
+        [KNOWN_INSTANCE_ID]: {
+          scorable,
+          reason: scorable ? 'gold-patch-resolves' : 'gold-patch-not-resolved',
+          checkedAt: new Date().toISOString(),
+        },
+      },
+    }, null, 2),
+  );
+}
 
 function manifestFixture(opName: string, overrides: { rpcUrl?: string; fleetSafe?: string } = {}): unknown {
   return {
@@ -101,6 +126,21 @@ function byId(checks: CheckResult[], id: CheckResult['id']): CheckResult {
 
 const credsPresent = async () => true;
 const credsMissing = async () => false;
+const fakeEnableEvaluatorHarness = async (implStateDir: string) => {
+  const upstreamRepoDir = path.join(implStateDir, 'upstream');
+  await fs.mkdir(upstreamRepoDir, { recursive: true });
+  await fs.writeFile(path.join(upstreamRepoDir, 'eval.py'), '# fake upstream\n');
+  await fs.writeFile(
+    path.join(implStateDir, 'state.json'),
+    JSON.stringify({
+      schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+      enabled: true,
+      enabledAt: new Date().toISOString(),
+      upstreamRepoDir,
+    }, null, 2) + '\n',
+  );
+  return { status: 'ready', details: { upstreamRepoDir } };
+};
 
 describe('substrate-provision doctor', () => {
   let root: string;
@@ -153,14 +193,21 @@ describe('substrate-provision doctor', () => {
       skipOnChain: true,
       isEvaluator: true,
       hasHarnessCreds: credsPresent,
+      enableEvaluatorHarness: fakeEnableEvaluatorHarness,
     });
 
-    expect(res.ok).toBe(true);
+    // --repair fixes every structural drift, BUT seeds an EMPTY admission pool —
+    // it cannot synthesise a scorable gold-patch grade for the gate fixture, so
+    // admission-pool-fixture stays drift and the op is not yet release-ready
+    // (the operator must run `validate-pool`). This is the fast-fail that
+    // replaces a 23-min T3.1 timeout (2026-06-08 cut).
+    expect(res.ok).toBe(false);
     expect(byId(res.checks, 'rpc-fallback-chain').status).toBe('repaired');
     expect(byId(res.checks, 'harness-config').status).toBe('repaired');
     expect(byId(res.checks, 'evaluator-role').status).toBe('repaired');
     expect(byId(res.checks, 'evaluator-harness-state').status).toBe('repaired');
     expect(byId(res.checks, 'admission-pool').status).toBe('repaired');
+    expect(byId(res.checks, 'admission-pool-fixture').status).toBe('drift');
 
     const cfg = JSON.parse(await fs.readFile(path.join(opDir, '.jinn-client', 'config.json'), 'utf-8'));
     expect(Array.isArray(cfg.rpcUrl)).toBe(true);
@@ -176,16 +223,38 @@ describe('substrate-provision doctor', () => {
     const stateDir = path.join(opDir, '.jinn-client', 'engine', 'impl-state', EVALUATOR_STATE_DIR_NAME);
     const state = JSON.parse(await fs.readFile(path.join(stateDir, 'state.json'), 'utf-8'));
     expect(state.enabled).toBe(true);
+    await expect(fs.access(path.join(stateDir, 'upstream', 'eval.py'))).resolves.toBeUndefined();
     const pool = JSON.parse(await fs.readFile(path.join(stateDir, 'validated-pool.json'), 'utf-8'));
     expect(pool.schemaVersion).toBe('swe-rebench-v2-validated-pool.v1');
     expect(pool.entries).toEqual({});
   });
 
   it('is idempotent — a second repair run reports ok with no further repairs', async () => {
-    await setupHome(root, 'op-b');
-    await provisionSubstrate('op-b', { substrateRoot: root, repair: true, skipOnChain: true, isEvaluator: true, hasHarnessCreds: credsPresent });
+    const opDir = await setupHome(root, 'op-b');
+    await provisionSubstrate('op-b', {
+      substrateRoot: root,
+      repair: true,
+      skipOnChain: true,
+      isEvaluator: true,
+      hasHarnessCreds: credsPresent,
+      enableEvaluatorHarness: fakeEnableEvaluatorHarness,
+    });
 
-    const second = await provisionSubstrate('op-b', { substrateRoot: root, repair: true, skipOnChain: true, isEvaluator: true, hasHarnessCreds: credsPresent });
+    // Simulate the operator running `validate-pool` between preflights: the gate
+    // fixture now has a scorable v4 admission, so the home is fully release-ready
+    // and the second run is a clean no-op.
+    await seedFixturePool(opDir, true);
+
+    const second = await provisionSubstrate('op-b', {
+      substrateRoot: root,
+      repair: true,
+      skipOnChain: true,
+      isEvaluator: true,
+      hasHarnessCreds: credsPresent,
+      enableEvaluatorHarness: async () => {
+        throw new Error('enable should not be called when state+upstream are ready');
+      },
+    });
     expect(second.ok).toBe(true);
     const repaired = second.checks.filter((c) => c.status === 'repaired');
     expect(repaired).toHaveLength(0);
@@ -194,12 +263,71 @@ describe('substrate-provision doctor', () => {
     }
   });
 
+  it('admission-pool-fixture: ok when the gate fixture is scorable under the current semantics', async () => {
+    const opDir = await setupHome(root, 'op-a');
+    await seedFixturePool(opDir, true);
+
+    const res = await provisionSubstrate('op-a', {
+      substrateRoot: root,
+      skipOnChain: true,
+      isEvaluator: true,
+      hasHarnessCreds: credsPresent,
+    });
+
+    expect(byId(res.checks, 'admission-pool').status).toBe('ok');
+    expect(byId(res.checks, 'admission-pool-fixture').status).toBe('ok');
+  });
+
+  it('admission-pool-fixture: drift (un-repairable) when the gate fixture is recorded unscorable', async () => {
+    const opDir = await setupHome(root, 'op-c');
+    await seedFixturePool(opDir, false);
+
+    // --repair cannot fix this: a scorable admission needs a real gold-patch grade.
+    const res = await provisionSubstrate('op-c', {
+      substrateRoot: root,
+      repair: true,
+      skipOnChain: true,
+      isEvaluator: true,
+      hasHarnessCreds: credsPresent,
+      enableEvaluatorHarness: fakeEnableEvaluatorHarness,
+    });
+
+    expect(byId(res.checks, 'admission-pool-fixture').status).toBe('drift');
+    expect(res.ok).toBe(false);
+  });
+
   it('harness-creds drift can never be auto-repaired (no synthesised login)', async () => {
     await setupHome(root, 'op-a');
     const res = await provisionSubstrate('op-a', { substrateRoot: root, repair: true, skipOnChain: true, hasHarnessCreds: credsMissing });
     const creds = byId(res.checks, 'harness-creds');
     expect(creds.status).toBe('drift');
     expect(res.ok).toBe(false);
+  });
+
+  it('treats enabled evaluator state without the upstream checkout as drift', async () => {
+    const opDir = await setupHome(root, 'op-b');
+    const stateDir = path.join(opDir, '.jinn-client', 'engine', 'impl-state', EVALUATOR_STATE_DIR_NAME);
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(
+      path.join(stateDir, 'state.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+        enabled: true,
+        enabledAt: new Date().toISOString(),
+        upstreamRepoDir: path.join(stateDir, 'upstream'),
+      }, null, 2) + '\n',
+    );
+
+    const res = await provisionSubstrate('op-b', {
+      substrateRoot: root,
+      skipOnChain: true,
+      isEvaluator: true,
+      hasHarnessCreds: credsPresent,
+    });
+
+    const stateCheck = byId(res.checks, 'evaluator-harness-state');
+    expect(stateCheck.status).toBe('drift');
+    expect(stateCheck.detail).toMatch(/upstream repo missing/);
   });
 
   it('prepends a paid RPC key to the testnet chain when provided', async () => {

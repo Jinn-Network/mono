@@ -2034,6 +2034,120 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('watchForDeliveries maps SWE-rebench v2 passed_match=true verdict envelopes to Pass', async () => {
+    const { keccak256 } = await import('viem');
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+
+    const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
+    const fakeEnvelope = {
+      schemaVersion: 'jinn.execution.v1',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'verdict',
+      payload: {
+        score: 1,
+        passed_match: true,
+      },
+      signature: {
+        algo: 'secp256k1',
+        signer: '0xabc',
+        hash: expectedHash,
+        sig: '0xsig',
+      },
+    };
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'verdict' });
+    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+      requestId: REQUEST_ID,
+      deliveryDataHex: TASK_CID_DIGEST,
+      mechAddress: '0x9999999999999999999999999999999999999999',
+    }]);
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v3' });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).deliveryBlockCursor = 100n;
+    (adapter as any).pendingEvaluations.set(REQUEST_ID, {
+      id: 'swe-rebench-v2-task-1',
+      description: 'test',
+      role: 'evaluation',
+      solverType: 'swe-rebench-v2.v1',
+    });
+    (adapter as any).originalStates.set(REQUEST_ID, {
+      id: 'swe-rebench-v2-task-1',
+      description: 'test',
+      role: 'evaluation',
+      solverType: 'swe-rebench-v2.v1',
+    });
+
+    const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+    await gen.next();
+
+    expect(claimDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      REQUEST_ID,
+      {
+        variant: 'v3',
+        kind: 'verdict',
+        evidenceHash: expectedHash,
+        verdictCode: VerdictCode.Pass,
+      },
+      undefined,
+    );
+
+    await adapter.stop();
+  });
+
+  it('does not claim Invalid(3) for verdict envelopes without an explicit verdict signal', async () => {
+    const { keccak256 } = await import('viem');
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+
+    const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
+    const fakeEnvelope = {
+      schemaVersion: 'jinn.execution.v1',
+      solverType: 'prediction.v1',
+      role: 'verdict',
+      payload: {
+        score: 1,
+      },
+      signature: {
+        algo: 'secp256k1',
+        signer: '0xabc',
+        hash: expectedHash,
+        sig: '0xsig',
+      },
+    };
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v3' });
+    await adapter.initialize();
+    (adapter as any).requestKinds.set(REQUEST_ID, 'verdict');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect((adapter as any).ensureDeliveryClaimed(REQUEST_ID, TASK_CID_DIGEST)).resolves.toBe('retry');
+      expect(claimDelivery).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('delivery claim metadata derivation failed'),
+        expect.any(Error),
+      );
+    } finally {
+      errorSpy.mockRestore();
+      await adapter.stop();
+    }
+  });
+
   // ── issue #552: watchForDeliveries chunked log scan ─────────────────────────
   // The mech adapter's delivery-polling loop must paginate `getLogs` so a
   // multi-100k-block cursor → head gap can drain without hitting RPC block-range

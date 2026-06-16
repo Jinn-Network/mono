@@ -23,7 +23,7 @@ import { join, relative, resolve, extname, isAbsolute } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { createWriteStream } from 'node:fs';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { Task } from '../../types/task.js';
 import type { OutputArtifact } from '../../types/portfolio.js';
 import type { Artifact } from '../../types/envelope.js';

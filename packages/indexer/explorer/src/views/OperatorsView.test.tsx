@@ -166,9 +166,9 @@ describe('OperatorsView', () => {
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       // 1e18 wei = 1.00 JINN, 5e17 wei = 0.50 JINN
-      expect(screen.getByText('1.00 JINN')).toBeInTheDocument();
+      expect(screen.getByText('1.00 tJINN')).toBeInTheDocument();
     });
-    expect(screen.getByText('0.50 JINN')).toBeInTheDocument();
+    expect(screen.getByText('0.50 tJINN')).toBeInTheDocument();
     expect(screen.getByText(/jinn earned/i)).toBeInTheDocument();
   });
 

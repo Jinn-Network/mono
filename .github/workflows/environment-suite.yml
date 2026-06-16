@@ -65,7 +65,15 @@ defaults:
 
 jobs:
   environment-suite:
-    name: environment-suite
+    # Display name MUST differ from the verdict check-run context
+    # ("environment-suite", posted by scripts/release/post-check-run-verdict.mjs).
+    # GitHub auto-creates an implicit job-level check-run named after this `name:`;
+    # if it matched the verdict context the two collide on the same SHA, and the
+    # publish guard's "newest completed_at wins" tie-break can let this job's
+    # exit-0 success MASK an honest `neutral`/infra-blocked verdict (2026-06-08 cut).
+    # Keep the job *key* (`environment-suite`) for dispatch/needs/concurrency; only
+    # the display name differs.
+    name: environment-suite-runner
     runs-on: ubuntu-latest
     # The protected, HUMAN-CREATED Environment that holds the testnet-gate
     # secrets (§9). If it does not exist yet, the run fails fast at secret
@@ -163,6 +171,14 @@ jobs:
       - if: steps.resolve.outputs.skip != 'true'
         run: yarn install --immutable
 
+      # warm-operator-preflight imports the production evaluator harness when
+      # repairing evaluator readiness. That harness imports @jinn-network/sdk
+      # through package exports, which resolve to packages/sdk/dist; build the
+      # SDK before preflight so tsx can load the harness on a clean runner.
+      - name: Build SDK package for preflight harness imports
+        if: steps.resolve.outputs.skip != 'true'
+        run: yarn build:sdk
+
       # The tier-2 daemon-harness deploys the JinnRouterV3 stack onto its Anvil
       # fork by compiling contracts at runtime (`yarn compile` in `contracts/` —
       # see test/e2e/task-first-helpers.ts). `contracts/` is a SEPARATE Yarn
@@ -244,6 +260,11 @@ jobs:
       # JINN_PASSWORD secret if its tar omitted the file; the secondary's tar is
       # expected to embed its own (its password is not a separate secret). A gold
       # home with no readable keystore-password is fail-loud infra.
+      #
+      # NB: warm-operator-preflight below re-adopts the restored source homes
+      # into these same gold paths before running repairs. That can overwrite
+      # the op-b fallback password written here, so the workflow finalizes the
+      # runtime gold passwords again after preflight.
       - name: Bridge warm operators into substrate gold paths
         if: steps.resolve.outputs.skip != 'true'
         env:
@@ -305,23 +326,25 @@ jobs:
           # is needed; a gap the faucet can't keep up with is reported as
           # infra-blocked.
           #
-          # BOTH ops must be healthy+funded: op-b (solver) AND op-c (creator/
-          # evaluator). op-c posts the task + settles the verdict, so a dry op-c
-          # would stall the loop and misreport as a product-red. Preflight each;
-          # if EITHER is infra-blocked (exit 75) the whole suite is infra-blocked
-          # (not product) — the publish guard still blocks the cut, honestly.
+          # BOTH canonical tier ops must be healthy+funded: op-b (solver) AND
+          # op-a (creator/evaluator). Preflight the same gold names that T2/T3
+          # spawn, otherwise --repair fixes a throwaway substrate and the suite
+          # still runs with stale op-a/op-b state. op-a also needs evaluator
+          # substrate checks so T3 cannot spend 25 minutes before discovering
+          # swe-rebench-v2-evaluator was never enabled.
           INFRA=false
-          preflight_one() {  # $1=client dir, $2=op name, $3=preflight json path
+          preflight_one() {  # $1=client dir, $2=op name, $3=preflight json path, $4...=extra args
             yarn tsx scripts/release/warm-operator-preflight.ts \
               --op-name "$2" \
               --jinn-client-dir "$1" \
               --repair \
+              "${@:4}" \
               | tee "$3"
             return "${PIPESTATUS[0]}"
           }
-          preflight_one "${HOME}/.jinn-client" warm-operator "${RUNNER_TEMP}/preflight.json"
+          preflight_one "${HOME}/.jinn-client" op-b "${RUNNER_TEMP}/preflight.json"
           CODE_A=$?
-          preflight_one "${HOME}/.jinn-client-b" warm-operator-b "${RUNNER_TEMP}/preflight-b.json"
+          preflight_one "${HOME}/.jinn-client-b" op-a "${RUNNER_TEMP}/preflight-b.json" --evaluator
           CODE_B=$?
           set -e
           echo "preflight_exit_a=${CODE_A}" >> "${GITHUB_OUTPUT}"
@@ -337,6 +360,39 @@ jobs:
           if [ "${INFRA}" = "true" ]; then
             echo "infra_blocked=true" >> "${GITHUB_OUTPUT}"
           fi
+
+      # Preflight adopts + repairs the exact gold homes that T2/T3 spawn. For
+      # op-b, the restored source tar may intentionally omit keystore-password
+      # and rely on the protected JINN_PASSWORD secret instead. Since daemon
+      # spawning strips JINN_PASSWORD by design, re-apply that fallback to the
+      # post-preflight gold home. This must happen AFTER preflight; doing it
+      # only in the initial bridge step gets wiped by adoptOperator().
+      - name: Finalize gold operator runtime secrets
+        if: steps.resolve.outputs.skip != 'true' && steps.preflight.outputs.infra_blocked != 'true'
+        env:
+          JINN_PASSWORD: ${{ secrets.JINN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ensure_gold_password() {  # $1=gold op name, $2=password fallback (may be empty)
+            local name="$1" pw="${2:-}"
+            local dst="${HOME}/jinn-dev/operators/${name}/.jinn-client"
+            if [ ! -d "$dst" ]; then
+              echo "::error::gold op ${name} missing at ${dst}; preflight did not adopt it."
+              return 1
+            fi
+            if [ ! -s "$dst/keystore-password" ] && [ -n "$pw" ]; then
+              printf '%s' "$pw" > "$dst/keystore-password"
+            fi
+            if [ ! -s "$dst/keystore-password" ]; then
+              echo "::error::gold op ${name} has no keystore-password after preflight — spawned daemon would auto-generate the wrong password and fail to decrypt the mnemonic."
+              return 1
+            fi
+            chmod 600 "$dst/keystore-password"
+            chmod -R go-rwx "${HOME}/jinn-dev/operators/${name}"
+            echo "gold op ${name} runtime keystore-password ready"
+          }
+          ensure_gold_password op-b "${JINN_PASSWORD:-}"
+          ensure_gold_password op-a ""
 
       # Short-circuit verdict for an infra-blocked operator: post a NEUTRAL
       # `environment-suite` check-run (not failure — §10 keeps infra distinct
@@ -401,6 +457,13 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           JINN_E2E_HARNESS: claude-code
           CANDIDATE_SHA: ${{ steps.resolve.outputs.candidate_sha }}
+          # Raise the AI-units block cap for the warm operator's subscription
+          # credential. The default ($0.50 / 6h-block) starves the real-harness
+          # solver mid-run when warm-operator state carries prior same-block spend
+          # (2026-06-08 cut: $1.04 already spent in-block → claims paused → T3.1
+          # timed out). Tunable via repo var; default = $5/block, $140/week. The
+          # gate stays armed — this widens the ceiling, it does not disable it.
+          JINN_AI_UNITS_CEILING_OVERRIDE: ${{ vars.JINN_ENV_SUITE_AI_UNITS_CEILING || '1000:28000' }}
         run: |
           set -euo pipefail
           # §8 discipline: the subscription OAuth token is the only Claude cred.
@@ -515,12 +578,17 @@ jobs:
         if: always()
         working-directory: ${{ github.workspace }}
         run: |
-          shopt -s nullglob
-          for f in "${RUNNER_TEMP}"/env-suite/*.log "${RUNNER_TEMP}"/preflight.json "${RUNNER_TEMP}"/preflight-b.json; do
+          shopt -s globstar nullglob
+          for f in \
+            "${RUNNER_TEMP}"/env-suite/*.log \
+            "${RUNNER_TEMP}"/preflight.json \
+            "${RUNNER_TEMP}"/preflight-b.json \
+            client/tier-2-evidence/**/* \
+            client/tier-3-evidence/**/*; do
             [ -f "$f" ] || continue
             sed -i -E 's#https?://[^[:space:]"'"'"']+#<redacted-url>#g' "$f"
           done
-          echo "scrubbed URLs from env-suite evidence logs"
+          echo "scrubbed URLs from env-suite evidence logs and detailed tier evidence"
 
       # Surface the raw (URL-scrubbed) scenario logs so a reviewer can step through a red.
       - name: Upload env-suite evidence
@@ -533,5 +601,7 @@ jobs:
             ${{ runner.temp }}/preflight.json
             ${{ runner.temp }}/preflight-b.json
             ${{ runner.temp }}/environment-suite-verdict.json
+            ${{ github.workspace }}/client/tier-2-evidence/
+            ${{ github.workspace }}/client/tier-3-evidence/
           retention-days: 14
           if-no-files-found: ignore

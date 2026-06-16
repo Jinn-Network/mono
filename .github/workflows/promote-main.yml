@@ -114,16 +114,27 @@ jobs:
             echo "::notice::no open release-review PR found to audit-comment (non-fatal)"
           fi
 
+      - name: Validate release promotion token
+        if: steps.skip_check.outputs.skip != 'true'
+        env:
+          RELEASE_PROMOTION_TOKEN: ${{ secrets.RELEASE_PROMOTION_TOKEN }}
+        run: |
+          if [ -z "${RELEASE_PROMOTION_TOKEN:-}" ]; then
+            echo "::error::RELEASE_PROMOTION_TOKEN is not configured. main is protected and the default GITHUB_TOKEN cannot fast-forward it on release publish."
+            exit 1
+          fi
+
       - name: Fast-forward main
         if: steps.skip_check.outputs.skip != 'true'
         env:
           RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PROMOTION_TOKEN: ${{ secrets.RELEASE_PROMOTION_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git merge --ff-only "$RELEASE_SHA"
-          git push origin main
+          git push "https://x-access-token:${RELEASE_PROMOTION_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
           echo "::notice::main advanced to $RELEASE_SHA (release $RELEASE_TAG)"
 
       - name: Audit-comment the auto-closed release-review PR (issue #307)

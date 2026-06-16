@@ -13,7 +13,7 @@ What is **not** cosmetic: the daemon's task-posting code now computes the bytes3
 
 ## Operational impact — testnet task-data clean break
 
-Per spec §15 + Decision 6 (C-semantic), this is a **clean break** on testnet task data. Pre-release status; no external operators are running the new build yet, so there is no data migration burden.
+Per spec §15 + Decision 6 (C-semantic), this is a **clean break** on testnet task data. Whether a data-migration burden exists turns on the current external-operator set — enumerate it from on-chain state (claim events / ERC-8004 IdentityRegistry registrations) rather than assuming none.
 
 After the cutover:
 

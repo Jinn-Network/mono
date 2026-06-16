@@ -101,6 +101,6 @@ describe('rewards command', () => {
     const stdout = raw.join('');
     expect(stdout).toContain('Pending staking collector claims:');
     expect(stdout).toContain('collector-token');
-    expect(stdout).toContain('Operator tJINN/JINN earnings');
+    expect(stdout).toContain('Operator testnet JINN (tJINN) earnings');
   });
 });

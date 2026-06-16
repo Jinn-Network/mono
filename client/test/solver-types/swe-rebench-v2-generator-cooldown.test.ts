@@ -1,9 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, unlinkSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
+import {
+  loadActiveHeldOutSlateIds,
+  ACTIVE_HELD_OUT_SLATE_VERSIONS,
+} from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
 import {
   ValidatedPoolStore,
   EVAL_SEMANTICS_VERSION,
@@ -560,5 +564,50 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     expect(ipfsUploadCount).toBe(0);
     expect(gen.getState().poolPublicationCurrentSize).toBeUndefined();
     expect(gen.getState().poolPublicationPriorSize).toBeUndefined();
+  });
+
+  it('re-publishes a CLEAN artifact when the existing publication is contaminated with a held-out instance (#986 substrate exclusion + wiring)', async () => {
+    // A real active held-out id (self-adjusting to the committed slate). The
+    // generator passes SOLVER_TYPE='swe-rebench-v2.v1' to the slate loader; mirror it.
+    const victim = [...loadActiveHeldOutSlateIds('swe-rebench-v2.v1', ACTIVE_HELD_OUT_SLATE_VERSIONS)][0];
+    expect(victim).toBeTypeOf('string');
+
+    // Existing publication is CONTAMINATED (lists org__repo-1 + the held-out victim).
+    // Its updatedAt is AFTER the validated pool's, so `validatedNewer` is false —
+    // the ONLY thing that can trigger a republish here is the contamination guard.
+    const contaminated: SweRebenchV2VettedPoolArtifact = {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-05-22T02:00:00.000Z',
+      entries: [
+        { instance_id: 'org__repo-1', scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' },
+        { instance_id: victim, scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' },
+      ],
+    };
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: launchedRecord().manifestCid,
+      artifactCid: 'bafy-contaminated-vetted-pool',
+      artifactHash: hashVettedPoolArtifact(contaminated),
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      publishedAt: '2026-05-22T02:00:00.000Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact: contaminated, updatedAt: '2026-05-22T02:00:00.000Z' });
+
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record('org__repo-1', { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' }, EVAL_SEMANTICS_VERSION);
+    await store.record(victim, { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' }, EVAL_SEMANTICS_VERSION);
+
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required', post_batch_size: 1 });
+    await gen();
+
+    // Contamination forced a republish (not the timestamp gate).
+    expect(ipfsUploadCount).toBe(1);
+    // The republished artifact drops the held-out victim but keeps the rest.
+    const published = JSON.parse(readFileSync(join(stateDir, 'vetted-pool-artifact-publication.json'), 'utf8'));
+    const ids = published.artifact.entries.map((e: { instance_id: string }) => e.instance_id);
+    expect(ids).toContain('org__repo-1');
+    expect(ids).not.toContain(victim);
+    // Scoring is unaffected: the held-out instance is still validated-scorable locally.
+    expect(await store.getScorableIds(EVAL_SEMANTICS_VERSION)).toContain(victim);
   });
 });

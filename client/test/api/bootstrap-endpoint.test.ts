@@ -420,4 +420,34 @@ describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
     expect(body['mode']).toBe('uninitialized');
     expect('embeddedAgentEnabled' in body).toBe(false);
   });
+
+  it('surfaces onboardingComplete from the configReader in running mode', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, {
+      earningDir,
+      configReader: () => ({ onboardingComplete: true }),
+    });
+    const res = await app.request('/v1/bootstrap');
+    const body = (await res.json()) as { mode: string; onboardingComplete?: boolean };
+    expect(body.mode).toBe('running');
+    expect(body.onboardingComplete).toBe(true);
+  });
+
+  it('omits onboardingComplete when the configReader does not set it', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir, configReader: () => ({}) });
+    const res = await app.request('/v1/bootstrap');
+    const body = (await res.json()) as { onboardingComplete?: boolean };
+    expect(body.onboardingComplete).toBeUndefined();
+  });
 });

@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { api } from '../api/client.js';
 import { WalletCard, type ServiceIdentity } from './overview/WalletCard.js';
 import { IdentityCard } from './overview/IdentityCard.js';
-import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
 import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/NodeHealthCard.js';
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
@@ -242,20 +241,6 @@ export function OverviewPage(): JSX.Element {
   // through `jinn status`.
   const primaryServiceId = services.find((s) => s.serviceId !== null)?.serviceId ?? null;
 
-  // Harness names this operator has joined SolverNets against. Joined-only
-  // scope per design note 2026-05-26 — keeps the panel focused on harnesses
-  // the operator actually runs. Deduped + sorted for stable rendering.
-  const harnessNames = useMemo<string[]>(() => {
-    const collect = (entries: Record<string, { harness?: string } | undefined> | undefined): Set<string> => {
-      const set = new Set<string>();
-      for (const entry of Object.values(entries ?? {})) {
-        if (entry?.harness) set.add(entry.harness);
-      }
-      return set;
-    };
-    return Array.from(collect(bootstrap?.joinedSolverNets)).sort();
-  }, [bootstrap]);
-
   // tJINN earned — the real Sepolia ERC-20 Safe balance (#406). When the read
   // has resolved (`state === 'ready'`) a null `safeBalanceWei` is a
   // confirmed-empty balance, so format it as '0' rather than the bare '—'
@@ -412,30 +397,6 @@ export function OverviewPage(): JSX.Element {
             when at least one credential is paused; otherwise null. */}
         <AiUnitsPauseAlert aiUnits={status?.aiUnits} />
 
-
-        {/*
-         * Identity — §2.2 surface promoted out of WalletCard in #427. Stable
-         * address-of-record stats (master / agent / Safe / serviceId / agentId)
-         * plus the binding-pending retry flow. Renders first so the eye lands
-         * on the constant identity before the variable harness state below.
-         */}
-        <IdentityCard
-          masterAddress={bootstrap?.master_address ?? null}
-          agentAddress={null}
-          safeAddress={services[0]?.safeAddress ?? null}
-          serviceId={primaryServiceId}
-          agentId={services[0]?.agentId ?? null}
-          services={services}
-        />
-
-        {/*
-         * Harness Readiness — §2.9 surface. One row per harness this operator
-         * has joined SolverNets against; per-row queries hit
-         * api.harnessReadiness on a 30s refetch. Empty state links to
-         * /operator/registry when the operator hasn't joined a net yet.
-         */}
-        <HarnessStatusPanel harnessNames={harnessNames} />
-
         {/*
          * Activity — the operator's view of their node's work. One surface
          * replaces the prior Network · counters / Solving on / In-flight /
@@ -474,6 +435,20 @@ export function OverviewPage(): JSX.Element {
               throw new Error('Restart request failed.');
             }
           }}
+        />
+
+        {/*
+         * Identity — §2.2 surface. Stable address-of-record stats (master /
+         * agent / Safe / serviceId / agentId) plus the binding-pending retry
+         * flow. Lives in the right rail paired with the Wallet card.
+         */}
+        <IdentityCard
+          masterAddress={bootstrap?.master_address ?? null}
+          agentAddress={null}
+          safeAddress={services[0]?.safeAddress ?? null}
+          serviceId={primaryServiceId}
+          agentId={services[0]?.agentId ?? null}
+          services={services}
         />
 
         <WalletCard

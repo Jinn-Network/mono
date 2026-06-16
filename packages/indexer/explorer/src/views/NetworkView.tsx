@@ -204,7 +204,7 @@ function EconomyRow({ data }: { data: NetworkResponse }) {
             marginBottom: 10,
           }}
         >
-          JINN distributed
+          Testnet JINN distributed
         </div>
         <div
           className="data"
@@ -283,7 +283,7 @@ function EconomyRow({ data }: { data: NetworkResponse }) {
             marginBottom: 12,
           }}
         >
-          How JINN flows
+          How testnet JINN flows
         </div>
         <p
           style={{

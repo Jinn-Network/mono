@@ -51,7 +51,7 @@
  */
 import type { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import {
   getSolverNetContract,
   type SolverNetManifestV1,

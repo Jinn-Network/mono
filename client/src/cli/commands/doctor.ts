@@ -282,7 +282,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
       return {
         name: 'distributor_reachable',
         ok: false,
-        detail: `testnet staking pool is drained — distributor holds ${jinn.toFixed(2)} JINN, need ≥${required.toFixed(2)} per service`,
+        detail: `testnet staking pool is drained — distributor holds ${jinn.toFixed(2)} tJINN, need ≥${required.toFixed(2)} per service`,
         remedy:
           'Protocol-team action required (operators cannot fix this locally). ' +
           'Report the outage to the Jinn testnet channel; bootstrap will keep failing with `Overflow` until the pool is topped up.',
@@ -291,7 +291,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
     return {
       name: 'distributor_reachable',
       ok: true,
-      detail: `distributor holds ${jinn.toFixed(2)} JINN (${Math.floor(jinn / required)} services of runway)`,
+      detail: `distributor holds ${jinn.toFixed(2)} tJINN (${Math.floor(jinn / required)} services of runway)`,
     };
   } catch (err) {
     return {

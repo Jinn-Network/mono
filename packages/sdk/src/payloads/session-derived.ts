@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 const HexShaSchema = z.string().regex(/^[0-9a-f]{64}$/);
 

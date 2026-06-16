@@ -36,6 +36,7 @@ const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
 const REQUIRED_STATUS_OPTIONS: readonly ProjectStatus[] = [
   'Todo',
   'In Progress',
+  'Human',
   'In Review',
   'Done',
 ];

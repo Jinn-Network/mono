@@ -190,6 +190,21 @@ export class SolverNetRegistry {
     return this.nets.get(name);
   }
 
+  /**
+   * Remove every entry registered under `name` — both the bare key and any
+   * `name#N` collision-suffixed keys `register()` may have assigned. Used by
+   * the live join applier (#1037) to make a re-join idempotent: it clears the
+   * prior registration before re-registering, so a re-apply updates in place
+   * instead of inserting a phantom `name#2` duplicate. Boot never calls this,
+   * so first-registration behaviour is unchanged.
+   */
+  unregister(name: string): void {
+    for (const key of [...this.nets.keys()]) {
+      const net = this.nets.get(key);
+      if (net && net.name === name) this.nets.delete(key);
+    }
+  }
+
   forSolverType(solverType: string, taskRole?: SolverNetTaskRole): LoadedSolverNet | undefined {
     return [...this.nets.values()].find((net) =>
       net.enabled &&
@@ -223,87 +238,100 @@ export class SolverNetRegistry {
   }
 }
 
+/**
+ * Register a single joined SolverNet into `registry`, reproducing exactly the
+ * derivation + plugin-resolution the boot loop runs (default-plugin seeding,
+ * harness defaulting, role mapping). Shared by `loadSolverNets` (boot) and the
+ * live join applier (`daemon/join-applier.ts`, #1037) so the two paths cannot
+ * drift.
+ *
+ * No-ops when the joined entry has no resolvable contract or no roles.
+ */
+export async function registerJoinedNet(
+  registry: SolverNetRegistry,
+  cid: string,
+  joined: JoinedSolverNetConfig,
+): Promise<void> {
+  if (!joined.contract) return;
+  const solverType = `${joined.contract.id}.${joined.contract.version}`;
+  const contract = getSolverNetContract(joined.contract);
+  if (!contract) return;
+  const roles = rolesFromJoinedConfig(joined);
+  if (roles.length === 0) return;
+  const disabledDefaults = joined.disabledDefaultPlugins ?? [];
+  const defaultPlugins = defaultRuntimePluginsForSolverType(solverType)
+    .filter((plugin) => !defaultPluginDisabled(plugin, disabledDefaults));
+  const harness = joined.roles.includes('solver')
+    ? joined.harness ?? CLAUDE_CODE_HARNESS
+    : evaluatorHarnessNameForContract(contract) ?? joined.harness ?? CLAUDE_CODE_HARNESS;
+
+  const net: SolverNetConfig = {
+    enabled: true,
+    solverType,
+    roles,
+    harness,
+    ...(joined.model ? { model: joined.model } : {}),
+    plugins: [...defaultPlugins, ...(joined.plugins ?? [])],
+    taskGenerator: { enabled: false },
+  };
+  const name = joined.name ?? cid;
+
+  if (!net.enabled) return;
+  const runtimePlugins: RuntimePlugin[] = [];
+  const seenSources = new Set<string>();
+  const seenNames = new Set<string>();
+
+  async function addRuntimePlugin(
+    entry: SolverPluginEntry,
+    provenance: RuntimePlugin['provenance'],
+  ): Promise<void> {
+    const plugin = await resolveSolverPlugin(entry);
+    if (seenSources.has(plugin.source) || seenNames.has(plugin.name)) return;
+    if (!isRuntimePlugin(plugin) && !plugin.supports.includes(net.solverType)) {
+      throw new Error(
+        `SolverNet ${name} runtime plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
+      );
+    }
+    runtimePlugins.push(runtimePluginFrom(plugin, provenance));
+    seenSources.add(plugin.source);
+    seenNames.add(plugin.name);
+  }
+
+  // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, runtime
+  // plugins are operator-configured — the SolverNet contract no longer
+  // carries `defaultRuntimePlugins`. Network Tools is the one runtime-
+  // scoped default (`supports: ['jinn.runtime']`) auto-loaded so every
+  // operator's daemon can talk to the Jinn MCP surface. SolverType-bound
+  // plugins (e.g. the bundled prediction plugin) flow through
+  // `net.plugins`; the launcher seeds quick-start defaults into operator
+  // config rather than binding them to the contract.
+  for (const entry of [JINN_NETWORK_TOOLS_PLUGIN]) {
+    await addRuntimePlugin(entry, 'default');
+  }
+  for (const entry of net.plugins ?? []) {
+    await addRuntimePlugin(entry, 'configured');
+  }
+  registry.register({
+    name,
+    enabled: net.enabled,
+    solverType: net.solverType,
+    roles: rolesFromConfig(net),
+    contract,
+    harness: canonicalHarnessName(net.harness),
+    ...(net.model ? { model: net.model } : {}),
+    runtimePlugins,
+    taskGenerator: net.taskGenerator,
+  });
+}
+
 export async function loadSolverNets(
   config: {
     joinedSolverNets?: Record<string, JoinedSolverNetConfig>;
   },
 ): Promise<SolverNetRegistry> {
   const registry = new SolverNetRegistry();
-  async function registerFromConfig(
-    name: string,
-    net: SolverNetConfig,
-    contract: SolverNetContract,
-  ): Promise<void> {
-    if (!net.enabled) return;
-    const runtimePlugins: RuntimePlugin[] = [];
-    const seenSources = new Set<string>();
-    const seenNames = new Set<string>();
-
-    async function addRuntimePlugin(
-      entry: SolverPluginEntry,
-      provenance: RuntimePlugin['provenance'],
-    ): Promise<void> {
-      const plugin = await resolveSolverPlugin(entry);
-      if (seenSources.has(plugin.source) || seenNames.has(plugin.name)) return;
-      if (!isRuntimePlugin(plugin) && !plugin.supports.includes(net.solverType)) {
-        throw new Error(
-          `SolverNet ${name} runtime plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
-        );
-      }
-      runtimePlugins.push(runtimePluginFrom(plugin, provenance));
-      seenSources.add(plugin.source);
-      seenNames.add(plugin.name);
-    }
-
-    // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, runtime
-    // plugins are operator-configured — the SolverNet contract no longer
-    // carries `defaultRuntimePlugins`. Network Tools is the one runtime-
-    // scoped default (`supports: ['jinn.runtime']`) auto-loaded so every
-    // operator's daemon can talk to the Jinn MCP surface. SolverType-bound
-    // plugins (e.g. the bundled prediction plugin) flow through
-    // `net.plugins`; the launcher seeds quick-start defaults into operator
-    // config rather than binding them to the contract.
-    for (const entry of [JINN_NETWORK_TOOLS_PLUGIN]) {
-      await addRuntimePlugin(entry, 'default');
-    }
-    for (const entry of net.plugins ?? []) {
-      await addRuntimePlugin(entry, 'configured');
-    }
-    registry.register({
-      name,
-      enabled: net.enabled,
-      solverType: net.solverType,
-      roles: rolesFromConfig(net),
-      contract,
-      harness: canonicalHarnessName(net.harness),
-      ...(net.model ? { model: net.model } : {}),
-      runtimePlugins,
-      taskGenerator: net.taskGenerator,
-    });
-  }
-
   for (const [cid, joined] of Object.entries(config.joinedSolverNets ?? {})) {
-    if (!joined.contract) continue;
-    const solverType = `${joined.contract.id}.${joined.contract.version}`;
-    const contract = getSolverNetContract(joined.contract);
-    if (!contract) continue;
-    const roles = rolesFromJoinedConfig(joined);
-    if (roles.length === 0) continue;
-    const disabledDefaults = joined.disabledDefaultPlugins ?? [];
-    const defaultPlugins = defaultRuntimePluginsForSolverType(solverType)
-      .filter((plugin) => !defaultPluginDisabled(plugin, disabledDefaults));
-    const harness = joined.roles.includes('solver')
-      ? joined.harness ?? CLAUDE_CODE_HARNESS
-      : evaluatorHarnessNameForContract(contract) ?? joined.harness ?? CLAUDE_CODE_HARNESS;
-    await registerFromConfig(joined.name ?? cid, {
-      enabled: true,
-      solverType,
-      roles,
-      harness,
-      ...(joined.model ? { model: joined.model } : {}),
-      plugins: [...defaultPlugins, ...(joined.plugins ?? [])],
-      taskGenerator: { enabled: false },
-    }, contract);
+    await registerJoinedNet(registry, cid, joined);
   }
 
   return registry;

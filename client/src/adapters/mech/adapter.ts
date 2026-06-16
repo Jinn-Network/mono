@@ -63,6 +63,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
+import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -1138,6 +1139,9 @@ export class MechAdapter implements ExecutionAdapter {
         }));
       }
 
+      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
+      // nothing was yielded) so an idle-but-polling loop never looks stale.
+      if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
@@ -1307,15 +1311,37 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const kind = role === 'verdict' ? 'verdict' : 'solution';
     const payload = rawSigned['payload'];
-    const rawVerdict = payload != null && typeof payload === 'object'
-      ? (payload as Record<string, unknown>)['verdict']
+    const verdictCode = kind === 'verdict'
+      ? this.verdictCodeFromEnvelopePayload(parsed.solverType, payload)
       : undefined;
 
     return {
       evidenceHash: recomputed as Hex,
       kind,
-      verdictCode: kind === 'verdict' ? verdictCodeFromValue(rawVerdict) : undefined,
+      verdictCode,
     };
+  }
+
+  private verdictCodeFromEnvelopePayload(solverType: string, payload: unknown): VerdictCode {
+    if (payload == null || typeof payload !== 'object') {
+      throw new Error(
+        `missing verdict payload for solverType=${solverType}; refusing to claim Invalid(3) without an explicit evaluator verdict`,
+      );
+    }
+    const record = payload as Record<string, unknown>;
+    const rawVerdict = record['verdict'];
+    if (rawVerdict !== undefined) return verdictCodeFromValue(rawVerdict);
+
+    if (solverType === 'swe-rebench-v2.v1') {
+      const passedMatch = record['passed_match'];
+      if (typeof passedMatch === 'boolean') {
+        return passedMatch ? VerdictCode.Pass : VerdictCode.Fail;
+      }
+    }
+
+    throw new Error(
+      `missing verdict signal for solverType=${solverType}; refusing to claim Invalid(3) without an explicit evaluator verdict`,
+    );
   }
 
   private async ensureDeliveryClaimed(
@@ -1523,6 +1549,9 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
+      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
+      // nothing was yielded) so an idle-but-polling loop never looks stale.
+      if (this.store) recordLoopTick(this.store, 'delivery-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }

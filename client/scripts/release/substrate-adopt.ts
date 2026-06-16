@@ -16,6 +16,11 @@ const EXCLUDE_PATTERNS: RegExp[] = [
   /^run-/,
 ];
 
+const PRESERVED_ENGINE_STATE_FILES = [
+  ['engine', 'impl-state', 'swe-rebench-v2-evaluator', 'state.json'],
+  ['engine', 'impl-state', 'swe-rebench-v2-evaluator', 'validated-pool.json'],
+] as const;
+
 function isExcluded(name: string): boolean {
   return EXCLUDE_DIRS.has(name) || EXCLUDE_PATTERNS.some((re) => re.test(name));
 }
@@ -34,6 +39,25 @@ async function readJsonOrNull<T>(p: string): Promise<T | null> {
     return JSON.parse(await fs.readFile(p, 'utf-8')) as T;
   } catch {
     return null;
+  }
+}
+
+async function copyOptionalFile(src: string, dst: string): Promise<void> {
+  try {
+    const stat = await fs.stat(src);
+    await fs.mkdir(path.dirname(dst), { recursive: true });
+    await fs.copyFile(src, dst);
+    await fs.chmod(dst, stat.mode);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return;
+    throw e;
+  }
+}
+
+async function preserveEvaluatorEngineState(sourceDir: string, goldJinn: string): Promise<void> {
+  for (const parts of PRESERVED_ENGINE_STATE_FILES) {
+    await copyOptionalFile(path.join(sourceDir, ...parts), path.join(goldJinn, ...parts));
   }
 }
 
@@ -71,6 +95,9 @@ export async function adoptOperator(opts: AdoptOptions): Promise<void> {
 
   // 2. Copy the source dir with excludes
   await copyTree(opts.sourceDir, goldJinn, isExcluded);
+  // Preserve the small evaluator admission state needed by release preflight
+  // without copying bulky/transient engine work directories.
+  await preserveEvaluatorEngineState(opts.sourceDir, goldJinn);
 
   // 3. Rewrite apiPort in the copied config.json
   const cfgPath = path.join(goldJinn, 'config.json');

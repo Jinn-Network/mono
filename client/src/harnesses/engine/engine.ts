@@ -10,7 +10,7 @@
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { keccak256, toBytes } from 'viem';
-import type { ZodIssue } from 'zod';
+import type { ZodIssue } from 'zod/v3';
 import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
@@ -74,6 +74,7 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
+import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { harnessStateDirName } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 
@@ -136,6 +137,8 @@ export interface JoinedSolverNetsView {
   get(manifestCid: string): { roles: Array<'solver' | 'evaluator'> } | undefined;
   /** Enumerate all joined manifest CIDs (used for digest-based filtering). */
   manifestCids(): string[];
+  /** Add/replace one joined entry live (used by the hot-apply join applier, #1037). */
+  set(manifestCid: string, entry: { roles: Array<'solver' | 'evaluator'> }): void;
 }
 
 /** Map task role to the operator role it requires in `joinedSolverNets`. */
@@ -164,6 +167,28 @@ export function joinedSolverNetsViewFromConfig(
   return {
     get: (cid: string) => map.get(cid),
     manifestCids: () => [...map.keys()],
+    set: (cid, entry) => { map.set(cid, entry); },
+  };
+}
+
+/**
+ * Mutable `JoinedSolverNetsView` for the running daemon. Unlike
+ * `joinedSolverNetsViewFromConfig` (boot snapshot), the applier
+ * (`daemon/join-applier.ts`, #1037) keeps a handle and calls `set()` when a
+ * join is hot-applied, so the engine's per-task eligibility check sees the new
+ * cid on its next call without a restart.
+ */
+export function createMutableJoinedSolverNetsView(
+  initial: Record<string, { manifestCid: string; roles: Array<'solver' | 'evaluator'> }> | undefined,
+): JoinedSolverNetsView {
+  const map = new Map<string, { roles: Array<'solver' | 'evaluator'> }>();
+  for (const [key, entry] of Object.entries(initial ?? {})) {
+    map.set(entry.manifestCid ?? key, { roles: entry.roles });
+  }
+  return {
+    get: (cid: string) => map.get(cid),
+    manifestCids: () => [...map.keys()],
+    set: (cid, entry) => { map.set(cid, entry); },
   };
 }
 
@@ -625,6 +650,7 @@ export class TaskEngine {
       } catch (err) {
         console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
       }
+      recordLoopTick(this.store, 'engine-tick'); // #1043 loop watchdog
       if (this.stopped) break;
       await Promise.race([
         new Promise((resolve) => setTimeout(resolve, intervalMs)),
@@ -2000,12 +2026,9 @@ export class TaskEngine {
       case 'UNRESOLVED':
         return VerdictCode.Unresolved;
       default:
-        // gatingClaim is null, verdict is absent, or the string is unrecognized.
-        // Return Invalid(3) — not Pass(1). Pass must come from an explicit PASS/SCORED verdict.
-        console.warn(
-          `[harness-engine] verdictCodeForTask: unrecognized gatingClaim.verdict (got=${String(raw)}); defaulting to Invalid(3) — should never happen, indicates the evaluator harness didn't set gatingClaim.verdict before submission`,
+        throw new Error(
+          `[harness-engine] verdictCodeForTask: missing or unrecognized gatingClaim.verdict (got=${String(raw)}); refusing to claim Invalid(3) on-chain without an explicit evaluator verdict`,
         );
-        return VerdictCode.Invalid;
     }
   }
 

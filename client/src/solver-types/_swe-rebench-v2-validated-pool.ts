@@ -362,6 +362,51 @@ export function loadVettedPoolArtifactScorableEntries(raw: unknown): ScorableVet
   return { ids: new Set(byId.keys()), byId };
 }
 
+/**
+ * Substrate-level held-out exclusion (#986). Returns a copy of the artifact with
+ * the `excludeIds` instances dropped, so the PUBLISHED vetted-pool artifact — the
+ * shared substrate every generator can source its postable set from — never lists
+ * the held-out exam. This moves the exclusion up from each generator's posting
+ * decision (which only a generator running the slate code honours) to the artifact
+ * itself, so a fresh-recovery / independent / unguarded generator that reads the
+ * artifact cannot post the exam tasks either. Pure; never mutates its input. The
+ * caller re-hashes via `hashVettedPoolArtifact`.
+ */
+export function excludeFromVettedPoolArtifact(
+  artifact: SweRebenchV2VettedPoolArtifact,
+  excludeIds: ReadonlySet<string>,
+): SweRebenchV2VettedPoolArtifact {
+  if (excludeIds.size === 0) return artifact;
+  return { ...artifact, entries: artifact.entries.filter((e) => !excludeIds.has(e.instance_id)) };
+}
+
+/**
+ * Republication decision (#986). The published artifact is authoritative and
+ * write-once: it is NOT re-synced to local scorable unless the validated pool is
+ * strictly newer (the prior timestamp-gated behaviour, preserved here). But a
+ * timestamp-only check never fires when the *held-out set* changes while the
+ * validated pool is unchanged — so adding the exclusion in code, or activating a
+ * new slate version (e.g. `v3`), would leave the live artifact stale (still
+ * listing now-held-out instances) indefinitely. The narrow extra trigger:
+ * republish when the existing publication is CONTAMINATED — it still lists a
+ * now-held-out instance. This forces exactly the rollout / slate-bump refresh
+ * and nothing more (it does NOT republish merely because the publication diverges
+ * from local scorable, which would break the write-once / published-authoritative
+ * contract other operators recover against).
+ */
+export function shouldRepublishVettedPool(args: {
+  existingIds: ReadonlySet<string> | null;
+  heldOutIds: ReadonlySet<string>;
+  validatedNewer: boolean;
+}): boolean {
+  if (!args.existingIds) return true;
+  if (args.validatedNewer) return true;
+  for (const id of args.existingIds) {
+    if (args.heldOutIds.has(id)) return true;
+  }
+  return false;
+}
+
 export function createVettedPoolArtifactRef(args: {
   manifestCid: string;
   artifactCid: string;

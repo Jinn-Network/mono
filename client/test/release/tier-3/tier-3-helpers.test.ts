@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning, tierOpNames } from './tier-3-helpers.js';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning, tierOpNames, waitForHarnessReady } from './tier-3-helpers.js';
 
 describe('tierOpNames', () => {
   const saved = { p: process.env['JINN_TIER_PRODUCER_OP'], s: process.env['JINN_TIER_SOLVER_OP'] };
@@ -43,6 +43,40 @@ describe('isDailyDriverRunning', () => {
     } finally {
       await new Promise<void>((resolve) => srv.close(() => resolve()));
     }
+  });
+});
+
+describe('waitForHarnessReady', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fails fast with the evaluator readiness reason and next step', async () => {
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.headers).toMatchObject({ 'x-jinn-ui-token': 'ui-secret' });
+      return new Response(JSON.stringify({
+        harnessName: 'swe-rebench-v2-evaluator',
+        manifestCids: ['bafkrei-t3'],
+        ready: false,
+        reason: 'swe-rebench-v2 evaluator not enabled',
+        nextStep: { cli: 'jinn harnesses enable swe-rebench-v2-evaluator' },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(waitForHarnessReady({
+      opName: 'op-a',
+      apiPort: 7360,
+      harnessName: 'swe-rebench-v2-evaluator',
+      uiToken: 'ui-secret',
+      timeoutMs: 50,
+      intervalMs: 1,
+    })).rejects.toThrow(
+      /Tier 3 evaluator harness readiness infra-blocked on op-a: swe-rebench-v2 evaluator not enabled.*jinn harnesses enable swe-rebench-v2-evaluator/,
+    );
   });
 });
 

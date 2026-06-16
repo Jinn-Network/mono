@@ -20,6 +20,7 @@ const FIELD_CACHE: FieldCache = {
     options: {
       Todo: 'opt_todo',
       'In Progress': 'opt_in_progress',
+      Human: 'opt_human',
       'In Review': 'opt_in_review',
       Done: 'opt_done',
     },

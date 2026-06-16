@@ -128,6 +128,20 @@ describe('classifyFailure', () => {
     expect(classifyFailure(new Error('running an install might help'))).toBe('flake-infra');
   });
 
+  it('classifies Tier 3 evaluator readiness drift as flake-infra', () => {
+    expect(classifyFailure(new Error(
+      'Tier 3 evaluator harness readiness infra-blocked on op-a: swe-rebench-v2 evaluator not enabled',
+    ))).toBe('flake-infra');
+  });
+
+  it('classifies warm-operator keystore password drift as flake-infra', () => {
+    expect(classifyFailure(new Error(
+      'daemon on port 7361 exited before its API became reachable. ' +
+      'A keystore password was auto-generated for you. ' +
+      'Existing mnemonic keystore could not be decrypted: Key derivation failed - possibly wrong passphrase',
+    ))).toBe('flake-infra');
+  });
+
   it('#1018: does NOT mask a real contracts compile error as flake-infra', () => {
     // A genuine solc/Hardhat compile error (no install-missing signal) must stay
     // real-bug — the precision guard so the build-setup pattern is not a blanket

@@ -171,7 +171,7 @@ export async function tickStolasDistributorClaims(
       const receipt = await waitForReceipt(publicClient, txHash as Hex);
       if (receipt.status !== 'success') {
         result.failedPermanent += 1;
-        console.error(
+        console.debug(
           `[reward-claim] claim tx failed for service ${serviceId} (hash=${txHash})`,
         );
         continue;
@@ -194,7 +194,7 @@ export async function tickStolasDistributorClaims(
       } else {
         result.failedPermanent += 1;
       }
-      console.error(
+      console.debug(
         `[reward-claim] Skipped service ${serviceId}:`,
         err instanceof Error ? err.message : err,
       );
@@ -304,7 +304,7 @@ export async function tickSelfBondStakingClaims(
 
     if (!safeAddress || !agentPrivateKey || !rpcUrl) {
       result.skippedMissingConfig += 1;
-      console.error(
+      console.debug(
         `[reward-claim] Self-bond: service ${serviceId} skipped — missing safeAddress, agentPrivateKey, or rpcUrl on claim target.`,
       );
       continue;
@@ -346,7 +346,7 @@ export async function tickSelfBondStakingClaims(
       const receipt = await waitForReceipt(publicClient, txHash as Hex);
       if (receipt.status !== 'success') {
         result.failedPermanent += 1;
-        console.error(
+        console.debug(
           `[reward-claim] Self-bond claim tx failed for service ${serviceId} (hash=${txHash})`,
         );
         continue;
@@ -368,7 +368,7 @@ export async function tickSelfBondStakingClaims(
       } else {
         result.failedPermanent += 1;
       }
-      console.error(
+      console.debug(
         `[reward-claim] Self-bond: skipped service ${serviceId}:`,
         err instanceof Error ? err.message : err,
       );

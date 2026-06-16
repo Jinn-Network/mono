@@ -70,23 +70,23 @@ export const EVENT_KIND_META: Record<LifecycleKind, EventKindMeta> = {
     tone: 'info',
   },
   jinn_claim_emitted: {
-    label: 'JINN claim emitted',
-    description: 'A JINN earnings claim was emitted locally.',
+    label: 'Testnet JINN claim emitted',
+    description: 'A testnet JINN (tJINN) earnings claim was emitted locally.',
     tone: 'info',
   },
   jinn_claim_ticket_recorded: {
-    label: 'JINN ticket recorded',
-    description: 'A JINN claim ticket was recorded for later submission.',
+    label: 'Testnet JINN ticket recorded',
+    description: 'A testnet JINN (tJINN) claim ticket was recorded for later submission.',
     tone: 'info',
   },
   jinn_claim_submitted: {
-    label: 'JINN claim submitted',
-    description: 'A JINN earnings claim was submitted on-chain.',
+    label: 'Testnet JINN claim submitted',
+    description: 'A testnet JINN (tJINN) earnings claim was submitted on-chain.',
     tone: 'success',
   },
   jinn_claim_canonical_skip: {
-    label: 'JINN claim skipped',
-    description: 'A JINN claim was skipped as already canonical.',
+    label: 'Testnet JINN claim skipped',
+    description: 'A testnet JINN (tJINN) claim was skipped as already canonical.',
     tone: 'neutral',
   },
   engine_transition: {

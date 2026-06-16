@@ -165,7 +165,7 @@ Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
-JINN and OLAS the operator has earned or is owed.
+Testnet JINN (tJINN) and OLAS the operator has earned or is owed. Phase 1 emits testnet JINN only — operator-facing copy must say "testnet JINN" or "tJINN", never bare "JINN".
 
 - **Static**
   - claimable

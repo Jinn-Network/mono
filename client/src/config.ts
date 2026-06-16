@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
@@ -219,6 +219,7 @@ export const JinnConfigSchema = z.object({
    * Narrow task discovery to specific on-chain task ids. This is primarily
    * for live acceptance gates that must avoid claiming unrelated public
    * backlog while proving one fresh task path.
+   * Env: JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS (comma-separated).
    */
   taskDiscoveryAllowedTaskIds: z.array(z.string()).optional(),
 
@@ -358,6 +359,14 @@ export const JinnConfigSchema = z.object({
   jinnClaimLoopEnabled: z.boolean().default(false),
 
   /**
+   * Loop-watchdog auto-restart gate (#1043). Default OFF (the locked Option A
+   * decision): the watchdog always detects a stale loop and loud-logs + emits
+   * a `loop_watchdog_stale` event, but the non-zero process.exit recovery only
+   * fires when this is on. Env: JINN_WATCHDOG_AUTO_RESTART=1|true|yes.
+   */
+  watchdogAutoRestart: z.boolean().default(false),
+
+  /**
    * How often the daemon ticks the cross-chain JINN claim loop (ms). Default
    * 3 600 000 (1 hour) — well below mainnet challenge windows while
    * minimising RPC/gas churn. Set to 0 to disable when the address is set.
@@ -493,6 +502,19 @@ export const JinnConfigSchema = z.object({
       }),
     )
     .optional(),
+
+  /**
+   * Set true once the operator clicks "Enter dashboard" at the end of the
+   * #983 guided onboarding takeover. Distinct from `joinedSolverNets` being
+   * non-empty: a node can have a membership mid-onboarding (the first join
+   * populates the map) yet not have finished harness/model selection. The SPA
+   * gates the bootstrap→dashboard hand-off on this flag (see App.tsx), so the
+   * first join no longer ejects the operator before the harness step.
+   *
+   * Written by POST /v1/operator/onboarding-complete (persisted to disk AND
+   * mutated in-memory so GET /v1/bootstrap reflects it without a restart).
+   */
+  onboardingComplete: z.boolean().optional(),
 
   /**
    * Trusted ed25519 publishers for external harness impls. The daemon
@@ -919,6 +941,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TASK_DISCOVERY_FROM_BLOCK'] !== undefined) {
     merged.taskDiscoveryOnchainFromBlock = Number.parseInt(env['JINN_TASK_DISCOVERY_FROM_BLOCK'], 10);
   }
+  if (env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'] !== undefined) {
+    merged.taskDiscoveryAllowedTaskIds = env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS']
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
@@ -984,6 +1012,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_CLAIM_LOOP_ENABLED'] !== undefined) {
     const v = env['JINN_CLAIM_LOOP_ENABLED'].trim().toLowerCase();
     merged.jinnClaimLoopEnabled = v === '1' || v === 'true' || v === 'yes';
+  }
+  if (env['JINN_WATCHDOG_AUTO_RESTART'] !== undefined) {
+    const v = env['JINN_WATCHDOG_AUTO_RESTART'].trim().toLowerCase();
+    merged.watchdogAutoRestart = v === '1' || v === 'true' || v === 'yes';
   }
   if (env['JINN_CLAIM_LOOP_INTERVAL_MS'] !== undefined) {
     merged.jinnClaimLoopIntervalMs = parseInt(env['JINN_CLAIM_LOOP_INTERVAL_MS'], 10);
@@ -1348,6 +1380,7 @@ const TRACKED_ENV_VARS = [
   'JINN_DISCOVERY_MODE',
   'JINN_DISCOVERY_URL',
   'JINN_DISCOVERY_FALLBACK',
+  'JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS',
   'JINN_NODE_ENDPOINT',
   'JINN_IPFS_REGISTRY_URL',
   'JINN_IPFS_GATEWAY_URL',
@@ -1367,6 +1400,7 @@ const TRACKED_ENV_VARS = [
   'JINN_CLAIM_SUBMISSION_MODE',
   'JINN_CLAIM_LOOP_ENABLED',
   'JINN_CLAIM_LOOP_INTERVAL_MS',
+  'JINN_WATCHDOG_AUTO_RESTART',
   'JINN_STAKING_MODE',
   'JINN_TARGET_SERVICES',
   'JINN_DEBUG',

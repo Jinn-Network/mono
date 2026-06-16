@@ -46,13 +46,26 @@ server.listen(port, '127.0.0.1', () => {
 });
 `;
 
+const HANDSHAKE_THEN_FATAL_SOURCE = `
+const port = Number(process.env.JINN_API_PORT);
+process.stderr.write('[api] UI handshake URL: http://127.0.0.1:' + port + '/?k=test-token\\n');
+setTimeout(() => {
+  process.stderr.write('[main] Running fleet bootstrap...\\n');
+  process.stdout.write('{"schemaVersion":1,"code":"fatal","exitCode":50,"message":"Existing mnemonic keystore could not be decrypted: Key derivation failed - possibly wrong passphrase"}\\n');
+  process.exit(50);
+}, 50);
+`;
+
 describe('spawnMultiOpDaemons', () => {
   let tmpRoot: string;
+  let dummyBinPath: string;
   let opAHome: string;
   let opBHome: string;
 
   beforeAll(async () => {
     tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'multi-op-helper-'));
+    dummyBinPath = path.join(tmpRoot, 'dummy-daemon.cjs');
+    await fs.writeFile(dummyBinPath, DUMMY_DAEMON_SOURCE);
     opAHome = path.join(tmpRoot, 'op-a');
     opBHome = path.join(tmpRoot, 'op-b');
     await fs.mkdir(path.join(opAHome, '.jinn-client'), { recursive: true });
@@ -74,14 +87,6 @@ describe('spawnMultiOpDaemons', () => {
   });
 
   it('spawns N daemons with distinct ports and returns handles', async () => {
-    // NOTE: this test requires `yarn build` has been run (dist/bin/jinn.js exists).
-    // If dist is missing, it should skip rather than fail.
-    const distPath = path.resolve(__dirname, '..', '..', 'dist', 'bin', 'jinn.js');
-    try { await fs.access(distPath); } catch {
-      // dist not built; skip
-      return;
-    }
-
     let handle: MultiOpHandle | undefined;
     try {
       handle = await spawnMultiOpDaemons({
@@ -90,6 +95,7 @@ describe('spawnMultiOpDaemons', () => {
           { name: 'op-b', home: opBHome, apiPort: 7733 },
         ],
         readyTimeoutMs: 30000,
+        jinnBinPath: dummyBinPath,
       });
       expect(Object.keys(handle.daemons).sort()).toEqual(['op-a', 'op-b']);
       // handshakeUrl may be present only if the daemon emits it; bootstrap-incomplete daemons may not.
@@ -104,12 +110,10 @@ describe('spawnMultiOpDaemons', () => {
   }, 60000);
 
   it('teardown is idempotent', async () => {
-    const distPath = path.resolve(__dirname, '..', '..', 'dist', 'bin', 'jinn.js');
-    try { await fs.access(distPath); } catch { return; }
-
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort: 7734 }],
       readyTimeoutMs: 30000,
+      jinnBinPath: dummyBinPath,
     });
     await handle.teardown();
     await expect(handle.teardown()).resolves.toBeUndefined();
@@ -206,5 +210,17 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
     } finally {
       await handle.teardown();
     }
+  }, 30000);
+
+  it('keeps the fatal daemon envelope in the readiness error after handshake output', async () => {
+    const apiPort = pickPort();
+    const fatalBinPath = path.join(tmpRoot, 'fatal-after-handshake.cjs');
+    await fs.writeFile(fatalBinPath, HANDSHAKE_THEN_FATAL_SOURCE);
+
+    await expect(spawnMultiOpDaemons({
+      ops: [{ name: 'op-a', home: opAHome, apiPort }],
+      readyTimeoutMs: 5000,
+      jinnBinPath: fatalBinPath,
+    })).rejects.toThrow(/Existing mnemonic keystore could not be decrypted/);
   }, 30000);
 });

@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const FailClassSchema = z.enum(['real-bug', 'flake-infra', 'flake-timing', 'agent-crash']);
 export type FailClass = z.infer<typeof FailClassSchema>;
@@ -74,6 +74,17 @@ const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
       /node_modules state file/i,
       /running an install might help/i,
       /findPackageLocation/i,
+      // ── release substrate readiness drift: T3 uses a persistent warm
+      // evaluator operator. A missing local harness setup is an environment
+      // blocker, not a candidate-code regression.
+      /Tier 3 evaluator harness readiness infra-blocked/i,
+      // ── release substrate secret drift: a warm operator whose mnemonic
+      // keystore exists but whose runtime keystore-password file is missing or
+      // mismatched cannot start. That is a protected Environment / substrate
+      // state issue, not a product-loop regression.
+      /Existing mnemonic keystore could not be decrypted/i,
+      /possibly wrong passphrase/i,
+      /A keystore password was auto-generated/i,
     ],
   },
   {

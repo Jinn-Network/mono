@@ -51,6 +51,9 @@ import { chainForNetwork } from './substrate-verify.js';
 import { DEFAULT_TESTNET_RPC_URLS } from '../../src/config.js';
 import { canonicalHarnessName } from '../../src/harnesses/names.js';
 import { EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+// The instance the T3.1 real-harness loop actually submits — single source of
+// truth shared with the gate's evaluator preflight (admission-pool-fixture check).
+import { KNOWN_INSTANCE_ID } from '../../test/release/tier-2/fixtures/known-instance.js';
 
 const IDENTITY_REGISTRY_ABI = parseAbi([
   'function getAgentWallet(uint256 agentId) view returns (address)',
@@ -79,6 +82,7 @@ export interface CheckResult {
     | 'evaluator-role'
     | 'evaluator-harness-state'
     | 'admission-pool'
+    | 'admission-pool-fixture'
     | 'harness-creds';
   status: CheckStatus;
   detail: string;
@@ -111,6 +115,13 @@ export interface ProvisionOptions {
    * `~/.claude` / `~/.codex`. Defaults to a filesystem probe.
    */
   hasHarnessCreds?: (harness: string) => Promise<boolean>;
+  /**
+   * Idempotently enable the SWE-rebench v2 evaluator harness in the given impl
+   * state directory. Production uses the harness's real onEnable() path
+   * (Docker/Python validation + upstream git clone); tests inject a fake so the
+   * doctor stays unit-fast and offline.
+   */
+  enableEvaluatorHarness?: (implStateDir: string) => Promise<{ status: string; message?: string; details?: unknown; action?: { description?: string } }>;
 }
 
 interface OperatorConfig {
@@ -147,6 +158,25 @@ async function readJson<T>(p: string): Promise<T | null> {
 async function writeJson(p: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, JSON.stringify(value, null, 2) + '\n');
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function defaultEnableEvaluatorHarness(
+  implStateDir: string,
+): Promise<{ status: string; message?: string; details?: unknown; action?: { description?: string } }> {
+  const { SweRebenchV2EvaluatorHarness } = await import(
+    '../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js'
+  );
+  const harness = new SweRebenchV2EvaluatorHarness({ implStateDir });
+  return harness.onEnable({ runtimePlugins: [], args: {} });
 }
 
 /** The canonical testnet fallback chain, optionally with a paid key prepended. */
@@ -292,27 +322,65 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
     }
   }
 
-  // ── 4b. Evaluator harness state seed ───────────────────────────────────
+  // ── 4b. Evaluator harness enablement ───────────────────────────────────
   if (opts.isEvaluator) {
-    const statePath = path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME, EVALUATOR_STATE_FILE);
-    const existing = await readJson<{ enabled?: boolean }>(statePath);
-    if (existing?.enabled === true) {
-      checks.push({ id: 'evaluator-harness-state', status: 'ok', detail: 'evaluator harness enabled' });
-    } else if (repair) {
-      await writeJson(statePath, {
-        schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
-        enabled: true,
-        enabledAt: new Date().toISOString(),
-        upstreamRepoDir: path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME, 'upstream'),
+    const evaluatorStateDir = path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME);
+    const statePath = path.join(evaluatorStateDir, EVALUATOR_STATE_FILE);
+    const defaultUpstreamRepoDir = path.join(evaluatorStateDir, 'upstream');
+    const existing = await readJson<{ enabled?: boolean; upstreamRepoDir?: string }>(statePath);
+    const existingUpstreamRepoDir =
+      typeof existing?.upstreamRepoDir === 'string' ? existing.upstreamRepoDir : defaultUpstreamRepoDir;
+    const existingReady =
+      existing?.enabled === true && await pathExists(existingUpstreamRepoDir);
+
+    if (existingReady) {
+      checks.push({
+        id: 'evaluator-harness-state',
+        status: 'ok',
+        detail: `evaluator harness enabled; upstream=${existingUpstreamRepoDir}`,
       });
-      checks.push({ id: 'evaluator-harness-state', status: 'repaired', detail: 'seeded enabled state.json' });
+    } else if (repair) {
+      const enable = opts.enableEvaluatorHarness ?? defaultEnableEvaluatorHarness;
+      const result = await enable(evaluatorStateDir);
+      const refreshed = await readJson<{ enabled?: boolean; upstreamRepoDir?: string }>(statePath);
+      const refreshedUpstreamRepoDir =
+        typeof refreshed?.upstreamRepoDir === 'string' ? refreshed.upstreamRepoDir : defaultUpstreamRepoDir;
+      const refreshedReady =
+        refreshed?.enabled === true && await pathExists(refreshedUpstreamRepoDir);
+
+      if (result.status === 'ready' && refreshedReady) {
+        checks.push({
+          id: 'evaluator-harness-state',
+          status: 'repaired',
+          detail: `enabled evaluator harness; upstream=${refreshedUpstreamRepoDir}`,
+        });
+      } else {
+        const reason =
+          result.message ??
+          result.action?.description ??
+          (refreshed?.enabled === true
+            ? `upstream repo missing at ${refreshedUpstreamRepoDir}`
+            : 'evaluator harness state missing/not enabled');
+        checks.push({
+          id: 'evaluator-harness-state',
+          status: 'drift',
+          detail: `evaluator harness not ready after enable attempt: ${reason}`,
+        });
+      }
     } else {
-      checks.push({ id: 'evaluator-harness-state', status: 'drift', detail: 'evaluator harness state missing/not enabled' });
+      const detail = existing?.enabled === true
+        ? `evaluator harness state enabled but upstream repo missing at ${existingUpstreamRepoDir}`
+        : 'evaluator harness state missing/not enabled';
+      checks.push({ id: 'evaluator-harness-state', status: 'drift', detail });
     }
 
     // ── 4c. Admission pool (validated-pool.json must exist & be parseable) ─
-    const poolPath = path.join(implStateRoot, EVALUATOR_STATE_DIR_NAME, ADMISSION_FILE);
-    const pool = await readJson<{ schemaVersion?: string; evalSemanticsVersion?: string }>(poolPath);
+    const poolPath = path.join(evaluatorStateDir, ADMISSION_FILE);
+    const pool = await readJson<{
+      schemaVersion?: string;
+      evalSemanticsVersion?: string;
+      entries?: Record<string, { scorable?: boolean; reason?: string }>;
+    }>(poolPath);
     const poolValid = pool?.schemaVersion === ADMISSION_SCHEMA_VERSION && pool?.evalSemanticsVersion === EVAL_SEMANTICS_VERSION;
     if (poolValid) {
       checks.push({ id: 'admission-pool', status: 'ok', detail: `pool present (semantics v${EVAL_SEMANTICS_VERSION})` });
@@ -330,6 +398,29 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
       checks.push({ id: 'admission-pool', status: 'repaired', detail: `seeded empty pool (semantics v${EVAL_SEMANTICS_VERSION}) — run validate-pool to populate` });
     } else {
       checks.push({ id: 'admission-pool', status: 'drift', detail: 'validated-pool.json missing or wrong semantics version' });
+    }
+
+    // ── 4d. Gate fixture admission (fast-fail) ─────────────────────────────
+    // The shared T2.2/T3.1 fixture instance MUST be scorable under the current
+    // semantics, or the evaluator throws admission_missing_or_unscorable and the
+    // real-harness loop burns its full ~23-min budget before failing — surfaced
+    // as a mystery flake-timing rather than the real cause (2026-06-08 cut). A
+    // scorable admission can't be synthesised (it needs a real gold-patch grade
+    // via `jinn solver-nets validate-pool`), so — like harness-creds — this is
+    // ALWAYS drift when missing, even under --repair (the empty seeded pool above
+    // still can't grade the fixture). Caught here, it's an instant infra-blocked
+    // verdict naming the fix, not a 23-minute silent timeout.
+    const fixtureEntry =
+      pool?.evalSemanticsVersion === EVAL_SEMANTICS_VERSION ? pool?.entries?.[KNOWN_INSTANCE_ID] : undefined;
+    if (fixtureEntry?.scorable === true) {
+      checks.push({ id: 'admission-pool-fixture', status: 'ok', detail: `gate fixture ${KNOWN_INSTANCE_ID} scorable (semantics v${EVAL_SEMANTICS_VERSION})` });
+    } else {
+      const why = fixtureEntry ? `recorded unscorable (${fixtureEntry.reason ?? 'no reason'})` : 'no scorable entry';
+      checks.push({
+        id: 'admission-pool-fixture',
+        status: 'drift',
+        detail: `gate fixture ${KNOWN_INSTANCE_ID}: ${why} under semantics v${EVAL_SEMANTICS_VERSION} — run \`jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad\` on the warm operator and refresh its state; cannot auto-repair`,
+      });
     }
   }
 

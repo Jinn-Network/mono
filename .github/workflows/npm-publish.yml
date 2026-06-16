@@ -9,6 +9,16 @@ on:
     paths: ['client/**']
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published release tag to recover, for example v0.1.9'
+        required: true
+        type: string
+      release_sha:
+        description: 'Exact release commit SHA whose two-gate evidence must be verified'
+        required: true
+        type: string
 
 # Trusted publishing (OIDC): register this single workflow on npmjs for
 # @jinn-network/client. npm allows one trusted publisher config per package.
@@ -31,7 +41,7 @@ defaults:
 jobs:
   publish:
     name: Publish package
-    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     # Stable publish reruns the CI-safe release gates. The live donation-consumption
     # and app-first testnet gates require a producer daemon, UI auth/handshake, and
@@ -40,7 +50,7 @@ jobs:
     timeout-minutes: 90
     environment: npm-publish
     env:
-      JINN_BUILD_COMMIT: ${{ github.sha }}
+      JINN_BUILD_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
       # Use the high-quota Tenderly Base Sepolia gateway for CI e2e gates.
       # Without this, the e2e falls back to the public `https://sepolia.base.org`
       # which is heavily rate-limited and bites the `Base Sepolia fork
@@ -55,12 +65,17 @@ jobs:
       BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.ref }}
 
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
-      - run: npm install -g npm@11.5.1
+      # Trusted publishing requires npm >=11.5.1. Pin a newer CLI so recovery
+      # dispatches pick up npm registry/provenance fixes without changing the
+      # release candidate payload.
+      - run: npm install -g npm@11.16.0
       - run: corepack enable
       - run: yarn install --immutable
       # Keep the publish test environment aligned with CI. Some client unit
@@ -73,6 +88,9 @@ jobs:
       - name: Resolve publish metadata
         id: meta
         shell: bash
+        env:
+          MANUAL_RELEASE_TAG: ${{ inputs.release_tag }}
+          MANUAL_RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
@@ -81,7 +99,31 @@ jobs:
             PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
             DIST_TAG="canary"
           else
-            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            RELEASE_TAG="${MANUAL_RELEASE_TAG:-${{ github.event.release.tag_name }}}"
+            if [ -z "${RELEASE_TAG}" ]; then
+              echo "::error::Stable publish requires a release tag"
+              exit 1
+            fi
+            if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+              if [ -z "${MANUAL_RELEASE_SHA}" ]; then
+                echo "::error::Manual stable publish requires release_sha"
+                exit 1
+              fi
+              ACTUAL_SHA="$(git rev-parse HEAD)"
+              if [ "${ACTUAL_SHA}" != "${MANUAL_RELEASE_SHA}" ]; then
+                echo "::error::Checked out ${ACTUAL_SHA}, expected manual release_sha ${MANUAL_RELEASE_SHA}"
+                exit 1
+              fi
+              TAG_SHA="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')"
+              if [ -z "${TAG_SHA}" ]; then
+                echo "::error::Release tag ${RELEASE_TAG} does not exist on origin"
+                exit 1
+              fi
+              if [ "${TAG_SHA}" != "${MANUAL_RELEASE_SHA}" ]; then
+                echo "::error::Release tag ${RELEASE_TAG} points at ${TAG_SHA}, not manual release_sha ${MANUAL_RELEASE_SHA}"
+                exit 1
+              fi
+            fi
             # Two accepted tag formats per the engineering handbook §Cadence:
             # - v<semver>    (new format, used by the Monday scaffold workflow — jinn-mono-2cl.2)
             # - client-v<semver>  (legacy format, kept for backwards-compatibility)
@@ -114,9 +156,12 @@ jobs:
             DIST_TAG="latest"
           fi
 
-          echo "package_version=${PACKAGE_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "publish_version=${PUBLISH_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "dist_tag=${DIST_TAG}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "package_version=${PACKAGE_VERSION}"
+            echo "publish_version=${PUBLISH_VERSION}"
+            echo "dist_tag=${DIST_TAG}"
+            echo "release_tag=${RELEASE_TAG:-}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Patch package version for canary publish
         if: github.event_name == 'push'
@@ -170,11 +215,12 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'latest'
         uses: actions/github-script@v9
         env:
+          RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
           HERMETIC_GATE_WAIVED: ${{ vars.JINN_HERMETIC_GATE_WAIVED }}
           ENVIRONMENT_SUITE_WAIVED: ${{ vars.JINN_ENVIRONMENT_SUITE_WAIVED }}
         with:
           script: |
-            const sha = context.sha;
+            const sha = process.env.RELEASE_SHA || context.sha;
             const hermeticWaived = process.env.HERMETIC_GATE_WAIVED === 'true';
             const envSuiteWaived = process.env.ENVIRONMENT_SUITE_WAIVED === 'true';
 
@@ -285,13 +331,17 @@ jobs:
       # If it exists at a different SHA (two named releases on the same calendar day), the step
       # errors and asks for manual reconciliation.
       - name: Create v2026.MM.DD date tag
-        if: steps.meta.outputs.dist_tag == 'latest' && startsWith(github.event.release.tag_name, 'v')
+        if: steps.meta.outputs.dist_tag == 'latest' && startsWith(steps.meta.outputs.release_tag, 'v')
         working-directory: ${{ github.workspace }}
         shell: bash
         env:
           PUBLISHED_AT: ${{ github.event.release.published_at }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         run: |
+          if [ -z "$PUBLISHED_AT" ]; then
+            PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          fi
+
           # Format the date from the release's published_at (ISO 8601 from GitHub).
           # Use leading-zero %Y.%m.%d so May 18 is v2026.05.18, not v2026.5.18.
           DATE_TAG="$(date -u -d "$PUBLISHED_AT" +"v%Y.%m.%d")"
