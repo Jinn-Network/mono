@@ -32,6 +32,12 @@ describe('loadConfig', () => {
     expect(config.ipfsGateway).toBe('https://my-gateway.example');
   });
 
+  it('rejects unsafe DATABASE_SCHEMA identifiers before raw SQL/search_path use', () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, DATABASE_SCHEMA: 'jinn_indexer_v1"; DROP SCHEMA public; --' }),
+    ).toThrow(/DATABASE_SCHEMA/);
+  });
+
   it('overrides knobs from JINN_ENRICHMENT_* env', () => {
     const config = loadConfig({
       ...BASE_ENV,

@@ -21,6 +21,7 @@ import type { EnrichDeps } from '../src/enrich.js';
 import { createPgliteHarness, type PgliteHarness } from './helpers/pglite-db.js';
 
 const CHAIN_ID = 84532;
+const CID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
 
 let h: PgliteHarness;
 let runner: EnrichmentRunner | null = null;
@@ -33,6 +34,16 @@ afterEach(async () => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function cidFor(index: number): string {
+  let n = index;
+  let encoded = '';
+  do {
+    encoded = CID_ALPHABET[n % CID_ALPHABET.length] + encoded;
+    n = Math.floor(n / CID_ALPHABET.length);
+  } while (n > 0);
+  return `bafy${encoded.padStart(60, 'a')}`;
+}
+
 describe('AC3: read path is not starved by an enrichment backlog', () => {
   it('40 concurrent verdict reads all resolve while the worker drains a slow backlog', async () => {
     h = await createPgliteHarness();
@@ -40,10 +51,11 @@ describe('AC3: read path is not starved by an enrichment backlog', () => {
 
     // Seed 500 pending evaluation anchors.
     for (let i = 0; i < 500; i++) {
+      const cid = cidFor(i);
       await h.db.execute(
         sql`INSERT INTO ${sql.raw(`"${h.schema}"."envelope"`)}
           ("agent_id","metadata_key","chain_id","kind","manifest_cid","manifest_hash","evidence_tier","published_at_block","log_index")
-          VALUES (${'1'}, ${`evaluation:cid${i}`}, ${CHAIN_ID}, ${'evaluation'}, ${`cid${i}`}, ${'0x'}, ${'committed'}, ${BigInt(i)}, ${0})`,
+          VALUES (${'1'}, ${`evaluation:${cid}`}, ${CHAIN_ID}, ${'evaluation'}, ${cid}, ${'0x'}, ${'committed'}, ${BigInt(i)}, ${0})`,
       );
     }
 
@@ -69,6 +81,7 @@ describe('AC3: read path is not starved by an enrichment backlog', () => {
       ipfsTimeoutMs: 5000,
       batchSize: 25,
       chainId: CHAIN_ID,
+      maxRetries: 5,
       fetchImpl: slowFetch,
       now: () => Date.now(),
     };
@@ -95,5 +108,5 @@ describe('AC3: read path is not starved by an enrichment backlog', () => {
 
     runner.stop();
     await draining;
-  });
+  }, 20_000);
 });

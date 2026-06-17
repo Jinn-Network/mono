@@ -696,26 +696,22 @@ export const verdictEnvelopeMeta = onchainTable(
     evaluatorVerdict: t.text().notNull().default('UNKNOWN'),
     /**
      * 'pending' | 'retry' | 'ok' | 'failed'.
-     *  - 'pending': anchor written, not yet enriched (the enrichment worker's
-     *    discovery target, #779). Default.
-     *  - 'retry': the off-chain verdict body parsed (so we have the requestId PK)
-     *    but a follow-up step (task-body fetch / write) failed; the worker backs
-     *    off until `nextAttemptAt` and retries. Transient.
-     *  - 'ok': fully enriched. Excluded from the worker's discovery left-anti-join.
-     *  - 'failed': terminal give-up after `retryCount` reaches the worker's max.
+     * Current #779 worker writes only 'ok' rows here. Pre-requestId
+     * verdict-body failures are tracked in the worker-owned enrichment_attempt
+     * table because this table's primary key is inside the body. The other
+     * statuses remain for compatibility with any pre-existing/future row-keyed
+     * retry path and are still honoured by worker discovery.
      */
     enrichmentStatus: t.text().notNull().default('pending'),
     /**
-     * Worker-owned retry counter (#779). Incremented by the enrichment worker on
-     * each `retry`; once it reaches the worker's max-retries the row goes to
-     * `failed`. 0 for handler-written (in-process) enrichment.
+     * Row-keyed retry counter retained for compatibility/future use. The #779
+     * worker's verdict-body retry counter lives in enrichment_attempt.
      */
     retryCount: t.integer().notNull().default(0),
     /**
-     * Epoch-ms of the next eligible enrichment attempt (#779), nullable. NULL =
-     * eligible now. Set by the worker to `now + backoff(retryCount)` when a row
-     * goes to `retry`. bigint (not timestamp) to match this schema's bigint
-     * convention and keep the worker's comparison arithmetic simple.
+     * Epoch-ms for row-keyed retry eligibility, nullable. The #779 worker uses
+     * enrichment_attempt.next_attempt_at for verdict-body retry/backoff, but
+     * still honours this field for any pre-existing pending/retry rows.
      */
     nextAttemptAt: t.bigint(),
     /** Block number of the MetadataSet event that triggered enrichment. */
@@ -730,9 +726,8 @@ export const verdictEnvelopeMeta = onchainTable(
     actualPassedIdx: index().on(table.actualPassed),
     evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
     taskIdIdx: index().on(table.taskId),
-    // Supports the enrichment worker's discovery scan predicate (#779):
-    // enrichmentStatus IN ('pending','retry') AND (nextAttemptAt IS NULL OR
-    // nextAttemptAt <= now).
+    // Supports worker discovery for any pre-existing row-keyed pending/retry
+    // verdict rows.
     dueIdx: index().on(table.enrichmentStatus, table.nextAttemptAt),
     instanceIdIdx: index().on(table.manifestCid, table.actualPassed, table.instanceId),
     // Filter shape used by getInstanceSuccessCounts (#669 Finding 2): scope

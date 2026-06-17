@@ -21,10 +21,11 @@ its own event loop, and writes the result back into `verdict_envelope_meta`.
 
 ## How it works
 
-1. **Discover** (`src/db.ts` `discoverDue`) — a CID left-anti-join: `evaluation`
+1. **Claim** (`src/db.ts` `claimDue`) — a CID left-anti-join: `evaluation`
    `envelope` rows that have **no** `ok` `verdict_envelope_meta` row joined by
-   `manifest_cid` (or a `pending`/`retry` row whose `next_attempt_at` is due).
-   `FOR UPDATE OF e SKIP LOCKED` so two worker instances claim disjoint sets.
+   `manifest_cid`. The worker records each claimed CID in its
+   `enrichment_attempt` table with a short processing lease, so two worker
+   instances claim disjoint sets and a crashed worker's lease becomes due again.
 2. **Fetch + parse** (`src/enrich.ts`) — fetch the verdict body (+ task body for
    `swe-rebench-v2`) over IPFS, parse with the **shared**
    `@jinn-network/indexer/enrichment-parse` module — the SAME parser the handler
@@ -40,10 +41,12 @@ its own event loop, and writes the result back into `verdict_envelope_meta`.
    mark such rows for retry — that would be stricter than the handler, and #779
    is a behaviour-preserving refactor.
 
-The schema keeps `retry_count` / `next_attempt_at` columns and discovery still
-honours any pre-existing `pending`/`retry` rows, but the worker no longer writes
-them (no real transient path reaches a retry after the graceful-degrade above).
-`JINN_ENRICHMENT_MAX_RETRIES` is therefore reserved/inert today.
+Verdict-body fetch/parse failures do **not** write a partial
+`verdict_envelope_meta` row, because the request id and primary key live inside
+that body. Instead the worker marks the CID in `enrichment_attempt` for
+backoff retry, and quarantines it as `failed` after
+`JINN_ENRICHMENT_MAX_RETRIES`. Task-body failures still graceful-degrade as
+above to preserve handler behaviour.
 
 The poll loop (`src/runner.ts`) is `setTimeout`-scheduled with a re-entrancy
 guard. The boot path (`src/index.ts`) **fails loud** — a DB-connect failure
@@ -68,7 +71,7 @@ Worker-specific knobs:
 | `JINN_ENRICHMENT_POLL_INTERVAL_MS` | `10000` | Between ticks. |
 | `JINN_ENRICHMENT_BATCH_SIZE` | `25` | Anchors per tick (the O4 drain knob). |
 | `JINN_ENRICHMENT_IPFS_TIMEOUT_MS` | `5000` | Per-fetch timeout. |
-| `JINN_ENRICHMENT_MAX_RETRIES` | `5` | Reserved/inert — the worker graceful-degrades instead of marking retries (see How it works). |
+| `JINN_ENRICHMENT_MAX_RETRIES` | `5` | Verdict-body CID failures before quarantine. Task-body failures still graceful-degrade (see How it works). |
 
 ## Cutover / rollback
 

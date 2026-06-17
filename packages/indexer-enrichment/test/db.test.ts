@@ -142,6 +142,50 @@ describe('discoverDue', () => {
   });
 });
 
+// ── worker-owned CID attempt state ────────────────────────────────────────────
+
+describe('CID attempt state', () => {
+  it('claimDue marks anchors as processing so a second worker cannot claim the same batch', async () => {
+    await seedEnvelope({ agentId: '1', cid: 'bafyclaim0000000000000000000000000000000000000000000000000000000000', kind: 'evaluation', publishedAtBlock: 10n });
+
+    const first = await store.claimDue(25, 1_000_000n, 60_000n);
+    expect(first.map((r) => r.manifestCid)).toEqual([
+      'bafyclaim0000000000000000000000000000000000000000000000000000000000',
+    ]);
+
+    const second = await store.claimDue(25, 1_000_000n, 60_000n);
+    expect(second).toEqual([]);
+  });
+
+  it('markAttemptFailure backs off failed verdict-body fetches and eventually quarantines the CID', async () => {
+    const cid = 'bafyfail00000000000000000000000000000000000000000000000000000000000';
+    await seedEnvelope({ agentId: '1', cid, kind: 'evaluation', publishedAtBlock: 10n });
+    await store.claimDue(25, 1_000_000n, 60_000n);
+
+    await store.markAttemptFailure({
+      manifestCid: cid,
+      chainId: CHAIN_ID,
+      now: 1_000_000n,
+      maxRetries: 2,
+      error: 'IPFS offline',
+    });
+
+    const backedOff = await store.discoverDue(25, 1_000_001n);
+    expect(backedOff).toEqual([]);
+
+    await store.markAttemptFailure({
+      manifestCid: cid,
+      chainId: CHAIN_ID,
+      now: 2_000_000n,
+      maxRetries: 2,
+      error: 'IPFS still offline',
+    });
+
+    const failed = await store.discoverDue(25, 9_000_000n);
+    expect(failed).toEqual([]);
+  });
+});
+
 // ── upsertVerdict ─────────────────────────────────────────────────────────────
 
 describe('upsertVerdict', () => {
@@ -179,11 +223,17 @@ describe('upsertVerdict', () => {
     expect(String(row?.enriched_at_block)).toBe('100');
   });
 
-  it('on conflict updates only when blockNumber >= existing.enrichedAtBlock', async () => {
+  it('on conflict updates only when blockNumber is newer than existing.enrichedAtBlock', async () => {
     await store.upsertVerdict({ ...baseRow, enrichedAtBlock: 100n, chainId: CHAIN_ID });
     // older block → no-op
     await store.upsertVerdict({ ...baseRow, instanceId: 'STALE', actualScore: '0', enrichedAtBlock: 50n, chainId: CHAIN_ID });
     let row = await readVerdict('0xaa');
+    expect(row?.instance_id).toBe('sympy__sympy-27510');
+    expect(row?.actual_score).toBe('1');
+    // equal block → also no-op, preserving the first complete enrichment if a
+    // duplicate worker replays the same anchor with partial fields.
+    await store.upsertVerdict({ ...baseRow, instanceId: 'EQUAL_STALE', actualScore: '0', enrichedAtBlock: 100n, chainId: CHAIN_ID });
+    row = await readVerdict('0xaa');
     expect(row?.instance_id).toBe('sympy__sympy-27510');
     expect(row?.actual_score).toBe('1');
     // newer block → applies
@@ -200,6 +250,17 @@ describe('upsertVerdict', () => {
     expect(row?.enrichment_status).toBe('ok');
     expect(row?.retry_count).toBe(0);
     expect(row?.next_attempt_at).toBeNull();
+  });
+
+  it('clearAttempt removes worker CID attempt state after a row goes ok', async () => {
+    const cid = 'bafyok000000000000000000000000000000000000000000000000000000000000';
+    await seedEnvelope({ agentId: '1', cid, kind: 'evaluation', publishedAtBlock: 100n });
+    await store.claimDue(25, 1_000_000n, 60_000n);
+    await store.upsertVerdict({ ...baseRow, manifestCid: cid, enrichedAtBlock: 100n, chainId: CHAIN_ID });
+    await store.clearAttempt(cid, CHAIN_ID);
+
+    const due = await store.discoverDue(25, 1_000_001n);
+    expect(due).toEqual([]);
   });
 });
 

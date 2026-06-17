@@ -9,8 +9,9 @@
  *
  * Failure modes mirror the handler's graceful-degrade behaviour EXACTLY
  * (behaviour-preserving refactor — see plan T2.6 / §9 R3):
- *  - verdict-body fetch throws → NO row (no requestId without the body); the
- *    anchor stays un-enriched and reappears in discovery next tick (natural retry).
+ *  - verdict-body fetch throws or parses malformed → NO verdict row (no requestId
+ *    without the body); the CID-keyed worker attempt table backs off and
+ *    eventually quarantines the anchor.
  *  - swe-rebench-v2 task-body fetch throws AFTER the verdict parsed → the worker
  *    warns and falls through to write enrichmentStatus='ok' with instanceId='' and
  *    solverNetManifestCid='' — identical to handlers.ts (the task-fetch catch there
@@ -31,6 +32,7 @@ export interface EnrichDeps {
   ipfsTimeoutMs: number;
   batchSize: number;
   chainId: number;
+  maxRetries: number;
   /** Injected for tests; defaults to global fetch in production wiring. */
   fetchImpl?: FetchLike;
   /** epoch-ms clock; injected for deterministic tests. */
@@ -48,7 +50,7 @@ export async function enrichBatch(
   deps: EnrichDeps,
 ): Promise<EnrichBatchResult> {
   const nowMs = deps.now();
-  const due = await store.discoverDue(deps.batchSize, nowMs);
+  const due = await store.claimDue(deps.batchSize, nowMs, processingLeaseMs(deps));
   const result: EnrichBatchResult = {
     discovered: due.length,
     enriched: 0,
@@ -67,6 +69,13 @@ export async function enrichBatch(
       console.warn(
         `[indexer-enrichment] verdict body fetch failed for ${anchor.manifestCid}: ${String(err)}`,
       );
+      await store.markAttemptFailure({
+        manifestCid: anchor.manifestCid,
+        chainId: anchor.chainId,
+        now: nowMs,
+        maxRetries: deps.maxRetries,
+        error: String(err),
+      });
       result.failedFetch += 1;
       continue;
     }
@@ -74,7 +83,14 @@ export async function enrichBatch(
     const meta = parseVerdictEnvelopeLite(body);
     if (!meta) {
       // Not a recognisable verdict envelope (no task.requestId). Nothing to key
-      // a row on — leave un-enriched (matches the handler, which writes no row).
+      // a verdict row on, but the CID-keyed attempt state prevents a hot loop.
+      await store.markAttemptFailure({
+        manifestCid: anchor.manifestCid,
+        chainId: anchor.chainId,
+        now: nowMs,
+        maxRetries: deps.maxRetries,
+        error: 'malformed verdict envelope',
+      });
       result.failedFetch += 1;
       continue;
     }
@@ -121,10 +137,20 @@ export async function enrichBatch(
       solverNetManifestCid,
       evaluatorVerdict: meta.evaluatorVerdict,
       enrichedAtBlock: anchor.publishedAtBlock,
-      chainId: deps.chainId,
+      chainId: anchor.chainId,
     });
+    await store.clearAttempt(anchor.manifestCid, anchor.chainId);
     result.enriched += 1;
   }
 
   return result;
+}
+
+function processingLeaseMs(deps: EnrichDeps): bigint {
+  const worstCaseFetchesPerAnchor = 2;
+  const lease = Math.max(
+    deps.ipfsTimeoutMs * worstCaseFetchesPerAnchor * Math.max(1, deps.batchSize),
+    60_000,
+  );
+  return BigInt(lease);
 }

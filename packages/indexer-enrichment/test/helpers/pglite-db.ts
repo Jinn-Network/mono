@@ -3,11 +3,12 @@
  * (handbook rule 6 — a real Postgres engine for the migration/contract surface,
  * not a hand-rolled mock).
  *
- * Creates an in-memory PGlite instance, a schema, and the two tables the worker
- * touches (`envelope` read-only + `verdict_envelope_meta` read/write). The DDL
- * is GENERATED from the real Drizzle schema via getTableConfig so it cannot
- * drift from ponder.schema.ts — if the indexer adds/renames a column the worker
- * relies on, these tables change with it.
+ * Creates an in-memory PGlite instance, a schema, the two Ponder tables the
+ * worker touches (`envelope` read-only + `verdict_envelope_meta` read/write),
+ * and the worker-owned `enrichment_attempt` table. The Ponder DDL is GENERATED
+ * from the real Drizzle schema via getTableConfig so it cannot drift from
+ * ponder.schema.ts — if the indexer adds/renames a column the worker relies on,
+ * these tables change with it.
  */
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
@@ -57,6 +58,16 @@ export async function createPgliteHarness(): Promise<PgliteHarness> {
   await db.execute(sql.raw(`CREATE SCHEMA "${schema}"`));
   await db.execute(sql.raw(createTableDDL(schema, envelope)));
   await db.execute(sql.raw(createTableDDL(schema, verdictEnvelopeMeta)));
+  await db.execute(sql.raw(`CREATE TABLE "${schema}"."enrichment_attempt" (
+    "manifest_cid" text NOT NULL,
+    "chain_id" integer NOT NULL,
+    "status" text NOT NULL,
+    "retry_count" integer NOT NULL DEFAULT 0,
+    "next_attempt_at" bigint,
+    "last_error" text NOT NULL DEFAULT '',
+    "updated_at" bigint NOT NULL DEFAULT 0,
+    PRIMARY KEY ("manifest_cid", "chain_id")
+  )`));
   return {
     db,
     client,

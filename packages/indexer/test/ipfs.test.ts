@@ -1,8 +1,13 @@
 /**
  * Tests for the IPFS gateway fetch helper (src/ipfs.ts).
  */
-import { describe, it, expect } from 'vitest';
-import { normalizeIpfsGatewayBase, fetchIpfsJson, DEFAULT_IPFS_GATEWAY, type FetchLike } from '../src/ipfs.js';
+import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_IPFS_GATEWAY,
+  fetchIpfsJson,
+  normalizeIpfsGatewayBase,
+  type FetchLike,
+} from '../src/ipfs.js';
 
 describe('normalizeIpfsGatewayBase', () => {
   it('appends /ipfs/ to a plain base URL', () => {
@@ -21,11 +26,11 @@ describe('normalizeIpfsGatewayBase', () => {
     expect(normalizeIpfsGatewayBase('https://x/ipfs/')).toBe('https://x/ipfs/');
   });
 
-  it('empty string → DEFAULT_IPFS_GATEWAY/ipfs/', () => {
+  it('empty string -> DEFAULT_IPFS_GATEWAY/ipfs/', () => {
     expect(normalizeIpfsGatewayBase('')).toBe(`${DEFAULT_IPFS_GATEWAY}/ipfs/`);
   });
 
-  it('undefined → DEFAULT_IPFS_GATEWAY/ipfs/', () => {
+  it('undefined -> DEFAULT_IPFS_GATEWAY/ipfs/', () => {
     expect(normalizeIpfsGatewayBase(undefined)).toBe(`${DEFAULT_IPFS_GATEWAY}/ipfs/`);
   });
 
@@ -74,5 +79,47 @@ describe('fetchIpfsJson', () => {
 
     await fetchIpfsJson('https://stub', 'bafycid', { fetchImpl: stubFetch });
     expect(capturedOptions?.signal).toBeDefined();
+  });
+
+  it('rejects CID path traversal before building the gateway request', async () => {
+    let called = false;
+
+    await expect(
+      fetchIpfsJson('https://gateway.example', '../../admin', {
+        fetchImpl: async () => {
+          called = true;
+          return { ok: true, status: 200, json: async () => ({ ok: true }) };
+        },
+      }),
+    ).rejects.toThrow(/invalid IPFS CID/);
+
+    expect(called).toBe(false);
+  });
+
+  it('URL-encodes the CID path segment when fetching', async () => {
+    let requestedUrl = '';
+    await fetchIpfsJson('https://gateway.example', 'bafybeigdyrztaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', {
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      },
+    });
+
+    expect(requestedUrl).toBe(
+      'https://gateway.example/ipfs/bafybeigdyrztaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
+  });
+
+  it('rejects gateway responses that advertise oversized JSON', async () => {
+    await expect(
+      fetchIpfsJson('https://gateway.example', 'bafycid', {
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-length': '1000001' }),
+          json: async () => ({ ok: true }),
+        }),
+      }),
+    ).rejects.toThrow(/too large/);
   });
 });

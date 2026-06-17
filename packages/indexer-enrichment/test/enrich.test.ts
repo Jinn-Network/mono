@@ -7,6 +7,8 @@ import { createPgliteHarness, type PgliteHarness } from './helpers/pglite-db.js'
 
 const CHAIN_ID = 84532;
 const REQUEST_ID = `0x${'aa'.repeat(32)}`;
+const EVAL_CID = 'bafyevalaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const TASK_CID = 'bafytaskaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 let h: PgliteHarness;
 let store: EnrichmentStore;
@@ -41,6 +43,7 @@ function depsWith(fetchImpl: FetchLike): EnrichDeps {
     ipfsTimeoutMs: 5000,
     batchSize: 25,
     chainId: CHAIN_ID,
+    maxRetries: 2,
     fetchImpl,
     now: () => 1_000_000,
   };
@@ -50,7 +53,7 @@ const SWE_VERDICT_BODY = {
   schemaVersion: 'jinn.execution.v1',
   role: 'verdict',
   solverType: 'swe-rebench-v2.v1',
-  task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1, cid: 'bafytask' },
+  task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1, cid: TASK_CID },
   verdictIndex: 0,
   participant: { safeAddress: `0x${'bb'.repeat(20)}` },
   evidenceTier: 'committed',
@@ -65,9 +68,9 @@ const SWE_TASK_BODY = {
 
 describe('enrichBatch', () => {
   it('writes the full #669 field set with enrichmentStatus=ok and the anchor block', async () => {
-    await seedEvalAnchor('bafyeval', 41_500_000n);
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
     const fetchImpl: FetchLike = async (url) => {
-      if (String(url).includes('bafytask')) {
+      if (String(url).includes(TASK_CID)) {
         return { ok: true, status: 200, json: async () => SWE_TASK_BODY };
       }
       return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
@@ -90,7 +93,7 @@ describe('enrichBatch', () => {
   });
 
   it('does NOT fetch the task body for a non-swe-rebench-v2 verdict (instanceId stays empty)', async () => {
-    await seedEvalAnchor('bafyeval', 41_500_000n);
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
     const genericBody = {
       schemaVersion: 'jinn.execution.v1',
       role: 'verdict',
@@ -100,7 +103,7 @@ describe('enrichBatch', () => {
     };
     let taskFetched = false;
     const fetchImpl: FetchLike = async (url) => {
-      if (String(url).includes('bafytask')) {
+      if (String(url).includes(TASK_CID)) {
         taskFetched = true;
         return { ok: true, status: 200, json: async () => SWE_TASK_BODY };
       }
@@ -114,29 +117,44 @@ describe('enrichBatch', () => {
     expect(row?.enrichment_status).toBe('ok');
   });
 
-  it('leaves NO row and keeps the CID re-discoverable when the verdict body fetch throws', async () => {
-    await seedEvalAnchor('bafyeval', 41_500_000n);
+  it('leaves NO verdict row and backs off the CID when the verdict body fetch throws', async () => {
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
     const fetchImpl: FetchLike = async () => {
       throw new Error('IPFS offline');
     };
     const result = await enrichBatch(store, depsWith(fetchImpl));
     expect(result.enriched).toBe(0);
 
-    // No row written (we have no requestId without the body).
+    // No verdict row written (we have no requestId without the body).
     const res = await h.db.execute(
       sql`SELECT count(*)::int AS c FROM ${sql.raw(`"${h.schema}"."verdict_envelope_meta"`)}`,
     );
     expect((res.rows[0] as { c: number }).c).toBe(0);
 
-    // The anchor is still discoverable for a natural retry next tick.
+    // The worker records CID-keyed backoff instead of hot-looping next tick.
     const due = await store.discoverDue(25, 1_000_000);
-    expect(due.map((d) => d.manifestCid)).toContain('bafyeval');
+    expect(due.map((d) => d.manifestCid)).not.toContain(EVAL_CID);
+  });
+
+  it('quarantines a malformed verdict body after max retries', async () => {
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
+    const fetchImpl: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ nope: true }),
+    });
+
+    await enrichBatch(store, depsWith(fetchImpl));
+    await enrichBatch(store, { ...depsWith(fetchImpl), now: () => 2_000_000 });
+
+    const due = await store.discoverDue(25, 9_000_000);
+    expect(due.map((d) => d.manifestCid)).not.toContain(EVAL_CID);
   });
 
   it('graceful-degrades to ok + instanceId="" when the verdict parses but the task-body fetch fails (matches the handler)', async () => {
-    await seedEvalAnchor('bafyeval', 41_500_000n);
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
     const fetchImpl: FetchLike = async (url) => {
-      if (String(url).includes('bafytask')) throw new Error('task body offline');
+      if (String(url).includes(TASK_CID)) throw new Error('task body offline');
       return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
     };
     const result = await enrichBatch(store, depsWith(fetchImpl));
@@ -161,9 +179,9 @@ describe('enrichBatch', () => {
 
 describe('idempotency (AC6)', () => {
   it('re-running against an all-ok backlog does zero fetches and zero writes', async () => {
-    await seedEvalAnchor('bafyeval', 41_500_000n);
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
     const fetchImpl: FetchLike = async (url) => {
-      if (String(url).includes('bafytask')) {
+      if (String(url).includes(TASK_CID)) {
         return { ok: true, status: 200, json: async () => SWE_TASK_BODY };
       }
       return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
@@ -191,7 +209,7 @@ describe('idempotency (AC6)', () => {
       attemptIndex: 1,
       taskId: '42',
       evaluator: `0x${'bb'.repeat(20)}`,
-      manifestCid: 'bafyeval',
+      manifestCid: EVAL_CID,
       solverType: 'swe-rebench-v2.v1',
       evidenceTier: 'committed',
       actualPassed: true,
@@ -208,7 +226,13 @@ describe('idempotency (AC6)', () => {
     const before = await readVerdict(REQUEST_ID);
     // Replay at an OLDER block with different field values → guarded no-op.
     await store.upsertVerdict({ ...okRow, instanceId: 'STALE', actualPassed: false, enrichedAtBlock: 41_400_000n });
-    const after = await readVerdict(REQUEST_ID);
+    let after = await readVerdict(REQUEST_ID);
+    expect(after).toEqual(before);
+
+    // Replay at the SAME block from a duplicate worker with partial fields must
+    // also be a no-op. This preserves the first complete enrichment.
+    await store.upsertVerdict({ ...okRow, instanceId: '', solverNetManifestCid: '', actualPassed: false, enrichedAtBlock: 41_500_000n });
+    after = await readVerdict(REQUEST_ID);
     expect(after).toEqual(before);
   });
 });
@@ -217,10 +241,10 @@ describe('idempotency (AC6)', () => {
 
 describe('#669 partial-enrichment guard (AC4)', () => {
   it('task body present but missing instance_id → ok with instanceId="" (filtered by instanceId_not:"")', async () => {
-    await seedEvalAnchor('bafyeval', 41_500_000n);
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
     const taskBodyNoInstance = { schemaVersion: 'task.v1', solverNetManifestCid: 'bafyManifestSweA', spec: {} };
     const fetchImpl: FetchLike = async (url) => {
-      if (String(url).includes('bafytask')) {
+      if (String(url).includes(TASK_CID)) {
         return { ok: true, status: 200, json: async () => taskBodyNoInstance };
       }
       return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };

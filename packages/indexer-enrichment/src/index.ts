@@ -5,8 +5,8 @@
  * Boot path is fail-loud (the #1068 lesson): a DB-connect failure logs and exits
  * non-zero so Railway's ON_FAILURE policy restarts the process through this same
  * idempotent boot, rather than silently wedging an unobservable worker. The
- * worker writes ONLY verdict_envelope_meta on the indexer's shared
- * DATABASE_SCHEMA.
+ * worker writes verdict_envelope_meta plus a small worker-owned
+ * enrichment_attempt table on the indexer's shared DATABASE_SCHEMA.
  */
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -45,6 +45,7 @@ async function main(): Promise<void> {
 
   const db = drizzle(pool) as unknown as DrizzleLike;
   const store = new EnrichmentStore(db, config.databaseSchema);
+  await store.ensureWorkerTables();
 
   const deps: EnrichDeps = {
     ipfsGateway: config.ipfsGateway,
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
     // single-chain testnet today; wire this from env (e.g. JINN_ENRICHMENT_CHAIN_ID)
     // before any mainnet / multi-chain deploy.
     chainId: 84532,
+    maxRetries: config.maxRetries,
     now: () => Date.now(),
   };
 

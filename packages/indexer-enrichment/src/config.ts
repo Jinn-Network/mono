@@ -22,11 +22,9 @@ export interface EnrichmentWorkerConfig {
   /** Per-IPFS-fetch timeout, ms. */
   ipfsTimeoutMs: number;
   /**
-   * RESERVED — currently inert. The worker graceful-degrades on a task-fetch
-   * failure (writes 'ok' with instanceId='', matching the handler) rather than
-   * marking rows for backoff retry, so nothing consumes this today. Kept as a
-   * parsed knob for a future genuine-transient retry path and so the schema's
-   * retry_count/next_attempt_at columns have a documented ceiling.
+   * Verdict-body fetch/parse failures are retried with backoff in the
+   * worker-owned enrichment_attempt table, then quarantined as failed.
+   * Task-body fetch failures still graceful-degrade to match the handler.
    */
   maxRetries: number;
 }
@@ -34,6 +32,13 @@ export interface EnrichmentWorkerConfig {
 function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value) throw new Error(`missing required env ${name}`);
+  return value;
+}
+
+function parseIdentifier(value: string, name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`${name} must be a safe Postgres identifier`);
+  }
   return value;
 }
 
@@ -52,7 +57,7 @@ function parseNumber(
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnrichmentWorkerConfig {
   return {
     databaseUrl: requiredEnv(env, 'DATABASE_URL'),
-    databaseSchema: requiredEnv(env, 'DATABASE_SCHEMA'),
+    databaseSchema: parseIdentifier(requiredEnv(env, 'DATABASE_SCHEMA'), 'DATABASE_SCHEMA'),
     ipfsGateway: env.JINN_IPFS_GATEWAY_URL ?? '',
     port: parseNumber(env.JINN_ENRICHMENT_PORT, 8738, 'JINN_ENRICHMENT_PORT'),
     pollIntervalMs: parseNumber(
