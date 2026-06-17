@@ -316,19 +316,57 @@ If the PR does not exist, dispatch a fix subagent.
 
 **Remove the worktree (final step).** The per-issue worktree is ephemeral scratch — the branch on `origin` is the durable artifact, so once the PR is open the worktree buys nothing and only produces dispatcher drift noise (`packages/eng-loop/src/dispatcher/state.ts` flags every "worktree exists but issue not In Progress" pair as drift, which would otherwise fire on this entirely-legitimate post-PR-open state). Remove it as the **last action of the run**.
 
-`git worktree remove` refuses to remove the worktree you are standing in, and pulling the CWD out from under the shell breaks every subsequent command — so run the removal **from outside the worktree**, from the primary checkout. Git always lists the main working tree first, so the primary checkout is the path on the **first `worktree ` line** of `git worktree list --porcelain`. Use `--force` because the worktree carries untracked build output (`dist/`, `node_modules`, etc.) that would otherwise block removal. `WORKTREE_PATH` is the value from Step 2, or the absolute worktree path from the dispatcher prompt if the worktree was pre-created:
+`git worktree remove` refuses to remove the worktree you are standing in, and pulling the CWD out from under the shell breaks every subsequent command. `git -C "$PRIMARY"` does not move the coordinator shell/session out of `"$WORKTREE_PATH"`; the removal must run with the tool/session `workdir` set to the primary checkout, or the shell must actually `cd "$PRIMARY"` before removing. `WORKTREE_PATH` is the value from Step 2, or the absolute worktree path from the dispatcher prompt if the worktree was pre-created. Use `--force` only after the guards below pass; it is for ignored build output that can remain after a clean status, not for preserving uncommitted work:
 
 ```bash
+set -euo pipefail
+
+BRANCH="$(git -C "$WORKTREE_PATH" branch --show-current)"
+if [[ -z "$BRANCH" ]]; then
+  echo "Refusing to remove detached worktree: $WORKTREE_PATH" >&2
+  exit 1
+fi
+
+git -C "$WORKTREE_PATH" fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+LOCAL_HEAD="$(git -C "$WORKTREE_PATH" rev-parse HEAD)"
+REMOTE_HEAD="$(git -C "$WORKTREE_PATH" rev-parse "refs/remotes/origin/${BRANCH}")"
+if [[ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]]; then
+  echo "Refusing to remove worktree: local HEAD does not match origin/${BRANCH}" >&2
+  echo "local:  $LOCAL_HEAD" >&2
+  echo "remote: $REMOTE_HEAD" >&2
+  exit 1
+fi
+
+STATUS="$(git -C "$WORKTREE_PATH" status --porcelain=v1 --untracked-files=all)"
+if [[ -n "$STATUS" ]]; then
+  echo "Refusing to remove worktree with uncommitted tracked changes or untracked files:" >&2
+  printf '%s\n' "$STATUS" >&2
+  exit 1
+fi
+
 # PRIMARY = path on the first `worktree ` line of `git worktree list --porcelain`
 # (git always lists the main working tree first).
-PRIMARY="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
-git -C "$PRIMARY" worktree remove --force "$WORKTREE_PATH"
+PRIMARY="$(git -C "$WORKTREE_PATH" worktree list --porcelain | sed -n 's/^worktree //p' | head -n1)"
+cd "$PRIMARY" || exit 1
+git worktree remove --force "$WORKTREE_PATH"
 ```
 
-This is the **final action** of the run — do not read, write, or `cd` into the worktree afterward; it no longer exists. If a later review cycle requests changes, recreate it in one command (the branch persists on `origin`):
+This is the **final action** of the run — do not read, write, or `cd` into the worktree afterward; it no longer exists. If a later review cycle requests changes, recreate it from `origin/<branch>` using the same canonical sibling path logic from Step 2 (the branch persists on `origin`):
 
 ```bash
-git worktree add jinn-mono_worktrees/<N> <branch>
+# Recreate the canonical sibling worktree path from Step 2.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PARENT="$(dirname "$REPO_ROOT")"
+if [[ "$(basename "$PARENT")" == "jinn-mono_worktrees" ]]; then
+  WORKTREES_BASE="$PARENT"
+else
+  WORKTREES_BASE="${PARENT}/jinn-mono_worktrees"
+fi
+WORKTREE_PATH="${WORKTREES_BASE}/<issue-number>"
+BRANCH="<branch>"
+
+git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+git worktree add "$WORKTREE_PATH" "origin/${BRANCH}"
 ```
 
 ---
