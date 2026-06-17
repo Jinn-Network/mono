@@ -7,7 +7,7 @@ afterEach(() => {
 
 describe('api.fetchLauncherTasks', () => {
   it('serializes manifestCid with pagination options', async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(
         JSON.stringify({ schemaVersion: 1, generatedAt: '', tasks: [] }),
         { status: 200, headers: { 'content-type': 'application/json' } },
