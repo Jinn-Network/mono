@@ -207,13 +207,13 @@ function findFilesystemPathEnd(value: string, start: number): number {
 }
 
 function redactAbsoluteFilesystemPaths(value: string): string {
-  const pathStart = /\/(?:Users|home|var|tmp|private|opt|Volumes|Applications|Library|System|usr|etc|mnt)(?=\/)|~\/|\$HOME\//g;
+  const pathStart = /(^|[\s("'`={\[,;:])\/(?!\/)(?=[^\s<>"`|)\]}]*\/)|~\/|\$HOME\//g;
   let output = '';
   let last = 0;
   for (;;) {
     const match = pathStart.exec(value);
     if (!match) break;
-    const start = match.index;
+    const start = match.index + (match[1]?.length ?? 0);
     if (start < last) continue;
     const end = findFilesystemPathEnd(value, start);
     output += `${value.slice(last, start)}<redacted-path>`;
@@ -236,6 +236,16 @@ function redactPathSegments(value: string): string {
     .replace(/\b[A-Za-z]:\\[^\s<>"`|]+(?:\s+[^\s<>"`|]+\\[^\s<>"`|]+)*/g, '<redacted-path>');
 }
 
+function redactLabelledRequestIds(value: string): string {
+  return value.replace(
+    /\b(request(?:[_-]?id|[ \t-]+id)|requestId)\b([ \t]*(?:=|:)?[ \t]*)([A-Za-z0-9][A-Za-z0-9._-]{2,})/gi,
+    (match, label: string, separator: string, id: string) => {
+      if (!/[=:]/.test(separator) && !/[0-9._-]/.test(id) && !/[A-Z]/.test(id)) return match;
+      return `${label}${separator}<redacted-id>`;
+    },
+  );
+}
+
 function redactSensitiveText(value: string): string {
   const redactedSecrets = value
     .replace(
@@ -249,7 +259,7 @@ function redactSensitiveText(value: string): string {
     .replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/g, '<redacted-github-token>')
     .replace(/\bgithub_pat_[A-Za-z0-9_]+/g, '<redacted-github-token>')
     .replace(/\bhttps?:\/\/[^\s<>"')]+/gi, (url) => redactUrl(url));
-  return redactPathSegments(redactedSecrets)
+  return redactLabelledRequestIds(redactPathSegments(redactedSecrets))
     .replace(/\b0x[a-fA-F0-9]{40}\b/g, '<redacted-address>')
     .replace(/\b(?:0x)?[a-fA-F0-9]{64,}\b/g, '<redacted-hex>')
     .replace(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g, '<redacted-address>')

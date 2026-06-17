@@ -188,6 +188,37 @@ describe('audit-task-run-failures CLI output safety', () => {
     });
   });
 
+  it('redacts generic POSIX paths and labelled request IDs from safe drilldown snippets', () => {
+    withTempDb((dbPath) => {
+      const rootConfigPath = '/root/.jinn-client/config.json';
+      const requestIds = ['producer-request', 'camel-request', 'spaced-request'];
+      createDbWithFailureReasons(dbPath, [
+        `failed to open ${rootConfigPath}: permission denied`,
+        `failed while processing request_id=${requestIds[0]}: no delivery`,
+        `failed while processing requestId: ${requestIds[1]}: no delivery`,
+        `failed while processing request id ${requestIds[2]}: no delivery`,
+      ]);
+
+      const human = runAudit(dbPath, ['--all', '--drilldown']);
+      const bucket = runAudit(dbPath, ['--all', '--bucket', 'unknown']);
+      const jsonText = runAudit(dbPath, ['--all', '--drilldown', '--json']);
+
+      for (const output of [human, bucket, jsonText]) {
+        expect(output).not.toContain(rootConfigPath);
+        expect(output).not.toContain('/root/.jinn-client');
+        expect(output).not.toContain('config.json');
+        for (const requestId of requestIds) {
+          expect(output).not.toContain(requestId);
+        }
+        expect(output).not.toContain(`request_id=${requestIds[0]}`);
+        expect(output).not.toContain(`requestId: ${requestIds[1]}`);
+        expect(output).not.toContain(`request id ${requestIds[2]}`);
+        expect(output).toContain('<redacted-path>');
+        expect(output).toContain('<redacted-id>');
+      }
+    });
+  });
+
   it('keeps embedded failure_reason paths available behind --unsafe-raw', () => {
     withTempDb((dbPath) => {
       const requestPathId = '01J3Q9RM0T0A7P9B6C5D4E3F2G';
@@ -202,6 +233,28 @@ describe('audit-task-run-failures CLI output safety', () => {
 
       expect(output).toContain(missingArtifactPath);
       expect(output).toContain(staleHookPath);
+    });
+  });
+
+  it('keeps generic POSIX paths and labelled request IDs raw behind --unsafe-raw', () => {
+    withTempDb((dbPath) => {
+      const rootConfigPath = '/root/.jinn-client/config.json';
+      const producerRequestId = 'producer-request';
+      const camelRequestId = 'camel-request';
+      const spacedRequestId = 'spaced-request';
+      createDbWithFailureReasons(dbPath, [
+        `failed to open ${rootConfigPath}: permission denied`,
+        `failed while processing request_id=${producerRequestId}: no delivery`,
+        `failed while processing requestId: ${camelRequestId}: no delivery`,
+        `failed while processing request id ${spacedRequestId}: no delivery`,
+      ]);
+
+      const output = runAudit(dbPath, ['--all', '--drilldown', '--unsafe-raw']);
+
+      expect(output).toContain(rootConfigPath);
+      expect(output).toContain(`request_id=${producerRequestId}`);
+      expect(output).toContain(`requestId: ${camelRequestId}`);
+      expect(output).toContain(`request id ${spacedRequestId}`);
     });
   });
 
