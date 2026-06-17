@@ -41,6 +41,7 @@ import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { format } from 'node:util';
 import { loadConfig, getConfigPathFromArgs } from '../src/config.js';
 import { classify, ALL_BUCKETS, type Bucket } from './classify-failure.js';
 
@@ -116,6 +117,8 @@ function parseArgs(argv: string[]): Args {
       case '--config':
         readFlagValue(argv, i, a);
         i++;
+        break;
+      case '--':
         break;
       default:
         throw new Error(a.startsWith('--') ? `Unknown flag: ${a}` : `Unknown argument: ${a}`);
@@ -305,6 +308,25 @@ function displayDbPath(dbPath: string, unsafeRaw: boolean): string {
   return '<redacted-db>';
 }
 
+function captureConsoleError<T>(fn: () => T): { result: T; stderr: string } {
+  const original = console.error;
+  const chunks: string[] = [];
+  console.error = (...values: unknown[]): void => {
+    chunks.push(`${format(...values)}\n`);
+  };
+  try {
+    return { result: fn(), stderr: chunks.join('') };
+  } finally {
+    console.error = original;
+  }
+}
+
+function formatCliError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const clean = stripTerminalControls(message).replace(/\s+/g, ' ').trim();
+  return redactSensitiveText(clean) || 'Unknown error';
+}
+
 function getTaskRunsColumns(db: Database.Database): Set<string> {
   return new Set(
     db
@@ -351,7 +373,8 @@ function buildFailedRowsSql(columns: Set<string>): string {
 
 function resolveDbPath(args: Args): string {
   if (args.db) return args.db;
-  const config = loadConfig(getConfigPathFromArgs());
+  const { result: config, stderr } = captureConsoleError(() => loadConfig(getConfigPathFromArgs()));
+  if (args.unsafeRaw && stderr) process.stderr.write(stderr);
   return config.dbPath;
 }
 
@@ -465,4 +488,9 @@ function main(): void {
   }
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  process.stderr.write(`audit-task-run-failures: ${formatCliError(error)}\n`);
+  process.exitCode = 1;
+}

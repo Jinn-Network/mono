@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,16 @@ import { describe, expect, it } from 'vitest';
 const clientRoot = fileURLToPath(new URL('../..', import.meta.url));
 const tsxBin = join(clientRoot, 'node_modules/.bin/tsx');
 const scriptPath = join(clientRoot, 'scripts/audit-task-run-failures.ts');
+
+function auditEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('JINN_') || key === 'BASE_RPC_URL' || key === 'BASE_SEPOLIA_RPC_URL') {
+      delete env[key];
+    }
+  }
+  return { ...env, ...overrides, NO_COLOR: '1' };
+}
 
 function withTempDb(fn: (dbPath: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-audit-failures-'));
@@ -23,7 +33,15 @@ function runAudit(dbPath: string, args: string[]): string {
   return execFileSync(process.execPath, [tsxBin, scriptPath, '--db', dbPath, ...args], {
     cwd: clientRoot,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: auditEnv(),
+  });
+}
+
+function runAuditProcess(args: string[], env: NodeJS.ProcessEnv = {}) {
+  return spawnSync(process.execPath, [tsxBin, scriptPath, ...args], {
+    cwd: clientRoot,
+    encoding: 'utf8',
+    env: auditEnv(env),
   });
 }
 
@@ -118,6 +136,54 @@ function createDbWithFailureReasons(dbPath: string, failureReasons: string[]): v
 }
 
 describe('audit-task-run-failures CLI output safety', () => {
+  it('does not leak the default config path when resolving the DB path in safe mode', () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-audit-home-'));
+    try {
+      const clientHome = join(home, '.jinn-client');
+      const configPath = join(clientHome, 'config.json');
+      const dbPath = join(clientHome, 'jinn.db');
+      mkdirSync(clientHome, { recursive: true });
+      createFullSchemaDb(dbPath);
+      writeFileSync(configPath, JSON.stringify({ dbPath }), 'utf8');
+
+      const result = runAuditProcess(['--all'], { HOME: home });
+      expect(result.status).toBe(0);
+
+      for (const output of [result.stdout, result.stderr]) {
+        expect(output).not.toContain(configPath);
+        expect(output).not.toContain(home);
+        expect(output).not.toContain('.jinn-client/config.json');
+      }
+      expect(result.stdout).toContain('<redacted-db>');
+      expect(result.stderr).toBe('');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts the documented Yarn -- passthrough argument', () => {
+    withTempDb((dbPath) => {
+      createFullSchemaDb(dbPath);
+
+      const output = runAudit(dbPath, ['--', '--all']);
+
+      expect(output).toContain('Failure-cause audit');
+      expect(output).toContain('TOTAL');
+    });
+  });
+
+  it('prints sanitized CLI errors without stack traces for unknown flags', () => {
+    const result = runAuditProcess(['--unknown-audit-flag']);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Unknown flag: --unknown-audit-flag');
+    expect(result.stderr).not.toContain(scriptPath);
+    expect(result.stderr).not.toContain(clientRoot);
+    expect(result.stderr).not.toContain('/scripts/audit-task-run-failures.ts');
+    expect(result.stderr).not.toContain('at ');
+  });
+
   it('redacts raw operator data and terminal controls from default human and JSON drilldown output', () => {
     withTempDb((dbPath) => {
       createFullSchemaDb(dbPath);
@@ -334,9 +400,17 @@ describe('audit-task-run-failures CLI output safety', () => {
     withTempDb((dbPath) => {
       createFullSchemaDb(dbPath);
 
-      expect(() => runAudit(dbPath, ['--all', '--config', '/tmp/jinn-config.json', '--drildown'])).toThrow(
-        /Unknown flag: --drildown/,
-      );
+      const result = runAuditProcess([
+        '--db',
+        dbPath,
+        '--all',
+        '--config',
+        '/tmp/jinn-config.json',
+        '--drildown',
+      ]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Unknown flag: --drildown');
     });
   });
 });
