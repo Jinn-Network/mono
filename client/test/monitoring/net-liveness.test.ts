@@ -39,7 +39,7 @@ describe('classifyNetLiveness', () => {
       chainHeadBlock: 10_000n,
       prevChainHeadBlock: 9_999n,
       latestActivityBlock: 9_900n, // 100 blocks behind head, under 900
-      indexerHeadBlock: 9_999n,
+      indexerHeadBlock: 10_000n,
       thresholdBlocks,
     });
     expect(r.state).toBe('healthy');
@@ -50,7 +50,7 @@ describe('classifyNetLiveness', () => {
       chainHeadBlock: 10_000n,
       prevChainHeadBlock: 9_999n,
       latestActivityBlock: 8_000n, // 2000 blocks behind head, over 900
-      indexerHeadBlock: 9_999n,
+      indexerHeadBlock: 10_000n,
       thresholdBlocks,
     });
     expect(r.state).toBe('stale');
@@ -62,7 +62,7 @@ describe('classifyNetLiveness', () => {
       chainHeadBlock: 10_000n,
       prevChainHeadBlock: 9_999n,
       latestActivityBlock: null,
-      indexerHeadBlock: 9_999n,
+      indexerHeadBlock: 10_000n,
       thresholdBlocks,
     });
     expect(r.state).toBe('stale');
@@ -107,7 +107,7 @@ describe('classifyNetLiveness', () => {
       chainHeadBlock: 10_000n,
       prevChainHeadBlock: 9_999n,
       latestActivityBlock: 10_000n - BigInt(thresholdBlocks), // exactly 900 behind
-      indexerHeadBlock: 9_999n,
+      indexerHeadBlock: 10_000n,
       thresholdBlocks,
     });
     expect(r.state).toBe('healthy');
@@ -118,10 +118,22 @@ describe('classifyNetLiveness', () => {
       chainHeadBlock: 10_000n,
       prevChainHeadBlock: 9_999n,
       latestActivityBlock: 10_000n - BigInt(thresholdBlocks) - 1n, // 901 behind
-      indexerHeadBlock: 9_999n,
+      indexerHeadBlock: 10_000n,
       thresholdBlocks,
     });
     expect(r.state).toBe('stale');
+  });
+
+  it('healthy: sub-threshold indexer lag measures activity against the indexed head', () => {
+    const r = classifyNetLiveness({
+      chainHeadBlock: 10_000n,
+      prevChainHeadBlock: 9_999n,
+      latestActivityBlock: 9_099n,
+      indexerHeadBlock: 9_101n,
+      thresholdBlocks,
+    });
+    expect(r.state).toBe('healthy');
+    expect(r.staleForBlocks).toBe(2n);
   });
 
   it('boundary: indexer exactly thresholdBlocks behind → not lagging', () => {
@@ -159,7 +171,7 @@ describe('runNetLivenessProbe', () => {
         .mockResolvedValueOnce(9_999n)
         .mockResolvedValueOnce(10_000n),
       fetchLatestActivityBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(9_900n),
-      fetchIndexerHeadBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(9_999n),
+      fetchIndexerHeadBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(10_000n),
       postWebhook: null as ((p: NetLivenessAlertPayload) => Promise<void>) | null,
       thresholdMinutes: 30,
       // no-op sleep keeps orchestrator tests fast (real delay is injected only by the script)

@@ -54,7 +54,7 @@ export type NetLivenessState =
 
 export interface NetLivenessResult {
   state: NetLivenessState;
-  /** Blocks since the last indexed activity (chainHead − latestActivity, floored at 0). */
+  /** Blocks since the last indexed activity, measured against the trusted activity head and floored at 0. */
   staleForBlocks: bigint;
   reason: string;
 }
@@ -70,25 +70,26 @@ export function classifyNetLiveness(inputs: NetLivenessInputs): NetLivenessResul
   const { chainHeadBlock, prevChainHeadBlock, latestActivityBlock, indexerHeadBlock, thresholdBlocks } =
     inputs;
   const threshold = BigInt(thresholdBlocks);
-  const rawStaleForBlocks = chainHeadBlock - (latestActivityBlock ?? 0n);
-  const staleForBlocks = rawStaleForBlocks < 0n ? 0n : rawStaleForBlocks;
+  const rawChainStaleForBlocks = chainHeadBlock - (latestActivityBlock ?? 0n);
+  const chainStaleForBlocks = rawChainStaleForBlocks < 0n ? 0n : rawChainStaleForBlocks;
 
   // 1. Indexer unreachable — we have no indexed-activity truth to compare.
   if (indexerHeadBlock === null) {
     return {
       state: 'indexer-down',
-      staleForBlocks,
+      staleForBlocks: chainStaleForBlocks,
       reason: 'indexer /status unreachable; cannot cross-reference indexed activity',
     };
   }
 
   // 2. Indexer reachable but far behind chain head — its activity reads are
   //    stale-by-construction, so absence of recent activity proves nothing.
-  if (chainHeadBlock - indexerHeadBlock > threshold) {
+  const indexerLagForBlocks = chainHeadBlock - indexerHeadBlock;
+  if (indexerLagForBlocks > threshold) {
     return {
       state: 'indexer-lagging',
-      staleForBlocks,
-      reason: `indexer head ${indexerHeadBlock} is ${chainHeadBlock - indexerHeadBlock} blocks behind chain head ${chainHeadBlock}`,
+      staleForBlocks: chainStaleForBlocks,
+      reason: `indexer head ${indexerHeadBlock} is ${indexerLagForBlocks} blocks behind chain head ${chainHeadBlock}`,
     };
   }
 
@@ -97,13 +98,16 @@ export function classifyNetLiveness(inputs: NetLivenessInputs): NetLivenessResul
   if (prevChainHeadBlock !== null && chainHeadBlock <= prevChainHeadBlock) {
     return {
       state: 'chain-halted',
-      staleForBlocks,
+      staleForBlocks: chainStaleForBlocks,
       reason: `chain head did not advance (${prevChainHeadBlock} → ${chainHeadBlock})`,
     };
   }
 
-  // 4. Chain advancing + indexer caught up, but no recent indexed activity →
-  //    the #1038 silent-stall signature. ALERT.
+  const rawIndexedStaleForBlocks = indexerHeadBlock - (latestActivityBlock ?? 0n);
+  const staleForBlocks = rawIndexedStaleForBlocks < 0n ? 0n : rawIndexedStaleForBlocks;
+
+  // 4. Chain advancing + indexer usable, but no recent indexed activity
+  //    relative to the indexed head → the #1038 silent-stall signature. ALERT.
   if (latestActivityBlock === null || staleForBlocks > threshold) {
     return {
       state: 'stale',
@@ -111,7 +115,7 @@ export function classifyNetLiveness(inputs: NetLivenessInputs): NetLivenessResul
       reason:
         latestActivityBlock === null
           ? 'no indexed attempt/verdict found at all'
-          : `last indexed activity at block ${latestActivityBlock} is ${staleForBlocks} blocks behind chain head ${chainHeadBlock}`,
+          : `last indexed activity at block ${latestActivityBlock} is ${staleForBlocks} blocks behind indexer head ${indexerHeadBlock}`,
     };
   }
 
@@ -119,7 +123,7 @@ export function classifyNetLiveness(inputs: NetLivenessInputs): NetLivenessResul
   return {
     state: 'healthy',
     staleForBlocks,
-    reason: `last indexed activity ${staleForBlocks} blocks behind chain head (under ${thresholdBlocks})`,
+    reason: `last indexed activity ${staleForBlocks} blocks behind indexer head (under ${thresholdBlocks})`,
   };
 }
 
@@ -240,7 +244,7 @@ export async function runNetLivenessProbe(
       text:
         `Jinn net-liveness alert: no on-chain attempt/verdict indexed for ` +
         `~${staleForMinutes} min (${result.staleForBlocks} blocks). ` +
-        `Chain head ${chainHeadBlock} is advancing and the indexer is caught up, ` +
+        `Chain head ${chainHeadBlock} is advancing and indexed activity is stale relative to indexer head ${indexerHeadBlock}, ` +
         `so this is a network stall, not an indexer outage. ${result.reason}`,
       state: result.state,
       staleForBlocks: result.staleForBlocks.toString(),
