@@ -28,6 +28,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
+import { appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +38,7 @@ import {
   runNetLivenessProbe,
   fetchIndexerHeadBlock,
   fetchLatestActivityBlock,
+  parseNetLivenessIntegerEnv,
   postNetLivenessWebhook,
   BASE_BLOCKS_PER_MINUTE,
   DEFAULT_HEAD_SAMPLE_DELAY_MS,
@@ -66,10 +68,24 @@ async function main(): Promise<void> {
   }
   const gqlUrl = indexerBaseUrl.endsWith('/graphql') ? indexerBaseUrl : `${indexerBaseUrl}/graphql`;
 
-  const thresholdMinutes = Number(process.env['JINN_NET_LIVENESS_THRESHOLD_MINUTES'] ?? 30);
+  const thresholdMinutes = parseNetLivenessIntegerEnv(
+    process.env['JINN_NET_LIVENESS_THRESHOLD_MINUTES'],
+    {
+      name: 'JINN_NET_LIVENESS_THRESHOLD_MINUTES',
+      defaultValue: 30,
+      min: 1,
+      max: 1440,
+    },
+  );
   const webhookUrl = process.env['JINN_NET_LIVENESS_WEBHOOK_URL'];
-  const headSampleDelayMs = Number(
-    process.env['JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS'] ?? DEFAULT_HEAD_SAMPLE_DELAY_MS,
+  const headSampleDelayMs = parseNetLivenessIntegerEnv(
+    process.env['JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS'],
+    {
+      name: 'JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS',
+      defaultValue: DEFAULT_HEAD_SAMPLE_DELAY_MS,
+      min: 1_000,
+      max: 120_000,
+    },
   );
 
   const client = createJinnPublicClient(config.rpcUrls, network);
@@ -78,7 +94,8 @@ async function main(): Promise<void> {
     // cacheTime:0 bypasses viem's getBlockNumber cache (default ~4s) so the two
     // samples reflect real chain state, not a memoized first read.
     fetchChainHead: () => client.getBlockNumber({ cacheTime: 0 }),
-    fetchLatestActivityBlock: () => fetchLatestActivityBlock({ gqlUrl }),
+    fetchLatestActivityBlock: () =>
+      fetchLatestActivityBlock({ gqlUrl, chainId: indexerChain.chainId }),
     fetchIndexerHeadBlock: () => fetchIndexerHeadBlock({ baseUrl: indexerBaseUrl, ...indexerChain }),
     postWebhook: postNetLivenessWebhook(webhookUrl),
     thresholdMinutes,
@@ -86,6 +103,8 @@ async function main(): Promise<void> {
     headSampleDelayMs,
     now: () => new Date(),
   });
+
+  writeGitHubOutput('state', result.state);
 
   const staleForMinutes = Number(result.staleForBlocks) / BASE_BLOCKS_PER_MINUTE;
   console.log(
@@ -104,3 +123,12 @@ main().catch((err) => {
   console.error('[net-liveness] probe failed to run:', err);
   process.exit(1);
 });
+
+function writeGitHubOutput(name: string, value: string): void {
+  const outputPath = process.env['GITHUB_OUTPUT'];
+  if (!outputPath) return;
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+    throw new Error('invalid GitHub output name');
+  }
+  appendFileSync(outputPath, `${name}=${value}\n`, { encoding: 'utf8' });
+}

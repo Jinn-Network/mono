@@ -108,6 +108,17 @@ jobs:
           JINN_NET_LIVENESS_THRESHOLD_MINUTES: '30'
           JINN_NET_LIVENESS_WEBHOOK_URL: ${{ steps.webhook.outputs.url }}
         run: |
+          write_multiline_output() {
+            local name="$1"
+            local delimiter
+            delimiter="NET_LIVENESS_$(node -e "console.log(require('node:crypto').randomUUID().replace(/-/g, ''))")"
+            {
+              echo "${name}<<${delimiter}"
+              cat
+              echo "${delimiter}"
+            } >> "$GITHUB_OUTPUT"
+          }
+
           set +e
           OUTPUT="$(yarn --cwd client net-liveness 2>&1)"
           CODE=$?
@@ -122,20 +133,12 @@ jobs:
 
           if [ -s "$NET_LIVENESS_PAYLOAD_FILE" ]; then
             echo "alert=true" >> "$GITHUB_OUTPUT"
-            {
-              echo "payload<<PAYLOAD_EOF"
-              cat "$NET_LIVENESS_PAYLOAD_FILE"
-              echo "PAYLOAD_EOF"
-            } >> "$GITHUB_OUTPUT"
+            write_multiline_output "payload" < "$NET_LIVENESS_PAYLOAD_FILE"
           else
             echo "alert=false" >> "$GITHUB_OUTPUT"
           fi
 
-          {
-            echo "reason<<REASON_EOF"
-            echo "$OUTPUT"
-            echo "REASON_EOF"
-          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$OUTPUT" | write_multiline_output "reason"
 
       - name: Stop alert capture webhook
         if: always()
@@ -164,7 +167,7 @@ jobs:
             --repo "${REPO}" \
             --search "[net-liveness-stall] in:title is:open" \
             --json number \
-            --jq '.[0].number // empty' 2>/dev/null || true)"
+            --jq '.[0].number // empty')"
           echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Open or update net-liveness alert issue
@@ -235,7 +238,7 @@ jobs:
           exit 1
 
       - name: Auto-close net-liveness alert if passing
-        if: steps.probe.outputs.result == 'pass' && steps.probe.outputs.alert == 'false'
+        if: steps.probe.outputs.result == 'pass' && steps.probe.outputs.alert == 'false' && steps.probe.outputs.state == 'healthy'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}

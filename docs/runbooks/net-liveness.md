@@ -63,8 +63,8 @@ so the probe works in block-space. Base produces roughly one block every 2s →
 | Env var | Default | Notes |
 |---------|---------|-------|
 | `JINN_NET_LIVENESS_WEBHOOK_URL` | unset | Generic incoming-webhook URL (Slack-compatible). Unset → NO-OP: the probe still classifies and logs, it just never posts. |
-| `JINN_NET_LIVENESS_THRESHOLD_MINUTES` | `30` | Staleness threshold, in minutes. Converted to block-space at 30 blocks/min. |
-| `JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS` | `4000` | Delay between the two chain-head reads. Must exceed Base's ~2s blocktime so a live chain advances at least one block between samples (a same-block pair classifies as `chain-halted` and never alerts). Also exceeds viem's ~4s `getBlockNumber` cache window; the reads additionally pass `cacheTime: 0`. |
+| `JINN_NET_LIVENESS_THRESHOLD_MINUTES` | `30` | Staleness threshold, in minutes. Must be an integer from `1` to `1440`. Converted to block-space at 30 blocks/min. |
+| `JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS` | `4000` | Delay between the two chain-head reads. Must be an integer from `1000` to `120000`. Must exceed Base's ~2s blocktime so a live chain advances at least one block between samples (a same-block pair classifies as `chain-halted` and never alerts). Also exceeds viem's ~4s `getBlockNumber` cache window; the reads additionally pass `cacheTime: 0`. |
 | `BASE_SEPOLIA_RPC_URL` / `JINN_RPC_URL` | inherited from daemon config | The RPC chain used for the chain-head read. Same #592 fallback chain as the daemon. |
 | `JINN_DISCOVERY_URL` | inherited from daemon config | The indexer base URL. If `discovery.mode` is `onchain` and no URL is set, the probe logs "no indexer configured" and exits 0 — there is nothing to cross-reference. |
 
@@ -101,7 +101,10 @@ minutes and can be run manually with `workflow_dispatch`. It executes
 posts a `stale` payload, the workflow opens or updates a
 `[net-liveness-stall]` GitHub issue labelled `automated:net-liveness`, then
 fails the run so the scheduled check stays red until recovery. A later healthy
-run auto-closes the alert issue.
+run auto-closes the alert issue. Confound states (`indexer-down`,
+`indexer-lagging`, and `chain-halted`) do not auto-close an existing stale alert;
+the workflow only closes when the probe emits `state=healthy` to the GitHub
+Actions output file.
 
 The workflow uses `secrets.BASE_SEPOLIA_RPC_URL` when present and falls back
 through the normal client config path otherwise. It points `JINN_DISCOVERY_URL`

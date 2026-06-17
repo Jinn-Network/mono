@@ -14,6 +14,7 @@ import {
   classifyNetLiveness,
   fetchIndexerHeadBlock,
   fetchLatestActivityBlock,
+  parseNetLivenessIntegerEnv,
   postNetLivenessWebhook,
   runNetLivenessProbe,
   type NetLivenessAlertPayload,
@@ -307,7 +308,7 @@ describe('runNetLivenessProbe', () => {
   ) {
     return baseDeps({
       fetchLatestActivityBlock: () =>
-        fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl }),
+        fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, chainId: 84532, fetchImpl }),
       fetchIndexerHeadBlock: () =>
         fetchIndexerHeadBlock({
           baseUrl: BASE_URL,
@@ -338,6 +339,37 @@ describe('runNetLivenessProbe', () => {
 
     expect(r.state).toBe('indexer-down');
     expect(postWebhook).not.toHaveBeenCalled();
+  });
+
+  it('does not let another-chain activity mask staleness on the monitored chain', async () => {
+    const postWebhook = vi.fn<[NetLivenessAlertPayload], Promise<void>>().mockResolvedValue();
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/status')) {
+        return new Response(
+          JSON.stringify({ 'base-sepolia': { id: 84532, block: { number: 9_999 } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+
+      const body = JSON.parse(init?.body as string) as {
+        query: string;
+        variables?: { chainId?: number };
+      };
+      const key = body.query.includes('verdicts') ? 'verdicts' : 'attempts';
+      const items =
+        body.variables?.chainId === 84532
+          ? []
+          : [{ createdAtBlock: '9900' }]; // activity on a different chain
+      return new Response(JSON.stringify({ data: { [key]: { items } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const r = await runNetLivenessProbe(depsWithIndexerFetch(fetchImpl, postWebhook));
+
+    expect(r.state).toBe('stale');
+    expect(postWebhook).toHaveBeenCalledTimes(1);
   });
 
   it('GraphQL error envelope with healthy /status is indexer-down and does not post stale alert', async () => {
@@ -391,5 +423,68 @@ describe('runNetLivenessProbe', () => {
     await expect(runNetLivenessProbe(deps)).rejects.toThrow(
       /net-liveness webhook delivery failed: HTTP 429/,
     );
+  });
+});
+
+describe('parseNetLivenessIntegerEnv', () => {
+  const threshold = {
+    name: 'JINN_NET_LIVENESS_THRESHOLD_MINUTES',
+    defaultValue: 30,
+    min: 1,
+    max: 1440,
+  } as const;
+  const headDelay = {
+    name: 'JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS',
+    defaultValue: 4_000,
+    min: 1_000,
+    max: 120_000,
+  } as const;
+
+  it('returns the configured default when the env var is unset', () => {
+    expect(parseNetLivenessIntegerEnv(undefined, threshold)).toBe(30);
+    expect(parseNetLivenessIntegerEnv(undefined, headDelay)).toBe(4_000);
+  });
+
+  it.each([
+    ['abc'],
+    ['NaN'],
+    ['12ms'],
+    ['1.5'],
+    [''],
+    ['   '],
+  ])('rejects non-integer threshold values: %j', (raw) => {
+    expect(() => parseNetLivenessIntegerEnv(raw, threshold)).toThrow(
+      /JINN_NET_LIVENESS_THRESHOLD_MINUTES must be an integer between 1 and 1440/,
+    );
+  });
+
+  it.each([
+    ['0'],
+    ['-1'],
+    ['1441'],
+  ])('rejects out-of-range threshold values: %j', (raw) => {
+    expect(() => parseNetLivenessIntegerEnv(raw, threshold)).toThrow(
+      /JINN_NET_LIVENESS_THRESHOLD_MINUTES must be an integer between 1 and 1440/,
+    );
+  });
+
+  it.each([
+    ['999'],
+    ['0'],
+    ['-1000'],
+    ['120001'],
+    ['abc'],
+  ])('rejects invalid head-sample delays: %j', (raw) => {
+    expect(() => parseNetLivenessIntegerEnv(raw, headDelay)).toThrow(
+      /JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS must be an integer between 1000 and 120000/,
+    );
+  });
+
+  it('does not echo invalid raw env values into setup errors', () => {
+    const raw = 'secret-token-123';
+    expect(() => parseNetLivenessIntegerEnv(raw, threshold)).toThrow(
+      /JINN_NET_LIVENESS_THRESHOLD_MINUTES must be an integer between 1 and 1440/,
+    );
+    expect(() => parseNetLivenessIntegerEnv(raw, threshold)).not.toThrow(raw);
   });
 });

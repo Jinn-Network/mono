@@ -168,6 +168,30 @@ export interface NetLivenessProbeDeps {
 /** Default delay between the two chain-head samples (ms). See headSampleDelayMs. */
 export const DEFAULT_HEAD_SAMPLE_DELAY_MS = 4_000;
 
+export interface NetLivenessIntegerEnvSpec {
+  name: string;
+  defaultValue: number;
+  min: number;
+  max: number;
+}
+
+export function parseNetLivenessIntegerEnv(
+  raw: string | undefined,
+  spec: NetLivenessIntegerEnvSpec,
+): number {
+  if (raw === undefined) return spec.defaultValue;
+
+  const trimmed = raw.trim();
+  const fail = () => {
+    throw new Error(`${spec.name} must be an integer between ${spec.min} and ${spec.max}`);
+  };
+
+  if (!/^[0-9]+$/.test(trimmed)) fail();
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value < spec.min || value > spec.max) fail();
+  return value;
+}
+
 /**
  * Run one probe: read chain head twice (to detect advancement within the run),
  * read the indexer head and latest activity (tolerating throws as
@@ -284,14 +308,16 @@ export async function fetchIndexerHeadBlock(args: {
 
 /**
  * Read the newest indexed activity block — the max `createdAtBlock` across the
- * latest verdict and the latest attempt (NOT task: a posted-but-unclaimed task is
- * itself the stall condition). Two `limit:1` descending GraphQL queries. Returns
- * null only when both legs are clean empty result sets. Throws on transport,
+ * latest verdict and the latest attempt on the monitored chain (NOT task: a
+ * posted-but-unclaimed task is itself the stall condition). Two `limit:1`
+ * descending GraphQL queries. Returns null only when both legs are clean empty
+ * result sets. Throws on transport,
  * HTTP, GraphQL, or malformed-response failures so the orchestrator can classify
  * those as indexer-down instead of a false net-stall page.
  */
 export async function fetchLatestActivityBlock(args: {
   gqlUrl: string;
+  chainId: number;
   fetchImpl?: typeof fetch;
 }): Promise<bigint | null> {
   const [verdict, attempt] = await Promise.all([
@@ -303,12 +329,12 @@ export async function fetchLatestActivityBlock(args: {
 }
 
 async function latestBlockFor(
-  args: { gqlUrl: string; fetchImpl?: typeof fetch },
+  args: { gqlUrl: string; chainId: number; fetchImpl?: typeof fetch },
   field: 'verdicts' | 'attempts',
 ): Promise<bigint | null> {
   const fetchImpl = args.fetchImpl ?? globalThis.fetch;
-  const query = `query LatestActivity {
-  ${field}(orderBy: "createdAtBlock", orderDirection: "desc", limit: 1) {
+  const query = `query LatestActivity($chainId: Int!) {
+  ${field}(where: { chainId: $chainId }, orderBy: "createdAtBlock", orderDirection: "desc", limit: 1) {
     items { createdAtBlock }
   }
 }`;
@@ -316,7 +342,7 @@ async function latestBlockFor(
     const res = await fetchImpl(args.gqlUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, variables: { chainId: args.chainId } }),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error();
