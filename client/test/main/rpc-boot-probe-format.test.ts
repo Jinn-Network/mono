@@ -32,9 +32,10 @@ function startBlockNumberServer(): Promise<{ url: string }> {
       let body = '';
       req.on('data', (chunk) => { body += String(chunk); });
       req.on('end', () => {
-        const parsed = JSON.parse(body) as { id?: number };
+        const parsed = JSON.parse(body) as { id?: number; method?: string };
+        const result = parsed.method === 'eth_chainId' ? '0x14a34' : '0x100';
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id ?? 1, result: '0x100' }));
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id ?? 1, result }));
       });
     });
     server.listen(0, '127.0.0.1', () => {
