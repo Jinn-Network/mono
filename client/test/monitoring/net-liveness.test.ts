@@ -12,9 +12,14 @@ import {
   BASE_BLOCKS_PER_MINUTE,
   minutesToThresholdBlocks,
   classifyNetLiveness,
+  fetchIndexerHeadBlock,
+  fetchLatestActivityBlock,
+  postNetLivenessWebhook,
   runNetLivenessProbe,
   type NetLivenessAlertPayload,
 } from '../../src/monitoring/net-liveness.js';
+
+const BASE_URL = 'http://localhost:42069';
 
 describe('minutesToThresholdBlocks', () => {
   it('converts minutes to Base block-space at 30 blocks/min', () => {
@@ -126,6 +131,18 @@ describe('classifyNetLiveness', () => {
       thresholdBlocks,
     });
     expect(r.state).toBe('healthy');
+  });
+
+  it('floors staleForBlocks at zero when indexed activity is ahead of the sampled RPC head', () => {
+    const r = classifyNetLiveness({
+      chainHeadBlock: 10_000n,
+      prevChainHeadBlock: 9_999n,
+      latestActivityBlock: 10_010n,
+      indexerHeadBlock: 10_000n,
+      thresholdBlocks,
+    });
+    expect(r.state).toBe('healthy');
+    expect(r.staleForBlocks).toBe(0n);
   });
 });
 
@@ -282,5 +299,97 @@ describe('runNetLivenessProbe', () => {
     });
     const r = await runNetLivenessProbe(deps);
     expect(r.state).toBe('indexer-down');
+  });
+
+  function depsWithIndexerFetch(
+    fetchImpl: typeof fetch,
+    postWebhook: ((p: NetLivenessAlertPayload) => Promise<void>) | null,
+  ) {
+    return baseDeps({
+      fetchLatestActivityBlock: () =>
+        fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl }),
+      fetchIndexerHeadBlock: () =>
+        fetchIndexerHeadBlock({
+          baseUrl: BASE_URL,
+          chainName: 'base-sepolia',
+          chainId: 84532,
+          fetchImpl,
+        }),
+      postWebhook,
+    });
+  }
+
+  it('GraphQL non-2xx with healthy /status is indexer-down and does not post stale alert', async () => {
+    const postWebhook = vi.fn<[NetLivenessAlertPayload], Promise<void>>().mockResolvedValue();
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith('/status')) {
+        return new Response(
+          JSON.stringify({ 'base-sepolia': { id: 84532, block: { number: 9_999 } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const r = await runNetLivenessProbe(depsWithIndexerFetch(fetchImpl, postWebhook));
+
+    expect(r.state).toBe('indexer-down');
+    expect(postWebhook).not.toHaveBeenCalled();
+  });
+
+  it('GraphQL error envelope with healthy /status is indexer-down and does not post stale alert', async () => {
+    const postWebhook = vi.fn<[NetLivenessAlertPayload], Promise<void>>().mockResolvedValue();
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith('/status')) {
+        return new Response(
+          JSON.stringify({ 'base-sepolia': { id: 84532, block: { number: 9_999 } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const r = await runNetLivenessProbe(depsWithIndexerFetch(fetchImpl, postWebhook));
+
+    expect(r.state).toBe('indexer-down');
+    expect(postWebhook).not.toHaveBeenCalled();
+  });
+
+  it('GraphQL transport failure with healthy /status is indexer-down and does not post stale alert', async () => {
+    const postWebhook = vi.fn<[NetLivenessAlertPayload], Promise<void>>().mockResolvedValue();
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith('/status')) {
+        return new Response(
+          JSON.stringify({ 'base-sepolia': { id: 84532, block: { number: 9_999 } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new TypeError('connection refused');
+    }) as unknown as typeof fetch;
+
+    const r = await runNetLivenessProbe(depsWithIndexerFetch(fetchImpl, postWebhook));
+
+    expect(r.state).toBe('indexer-down');
+    expect(postWebhook).not.toHaveBeenCalled();
+  });
+
+  it('webhook non-2xx response rejects instead of silently succeeding', async () => {
+    const fetchImpl = vi.fn(async () => new Response('rate limited', { status: 429 })) as unknown as typeof fetch;
+    const postWebhook = postNetLivenessWebhook('https://hooks.example/services/TOKEN', fetchImpl);
+
+    const deps = baseDeps({
+      fetchLatestActivityBlock: vi.fn<[], Promise<bigint | null>>().mockResolvedValue(1_000n),
+      postWebhook,
+    });
+
+    await expect(runNetLivenessProbe(deps)).rejects.toThrow(
+      /net-liveness webhook delivery failed: HTTP 429/,
+    );
   });
 });

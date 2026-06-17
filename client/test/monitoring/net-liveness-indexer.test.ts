@@ -1,8 +1,8 @@
 /**
  * Tests for the indexer readers used by the net-liveness probe. Both read
- * on-chain truth through the Ponder indexer and tolerate any failure by
- * returning null (never throwing) — the probe classifies a null as
- * indexer-down / indexer-lagging rather than crashing.
+ * on-chain truth through the Ponder indexer. `/status` failures return null so
+ * the probe classifies them as indexer-down; GraphQL activity read failures
+ * throw so they cannot be confused with clean empty result sets.
  *
  * Request shapes are mocked the same way as test/discovery/http.test.ts: a
  * vi.fn fetchImpl returning Response stubs.
@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   fetchIndexerHeadBlock,
   fetchLatestActivityBlock,
+  postNetLivenessWebhook,
 } from '../../src/monitoring/net-liveness.js';
 
 const BASE_URL = 'http://localhost:42069';
@@ -24,7 +25,12 @@ describe('fetchIndexerHeadBlock', () => {
       ),
     ) as unknown as typeof fetch;
 
-    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    const head = await fetchIndexerHeadBlock({
+      baseUrl: BASE_URL,
+      chainName: 'base-sepolia',
+      chainId: 84532,
+      fetchImpl,
+    });
     expect(head).toBe(12345n);
     // /status is served at the host root
     expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
@@ -32,9 +38,35 @@ describe('fetchIndexerHeadBlock', () => {
     );
   });
 
+  it('selects the expected chain when /status includes multiple chains', async () => {
+    const fetchImpl = vi.fn(async (_url: string) =>
+      new Response(
+        JSON.stringify({
+          base: { id: 8453, block: { number: 999, timestamp: 1 } },
+          'base-sepolia': { id: 84532, block: { number: 12345, timestamp: 1 } },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const head = await fetchIndexerHeadBlock({
+      baseUrl: BASE_URL,
+      chainName: 'base-sepolia',
+      chainId: 84532,
+      fetchImpl,
+    });
+
+    expect(head).toBe(12345n);
+  });
+
   it('returns null when /status responds 503', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 503 })) as unknown as typeof fetch;
-    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    const head = await fetchIndexerHeadBlock({
+      baseUrl: BASE_URL,
+      chainName: 'base-sepolia',
+      chainId: 84532,
+      fetchImpl,
+    });
     expect(head).toBeNull();
   });
 
@@ -45,7 +77,12 @@ describe('fetchIndexerHeadBlock', () => {
         headers: { 'content-type': 'application/json' },
       }),
     ) as unknown as typeof fetch;
-    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    const head = await fetchIndexerHeadBlock({
+      baseUrl: BASE_URL,
+      chainName: 'base-sepolia',
+      chainId: 84532,
+      fetchImpl,
+    });
     expect(head).toBeNull();
   });
 
@@ -53,7 +90,12 @@ describe('fetchIndexerHeadBlock', () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('connection refused');
     }) as unknown as typeof fetch;
-    const head = await fetchIndexerHeadBlock({ baseUrl: BASE_URL, fetchImpl });
+    const head = await fetchIndexerHeadBlock({
+      baseUrl: BASE_URL,
+      chainName: 'base-sepolia',
+      chainId: 84532,
+      fetchImpl,
+    });
     expect(head).toBeNull();
   });
 });
@@ -98,22 +140,76 @@ describe('fetchLatestActivityBlock', () => {
     expect(block).toBe(4_242n);
   });
 
-  it('returns null when the GraphQL response is an error envelope (no throw)', async () => {
+  it('throws when GraphQL responds non-2xx', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl }),
+    ).rejects.toThrow(/GraphQL latest activity read failed/);
+  });
+
+  it('throws when the GraphQL response is an error envelope', async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),
     ) as unknown as typeof fetch;
-    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
-    expect(block).toBeNull();
+    await expect(
+      fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl }),
+    ).rejects.toThrow(/GraphQL latest activity read failed/);
   });
 
-  it('returns null when the fetch throws', async () => {
+  it('throws when GraphQL returns malformed JSON', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response('{not json', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl }),
+    ).rejects.toThrow(/GraphQL latest activity read failed/);
+  });
+
+  it('throws when the fetch throws', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('connection refused');
     }) as unknown as typeof fetch;
-    const block = await fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl });
-    expect(block).toBeNull();
+    await expect(
+      fetchLatestActivityBlock({ gqlUrl: `${BASE_URL}/graphql`, fetchImpl }),
+    ).rejects.toThrow(/GraphQL latest activity read failed/);
+  });
+});
+
+describe('postNetLivenessWebhook', () => {
+  const payload = {
+    text: 'stale',
+    state: 'stale' as const,
+    staleForBlocks: '9000',
+    staleForMinutes: 300,
+    chainHeadBlock: '10000',
+    latestActivityBlock: '1000',
+    runAt: '2026-06-14T00:00:00.000Z',
+  };
+
+  it('throws a sanitized delivery error when the webhook responds non-2xx', async () => {
+    const secretUrl = 'https://hooks.example/services/TOKEN/SECRET';
+    const fetchImpl = vi.fn(async () => new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
+
+    const post = postNetLivenessWebhook(secretUrl, fetchImpl);
+
+    await expect(post?.(payload)).rejects.toThrow(/webhook delivery failed: HTTP 403/);
+    await expect(post?.(payload)).rejects.not.toThrow(secretUrl);
+  });
+
+  it('throws a sanitized setup error for invalid webhook URLs', () => {
+    expect(() => postNetLivenessWebhook('not a url')).toThrow(/invalid webhook URL/);
   });
 });

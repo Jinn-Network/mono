@@ -37,7 +37,7 @@ export interface NetLivenessInputs {
   chainHeadBlock: bigint;
   /** Chain head from the first RPC read, or null if only one read was taken. */
   prevChainHeadBlock: bigint | null;
-  /** Block of the newest indexed attempt OR verdict, or null if none / unreadable. */
+  /** Block of the newest indexed attempt OR verdict, or null if no rows exist. */
   latestActivityBlock: bigint | null;
   /** The indexer's own indexed head, or null if the indexer is unreachable. */
   indexerHeadBlock: bigint | null;
@@ -70,7 +70,8 @@ export function classifyNetLiveness(inputs: NetLivenessInputs): NetLivenessResul
   const { chainHeadBlock, prevChainHeadBlock, latestActivityBlock, indexerHeadBlock, thresholdBlocks } =
     inputs;
   const threshold = BigInt(thresholdBlocks);
-  const staleForBlocks = chainHeadBlock - (latestActivityBlock ?? 0n);
+  const rawStaleForBlocks = chainHeadBlock - (latestActivityBlock ?? 0n);
+  const staleForBlocks = rawStaleForBlocks < 0n ? 0n : rawStaleForBlocks;
 
   // 1. Indexer unreachable — we have no indexed-activity truth to compare.
   if (indexerHeadBlock === null) {
@@ -142,7 +143,7 @@ export interface NetLivenessAlertPayload {
 export interface NetLivenessProbeDeps {
   /** Read the current chain head via RPC. Called twice per run. */
   fetchChainHead: () => Promise<bigint>;
-  /** Newest indexed attempt/verdict block, or null if none / unreadable. */
+  /** Newest indexed attempt/verdict block, or null if no rows exist. Throws on read failure. */
   fetchLatestActivityBlock: () => Promise<bigint | null>;
   /** The indexer's own indexed head, or null if unreachable. */
   fetchIndexerHeadBlock: () => Promise<bigint | null>;
@@ -172,7 +173,8 @@ export const DEFAULT_HEAD_SAMPLE_DELAY_MS = 4_000;
  * read the indexer head and latest activity (tolerating throws as
  * indexer-down), classify, and POST an alert only when the state is `stale` and
  * a webhook is configured. Never throws on a read failure; returns the
- * classification for the caller to log.
+ * classification for the caller to log. Webhook delivery failures still throw
+ * so cron can flag the alert path itself as broken.
  */
 export async function runNetLivenessProbe(
   deps: NetLivenessProbeDeps,
@@ -243,19 +245,22 @@ async function safeRead(
 
 /**
  * Per-request timeout for every indexer fetch. Mirrors http.ts: a never-settling
- * fetch (half-open socket mid-redeploy) is bounded so a hang becomes a null read,
- * not a wedged probe.
+ * fetch (half-open socket mid-redeploy) is bounded so a hang becomes a bounded
+ * failure, not a wedged probe.
  */
 const FETCH_TIMEOUT_MS = 15_000;
 
 /**
  * Read the indexer's own indexed head via Ponder's host-root `/status` endpoint.
- * `/status` returns `{ <chainName>: { id, block: { number, timestamp } } }`; we
- * take the first chain entry's block number. Returns null on any failure or
- * shape mismatch — the probe classifies null as indexer-down.
+ * `/status` returns `{ <chainName>: { id, block: { number, timestamp } } }`.
+ * Select the monitored chain by explicit name, falling back to chain ID when
+ * the status key does not match. Returns null on failure or shape mismatch —
+ * the probe classifies null as indexer-down.
  */
 export async function fetchIndexerHeadBlock(args: {
   baseUrl: string;
+  chainName: string;
+  chainId: number;
   fetchImpl?: typeof fetch;
 }): Promise<bigint | null> {
   const fetchImpl = args.fetchImpl ?? globalThis.fetch;
@@ -264,12 +269,14 @@ export async function fetchIndexerHeadBlock(args: {
   try {
     const res = await fetchImpl(statusUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) return null;
-    const body = (await res.json()) as Record<string, { block?: { number?: number } } | undefined>;
-    for (const chain of Object.values(body)) {
-      const n = chain?.block?.number;
-      if (typeof n === 'number' && Number.isFinite(n)) return BigInt(Math.trunc(n));
-    }
-    return null;
+    const body = (await res.json()) as Record<
+      string,
+      { id?: number | string; block?: { number?: number | string } } | undefined
+    >;
+    const chain =
+      body[args.chainName] ??
+      Object.values(body).find((entry) => Number(entry?.id) === args.chainId);
+    return parseBlockNumber(chain?.block?.number);
   } catch {
     return null;
   }
@@ -279,7 +286,9 @@ export async function fetchIndexerHeadBlock(args: {
  * Read the newest indexed activity block — the max `createdAtBlock` across the
  * latest verdict and the latest attempt (NOT task: a posted-but-unclaimed task is
  * itself the stall condition). Two `limit:1` descending GraphQL queries. Returns
- * null if both legs are empty, or on any failure / error-envelope — never throws.
+ * null only when both legs are clean empty result sets. Throws on transport,
+ * HTTP, GraphQL, or malformed-response failures so the orchestrator can classify
+ * those as indexer-down instead of a false net-stall page.
  */
 export async function fetchLatestActivityBlock(args: {
   gqlUrl: string;
@@ -310,18 +319,21 @@ async function latestBlockFor(
       body: JSON.stringify({ query }),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error();
     const json = (await res.json()) as {
       data?: Record<string, { items?: { createdAtBlock?: string | number }[] }>;
       errors?: unknown[];
     };
-    if (json.errors?.length || !json.data) return null;
-    const items = json.data[field]?.items ?? [];
+    if (json.errors?.length) throw new Error();
+    if (!json.data?.[field] || !Array.isArray(json.data[field].items)) {
+      throw new Error();
+    }
+    const items = json.data[field].items;
     const raw = items[0]?.createdAtBlock;
     if (raw === undefined || raw === null) return null;
     return BigInt(raw);
   } catch {
-    return null;
+    throw new Error(`GraphQL latest activity read failed for ${field}`);
   }
 }
 
@@ -329,6 +341,12 @@ function maxNullable(a: bigint | null, b: bigint | null): bigint | null {
   if (a === null) return b;
   if (b === null) return a;
   return a > b ? a : b;
+}
+
+function parseBlockNumber(value: unknown): bigint | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+  if (typeof value === 'string' && /^[0-9]+$/.test(value)) return BigInt(value);
+  return null;
 }
 
 // ── Webhook POST helper ──────────────────────────────────────────────────────
@@ -343,12 +361,29 @@ export function postNetLivenessWebhook(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): ((payload: NetLivenessAlertPayload) => Promise<void>) | null {
   if (!url) return null;
+  let webhookUrl: URL;
+  try {
+    webhookUrl = new URL(url);
+  } catch {
+    throw new Error('invalid webhook URL');
+  }
+  if (webhookUrl.protocol !== 'https:' && webhookUrl.protocol !== 'http:') {
+    throw new Error('invalid webhook URL');
+  }
   return async (payload: NetLivenessAlertPayload) => {
-    await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(webhookUrl.toString(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      throw new Error('net-liveness webhook delivery failed: transport error');
+    }
+    if (!response.ok) {
+      throw new Error(`net-liveness webhook delivery failed: HTTP ${response.status}`);
+    }
   };
 }

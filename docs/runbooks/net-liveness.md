@@ -95,31 +95,18 @@ stall is caught within one window.
 
 ### GitHub Actions (scheduled workflow)
 
-```yaml
-name: net-liveness
-on:
-  schedule:
-    - cron: '*/15 * * * *'   # every 15 minutes; this interval is the rate-limit
-jobs:
-  probe:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn net-liveness
-        env:
-          JINN_NET_LIVENESS_WEBHOOK_URL: ${{ secrets.JINN_NET_LIVENESS_WEBHOOK_URL }}
-          JINN_NET_LIVENESS_THRESHOLD_MINUTES: '30'
-          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
-          JINN_DISCOVERY_URL: ${{ secrets.JINN_DISCOVERY_URL }}
-```
+The checked-in workflow at `.github/workflows/net-liveness.yml` runs every 15
+minutes and can be run manually with `workflow_dispatch`. It executes
+`yarn --cwd client net-liveness` with a local capture webhook; when the probe
+posts a `stale` payload, the workflow opens or updates a
+`[net-liveness-stall]` GitHub issue labelled `automated:net-liveness`, then
+fails the run so the scheduled check stays red until recovery. A later healthy
+run auto-closes the alert issue.
+
+The workflow uses `secrets.BASE_SEPOLIA_RPC_URL` when present and falls back
+through the normal client config path otherwise. It points `JINN_DISCOVERY_URL`
+at the production indexer (`https://jinn-indexer-production.up.railway.app`) so
+the monitor remains out-of-band from any operator daemon.
 
 ### Railway cron
 
@@ -134,6 +121,7 @@ start command:  cd client && yarn net-liveness
 Set `JINN_NET_LIVENESS_WEBHOOK_URL`, `JINN_NET_LIVENESS_THRESHOLD_MINUTES`,
 `BASE_SEPOLIA_RPC_URL`, and `JINN_DISCOVERY_URL` as service variables.
 
-The probe always exits 0 on a completed run — the alert is a side-effect, not a
-failure — so a non-zero exit means the probe itself failed to run (bad config or
-unreachable RPC chain), which a cron failure policy should surface separately.
+The probe exits 0 for completed non-stale runs and for stale runs whose webhook
+delivery succeeds. A non-zero exit means the probe itself failed to run (bad
+config or unreachable RPC chain) or the alert webhook could not be delivered,
+which a cron failure policy should surface separately.

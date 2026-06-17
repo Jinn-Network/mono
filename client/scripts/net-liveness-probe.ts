@@ -10,9 +10,9 @@
  * daemons cannot be trusted to self-report.
  *
  * Stateless and cron-driven, NOT in-daemon. The cron interval is the de-dup /
- * rate-limit; there is no persisted alert marker. Always exits 0 on a completed
- * run — the alert is a side-effect, not a failure mode. See
- * docs/runbooks/net-liveness.md.
+ * rate-limit; there is no persisted alert marker. Exits non-zero when setup,
+ * RPC reads, or webhook delivery fail so cron can surface a broken probe or
+ * alert path. See docs/runbooks/net-liveness.md.
  *
  * Usage:
  *   yarn net-liveness
@@ -44,9 +44,15 @@ import {
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
+const INDEXER_CHAINS = {
+  base: { chainName: 'base', chainId: 8453 },
+  'base-sepolia': { chainName: 'base-sepolia', chainId: 84532 },
+} as const;
+
 async function main(): Promise<void> {
   const config = loadConfig(getConfigPathFromArgs());
   const network = config.network === 'testnet' ? 'base-sepolia' : 'base';
+  const indexerChain = INDEXER_CHAINS[network];
 
   // Indexer base URL: explicit discovery.url, else the testnet default. When the
   // operator has pinned the RPC-only floor (discovery.mode 'onchain') and given
@@ -73,7 +79,7 @@ async function main(): Promise<void> {
     // samples reflect real chain state, not a memoized first read.
     fetchChainHead: () => client.getBlockNumber({ cacheTime: 0 }),
     fetchLatestActivityBlock: () => fetchLatestActivityBlock({ gqlUrl }),
-    fetchIndexerHeadBlock: () => fetchIndexerHeadBlock({ baseUrl: indexerBaseUrl }),
+    fetchIndexerHeadBlock: () => fetchIndexerHeadBlock({ baseUrl: indexerBaseUrl, ...indexerChain }),
     postWebhook: postNetLivenessWebhook(webhookUrl),
     thresholdMinutes,
     sleep,

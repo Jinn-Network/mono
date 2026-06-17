@@ -1,0 +1,259 @@
+# Scheduled monitor for Jinn net-liveness (#1044).
+#
+# Runs the operator-independent `yarn net-liveness` probe from outside any daemon
+# and turns the probe's stale webhook payload into a GitHub issue alert. This
+# mirrors the indexer monitor's issue-as-alert pattern while keeping the script's
+# generic webhook interface as the alert seam.
+
+name: net liveness monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  net-liveness:
+    name: Net liveness probe
+    runs-on: ubuntu-latest
+    env:
+      NET_LIVENESS_PAYLOAD_FILE: ${{ runner.temp }}/net-liveness-alert.json
+      NET_LIVENESS_WEBHOOK_READY_FILE: ${{ runner.temp }}/net-liveness-webhook-ready.json
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install client dependencies
+        run: yarn --cwd client install --immutable
+
+      - name: Start alert capture webhook
+        id: webhook
+        shell: bash
+        run: |
+          rm -f "$NET_LIVENESS_PAYLOAD_FILE" "$NET_LIVENESS_WEBHOOK_READY_FILE"
+          node <<'NODE' &
+          const fs = require('node:fs');
+          const http = require('node:http');
+
+          const payloadFile = process.env.NET_LIVENESS_PAYLOAD_FILE;
+          const readyFile = process.env.NET_LIVENESS_WEBHOOK_READY_FILE;
+
+          const server = http.createServer((req, res) => {
+            if (req.method !== 'POST') {
+              res.writeHead(405).end();
+              return;
+            }
+
+            let body = '';
+            req.setEncoding('utf8');
+            req.on('data', (chunk) => {
+              body += chunk;
+              if (body.length > 1_000_000) req.destroy();
+            });
+            req.on('end', () => {
+              try {
+                JSON.parse(body);
+                fs.writeFileSync(payloadFile, body);
+                res.writeHead(204).end();
+              } catch {
+                res.writeHead(400).end('invalid json');
+              }
+            });
+          });
+
+          server.listen(0, '127.0.0.1', () => {
+            const address = server.address();
+            fs.writeFileSync(readyFile, JSON.stringify({ port: address.port, pid: process.pid }));
+          });
+
+          const shutdown = () => server.close(() => process.exit(0));
+          process.on('SIGINT', shutdown);
+          process.on('SIGTERM', shutdown);
+          NODE
+
+          for _ in {1..50}; do
+            if [ -s "$NET_LIVENESS_WEBHOOK_READY_FILE" ]; then
+              break
+            fi
+            sleep 0.1
+          done
+
+          if [ ! -s "$NET_LIVENESS_WEBHOOK_READY_FILE" ]; then
+            echo "::error::alert capture webhook did not start"
+            exit 1
+          fi
+
+          PORT="$(node -e "const fs = require('node:fs'); console.log(JSON.parse(fs.readFileSync(process.env.NET_LIVENESS_WEBHOOK_READY_FILE, 'utf8')).port)")"
+          PID="$(node -e "const fs = require('node:fs'); console.log(JSON.parse(fs.readFileSync(process.env.NET_LIVENESS_WEBHOOK_READY_FILE, 'utf8')).pid)")"
+          echo "url=http://127.0.0.1:${PORT}/net-liveness" >> "$GITHUB_OUTPUT"
+          echo "pid=${PID}" >> "$GITHUB_OUTPUT"
+
+      - name: Run net-liveness probe
+        id: probe
+        shell: bash
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          JINN_DISCOVERY_URL: https://jinn-indexer-production.up.railway.app
+          JINN_NET_LIVENESS_HEAD_SAMPLE_DELAY_MS: '4000'
+          JINN_NET_LIVENESS_THRESHOLD_MINUTES: '30'
+          JINN_NET_LIVENESS_WEBHOOK_URL: ${{ steps.webhook.outputs.url }}
+        run: |
+          set +e
+          OUTPUT="$(yarn --cwd client net-liveness 2>&1)"
+          CODE=$?
+          set -e
+
+          echo "$OUTPUT"
+          if [ "$CODE" -eq 0 ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -s "$NET_LIVENESS_PAYLOAD_FILE" ]; then
+            echo "alert=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "payload<<PAYLOAD_EOF"
+              cat "$NET_LIVENESS_PAYLOAD_FILE"
+              echo "PAYLOAD_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "alert=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "reason<<REASON_EOF"
+            echo "$OUTPUT"
+            echo "REASON_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Stop alert capture webhook
+        if: always()
+        shell: bash
+        run: |
+          kill "${{ steps.webhook.outputs.pid }}" 2>/dev/null || true
+
+      - name: Ensure label exists
+        if: steps.probe.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "automated:net-liveness" \
+            --color "D93F0B" \
+            --description "Surfaced by the net liveness monitor workflow" \
+            --force \
+            --repo "${{ github.repository }}" || true
+
+      - name: Find open net-liveness alert issue
+        id: find-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          NUMBER="$(gh issue list \
+            --repo "${REPO}" \
+            --search "[net-liveness-stall] in:title is:open" \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+          echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update net-liveness alert issue
+        if: steps.probe.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REASON: ${{ steps.probe.outputs.reason }}
+          PAYLOAD: ${{ steps.probe.outputs.payload }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
+        shell: bash
+        run: |
+          TITLE="[net-liveness-stall] Base Sepolia attempt/verdict activity stale"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          BODY_FILE="$(mktemp)"
+          cat > "$BODY_FILE" <<BODY_EOF
+          ## Net-liveness probe posted a stale alert
+
+          The scheduled net-liveness monitor ran \`yarn --cwd client net-liveness\`
+          and captured a stale alert payload. The chain is advancing and the
+          indexer is caught up, but no attempt/verdict activity was indexed within
+          the configured threshold.
+
+          **Probe output:**
+
+          \`\`\`
+          ${REASON}
+          \`\`\`
+
+          **Alert payload:**
+
+          \`\`\`json
+          ${PAYLOAD}
+          \`\`\`
+
+          ### Run URL
+
+          ${RUN_URL}
+          BODY_EOF
+
+          if [ -n "$EXISTING" ]; then
+            COMMENT_FILE="$(mktemp)"
+            cat > "$COMMENT_FILE" <<COMMENT_EOF
+          Still stale as of run ${RUN_URL}.
+
+          \`\`\`
+          ${REASON}
+          \`\`\`
+          COMMENT_EOF
+            if [ "$((10#$(date -u +%M)))" -lt 15 ]; then
+              gh issue comment "$EXISTING" \
+                --repo "${REPO}" \
+                --body-file "$COMMENT_FILE"
+              echo "::warning::Commented on existing net-liveness alert issue #${EXISTING}"
+            else
+              echo "::warning::net-liveness alert issue #${EXISTING} still open; hourly comment throttle skipped this run"
+            fi
+          else
+            gh issue create \
+              --repo "${REPO}" \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --label "automated:net-liveness"
+            echo "::error::net-liveness stale alert issue opened. See ${RUN_URL}"
+          fi
+
+          exit 1
+
+      - name: Auto-close net-liveness alert if passing
+        if: steps.probe.outputs.result == 'pass' && steps.probe.outputs.alert == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EXISTING: ${{ steps.find-issue.outputs.number }}
+        shell: bash
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" \
+              --repo "${REPO}" \
+              --comment "net-liveness healthy as of run ${RUN_URL}. Closing."
+            echo "::notice::Auto-closed net-liveness alert issue #${EXISTING}."
+          else
+            echo "::notice::net-liveness healthy; no open alert issue to close."
+          fi
+
+      - name: Fail if probe could not run
+        if: steps.probe.outputs.result == 'fail' && steps.probe.outputs.alert != 'true'
+        run: |
+          echo "::error::net-liveness probe failed to run"
+          exit 1
