@@ -366,7 +366,7 @@ WORKTREE_PATH="${WORKTREES_BASE}/<issue-number>"
 BRANCH="<branch>"
 
 git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-git worktree add "$WORKTREE_PATH" "origin/${BRANCH}"
+git worktree add -B "$BRANCH" "$WORKTREE_PATH" "origin/${BRANCH}"
 ```
 
 ---
