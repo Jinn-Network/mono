@@ -126,6 +126,7 @@ describe('audit-task-run-failures CLI output safety', () => {
       const jsonText = runAudit(dbPath, ['--all', '--drilldown', '--json']);
 
       for (const output of [human, jsonText]) {
+        expect(output).toContain('<redacted-db>');
         expect(output).not.toContain('OPENROUTER_API_KEY');
         expect(output).not.toContain('sk-or-v1-raw-secret');
         expect(output).not.toContain('raw-bearer-token');
@@ -133,6 +134,7 @@ describe('audit-task-run-failures CLI output safety', () => {
         expect(output).not.toContain('\u001b');
         expect(output).not.toContain('\u0007');
         expect(output).not.toContain(dbPath);
+        expect(output).not.toContain('jinn.db');
         expect(output).not.toContain('req-raw-secret-1234567890');
         expect(output).not.toContain('task-raw-secret-id');
         expect(output).not.toContain('impl-raw-secret-name');
@@ -219,6 +221,31 @@ describe('audit-task-run-failures CLI output safety', () => {
     });
   });
 
+  it('redacts file URI filesystem paths from safe drilldown snippets', () => {
+    withTempDb((dbPath) => {
+      const fileUri = 'file:///root/.jinn-client/config.json';
+      const producerRequestId = 'producer-request';
+      createDbWithFailureReasons(dbPath, [
+        `failed reading ${fileUri} for request_id=${producerRequestId}`,
+      ]);
+
+      const human = runAudit(dbPath, ['--all', '--drilldown']);
+      const bucket = runAudit(dbPath, ['--all', '--bucket', 'unknown']);
+      const jsonText = runAudit(dbPath, ['--all', '--json', '--drilldown']);
+
+      for (const output of [human, bucket, jsonText]) {
+        expect(output).not.toContain(fileUri);
+        expect(output).not.toContain('file:///root/.jinn-client/config.json');
+        expect(output).not.toContain('/root/.jinn-client');
+        expect(output).not.toContain('config.json');
+        expect(output).not.toContain(producerRequestId);
+        expect(output).not.toContain(`request_id=${producerRequestId}`);
+        expect(output).toContain('<redacted-path>');
+        expect(output).toContain('<redacted-id>');
+      }
+    });
+  });
+
   it('keeps embedded failure_reason paths available behind --unsafe-raw', () => {
     withTempDb((dbPath) => {
       const requestPathId = '01J3Q9RM0T0A7P9B6C5D4E3F2G';
@@ -255,6 +282,21 @@ describe('audit-task-run-failures CLI output safety', () => {
       expect(output).toContain(`request_id=${producerRequestId}`);
       expect(output).toContain(`requestId: ${camelRequestId}`);
       expect(output).toContain(`request id ${spacedRequestId}`);
+    });
+  });
+
+  it('keeps file URI filesystem paths raw behind --unsafe-raw', () => {
+    withTempDb((dbPath) => {
+      const fileUri = 'file:///root/.jinn-client/config.json';
+      const producerRequestId = 'producer-request';
+      createDbWithFailureReasons(dbPath, [
+        `failed reading ${fileUri} for request_id=${producerRequestId}`,
+      ]);
+
+      const output = runAudit(dbPath, ['--all', '--drilldown', '--unsafe-raw']);
+
+      expect(output).toContain(fileUri);
+      expect(output).toContain(`request_id=${producerRequestId}`);
     });
   });
 

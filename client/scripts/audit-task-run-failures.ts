@@ -39,7 +39,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from '../src/config.js';
 import { classify, ALL_BUCKETS, type Bucket } from './classify-failure.js';
@@ -172,6 +172,13 @@ function redactUrl(value: string): string {
   }
 }
 
+function redactFileUri(value: string): string {
+  return value.replace(/\bfile:\/\/[^\s<>"'`)\]}]+/gi, (uri) => {
+    const trailing = uri.match(/[.,;:]+$/)?.[0] ?? '';
+    return `<redacted-path>${trailing}`;
+  });
+}
+
 function isPathWhitespace(value: string): boolean {
   return /\s/.test(value);
 }
@@ -258,6 +265,7 @@ function redactSensitiveText(value: string): string {
     .replace(/\bsk-[A-Za-z0-9_-]{16,}/gi, '<redacted-openai-key>')
     .replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/g, '<redacted-github-token>')
     .replace(/\bgithub_pat_[A-Za-z0-9_]+/g, '<redacted-github-token>')
+    .replace(/\bfile:\/\/[^\s<>"'`)\]}]+/gi, (uri) => redactFileUri(uri))
     .replace(/\bhttps?:\/\/[^\s<>"')]+/gi, (url) => redactUrl(url));
   return redactLabelledRequestIds(redactPathSegments(redactedSecrets))
     .replace(/\b0x[a-fA-F0-9]{40}\b/g, '<redacted-address>')
@@ -294,13 +302,7 @@ function displayText(value: string | null, unsafeRaw: boolean): string | null {
 function displayDbPath(dbPath: string, unsafeRaw: boolean): string {
   const clean = stripTerminalControls(dbPath);
   if (unsafeRaw) return clean;
-  const home = process.env.HOME;
-  if (home && (clean === home || clean.startsWith(`${home}${sep}`))) {
-    const rel = relative(home, clean);
-    return rel ? `~${sep}${rel}` : '~';
-  }
-  if (!isAbsolute(clean)) return clean;
-  return `<redacted-dir>${sep}${basename(clean)}`;
+  return '<redacted-db>';
 }
 
 function getTaskRunsColumns(db: Database.Database): Set<string> {
