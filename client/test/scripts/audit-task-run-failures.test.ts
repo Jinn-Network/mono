@@ -73,6 +73,50 @@ function createFullSchemaDb(dbPath: string): void {
   }
 }
 
+function createDbWithFailureReasons(dbPath: string, failureReasons: string[]): void {
+  const db = new Database(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE task_runs (
+        request_id TEXT NOT NULL,
+        task_id TEXT,
+        attempt_index INTEGER,
+        solver_type TEXT,
+        task_role TEXT,
+        impl_name TEXT,
+        solver_net_manifest_cid TEXT,
+        state_updated_at INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        failure_reason TEXT
+      );
+    `);
+    const insert = db.prepare(
+      `INSERT INTO task_runs
+        (request_id, task_id, attempt_index, solver_type, task_role, impl_name,
+         solver_net_manifest_cid, state_updated_at, state, failure_reason)
+       VALUES
+        (@request_id, @task_id, @attempt_index, @solver_type, @task_role, @impl_name,
+         @solver_net_manifest_cid, @state_updated_at, @state, @failure_reason)`,
+    );
+    for (const [index, failure_reason] of failureReasons.entries()) {
+      insert.run({
+        request_id: `req-row-${index}`,
+        task_id: `task-row-${index}`,
+        attempt_index: index,
+        solver_type: 'prediction.v0',
+        task_role: 'restoration',
+        impl_name: `impl-row-${index}`,
+        solver_net_manifest_cid: `bafy-row-${index}`,
+        state_updated_at: Date.UTC(2026, 5, 14) + index,
+        state: 'FAILED',
+        failure_reason,
+      });
+    }
+  } finally {
+    db.close();
+  }
+}
+
 describe('audit-task-run-failures CLI output safety', () => {
   it('redacts raw operator data and terminal controls from default human and JSON drilldown output', () => {
     withTempDb((dbPath) => {
@@ -111,6 +155,53 @@ describe('audit-task-run-failures CLI output safety', () => {
       expect(output).toContain('task-raw-secret-id');
       expect(output).toContain('impl-raw-secret-name');
       expect(output).toContain('bafyRawSecretManifestCid1234567890');
+    });
+  });
+
+  it('redacts local paths and embedded identifiers from safe reason snippets', () => {
+    withTempDb((dbPath) => {
+      const requestPathId = '01J3Q9RM0T0A7P9B6C5D4E3F2G';
+      const walletAddress = '0x1234567890abcdef1234567890abcdef12345678';
+      const privateKeyLikeHex = 'a'.repeat(64);
+      const staleHookPath = "/Users/alice/life's-work/jinn-mono/client/hooks/session-start";
+      createDbWithFailureReasons(dbPath, [
+        `Required artifact missing: /Users/alice/Library/Application Support/jinn/engine-work/requests/${requestPathId}/.orient/summary.json sk-proj-local-secret ghp_localSecretToken1234567890 ${walletAddress} ${privateKeyLikeHex}`,
+        `Failed to load stale hook path ${staleHookPath}`,
+      ]);
+
+      const human = runAudit(dbPath, ['--all', '--drilldown']);
+      const jsonText = runAudit(dbPath, ['--all', '--drilldown', '--json']);
+
+      for (const output of [human, jsonText]) {
+        expect(output).not.toContain('/Users/alice');
+        expect(output).not.toContain('Application Support');
+        expect(output).not.toContain('engine-work');
+        expect(output).not.toContain(requestPathId);
+        expect(output).not.toContain('summary.json');
+        expect(output).not.toContain(staleHookPath);
+        expect(output).not.toContain('hooks/session-start');
+        expect(output).not.toContain('sk-proj-local-secret');
+        expect(output).not.toContain('ghp_localSecretToken1234567890');
+        expect(output).not.toContain(walletAddress);
+        expect(output).not.toContain(privateKeyLikeHex);
+      }
+    });
+  });
+
+  it('keeps embedded failure_reason paths available behind --unsafe-raw', () => {
+    withTempDb((dbPath) => {
+      const requestPathId = '01J3Q9RM0T0A7P9B6C5D4E3F2G';
+      const missingArtifactPath = `/Users/alice/engine-work/requests/${requestPathId}/.orient/summary.json`;
+      const staleHookPath = "/Users/alice/life's-work/jinn-mono/client/hooks/session-start";
+      createDbWithFailureReasons(dbPath, [
+        `Required artifact missing: ${missingArtifactPath}`,
+        `Failed to load stale hook path ${staleHookPath}`,
+      ]);
+
+      const output = runAudit(dbPath, ['--all', '--drilldown', '--unsafe-raw']);
+
+      expect(output).toContain(missingArtifactPath);
+      expect(output).toContain(staleHookPath);
     });
   });
 

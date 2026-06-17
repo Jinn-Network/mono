@@ -172,15 +172,90 @@ function redactUrl(value: string): string {
   }
 }
 
+function isPathWhitespace(value: string): boolean {
+  return /\s/.test(value);
+}
+
+function shouldIncludeQuotedPathChar(value: string, index: number): boolean {
+  const prev = value[index - 1] ?? '';
+  const next = value[index + 1] ?? '';
+  return /[A-Za-z0-9]/.test(prev) && /[A-Za-z0-9]/.test(next);
+}
+
+function findFilesystemPathEnd(value: string, start: number): number {
+  let end = start;
+  while (end < value.length) {
+    const ch = value[end];
+    if (ch === '"' || ch === '`' || ch === '<' || ch === '>' || ch === '|') break;
+    if ((ch === "'" || ch === ')' || ch === ']' || ch === '}') && !shouldIncludeQuotedPathChar(value, end)) break;
+    if (ch === '\r' || ch === '\n' || ch === '\t') break;
+    if (isPathWhitespace(ch)) {
+      let next = end + 1;
+      while (next < value.length && isPathWhitespace(value[next])) next++;
+      const nextStop = value.slice(next).search(/[\s<>"`|)\]}]/);
+      const nextChunk = nextStop === -1 ? value.slice(next) : value.slice(next, next + nextStop);
+      if (nextChunk.includes('/') || nextChunk.includes('\\')) {
+        end = next;
+        continue;
+      }
+      break;
+    }
+    end++;
+  }
+  while (end > start && /[,;:]/.test(value[end - 1])) end--;
+  return end;
+}
+
+function redactAbsoluteFilesystemPaths(value: string): string {
+  const pathStart = /\/(?:Users|home|var|tmp|private|opt|Volumes|Applications|Library|System|usr|etc|mnt)(?=\/)|~\/|\$HOME\//g;
+  let output = '';
+  let last = 0;
+  for (;;) {
+    const match = pathStart.exec(value);
+    if (!match) break;
+    const start = match.index;
+    if (start < last) continue;
+    const end = findFilesystemPathEnd(value, start);
+    output += `${value.slice(last, start)}<redacted-path>`;
+    last = end;
+    pathStart.lastIndex = end;
+  }
+  return `${output}${value.slice(last)}`;
+}
+
+function redactPathSegments(value: string): string {
+  return redactAbsoluteFilesystemPaths(value)
+    .replace(
+      /(^|[\s("'`])(?:(?:~|\.\.?)\/)?(?:[A-Za-z0-9_. '-]+\/)*engine-work\/[^\s<>"'`)\]}]*/gi,
+      '$1<redacted-path>',
+    )
+    .replace(
+      /(^|[\s("'`])(?:(?:~|\.\.?)\/)?(?:[A-Za-z0-9_. '-]+\/)*hooks\/session-start\b[^\s<>"'`)\]}]*/gi,
+      '$1<redacted-path>',
+    )
+    .replace(/\b[A-Za-z]:\\[^\s<>"`|]+(?:\s+[^\s<>"`|]+\\[^\s<>"`|]+)*/g, '<redacted-path>');
+}
+
 function redactSensitiveText(value: string): string {
-  return value
+  const redactedSecrets = value
     .replace(
       /\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|RPC[_-]?URL|RPCURL)[A-Z0-9_]*\s*=\s*[^\s]+/gi,
       '<redacted-secret>',
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
     .replace(/\bsk-or-v1-[A-Za-z0-9_-]+/gi, '<redacted-openrouter-key>')
+    .replace(/\bsk-(?:proj|svcacct)-[A-Za-z0-9_-]+/gi, '<redacted-openai-key>')
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}/gi, '<redacted-openai-key>')
+    .replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/g, '<redacted-github-token>')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]+/g, '<redacted-github-token>')
     .replace(/\bhttps?:\/\/[^\s<>"')]+/gi, (url) => redactUrl(url));
+  return redactPathSegments(redactedSecrets)
+    .replace(/\b0x[a-fA-F0-9]{40}\b/g, '<redacted-address>')
+    .replace(/\b(?:0x)?[a-fA-F0-9]{64,}\b/g, '<redacted-hex>')
+    .replace(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g, '<redacted-address>')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '<redacted-id>')
+    .replace(/(^|[\\/ \t])req[-_][A-Za-z0-9_-]{10,}(?=$|[\\/.\s])/gi, '$1<redacted-id>')
+    .replace(/(^|[\\/ \t])[0-9A-HJKMNP-TV-Z]{20,32}(?=$|[\\/.\s])/gi, '$1<redacted-id>');
 }
 
 function compactReason(reason: string | null, unsafeRaw: boolean): string {
