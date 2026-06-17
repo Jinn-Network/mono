@@ -19,8 +19,12 @@ import { MIGRATIONS_FILE } from '../earning/store.js';
 export interface RpcSlotHealthEntry {
   ok: boolean;
   host: string;
+  expectedChainId?: number;
+  actualChainId?: number;
   latencyMs?: number;
   code?: number;
+  reason?: 'chain_mismatch' | 'unreachable' | 'unknown';
+  localDev?: true;
 }
 
 export interface BootstrapEndpointConfig {

@@ -473,8 +473,20 @@ describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
           'https://sepolia.base.org',
         ],
         rpcSlotHealth: [
-          { ok: true, host: 'my-alchemy.example', latencyMs: 12 },
-          { ok: true, host: 'base-sepolia.publicnode.com', latencyMs: 40 },
+          {
+            ok: true,
+            host: 'my-alchemy.example',
+            latencyMs: 12,
+            expectedChainId: 84532,
+            actualChainId: 84532,
+          },
+          {
+            ok: false,
+            host: 'base-sepolia.publicnode.com',
+            reason: 'chain_mismatch',
+            expectedChainId: 84532,
+            actualChainId: 8453,
+          },
           { ok: false, host: 'sepolia.base.org', code: 429 },
         ],
       }),
@@ -484,7 +496,15 @@ describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
     const body = await res.json() as {
       rpcUrls: string[];
       publicDefaults: string[];
-      rpcSlotHealth: Array<{ ok: boolean; host: string; latencyMs?: number; code?: number }>;
+      rpcSlotHealth: Array<{
+        ok: boolean;
+        host: string;
+        latencyMs?: number;
+        code?: number;
+        reason?: string;
+        expectedChainId?: number;
+        actualChainId?: number;
+      }>;
     };
     expect(body.rpcUrls).toEqual([
       'https://my-alchemy.example/key',
@@ -496,6 +516,13 @@ describe('GET /v1/bootstrap — no feature-flag fields (issue #367)', () => {
       'https://sepolia.base.org',
     ]);
     expect(body.rpcSlotHealth).toHaveLength(3);
+    expect(body.rpcSlotHealth[1]).toEqual({
+      ok: false,
+      host: 'base-sepolia.publicnode.com',
+      reason: 'chain_mismatch',
+      expectedChainId: 84532,
+      actualChainId: 8453,
+    });
     expect(body.rpcSlotHealth[2]).toEqual({ ok: false, host: 'sepolia.base.org', code: 429 });
   });
 

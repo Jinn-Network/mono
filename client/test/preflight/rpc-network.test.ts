@@ -137,7 +137,8 @@ describe('rpc network preflight', () => {
 
 function startBlockNumberServer(opts: {
   status?: number;
-  result?: string;
+  blockNumber?: string;
+  chainId?: string;
   hangMs?: number;
 }): Promise<{ url: string; close: () => Promise<void> }> {
   return new Promise((resolve) => {
@@ -154,7 +155,10 @@ function startBlockNumberServer(opts: {
             return;
           }
           res.setHeader('content-type', 'application/json');
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id ?? 1, result: opts.result ?? '0x100' }));
+          const result = parsed.method === 'eth_chainId'
+            ? (opts.chainId ?? '0x14a34')
+            : (opts.blockNumber ?? '0x100');
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id ?? 1, result }));
         };
         if (opts.hangMs) setTimeout(reply, opts.hangMs);
         else reply();
@@ -178,8 +182,8 @@ describe('probeFallbackChain', () => {
   });
 
   it('records an ok result per URL with latency', async () => {
-    const a = await startBlockNumberServer({ result: '0x101' });
-    const b = await startBlockNumberServer({ result: '0x102' });
+    const a = await startBlockNumberServer({ blockNumber: '0x101' });
+    const b = await startBlockNumberServer({ blockNumber: '0x102' });
     const results = await probeFallbackChain([a.url, b.url], 'testnet', 'L2');
     expect(results).toHaveLength(2);
     expect(results[0]).toMatchObject({ ok: true });
@@ -190,11 +194,51 @@ describe('probeFallbackChain', () => {
 
   it('classifies a 429 response as ok:false with code 429 (does NOT throw)', async () => {
     const a = await startBlockNumberServer({ status: 429 });
-    const b = await startBlockNumberServer({ result: '0x100' });
+    const b = await startBlockNumberServer({ blockNumber: '0x100' });
     // The probe must not gate startup — it logs warnings and continues.
     const results = await probeFallbackChain([a.url, b.url], 'testnet', 'L2');
     expect(results[0]).toMatchObject({ ok: false, code: 429 });
     expect(results[1]).toMatchObject({ ok: true });
+  });
+
+  it('marks a reachable fallback with the wrong chain id as unhealthy', async () => {
+    const primary = await startBlockNumberServer({
+      chainId: '0x14a34',
+      blockNumber: '0x101',
+    });
+    const wrongChainFallback = await startBlockNumberServer({
+      chainId: '0x2105',
+      blockNumber: '0x102',
+    });
+
+    const results = await probeFallbackChain(
+      [primary.url, wrongChainFallback.url],
+      'testnet',
+      'L2',
+    );
+
+    expect(results[0]).toMatchObject({ ok: true, expectedChainId: 84532, actualChainId: 84532 });
+    expect(results[1]).toMatchObject({
+      ok: false,
+      reason: 'chain_mismatch',
+      expectedChainId: 84532,
+      actualChainId: 8453,
+    });
+  });
+
+  it('uses the L1 expected chain id for L1 fallback probes', async () => {
+    const sepolia = await startBlockNumberServer({
+      chainId: '0xaa36a7',
+      blockNumber: '0x103',
+    });
+
+    const results = await probeFallbackChain([sepolia.url], 'testnet', 'L1');
+
+    expect(results[0]).toMatchObject({
+      ok: true,
+      expectedChainId: 11155111,
+      actualChainId: 11155111,
+    });
   });
 
   it('classifies a 5xx response as ok:false with the status code', async () => {
@@ -215,7 +259,7 @@ describe('probeFallbackChain', () => {
   });
 
   it('emits per-slot log lines via the injected logger', async () => {
-    const a = await startBlockNumberServer({ result: '0x103' });
+    const a = await startBlockNumberServer({ blockNumber: '0x103' });
     const b = await startBlockNumberServer({ status: 429 });
     const log = vi.fn();
     await probeFallbackChain([a.url, b.url], 'testnet', 'L2', { log });

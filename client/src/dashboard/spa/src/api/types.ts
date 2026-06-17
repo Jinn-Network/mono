@@ -100,9 +100,14 @@ export interface BootstrapErrorEnvelope {
 export interface RpcSlotHealth {
   ok: boolean;
   host: string;
+  expectedChainId?: number;
+  actualChainId?: number;
   latencyMs?: number;
   /** HTTP status when the slot failed with one (e.g. 429, 503). */
   code?: number;
+  /** Structured failure reason when no HTTP status is present. */
+  reason?: 'chain_mismatch' | 'unreachable' | 'unknown';
+  localDev?: true;
 }
 
 export interface BootstrapState {

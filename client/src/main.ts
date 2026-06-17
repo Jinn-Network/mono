@@ -1194,8 +1194,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           publicDefaults: RPC_PUBLIC_DEFAULTS,
           rpcSlotHealth: lastL2Probe.map((p) =>
             p.ok
-              ? { ok: true as const, host: p.host, latencyMs: p.latencyMs }
-              : { ok: false as const, host: p.host, code: p.code },
+              ? {
+                ok: true as const,
+                host: p.host,
+                latencyMs: p.latencyMs,
+                expectedChainId: p.expectedChainId,
+                actualChainId: p.actualChainId,
+                ...(p.localDev ? { localDev: true as const } : {}),
+              }
+              : {
+                ok: false as const,
+                host: p.host,
+                code: p.code,
+                reason: p.reason,
+                expectedChainId: p.expectedChainId,
+                actualChainId: p.actualChainId,
+              },
           ),
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
           onboardingComplete: config.onboardingComplete,

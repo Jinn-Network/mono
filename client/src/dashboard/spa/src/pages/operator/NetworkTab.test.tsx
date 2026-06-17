@@ -22,8 +22,20 @@ vi.mock('../../api/client.js', () => ({
         'https://sepolia.base.org',
       ],
       rpcSlotHealth: [
-        { ok: true, host: 'my-alchemy.example', latencyMs: 12 },
-        { ok: true, host: 'base-sepolia.publicnode.com', latencyMs: 40 },
+        {
+          ok: true,
+          host: 'my-alchemy.example',
+          latencyMs: 12,
+          expectedChainId: 84532,
+          actualChainId: 84532,
+        },
+        {
+          ok: false,
+          host: 'base-sepolia.publicnode.com',
+          reason: 'chain_mismatch',
+          expectedChainId: 84532,
+          actualChainId: 8453,
+        },
         { ok: false, host: 'sepolia.base.org', code: 429 },
       ],
     })),
@@ -91,6 +103,9 @@ describe('NetworkTab', () => {
     expect(rows[0]!.textContent).not.toMatch(/\/key/);
     expect(rows[1]!.textContent).toMatch(/base-sepolia\.publicnode\.com/);
     expect(rows[2]!.textContent).toMatch(/sepolia\.base\.org/);
+    // A reachable wrong-chain slot is not healthy.
+    expect(rows[1]!.textContent).toMatch(/wrong chain/i);
+    expect(rows[1]!.textContent).not.toMatch(/healthy/i);
     // The 429 slot renders a degraded badge.
     expect(rows[2]!.textContent).toMatch(/429|unhealthy|degraded/i);
   });

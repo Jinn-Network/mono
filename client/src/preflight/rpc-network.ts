@@ -1,5 +1,5 @@
 import { createPublicClient, http, HttpRequestError } from 'viem';
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, mainnet, sepolia } from 'viem/chains';
 import type { JinnConfig } from '../config.js';
 import { describeFallbackChain, maskRpcHost } from '../rpc/transport.js';
 
@@ -171,24 +171,39 @@ export function rpcNetworkFailureHint(result: RpcNetworkPreflightFail): string {
   return 'Set rpcUrl to a Base mainnet endpoint such as https://mainnet.base.org, or set BASE_RPC_URL.';
 }
 
-// ── probeFallbackChain — boot-time per-slot eth_blockNumber probe ────────────
+// ── probeFallbackChain — boot-time per-slot chain + block probe ──────────────
 
 /** Layer label for log lines and AC7 summary formatting. */
 export type ProbeLayer = 'L1' | 'L2';
+
+function expectedChainIdForProbe(network: ExpectedRpcNetwork, layer: ProbeLayer): number {
+  if (layer === 'L1') return network === 'testnet' ? sepolia.id : mainnet.id;
+  return expectedChainIdForNetwork(network);
+}
+
+function expectedChainForProbe(network: ExpectedRpcNetwork, layer: ProbeLayer) {
+  if (layer === 'L1') return network === 'testnet' ? sepolia : mainnet;
+  return expectedChainForNetwork(network);
+}
 
 export type ProbeOk = {
   ok: true;
   host: string;
   latencyMs: number;
+  expectedChainId: number;
+  actualChainId: number;
+  localDev?: true;
 };
 
 export type ProbeFail = {
   ok: false;
   host: string;
+  expectedChainId: number;
+  actualChainId?: number;
   /** HTTP status when applicable (4xx / 5xx). */
   code?: number;
   /** Failure shape when no HTTP status is available. */
-  reason?: 'unreachable' | 'unknown';
+  reason?: 'chain_mismatch' | 'unreachable' | 'unknown';
   message: string;
 };
 
@@ -199,25 +214,31 @@ export interface ProbeFallbackChainOptions {
   log?: (message: string) => void;
 }
 
-function classifyProbeError(host: string, err: unknown): ProbeFail {
+function classifyProbeError(
+  host: string,
+  expectedChainId: number,
+  actualChainId: number | undefined,
+  err: unknown,
+): ProbeFail {
   const message = err instanceof Error ? err.message : String(err);
   if (err instanceof HttpRequestError && typeof err.status === 'number') {
-    return { ok: false, host, code: err.status, message };
+    return { ok: false, host, expectedChainId, actualChainId, code: err.status, message };
   }
   // viem wraps HTTP errors inside other shapes; walk the cause chain.
   let cur: unknown = (err as { cause?: unknown } | undefined)?.cause;
   while (cur) {
     if (cur instanceof HttpRequestError && typeof cur.status === 'number') {
-      return { ok: false, host, code: cur.status, message };
+      return { ok: false, host, expectedChainId, actualChainId, code: cur.status, message };
     }
     cur = (cur as { cause?: unknown }).cause;
   }
-  return { ok: false, host, reason: 'unreachable', message };
+  return { ok: false, host, expectedChainId, actualChainId, reason: 'unreachable', message };
 }
 
 /**
- * Probe each URL in a fallback chain with a per-slot `eth_blockNumber` call.
- * Records ok/latency or a structured failure (HTTP status / unreachable).
+ * Probe each URL in a fallback chain with per-slot `eth_chainId` +
+ * `eth_blockNumber` calls. Records ok/latency or a structured failure
+ * (chain mismatch / HTTP status / unreachable).
  *
  * The probe is **log-only** — it never throws on per-slot failures. Startup
  * gating remains the job of {@link checkRpcNetwork}, which fails loud on
@@ -225,6 +246,7 @@ function classifyProbeError(host: string, err: unknown): ProbeFail {
  *
  * Per AC9 (issue #592): emits one log line per slot
  *   `[rpc] <layer> <host> ok latency=Nms`
+ *   `[rpc] <layer> <host> warn chain_mismatch expected=<id> actual=<id>`
  *   `[rpc] <layer> <host> warn <http-status>`     (e.g. 429, 503)
  *   `[rpc] <layer> <host> warn unreachable: <message>`
  */
@@ -235,23 +257,46 @@ export async function probeFallbackChain(
   options: ProbeFallbackChainOptions = {},
 ): Promise<ProbeResult[]> {
   const log = options.log ?? ((m: string) => process.stderr.write(`${m}\n`));
-  // Chain is informational only — eth_blockNumber doesn't depend on chain
-  // identity. Both L1 and L2 layers reuse the same Base/Base-Sepolia pair
-  // since this is just used to satisfy viem's typing.
-  const chain = network === 'testnet' ? baseSepolia : base;
+  const expectedChainId = expectedChainIdForProbe(network, layer);
+  const chain = expectedChainForProbe(network, layer);
 
   const results: ProbeResult[] = [];
   for (const url of urls) {
     const host = maskRpcHost(url);
     const client = createPublicClient({ chain, transport: http(url, { retryCount: 0 }) });
     const t0 = performance.now();
+    let actualChainId: number | undefined;
     try {
+      actualChainId = await client.getChainId();
+      const localDev = evmLocalDevOverrideAcceptable(expectedChainId, actualChainId, url);
+      if (actualChainId !== expectedChainId && !localDev) {
+        const failure: ProbeFail = {
+          ok: false,
+          host,
+          expectedChainId,
+          actualChainId,
+          reason: 'chain_mismatch',
+          message: `expected chain ${expectedChainId}, got ${actualChainId}`,
+        };
+        log(
+          `[rpc] ${layer} ${host} warn chain_mismatch expected=${expectedChainId} actual=${actualChainId}`,
+        );
+        results.push(failure);
+        continue;
+      }
       await client.getBlockNumber();
       const latencyMs = Math.max(0, Math.round(performance.now() - t0));
       log(`[rpc] ${layer} ${host} ok latency=${latencyMs}ms`);
-      results.push({ ok: true, host, latencyMs });
+      results.push({
+        ok: true,
+        host,
+        latencyMs,
+        expectedChainId,
+        actualChainId,
+        ...(localDev ? { localDev: true as const } : {}),
+      });
     } catch (err) {
-      const failure = classifyProbeError(host, err);
+      const failure = classifyProbeError(host, expectedChainId, actualChainId, err);
       if (failure.code !== undefined) {
         log(`[rpc] ${layer} ${host} warn ${failure.code}`);
       } else {

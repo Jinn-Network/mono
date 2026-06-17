@@ -196,9 +196,17 @@ function SlotHealthBadge({ health }: { health?: RpcSlotHealth }): JSX.Element {
   if (health.ok) {
     return (
       <Badge variant="success">
-        healthy{health.latencyMs !== undefined ? ` · ${health.latencyMs}ms` : ''}
+        {health.localDev ? 'local dev' : 'healthy'}
+        {health.latencyMs !== undefined ? ` · ${health.latencyMs}ms` : ''}
       </Badge>
     );
+  }
+  if (health.reason === 'chain_mismatch') {
+    const detail =
+      health.actualChainId !== undefined && health.expectedChainId !== undefined
+        ? ` · ${health.actualChainId}/${health.expectedChainId}`
+        : '';
+    return <Badge variant="destructive">wrong chain{detail}</Badge>;
   }
   return (
     <Badge variant={health.code === 429 ? 'warning' : 'destructive'}>
