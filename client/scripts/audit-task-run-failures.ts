@@ -22,26 +22,29 @@
  *   yarn audit:failures -- --bucket unknown      # drilldown filtered to one bucket
  *   yarn audit:failures -- --all --json          # machine output for the DR
  *   yarn audit:failures -- --db ./other.db       # alternate DB file
+ *   yarn audit:failures -- --unsafe-raw          # include raw row identifiers/reasons
  *
  * Flags:
- *   --db <path>     DB file (default: config dbPath → ~/.jinn-client/jinn.db)
- *   --days <n>      window = trailing n days (default 30)
- *   --since <ISO>   window start (overrides --days)
- *   --all           no window filter (lifetime)
- *   --drilldown     print the per-row table (all buckets)
- *   --bucket <name> drilldown filtered to one bucket (implies --drilldown)
- *   --json          machine output (counts + rows)
- *   --config <path> config file path (same resolution as the daemon)
+ *   --db <path>      DB file (default: config dbPath → ~/.jinn-client/jinn.db)
+ *   --days <n>       window = trailing n days (default 30)
+ *   --since <ISO>    window start (overrides --days)
+ *   --all            no window filter (lifetime)
+ *   --drilldown      print the per-row table (all buckets)
+ *   --bucket <name>  drilldown filtered to one bucket (implies --drilldown)
+ *   --json           machine output (counts + rows)
+ *   --unsafe-raw     print raw identifiers, DB path, and failure_reason snippets
+ *   --config <path>  config file path (same resolution as the daemon)
  */
 
 import { config as dotenvConfig } from 'dotenv';
 import Database from 'better-sqlite3';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from '../src/config.js';
 import { classify, ALL_BUCKETS, type Bucket } from './classify-failure.js';
 
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env'), quiet: true });
 
 const DAY_MS = 86_400_000;
 
@@ -53,24 +56,36 @@ interface Args {
   drilldown: boolean;
   bucket?: Bucket;
   json: boolean;
+  unsafeRaw: boolean;
+}
+
+function readFlagValue(argv: string[], index: number, flag: string): string {
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${flag} requires a value`);
+  }
+  return value;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { days: 30, all: false, drilldown: false, json: false };
+  const args: Args = { days: 30, all: false, drilldown: false, json: false, unsafeRaw: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     switch (a) {
       case '--db':
-        args.db = argv[++i];
+        args.db = readFlagValue(argv, i, a);
+        i++;
         break;
       case '--days':
-        args.days = Number(argv[++i]);
+        args.days = Number(readFlagValue(argv, i, a));
+        i++;
         if (!Number.isFinite(args.days) || args.days <= 0) {
           throw new Error(`--days must be a positive number, got ${argv[i]}`);
         }
         break;
       case '--since':
-        args.since = argv[++i];
+        args.since = readFlagValue(argv, i, a);
+        i++;
         if (Number.isNaN(Date.parse(args.since))) {
           throw new Error(`--since must be an ISO date, got ${args.since}`);
         }
@@ -82,7 +97,8 @@ function parseArgs(argv: string[]): Args {
         args.drilldown = true;
         break;
       case '--bucket': {
-        const b = argv[++i];
+        const b = readFlagValue(argv, i, a);
+        i++;
         if (!ALL_BUCKETS.includes(b as Bucket)) {
           throw new Error(`--bucket must be one of: ${ALL_BUCKETS.join(', ')} (got ${b})`);
         }
@@ -93,13 +109,16 @@ function parseArgs(argv: string[]): Args {
       case '--json':
         args.json = true;
         break;
+      case '--unsafe-raw':
+        args.unsafeRaw = true;
+        break;
       // --config is consumed by getConfigPathFromArgs; skip its value here.
       case '--config':
+        readFlagValue(argv, i, a);
         i++;
         break;
       default:
-        // Ignore unknown flags so `yarn ... -- --config x` style passthrough works.
-        break;
+        throw new Error(a.startsWith('--') ? `Unknown flag: ${a}` : `Unknown argument: ${a}`);
     }
   }
   return args;
@@ -131,14 +150,116 @@ interface ClassifiedRow {
   reason120: string;
 }
 
-function shortCid(cid: string | null): string {
-  if (!cid) return '—';
-  return cid.length > 12 ? `${cid.slice(0, 10)}…` : cid;
+interface TableColumn {
+  name: string;
 }
 
-function reason120(reason: string | null): string {
+function stripTerminalControls(value: string): string {
+  return value
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-Z\\-_]/g, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+}
+
+function redactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.origin}/<redacted-url>`;
+  } catch {
+    return '<redacted-url>';
+  }
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(
+      /\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|RPC[_-]?URL|RPCURL)[A-Z0-9_]*\s*=\s*[^\s]+/gi,
+      '<redacted-secret>',
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
+    .replace(/\bsk-or-v1-[A-Za-z0-9_-]+/gi, '<redacted-openrouter-key>')
+    .replace(/\bhttps?:\/\/[^\s<>"')]+/gi, (url) => redactUrl(url));
+}
+
+function compactReason(reason: string | null, unsafeRaw: boolean): string {
   if (!reason) return '';
-  return reason.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const clean = stripTerminalControls(reason.toString()).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return (unsafeRaw ? clean : redactSensitiveText(clean)).slice(0, 120);
+}
+
+function stableRef(prefix: string, value: string | null): string | null {
+  if (!value) return null;
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 10);
+  return `${prefix}:${digest}`;
+}
+
+function displayField(prefix: string, value: string | null, unsafeRaw: boolean): string | null {
+  if (!value) return null;
+  return unsafeRaw ? stripTerminalControls(value) : stableRef(prefix, value);
+}
+
+function displayText(value: string | null, unsafeRaw: boolean): string | null {
+  if (!value) return null;
+  const clean = stripTerminalControls(value);
+  return unsafeRaw ? clean : redactSensitiveText(clean);
+}
+
+function displayDbPath(dbPath: string, unsafeRaw: boolean): string {
+  const clean = stripTerminalControls(dbPath);
+  if (unsafeRaw) return clean;
+  const home = process.env.HOME;
+  if (home && (clean === home || clean.startsWith(`${home}${sep}`))) {
+    const rel = relative(home, clean);
+    return rel ? `~${sep}${rel}` : '~';
+  }
+  if (!isAbsolute(clean)) return clean;
+  return `<redacted-dir>${sep}${basename(clean)}`;
+}
+
+function getTaskRunsColumns(db: Database.Database): Set<string> {
+  return new Set(
+    db
+      .prepare<[], TableColumn>('PRAGMA table_info(task_runs)')
+      .all()
+      .map((column) => column.name),
+  );
+}
+
+function requireColumns(columns: Set<string>, required: string[]): void {
+  const missing = required.filter((column) => !columns.has(column));
+  if (missing.length > 0) {
+    throw new Error(`task_runs is missing required column(s): ${missing.join(', ')}`);
+  }
+}
+
+function selectColumn(columns: Set<string>, column: string, optional = false): string {
+  if (columns.has(column)) return column;
+  if (optional) return `NULL AS ${column}`;
+  throw new Error(`task_runs is missing required column: ${column}`);
+}
+
+function buildFailedRowsSql(columns: Set<string>): string {
+  requireColumns(columns, ['request_id', 'solver_type', 'impl_name', 'state_updated_at', 'state', 'failure_reason']);
+  const select = [
+    selectColumn(columns, 'request_id'),
+    selectColumn(columns, 'task_id', true),
+    selectColumn(columns, 'attempt_index', true),
+    selectColumn(columns, 'solver_type'),
+    selectColumn(columns, 'task_role', true),
+    selectColumn(columns, 'impl_name'),
+    selectColumn(columns, 'solver_net_manifest_cid', true),
+    selectColumn(columns, 'state_updated_at'),
+    selectColumn(columns, 'failure_reason'),
+  ].join(', ');
+  return `
+      SELECT ${select}
+      FROM task_runs
+      WHERE state = 'FAILED'
+        AND (@all = 1 OR state_updated_at >= @sinceMs)
+      ORDER BY state_updated_at DESC
+    `;
 }
 
 function resolveDbPath(args: Args): string {
@@ -164,14 +285,7 @@ function main(): void {
 
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    const sql = `
-      SELECT request_id, task_id, attempt_index, solver_type, task_role, impl_name,
-             solver_net_manifest_cid, state_updated_at, failure_reason
-      FROM task_runs
-      WHERE state = 'FAILED'
-        AND (@all = 1 OR state_updated_at >= @sinceMs)
-      ORDER BY state_updated_at DESC
-    `;
+    const sql = buildFailedRowsSql(getTaskRunsColumns(db));
     const raw = db.prepare(sql).all({
       all: args.all ? 1 : 0,
       sinceMs: sinceMs ?? 0,
@@ -180,17 +294,17 @@ function main(): void {
     const rows: ClassifiedRow[] = raw.map((r) => {
       const { bucket, ruleId } = classify(r.failure_reason);
       return {
-        requestId: r.request_id,
-        taskId: r.task_id,
+        requestId: displayField('req', r.request_id, args.unsafeRaw) ?? '—',
+        taskId: displayField('task', r.task_id, args.unsafeRaw),
         attemptIndex: r.attempt_index,
-        solverType: r.solver_type,
-        taskRole: r.task_role,
-        implName: r.impl_name,
-        manifestCid: r.solver_net_manifest_cid,
+        solverType: displayText(r.solver_type, args.unsafeRaw),
+        taskRole: displayText(r.task_role, args.unsafeRaw),
+        implName: displayField('impl', r.impl_name, args.unsafeRaw),
+        manifestCid: displayField('cid', r.solver_net_manifest_cid, args.unsafeRaw),
         tsIso: new Date(r.state_updated_at).toISOString(),
         bucket,
         ruleId,
-        reason120: reason120(r.failure_reason),
+        reason120: compactReason(r.failure_reason, args.unsafeRaw),
       };
     });
 
@@ -203,7 +317,7 @@ function main(): void {
     if (args.json) {
       const out = {
         asOf: new Date().toISOString(),
-        dbPath,
+        dbPath: displayDbPath(dbPath, args.unsafeRaw),
         window: {
           mode: args.all ? 'all' : args.since ? 'since' : 'days',
           days: args.all || args.since ? undefined : args.days,
@@ -219,7 +333,7 @@ function main(): void {
     }
 
     // Human count table — sorted descending by count.
-    console.log(`Failure-cause audit  (db: ${dbPath})`);
+    console.log(`Failure-cause audit  (db: ${displayDbPath(dbPath, args.unsafeRaw)})`);
     console.log(`  window: ${windowDesc}`);
     console.log('');
     if (total === 0) {
@@ -253,7 +367,7 @@ function main(): void {
           console.log(
             `    ${r.tsIso}  ${r.ruleId}  attempt=${r.attemptIndex ?? '—'}  ` +
               `solver=${r.solverType ?? '—'}  role=${r.taskRole ?? '—'}  impl=${r.implName ?? '—'}  ` +
-              `cid=${shortCid(r.manifestCid)}  req=${r.requestId.slice(0, 14)}…  task=${r.taskId ?? '—'}`,
+              `cid=${r.manifestCid ?? '—'}  req=${r.requestId}  task=${r.taskId ?? '—'}`,
           );
           console.log(`      reason: ${r.reason120 || '(empty)'}`);
         }

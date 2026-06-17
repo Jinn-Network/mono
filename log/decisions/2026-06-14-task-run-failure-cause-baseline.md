@@ -72,14 +72,14 @@ window total.
 
 1. **Harness-subprocess crash dominance.** Over half of all failures (225/410
    lifetime, **65.5% in the trailing 30 days**) are the adapter subprocess dying
-   non-zero. Composition: 208 `child exited` rows (overwhelmingly `code=1` from the
-   hermes/claude/codex adapters; only 2 are `code=143` = SIGTERM, which the cascade
-   correctly diverts to `daemon_restart_mid_attempt`) plus 19 `session-start hook
-   failed` rows (the codex-code learner hook resolving a stale absolute path,
-   `bash: /…/plugins/learner/hooks/session-start: No such file or directory`). This
-   is the single highest-leverage failure class to attack, and the 19 session-hook
-   rows in particular look like a concrete, fixable config defect, not a model
-   capability gap.
+   non-zero. The bucket is dominated by `child exited` rows from the
+   hermes/claude/codex adapters after provider signatures and SIGTERM/143 exits are
+   skimmed out by earlier rules. It also includes `session-start hook failed` rows
+   from the codex-code learner hook resolving a stale absolute path (`bash:
+   /…/plugins/learner/hooks/session-start: No such file or directory`). This is the
+   single highest-leverage failure class to attack, and the session-hook family in
+   particular looks like a concrete, fixable config defect, not a model capability
+   gap.
 
 2. **`race_loss_misclassified` is a #896 data artifact, not a steady-state failure
    mode.** 33 lifetime rows (8.0%), **all of them outside the trailing-30-day window
@@ -105,14 +105,15 @@ window total.
    for a new rule** (or a structured category) in the next iteration — but adding it
    is out of scope for this fixed-8-bucket spike.
 
-4. **The "tail" buckets are small but real.** `provider_api_error` (23 lifetime) =
-   9× OpenRouter/hermes 403 budget-limit (correctly skimmed out of the child-exit
-   crash bucket by r01), 10× IPFS-registry 413, 13× HF/substrate-pool fetch.
-   `lease_expired_no_delivery` (13) = on-chain `TCAttemptClaimExpired`, including the
-   recovery-/Safe-revert-wrapped variants r06 correctly reclaims from restart/rpc.
-   `solver_produced_wrong_answer` (25) = `eval_not_gradeable:patch_*` (the solver's
-   patch itself failed to apply/was corrupt/conflicted) plus evaluator
-   `did not produce verdictPayload` packaging failures.
+4. **The "tail" buckets are small but real.** `provider_api_error` (23 lifetime)
+   captures OpenRouter/hermes budget/rate-limit failures, IPFS-registry 413
+   responses, and HF/substrate-pool fetch failures that the provider rules skim out
+   of the generic child-exit bucket. `lease_expired_no_delivery` (13) captures
+   on-chain `TCAttemptClaimExpired`, including the recovery-/Safe-revert-wrapped
+   variants r06 correctly reclaims from restart/rpc. `solver_produced_wrong_answer`
+   (25) captures `eval_not_gradeable:patch_*` (the solver's patch itself failed to
+   apply/was corrupt/conflicted) plus evaluator `did not produce verdictPayload`
+   packaging failures.
 
 ## Confidence / caveats
 
@@ -151,13 +152,13 @@ window total.
   `\b50[023]\b.*error` alternative — which would have greedily claimed a child-exit
   crash carrying a stray `50x` token before "error" (e.g. `…: 502 tokens, fatal
   error`) into `provider_api_error`, masking a real r10 harness crash — and now
-  matches only the precise `Error code: 5xx` form; r02 (provider 429) gained a
-  `superseded`/`single-flight` guard so a supersede reason carrying a stray `429`
-  token reaches the race-loss reclassification (r19) instead of being skimmed into
+  matches only the precise `Error code: 5xx` form; r02 (provider 429) now requires
+  provider/rate-limit/status/error-code context and keeps the
+  `superseded`/`single-flight` guard so a supersede reason or crash carrying a stray
+  `429` token reaches the downstream rule instead of being skimmed into
   `provider_api_error`. The live corpus contained **zero** rows matching either
-  pattern, so every bucket count above is identical before and after the tightening;
-  the fix is a latent-gap correction, and the cited table reflects the final
-  classifier.
+  latent false-positive pattern, so every bucket count above is identical before and
+  after the tightening; the cited table reflects the final classifier.
 
 ## Highest-leverage follow-up
 
@@ -184,5 +185,5 @@ Secondary, concrete, already-actionable from this baseline:
 ## Status
 
 `proposed` — spike output; ratification is a separate human step. Per the handbook's
-spike rules the audit script + unit test are spike artifacts that do not themselves
-merge to `next`; this DR is the durable finding.
+spike rules this DR is the durable finding; the audit script and unit tests are repo
+artifacts for reproducing the baseline and regression-locking the classifier.

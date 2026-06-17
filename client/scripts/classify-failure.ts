@@ -60,6 +60,19 @@ interface Rule {
 
 const has = (lower: string, needle: string): boolean => lower.includes(needle.toLowerCase());
 
+function hasProvider429Context(raw: string, lower: string): boolean {
+  if (/error code:\s*429/i.test(raw) || /\b(?:http\s+)?status\s*[:=]?\s*429\b/i.test(raw)) return true;
+  if (!/\b429\b/.test(raw)) return false;
+  return (
+    /\b(?:rate[-\s]?limit(?:ed|ing)?|too many requests)\b/i.test(raw) ||
+    /\b(?:returned|returning|response|responded|failed with)\s+(?:with\s+)?429\b/i.test(raw) ||
+    /\b(?:openrouter|provider|api)\b.{0,80}\b(?:returned|returning|status|error[-\s]?code|rate[-\s]?limit|too many requests)\b.{0,80}\b429\b/i.test(
+      raw,
+    ) ||
+    /\b429\b.{0,80}\b(?:from|by|via)\b.{0,80}\b(?:openrouter|provider|api)\b/i.test(raw)
+  );
+}
+
 /**
  * The ordered rule table. Evaluated top-to-bottom; first match wins. Each row is
  * `{ id, bucket, test }` with a one-line rationale comment. DO NOT reorder without
@@ -73,17 +86,14 @@ const RULES: Rule[] = [
     bucket: 'provider_api_error',
     test: (raw, lower) => /error code:\s*403/i.test(raw) || (/\b403\b/.test(raw) && has(lower, 'budget limit')),
   },
-  // r02 — provider rate-limit (429), incl. nested inside a subprocess exit. Guarded post-review
-  //       (#577) so a `superseded`/`single-flight` supersede reason carrying a stray `429` token
-  //       does not pre-empt the race-loss reclassification (r19) — latent gap, 0 such rows in the
-  //       live corpus, but the cascade must stay correct.
+  // r02 — provider rate-limit (429), incl. nested inside a subprocess exit. Requires
+  //       provider/rate-limit/status context so a bare token count or queue depth of
+  //       `429` does not pre-empt the more specific downstream rules.
   {
     id: 'r02',
     bucket: 'provider_api_error',
     test: (raw, lower) =>
-      !has(lower, 'superseded') &&
-      !has(lower, 'single-flight') &&
-      (/error code:\s*429/i.test(raw) || /\b429\b/.test(raw)),
+      !has(lower, 'superseded') && !has(lower, 'single-flight') && hasProvider429Context(raw, lower),
   },
   // r03 — IPFS registry (Autonolas) rejected the upload — provider/gateway error.
   {
@@ -131,12 +141,14 @@ const RULES: Rule[] = [
     test: (_raw, lower) => has(lower, 'recovery:'),
   },
   // r09 — exit 143 = 128+15 = SIGTERM: the daemon terminated the child on shutdown/restart,
-  //       not a solver crash. MUST beat r10. (Invariant 3.)
+  //       not a solver crash. Bare SIGKILL is not an orderly restart marker; let r10 catch
+  //       child-exit crashes or r21 leave non-child SIGKILL text unknown. MUST beat r10.
+  //       (Invariant 3.)
   {
     id: 'r09',
     bucket: 'daemon_restart_mid_attempt',
     test: (raw, lower) =>
-      /child exited.*code=143/i.test(raw) || has(lower, 'signal=sigterm') || has(lower, 'signal=sigkill'),
+      /child exited.*code=143/i.test(raw) || has(lower, 'signal=sigterm'),
   },
   // r10 — codex/claude/hermes adapter subprocess died non-zero (code=1) or its session-start
   //       bash hook errored — harness-side crash. Catches the residual code=1 rows after the

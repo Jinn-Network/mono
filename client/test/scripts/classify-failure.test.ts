@@ -148,11 +148,31 @@ describe('classify — the four ordering invariants (must never be reshuffled)',
     expect(c.ruleId).toBe('r05');
   });
 
+  it('a precise `Error code: 429` is provider_api_error via r02', () => {
+    const c = classify(
+      "hermes-agent: child exited code=1 signal=null: Error: Error code: 429 - {'error': {'message': 'Rate limited'}}",
+    );
+    expect(c.bucket).toBe<Bucket>('provider_api_error');
+    expect(c.ruleId).toBe('r02');
+  });
+
   // … but a harness crash that merely carries a standalone 50x token before the word "error"
   // (the dropped loose `\b50[023]\b.*error` alternative) must NOT be skimmed into provider — it is
   // a real subprocess crash and belongs in r10.
   it('a child-exit crash with a stray 502 token before "error" is harness_subprocess_crash (r10), NOT provider', () => {
     const c = classify('claude-code adapter: child exited code=1 signal=null: 502 tokens, fatal error');
+    expect(c.bucket).toBe<Bucket>('harness_subprocess_crash');
+    expect(c.ruleId).toBe('r10');
+  });
+
+  it('a child-exit crash with a stray 429 token before "error" is harness_subprocess_crash (r10), NOT provider', () => {
+    const c = classify('claude-code adapter: child exited code=1 signal=null: 429 tokens, fatal error');
+    expect(c.bucket).toBe<Bucket>('harness_subprocess_crash');
+    expect(c.ruleId).toBe('r10');
+  });
+
+  it('provider-adjacent text with a stray 429 token count is harness_subprocess_crash (r10), NOT provider', () => {
+    const c = classify('claude-code adapter: child exited code=1 signal=null: provider counted 429 tokens before fatal error');
     expect(c.bucket).toBe<Bucket>('harness_subprocess_crash');
     expect(c.ruleId).toBe('r10');
   });
@@ -177,6 +197,24 @@ describe('classify — the four ordering invariants (must never be reshuffled)',
     const c = classify('claude-code adapter: child exited with code=143 signal=null:');
     expect(c.bucket).toBe<Bucket>('daemon_restart_mid_attempt');
     expect(c.ruleId).toBe('r09');
+  });
+
+  it('child exited with signal=SIGTERM is daemon_restart_mid_attempt, NOT harness_subprocess_crash', () => {
+    const c = classify('claude-code adapter: child exited with code=null signal=SIGTERM:');
+    expect(c.bucket).toBe<Bucket>('daemon_restart_mid_attempt');
+    expect(c.ruleId).toBe('r09');
+  });
+
+  it('child exited with signal=SIGKILL is harness_subprocess_crash (r10), NOT daemon_restart_mid_attempt', () => {
+    const c = classify('claude-code adapter: child exited with code=null signal=SIGKILL:');
+    expect(c.bucket).toBe<Bucket>('harness_subprocess_crash');
+    expect(c.ruleId).toBe('r10');
+  });
+
+  it('bare signal=SIGKILL without a child-exit crash marker stays unknown', () => {
+    const c = classify('adapter observed signal=SIGKILL with no subprocess exit envelope');
+    expect(c.bucket).toBe<Bucket>('unknown');
+    expect(c.ruleId).toBe('r21');
   });
 
   // Invariant 4: patch_* (r14) split from pytest_missing/docker/timeout (r15).
