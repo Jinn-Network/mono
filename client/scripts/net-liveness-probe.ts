@@ -43,6 +43,7 @@ import {
   BASE_BLOCKS_PER_MINUTE,
   DEFAULT_HEAD_SAMPLE_DELAY_MS,
 } from '../src/monitoring/net-liveness.js';
+import { redactRpcUrls } from '../src/util/redact-rpc-urls.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -51,8 +52,11 @@ const INDEXER_CHAINS = {
   'base-sepolia': { chainName: 'base-sepolia', chainId: 84532 },
 } as const;
 
+let configuredRpcUrls: readonly string[] = [];
+
 async function main(): Promise<void> {
   const config = loadConfig(getConfigPathFromArgs());
+  configuredRpcUrls = config.rpcUrls;
   const network = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const indexerChain = INDEXER_CHAINS[network];
 
@@ -120,7 +124,7 @@ main().catch((err) => {
   // A throw here is a probe-setup failure (bad config / RPC chain unreachable),
   // not a net-liveness verdict. Surface it loudly with a non-zero exit so a cron
   // failure policy can flag the probe itself as broken.
-  console.error('[net-liveness] probe failed to run:', err);
+  console.error(`[net-liveness] probe failed to run: ${redactRpcUrls(err, configuredRpcUrls)}`);
   process.exit(1);
 });
 

@@ -19,6 +19,7 @@ import {
   runNetLivenessProbe,
   type NetLivenessAlertPayload,
 } from '../../src/monitoring/net-liveness.js';
+import { redactRpcUrls } from '../../src/util/redact-rpc-urls.js';
 
 const BASE_URL = 'http://localhost:42069';
 
@@ -486,5 +487,24 @@ describe('parseNetLivenessIntegerEnv', () => {
       /JINN_NET_LIVENESS_THRESHOLD_MINUTES must be an integer between 1 and 1440/,
     );
     expect(() => parseNetLivenessIntegerEnv(raw, threshold)).not.toThrow(raw);
+  });
+});
+
+describe('redactRpcUrls', () => {
+  it('redacts configured RPC URL secrets even when viem includes the key outside the URL', () => {
+    const rpcSecret = 'alchemySecretKey1234567890';
+    const querySecret = 'querySecret1234567890';
+    const rpcUrl = `https://base-sepolia.g.alchemy.com/v2/${rpcSecret}?apikey=${querySecret}`;
+    const err = new Error(
+      `HTTP request failed. URL: ${rpcUrl}. Provider detail repeated keys ${rpcSecret} and ${querySecret}.`,
+    );
+
+    const message = redactRpcUrls(err, [rpcUrl]);
+
+    expect(message).toContain('<rpc-url>');
+    expect(message).toContain('<rpc-secret>');
+    expect(message).not.toContain(rpcUrl);
+    expect(message).not.toContain(rpcSecret);
+    expect(message).not.toContain(querySecret);
   });
 });

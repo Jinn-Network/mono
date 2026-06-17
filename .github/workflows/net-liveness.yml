@@ -20,9 +20,6 @@ jobs:
   net-liveness:
     name: Net liveness probe
     runs-on: ubuntu-latest
-    env:
-      NET_LIVENESS_PAYLOAD_FILE: ${{ runner.temp }}/net-liveness-alert.json
-      NET_LIVENESS_WEBHOOK_READY_FILE: ${{ runner.temp }}/net-liveness-webhook-ready.json
     steps:
       - uses: actions/checkout@v6
 
@@ -32,6 +29,14 @@ jobs:
 
       - name: Enable corepack
         run: corepack enable
+
+      - name: Prepare monitor temp files
+        shell: bash
+        run: |
+          {
+            echo "NET_LIVENESS_PAYLOAD_FILE=${RUNNER_TEMP}/net-liveness-alert.json"
+            echo "NET_LIVENESS_WEBHOOK_READY_FILE=${RUNNER_TEMP}/net-liveness-webhook-ready.json"
+          } >> "$GITHUB_ENV"
 
       - name: Install client dependencies
         run: yarn --cwd client install --immutable
@@ -165,7 +170,7 @@ jobs:
         run: |
           NUMBER="$(gh issue list \
             --repo "${REPO}" \
-            --search "[net-liveness-stall] in:title is:open" \
+            --search '[net-liveness-stall] in:title is:open label:"automated:net-liveness"' \
             --json number \
             --jq '.[0].number // empty')"
           echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
