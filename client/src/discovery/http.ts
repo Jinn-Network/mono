@@ -556,8 +556,8 @@ interface TaskStatusesPage {
   tasks: {
     items: Array<{
       id: string;
-      finalized: boolean;
-      refunded: boolean;
+      finalized: boolean | string | number | null;
+      refunded: boolean | string | number | null;
       claimWindowEnd?: string | number | null;
     }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
@@ -832,6 +832,23 @@ function parseOptionalNumber(value: string | number | null | undefined): number 
   if (typeof value !== 'string') return undefined;
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+function parseOptionalBoolean(
+  value: boolean | string | number | null | undefined,
+): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    return undefined;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  return undefined;
 }
 
 function isHex(value: string | undefined): value is `0x${string}` {
@@ -1763,11 +1780,12 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
       );
       for (const row of data.tasks?.items ?? []) {
+        const claimWindowEnd = parseOptionalNumber(row.claimWindowEnd);
         out.set(row.id, {
           taskId: row.id,
-          finalized: Boolean(row.finalized),
-          refunded: Boolean(row.refunded),
-          claimWindowEnd: row.claimWindowEnd != null ? Number(row.claimWindowEnd) : undefined,
+          finalized: parseOptionalBoolean(row.finalized) ?? false,
+          refunded: parseOptionalBoolean(row.refunded) ?? false,
+          claimWindowEnd,
         });
       }
       const pageInfo = data.tasks?.pageInfo;

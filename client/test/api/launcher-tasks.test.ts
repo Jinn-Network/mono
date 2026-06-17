@@ -124,8 +124,29 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     expect(response.tasks[0]?.onchainStatus).toBe('open');
   });
 
-  it('renders open when the claim window is unknown (degrades, not expired)', async () => {
+  it('renders unknown when the claim window is missing (does not guess open)', async () => {
     const deps = makeDeps({ t1: { taskId: 't1', finalized: false, refunded: false } });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('unknown');
+  });
+
+  it('renders unknown when the claim window is invalid (does not guess open)', async () => {
+    const deps = makeDeps({
+      t1: {
+        taskId: 't1',
+        finalized: false,
+        refunded: false,
+        claimWindowEnd: Number.NaN,
+      },
+    });
+    const response = await gatherLauncherTasks(deps);
+    expect(response.tasks[0]?.onchainStatus).toBe('unknown');
+  });
+
+  it('renders open when now exactly equals claimWindowEnd', async () => {
+    const deps = makeDeps({
+      t1: { taskId: 't1', finalized: false, refunded: false, claimWindowEnd: 1_780_000_000 },
+    });
     const response = await gatherLauncherTasks(deps);
     expect(response.tasks[0]?.onchainStatus).toBe('open');
   });
@@ -220,5 +241,65 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     await gatherLauncherTasks(deps);
     expect(fetchTaskStatuses).toHaveBeenCalledTimes(1);
     expect(fetchTaskStatuses).toHaveBeenCalledWith('bafymanifest');
+  });
+
+  it('uses the provided launched manifest CID for statuses even when not joined', async () => {
+    const fetchTaskStatuses = vi.fn(
+      async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),
+    );
+    const response = await gatherLauncherTasks(
+      {
+        config: { joinedSolverNets: {} } as unknown as JinnConfig,
+        creatorAddress: '0xabc',
+        now: () => NOW_MS,
+        fetchPostedTasks: () => [
+          { taskId: 't1', taskCid: 'cid1', postedAt: '2026-05-25T00:00:00Z', budget: { totalWei: '0' } },
+        ],
+        fetchTaskStatuses,
+      },
+      { manifestCid: 'bafy-owned-launch' },
+    );
+
+    expect(fetchTaskStatuses).toHaveBeenCalledTimes(1);
+    expect(fetchTaskStatuses).toHaveBeenCalledWith('bafy-owned-launch');
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
+  });
+
+  it('prefers the provided launched manifest CID instead of fanning out joined memberships', async () => {
+    const fetchTaskStatuses = vi.fn(
+      async (cid: string) =>
+        new Map([
+          [
+            't1',
+            {
+              taskId: 't1',
+              finalized: cid === 'bafy-launched',
+              refunded: false,
+              claimWindowEnd: 1_790_000_000,
+            },
+          ],
+        ]),
+    );
+    const response = await gatherLauncherTasks(
+      {
+        config: {
+          joinedSolverNets: {
+            'bafy-joined-a': { manifestCid: 'bafy-joined-a', roles: ['solver'] },
+            'bafy-joined-b': { manifestCid: 'bafy-joined-b', roles: ['solver'] },
+          },
+        } as unknown as JinnConfig,
+        creatorAddress: '0xabc',
+        now: () => NOW_MS,
+        fetchPostedTasks: () => [
+          { taskId: 't1', taskCid: 'cid1', postedAt: '2026-05-25T00:00:00Z', budget: { totalWei: '0' } },
+        ],
+        fetchTaskStatuses,
+      },
+      { manifestCid: 'bafy-launched' },
+    );
+
+    expect(fetchTaskStatuses).toHaveBeenCalledTimes(1);
+    expect(fetchTaskStatuses).toHaveBeenCalledWith('bafy-launched');
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
   });
 });

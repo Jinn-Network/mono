@@ -198,6 +198,20 @@ describe('LauncherLaunchedPage', () => {
     );
   });
 
+  it('passes the launched manifest CID when polling recent posted tasks', async () => {
+    vi.mocked(api.solvernets.get).mockResolvedValue(buildRecord());
+    vi.mocked(api.solvernets.getManifest).mockResolvedValue(buildManifestResponse());
+    wrap(<LauncherLaunchedPage solverNetId="sn-1" pollIntervalMs={1000} />);
+
+    await waitFor(() =>
+      expect(api.fetchLauncherTasks).toHaveBeenCalledWith({
+        cursor: undefined,
+        limit: 5,
+        manifestCid: 'bafybeigtest1234567890',
+      }),
+    );
+  });
+
   it('renders manifest fields (not placeholders) for an owned launching record (issue #114)', async () => {
     // Simulates the just-launched window: record.status === 'launching',
     // registry.metadataBlockNumber undefined. The API now serves the

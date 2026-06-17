@@ -70,11 +70,12 @@ export interface TasksPanelProps {
   record: LaunchedSolverNetRecord;
   /**
    * Override the fetcher in tests. Defaults to
-   * `api.fetchLauncherTasks({ cursor, limit })`.
+   * `api.fetchLauncherTasks({ cursor, limit, manifestCid })`.
    */
   fetchTasks?: (opts: {
     cursor?: string;
     limit?: number;
+    manifestCid?: string;
   }) => Promise<LauncherTasksResponse>;
 }
 
@@ -88,8 +89,8 @@ export function TasksPanel({ record, fetchTasks }: TasksPanelProps): JSX.Element
 
   const fetcher = fetchTasks ?? ((opts) => api.fetchLauncherTasks(opts));
   const { data, isLoading, isError, error, refetch } = useQuery<LauncherTasksResponse>({
-    queryKey: ['launcher-tasks', record.solverNetId, cursor ?? null],
-    queryFn: () => fetcher({ cursor, limit: PAGE_SIZE }),
+    queryKey: ['launcher-tasks', record.solverNetId, record.manifestCid, cursor ?? null],
+    queryFn: () => fetcher({ cursor, limit: PAGE_SIZE, manifestCid: record.manifestCid }),
     refetchInterval: 15_000,
   });
 
@@ -161,7 +162,7 @@ export function TasksPanel({ record, fetchTasks }: TasksPanelProps): JSX.Element
                     <TableHead className="w-[34%]">Task</TableHead>
                     <TableHead className="w-[16%]">SolverType</TableHead>
                     <TableHead className="w-[22%]">Posted</TableHead>
-                    <TableHead className="w-[14%]">State</TableHead>
+                    <TableHead className="w-[14%]">Local State</TableHead>
                     <TableHead className="w-[14%] text-right">Claims</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -212,6 +213,7 @@ function TaskRow({ task }: { task: LauncherTaskEntry }): JSX.Element {
   const tone = STATE_TONE[task.state] ?? { variant: 'secondary' as BadgeVariant, label: task.state };
   const titleText = task.summary?.title ?? truncateCid(task.taskCid);
   const solverLabel = task.solverType ?? task.solverNet;
+  const onchainStatus = normalizeOnchainStatus(task.onchainStatus);
   return (
     <TableRow
       data-testid="launcher-launched-task-row"
@@ -250,26 +252,41 @@ function TaskRow({ task }: { task: LauncherTaskEntry }): JSX.Element {
           <span>
             {task.claims.current} / {task.claims.max}
           </span>
-          {task.onchainStatus === 'unknown' ? (
-            <span
-              data-testid="launcher-launched-task-onchain"
-              aria-label="On-chain status unknown"
-              className="text-[var(--fg-muted)]"
-            >
-              —
-            </span>
-          ) : (
-            <Badge
-              data-testid="launcher-launched-task-onchain"
-              variant={ONCHAIN_TONE[task.onchainStatus].variant}
-              className="rounded-sm normal-case tracking-[0.1em]"
-            >
-              {ONCHAIN_TONE[task.onchainStatus].label}
-            </Badge>
-          )}
+          <OnchainStatusChip status={onchainStatus} />
         </span>
       </TableCell>
     </TableRow>
+  );
+}
+
+function normalizeOnchainStatus(status: TaskOnchainStatus | undefined): TaskOnchainStatus {
+  if (status === 'finalized' || status === 'open' || status === 'expired') return status;
+  return 'unknown';
+}
+
+function OnchainStatusChip({ status }: { status: TaskOnchainStatus }): JSX.Element {
+  if (status === 'unknown') {
+    return (
+      <span
+        data-testid="launcher-launched-task-onchain"
+        aria-label="On-chain status unknown"
+        className="text-[var(--fg-muted)]"
+      >
+        —
+      </span>
+    );
+  }
+
+  const tone = ONCHAIN_TONE[status];
+  return (
+    <Badge
+      data-testid="launcher-launched-task-onchain"
+      aria-label={`On-chain status: ${tone.label}`}
+      variant={tone.variant}
+      className="rounded-sm normal-case tracking-[0.1em]"
+    >
+      {tone.label}
+    </Badge>
   );
 }
 

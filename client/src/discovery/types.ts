@@ -564,8 +564,8 @@ export interface DiscoveryAPI {
    * floor-empty to `'unknown'` and MUST NEVER guess `'open'`.
    *
    * `claimWindowEnd` (unix seconds) may be null/undefined in the live indexer
-   * today (call-trace decode pending), so an `'expired'` derivation degrades to
-   * `'open'` when the window is unknown.
+   * today (call-trace decode pending), so callers must treat a missing/invalid
+   * window as `'unknown'` rather than guessing `'open'`.
    */
   getTaskStatuses(args: { manifestCid: string }): Promise<Map<string, TaskStatusSnapshot>>;
 }

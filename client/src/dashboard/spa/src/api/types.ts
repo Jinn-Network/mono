@@ -312,6 +312,13 @@ export interface LauncherTasksResponse {
   tasks: LauncherTaskEntry[];
 }
 
+export interface LauncherTasksRequestOptions {
+  cursor?: string;
+  limit?: number;
+  /** Launched-record manifest CID used to scope on-chain status lookup. */
+  manifestCid?: string;
+}
+
 /**
  * Legacy body shape for `PATCH /v1/launcher/solvernets/:name`. The endpoint
  * was retired by Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md

@@ -68,6 +68,11 @@ function parseCursor(raw: string | undefined): string | undefined {
   return raw;
 }
 
+function parseManifestCid(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function addLauncherRoutes(app: Hono, deps: LauncherRoutesDeps): void {
   app.get('/v1/launcher/status', async (c) => {
     const body = await gatherLauncherStatus({ ...deps, config: deps.getConfig() });
@@ -77,9 +82,10 @@ export function addLauncherRoutes(app: Hono, deps: LauncherRoutesDeps): void {
   app.get('/v1/launcher/tasks', async (c) => {
     const limit = parseLimit(c.req.query('limit'));
     const before = parseCursor(c.req.query('cursor'));
+    const manifestCid = parseManifestCid(c.req.query('manifestCid'));
     const body = await gatherLauncherTasks(
       { ...deps.tasksDeps, config: deps.getConfig() },
-      { limit, ...(before ? { before } : {}) },
+      { limit, ...(before ? { before } : {}), ...(manifestCid ? { manifestCid } : {}) },
     );
     return c.json(body);
   });

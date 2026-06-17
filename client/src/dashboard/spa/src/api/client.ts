@@ -7,6 +7,7 @@ import type {
   SolverNetsCatalogResponse,
   LauncherStatusResponse,
   LauncherTasksResponse,
+  LauncherTasksRequestOptions,
   LauncherSolverNetPatch,
   LauncherSolverNetPatchResponse,
   DraftListResponse,
@@ -302,10 +303,11 @@ export const api = {
   // state per §6.3 strict separation.
   fetchLauncherStatus: () =>
     jfetch<LauncherStatusResponse>('/v1/launcher/status'),
-  fetchLauncherTasks: (opts: { cursor?: string; limit?: number } = {}) => {
+  fetchLauncherTasks: (opts: LauncherTasksRequestOptions = {}) => {
     const q = new URLSearchParams();
     if (opts.cursor) q.set('cursor', opts.cursor);
     if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    if (opts.manifestCid) q.set('manifestCid', opts.manifestCid);
     const qs = q.toString();
     return jfetch<LauncherTasksResponse>(
       `/v1/launcher/tasks${qs ? `?${qs}` : ''}`,

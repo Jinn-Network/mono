@@ -130,10 +130,33 @@ describe('TasksPanel', () => {
     );
     expect(screen.getByText('Finalized')).toBeTruthy();
     expect(screen.getByText('Expired')).toBeTruthy();
+    expect(screen.getByLabelText('On-chain status: Finalized')).toBeTruthy();
+    expect(screen.getByLabelText('On-chain status: Expired')).toBeTruthy();
+    expect(screen.getByLabelText('On-chain status: Open')).toBeTruthy();
+    expect(screen.getByLabelText('On-chain status unknown')).toBeTruthy();
     // The 'open' on-chain chip is labelled "Open"; the 'unknown' renders a dash.
     const chips = screen.getAllByTestId('launcher-launched-task-onchain');
     expect(chips.length).toBe(4);
     expect(chips.some((c) => c.textContent === '—')).toBe(true);
+  });
+
+  it('treats a missing on-chain status as unknown instead of indexing a chip tone', async () => {
+    const taskWithoutStatus = {
+      ...buildTask({ taskId: 't-missing' }),
+      onchainStatus: undefined,
+    } as unknown as LauncherTaskEntry;
+    const fetchTasks = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '',
+      tasks: [taskWithoutStatus],
+    } satisfies LauncherTasksResponse);
+    wrap(<TasksPanel record={buildRecord()} fetchTasks={fetchTasks} />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId('launcher-launched-task-row').length).toBe(1),
+    );
+
+    expect(screen.getByLabelText('On-chain status unknown')).toBeTruthy();
+    expect(screen.getByTestId('launcher-launched-task-onchain').textContent).toBe('—');
   });
 
   it('renders error state when the query rejects', async () => {
@@ -164,13 +187,18 @@ describe('TasksPanel', () => {
     await waitFor(() =>
       expect(screen.getAllByTestId('launcher-launched-task-row').length).toBe(1),
     );
-    expect(fetchTasks).toHaveBeenCalledWith({ cursor: undefined, limit: 5 });
+    expect(fetchTasks).toHaveBeenCalledWith({
+      cursor: undefined,
+      limit: 5,
+      manifestCid: 'bafybeig',
+    });
 
     fireEvent.click(screen.getByTestId('launcher-launched-tasks-next'));
     await waitFor(() => expect(fetchTasks).toHaveBeenCalledTimes(2));
     expect(fetchTasks).toHaveBeenLastCalledWith({
       cursor: '2026-05-05T15:00:00Z',
       limit: 5,
+      manifestCid: 'bafybeig',
     });
   });
 

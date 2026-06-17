@@ -19,6 +19,7 @@ import type {
   PostedTaskRecord,
   FetchPostedTasksOptions,
 } from '../../src/api/launcher-tasks.js';
+import type { TaskStatusSnapshot } from '../../src/discovery/types.js';
 import { withTempStore } from '@test/store.js';
 
 const UI_TOKEN = 'ui-token-test';
@@ -53,6 +54,7 @@ interface BuildArgs {
   postedTasks?:
     | PostedTaskRecord[]
     | ((opts: FetchPostedTasksOptions) => PostedTaskRecord[]);
+  fetchTaskStatuses?: (manifestCid: string) => Promise<Map<string, TaskStatusSnapshot>>;
 }
 
 /**
@@ -146,6 +148,7 @@ function buildTestApp(args: BuildArgs): {
     tasksDeps: {
       creatorAddress: SAFE_ADDRESS,
       fetchPostedTasks,
+      ...(args.fetchTaskStatuses ? { fetchTaskStatuses: args.fetchTaskStatuses } : {}),
       now: args.now !== undefined ? () => args.now! : undefined,
     },
     persistConfigValue: persistShim.persistConfigValue,
@@ -327,6 +330,7 @@ interface TasksResponseBody {
     solverNet: string;
     postedAt: string;
     state: string;
+    onchainStatus: string;
     claims: { current: number; max: number };
     budget: { totalWei: string; remainingWei: string; reclaimableAt?: string };
     summary?: { title?: string; resolutionTime?: string };
@@ -408,6 +412,37 @@ describe('GET /v1/launcher/tasks', () => {
     // The fetch dep saw the parsed before timestamp.
     expect(fetchSpy.lastOpts?.before).toBe('2026-05-05T10:00:00.000Z');
     expect(fetchSpy.lastOpts?.limit).toBe(10);
+  });
+
+  it('passes ?manifestCid through so owned launched SolverNets can fetch statuses without membership', async () => {
+    const statusCalls: string[] = [];
+    const { app, token } = buildTestApp({
+      solverNets: {},
+      postedTasks: [
+        {
+          taskId: 'display-task',
+          protocolTaskId: '42',
+          taskCid: 'Qmstatus',
+          solverType: 'prediction.v1',
+          postedAt: '2026-05-05T10:00:00.000Z',
+        },
+      ],
+      fetchTaskStatuses: async (manifestCid) => {
+        statusCalls.push(manifestCid);
+        return new Map([
+          ['42', { taskId: '42', finalized: true, refunded: false }],
+        ]);
+      },
+    });
+
+    const res = await app.request('/v1/launcher/tasks?manifestCid=bafy-owned-launch', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TasksResponseBody;
+    expect(statusCalls).toEqual(['bafy-owned-launch']);
+    expect(body.tasks[0]?.onchainStatus).toBe('finalized');
   });
 
   it('maps unknown solverType to solverNet="unknown" without dropping the row', async () => {

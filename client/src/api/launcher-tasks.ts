@@ -117,6 +117,11 @@ export interface GatherLauncherTasksOptions {
   limit?: number;
   /** ISO-8601 timestamp; filter to rows with `postedAt < before`. */
   before?: string;
+  /**
+   * Optional launched-record manifest CID. When present, on-chain statuses are
+   * fetched only for this SolverNet, even if the launcher has not joined it.
+   */
+  manifestCid?: string;
 }
 
 const DEFAULT_LIMIT = 25;
@@ -158,6 +163,26 @@ function buildSolverTypeToNetIndex(
   return index;
 }
 
+function normalizeManifestCid(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function statusLookupManifestCids(
+  joinedSolverNets: JinnConfig['joinedSolverNets'] | undefined,
+  launchedManifestCid: string | undefined,
+): string[] {
+  const scopedCid = normalizeManifestCid(launchedManifestCid);
+  if (scopedCid) return [scopedCid];
+
+  const cids = new Set<string>();
+  for (const [cid, joined] of Object.entries(joinedSolverNets ?? {})) {
+    const normalized = normalizeManifestCid(joined.manifestCid) ?? normalizeManifestCid(cid);
+    if (normalized) cids.add(normalized);
+  }
+  return [...cids];
+}
+
 /**
  * Derive the on-chain status chip (#579) from a task's finalization snapshot.
  *
@@ -168,10 +193,11 @@ function buildSolverTypeToNetIndex(
  *   creator reclaimed budget), so it is terminal just like a finalized one. We
  *   collapse both into the 'finalized' chip rather than adding a 'refunded'
  *   tone — the launcher table only distinguishes open / closed / expired.
- * - not finalized, `claimWindowEnd <= now` → 'expired'.
- * - otherwise (incl. unknown `claimWindowEnd`) → 'open'. `claimWindowEnd` may be
- *   null/undefined in the live indexer today, so 'expired' degrades to 'open'
- *   when the window is unknown.
+ * - missing/invalid `claimWindowEnd` → 'unknown' (the indexer cannot prove
+ *   that claims are still open).
+ * - not finalized, `now > claimWindowEnd` → 'expired'. Exact equality remains
+ *   open, matching `TaskCoordinator.claimTask`.
+ * - otherwise → 'open'.
  *
  * `nowSeconds` is unix seconds, matching the indexer's `claimWindowEnd`.
  */
@@ -181,9 +207,10 @@ export function deriveOnchainStatus(
 ): TaskOnchainStatus {
   if (!snapshot) return 'unknown';
   if (snapshot.finalized || snapshot.refunded) return 'finalized';
-  if (snapshot.claimWindowEnd != null && snapshot.claimWindowEnd <= nowSeconds) {
-    return 'expired';
+  if (typeof snapshot.claimWindowEnd !== 'number' || !Number.isFinite(snapshot.claimWindowEnd)) {
+    return 'unknown';
   }
+  if (nowSeconds > snapshot.claimWindowEnd) return 'expired';
   return 'open';
 }
 
@@ -264,7 +291,7 @@ export async function gatherLauncherTasks(
   const statusMap = new Map<string, TaskStatusSnapshot>();
   const fetchTaskStatuses = deps.fetchTaskStatuses;
   if (fetchTaskStatuses) {
-    for (const cid of Object.keys(deps.config.joinedSolverNets ?? {})) {
+    for (const cid of statusLookupManifestCids(deps.config.joinedSolverNets, opts.manifestCid)) {
       try {
         const snapshots = await fetchTaskStatuses(cid);
         for (const [taskId, snapshot] of snapshots) statusMap.set(taskId, snapshot);

@@ -99,6 +99,35 @@ describe('HttpDiscoveryAPI.getTaskStatuses (#579)', () => {
     });
   });
 
+  it('strictly parses string booleans and invalid claimWindowEnd values', async () => {
+    const page = {
+      data: {
+        tasks: {
+          items: [
+            {
+              id: '201',
+              finalized: 'false',
+              refunded: 'true',
+              claimWindowEnd: 'not-a-number',
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify(page), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const statuses = await api.getTaskStatuses({ manifestCid: 'bafymanifest' });
+    expect(statuses.get('201')).toEqual({
+      taskId: '201', finalized: false, refunded: true, claimWindowEnd: undefined,
+    });
+  });
+
   it('throws DiscoveryUnavailableError when the network fetch throws', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (isReadyProbe(url)) return new Response('ok', { status: 200 });
