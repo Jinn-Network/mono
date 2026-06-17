@@ -128,6 +128,52 @@ describe('HttpDiscoveryAPI.getTaskStatuses (#579)', () => {
     });
   });
 
+  it('treats blank claimWindowEnd as missing instead of zero', async () => {
+    const page = {
+      data: {
+        tasks: {
+          items: [{ id: '202', finalized: false, refunded: false, claimWindowEnd: '   ' }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify(page), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const statuses = await api.getTaskStatuses({ manifestCid: 'bafymanifest' });
+    expect(statuses.get('202')).toEqual({
+      taskId: '202', finalized: false, refunded: false, claimWindowEnd: undefined,
+    });
+  });
+
+  it('omits task status snapshots with malformed finalization flags', async () => {
+    const page = {
+      data: {
+        tasks: {
+          items: [
+            { id: '203', finalized: 'sometimes', refunded: false, claimWindowEnd: '1700000000' },
+            { id: '204', finalized: false, refunded: 'maybe', claimWindowEnd: '1700000000' },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify(page), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const statuses = await api.getTaskStatuses({ manifestCid: 'bafymanifest' });
+    expect(statuses.has('203')).toBe(false);
+    expect(statuses.has('204')).toBe(false);
+  });
+
   it('throws DiscoveryUnavailableError when the network fetch throws', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (isReadyProbe(url)) return new Response('ok', { status: 200 });

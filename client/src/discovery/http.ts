@@ -830,7 +830,9 @@ function fetchWithRetry(baseFetch: typeof fetch, retryDelaysMs: readonly number[
 function parseOptionalNumber(value: string | number | null | undefined): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
   if (typeof value !== 'string') return undefined;
-  const n = Number(value);
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
   return Number.isFinite(n) ? n : undefined;
 }
 
@@ -1780,11 +1782,14 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
       );
       for (const row of data.tasks?.items ?? []) {
+        const finalized = parseOptionalBoolean(row.finalized);
+        const refunded = parseOptionalBoolean(row.refunded);
+        if (finalized === undefined || refunded === undefined) continue;
         const claimWindowEnd = parseOptionalNumber(row.claimWindowEnd);
         out.set(row.id, {
           taskId: row.id,
-          finalized: parseOptionalBoolean(row.finalized) ?? false,
-          refunded: parseOptionalBoolean(row.refunded) ?? false,
+          finalized,
+          refunded,
           claimWindowEnd,
         });
       }

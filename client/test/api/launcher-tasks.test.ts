@@ -243,6 +243,50 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     expect(fetchTaskStatuses).toHaveBeenCalledWith('bafymanifest');
   });
 
+  it('scopes joined status lookup to manifest cids matching the current page solver type', async () => {
+    const fetchTaskStatuses = vi.fn(
+      async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),
+    );
+    const response = await gatherLauncherTasks({
+      config: {
+        joinedSolverNets: {
+          'bafy-unrelated': {
+            manifestCid: 'bafy-unrelated',
+            name: 'other',
+            contract: { id: 'other', version: 'v1' },
+            roles: ['solver'],
+            plugins: [],
+            disabledDefaultPlugins: [],
+          },
+          'bafy-current': {
+            manifestCid: 'bafy-current',
+            name: 'swe-rebench-v2',
+            contract: { id: 'swe-rebench-v2', version: 'v1' },
+            roles: ['solver'],
+            plugins: [],
+            disabledDefaultPlugins: [],
+          },
+        },
+      } as unknown as JinnConfig,
+      creatorAddress: '0xabc',
+      now: () => NOW_MS,
+      fetchPostedTasks: () => [
+        {
+          taskId: 't1',
+          taskCid: 'cid1',
+          solverType: 'swe-rebench-v2.v1',
+          postedAt: '2026-05-25T00:00:00Z',
+          budget: { totalWei: '0' },
+        },
+      ],
+      fetchTaskStatuses,
+    });
+
+    expect(fetchTaskStatuses).toHaveBeenCalledTimes(1);
+    expect(fetchTaskStatuses).toHaveBeenCalledWith('bafy-current');
+    expect(response.tasks[0]?.onchainStatus).toBe('finalized');
+  });
+
   it('uses the provided launched manifest CID for statuses even when not joined', async () => {
     const fetchTaskStatuses = vi.fn(
       async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),

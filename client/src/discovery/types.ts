@@ -63,8 +63,8 @@ export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
  * Per-task on-chain finalization snapshot, returned by `getTaskStatuses` keyed
  * by on-chain taskId (decimal string). `claimWindowEnd` is unix seconds and MAY
  * be null/undefined in the live indexer today (its call-trace decode is
- * pending), so an 'expired' derivation degrades to 'open' when the window is
- * unknown.
+ * pending), so a missing/invalid window degrades to 'unknown' rather than
+ * guessing 'open'.
  */
 export interface TaskStatusSnapshot {
   taskId: string;

@@ -159,11 +159,11 @@ export function TasksPanel({ record, fetchTasks }: TasksPanelProps): JSX.Element
               <Table className="table-fixed">
                 <TableHeader>
                   <TableRow className="bg-[var(--bg)] hover:bg-[var(--bg)]">
-                    <TableHead className="w-[34%]">Task</TableHead>
+                    <TableHead className="w-[30%]">Task</TableHead>
                     <TableHead className="w-[16%]">SolverType</TableHead>
-                    <TableHead className="w-[22%]">Posted</TableHead>
+                    <TableHead className="w-[20%]">Posted</TableHead>
                     <TableHead className="w-[14%]">Local State</TableHead>
-                    <TableHead className="w-[14%] text-right">Claims</TableHead>
+                    <TableHead className="w-[20%] text-right">Claims / On-chain</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

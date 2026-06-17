@@ -128,6 +128,7 @@ describe('TasksPanel', () => {
     await waitFor(() =>
       expect(screen.getAllByTestId('launcher-launched-task-row').length).toBe(4),
     );
+    expect(screen.getByRole('columnheader', { name: 'Claims / On-chain' })).toBeTruthy();
     expect(screen.getByText('Finalized')).toBeTruthy();
     expect(screen.getByText('Expired')).toBeTruthy();
     expect(screen.getByLabelText('On-chain status: Finalized')).toBeTruthy();

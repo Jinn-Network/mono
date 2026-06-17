@@ -171,9 +171,22 @@ function normalizeManifestCid(raw: string | undefined): string | undefined {
 function statusLookupManifestCids(
   joinedSolverNets: JinnConfig['joinedSolverNets'] | undefined,
   launchedManifestCid: string | undefined,
+  records: readonly PostedTaskRecord[],
 ): string[] {
   const scopedCid = normalizeManifestCid(launchedManifestCid);
   if (scopedCid) return [scopedCid];
+
+  const solverTypes = new Set(records.map((record) => record.solverType).filter(Boolean));
+  if (solverTypes.size > 0) {
+    const cids = new Set<string>();
+    for (const [cid, joined] of Object.entries(joinedSolverNets ?? {})) {
+      const solverType = solverTypeFromJoinedContract(joined);
+      if (!solverType || !solverTypes.has(solverType)) continue;
+      const normalized = normalizeManifestCid(joined.manifestCid) ?? normalizeManifestCid(cid);
+      if (normalized) cids.add(normalized);
+    }
+    return [...cids];
+  }
 
   const cids = new Set<string>();
   for (const [cid, joined] of Object.entries(joinedSolverNets ?? {})) {
@@ -279,19 +292,25 @@ export async function gatherLauncherTasks(
     if (Number.isFinite(tb)) return 1;
     return 0;
   });
+  const pageRecords = sorted.slice(0, limit);
 
   const solverTypeIndex = buildSolverTypeToNetIndex(deps.config.joinedSolverNets);
 
-  // Build a merged on-chain status map keyed by taskId, one fetch per joined
-  // SolverNet manifest CID. Each call is guarded so the store-only / offline /
-  // indexer-outage path degrades to all-'unknown' rather than erroring the
-  // whole response (#579 graceful-degradation guard).
+  // Build a merged on-chain status map keyed by taskId. The launched-SolverNet
+  // page scopes this to its manifest CID; the generic fallback only checks
+  // joined SolverNets matching the current page's solver types to avoid
+  // unbounded dashboard-poll fanout. Each call is guarded so the store-only /
+  // offline / indexer-outage path degrades to all-'unknown' (#579).
   const generatedAtMs = deps.now?.() ?? Date.now();
   const nowSeconds = Math.floor(generatedAtMs / 1000);
   const statusMap = new Map<string, TaskStatusSnapshot>();
   const fetchTaskStatuses = deps.fetchTaskStatuses;
   if (fetchTaskStatuses) {
-    for (const cid of statusLookupManifestCids(deps.config.joinedSolverNets, opts.manifestCid)) {
+    for (const cid of statusLookupManifestCids(
+      deps.config.joinedSolverNets,
+      opts.manifestCid,
+      pageRecords,
+    )) {
       try {
         const snapshots = await fetchTaskStatuses(cid);
         for (const [taskId, snapshot] of snapshots) statusMap.set(taskId, snapshot);
@@ -301,8 +320,7 @@ export async function gatherLauncherTasks(
     }
   }
 
-  const tasks = sorted
-    .slice(0, limit)
+  const tasks = pageRecords
     .map((record) => mapRecordToEntry(record, solverTypeIndex, statusMap, nowSeconds));
 
   const cursor =
