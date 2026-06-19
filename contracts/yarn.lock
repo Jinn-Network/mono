@@ -1892,9 +1892,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hardhat@npm:3.8.0":
-  version: 3.8.0
-  resolution: "hardhat@npm:3.8.0"
+"hardhat@npm:3.9.0":
+  version: 3.9.0
+  resolution: "hardhat@npm:3.9.0"
   dependencies:
     "@nomicfoundation/edr": "npm:0.12.0"
     "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
@@ -1916,7 +1916,7 @@ __metadata:
     zod: "npm:^3.23.8"
   bin:
     hardhat: dist/src/cli.js
-  checksum: 10c0/93edf601f9addcd5731afbeba4424e3f1d0809612ba41ec6510216ad8033245a51a5adc856431f02ada368457973202b29fe1bf53cd54caf4cd9921f7eaf4ba8
+  checksum: 10c0/c2372449a84d594442ab220cca39afd50966f41691ab4dc42de3e1a60a9d5390faebb27f590002c73fdb6aa32f4620508717fe885f27be26f912db47eab22670
   languageName: node
   linkType: hard
 
@@ -2110,7 +2110,7 @@ __metadata:
     chai: "npm:^5.3.3"
     dotenv: "npm:^17.3.1"
     ethers: "npm:^6.16.0"
-    hardhat: "npm:3.8.0"
+    hardhat: "npm:3.9.0"
     mocha: "npm:^11.7.6"
     typescript: "npm:6.0"
   languageName: unknown
