@@ -695,12 +695,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:^1.19.12, @hono/node-server@npm:^1.19.9":
+"@hono/node-server@npm:^1.19.9":
   version: 1.19.14
   resolution: "@hono/node-server@npm:1.19.14"
   peerDependencies:
     hono: ^4
   checksum: 10c0/41a099bb3705d96aac44b7a8db8805f2a22ce8a0f767a27b6d10b74a9964925df01c5f35d3631e882f8bcdeee3518884c30f40588ac8c960d88bf71048ba0df3
+  languageName: node
+  linkType: hard
+
+"@hono/node-server@npm:^2.0.5":
+  version: 2.0.5
+  resolution: "@hono/node-server@npm:2.0.5"
+  peerDependencies:
+    hono: ^4
+  checksum: 10c0/b091faad4a6033b5690f134a3defa2b4b0efbf839152bf0246226b2e9403547555a0f96ba2d16645225fc090e3e8dde0907110dd114473583ba75d16e98df561
   languageName: node
   linkType: hard
 
@@ -985,7 +994,7 @@ __metadata:
     "@coinbase/cdp-sdk": "npm:^1.48.2"
     "@ethereumjs/wallet": "npm:^10.0.0"
     "@grpc/grpc-js": "npm:^1.14.3"
-    "@hono/node-server": "npm:^1.19.12"
+    "@hono/node-server": "npm:^2.0.5"
     "@huggingface/transformers": "npm:^4.2.0"
     "@jinn-network/sdk": "portal:../packages/sdk"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"

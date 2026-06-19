@@ -121,7 +121,7 @@
   "dependencies": {
     "@ethereumjs/wallet": "^10.0.0",
     "@grpc/grpc-js": "^1.14.3",
-    "@hono/node-server": "^1.19.12",
+    "@hono/node-server": "^2.0.5",
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@msgpack/msgpack": "^3.0.0",
