@@ -4396,6 +4396,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@x402/core@npm:~2.15.0":
+  version: 2.15.0
+  resolution: "@x402/core@npm:2.15.0"
+  dependencies:
+    zod: "npm:^3.24.2"
+  checksum: 10c0/0d59713929b29ef8691498a980c1926af82315e5dff9058e0edde75fbd5312ad327d4673f7e956747de475f260d9c9045784abfe7e680246c0fce118b0a35620
+  languageName: node
+  linkType: hard
+
 "@x402/evm@npm:^2.14.0":
   version: 2.14.0
   resolution: "@x402/evm@npm:2.14.0"
@@ -4425,11 +4434,11 @@ __metadata:
   linkType: hard
 
 "@x402/fetch@npm:^2.14.0":
-  version: 2.14.0
-  resolution: "@x402/fetch@npm:2.14.0"
+  version: 2.15.0
+  resolution: "@x402/fetch@npm:2.15.0"
   dependencies:
-    "@x402/core": "npm:~2.14.0"
-  checksum: 10c0/053af42fb96f80dc00dbaeebc43095a31e95008196be35c6d95019fe625bc100fddd53e9b672a9924f1a160c1d302f2144200577503143890353720343270ae8
+    "@x402/core": "npm:~2.15.0"
+  checksum: 10c0/aa5900b2257a764ec359a2ad30594e8c8a23160bc6e1828168d810621fe6d9ce5e0a437b48035f581d8ec59a1e9e739dcae066bc3d7d42801fe07228ad6e9a75
   languageName: node
   linkType: hard
 
