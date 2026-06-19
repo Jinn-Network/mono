@@ -693,19 +693,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-mocha@npm:^3.0.20":
-  version: 3.0.20
-  resolution: "@nomicfoundation/hardhat-mocha@npm:3.0.20"
+"@nomicfoundation/hardhat-mocha@npm:^3.0.21":
+  version: 3.0.21
+  resolution: "@nomicfoundation/hardhat-mocha@npm:3.0.21"
   dependencies:
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.13"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
     "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
     "@nomicfoundation/hardhat-zod-utils": "npm:^3.0.5"
     tsx: "npm:^4.19.3"
     zod: "npm:^3.23.8"
   peerDependencies:
-    hardhat: ^3.4.0
+    hardhat: ^3.8.0
     mocha: ^11.0.0
-  checksum: 10c0/53461ae3a4a3620012ada1971c227866f7234094fffd340328a7c149dc1d0881d6c5beefebd0716cbf42fe9ef4760aed6054bcc7c609d738ae21bf1b18bc1313
+  checksum: 10c0/8541b6b47b821bc153c20785b438e22cffb5205d98723c639def7cccb6b7e124f2955a0aa44b2ab42dd5d445ef4e7b44f083fbcdfb39d7300a97945305a6774b
   languageName: node
   linkType: hard
 
@@ -2114,7 +2114,7 @@ __metadata:
     "@nomicfoundation/hardhat-ignition": "npm:^3.1.6"
     "@nomicfoundation/hardhat-ignition-ethers": "npm:^3.1.6"
     "@nomicfoundation/hardhat-keystore": "npm:^3.0.12"
-    "@nomicfoundation/hardhat-mocha": "npm:^3.0.20"
+    "@nomicfoundation/hardhat-mocha": "npm:^3.0.21"
     "@nomicfoundation/hardhat-network-helpers": "npm:^3.0.10"
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "npm:^3.0.7"
     "@nomicfoundation/hardhat-typechain": "npm:^3.1.1"
