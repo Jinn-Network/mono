@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: packages/indexer-enrichment
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -60,7 +60,7 @@ jobs:
     name: Enrichment Worker Docker Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Build context is packages/ (not packages/indexer-enrichment/) so the
       # Dockerfile can COPY + build the @jinn-network/sdk and @jinn-network/indexer

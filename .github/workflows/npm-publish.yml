@@ -64,7 +64,7 @@ jobs:
       # timeout class of CI flake without requiring a paid backup secret.
       BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.ref }}
 
@@ -346,7 +346,7 @@ jobs:
           # Use leading-zero %Y.%m.%d so May 18 is v2026.05.18, not v2026.5.18.
           DATE_TAG="$(date -u -d "$PUBLISHED_AT" +"v%Y.%m.%d")"
 
-          # actions/checkout@v6 does a shallow clone and may not have fetched the just-created
+          # actions/checkout@v7 does a shallow clone and may not have fetched the just-created
           # release tag into refs/tags/. Fetch it explicitly before resolving.
           git fetch --tags --depth=1 origin "${RELEASE_TAG}"
 
