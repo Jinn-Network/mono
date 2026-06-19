@@ -1968,6 +1968,28 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@radix-ui/react-collection@npm:1.1.10":
+  version: 1.1.10
+  resolution: "@radix-ui/react-collection@npm:1.1.10"
+  dependencies:
+    "@radix-ui/react-compose-refs": "npm:1.1.3"
+    "@radix-ui/react-context": "npm:1.1.4"
+    "@radix-ui/react-primitive": "npm:2.1.6"
+    "@radix-ui/react-slot": "npm:1.3.0"
+  peerDependencies:
+    "@types/react": "*"
+    "@types/react-dom": "*"
+    react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+  peerDependenciesMeta:
+    "@types/react":
+      optional: true
+    "@types/react-dom":
+      optional: true
+  checksum: 10c0/2dd9387e0368ad1173809aee7bbcbdf1a1e75599ee33ecad97ccdac17bef1ed3a911e0c7891bc95ddba0e3906ea9050c0fabbcba35a563502b590d451194fc14
+  languageName: node
+  linkType: hard
+
 "@radix-ui/react-collection@npm:1.1.7":
   version: 1.1.7
   resolution: "@radix-ui/react-collection@npm:1.1.7"
@@ -1987,28 +2009,6 @@ __metadata:
     "@types/react-dom":
       optional: true
   checksum: 10c0/fa321a7300095508491f75414f02b243f0c3f179dc0728cfd115e2ea9f6f48f1516532b59f526d9ac81bbab63cd98a052074b4703ec0b9428fac945ebabec5fd
-  languageName: node
-  linkType: hard
-
-"@radix-ui/react-collection@npm:1.1.9":
-  version: 1.1.9
-  resolution: "@radix-ui/react-collection@npm:1.1.9"
-  dependencies:
-    "@radix-ui/react-compose-refs": "npm:1.1.3"
-    "@radix-ui/react-context": "npm:1.1.4"
-    "@radix-ui/react-primitive": "npm:2.1.5"
-    "@radix-ui/react-slot": "npm:1.2.5"
-  peerDependencies:
-    "@types/react": "*"
-    "@types/react-dom": "*"
-    react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
-    react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
-  peerDependenciesMeta:
-    "@types/react":
-      optional: true
-    "@types/react-dom":
-      optional: true
-  checksum: 10c0/26e86ba9e4f196ae07df0b19cad347f7c1c3ab26eb0d833c92e18c10a6279bd4277c31ab183fd0e7ddccb48ad0b77a84452f480b1f2186bad04219316cc702e3
   languageName: node
   linkType: hard
 
@@ -2556,6 +2556,25 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@radix-ui/react-primitive@npm:2.1.6":
+  version: 2.1.6
+  resolution: "@radix-ui/react-primitive@npm:2.1.6"
+  dependencies:
+    "@radix-ui/react-slot": "npm:1.3.0"
+  peerDependencies:
+    "@types/react": "*"
+    "@types/react-dom": "*"
+    react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+  peerDependenciesMeta:
+    "@types/react":
+      optional: true
+    "@types/react-dom":
+      optional: true
+  checksum: 10c0/2d497bf05275df598a1435fe0c45d0c4da6647d5ddd692ec77780242cab57819f6acd2c3b56086f202f7998a649697c680daf93e68a08bf3bc660b0155ebd88e
+  languageName: node
+  linkType: hard
+
 "@radix-ui/react-progress@npm:^1.1.0":
   version: 1.1.9
   resolution: "@radix-ui/react-progress@npm:1.1.9"
@@ -2631,17 +2650,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@radix-ui/react-roving-focus@npm:1.1.12":
-  version: 1.1.12
-  resolution: "@radix-ui/react-roving-focus@npm:1.1.12"
+"@radix-ui/react-roving-focus@npm:1.1.13":
+  version: 1.1.13
+  resolution: "@radix-ui/react-roving-focus@npm:1.1.13"
   dependencies:
     "@radix-ui/primitive": "npm:1.1.4"
-    "@radix-ui/react-collection": "npm:1.1.9"
+    "@radix-ui/react-collection": "npm:1.1.10"
     "@radix-ui/react-compose-refs": "npm:1.1.3"
     "@radix-ui/react-context": "npm:1.1.4"
     "@radix-ui/react-direction": "npm:1.1.2"
     "@radix-ui/react-id": "npm:1.1.2"
-    "@radix-ui/react-primitive": "npm:2.1.5"
+    "@radix-ui/react-primitive": "npm:2.1.6"
     "@radix-ui/react-use-callback-ref": "npm:1.1.2"
     "@radix-ui/react-use-controllable-state": "npm:1.2.3"
   peerDependencies:
@@ -2654,7 +2673,7 @@ __metadata:
       optional: true
     "@types/react-dom":
       optional: true
-  checksum: 10c0/7a93bc145a9891a7f48921d7edcb379ab7a318366ac22a18a1d9aa34a89e0b5bd42a7401bf84ed8a1d541c933dadb6c49fb0a6c1e0eb78f8416aa169a850fcb5
+  checksum: 10c0/5259df343f97240cb7c68a0bec91c09e1517eb469b6821800c9b1b64204ab9aa70bf93fb911078cc7b1a073c7427b681fd4aac8e72c7b0c9433b2b22993833fc
   languageName: node
   linkType: hard
 
@@ -2715,6 +2734,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@radix-ui/react-slot@npm:1.3.0":
+  version: 1.3.0
+  resolution: "@radix-ui/react-slot@npm:1.3.0"
+  dependencies:
+    "@radix-ui/react-compose-refs": "npm:1.1.3"
+  peerDependencies:
+    "@types/react": "*"
+    react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+  peerDependenciesMeta:
+    "@types/react":
+      optional: true
+  checksum: 10c0/7353520950dcbc5c331f79aeac5bc8efa5130014e8121f85b337996ec5a2cef89f1375ff879b72ba05182de93c1126b22ec328f171edd7a2888c1532d10f74b5
+  languageName: node
+  linkType: hard
+
 "@radix-ui/react-slot@npm:^1.1.0":
   version: 1.2.4
   resolution: "@radix-ui/react-slot@npm:1.2.4"
@@ -2756,16 +2790,16 @@ __metadata:
   linkType: hard
 
 "@radix-ui/react-tabs@npm:^1.1.1":
-  version: 1.1.14
-  resolution: "@radix-ui/react-tabs@npm:1.1.14"
+  version: 1.1.15
+  resolution: "@radix-ui/react-tabs@npm:1.1.15"
   dependencies:
     "@radix-ui/primitive": "npm:1.1.4"
     "@radix-ui/react-context": "npm:1.1.4"
     "@radix-ui/react-direction": "npm:1.1.2"
     "@radix-ui/react-id": "npm:1.1.2"
     "@radix-ui/react-presence": "npm:1.1.6"
-    "@radix-ui/react-primitive": "npm:2.1.5"
-    "@radix-ui/react-roving-focus": "npm:1.1.12"
+    "@radix-ui/react-primitive": "npm:2.1.6"
+    "@radix-ui/react-roving-focus": "npm:1.1.13"
     "@radix-ui/react-use-controllable-state": "npm:1.2.3"
   peerDependencies:
     "@types/react": "*"
@@ -2777,7 +2811,7 @@ __metadata:
       optional: true
     "@types/react-dom":
       optional: true
-  checksum: 10c0/73c2a9e8d87545c8f9582b7ff861b02e0ce4e0e97a3294489e07fc0ae0cd82e7563007292ae191dda17e4c2ae91f01977e6e3eda2a2428434a67d38de9eba025
+  checksum: 10c0/b95e3b4474affe4dce363f88a4baf1abd9075f80833678d2a9b731b4ab8909686132941dead7f5168e8b65a88341a4394f42c71a91685e7740a7410d8537f76c
   languageName: node
   linkType: hard
 
