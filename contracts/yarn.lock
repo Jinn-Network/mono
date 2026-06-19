@@ -783,19 +783,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-verify@npm:^3.0.18":
-  version: 3.0.18
-  resolution: "@nomicfoundation/hardhat-verify@npm:3.0.18"
+"@nomicfoundation/hardhat-verify@npm:^3.0.20":
+  version: 3.0.20
+  resolution: "@nomicfoundation/hardhat-verify@npm:3.0.20"
   dependencies:
     "@ethersproject/abi": "npm:^5.8.0"
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.13"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
     "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
     "@nomicfoundation/hardhat-zod-utils": "npm:^3.0.5"
     cbor2: "npm:^1.9.0"
     zod: "npm:^3.23.8"
   peerDependencies:
-    hardhat: ^3.4.0
-  checksum: 10c0/262658ee9855622f36f4d1c8962e807f52bfd5ed9ac457c377576dcbb336f7f25e7ed9229b392c125fe7a505a0aa202b3de4d4b5696fdbd20be099a61d8e97e8
+    hardhat: ^3.8.0
+  checksum: 10c0/b644ad7b898467ec5cc64da3bb58411689df86c68be242bf718bfcd83c5a67910b274fdecc9c83b8b18990332272ca3db1cff243d4ba31c9839d4547a0da198a
   languageName: node
   linkType: hard
 
@@ -2118,7 +2118,7 @@ __metadata:
     "@nomicfoundation/hardhat-network-helpers": "npm:^3.0.10"
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "npm:^3.0.7"
     "@nomicfoundation/hardhat-typechain": "npm:^3.1.1"
-    "@nomicfoundation/hardhat-verify": "npm:^3.0.18"
+    "@nomicfoundation/hardhat-verify": "npm:^3.0.20"
     "@nomicfoundation/ignition-core": "npm:^3.1.7"
     "@openzeppelin/contracts": "npm:^5.6.1"
     "@prb/math": "npm:^4.1.2"
