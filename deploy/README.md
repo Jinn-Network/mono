@@ -54,12 +54,11 @@ RUN chmod +x /usr/local/bin/<recipe>-seed.sh
 CMD ["/usr/local/bin/<recipe>-seed.sh", "run", "--config", "/data/config.json"]
 ```
 
-The overlay keeps the base `ENTRYPOINT` (do **not** override it). At boot the
-base entrypoint drops root→node, then its case-dispatch sees the absolute-path
-CMD[0] and `exec`s the seed script as the node user. The seed script does
-**seeding only** (auth file, git identity, config / launched-record seed,
-optional one-shot state restore) and ends with `exec node dist/bin/jinn.js "$@"`,
-so the CMD tail (`run --config /data/config.json`) reaches the daemon.
+Most overlays keep the base `ENTRYPOINT`. The launcher overlay is the exception
+while published base tags can lag absolute-path dispatch support: its seed script
+also chowns `/data` and drops root→node before seeding. All seed scripts end with
+`exec node dist/bin/jinn.js "$@"`, so the CMD tail (`run --config /data/config.json`)
+reaches the daemon.
 
 `BASE_TAG` must point to a base release that includes #988. Default is `latest`;
 pin it via a `BASE_TAG` Railway service variable or `[build.args]` in the
@@ -95,7 +94,7 @@ Current recipes:
 
 | Recipe | Harness | Agent CLI added on top of base |
 |---|---|---|
-| [`railway-launcher-operator/`](railway-launcher-operator/) | claude-code / Haiku | none (claude-code is in the base) |
+| [`railway-launcher-operator/`](railway-launcher-operator/) | claude-code or codex | `@openai/codex@0.133.0` (claude-code is in the base) |
 | [`railway-operator-codex/`](railway-operator-codex/) | codex | `@openai/codex@0.133.0` |
 
 ## Canary lane — running `next` on the pre-release test operator
@@ -143,12 +142,13 @@ Every recipe shares the same runtime contract:
 - **A `/data` volume, mounted at the service level** — never a `VOLUME` directive
   in the Dockerfile (Railway rejects it and it masks the entrypoint chown). On
   Railway: `railway volume add --mount-path /data`.
-- **`JINN_STATE_DIR=/data`** (baked into the base). The daemon derives `earning/`,
-  the SQLite db, `engine/impl-state/`, and `swe-rebench-v2/` under this one root —
-  no per-key `JINN_EARNING_DIR` / `JINN_DB_PATH` / etc. overrides needed.
+- **`JINN_STATE_DIR=/data`** (baked into current base releases). The daemon
+  derives `earning/`, the SQLite db, `engine/impl-state/`, and `swe-rebench-v2/`
+  under this one root. The launcher overlay also sets the older per-key state
+  envs while published tags lag the root-aware daemon.
 - **Seed env vars** (set in the service's Variables panel):
-  - `CLAUDE_CODE_OAUTH_TOKEN` (claude-code recipe) **or** `CODEX_AUTH_JSON`
-    (codex recipe) — the agent CLI credential.
+  - `CLAUDE_CODE_OAUTH_TOKEN` for claude-code and/or `CODEX_AUTH_JSON`
+    for codex — the agent CLI credential.
   - `CONFIG_TEMPLATE_JSON` — the operator config, minified; seeded to
     `/data/config.json` on first boot only. Must carry the `joinedSolverNets`
     entry with the load-bearing `contract: { id, version }` field (#674).
@@ -206,8 +206,10 @@ four daemon-correctness bash lines in the entrypoint:
    loaded, the generator spawns, task-creation on the indexer is non-zero) and
    `/v1/status` shows the same readouts (ai-units cap engaged, loop-completion,
    impl-state cadence, earning).
-4. **Confirm the entrypoint is clean** — none of the four daemon-correctness bash
-   lines remain in the overlay seed scripts:
+4. **Confirm the entrypoint is clean** for overlays using a base that includes
+   #988 — none of the four daemon-correctness bash lines remain in those overlay
+   seed scripts. The launcher overlay temporarily carries compatibility shims
+   while published base tags lag:
    - `gosu node …` (the base entrypoint does the drop, not the overlay),
    - `rm -f …/daemon.pid` (#955, daemon-owned),
    - `find … -name '._*' -delete` (#954, daemon-owned),

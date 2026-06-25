@@ -30,10 +30,16 @@ export function hasClaudeCodeOnDisk(homeDirOverride?: string): boolean {
 /**
  * Does this operator have Codex CLI installed and authed?
  *
- * Codex CLI writes its OAuth to `~/.codex/auth.json`. Presence is the
- * subscription signal.
+ * Codex CLI writes OAuth to `$CODEX_HOME/auth.json` in hosted deploys or
+ * `~/.codex/auth.json` locally. Presence is the subscription signal.
  */
 export function hasCodexOnDisk(homeDirOverride?: string): boolean {
+  return hasCodexAuthFile(process.env, homeDirOverride);
+}
+
+function hasCodexAuthFile(env: NodeJS.ProcessEnv, homeDirOverride?: string): boolean {
+  const codexHome = env['CODEX_HOME']?.trim();
+  if (codexHome && existsSync(join(codexHome, 'auth.json'))) return true;
   return existsSync(join(homeDirOverride ?? homedir(), '.codex', 'auth.json'));
 }
 
@@ -68,7 +74,7 @@ export function resolveCredentialId(
       return null;
     case CODEX_HARNESS:
       if (env['OPENAI_API_KEY']) return 'openai:api-key';
-      if (hasCodexOnDisk(homeDirOverride)) return 'openai:subscription';
+      if (hasCodexAuthFile(env, homeDirOverride)) return 'openai:subscription';
       return null;
     case HERMES_AGENT_HARNESS: {
       const provider = (env['JINN_HERMES_PROVIDER'] ?? 'hermes').trim().toLowerCase();

@@ -8,11 +8,19 @@
 # See docs/superpowers/specs/2026-06-01-host-supervised-launcher-operator-daemon-design.md
 set -euo pipefail
 
+if [ "$(id -u)" = "0" ]; then
+  STATE_DIR="${JINN_STATE_DIR:-/data}"
+  mkdir -p "$STATE_DIR"
+  chown -R node:node "$STATE_DIR" 2>/dev/null || true
+  exec gosu node env HOME=/home/node "$0" "$@"
+fi
+
 echo "[seed] running as uid=$(id -u) ($(id -un)) HOME=$HOME"
 
 EARNING_DIR="${JINN_EARNING_DIR:-${JINN_STATE_DIR:-/data}/earning}"
 CONFIG_PATH="${JINN_CONFIG:-/data/config.json}"
 LAUNCHED_DIR="$EARNING_DIR/solvernets/launched"
+CODEX_HOME="${CODEX_HOME:-/data/codex-home}"
 
 # --- One-shot state restore (cutover migration path) --------------------------
 # JINN_STATE_TARBALL_B64, if set, is a base64-encoded tar.gz built with:
@@ -57,6 +65,24 @@ if command -v claude >/dev/null 2>&1; then
   echo "[seed] claude CLI: $(claude --version 2>&1 | head -1)"
 else
   echo "[seed] ERROR: claude CLI not in PATH; claude-code tasks will fail"
+fi
+
+# --- Codex auth probe ---------------------------------------------------------
+# The hosted launcher may solve with either claude-code or codex, depending on
+# the persisted joinedSolverNets harness selection. CODEX_AUTH_JSON mirrors the
+# codex-only recipe: base64 of ~/.codex/auth.json from a logged-in machine.
+mkdir -p "$CODEX_HOME"
+if [ -n "${CODEX_AUTH_JSON:-}" ]; then
+  echo "[seed] writing CODEX_HOME=$CODEX_HOME/auth.json from CODEX_AUTH_JSON env"
+  printf '%s' "$CODEX_AUTH_JSON" | base64 -d > "$CODEX_HOME/auth.json"
+  chmod 600 "$CODEX_HOME/auth.json"
+else
+  echo "[seed] INFO: CODEX_AUTH_JSON unset; codex harness tasks need OPENAI_API_KEY or a pre-existing $CODEX_HOME/auth.json"
+fi
+if command -v codex >/dev/null 2>&1; then
+  echo "[seed] codex CLI: $(codex --version 2>&1 | head -1)"
+else
+  echo "[seed] ERROR: codex CLI not in PATH; codex tasks will fail if selected"
 fi
 
 # --- Operator config (seeded only on first run) -------------------------------
@@ -104,6 +130,23 @@ if [ "$contract" -lt "$REQUIRED_BASE_CONTRACT" ]; then
   echo "[seed] FATAL: this overlay needs a base built from #988+ (absolute-path CMD dispatch)." >&2
   echo "[seed] FATAL: rebuild against a newer ghcr.io/jinn-network/client base (BASE_IMAGE/BASE_TAG)." >&2
   exit 1
+fi
+
+# --- Stale pidfile cleanup ----------------------------------------------------
+# Published base images can lag the daemon-side PID-1 reclaim (#955/#805). On
+# Railway, a persisted pidfile containing "1" points at the previous container's
+# daemon, but PID 1 in the new container is always alive, so old clients refuse
+# to start. Reclaim that known-stale record here before handing off.
+PIDFILE="$EARNING_DIR/daemon.pid"
+if [ -f "$PIDFILE" ]; then
+  PID="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const n=parseInt(fs.readFileSync(p,"utf8").trim(),10); process.stdout.write(Number.isFinite(n) ? String(n) : "");' "$PIDFILE" 2>/dev/null || true)"
+  if [ "$PID" = "1" ]; then
+    echo "[seed] removing stale daemon pidfile recording PID 1 ($PIDFILE)"
+    rm -f "$PIDFILE"
+  elif [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then
+    echo "[seed] removing stale daemon pidfile recording dead PID $PID ($PIDFILE)"
+    rm -f "$PIDFILE"
+  fi
 fi
 
 # --- Hand off to the daemon ---------------------------------------------------

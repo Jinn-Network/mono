@@ -47,3 +47,5 @@ packages/sdk/.yarn/unplugged
 # OS / editor noise
 .DS_Store
 *.log
+.cursor
+.codex

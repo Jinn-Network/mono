@@ -5,7 +5,7 @@
  * nothing maps to a known credential at all; otherwise the gate always
  * runs (the ceiling is hard-coded, not opt-in).
  */
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -106,6 +106,35 @@ describe('buildAiUnitsConfig', () => {
     const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
     expect(out?.manifestCredentials['bafycid2']).toBe('anthropic:subscription');
     expect(out?.manifestProjectedUsdMicros['bafycid2']).toBeGreaterThan(0);
+  });
+
+  it('codex-code resolves hosted subscription auth from CODEX_HOME/auth.json', () => {
+    const codexHome = join(home, 'codex-home');
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'auth.json'), JSON.stringify({
+      auth_mode: 'chatgpt',
+      OPENAI_API_KEY: null,
+      tokens: { refresh_token: 'refresh-token' },
+    }));
+    const codexJoined = {
+      bafycodex: {
+        manifestCid: 'bafycodex',
+        name: 'codex-net',
+        roles: ['solver'],
+        harness: 'codex-code-learner',
+        plugins: [],
+        model: 'gpt-5.4-mini',
+      },
+    } as never;
+
+    const out = buildAiUnitsConfig(
+      { joinedSolverNets: codexJoined },
+      { CODEX_HOME: codexHome },
+      home,
+    );
+
+    expect(out?.manifestCredentials['bafycodex']).toBe('openai:subscription');
+    expect(out?.manifestModels['bafycodex']).toBe('gpt-5.4-mini');
   });
 
   describe('buildAiUnitsConfig — USD fields (issue #1004)', () => {

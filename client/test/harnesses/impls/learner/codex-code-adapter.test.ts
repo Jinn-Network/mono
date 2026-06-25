@@ -393,6 +393,158 @@ describe('CodexCodeHarnessAdapter', () => {
     }
   });
 
+  it('injects SessionStart additionalContext from the learner hook into the Codex prompt', async () => {
+    const calls: SpawnCall[] = [];
+    let captured: FakeCodexChild | undefined;
+    const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {
+      calls.push({ command, args, options });
+      captured = fakeCodexChild();
+      return captured;
+    });
+    const hookFn = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: 'A seven-phase self-improvement loop is available as the learn skill (claude-code-learner:learn). Your FIRST action MUST be to invoke it.',
+        },
+      }),
+      stderr: '',
+    }));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hook-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hook-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _spawnSyncFn: hookFn as never,
+      });
+
+      await adapter.runTask({
+        taskId: 'swe-rebench-task-restoration',
+        requestId: '0x' + '7'.repeat(64),
+        solverType: 'swe-rebench-v2.v1',
+        taskBody: sweTask() as never,
+        implStateDir,
+        workingDir,
+        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+        windowStartTs: 1,
+        windowEndTs: 2,
+        msUntilEndTs: 1,
+        mode: 'train',
+        abort: new AbortController().signal,
+      }, learnerPluginRoot);
+
+      expect(hookFn).toHaveBeenCalledWith(
+        '/bin/bash',
+        [join(learnerPluginRoot, 'hooks', 'session-start')],
+        expect.objectContaining({
+          cwd: workingDir,
+          encoding: 'utf8',
+          env: expect.objectContaining({
+            JINN_HARNESS_MODE: 'train',
+            IMPL_STATE_DIR: implStateDir,
+          }),
+        }),
+      );
+      expect(captured).toBeDefined();
+      const promptArg = captured!.stdinChunks.join('');
+      expect(promptArg).toContain('Session start context:');
+      expect(promptArg).toContain('claude-code-learner:learn');
+      expect(promptArg).toContain('FIRST action MUST be to invoke it');
+      expect(promptArg).not.toContain('"schemaVersion":"swe-rebench-v2-solution.v1"');
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails before spawning Codex when the session-start hook fails', async () => {
+    const spawnFn = vi.fn();
+    const hookFn = vi.fn(() => ({
+      status: 1,
+      stdout: '',
+      stderr: 'session-start exploded',
+    }));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hook-fail-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hook-fail-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _spawnSyncFn: hookFn as never,
+      });
+
+      await expect(adapter.runTask({
+        taskId: 'swe-rebench-task-restoration',
+        requestId: '0x' + '7'.repeat(64),
+        solverType: 'swe-rebench-v2.v1',
+        taskBody: sweTask() as never,
+        implStateDir,
+        workingDir,
+        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+        windowStartTs: 1,
+        windowEndTs: 2,
+        msUntilEndTs: 1,
+        mode: 'train',
+        abort: new AbortController().signal,
+      }, learnerPluginRoot)).rejects.toThrow('session-start exploded');
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores malformed session-start hook stdout instead of crashing Codex startup', async () => {
+    let captured: FakeCodexChild | undefined;
+    const spawnFn = vi.fn(() => {
+      captured = fakeCodexChild();
+      return captured;
+    });
+    const hookFn = vi.fn(() => ({
+      status: 0,
+      stdout: 'session-start: ready, but not json',
+      stderr: '',
+    }));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hook-malformed-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-hook-malformed-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _spawnSyncFn: hookFn as never,
+      });
+
+      await adapter.runTask({
+        taskId: 'swe-rebench-task-restoration',
+        requestId: '0x' + '7'.repeat(64),
+        solverType: 'swe-rebench-v2.v1',
+        taskBody: sweTask() as never,
+        implStateDir,
+        workingDir,
+        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+        windowStartTs: 1,
+        windowEndTs: 2,
+        msUntilEndTs: 1,
+        mode: 'train',
+        abort: new AbortController().signal,
+      }, learnerPluginRoot);
+
+      expect(captured).toBeDefined();
+      const promptArg = captured!.stdinChunks.join('');
+      expect(promptArg).toContain('You are executing a Jinn task');
+      expect(promptArg).not.toContain('Session start context:');
+      expect(promptArg).not.toContain('session-start: ready, but not json');
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
   // Regression for #675 — @openai/codex@0.133.0 detects a non-TTY-with-no-data
   // stdin as a hard error and exits before reading the positional [PROMPT].
   // The fix pipes the prompt to child.stdin and drops the positional arg.

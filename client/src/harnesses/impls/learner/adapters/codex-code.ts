@@ -23,6 +23,7 @@ export interface CodexCodeHarnessAdapterConfig {
   };
   clientRoot?: string;
   _spawnFn?: typeof spawn;
+  _spawnSyncFn?: typeof spawnSync;
   _runSessionStartHook?: boolean;
   /**
    * Override the process-group kill for testing (#895, mirrors #883). Called
@@ -35,6 +36,7 @@ export interface CodexCodeHarnessAdapterConfig {
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
 const MACOS_CODEX_APP_BINARY = '/Applications/Codex.app/Contents/Resources/codex';
+const SESSION_START_SHELL = '/bin/bash';
 
 const ENV_ALLOWLIST = [
   'PATH',
@@ -111,7 +113,7 @@ function taskContextJson(inputs: TaskSessionInputs): string {
  * SolverNet would require a code change in every adapter's prompt
  * builder.
  */
-function buildInitialPrompt(inputs: TaskSessionInputs): string {
+function buildInitialPrompt(inputs: TaskSessionInputs, sessionStartContext = ''): string {
   return [
     'You are executing a Jinn task.',
     'Complete the task described by the task payload below.',
@@ -127,6 +129,9 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
     `- goal.deadline = ${inputs.windowEndTs} (ms since epoch)`,
     `- msUntilDeadline = ${inputs.msUntilEndTs}`,
     `- mode = ${inputs.mode}`,
+    sessionStartContext.trim()
+      ? `\nSession start context:\n${sessionStartContext.trim()}`
+      : '',
     inputs.taskBody
       ? `\ngoal (full body):\n${JSON.stringify(inputs.taskBody, null, 2)}`
       : '',
@@ -137,6 +142,29 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
 
 function captureLogError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
+}
+
+function sessionStartContextFromHookStdout(stdout: string): string {
+  for (const line of stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+      const hookSpecificOutput = (parsed as Record<string, unknown>)['hookSpecificOutput'];
+      if (!hookSpecificOutput || typeof hookSpecificOutput !== 'object' || Array.isArray(hookSpecificOutput)) {
+        continue;
+      }
+      const record = hookSpecificOutput as Record<string, unknown>;
+      if (record['hookEventName'] !== 'SessionStart') continue;
+      const additionalContext = record['additionalContext'];
+      if (typeof additionalContext === 'string' && additionalContext.trim()) {
+        return additionalContext.trim();
+      }
+    } catch {
+      // Codex runs hooks manually, so ignore non-JSON operational stdout. Hook
+      // failure is still fail-closed via the process exit status.
+    }
+  }
+  return '';
 }
 
 export class CodexCodeHarnessAdapter implements HarnessAdapter {
@@ -151,6 +179,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
   private readonly corpusEnv: CodexCodeHarnessAdapterConfig['corpusEnv'];
   private readonly clientRoot: string;
   private readonly spawnFn: typeof spawn;
+  private readonly spawnSyncFn: typeof spawnSync;
   private readonly runSessionStartHook: boolean;
   private readonly killProcessGroup: (childPid: number, signal: NodeJS.Signals) => void;
 
@@ -163,6 +192,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     this.corpusEnv = config.corpusEnv;
     this.clientRoot = config.clientRoot ?? defaultClientRoot();
     this.spawnFn = config._spawnFn ?? spawn;
+    this.spawnSyncFn = config._spawnSyncFn ?? spawnSync;
     this.runSessionStartHook = config._runSessionStartHook ?? true;
     this.killProcessGroup =
       config._killProcessGroup ?? ((childPid, signal) => { process.kill(-childPid, signal); });
@@ -178,9 +208,9 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
    * the positional-arg invocation used pre-0.133 is no longer supported.
    */
   async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
-    const prompt = buildInitialPrompt(inputs);
     const baseEnv = {
       IMPL_STATE_DIR: inputs.implStateDir,
+      JINN_HARNESS_MODE: inputs.mode ?? 'train',
       WORKING_DIR: inputs.workingDir,
       JINN_WORKING_DIR: inputs.workingDir,
       PLUGIN_ROOT: pluginRoot,
@@ -206,6 +236,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     };
     const env = buildAgentEnv(baseEnv);
 
+    let sessionStartContext = '';
     if (this.runSessionStartHook) {
       // Sync spawnSync is acceptable here (#778, #398): this runs once per
       // claimed task during the synchronous `runTask` setup phase before the
@@ -215,17 +246,20 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       // outer task-execution timeout. The wedge fixed in #778 was the
       // post-execution `git diff --binary` in harvest.ts, which ran on every
       // delivery on the main thread with no upstream timeout.
-      const hook = spawnSync('bash', [join(pluginRoot, 'hooks', 'session-start')], {
+      const hook = this.spawnSyncFn(SESSION_START_SHELL, [join(pluginRoot, 'hooks', 'session-start')], {
         cwd: inputs.workingDir,
         env,
         encoding: 'utf8',
       });
       if (hook.status !== 0) {
+        const detail = hook.stderr || hook.stdout || hook.error?.message || '';
         throw new Error(
-          `codex-code adapter: session-start hook failed: ${(hook.stderr || hook.stdout || '').slice(0, 500)}`,
+          `codex-code adapter: session-start hook failed: ${detail.slice(0, 500)}`,
         );
       }
+      sessionStartContext = sessionStartContextFromHookStdout(hook.stdout?.toString() ?? '');
     }
+    const prompt = buildInitialPrompt(inputs, sessionStartContext);
 
     const prepared = prepareCodexPluginWorkspace({
       workingDir: inputs.workingDir,
