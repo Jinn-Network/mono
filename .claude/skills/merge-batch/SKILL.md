@@ -5,7 +5,15 @@ description: Use when the human is ready to integrate the ready pull requests in
 
 # merge-batch
 
-You are the coordinating agent for one batch integration. The human invokes you when they are ready to integrate the ready pull requests into `next`. You survey the open ready PRs, decide a conflict-aware merge order, merge them one at a time, rebase and re-gate each remaining PR after `next` advances, auto-resolve clean conflicts, and escalate a genuine semantic conflict — routing that one PR's issue to `Blocked on: Human` — without blocking the rest of the batch. You do not touch the Monday `next` → `main` cut; you only feed `next`.
+You are the coordinating agent for one batch integration into `next`. For small
+batches you may execute one wave. For large batches, especially 30-50 PRs, plan
+deterministic waves first: survey PRs, build a manifest, group
+dependency/overlap/refactor components, isolate large PRs, preflight each wave,
+execute one wave at a time, checkpoint, and continue only while gates stay
+green. For `next`, explicit human authorization may allow an admin/autopilot
+approval or admin merge path after CI, Project, ordering, and conflict gates
+pass. Do not bypass red CI, `Blocked on: Human`, semantic-conflict escalation,
+or the Monday `next` → `main` cut.
 
 ## Read first
 
@@ -46,17 +54,22 @@ gh project item-list 1 --owner Jinn-Network --format json \
   | jq '.items[] | select(.content.number == <N>) | .fieldValues'
 ```
 
+Before applying review gating, determine whether this run has an explicit
+`next` admin/autopilot authorization from the human. Phrases like "use admin to
+approve and merge", "admin merge into next", or "autonomous autopilot flow" are
+sufficient. This authorization applies only to this `next` batch run.
+
 **Drop from the batch:**
 - Any PR whose CI rollup is red or has pending checks.
 - Any PR whose linked issue has `Blocked on: Human` (it is already a paused session; do not integrate it).
-- Any PR that fails the **Code-owner review gate** below.
+- Any PR that fails the **Review/admin gate** below.
 
-### Code-owner review gate
+### Review/admin gate
 
 After the CI and `Blocked on: Human` drops, apply this gate to every surviving
 PR. The operational source-of-truth — exact `gh` invocation, `latestReviews`
 JSON shape, CODEOWNERS parsing (last-match-wins, `@`-stripping normalization),
-glob semantics, and the seven-step pseudocode — lives in
+glob semantics, admin authorization handling, and the gate pseudocode — lives in
 [`references/merge-mechanics.md`](references/merge-mechanics.md) §Step 1.5.
 This section states the rule the gate enforces; do not improvise mechanics
 that disagree with the reference.
@@ -75,31 +88,59 @@ Then decide by cases:
 
 - **Coverage case** (`requiredOwnerSets` non-empty): keep iff every
   `S ∈ requiredOwnerSets` has `S ∩ currentApprovers ≠ ∅`. Otherwise drop
-  with `skipped: awaiting code-owner review`.
+  with `skipped: awaiting code-owner review` unless admin/autopilot
+  authorization is active for this `next` batch.
 
 - **No-coverage case** (`requiredOwnerSets` empty — the common case in this
   repo, since CODEOWNERS only covers eight canonical docs): keep iff some
   entry in `currentApprovers` has `authorAssociation ∈ {"OWNER", "MEMBER"}`.
   `authorAssociation` is GitHub's own org-membership signal, returned inline
   in each `latestReviews` entry, so no separate allow-list file is needed.
-  Otherwise drop with `skipped: awaiting maintainer review`.
+  Otherwise drop with `skipped: awaiting maintainer review` unless
+  admin/autopilot authorization is active for this `next` batch.
 
 The two distinct skip reasons (`awaiting code-owner review` vs
 `awaiting maintainer review`) tell the human which rule the PR failed —
-the canonical-doc CODEOWNERS rule or the no-coverage maintainer rule.
+the canonical-doc CODEOWNERS rule or the no-coverage maintainer rule. When
+admin/autopilot authorization is active, do not drop these PRs for review
+alone; keep them as `admin-authorized` candidates and annotate the manifest
+with the missing review reason.
 
-#### Refusal clause — operator authorization does not bypass the gate
+#### Admin/autopilot approval path for `next`
 
-Operator authorization to approve PRs is procedural only — it never
-substitutes for code-owner review. **The code-owner gate runs *before*
-operator authorization is consulted.** If the gate would drop a PR, the skill
-drops it; it does not submit an approving review on the operator's behalf,
-regardless of any blanket authorization given for this batch. This applies
-verbatim to the "approve any PR you would have approved yourself" pattern that
-preceded the PR #423 / PR #607 incident on 2026-05-25 — that authorization is
-exhausted before the gate runs, not after.
+The autonomous autopilot flow is allowed to use admin authority for `next`
+integration when the human explicitly authorizes it for the current batch. This
+is a procedural integration approval, not a relaxation of CI or Project-state
+gates. Use it only after:
+
+1. CI is fully green.
+2. The linked issue is not `Blocked on: Human`.
+3. The ordered merge list has been surfaced.
+4. The PR rebases/preflights cleanly, or any conflict is classified and handled.
+5. The current `headRefOid` still matches the reviewed/planned head.
+
+If those gates hold and a PR lacks a qualifying current reviewer, the merge
+loop may submit an admin approval (`gh pr review <N> --approve ...`) when that
+is accepted by GitHub, or use `gh pr merge --admin --rebase ...` when branch
+protection blocks solely on review state and the authenticated account has
+admin rights. Never use this path for `main` promotion.
 
 After the CI / `Blocked on: Human` / code-owner drops, feed the surviving PRs' `{number, headRefName, baseRefName}` into `enumerateStacks(prs, 'next')`. Its `candidates` (ordered, tiered) are the **candidate set** for ordering; its `orphans` (base = deleted branch or a cycle) are reported separately (Step 5) and never dropped silently.
+
+### Large-batch mode
+
+Use large-batch mode when there are more than 10 candidate PRs, any PR is
+`large` or `solo`, or the human asks to integrate multiple batches.
+Large-batch mode is:
+
+1. Produce a manifest with the `jinn-merge-batch plan` helper when structured
+   PR metadata is available, or manually build the same manifest shape from the
+   survey output.
+2. Show waves and skipped PRs to the human.
+3. Execute one wave at a time.
+4. After each wave, verify `origin/next`, canary trigger, and manifest state.
+5. Stop when drift, CI failure, semantic conflict, or human review need makes
+   the next wave unsafe.
 
 ---
 
@@ -186,15 +227,37 @@ If the log is empty after a rebase that should have produced commits, dispatch a
 Wait for CI on the rebased branch. While waiting, the local fallback (typecheck + tests + build) can run in parallel:
 
 ```bash
-yarn typecheck && yarn test && yarn build
+cd client && yarn typecheck && yarn test && yarn build
 ```
 
 Do not proceed to merge until the CI rollup is fully green.
 
+**Review preservation after clean rebase.**
+
+A clean rebase may preserve the skill's review gate only when:
+
+```bash
+git range-diff <old-base>..<old-head> <new-base>..<new-head>
+```
+
+shows patch-equivalent commits (`=` lines only). If `range-diff` shows changed,
+added, or removed commits, move the PR to `awaiting-review` unless the human's
+explicit admin/autopilot authorization is active for this `next` batch and the
+coordinator has re-checked the changed patch. If GitHub branch protection
+dismisses approvals after a push, either re-approve through the authorized
+admin path or pause if the changed patch needs human review.
+
 **3c. Merge into `next`.**
 
 ```bash
-gh pr merge <N> --rebase --repo Jinn-Network/mono
+gh pr merge <N> --rebase --repo Jinn-Network/mono --match-head-commit <headRefOid>
+```
+
+If branch protection blocks solely on review state and this run is
+admin/autopilot-authorized, use:
+
+```bash
+gh pr merge <N> --admin --rebase --repo Jinn-Network/mono --match-head-commit <headRefOid>
 ```
 
 This keeps `next` linear (rebase-merge, not a merge commit). The push to `next` triggers the existing auto-canary — this is expected and not a concern.
@@ -266,13 +329,20 @@ A conflict is **semantic** when a correct resolution requires re-implementing th
 
 5. **Continue the batch** with the remaining PRs. One bad PR never blocks the others.
 
-### The two-queue property
+### End-state property
 
-When the batch is complete, every PR is in exactly one of two states:
-- **Integrated into `next`** — merged, linear, canary build triggered.
-- **`Blocked on: Human`** — a paused, resumable item with a note explaining why.
+At wrap-up, every PR from the manifest is in exactly one state:
 
-No PR is left in an ambiguous state (partially rebased, merged without gates, or silently dropped).
+- `merged` — integrated into `next`.
+- `blocked-human` — semantic conflict or decision needed; linked issue set to
+  `Blocked on: Human`.
+- `awaiting-review` — review gate not satisfied; no Project mutation.
+- `awaiting-ci` — CI pending or red; no Project mutation unless the failure is
+  a semantic merge-batch finding.
+- `deferred-large` — explicitly left for a solo wave.
+
+No PR is left partially rebased, silently dropped, or merged without a matching
+manifest entry.
 
 ---
 
@@ -319,6 +389,13 @@ escalation. Surface each such PR with:
 - The no-coverage flag, when no touched path matched CODEOWNERS
   (`no CODEOWNERS coverage — needed maintainer (OWNER/MEMBER) approval`).
 
+When admin/autopilot authorization was active, include a separate line in the
+merged table or notes for each PR merged through that path:
+
+- `admin-authorized` — review gate was not already satisfied; merged into
+  `next` using explicit admin/autopilot authorization after CI and Project gates
+  passed.
+
 ### Human's next step
 
 App-test `next`: install the canary build and use the app. Whatever you find while testing → `file-issue` skill → dispatcher queue.
@@ -341,7 +418,8 @@ jinn run
 | A CI check fails on infrastructure grounds unrelated to the diff (runner timeout, network/registry flake, transient action error) | Re-run the failed check (`gh run rerun <run-id> --failed`) and re-read the rollup. Do **not** route the issue to `Blocked on: Human` — an infra flake is not a semantic conflict. Escalate only if it fails again on the same infra grounds after the re-run. |
 | Semantic conflict cannot be cleanly described in one paragraph | Route to `Blocked on: Human` with whatever partial context you have; do not let classification difficulty block the batch. |
 | All PRs in the batch route to `Blocked on: Human` | Report this outcome — the batch is empty-merged. The human needs to jump into the paused sessions. |
-| PR drops to "awaiting code-owner review" (or "awaiting maintainer review") | Report the PR in the Step 5 skipped-PRs surface with the missing owner-set or `no CODEOWNERS coverage` note. Do **not** approve the PR on the operator's behalf and do **not** route the linked issue to `Blocked on: Human` — the gate is a queue signal, not an escalation. |
+| PR drops to "awaiting code-owner review" (or "awaiting maintainer review") and no admin/autopilot authorization is active | Report the PR in the Step 5 skipped-PRs surface with the missing owner-set or `no CODEOWNERS coverage` note. Do not route the linked issue to `Blocked on: Human` — the gate is a queue signal, not an escalation. |
+| PR lacks qualifying review and admin/autopilot authorization is active | Keep the PR as `admin-authorized`; merge with normal rebase merge first, then `--admin` only if branch protection blocks solely on review state. |
 
 ---
 

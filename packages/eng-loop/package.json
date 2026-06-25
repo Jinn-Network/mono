@@ -5,6 +5,7 @@
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "bin": {
+    "jinn-merge-batch": "./bin/jinn-merge-batch.ts",
     "jinn-triage-check": "./bin/jinn-triage-check.ts"
   },
   "scripts": {
@@ -12,6 +13,7 @@
     "test": "vitest run",
     "pressure": "tsx scripts/run-pressure-suite.ts",
     "eng:loop": "tsx scripts/run-eng-loop.ts",
+    "merge:batch": "tsx bin/jinn-merge-batch.ts",
     "triage:check": "tsx bin/jinn-triage-check.ts"
   },
   "devDependencies": {

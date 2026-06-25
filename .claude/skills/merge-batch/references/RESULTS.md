@@ -317,7 +317,7 @@ Note that #905's reviewer carries `authorAssociation == CONTRIBUTOR`, but that f
 
 **Check 5 — PR touching a CODEOWNERS-covered path without a qualifying owner approval is dropped with `skipped: awaiting code-owner review`.** PASS. #905 touches `/PRINCIPLES.md` whose CODEOWNERS rule names `@oaksprout @ritsukai`. The single approving review came from `ritsukai-bot` (CONTRIBUTOR) — its `commit.oid` matched head and it passed the staleness and author-exclusion filters, so it entered `currentApprovers`. But `{oaksprout, ritsukai} ∩ {ritsukai-bot} = ∅` — the bot's login is not one of the named code-owners (despite the visual proximity to `ritsukai`). The coverage-case rule dropped the PR with the distinct `awaiting code-owner review` reason — different from #901/#904's `awaiting maintainer review` reason. This worked example exercises the second drop-reason that AC1's human-visible output names; together with Check 1 and Check 4 it confirms both reasons surface correctly.
 
-**Check 6 — explicit refusal clause holds even under operator blanket authorization.** PASS by construction. The operator's batch-opening note ("Approve any PR you would have approved yourself — blanket authorization for this batch") is recorded but never consulted: the Code-owner review gate runs *before* operator authorization is checked. #901, #904, and #905 were dropped at the gate; the skill did not submit a review of its own to satisfy the gate retroactively, and would have refused to do so even if instructed. AC2 is satisfied at the algorithm level — the gate's "drop iff not satisfied" decision is independent of any operator authorization variable, because the authorization variable is not an input to the algorithm.
+**Historical Check 6 — explicit refusal clause held under operator blanket authorization.** PASS by construction under the 2026-05-26 policy, now superseded for `next` by the 2026-06-18 admin/autopilot authorization update below. The operator's batch-opening note ("Approve any PR you would have approved yourself — blanket authorization for this batch") was recorded but never consulted: the Code-owner review gate ran *before* operator authorization was checked. #901, #904, and #905 were dropped at the gate; the skill did not submit a review of its own to satisfy the gate retroactively, and would have refused to do so even if instructed. AC2 was satisfied at the algorithm level under the old rule.
 
 ### Weaknesses found
 
@@ -363,11 +363,56 @@ incident; stale approvals (Check 4) are invalidated by head-SHA mismatch, which
 matches the design's stated stale-approval discipline; the coverage-case drop
 reason (Check 5, the second of AC1's two distinct skip reasons) fires when a
 CODEOWNERS-covered path receives only a non-owner approval; and operator
-blanket authorization (Check 6) does not bypass the gate, by construction.
+blanket authorization (Historical Check 6) did not bypass the old gate, by
+construction. That refusal behavior is superseded for `next` by the 2026-06-18
+admin/autopilot authorization update below.
 Both drop reasons are now exercised by at least one worked example —
 `awaiting maintainer review` by #901 and #904, `awaiting code-owner review`
 by #905 — so AC1's human-visible output surface is covered on both sides.
-The acceptance criteria from Issue #608 — AC1 (drop with a clear note), AC2
-(refusal under blanket authorization), AC3 (worked-example regression
-artifact) — are all satisfied by the gate as documented in `SKILL.md` Step 1
-and `merge-mechanics.md` Step 1.5.
+The acceptance criteria from Issue #608 — AC1 (drop with a clear note), the
+then-current AC2 (refusal under blanket authorization), AC3 (worked-example
+regression artifact) — were satisfied by the old gate. The current `next`
+policy is the 2026-06-18 admin/autopilot authorization update below.
+
+---
+
+## Large-batch wave planning verification (2026-06-17)
+
+Scope: planner only, no real merges, no writes to `next`.
+
+Fixture: 50 PRs, max wave size 8, one solo package PR, one overlapping store
+pair, one dependency edge, and one PR awaiting maintainer review.
+
+Expected:
+- PR awaiting maintainer review is skipped without Project mutation.
+- Solo package PR is isolated in its own wave.
+- Overlapping store PRs stay together in a reactive-overlap wave.
+- Independent PRs are split into bounded waves.
+
+Verdict: PASS when
+`cd packages/eng-loop && yarn test test/merge-batch/large-batch-fixture.test.ts`
+passes.
+
+---
+
+## Admin/autopilot next-merge authorization update (2026-06-18)
+
+Scope: skill policy and planner model only; no real merges, no writes to `next`.
+
+User directive: for merging into `next`, the autonomous autopilot flow may use
+admin authority to approve and merge. This supersedes the 2026-05-26 refusal
+clause for `next` integration only.
+
+Expected:
+- CI red/pending, `Blocked on: Human`, semantic conflicts, and unexpected head
+  SHAs still block the batch.
+- A PR that lacks a qualifying current review is kept as `admin-authorized`
+  when the human explicitly authorizes admin/autopilot merge for the current
+  `next` batch.
+- The merge loop attempts ordinary rebase merge first, then uses
+  `gh pr merge --admin --rebase ... --match-head-commit <headRefOid>` only if
+  branch protection blocks solely on review state.
+- This authorization never applies to `main` promotion.
+
+Verdict: PASS when `cd packages/eng-loop && yarn typecheck && yarn test
+test/merge-batch/manifest.test.ts` passes.

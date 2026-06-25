@@ -6,6 +6,37 @@ All commands assume `Jinn-Network/mono` as the repo and `next` as the integratio
 
 ---
 
+## Large-batch wave mechanics
+
+For batches above 10 PRs, or any batch containing a large/solo PR, do not hold a
+single 30-50 PR serial loop in working memory. Build a manifest and execute one
+wave at a time.
+
+Wave preflight uses a temporary branch:
+
+```bash
+git fetch origin
+git switch --detach origin/next
+git switch -c integrate/merge-batch-<date>-wave-<n>
+```
+
+Apply the wave's PR branches in manifest order. If a wave does not preflight
+cleanly, split the wave or defer the specific PR that caused the conflict. Do
+not mutate `next` until the current wave's plan is understood.
+
+After each wave:
+
+```bash
+git fetch origin
+git rev-parse origin/next
+```
+
+Record the new `origin/next` SHA in the batch report before planning or
+executing the next wave. If `origin/next` changed outside the batch, stop and
+rebuild the manifest.
+
+---
+
 ## Step 1 — Detect the ready PRs
 
 ### Fetch all open PRs
@@ -61,11 +92,19 @@ That item is already in a paused session — do not integrate it.
 
 ---
 
-## Step 1.5 — Code-owner review gate mechanics
+## Step 1.5 — Review/admin gate mechanics
 
-This section is the operational source-of-truth for the Code-owner review gate
+This section is the operational source-of-truth for the Review/admin gate
 introduced in `SKILL.md` §Step 1. `SKILL.md` states the rule; this section
 states the algorithm.
+
+### Detect admin/autopilot authorization
+
+Before applying review gating, decide whether the human explicitly authorized
+admin/autopilot integration for this `next` batch. Treat phrases such as "use
+admin to approve and merge", "admin merge into next", or "autonomous autopilot
+flow" as authorization for the current batch. This flag applies only to `next`
+integration and never to `main` promotion.
 
 ### Fetch the review state
 
@@ -195,23 +234,64 @@ For each PR `P` that survives the prior Step 1 drops:
    requirement (see Edge cases below).
 6. **Coverage-case decision.** If `requiredOwnerSets` is non-empty: keep `P`
    iff for every `S ∈ requiredOwnerSets`,
-   `S ∩ { r.author.login | r ∈ currentApprovers } ≠ ∅`. Otherwise drop with
-   `skipped: awaiting code-owner review`.
+   `S ∩ { r.author.login | r ∈ currentApprovers } ≠ ∅`. If this is false and
+   admin/autopilot authorization is active, keep `P` as `admin-authorized`
+   with detail `would otherwise be skipped: awaiting code-owner review`.
+   Otherwise drop with `skipped: awaiting code-owner review`.
 7. **No-coverage-case decision.** If `requiredOwnerSets` is empty (every
    touched file was unmatched by CODEOWNERS): keep `P` iff there exists
    `r ∈ currentApprovers` with `r.authorAssociation ∈ {"OWNER", "MEMBER"}`.
-   Otherwise drop with `skipped: awaiting maintainer review`. Note that
-   `currentApprovers` (computed at Step 5) has already filtered for
-   `state == "APPROVED"`, fresh `commit.oid`, and non-author — Step 7 composes
-   on top of those filters rather than re-deriving them.
+   If this is false and admin/autopilot authorization is active, keep `P` as
+   `admin-authorized` with detail `would otherwise be skipped: awaiting
+   maintainer review`. Otherwise drop with `skipped: awaiting maintainer
+   review`. Note that `currentApprovers` (computed at Step 5) has already
+   filtered for `state == "APPROVED"`, fresh `commit.oid`, and non-author —
+   Step 7 composes on top of those filters rather than re-deriving them.
+
+### Admin/autopilot merge execution
+
+For `admin-authorized` PRs, keep all non-review gates intact:
+
+1. CI must be fully green.
+2. The linked issue must not be `Blocked on: Human`.
+3. The PR must be in the surfaced ordered merge list.
+4. Rebase/preflight must complete cleanly or any conflict must be classified
+   and handled under the normal conflict rules.
+5. `--match-head-commit` must match the head that was planned and checked.
+
+Attempt the ordinary rebase merge first:
+
+```bash
+gh pr merge <N> --rebase --repo Jinn-Network/mono --match-head-commit <headRefOid>
+```
+
+If that fails solely because branch protection still requires review and the
+human authorized the admin path for this `next` run, either submit an admin
+approval if GitHub accepts it:
+
+```bash
+gh pr review <N> --repo Jinn-Network/mono --approve \
+  --body "Admin/autopilot approval for next integration batch."
+```
+
+or perform the admin rebase merge:
+
+```bash
+gh pr merge <N> --admin --rebase --repo Jinn-Network/mono --match-head-commit <headRefOid>
+```
+
+Do not use `--admin` for red CI, pending CI, `Blocked on: Human`, semantic
+conflicts, an unexpected head SHA, or `main` promotion.
 
 ### Edge cases
 
 - **Author's own approval.** If the only `latestReviews` entry on a PR is an
   approval the author submitted on themselves (e.g. via the API), it must not
-  satisfy either rule. This is enforced by the author-exclusion step in
-  `currentApprovers` (the `r.author.login != P.author.login` clause) but state
-  it explicitly so the agent does not regress this filter.
+  satisfy either normal-review rule. This is enforced by the author-exclusion
+  step in `currentApprovers` (the `r.author.login != P.author.login` clause).
+  If the human authorized admin/autopilot integration, record the PR as
+  `admin-authorized` instead of pretending the author's own approval satisfied
+  the normal gate.
 - **Superseded approvals.** Because `latestReviews` returns the most recent
   review per reviewer, a `DISMISSED` or `CHANGES_REQUESTED` review submitted
   after an earlier `APPROVED` review from the same reviewer fully supersedes
@@ -219,11 +299,11 @@ For each PR `P` that survives the prior Step 1 drops:
   later state, not the earlier one. The agent never needs to walk back through
   earlier reviews from the same reviewer.
 - **Stale approvals after rebase.** When the merge loop rebases a PR in
-  Step 2 and force-pushes (`--force-with-lease`), the head SHA changes. Any
-  approval submitted before the rebase has `commit.oid != new headRefOid` and
-  is filtered out by the stale-approval clause. Re-running the gate after the
-  rebase is the correct discipline; do not assume an approval persists across
-  a rebase.
+  Step 2 and force-pushes (`--force-with-lease`), the head SHA changes. The
+  strict survey-time gate filters approvals by `commit.oid == headRefOid`, so
+  a rebased PR must either pass the gate again or satisfy the clean-rebase
+  approval-preservation rule below. Do not assume approval persists across a
+  rebase without the `range-diff` check.
 
 ### Drop-report wording
 
@@ -239,6 +319,10 @@ PRs that fail the gate are dropped with one of two reasons:
 Surface each dropped PR in the Step 5 wrap-up report under the
 "Awaiting code-owner review" subsection — name the missing owner-set (when
 coverage was required) or the no-coverage flag.
+
+If admin/autopilot authorization was active, these review gaps are not skip
+reasons. Surface them in the merged/wave report as `admin-authorized` notes
+instead.
 
 ---
 
@@ -353,15 +437,44 @@ git push origin <branch-name> --force-with-lease
 since your last fetch. If it fails with `rejected ... stale info`, run
 `git fetch origin` and re-verify before re-trying.
 
+### Approval preservation after clean rebase
+
+Record the old base/head before rebasing:
+
+```bash
+OLD_BASE=$(git merge-base origin/next <branch-name>)
+OLD_HEAD=$(git rev-parse <branch-name>)
+```
+
+After rebasing, compare the old and new patch series:
+
+```bash
+NEW_BASE=$(git merge-base origin/next <branch-name>)
+NEW_HEAD=$(git rev-parse <branch-name>)
+git range-diff "$OLD_BASE..$OLD_HEAD" "$NEW_BASE..$NEW_HEAD"
+```
+
+Only `=` lines preserve the normal review gate. A `!`, added commit, removed
+commit, or conflict-resolution commit means the reviewed patch changed; move
+the PR to `awaiting-review` unless explicit admin/autopilot authorization is
+active for this `next` batch and the coordinator has re-checked the changed
+patch. GitHub branch protection is authoritative unless the current run is
+admin-authorized and the only remaining blocker is review state.
+
 ---
 
 ## Step 3 — Merge a PR into `next`
 
 ```bash
-gh pr merge <N> --rebase --repo Jinn-Network/mono
+gh pr merge <N> --rebase --repo Jinn-Network/mono --match-head-commit <headRefOid>
 ```
 
+For `admin-authorized` PRs, use the admin execution recipe in Step 1.5 if the
+ordinary merge is blocked solely by review state.
+
 `--rebase` performs a rebase-merge, keeping `next` linear (no merge commits).
+`--match-head-commit` prevents a time-of-check/time-of-use race where a new
+commit lands on the PR branch after the skill verified CI and review state.
 
 ### After merging — verify `next` advanced
 
@@ -529,8 +642,8 @@ parent has merged into `next`, `origin/next` *is* the parent's base.
 git log origin/next..<branch> --oneline
 ```
 
-**Merge each layer in order** using the same `gh pr merge <N> --rebase` command
-from Step 3. Never merge a dependent before its root.
+**Merge each layer in order** using the same `gh pr merge ... --match-head-commit`
+command from Step 3. Never merge a dependent before its root.
 
 ### When `gh-stack` is installed
 
