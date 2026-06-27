@@ -779,6 +779,34 @@ export async function gatherGatheredStatusRaw(
     }
   }
 
+  // L1 (Ethereum Sepolia) master gas runway (#1296). Same master key as L2;
+  // balance read on the L1 chain. Testnet-only — mainnet has no L1 gas surface
+  // here. Error-safe: a failed L1 read sets `error`, it never throws the
+  // endpoint. The L1 daily estimate reuses the resolved `daily` (env
+  // JINN_MASTER_ETH_DAILY_WEI — no new config key); the L1 floor reuses the
+  // per-chain `minEoaGasEth`, the same EOA gas floor that sizes the L2 master
+  // gate above.
+  if (
+    status.network === 'testnet' &&
+    status.config?.ethereumRpcUrl &&
+    fleet?.master_address
+  ) {
+    raw.l1MasterDailyEstimateWei = daily.toString();
+    raw.minL1MasterEthWei = chainCfg.minEoaGasEth.toString();
+    try {
+      const l1Client = createJinnL1PublicClient(status.config.ethereumRpcUrl, 'sepolia');
+      const l1Bal = await l1Client.getBalance({
+        address: fleet.master_address as `0x${string}`,
+      });
+      raw.l1Master = { address: fleet.master_address, balanceWei: l1Bal.toString() };
+    } catch (e) {
+      raw.l1Master = {
+        address: fleet.master_address,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
   if (fleet) {
     const per: Record<
       number,
