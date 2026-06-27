@@ -436,3 +436,42 @@ describe('assembleStatusV1 — autoRestake observability (#651)', () => {
     expect(j.autoRestake).toEqual({ enabled: true, checkIntervalMs: 60_000 });
   });
 });
+
+describe('assembleStatusV1 l1MasterGas (issue #1296)', () => {
+  function rawWithL1(over: Partial<GatheredStatusRaw> = {}): GatheredStatusRaw {
+    return {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true },
+      master: { address: '0xL2MASTER', balanceWei: '10000000000000000' },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '500000000000000',
+      minMasterEthWei: '1000000000000000',
+      l1Master: { address: '0xL1MASTER', balanceWei: '2000000000000000' },
+      minL1MasterEthWei: '1000000000000000',
+      l1MasterDailyEstimateWei: '500000000000000',
+      ...over,
+    };
+  }
+
+  it('emits an l1MasterGas block with computed runway when raw.l1Master is present', () => {
+    const body = assembleStatusV1(rawWithL1());
+    expect(body.l1MasterGas).toBeDefined();
+    expect(body.l1MasterGas!.address).toBe('0xL1MASTER');
+    expect(body.l1MasterGas!.balanceWei).toBe('2000000000000000');
+    expect(body.l1MasterGas!.minEthWei).toBe('1000000000000000');
+    // (2e15 - 1e15) / 5e14 = 2 days
+    expect(body.l1MasterGas!.runwayDaysExcess).toBe('2');
+  });
+
+  it('omits l1MasterGas when raw.l1Master is absent', () => {
+    const body = assembleStatusV1(rawWithL1({ l1Master: undefined }));
+    expect(body.l1MasterGas).toBeUndefined();
+  });
+});

@@ -145,6 +145,12 @@ export interface GatheredStatusRaw {
   /** Resolved daily burn estimate for runway (wei string). */
   masterDailyEstimateWei: string;
   minMasterEthWei?: string;
+  /** L1 (Ethereum Sepolia) master native balance for the L1 gas-runway warning (#1296). */
+  l1Master?: { address: string | null; balanceWei?: string; error?: string };
+  /** Minimum L1 master ETH floor (wei string). Absent ⇒ no l1MasterGas runway. */
+  minL1MasterEthWei?: string;
+  /** Resolved L1 daily burn estimate for runway (wei string). */
+  l1MasterDailyEstimateWei?: string;
   /** portfolio.v0 lifecycle data — populated by gather-status from the SQLite store. */
   portfolioV0?: PortfolioV0Status;
   /** prediction.v1 operator/lifecycle data — populated by gather-status from the SQLite store. */
@@ -247,6 +253,20 @@ export interface StatusV1Response {
     balanceWei?: string;
     dailyEstimateWei: string;
     /** Approximate days of excess ETH above minimum at daily estimate (if computable). */
+    runwayDaysExcess?: string;
+    minEthWei?: string;
+    error?: string;
+  };
+  /**
+   * L1 (Ethereum Sepolia) master gas runway — parallel to `masterGas` but for
+   * the L1 governance chain (#1296). Present only when the L1 master balance
+   * was gathered (testnet with an ethereumRpcUrl); omitted on mainnet /
+   * sqlite-only / older callers.
+   */
+  l1MasterGas?: {
+    address: string | null;
+    balanceWei?: string;
+    dailyEstimateWei: string;
     runwayDaysExcess?: string;
     minEthWei?: string;
     error?: string;
@@ -504,6 +524,16 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
           BigInt(raw.masterDailyEstimateWei),
         )
       : undefined;
+  // L1 (Ethereum Sepolia) gas runway (#1296). Computed only when the L1 master
+  // balance was gathered and an L1 daily estimate is present.
+  const l1Runway =
+    raw.l1Master?.balanceWei !== undefined && raw.l1MasterDailyEstimateWei !== undefined
+      ? computeRunwayDaysExcess(
+          BigInt(raw.l1Master.balanceWei),
+          raw.minL1MasterEthWei !== undefined ? BigInt(raw.minL1MasterEthWei) : undefined,
+          BigInt(raw.l1MasterDailyEstimateWei),
+        )
+      : undefined;
 
   return {
     statusMode: mode,
@@ -539,6 +569,21 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       minEthWei: raw.minMasterEthWei,
       error: raw.master.error,
     },
+    ...(raw.l1Master !== undefined
+      ? {
+          l1MasterGas: {
+            address: raw.l1Master.address,
+            balanceWei: raw.l1Master.balanceWei,
+            dailyEstimateWei: raw.l1MasterDailyEstimateWei ?? '0',
+            runwayDaysExcess:
+              raw.l1Master.balanceWei !== undefined && l1Runway !== undefined
+                ? l1Runway
+                : undefined,
+            minEthWei: raw.minL1MasterEthWei,
+            error: raw.l1Master.error,
+          },
+        }
+      : {}),
     earnings: {
       hint: buildEarningsHint(raw, fleetSum),
     },
