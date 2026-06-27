@@ -46,6 +46,44 @@ const INTENT_KINDS: ['intent'] = ['intent'];
  * - `password_rotation_due` reads `s.security.lastPasswordRotationAt` (#441) —
  *   the keystore-password file's ISO mtime, or null when env-sourced/missing.
  */
+/**
+ * Translate one daemon gas block (`masterGas` / `l1MasterGas` from
+ * `client/src/api/status-build.ts`) into a `funds.chains` entry for the deriver
+ * (#1296). Returns null when the block is absent or has no balance — the chain
+ * simply doesn't appear (correct on mainnet / older daemons that omit L1).
+ *
+ * `runwayDays` carries the real `runwayDaysExcess`; `Number.POSITIVE_INFINITY`
+ * when not computable (so `funding_low` stays silent). `empty` is the stronger
+ * "can't cover the next tx" signal: `balanceWei < minEthWei`.
+ */
+function gasChain(
+  chain: string,
+  gas:
+    | {
+        address?: string | null;
+        balanceWei?: string;
+        runwayDaysExcess?: string | number | null;
+        minEthWei?: string;
+      }
+    | undefined,
+): DeriveInput['status']['funds']['chains'][number] | null {
+  if (!gas || gas.balanceWei === undefined) return null;
+  let runwayDays = Number.POSITIVE_INFINITY;
+  if (gas.runwayDaysExcess !== undefined && gas.runwayDaysExcess !== null) {
+    const n = Number(gas.runwayDaysExcess);
+    if (Number.isFinite(n)) runwayDays = n;
+  }
+  let empty = false;
+  try {
+    if (gas.minEthWei !== undefined) {
+      empty = BigInt(gas.balanceWei) < BigInt(gas.minEthWei);
+    }
+  } catch {
+    // non-numeric — leave empty=false
+  }
+  return { chain, wallet: gas.address ?? null, runwayDays, empty };
+}
+
 export function mapStatusToDeriveInput(
   rawStatus: unknown,
   rawBootstrap: unknown,
@@ -54,19 +92,14 @@ export function mapStatusToDeriveInput(
   const s = (rawStatus ?? {}) as Record<string, any>;
   const b = (rawBootstrap ?? {}) as Record<string, any>;
 
-  const masterEthWei = String(s.masterGas?.balanceWei ?? '0');
-  let masterEth = '0';
-  let masterRunwayDays = Number.POSITIVE_INFINITY;
-  try {
-    const wei = BigInt(masterEthWei);
-    masterEth = wei.toString();
-    // Crude runway proxy: if there's any ETH, treat runway as not-low until the
-    // daemon exposes a real estimate. A real `funds.runwayDays` field on /v1/status
-    // would replace this. Zero balance still maps to 0 runway so funding_low fires.
-    masterRunwayDays = wei > 0n ? Number.POSITIVE_INFINITY : 0;
-  } catch {
-    // Non-numeric balance — leave the safe defaults in place.
-  }
+  // Per-chain gas runway (#1296). The L2 (Base Sepolia) master and the L1
+  // (Ethereum Sepolia) master each carry their own threshold; the daemon emits
+  // `masterGas` always and `l1MasterGas` on testnet only.
+  const chains: DeriveInput['status']['funds']['chains'] = [];
+  const l2 = gasChain('Base Sepolia', s.masterGas);
+  if (l2) chains.push(l2);
+  const l1 = gasChain('Ethereum Sepolia', s.l1MasterGas);
+  if (l1) chains.push(l1);
 
   // Map fleet.services → DeriveInput.services. The real field is
   // `safeBoundToAgent`, not `safeBound`. Default missing safeBound to true.
@@ -84,8 +117,8 @@ export function mapStatusToDeriveInput(
 
   return {
     funds: {
-      eth: masterEth,
-      runwayDays: masterRunwayDays,
+      eth: String(s.masterGas?.balanceWei ?? '0'),
+      chains,
     },
     // Staking / OLAS collector-queue values are substrate infrastructure, not
     // operator-facing notifications (the daemon no longer emits them on

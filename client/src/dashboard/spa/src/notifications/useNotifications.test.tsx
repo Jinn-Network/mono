@@ -55,7 +55,14 @@ describe('useNotifications', () => {
     apiMocks.getStatus.mockReset();
     apiMocks.getBootstrap.mockReset();
     apiMocks.getStatus.mockResolvedValue({
-      masterGas: { balanceWei: '0' }, // zero balance → runway 0 → funding_low fires
+      // Low-but-nonzero runway → funding_low fires (#1296). The adapter reads
+      // the real runwayDaysExcess; runway 1 < 3-day threshold.
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '5000000000000000',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
       services: [],
       version: '0.1.5',
     });
@@ -110,7 +117,12 @@ describe('useNotifications', () => {
 
   it('does not create claim notifications from collector pending rewards', async () => {
     apiMocks.getStatus.mockResolvedValue({
-      masterGas: { balanceWei: '0' },
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '5000000000000000',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
       fleet: { services: [] },
       version: '0.1.5',
     });

@@ -22,3 +22,56 @@ describe('mapStatusToDeriveInput — password rotation (#441)', () => {
     ).toBeUndefined();
   });
 });
+
+describe('mapStatusToDeriveInput funds mapping (issue #1296)', () => {
+  it('maps a low-but-nonzero L2 runway to a low chain entry (not Infinity)', () => {
+    const status = {
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '5000000000000000', // 0.005 ETH, > 0
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
+    };
+    const mapped = mapStatusToDeriveInput(status, {}, false);
+    const l2 = mapped.funds.chains.find((c) => c.wallet === '0xL2MASTER');
+    expect(l2).toBeDefined();
+    expect(l2!.runwayDays).toBe(1); // NOT Infinity
+    expect(l2!.empty).toBe(false);
+  });
+
+  it('flags empty when balanceWei < minEthWei', () => {
+    const status = {
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '500000000000000', // 0.0005 ETH
+        runwayDaysExcess: '0',
+        minEthWei: '1000000000000000', // 0.001 ETH min
+      },
+    };
+    const mapped = mapStatusToDeriveInput(status, {}, false);
+    const l2 = mapped.funds.chains.find((c) => c.wallet === '0xL2MASTER');
+    expect(l2!.empty).toBe(true);
+  });
+
+  it('adds a separate L1 chain entry from l1MasterGas', () => {
+    const status = {
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '5000000000000000',
+        runwayDaysExcess: '5',
+        minEthWei: '1000000000000000',
+      },
+      l1MasterGas: {
+        address: '0xL1MASTER',
+        balanceWei: '2000000000000000',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
+    };
+    const mapped = mapStatusToDeriveInput(status, {}, false);
+    expect(mapped.funds.chains.find((c) => c.chain === 'Ethereum Sepolia')?.wallet).toBe(
+      '0xL1MASTER',
+    );
+  });
+});
