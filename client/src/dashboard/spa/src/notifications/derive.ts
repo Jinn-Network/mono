@@ -8,7 +8,15 @@ export interface DeriveInput {
   now?: number;
   bootstrap: { mode: string; blockingReason?: string };
   status: {
-    funds: { eth: string; runwayDays: number };
+    funds: {
+      eth: string;
+      chains: Array<{
+        chain: string;
+        wallet: string | null;
+        runwayDays: number;
+        empty: boolean;
+      }>;
+    };
     harness: { ready: boolean; name: string | null; reason: string | null };
     rpc: { reachable: boolean };
     restartPending: boolean;
@@ -36,13 +44,25 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
     });
   }
 
-  if (s.funds.runwayDays < RUNWAY_LOW_THRESHOLD_DAYS) {
-    out.push({
-      kind: 'funding_low',
-      severity: 'warning',
-      message: `Runway is ${s.funds.runwayDays} day(s). Top up gas to keep claiming work.`,
-      jumpTo: '/overview',
-    });
+  for (const c of s.funds.chains) {
+    const walletLabel = c.wallet ?? 'wallet';
+    if (c.empty) {
+      out.push({
+        kind: 'funding_empty',
+        severity: 'blocking',
+        message: `${c.chain} wallet (${walletLabel}) can no longer cover the next transaction. Top up now.`,
+        jumpTo: '/overview',
+      });
+      continue; // empty supersedes low for this chain
+    }
+    if (c.runwayDays < RUNWAY_LOW_THRESHOLD_DAYS) {
+      out.push({
+        kind: 'funding_low',
+        severity: 'warning',
+        message: `Runway is ${c.runwayDays} day(s) on ${c.chain}. Top up gas (${walletLabel}) to keep claiming work.`,
+        jumpTo: '/overview',
+      });
+    }
   }
 
   if (!s.harness.ready) {

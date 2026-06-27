@@ -2,6 +2,7 @@ import type { Severity } from './severity.js';
 
 export const CANONICAL_KINDS = [
   'funding_low',
+  'funding_empty',
   'password_rotation_due',
   'harness_not_ready',
   'bootstrap_blocked',
