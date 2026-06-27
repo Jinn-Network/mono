@@ -234,4 +234,24 @@ describe('WalletCard', () => {
     expect(gas.textContent).not.toMatch(/daily faucet cap reached/i);
   });
 
+  // ── Runway severity tint (issue #1296) ──────────────────────────────────
+  it('tints the runway line warning when runwaySeverity is warning', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} runwayDays={1} runwaySeverity="warning" />);
+    render(ui);
+    const el = screen.getByTestId('wallet-runway');
+    expect(el.getAttribute('data-runway-severity')).toBe('warning');
+  });
+
+  it('tints the runway line blocking when runwaySeverity is blocking', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} runwayDays="—" runwaySeverity="blocking" />);
+    render(ui);
+    expect(screen.getByTestId('wallet-runway').getAttribute('data-runway-severity')).toBe('blocking');
+  });
+
+  it('leaves the runway line untinted by default', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} />);
+    render(ui);
+    expect(screen.getByTestId('wallet-runway').getAttribute('data-runway-severity')).toBe('none');
+  });
+
 });
