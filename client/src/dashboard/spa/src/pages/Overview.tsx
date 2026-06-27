@@ -79,6 +79,16 @@ interface OverviewStatusV1 {
   masterGas?: {
     balanceWei?: string;
     runwayDaysExcess?: string | number | null;
+    minEthWei?: string;
+  };
+  /**
+   * L1 (Ethereum Sepolia) master gas runway (#1296) — parallel to `masterGas`.
+   * Present only on testnet daemons that gather the L1 master balance.
+   */
+  l1MasterGas?: {
+    balanceWei?: string;
+    runwayDaysExcess?: string | number | null;
+    minEthWei?: string;
   };
   /**
    * Per-role ETH balances (master / agent / Safe) exposed on /v1/status (#430).
@@ -258,6 +268,24 @@ export function OverviewPage(): JSX.Element {
 
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
+
+  // Runway severity tint for the Wallet card (#1296). The card shows the L2
+  // master; blocking when the balance can't cover the next tx, warning when
+  // runway is under the low threshold (mirrors the deriver's funding notices).
+  const gasRunwaySeverity: 'warning' | 'blocking' | null = (() => {
+    const mg = status?.masterGas;
+    if (!mg || mg.balanceWei === undefined) return null;
+    try {
+      if (mg.minEthWei !== undefined && BigInt(mg.balanceWei) < BigInt(mg.minEthWei)) {
+        return 'blocking';
+      }
+    } catch {
+      /* non-numeric */
+    }
+    const days = Number(mg.runwayDaysExcess);
+    if (Number.isFinite(days) && days < 3) return 'warning';
+    return null;
+  })();
 
   // Per-role ETH balances (#430). `?? undefined` coerces the nullable wire shape
   // to formatEth's `string | undefined`; formatEth then renders '—' for missing input.
@@ -454,6 +482,7 @@ export function OverviewPage(): JSX.Element {
         <WalletCard
           totalEth={gasBalanceEth}
           runwayDays={gasRunwayDays}
+          runwaySeverity={gasRunwaySeverity}
           actionsDisabled={activeAction !== null}
           perRole={{
             master: perRoleMasterEth,
