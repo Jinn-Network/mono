@@ -449,6 +449,35 @@ on that recovery module, but the live service registry does not authorize it as
 a multisig implementation. Fix owner-side registry/distributor authorization
 before attempting to migrate service 46 to the fresh proxy on Base Sepolia.
 
+**Fork-only rehearsal command (non-live):** this proves the blocker and the
+owner-side fix without mutating Base Sepolia. The script refuses to run unless
+it sees chainId `84532` and an Anvil fork node.
+
+```bash
+# Terminal A: fork the observed failure block.
+anvil --fork-url "$BASE_SEPOLIA_RPC_URL" \
+  --fork-block-number 43490999 \
+  --chain-id 84532 \
+  --port 8547
+
+# Terminal B: run from contracts/.
+LOCAL_RPC_URL=http://127.0.0.1:8547 LOCAL_CHAIN_ID=84532 \
+  yarn hardhat run scripts/rehearse-stolas-service-migration.ts --network localhost
+```
+
+Expected result:
+
+- pre-authorization `stake(0x3A14..., 46, ...)` reverts with selector
+  `0x14460f20` (`UnauthorizedMultisig`);
+- impersonated registry owner
+  `0xeDd71796B90eaCc56B074C39BAC90ED2Ca6D93Ee` authorizes recovery module
+  `0x5E3327C73834502f14e93e6b7D74742De1f9F3FD` on the fork;
+- the rerun migration unstake/stake succeeds locally, service 46 is owned by
+  `0x3A14c71e94F3d38A6BE4319808B259FbFb47B86f`, and the fresh proxy lists
+  service 46 with staking state `1`;
+- evidence is written to
+  `.local/stolas-service46-fresh-proxy-rehearsal.json`.
+
 **Reward pool:** the fresh proxy is now funded (`availableRewards = 4e18`) but
 empty (`getServiceIds() = []`). The current fleet proxy had
 `availableRewards = 25596000000000000000` after the Tier B reward claim.
