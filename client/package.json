@@ -71,6 +71,7 @@
     "release:tier-2:T2.2": "vitest run test/release/tier-2/T2.2-producer-evaluator.test.ts",
     "release:tier-3": "tsx scripts/release/run-tier-3.ts",
     "release:tier-3:T3.1": "JINN_T31_REAL=1 vitest run test/release/tier-3/T3.1-producer-evaluator-real.test.ts",
+    "release:olas-rails-smoke": "tsx scripts/release/olas-rails-smoke.ts",
     "release:donation-consumption": "node dist/scripts/donation-consumption-acceptance.js",
     "setup:testnet-acceptance-operator": "node scripts/setup-testnet-acceptance-operator-docker.mjs",
     "setup:testnet-acceptance-operator:docker": "node scripts/setup-testnet-acceptance-operator-docker.mjs",
