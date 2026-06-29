@@ -436,6 +436,19 @@ because `0x24e34...` reads the same V3 checker, is funded, and pays rewards.
 Move service 46 to `0x3A14...` only when exercising the fresh-proxy migration
 path directly.
 
+**2026-06-29 fresh-proxy migration preflight:** do not run the
+service-46 migration sequence live yet. A live `eth_call` for
+`unstakeAndWithdraw(0x24e34..., 46, bytes32(0x24e34...))` from the master EOA
+returned success, and the same call succeeded on an Anvil fork at block
+`43490999`, moving service 46 out of the old proxy. The follow-up fork tx
+`stake(0x3A14..., 46, 103, 0x16842c...0101, 0x63192d...)` reverted during
+`ServiceRegistry.deploy(..., recoveryModule, ...)` with
+`UnauthorizedMultisig(0x5E3327C73834502f14e93e6b7D74742De1f9F3FD)` (selector
+`0x14460f20`). The deployed distributor's nonzero-service reuse path depends
+on that recovery module, but the live service registry does not authorize it as
+a multisig implementation. Fix owner-side registry/distributor authorization
+before attempting to migrate service 46 to the fresh proxy on Base Sepolia.
+
 **Reward pool:** the fresh proxy is now funded (`availableRewards = 4e18`) but
 empty (`getServiceIds() = []`). The current fleet proxy had
 `availableRewards = 25596000000000000000` after the Tier B reward claim.
