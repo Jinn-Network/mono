@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
-const TRACKED_ENVS = ['PONDER_RPC_URL_84532', 'PONDER_RPC_URL_11155111'];
+const TRACKED_ENVS = ['PONDER_RPC_URL_84532'];
 
 beforeEach(() => {
   for (const key of TRACKED_ENVS) {
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 async function loadConfig(): Promise<{
-  chains: { baseSepolia: any; sepolia: any };
+  chains: { baseSepolia: any };
 }> {
   const mod = await import('../ponder.config.js');
   return mod.default;
@@ -75,15 +75,9 @@ describe('ponder.config baseSepolia fallback (AC4)', () => {
     const config = await loadConfig();
     expect(config.chains.baseSepolia.ethGetLogsBlockRange).toBe(2000);
   });
-});
 
-describe('ponder.config sepolia fallback (L1)', () => {
-  it('builds a fallback transport for L1 too', async () => {
-    process.env.PONDER_RPC_URL_11155111 = 'https://eth-a.example,https://eth-b.example';
+  it('declares only the baseSepolia chain (Sepolia L1 / JinnDistributor removed)', async () => {
     const config = await loadConfig();
-    const transport = config.chains.sepolia.rpc;
-    const instantiated = transport({ chain: { id: 11155111 } as any });
-    expect(instantiated.config.type).toBe('fallback');
-    expect(instantiated.value.transports.length).toBe(2);
+    expect(Object.keys(config.chains)).toEqual(['baseSepolia']);
   });
 });

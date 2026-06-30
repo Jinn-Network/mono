@@ -28,7 +28,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -36,7 +36,6 @@ import {
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
-  handleClaimed,
   parseCheckpointManifestLite,
   parseSolverNetManifestLite,
   parseVerdictEnvelopeLite,
@@ -55,7 +54,6 @@ import {
   envelopePayloadV2,
   verdictDeliveryClaimedEvent,
   taskBudgetRefundedEvent,
-  claimedEvent,
 } from './helpers/events.js';
 
 const CHAIN_ID = 84532;
@@ -72,7 +70,6 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [envelope, ['agentId', 'metadataKey', 'chainId']],
   [pluginPublication, ['id']],
   [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
-  [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
   [attemptEnvelopeMeta, ['requestId', 'chainId']],
   [verdictEnvelopeMeta, ['requestId', 'chainId']],
@@ -658,60 +655,6 @@ describe('TaskBudgetRefunded → task.refunded', () => {
   });
 });
 
-// ── Claimed → rewardDistribution ─────────────────────────────────────────────
-
-describe('Claimed → rewardDistribution', () => {
-  it('creates a rewardDistribution row with all expected fields', async () => {
-    await handleClaimed({
-      event: claimedEvent(
-        {
-          serviceId: 1n,
-          multisig: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
-          operatorMinted: 1000n,
-          daoMinted: 200n,
-          totalEntitledOperator: 1000n,
-          totalEntitledDao: 200n,
-        },
-        { block: 8_000_001n, logIndex: 3, txHash: ('0x' + 'dd'.repeat(32)) as `0x${string}`, timestamp: 1_700_000_042n },
-      ),
-      context,
-      rewardDistribution,
-    });
-
-    const row = db.get(rewardDistribution, { chainId: CHAIN_ID, serviceId: '1', claimedAtBlock: 8_000_001n, logIndex: 3 });
-    expect(row).toBeDefined();
-    expect(row).toMatchObject({
-      serviceId: '1',
-      multisig: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
-      operatorMinted: 1000n,
-      daoMinted: 200n,
-      totalEntitledOperator: 1000n,
-      totalEntitledDao: 200n,
-      claimedAtBlock: 8_000_001n,
-      claimedAtTimestamp: 1_700_000_042n,
-      logIndex: 3,
-      claimedAtTx: ('0x' + 'dd'.repeat(32)) as `0x${string}`,
-      chainId: CHAIN_ID,
-    });
-  });
-
-  it('is idempotent — a replayed Claimed event does not create a duplicate row', async () => {
-    const ev = claimedEvent(
-      {
-        serviceId: 1n,
-        multisig: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
-        operatorMinted: 1000n,
-        daoMinted: 200n,
-        totalEntitledOperator: 1000n,
-        totalEntitledDao: 200n,
-      },
-      { block: 8_000_001n, logIndex: 3, txHash: ('0x' + 'dd'.repeat(32)) as `0x${string}` },
-    );
-    await handleClaimed({ event: ev, context, rewardDistribution });
-    await handleClaimed({ event: ev, context, rewardDistribution });
-    expect(db.count(rewardDistribution)).toBe(1);
-  });
-});
 
 describe('envelope most-recent-wins', () => {
   const key = `envelope:${ENVELOPE_CID}`;

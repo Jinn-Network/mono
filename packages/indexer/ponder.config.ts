@@ -1,7 +1,7 @@
 /**
  * Ponder configuration for the Jinn protocol indexer.
  *
- * Chains: Base Sepolia (84532) + Sepolia L1 (11155111).
+ * Chains: Base Sepolia (84532).
  *
  *   Base mainnet (8453) is intentionally NOT indexed yet. The public
  *   mainnet.base.org endpoint cannot sustain the ~5M-block historical sync
@@ -11,20 +11,12 @@
  *   mainnet addresses in the comment below, and set PONDER_RPC_URL_8453.
  *   Tracked in jinn-mono-280n.4.
  *
- *   JinnDistributor is on Sepolia L1 (chain 11155111), NOT Base. It distributes
- *   JINN tokens from the L1 DAO. The per-channel split
- *   (wCreation/wRestorationDelivery/wEvaluationDelivery) is reconstructed from
- *   JinnRouter activity counts, not from the Claimed event.
- *
- * Contracts: JinnRouter, IdentityRegistry, JinnDistributor.
+ * Contracts: JinnRouter, IdentityRegistry.
  *
  * Environment variables:
  *   PONDER_RPC_URL_84532          — RPC URL for Base Sepolia (defaults to the public
  *                                   endpoint; set a Tenderly/Alchemy/etc. URL in
  *                                   production for headroom).
- *   PONDER_RPC_URL_11155111       — RPC URL for Sepolia L1 (for JinnDistributor;
- *                                   defaults to a public endpoint, set a real RPC in
- *                                   production).
  *   JINN_INDEXER_ENRICH_ENVELOPES — dual meaning since #779. EXECUTION-envelope
  *                                   enrichment (attemptEnvelopeMeta + manifest +
  *                                   checkpoint) defaults ENABLED; set false/0 to
@@ -53,22 +45,17 @@
  *   JinnRouter mainnet:     0xfFa7118A3D820cd4E820010837D65FAfF463181B  (Base mainnet — not yet indexed)
  *   IdentityRegistry 84532: 0x8004A818BFB912233c491871b3d84c89A494BD9e
  *   IdentityRegistry 8453:  0x8004A169FB4a3325136EB29fA0ceB6D2e539a432   (not yet indexed)
- *   JinnDistributor 11155111: 0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6  (Sepolia L1 — NOT Base)
  *
  * Start blocks:
  *   JinnRouter testnet:       41_153_291 (from client/src/adapters/mech/adapter.ts)
  *   JinnRouter mainnet:       25_000_000 (conservative; tighten when first events observed)
  *   IdentityRegistry 84532:   41_100_000 (per DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK)
  *   IdentityRegistry 8453:    25_000_000
- *   JinnDistributor 11155111:  8_000_000 (conservative; deployed 2026-04-29 — source:
- *                             client/deployments/deployment-jinn-mvi-l1-sepolia.json)
- *                             // TODO(ebu7.2): tighten to the JinnDistributor deploy block
  */
 import { createConfig } from 'ponder';
 import { fallback, http } from 'viem';
 import { JINN_ROUTER_ABI } from './abis/JinnRouter.js';
 import { IDENTITY_REGISTRY_ABI } from './abis/IdentityRegistry.js';
-import { JINN_DISTRIBUTOR_ABI } from './abis/JinnDistributor.js';
 
 /**
  * Hard cap on the number of providers in a single fallback chain (issue #592).
@@ -102,7 +89,6 @@ function buildIndexerFallback(urls: readonly string[]) {
 }
 
 const baseSepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_84532'], 'https://sepolia.base.org');
-const sepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_11155111'], 'https://ethereum-sepolia-rpc.publicnode.com');
 
 /**
  * Hermetic snapshot mode (the hermetic snapshot indexer round-trip test,
@@ -111,10 +97,10 @@ const sepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_11155111'], 'https
  * When `JINN_INDEXER_SNAPSHOT_ROUTER` is set, the indexer targets a single,
  * locally-loaded Anvil snapshot chain instead of the live testnet: it indexes
  * ONLY the snapshot's JinnRouter (address + start block + chain id from env),
- * with its RPC from `PONDER_RPC_URL_<chainId>`. IdentityRegistry/JinnDistributor
- * are still DECLARED (so their handler registrations in src/index.ts resolve)
- * but pointed at a dead address so they index nothing — this keeps the config a
- * single chain with a single live RPC, fully deterministic with no network.
+ * with its RPC from `PONDER_RPC_URL_<chainId>`. IdentityRegistry is still
+ * DECLARED (so its handler registration in src/index.ts resolves) but pointed
+ * at a dead address so it indexes nothing — this keeps the config a single
+ * chain with a single live RPC, fully deterministic with no network.
  */
 const SNAPSHOT_ROUTER = process.env['JINN_INDEXER_SNAPSHOT_ROUTER'];
 const DEAD_ADDRESS = '0x000000000000000000000000000000000000dEaD' as const;
@@ -136,10 +122,6 @@ function buildSnapshotConfig(): ReturnType<typeof createConfig> {
         abi: IDENTITY_REGISTRY_ABI,
         chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
       },
-      JinnDistributor: {
-        abi: JINN_DISTRIBUTOR_ABI,
-        chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
-      },
     },
   });
 }
@@ -155,10 +137,6 @@ const testnetConfig = createConfig({
       // the same code path works regardless of which slot in the fallback
       // chain actually serves the request.
       ethGetLogsBlockRange: 2000,
-    },
-    sepolia: {
-      id: 11155111,
-      rpc: buildIndexerFallback(sepoliaUrls),
     },
   },
   contracts: {
@@ -180,19 +158,6 @@ const testnetConfig = createConfig({
         },
       },
     },
-    JinnDistributor: {
-      abi: JINN_DISTRIBUTOR_ABI,
-      chain: {
-        sepolia: {
-          address: '0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6', // Sepolia L1 — client/deployments/deployment-jinn-mvi-l1-sepolia.json
-          // First on-chain Claimed event is at Sepolia block 10_756_427 (from the live cast logs scan
-          // 2026-05-13). Starting a few hundred blocks earlier to be conservative and not miss any
-          // earlier events. Cuts historical sync from ~2.85M blocks (when this was 8_000_000) to ~100K
-          // — minutes vs hours on the Alchemy RPC. Resync requires a DATABASE_SCHEMA bump.
-          startBlock: 10_756_000,
-        },
-      },
-    },
   },
 });
 
@@ -200,8 +165,8 @@ const testnetConfig = createConfig({
 // testnet config. The static type is pinned to `typeof testnetConfig` so Ponder
 // codegen resolves a single concrete contract/event set: a ternary union of two
 // `createConfig` shapes (snapshot declares the chain key `snapshot`; testnet
-// declares `baseSepolia`/`sepolia`) collapses the virtual `ponder:registry`
+// declares `baseSepolia`) collapses the virtual `ponder:registry`
 // event names to `never`. Both branches declare the same JinnRouter /
-// IdentityRegistry / JinnDistributor contracts, so the testnet type is a sound
+// IdentityRegistry contracts, so the testnet type is a sound
 // description of either runtime value for handler registration.
 export default (SNAPSHOT_ROUTER ? buildSnapshotConfig() : testnetConfig) as typeof testnetConfig;

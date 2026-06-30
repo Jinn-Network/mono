@@ -2,7 +2,7 @@
  * Typed fetch helpers + React Query hooks for the Jinn network explorer.
  *
  * All shapes mirror the exact JSON responses from `packages/indexer/src/api/explorer.ts`.
- * bigint fields serialised as decimal strings (jinnEarned, mostRecentSettlementBlock, etc.).
+ * bigint fields serialised as decimal strings (mostRecentSettlementBlock, etc.).
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -32,44 +32,8 @@ export interface LeaderboardRow {
   verdictsPass: number;
   /** null when verdictsTotal === 0 */
   resolvedRate: number | null;
-  /** decimal string, e.g. "100500000000000000044" */
-  jinnEarned: string;
-  /**
-   * Liveness (issue #926): true when the operator earned ≥ the per-block floor
-   * in the NEWEST completed block of `activeWindow` (the in-progress block is
-   * excluded). This is what the `Active?` column means — "earning now" — not
-   * the 48h-sustained gate. Derive sustained from `recentBlocks.every(Boolean)`.
-   */
+  /** true when the operator has ≥1 on-chain attempt. */
   active: boolean;
-  /**
-   * Per-block qualification flags over `activeWindow` — length
-   * `activeWindow.blockCount` (8), oldest-first (`recentBlocks[0]` is the
-   * oldest completed bucket, `recentBlocks[7]` is the newest). `true` when the
-   * operator earned ≥ `activeWindow.requiredTjinnPerBlock` in that block.
-   *
-   * Server contract: present on every `ranked`/`lowVolume` entry returned by
-   * `/explorer/operators`. Optional on the wire type because the train/frozen
-   * leaderboards inside `/explorer/solvernet/:cid` reuse this shape and do
-   * not populate it.
-   */
-  recentBlocks?: boolean[];
-}
-
-/**
- * Reference window for the "active operator" surface — the most recent
- * `blockCount` × `blockSeconds`-second blocks, ending at the most-recent
- * completed UTC boundary.
- *
- * `requiredTjinnPerBlock` is the wei floor an operator's per-block
- * `operatorMinted` sum must clear to qualify a block. Serialised as a
- * decimal string because bigints don't round-trip through JSON.
- */
-export interface ActiveWindow {
-  startTs: number;
-  endTs: number;
-  blockSeconds: number;
-  blockCount: number;
-  requiredTjinnPerBlock: string;
 }
 
 export interface RankedLeaderboardRow extends LeaderboardRow {
@@ -91,14 +55,6 @@ export interface NetworkResponse extends FreshnessMeta {
    * disambiguate from the headline "active operators" surface.
    */
   everAttemptedOperators: number;
-  /**
-   * Liveness count — operators that qualified in the newest completed bucket of
-   * `activeWindow` (issue #926). "Earning now," not the 48h gate.
-   */
-  activeOperators: number;
-  /** Milestone-1 count — operators that qualified on EVERY bucket of `activeWindow`. */
-  sustainedOperators: number;
-  activeWindow: ActiveWindow;
   solverNetsRunning: number;
   verdicts: number;
   /** Envelope-truth-preferring pass count. */
@@ -122,8 +78,6 @@ export interface NetworkResponse extends FreshnessMeta {
     total: number;
     share: number;
   };
-  jinnDistributedOperator: string;
-  jinnDistributedDao: string;
   mostRecentSettlementBlock: string | null;
   composition: {
     byMode: CompositionEntry[];
@@ -266,19 +220,11 @@ export interface OperatorsResponse extends FreshnessMeta {
   ranked: RankedLeaderboardRow[];
   lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
   minVerdicts: number;
-  /** Liveness count — multisigs active in the newest completed bucket (issue #926). */
+  /** Distinct operators with ≥1 on-chain attempt. */
   activeOperators: number;
-  /** Milestone-1 count — multisigs that qualified on EVERY bucket of `activeWindow`. */
-  sustainedOperators: number;
-  /** Milestone-3 count — distinct recipient Safes with ≥25 tJINN earned ever (lifetime). */
-  operatorsAtMilestone3: number;
-  activeWindow: ActiveWindow;
   appliedFilters?: {
     mode?: string;
     harness?: string;
-  };
-  meta: {
-    jinnAttribution: 'pending' | 'ok';
   };
 }
 
@@ -307,10 +253,6 @@ export interface OperatorResponse extends FreshnessMeta {
     verdictsTotal: number;
     verdictsPass: number;
     resolvedRate: number | null;
-    jinnEarned: string;
-  };
-  meta: {
-    jinnAttribution: 'pending' | 'ok';
   };
 }
 

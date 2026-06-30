@@ -7,7 +7,7 @@
  *     the SolverNet boards don't carry those per-row)
  *
  * Columns:
- *   # (rank) | Operator | Resolved rate | Attempts | Settled | Verdicts | JINN | Mode? | Harness?
+ *   # (rank) | Operator | Resolved rate | Attempts | Settled | Verdicts | Mode? | Harness?
  *
  * Sort lives in URL-state via useEnumParam('sort', ...) + useEnumParam('dir', ...).
  * Low-volume rows are visually separated below the ranked rows.
@@ -21,7 +21,7 @@ import type { RankedLeaderboardRow, LeaderboardRow } from '../lib/api';
 import { DataTable, cellStyle, cellNumStyle, cellMutedStyle } from './DataTable';
 import { StatusChip } from './StatusChip';
 import { useEnumParam } from '../lib/url-state';
-import { pct, int, jinn, shortAddr } from '../lib/format';
+import { pct, int, shortAddr } from '../lib/format';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,6 @@ export interface LeaderboardProps {
   ranked: LeaderboardRankedRow[];
   lowVolume: LeaderboardLowVolumeRow[];
   minVerdicts?: number;
-  meta?: { jinnAttribution: 'pending' | 'ok' };
   /** compact — smaller padding, fewer optional columns (for SolverNet embedding) */
   compact?: boolean;
   /**
@@ -60,7 +59,6 @@ type SortKey =
   | 'attempts'
   | 'settledContribution'
   | 'verdicts'
-  | 'jinnEarned'
   | 'operator';
 
 const SORT_KEYS: SortKey[] = [
@@ -69,7 +67,6 @@ const SORT_KEYS: SortKey[] = [
   'attempts',
   'settledContribution',
   'verdicts',
-  'jinnEarned',
   'operator',
 ];
 
@@ -104,11 +101,6 @@ function sortRows<T extends LeaderboardRow & { rank?: number }>(
         av = a.verdictsTotal;
         bv = b.verdictsTotal;
         break;
-      case 'jinnEarned':
-        // bigint string comparison — pad to equal length for lexicographic sort
-        av = a.jinnEarned.padStart(30, '0');
-        bv = b.jinnEarned.padStart(30, '0');
-        break;
       case 'operator':
         av = a.operator.toLowerCase();
         bv = b.operator.toLowerCase();
@@ -130,7 +122,6 @@ export function Leaderboard({
   ranked,
   lowVolume,
   minVerdicts,
-  meta,
   compact = false,
   onOperatorClick,
 }: LeaderboardProps) {
@@ -160,8 +151,6 @@ export function Leaderboard({
   const hasHarness = ranked.some((r) => r.dominantHarness !== undefined) ||
     lowVolume.some((r) => r.dominantHarness !== undefined);
 
-  const jinnPending = meta?.jinnAttribution === 'pending';
-
   // Sort ranked rows; keep lowVolume in server order (or sort the same way)
   const sortedRanked = sortRows(ranked, sortKey as SortKey, sortDir as 'asc' | 'desc');
   const sortedLowVolume = sortRows(lowVolume, sortKey as SortKey, sortDir as 'asc' | 'desc');
@@ -174,7 +163,6 @@ export function Leaderboard({
     { key: 'attempts', label: 'Attempts', numeric: true },
     { key: 'settledContribution', label: 'Settled', numeric: true },
     { key: 'verdicts', label: 'Pass / Total', numeric: true },
-    { key: 'jinnEarned', label: 'tJINN', numeric: true },
     ...(hasMode && !compact ? [{ key: 'mode', label: 'Mode', sortable: false }] : []),
     ...(hasHarness && !compact ? [{ key: 'harness', label: 'Harness', sortable: false }] : []),
     ...(onOperatorClick ? [{ key: 'opLink', label: '', sortable: false, width: 24 }] : []),
@@ -297,19 +285,6 @@ export function Leaderboard({
         {/* Verdicts pass / total */}
         <td className="data" style={{ ...cellNumStyle, padding: compact ? '8px 12px' : undefined }}>
           {int(row.verdictsPass)}&thinsp;/&thinsp;{int(row.verdictsTotal)}
-        </td>
-
-        {/* JINN earned */}
-        <td
-          className="data"
-          style={{
-            ...cellNumStyle,
-            color: 'var(--fg-muted)',
-            padding: compact ? '8px 12px' : undefined,
-          }}
-          title={jinnPending ? 'operator JINN attribution pending — see jinn-mono-ebu7.9' : undefined}
-        >
-          {jinnPending ? '—' : jinn(row.jinnEarned)}
         </td>
 
         {/* Mode (conditional) */}

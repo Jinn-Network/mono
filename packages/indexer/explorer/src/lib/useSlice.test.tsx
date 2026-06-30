@@ -26,7 +26,7 @@ describe('useSlice URL encoding', () => {
       new Response(JSON.stringify({
         params: {},
         enrichmentCoverage: 0,
-        kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null, jinnEarned: '0' },
+        kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null },
         series: [],
         leaderboard: { train: [], frozen: [] },
       }), { status: 200 }),

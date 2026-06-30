@@ -1,12 +1,11 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Ten entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X + attd:
+ * Nine entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X + attd:
  *
  *   Task                  — from JinnRouter.TaskCreated; finalized recomputed from VerdictDeliveryClaimed
  *   Attempt               — from JinnRouter.TaskAttemptCreated
  *   Verdict               — from JinnRouter.VerdictDeliveryClaimed
- *   RewardDistribution    — from JinnDistributor.Claimed on Sepolia L1
  *   SolverNetManifest     — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
  *   Envelope              — from IdentityRegistry.MetadataSet (envelope key patterns)
  *   PluginPublication     — from IdentityRegistry.MetadataSet (key prefix plugin:) per attd /
@@ -188,52 +187,6 @@ export const verdict = onchainTable(
     evaluatorIdx: index().on(table.evaluator),
     codeIdx: index().on(table.verdictCode),
     blockIdx: index().on(table.createdAtBlock),
-  }),
-);
-
-// ── RewardDistribution ───────────────────────────────────────────────────────
-
-/**
- * One JINN distribution claim. From JinnDistributor.Claimed on Sepolia L1.
- * Claimed carries cumulative entitlement (totalEntitled*) and this-claim's
- * minted delta (operatorMinted / daoMinted). One row per claim event; the
- * per-channel split (wCreation/wRestorationDelivery/wEvaluationDelivery) is NOT
- * in the event — the explorer reconstructs it from per-operator JinnRouter
- * activity counts (TaskCreated by creator, SolutionDeliveryClaimed by operator,
- * VerdictDeliveryClaimed by evaluator).
- *
- * Primary key: (chainId, serviceId, claimedAtBlock, logIndex) — a service can
- * claim repeatedly; block+logIndex disambiguate.
- */
-export const rewardDistribution = onchainTable(
-  'reward_distribution',
-  (t) => ({
-    serviceId: t.text().notNull(),
-    /** The operator multisig (Safe) that claimed — joins to attempt.operator. */
-    multisig: t.hex().notNull(),
-    /** JINN minted to the operator on this claim (wei). */
-    operatorMinted: t.bigint().notNull(),
-    /** JINN minted to the DAO on this claim (wei). */
-    daoMinted: t.bigint().notNull(),
-    /** Cumulative operator entitlement after this claim (wei). */
-    totalEntitledOperator: t.bigint().notNull(),
-    /** Cumulative DAO entitlement after this claim (wei). */
-    totalEntitledDao: t.bigint().notNull(),
-    claimedAtBlock: t.bigint().notNull(),
-    /**
-     * Block timestamp (UTC seconds) for `claimedAtBlock`. Used by the explorer's
-     * active-operator surface to bucket rewards into the rolling 8 × 6h window.
-     */
-    claimedAtTimestamp: t.bigint().notNull(),
-    logIndex: t.integer().notNull(),
-    claimedAtTx: t.hex().notNull(),
-    chainId: t.integer().notNull(),
-  }),
-  (table) => ({
-    pk: primaryKey({ columns: [table.chainId, table.serviceId, table.claimedAtBlock, table.logIndex] }),
-    serviceIdx: index().on(table.serviceId),
-    multisigIdx: index().on(table.multisig),
-    blockIdx: index().on(table.claimedAtBlock),
   }),
 );
 

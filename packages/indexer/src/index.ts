@@ -1,7 +1,7 @@
 /**
  * Ponder event handlers for the Jinn protocol indexer.
  *
- * Seven event sources, each mapped to one or more entities in ponder.schema.ts:
+ * Six event sources, each mapped to one or more entities in ponder.schema.ts:
  *
  *   JinnRouter:TaskCreated             → task
  *   JinnRouter:TaskAttemptCreated      → attempt
@@ -16,7 +16,6 @@
  *                                        default in-handler and owned by the standalone enrichment worker
  *                                        (packages/indexer-enrichment); set JINN_INDEXER_ENRICH_ENVELOPES=true
  *                                        to restore in-handler verdict enrichment (rollback).
- *   JinnDistributor:Claimed            → rewardDistribution
  *
  * Handlers are pure event-to-row mappings with no business logic. The
  * correctness gate (canClaimTask simulation) lives in the daemon adapter,
@@ -37,7 +36,7 @@
  */
 import { ponder } from 'ponder:registry';
 import { and, count, eq } from 'ponder';
-import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
 
 // ── Enrichment config (read once at module scope) ─────────────────────────────
 // JINN_INDEXER_ENRICH_ENVELOPES governs in-handler IPFS enrichment. Since #779
@@ -74,7 +73,6 @@ import {
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
-  handleClaimed,
   type HandlerContext,
   type TaskCreatedEvent,
   type TaskAttemptCreatedEvent,
@@ -82,7 +80,6 @@ import {
   type MetadataSetEvent,
   type VerdictDeliveryClaimedEvent,
   type TaskBudgetRefundedEvent,
-  type ClaimedEvent,
 } from './handlers.js';
 
 ponder.on('JinnRouter:TaskCreated', async ({ event, context }) => {
@@ -162,13 +159,5 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     enrichEnvelopes,
     enrichVerdicts,
     ipfsGateway,
-  });
-});
-
-ponder.on('JinnDistributor:Claimed', async ({ event, context }) => {
-  await handleClaimed({
-    event: event as unknown as ClaimedEvent,
-    context: context as unknown as HandlerContext,
-    rewardDistribution,
   });
 });
