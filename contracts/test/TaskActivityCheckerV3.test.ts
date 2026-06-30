@@ -68,6 +68,25 @@ describe("TaskActivityCheckerV3", function () {
     ).to.be.revertedWithCustomError(checker, "TACTaskAlreadyCredited");
   });
 
+  it("namespaces Task-creation credit per router (no cross-coordinator taskId collision)", async function () {
+    const { checker, owner, router, creator } = await deploy();
+    const routerB = (await ethers.getSigners())[5];
+
+    // Router A finalizes taskId 1.
+    await checker.connect(router).recordTaskCreationFinalized(await creator.getAddress(), 1, ethers.parseEther("1"));
+
+    // The checker proxy is shared and persists across coordinator/router redeploys, but a
+    // fresh coordinator restarts taskIds at 1. Re-point the shared checker to router B and
+    // finalize taskId 1 again — this must NOT revert, because the dedup key is
+    // keccak256(router, taskId), so (B,1) does not collide with the already-credited (A,1).
+    // (A direct call that reverts would fail the test; the weight assertion below confirms success.)
+    await checker.connect(owner).setAuthorizedRouter(await routerB.getAddress());
+    await checker.connect(routerB).recordTaskCreationFinalized(await creator.getAddress(), 1, ethers.parseEther("1"));
+
+    // Creator credited once per router (2e18 total) — proves the per-router keys are distinct.
+    expect(await checker.taskCreationWeight(await creator.getAddress())).to.equal(ethers.parseEther("2"));
+  });
+
   it("returns Safe nonce plus Task-native eligible activity weight", async function () {
     const { checker, router, safe } = await deploy();
     const safeAddress = await safe.getAddress();

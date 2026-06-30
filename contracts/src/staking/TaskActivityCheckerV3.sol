@@ -135,9 +135,16 @@ contract TaskActivityCheckerV3 is Implementation {
     function recordTaskCreationFinalized(address creator, uint256 taskId, uint256 weight) external {
         _requireRouter();
         if (creator == address(0)) revert ZeroAddress();
-        if (taskCreationFinalized[taskId]) revert TACTaskAlreadyCredited(taskId);
+        // The checker is shared and persists across coordinator/router redeploys, but taskId
+        // restarts at 1 per coordinator — so a fresh coordinator's taskIds collide with an old
+        // coordinator's already-credited ones (TACTaskAlreadyCredited). Namespace the
+        // creator-credit dedup by the calling (authorized) router, which is unique per
+        // coordinator+router deploy. Storage-safe: same slot and mapping type; only the key
+        // VALUE changes from taskId to keccak256(router, taskId).
+        uint256 creditKey = uint256(keccak256(abi.encode(msg.sender, taskId)));
+        if (taskCreationFinalized[creditKey]) revert TACTaskAlreadyCredited(taskId);
 
-        taskCreationFinalized[taskId] = true;
+        taskCreationFinalized[creditKey] = true;
         taskCreationWeight[creator] += weight;
         eligibleActivityWeight[creator] += weight;
 

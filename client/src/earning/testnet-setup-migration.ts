@@ -21,6 +21,11 @@ import {
 
 export const DEPRECATED_BASE_SEPOLIA_STAKING_PROXY =
   '0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b';
+export const DEPRECATED_BASE_SEPOLIA_STAKING_PROXIES = [
+  DEPRECATED_BASE_SEPOLIA_STAKING_PROXY,
+  '0x24e34E5037956a5Feca1AAAfaA30297084C228B8',
+  '0x3A14c71e94F3d38A6BE4319808B259FbFb47B86f',
+] as const;
 
 const MIGRATION_KIND = 'base-sepolia-standard-setup' as const;
 
@@ -75,8 +80,10 @@ function isDeprecatedService(
 ): boolean {
   return (
     svc.service_id !== null &&
-    sameAddress(svc.staking_address, DEPRECATED_BASE_SEPOLIA_STAKING_PROXY) &&
-    !sameAddress(currentStakingContract, DEPRECATED_BASE_SEPOLIA_STAKING_PROXY)
+    DEPRECATED_BASE_SEPOLIA_STAKING_PROXIES.some(proxy =>
+      sameAddress(svc.staking_address, proxy) &&
+      !sameAddress(currentStakingContract, proxy),
+    )
   );
 }
 
