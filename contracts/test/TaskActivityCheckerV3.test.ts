@@ -28,7 +28,7 @@ describe("TaskActivityCheckerV3", function () {
     return { checker, owner, router, operator, evaluator, creator, safe };
   }
 
-  it("records novelty-weighted Solution delivery", async function () {
+  it("records flat full-weight Solution delivery (anti-farming decay removed)", async function () {
     const { checker, router, operator } = await deploy();
     const solutionDigest = ethers.keccak256(ethers.toUtf8Bytes("same-solution"));
 
@@ -39,9 +39,10 @@ describe("TaskActivityCheckerV3", function () {
     expect(await checker.solutionDeliveryWeight(await operator.getAddress())).to.equal(ethers.parseEther("1"));
     expect(await checker.eligibleActivityWeight(await operator.getAddress())).to.equal(ethers.parseEther("1"));
 
+    // No novelty/similarity decay anymore: a repeated digest credits full weight again.
     await checker.connect(router).recordSolutionDelivery(await operator.getAddress(), solutionDigest);
-    expect(await checker.solutionDeliveryWeight(await operator.getAddress())).to.equal(ethers.parseEther("1"));
-    expect(await checker.eligibleActivityWeight(await operator.getAddress())).to.equal(ethers.parseEther("1"));
+    expect(await checker.solutionDeliveryWeight(await operator.getAddress())).to.equal(ethers.parseEther("2"));
+    expect(await checker.eligibleActivityWeight(await operator.getAddress())).to.equal(ethers.parseEther("2"));
   });
 
   it("records Verdict delivery at full weight", async function () {

@@ -104,8 +104,13 @@ contract TaskActivityCheckerV3 is Implementation {
         if (operator == address(0)) revert ZeroAddress();
         if (solutionDigest == bytes32(0)) revert TACZeroValue();
 
-        weight = _computeNoveltyWeight(operator, solutionDigest);
-        _writeSolutionEvidenceHash(operator, solutionDigest);
+        // Flat full-weight credit. On-chain anti-farming (novelty / similarity
+        // decay) is removed in the tokenless-OLAS pivot — quality is carried by
+        // launcher self-interest plus the deferred knowledge-pricing layer, not
+        // by a per-solution decay curve. The similarity/decay/evidence-buffer
+        // state slots are retained (unwritten) so this is an in-place,
+        // storage-identical upgrade of the live checker proxy.
+        weight = 1e18;
         solutionDeliveryWeight[operator] += weight;
         eligibleActivityWeight[operator] += weight;
 
@@ -157,66 +162,8 @@ contract TaskActivityCheckerV3 is Implementation {
         }
     }
 
-    function getSolutionEvidenceHashCount(address operator) external view returns (uint256) {
-        return _solutionEvidenceHashes[operator].length;
-    }
-
-    function getSolutionEvidenceHash(address operator, uint256 index) external view returns (bytes32) {
-        bytes32[] storage hashes = _solutionEvidenceHashes[operator];
-        uint256 len = hashes.length;
-        require(index < len, "TaskActivityCheckerV3: index out of bounds");
-
-        if (len < comparisonWindow) {
-            return hashes[index];
-        }
-        uint256 oldest = _solutionEvidenceWriteIndex[operator];
-        return hashes[(oldest + index) % len];
-    }
-
     function _requireRouter() internal view {
         if (msg.sender != authorizedRouter) revert TACUnauthorizedRouter(msg.sender, authorizedRouter);
     }
 
-    function _writeSolutionEvidenceHash(address operator, bytes32 newHash) internal {
-        bytes32[] storage hashes = _solutionEvidenceHashes[operator];
-        uint256 window = comparisonWindow;
-
-        if (hashes.length < window) {
-            hashes.push(newHash);
-            return;
-        }
-
-        uint256 idx = _solutionEvidenceWriteIndex[operator];
-        hashes[idx] = newHash;
-        unchecked {
-            _solutionEvidenceWriteIndex[operator] = (idx + 1) % window;
-        }
-    }
-
-    function _computeNoveltyWeight(address operator, bytes32 newHash) internal view returns (uint256) {
-        bytes32[] storage hashes = _solutionEvidenceHashes[operator];
-        uint256 len = hashes.length;
-        if (len == 0) return 1e18;
-
-        uint256 minDistance = 256;
-        for (uint256 i = 0; i < len; i++) {
-            uint256 distance = _hammingDistance(newHash, hashes[i]);
-            if (distance < minDistance) {
-                minDistance = distance;
-            }
-        }
-        return minDistance < similarityThreshold ? similarDecayMultiplier : 1e18;
-    }
-
-    function _hammingDistance(bytes32 a, bytes32 b) internal pure returns (uint256 count) {
-        uint256 x = uint256(a ^ b);
-        unchecked {
-            x = x - ((x >> 1) & 0x5555555555555555555555555555555555555555555555555555555555555555);
-            x = (x & 0x3333333333333333333333333333333333333333333333333333333333333333)
-                + ((x >> 2) & 0x3333333333333333333333333333333333333333333333333333333333333333);
-            x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F;
-            x = x * 0x0101010101010101010101010101010101010101010101010101010101010101;
-            count = x >> 248;
-        }
-    }
 }

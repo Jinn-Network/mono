@@ -162,6 +162,16 @@ export function assertAnvilForkNodeInfo(nodeInfo: unknown): string {
     );
   }
 
+  // Belt-and-suspenders alongside the chainId guard: ensure the fork is of Base
+  // Sepolia, not a mainnet fork pinned to --chain-id 84532. A wrong fork would
+  // produce evidence that looks valid but proves nothing about Base Sepolia.
+  if (!forkUrl.toLowerCase().includes('sepolia')) {
+    throw new Error(
+      `Fork URL "${forkUrl}" does not look like a Base Sepolia RPC (expected to contain ` +
+        `"sepolia"). Refusing to run the migration rehearsal against a non-Sepolia fork.`,
+    );
+  }
+
   return forkUrl;
 }
 
