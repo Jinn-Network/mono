@@ -13,7 +13,6 @@ import {
   keccak256,
   parseEther,
   toBytes,
-  zeroAddress,
   type Abi,
   type Address,
   type Hex,
@@ -179,6 +178,10 @@ export const TASK_COORDINATOR_E2E_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'taskId', type: 'uint256' }],
     outputs: [{
+      // Tokenless-OLAS pivot: TaskRecord trimmed — policy is now just `maxClaims`
+      // and the final flag is `creatorCredited`. Field order is otherwise
+      // unchanged, so positional `tupleField` reads (manifestDigest@2,
+      // submittedCount@6) still resolve.
       name: 'record',
       type: 'tuple',
       components: [
@@ -190,30 +193,13 @@ export const TASK_COORDINATOR_E2E_ABI = [
           name: 'policy',
           type: 'tuple',
           components: [
-            { name: 'claimWindowStart', type: 'uint64' },
-            { name: 'claimWindowEnd', type: 'uint64' },
-            { name: 'submissionDeadline', type: 'uint64' },
-            { name: 'claimLeaseTtlSeconds', type: 'uint32' },
-            { name: 'maxClaims', type: 'uint16' },
-            { name: 'maxClaimsPerOperator', type: 'uint16' },
-            { name: 'policyHook', type: 'address' },
-            {
-              name: 'evaluationPolicy',
-              type: 'tuple',
-              components: [
-                { name: 'requiredVerdicts', type: 'uint16' },
-                { name: 'passThreshold', type: 'uint16' },
-                { name: 'evaluationDeadline', type: 'uint64' },
-                { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
-                { name: 'disallowSolverSelfEvaluation', type: 'bool' },
-              ],
-            },
+            { name: 'maxClaims', type: 'uint32' },
           ],
         },
         { name: 'claimCount', type: 'uint32' },
         { name: 'submittedCount', type: 'uint32' },
         { name: 'finalizedAttemptCount', type: 'uint32' },
-        { name: 'taskCreationCredited', type: 'bool' },
+        { name: 'creatorCredited', type: 'bool' },
       ],
     }],
   },
@@ -1794,24 +1780,8 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     const predictionTask = PredictionV1TaskSchema.parse(task);
     const { digest: taskCidDigest, cid: taskCid } = taskCidDigestAndCid(task);
     const manifestDigest = keccak256(toBytes('prediction.v1'));
-    const latestBlock = await publicClient.getBlock();
-    const nowSec = Number(latestBlock.timestamp);
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + 120),
-      submissionDeadline: BigInt(nowSec + 300),
-      claimLeaseTtlSeconds: 120,
-      maxClaims: 2,
-      maxClaimsPerOperator: 1,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 420),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
-      },
-    };
+    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
+    const policy = { maxClaims: 2 };
 
     let created: { hash: Hex; receipt: TransactionReceipt };
     try {
@@ -2326,24 +2296,8 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const predictionTask = PredictionV1TaskSchema.parse(task);
     const { digest: taskCidDigest, cid: taskCid } = taskCidDigestAndCid(task);
     const manifestDigest = manifestDigestForCid(launched.manifestCid);
-    const latestBlock = await publicClient.getBlock();
-    const nowSec = Number(latestBlock.timestamp);
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + 120),
-      submissionDeadline: BigInt(nowSec + 300),
-      claimLeaseTtlSeconds: 120,
-      maxClaims: 2,
-      maxClaimsPerOperator: 1,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 420),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
-      },
-    };
+    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
+    const policy = { maxClaims: 2 };
 
     const created = await writeContractTx({
       publicClient,
@@ -2737,24 +2691,8 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
     const taskCidDigest = keccak256(toBytes(JSON.stringify(task)));
     const taskCid = `f01551220${taskCidDigest.slice(2)}`;
     const manifestDigest = keccak256(toBytes('prediction.v1'));
-    const latestBlock = await publicClient.getBlock();
-    const nowSec = Number(latestBlock.timestamp);
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + 300),
-      submissionDeadline: BigInt(nowSec + 900),
-      claimLeaseTtlSeconds: 120,
-      maxClaims: 3,
-      maxClaimsPerOperator: 1,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 1_020),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
-      },
-    };
+    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
+    const policy = { maxClaims: 3 };
 
     const created = await writeContractTx({
       publicClient,

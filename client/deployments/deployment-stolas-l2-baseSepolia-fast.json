@@ -2,10 +2,10 @@
   "network": "baseSepolia",
   "chainId": 84532,
   "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-  "deployedAt": "2026-04-10T16:46:00.888Z",
+  "deployedAt": "2026-06-29T14:53:46.226Z",
   "config": {
     "l2Jinn": "0xAB9a01cd4A379e36006ec6df2960CF39EF79df63",
-    "stakingContract": "0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b",
+    "stakingContract": "0x3A14c71e94F3d38A6BE4319808B259FbFb47B86f",
     "l1DepositProcessor": "0x494FBcd686C895fD6265e852086B53Abf15cb076",
     "l1DistributorProxy": "0x12F14eF5b4881a932BE3F334599cB9473aBE987A",
     "l1TreasuryProxy": "0xa87c117cB54d9C6C8a8e0aA0b336a1125E485Cb7",
@@ -31,5 +31,16 @@
     "stakingManagerImpl": "0xFb0B086D3f7C03f1F671C6ccD5D16CC779B25Af9",
     "stakingManager": "0x5edCd012C581b946E06a74e1906a5f29D588403e",
     "baseStakingProcessorL2": "0x23a063f600e9938405D0367a137f1bE2F0B4D0D2"
-  }
+  },
+  "rewires": [
+    {
+      "rewiredAt": "2026-06-29T14:53:46.226Z",
+      "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+      "legacyStakingProxy": "0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b",
+      "freshStakingProxy": "0x3A14c71e94F3d38A6BE4319808B259FbFb47B86f",
+      "activityChecker": "0x0e1B5f264F4FAdcFAA950fb00c58d9A39C040f70",
+      "packedConfig": "2199023257600001",
+      "fundWei": "100000000000000000000"
+    }
+  ]
 }

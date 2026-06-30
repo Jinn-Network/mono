@@ -2,10 +2,10 @@
  * acquire_artifact MCP tool handler.
  *
  * Tries fast paths in order before proxying to the daemon:
- *   1. served_artifacts (own published bytes; free)
+ *   1. served_artifacts (own published bytes)
  *   2. network_artifacts (previously fetched + cached; touches last_used_at)
- *   3. POST {daemonApiUrl}/v1/artifacts/acquire (daemon-side corpus owns
- *      the agent EOA private key and pays via x402)
+ *   3. POST {daemonApiUrl}/v1/artifacts/acquire (daemon-side corpus runs the
+ *      free origin fetch and owns the shared byte cache)
  *
  * Mirrors the daemon-side proxy precedent already used by
  * `submit_restoration_result` in mcp/server.ts. The MCP subprocess never

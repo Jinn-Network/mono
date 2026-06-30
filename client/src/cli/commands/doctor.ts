@@ -249,8 +249,8 @@ function checkDaemonRuntimeReady(): CheckResult {
 /**
  * On testnet, warn if the stOLAS distributor pool is drained. Operators can
  * neither fix this themselves nor bootstrap past it — the protocol team has
- * to refill (see contracts/scripts/README-jinn-testnet-faucet.md). Emitted
- * as a warning, not a hard failure, because a refill may be in-flight.
+ * to refill the distributor. Emitted as a warning, not a hard failure,
+ * because a refill may be in-flight.
  */
 async function checkDistributorReachable(config: JinnConfig): Promise<CheckResult | null> {
   if (config.network !== 'testnet') return null;

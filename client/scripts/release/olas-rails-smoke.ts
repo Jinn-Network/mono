@@ -360,6 +360,52 @@ async function waitForStatus(port: number, opts: { timeoutMs: number; pollMs: nu
   throw new Error(`Timed out waiting for daemon status on port ${port}`);
 }
 
+// Raw eth_call to StakingBase.getStakingState(serviceId) — selector 0xfd0bba8c.
+// Returns 0=Unstaked, 1=Staked, 2=Evicted, or null on RPC error. Dependency-free
+// so the smoke harness needs no viem import.
+async function readStakingState(rpcUrl: string, proxy: string, serviceId: number): Promise<number | null> {
+  const data = '0xfd0bba8c' + BigInt(serviceId).toString(16).padStart(64, '0');
+  try {
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: proxy, data }, 'latest'] }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { result?: string };
+    if (typeof json.result !== 'string' || json.result === '0x') return null;
+    return Number(BigInt(json.result));
+  } catch {
+    return null;
+  }
+}
+
+// The funded-rails reward only accrues for activity that happens while the service
+// is Staked: each reStake resets the OLAS liveness baseline to the current activity
+// weight, so a task submitted while the service is Evicted bumps the checker counter
+// but earns nothing (the staked window never overlaps the activity). Waiting for the
+// background EvictionLoop to reStake the service before submitting aligns the two.
+async function waitForServiceStaked(opts: {
+  rpcUrl: string;
+  proxy: string;
+  serviceId: number;
+  timeoutMs: number;
+  pollMs: number;
+}): Promise<void> {
+  const deadline = Date.now() + opts.timeoutMs;
+  let last = -1;
+  while (Date.now() < deadline) {
+    const state = await readStakingState(opts.rpcUrl, opts.proxy, opts.serviceId);
+    if (state !== null && state !== last) {
+      console.log(`[olas-rails-smoke] service ${opts.serviceId} staking state=${state} (0=unstaked,1=staked,2=evicted)`);
+      last = state;
+    }
+    if (state === 1) return;
+    await sleep(opts.pollMs);
+  }
+  throw new Error(`service ${opts.serviceId} not Staked within ${opts.timeoutMs}ms (last state=${last})`);
+}
+
 function runSync(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): { stdout: string; stderr: string } {
   const result = spawnSync(command, args, {
     cwd,
@@ -379,6 +425,12 @@ async function executeSmoke(opts: CliOptions, taskSpec: ReturnType<typeof buildP
   let daemon: ChildProcess | null = null;
   try {
     const logStream = createWriteStream(opts.logFile, { flags: 'a' });
+    // Ensure the file descriptor is open before handing the stream to spawn's
+    // stdio — Node 22+ rejects an unopened WriteStream (fd null).
+    await new Promise<void>((resolveOpen, rejectOpen) => {
+      logStream.once('open', () => resolveOpen());
+      logStream.once('error', rejectOpen);
+    });
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       JINN_PASSWORD: resolvePassword(),
@@ -402,6 +454,29 @@ async function executeSmoke(opts: CliOptions, taskSpec: ReturnType<typeof buildP
       pollMs: opts.pollMs,
     });
     writeJson(join(opts.evidenceDir, 'status-before.json'), initialStatus);
+
+    // Opt-in: align the loop's activity with the service's staked window. When
+    // JINN_SMOKE_STAKED_PROXY is set, hold the task submission until the named
+    // service reports Staked on-chain (the EvictionLoop reStakes it first), so the
+    // funded-rails reward actually accrues. See waitForServiceStaked above.
+    const stakedProxy = process.env['JINN_SMOKE_STAKED_PROXY'];
+    if (stakedProxy) {
+      const serviceId = Number(process.env['JINN_SMOKE_STAKED_SERVICE'] ?? '0');
+      const cfg = JSON.parse(readFileSync(opts.configPath, 'utf8')) as { rpcUrl?: string | string[] };
+      const rpcUrl = process.env['JINN_SMOKE_RPC_URL'] ?? (Array.isArray(cfg.rpcUrl) ? cfg.rpcUrl[0] : cfg.rpcUrl);
+      if (!rpcUrl || !serviceId) {
+        throw new Error('JINN_SMOKE_STAKED_PROXY is set but rpcUrl or JINN_SMOKE_STAKED_SERVICE is missing');
+      }
+      console.log(`[olas-rails-smoke] waiting for service ${serviceId} to be Staked on ${stakedProxy} before submitting…`);
+      await waitForServiceStaked({
+        rpcUrl,
+        proxy: stakedProxy,
+        serviceId,
+        timeoutMs: Math.min(opts.timeoutMs, 240_000),
+        pollMs: opts.pollMs,
+      });
+      console.log(`[olas-rails-smoke] service ${serviceId} is Staked — submitting task.`);
+    }
 
     const submit = runSync('yarn', [
       'jinn',

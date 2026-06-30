@@ -11,9 +11,7 @@ import {
 } from '../../src/preflight/rpc-network.js';
 import {
   DEFAULT_TESTNET_RPC_URLS,
-  DEFAULT_TESTNET_ETHEREUM_RPC_URLS,
   DEFAULT_MAINNET_RPC_URLS,
-  DEFAULT_MAINNET_ETHEREUM_RPC_URLS,
 } from '../../src/config.js';
 
 const servers: Server[] = [];
@@ -255,9 +253,7 @@ describe('summarizeFallbackChain (AC7 boot-log format)', () => {
 describe.skipIf(!process.env['JINN_RPC_LIVE_PROBE'])('default RPC lists — live chain-id probe (#911)', () => {
   const cases: ReadonlyArray<readonly [string, number, readonly string[]]> = [
     ['Base Sepolia', 84532, DEFAULT_TESTNET_RPC_URLS],
-    ['Ethereum Sepolia', 11155111, DEFAULT_TESTNET_ETHEREUM_RPC_URLS],
     ['Base mainnet', 8453, DEFAULT_MAINNET_RPC_URLS],
-    ['Ethereum mainnet', 1, DEFAULT_MAINNET_ETHEREUM_RPC_URLS],
   ];
 
   async function liveChainId(url: string): Promise<number> {

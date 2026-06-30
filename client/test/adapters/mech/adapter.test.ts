@@ -229,15 +229,13 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG.routerAddress,
       TASK_CID_DIGEST,
       expectedManifestDigest,
+      // Tokenless-OLAS pivot: the on-chain policy that crosses the wire is
+      // `maxClaims` + `allowSolverSelfEvaluation` (off-chain scheduling intent
+      // stays in claimPolicy above). TEST_CONFIG is mainnet (chainId 8453) and
+      // claimPolicy does not set the flag, so it defaults false.
       expect.objectContaining({
         maxClaims: 25,
-        maxClaimsPerOperator: 1,
-        evaluationPolicy: expect.objectContaining({
-          requiredVerdicts: 1,
-          passThreshold: 1,
-          maxVerdictsPerEvaluator: 1,
-          disallowSolverSelfEvaluation: true,
-        }),
+        allowSolverSelfEvaluation: false,
       }),
       1000000n,
       1000000n,

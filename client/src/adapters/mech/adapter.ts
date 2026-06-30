@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
@@ -698,55 +698,25 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private contractPolicyForTask(state: Task): RouterTaskPolicy {
-    const nowSeconds = Math.floor(Date.now() / 1000);
+    // Tokenless-OLAS pivot: the on-chain TaskCoordinator.TaskPolicy is the
+    // launcher-funded attempt count (`maxClaims`) plus the self-evaluation gate
+    // (`allowSolverSelfEvaluation`). Windows, lease, and quorum do NOT cross the
+    // wire — that off-chain scheduling intent stays in the task.v1 `claimPolicy`
+    // field (still carried on the signed task document and read by the local
+    // scheduler).
+    //
+    // `allowSolverSelfEvaluation` comes from the off-chain `claimPolicy` when it
+    // sets the flag explicitly; that explicit value always wins. When it is
+    // absent (the common case — the auto-generators do not set it) the default
+    // is network-keyed: TRUE on testnet (Base Sepolia, 84532) so a single
+    // operator can solve + self-evaluate + close the loop solo for dogfooding,
+    // and FALSE on mainnet to preserve the independent-evaluation invariant (the
+    // coordinator rejects a verdict whose evaluator is the attempt's solver).
     const claimPolicy = state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
-    const normalizeTs = (value: number | undefined, fallback: number): bigint => {
-      const raw = value ?? fallback;
-      return BigInt(raw > 10_000_000_000 ? Math.floor(raw / 1000) : raw);
-    };
-    const claimWindowStart = normalizeTs(
-      claimPolicy.claimWindowStartTs ?? state.window?.startTs,
-      nowSeconds,
-    );
-    const claimWindowEnd = normalizeTs(
-      claimPolicy.claimWindowEndTs ?? state.window?.endTs,
-      nowSeconds + 30 * 60,
-    );
-    const submissionDeadline = normalizeTs(
-      claimPolicy.submissionDeadlineTs,
-      Number(claimWindowEnd) + claimPolicy.claimLeaseTtlSeconds,
-    );
-
+    const isTestnet = this.config.chainId === 84532;
     return {
-      claimWindowStart,
-      claimWindowEnd,
-      submissionDeadline,
-      claimLeaseTtlSeconds: claimPolicy.claimLeaseTtlSeconds,
       maxClaims: claimPolicy.maxClaims,
-      maxClaimsPerOperator: claimPolicy.maxClaimsPerOperator,
-      policyHook: (claimPolicy.policyHook ?? zeroAddress) as Address,
-      evaluationPolicy: {
-        // `requiredVerdicts` defaults to 1 but is overridable via the task's
-        // claim policy. A value > 1 opens additional verdict claim slots per
-        // attempt; combined with the per-evaluator cap below (1), it
-        // guarantees an honest evaluator can still claim and deliver a slot
-        // even when other evaluators have squatted some — the structural fix
-        // for a shared/adversarial testnet where a non-delivering claimer
-        // would otherwise permanently lock a single-slot attempt.
-        requiredVerdicts: claimPolicy.requiredVerdicts ?? 1,
-        passThreshold: 1,
-        evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
-        maxVerdictsPerEvaluator: 1,
-        // Allow the same operator to evaluate its own Solution on Base Sepolia
-        // (84532) so a single dogfood daemon can close the full
-        // post→claim→solve→grade→settle loop without standing up a second
-        // operator. Mainnet (8453) keeps the protocol-level protection.
-        // TODO: revert to unconditional `true` before mainnet launch, OR move
-        // this to a per-SolverNet manifest field so individual launchers can
-        // opt in to single-operator dogfood while the protocol default stays
-        // strict.
-        disallowSolverSelfEvaluation: this.config.chainId !== 84532,
-      },
+      allowSolverSelfEvaluation: claimPolicy.allowSolverSelfEvaluation ?? isTestnet,
     };
   }
 

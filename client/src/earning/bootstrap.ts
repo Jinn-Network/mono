@@ -1395,8 +1395,8 @@ export class FleetBootstrapper {
       }
       if (onChainState === 2) {
         // Do NOT eagerly reStake at startup. Re-staking is orthogonal to the
-        // protocol loop and to JINN earning (JinnDistributor mints on
-        // delivered-work counts, not OLAS stake state), and an inline reStake
+        // protocol loop and to earning (OLAS staking rewards accrue from
+        // delivered-work activity counts, not from re-stake liveness), and an inline reStake
         // here broadcasts from the agent EOA during boot — contending with
         // other agent-EOA work that runs in the same window (e.g. a launch's
         // IdentityRegistry.setMetadata, which then reverts and strands the

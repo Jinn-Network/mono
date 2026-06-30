@@ -34,7 +34,6 @@ import {
   http,
   keccak256,
   toBytes,
-  zeroAddress,
   type Abi,
   type Address,
   type Hex,
@@ -128,20 +127,8 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
   async function postAndClaimViaSafe(): Promise<Hex> {
     const block = await publicClient.getBlock();
     const nowSec = Number(block.timestamp);
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + 3600),
-      submissionDeadline: BigInt(nowSec + 7200),
-      claimLeaseTtlSeconds: 3600,
-      maxClaims: 10,
-      maxClaimsPerOperator: 1,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1, passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 9000),
-        maxVerdictsPerEvaluator: 1, disallowSolverSelfEvaluation: false,
-      },
-    };
+    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
+    const policy = { maxClaims: 10 };
     const salt = `adapterA:${nowSec}:${Math.random()}`;
     const taskCidDigest = keccak256(toBytes(`task:${salt}`)) as Hex;
     const manifestDigest = keccak256(toBytes(`manifest:${salt}`)) as Hex;

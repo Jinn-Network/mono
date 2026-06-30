@@ -15,10 +15,10 @@ function defaultProps(): WalletCardProps {
     totalEth: '0.0088',
     runwayDays: 1,
     perRole: { master: '0.0088', agent: '—', safe: '—' },
-    tjinnEarned: '0.0000',
-    tjinnEarnedLast24h: '0.0000',
-    tjinnState: 'ready',
-    tjinnError: null,
+    olasEarned: '0.0000',
+    olasEarnedLast24h: '0.0000',
+    olasState: 'ready',
+    olasError: null,
     lastClaimAt: null,
     lastPasswordRotationAt: null,
     onTopUp: vi.fn(),
@@ -49,17 +49,16 @@ describe('WalletCard', () => {
     expect(gas.textContent).toMatch(/eth/i);
     expect(gas.textContent).toMatch(/1d runway/);
     expect(screen.getByTestId('wallet-topup').textContent).toMatch(/top up from faucet/i);
-    // Per-role drill-down is commented out — no `per role` button on the page.
     expect(screen.queryByRole('button', { name: /per role/i })).toBeNull();
   });
 
   it('does not show collector reward rows or claim actions', () => {
-    const { ui } = wrap(<WalletCard {...defaultProps()} tjinnEarned="1.2500" />);
+    const { ui } = wrap(<WalletCard {...defaultProps()} olasEarned="1.2500" />);
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
     expect(rewards.textContent).toMatch(/lifetime/i);
     expect(rewards.textContent).toContain('1.2500');
-    expect(rewards.textContent).toMatch(/jinn earned last 24hrs/i);
+    expect(rewards.textContent).toMatch(/olas earned last 24hrs/i);
     expect(rewards.textContent).not.toMatch(/lifetime claimed/i);
     expect(rewards.textContent).not.toMatch(/collector pending/i);
     expect(rewards.textContent).not.toMatch(/collector claimed/i);
@@ -68,79 +67,78 @@ describe('WalletCard', () => {
     expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
   });
 
-  it('shows the lifetime tJINN stat in the Rewards section when the read is ready', () => {
+  it('shows the lifetime OLAS stat in the Rewards section when the read is ready', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        tjinnEarned="1.5000"
-        tjinnState="ready"
+        olasEarned="1.5000"
+        olasState="ready"
       />,
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
     expect(rewards.textContent).toMatch(/lifetime/i);
-    const tjinnValue = screen.getByTestId('tjinn-earned-value');
-    expect(tjinnValue.textContent).toBe('1.5000');
-    // Ready state shows the unit and emits no state copy.
-    expect(rewards.textContent).toContain('tJINN');
-    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
+    const olasValue = screen.getByTestId('olas-earned-value');
+    expect(olasValue.textContent).toBe('1.5000');
+    expect(rewards.textContent).toContain('OLAS');
+    expect(screen.queryByTestId('olas-earned-state')).toBeNull();
   });
 
-  it('shows JINN earned in the last 24hrs above the lifetime balance', () => {
+  it('shows OLAS earned in the last 24hrs above the lifetime balance', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        tjinnEarned="1.5000"
-        tjinnEarnedLast24h="0.2500"
-        tjinnState="ready"
+        olasEarned="1.5000"
+        olasEarnedLast24h="0.2500"
+        olasState="ready"
       />,
     );
     render(ui);
-    const region = screen.getByTestId('tjinn-earned-24h-region');
-    expect(region.textContent).toMatch(/jinn earned last 24hrs/i);
-    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
-    expect(region.textContent).toContain('tJINN');
+    const region = screen.getByTestId('olas-earned-24h-region');
+    expect(region.textContent).toMatch(/olas earned last 24hrs/i);
+    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('0.2500');
+    expect(region.textContent).toContain('OLAS');
   });
 
-  it('shows pending copy and no value while the tJINN read is unresolved', () => {
+  it('shows pending copy while staking rewards are unresolved', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        tjinnEarned="—"
-        tjinnEarnedLast24h={null}
-        tjinnState="pending"
+        olasEarned="—"
+        olasEarnedLast24h={null}
+        olasState="pending"
       />,
     );
     render(ui);
-    expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending');
-    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('pending');
-    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
-      /waiting for sepolia balance/i,
+    expect(screen.getByTestId('olas-earned-value').textContent).toBe('pending');
+    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('pending');
+    expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
+      /waiting for staking rewards/i,
     );
   });
 
-  it('shows the error string when the tJINN read failed', () => {
+  it('shows the error string when the OLAS read failed', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        tjinnEarned="—"
-        tjinnEarnedLast24h={null}
-        tjinnState="error"
-        tjinnError="Sepolia tJINN balance temporarily unavailable."
+        olasEarned="—"
+        olasEarnedLast24h={null}
+        olasState="error"
+        olasError="OLAS staking rewards temporarily unavailable."
       />,
     );
     render(ui);
-    expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('unavailable');
-    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
+    expect(screen.getByTestId('olas-earned-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
       /temporarily unavailable/i,
     );
-    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('unavailable');
   });
 
-  it('wraps the tJINN-earned row in a polite live region', () => {
+  it('wraps the OLAS-earned row in a polite live region', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} />);
     render(ui);
-    const region = screen.getByTestId('tjinn-earned-region');
+    const region = screen.getByTestId('olas-earned-region');
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.getAttribute('aria-atomic')).toBe('true');
   });
@@ -151,8 +149,7 @@ describe('WalletCard', () => {
     expect(screen.getByText(/last rotated/i)).toBeTruthy();
     fireEvent.click(screen.getByTestId('wallet-change-password'));
     expect(hook).toBeTruthy();
-    // The button is a real button → click routes via wouter's memory location.
-    expect(window.location.pathname || '/').toBeTruthy(); // sanity; deep route assertion belongs in App.routing.test.tsx
+    expect(window.location.pathname || '/').toBeTruthy();
   });
 
   it('invokes onTopUp when Top up is clicked', () => {
@@ -163,7 +160,6 @@ describe('WalletCard', () => {
     expect(onTopUp).toHaveBeenCalledOnce();
   });
 
-  // ── Batched top-up quota (issue #560) ──────────────────────────────────
   it('surfaces remaining top-ups for today when quota is partially used (issue #560)', () => {
     const { ui } = wrap(
       <WalletCard
@@ -193,8 +189,6 @@ describe('WalletCard', () => {
     expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(true);
     const gas = screen.getByTestId('wallet-section-gas');
     expect(gas.textContent).toMatch(/daily faucet cap reached/i);
-    // AC3: surface the cooldown expiry, not just the quota. The
-    // Intl.RelativeTimeFormat output for a ~12h delta is "in 12 hours".
     expect(gas.textContent).toMatch(/resets in/i);
     expect(gas.textContent).toMatch(/12 hours/i);
   });

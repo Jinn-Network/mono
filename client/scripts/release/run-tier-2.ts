@@ -1,6 +1,5 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { runT21CrossOpDonation } from '../../test/release/tier-2/T2.1-cross-op-donation.js';
 import { runT22ProducerEvaluator } from '../../test/release/tier-2/T2.2-producer-evaluator.js';
 import { runT24ProducerEvaluatorSweRebench } from '../../test/release/tier-2/T2.4-producer-evaluator-swe-rebench.js';
 import { type ScenarioVerdict, ScenarioVerdictSchema, exitCodeForVerdicts } from './scenario-types.js';
@@ -28,10 +27,11 @@ export interface RunTier2Result {
 // app-experience coverage is being rebuilt in the right shape — deterministic
 // mocked-daemon Playwright flow tests (hermetic gate) + a non-gating real paired
 // app smoke — tracked in the follow-up issue. Tier 2 here gates on the
-// protocol-level callables: T2.1 (cross-op donation), T2.2 (prediction.v1
-// producer/evaluator — fully hermetic through the verdict), and T2.4
-// (swe-rebench-v2 producer/evaluator — hermetic stub solve + the real Docker
-// evaluator, skip-clean when Docker/upstream-repo absent; #898).
+// protocol-level callables: T2.2 (prediction.v1 producer/evaluator — fully
+// hermetic through the verdict) and T2.4 (swe-rebench-v2 producer/evaluator —
+// hermetic stub solve + the real Docker evaluator, skip-clean when
+// Docker/upstream-repo absent; #898). The former T2.1 cross-op donation
+// scenario was retired with the x402 payment layer (tokenless-OLAS pivot).
 
 export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Result> {
   const outputDir = opts.outputDir ?? path.join(
@@ -41,13 +41,12 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
   );
   await fs.mkdir(outputDir, { recursive: true });
 
-  // T2.1-T2.2 callables run in parallel. Each descriptor carries its own id and
-  // evidence path so the crash-fallback verdict needs no positional bookkeeping.
-  const T21_WALL_CLOCK_BUDGET_MS = 5 * 60 * 1000;
+  // T2.2 + T2.4 callables run in parallel. Each descriptor carries its own id
+  // and evidence path so the crash-fallback verdict needs no positional
+  // bookkeeping.
   const T22_WALL_CLOCK_BUDGET_MS = 18 * 60 * 1000;
   const T24_WALL_CLOCK_BUDGET_MS = 18 * 60 * 1000;
   const callables = [
-    { id: 'T2.1', run: runT21CrossOpDonation, wallClockBudgetMs: T21_WALL_CLOCK_BUDGET_MS },
     { id: 'T2.2', run: runT22ProducerEvaluator, wallClockBudgetMs: T22_WALL_CLOCK_BUDGET_MS },
     { id: 'T2.4', run: runT24ProducerEvaluatorSweRebench, wallClockBudgetMs: T24_WALL_CLOCK_BUDGET_MS },
   ].map((s) => ({

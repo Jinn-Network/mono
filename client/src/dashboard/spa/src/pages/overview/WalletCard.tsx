@@ -41,21 +41,19 @@ export interface WalletCardProps {
     safe: string;
   };
   /**
-   * Real Sepolia tJINN ERC-20 Safe balance, formatted as a decimal string
-   * (#406). Only meaningful when `tjinnState === 'ready'`; `pending`/`error`
-   * render state copy from `tjinnDisplay` instead.
+   * Lifetime stOLAS curating-agent rewards claimed via the distributor (wei
+   * string formatted for display). Meaningful when `olasState === 'ready'`.
    */
-  tjinnEarned: string;
+  olasEarned: string;
   /**
-   * Sum of `JinnDistributor.Claimed.operatorMinted` for the operator's
-   * services over the last 24 hours, formatted as a decimal string when
-   * available. Null while pending or on read error.
+   * Sum of distributor.claim reward_claims recorded in the last 24 hours,
+   * formatted as a decimal string when available.
    */
-  tjinnEarnedLast24h: string | null;
-  /** Read state for the Sepolia tJINN balance. */
-  tjinnState: TjinnStatusState;
-  /** Public read error string, if the Sepolia balance is unavailable. */
-  tjinnError?: string | null;
+  olasEarnedLast24h: string | null;
+  /** Read state for the OLAS earned figures. */
+  olasState: TjinnStatusState;
+  /** Public read error string when rewards are unavailable. */
+  olasError?: string | null;
   // lastClaimAt stays in the props so re-enabling the "last claim" row is
   // a one-block restore.
   /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
@@ -100,36 +98,34 @@ const statUnit = 'font-mono text-[12px] font-medium text-[var(--fg-muted)]';
 const statAux = 'font-mono text-[12px] text-[var(--fg-dim)]';
 
 /**
- * Display value + supporting copy for the tJINN-earned row, keyed on the read
- * state. A single lookup keeps `value` and `copy` in lockstep — `ready` shows
- * the formatted balance with no copy; `pending`/`error` show placeholder copy
- * instead of a misleading bare zero while the Sepolia read is unresolved.
+ * Display value + supporting copy for the OLAS-earned row, keyed on the read
+ * state.
  */
-function tjinnDisplay(
+function olasDisplay(
   state: TjinnStatusState,
-  tjinnEarned: string,
-  tjinnError: string | null | undefined,
+  olasEarned: string,
+  olasError: string | null | undefined,
 ): { value: string; copy: string | null } {
   switch (state) {
     case 'ready':
-      return { value: tjinnEarned, copy: null };
+      return { value: olasEarned, copy: null };
     case 'error':
       return {
         value: 'unavailable',
-        copy: tjinnError ?? 'Sepolia tJINN balance temporarily unavailable.',
+        copy: olasError ?? 'OLAS staking rewards temporarily unavailable.',
       };
     case 'pending':
-      return { value: 'pending', copy: 'Waiting for Sepolia balance.' };
+      return { value: 'pending', copy: 'Waiting for staking rewards.' };
   }
 }
 
 export function WalletCard({
   totalEth,
   runwayDays,
-  tjinnEarned,
-  tjinnEarnedLast24h,
-  tjinnState,
-  tjinnError,
+  olasEarned,
+  olasEarnedLast24h,
+  olasState,
+  olasError,
   lastPasswordRotationAt,
   onTopUp,
   actionsDisabled = false,
@@ -138,10 +134,10 @@ export function WalletCard({
   topupCooldownExpiresAt,
 }: WalletCardProps): JSX.Element {
   const [, navigate] = useLocation();
-  const { value: tjinnValue, copy: tjinnStateCopy } = tjinnDisplay(
-    tjinnState,
-    tjinnEarned,
-    tjinnError,
+  const { value: olasValue, copy: olasStateCopy } = olasDisplay(
+    olasState,
+    olasEarned,
+    olasError,
   );
 
   // Issue #560: quota copy + disable. When the cap is reached the button is
@@ -173,58 +169,56 @@ export function WalletCard({
           <span className={sectionLabel}>Rewards</span>
 
           {/*
-            24h-window minted is the operationally meaningful number — it's
-            what the operator earned today. Lifetime (`tJinn.safeBalanceWei`)
-            is a supporting reference shown below in smaller type.
+            24h-window claimed rewards is the operationally meaningful number.
+            Lifetime (`rewards.claimedStakingRewardsWei`) is shown below.
           */}
           <div
             className="flex flex-col gap-1"
-            data-testid="tjinn-earned-24h-region"
+            data-testid="olas-earned-24h-region"
             aria-live="polite"
             aria-atomic="true"
           >
             <p className="text-sm font-medium text-muted-foreground">
-              Testnet JINN earned last 24hrs
+              OLAS earned last 24hrs
             </p>
             <div className="flex items-baseline gap-2">
               <span
                 className="text-2xl font-bold tracking-tight"
-                data-testid="tjinn-earned-24h-value"
-                style={tjinnState === 'error' ? { color: 'var(--break-red)' } : undefined}
+                data-testid="olas-earned-24h-value"
+                style={olasState === 'error' ? { color: 'var(--break-red)' } : undefined}
               >
-                {tjinnEarnedLast24h ?? (tjinnState === 'error' ? 'unavailable' : 'pending')}
+                {olasEarnedLast24h ?? (olasState === 'error' ? 'unavailable' : 'pending')}
               </span>
-              {tjinnEarnedLast24h !== null && (
-                <span className="text-xs text-muted-foreground">tJINN</span>
+              {olasEarnedLast24h !== null && (
+                <span className="text-xs text-muted-foreground">OLAS</span>
               )}
             </div>
           </div>
 
-          {/* Lifetime tJINN ERC-20 Safe balance (#406), minted by JinnDistributor. */}
           <div
             className="flex flex-col gap-1"
-            data-testid="tjinn-earned-region"
+            data-testid="olas-earned-region"
             aria-live="polite"
             aria-atomic="true"
           >
-            <p className="text-xs text-muted-foreground" data-testid="tjinn-earned-state-prefix">
+            <p className="text-xs text-muted-foreground" data-testid="olas-earned-state-prefix">
               Lifetime
             </p>
             <div className="flex items-baseline gap-2">
               <span
                 className="text-base font-medium"
-                data-testid="tjinn-earned-value"
-                style={tjinnState === 'error' ? { color: 'var(--break-red)' } : undefined}
+                data-testid="olas-earned-value"
+                style={olasState === 'error' ? { color: 'var(--break-red)' } : undefined}
               >
-                {tjinnValue}
+                {olasValue}
               </span>
-              {tjinnState === 'ready' && (
-                <span className="text-xs text-muted-foreground">tJINN</span>
+              {olasState === 'ready' && (
+                <span className="text-xs text-muted-foreground">OLAS</span>
               )}
             </div>
-            {tjinnStateCopy && (
-              <span className="text-xs text-muted-foreground" data-testid="tjinn-earned-state">
-                {tjinnStateCopy}
+            {olasStateCopy && (
+              <span className="text-xs text-muted-foreground" data-testid="olas-earned-state">
+                {olasStateCopy}
               </span>
             )}
           </div>
