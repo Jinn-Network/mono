@@ -41,13 +41,13 @@
  *   JSON-RPC endpoint.
  *
  * Addresses:
- *   JinnRouter testnet:     0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9  (Base Sepolia)
+ *   JinnRouter testnet:     0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247  (Base Sepolia — tokenless-OLAS trimmed router)
  *   JinnRouter mainnet:     0xfFa7118A3D820cd4E820010837D65FAfF463181B  (Base mainnet — not yet indexed)
  *   IdentityRegistry 84532: 0x8004A818BFB912233c491871b3d84c89A494BD9e
  *   IdentityRegistry 8453:  0x8004A169FB4a3325136EB29fA0ceB6D2e539a432   (not yet indexed)
  *
  * Start blocks:
- *   JinnRouter testnet:       41_153_291 (from client/src/adapters/mech/adapter.ts)
+ *   JinnRouter testnet:       43_523_445 (0x6f47… deploy block, Base Sepolia)
  *   JinnRouter mainnet:       25_000_000 (conservative; tighten when first events observed)
  *   IdentityRegistry 84532:   41_100_000 (per DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK)
  *   IdentityRegistry 8453:    25_000_000
@@ -144,8 +144,11 @@ const testnetConfig = createConfig({
       abi: JINN_ROUTER_ABI,
       chain: {
         baseSepolia: {
-          address: '0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9',
-          startBlock: 41_153_291,
+          // Tokenless-OLAS pivot (DR-2026-06-30): the final trimmed JinnRouterV3
+          // the @canary client posts to. Deployed at block 43_523_445 (2026-06-30).
+          // Supersedes the earlier trimmed router 0xdC9BCcEB… (iteration 1).
+          address: '0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247',
+          startBlock: 43_523_445,
         },
       },
     },
