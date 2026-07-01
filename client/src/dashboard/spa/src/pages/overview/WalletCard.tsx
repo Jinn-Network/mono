@@ -112,10 +112,10 @@ function olasDisplay(
     case 'error':
       return {
         value: 'unavailable',
-        copy: olasError ?? 'OLAS staking rewards temporarily unavailable.',
+        copy: olasError ?? 'Your OLAS rewards are temporarily unavailable.',
       };
     case 'pending':
-      return { value: 'pending', copy: 'Waiting for staking rewards.' };
+      return { value: 'pending', copy: 'No rewards yet — they show up here as your node earns them.' };
   }
 }
 

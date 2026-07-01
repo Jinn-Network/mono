@@ -113,7 +113,7 @@ describe('WalletCard', () => {
     expect(screen.getByTestId('olas-earned-value').textContent).toBe('pending');
     expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('pending');
     expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
-      /waiting for staking rewards/i,
+      /no rewards yet/i,
     );
   });
 

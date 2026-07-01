@@ -168,7 +168,7 @@ Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
-OLAS the operator has earned from staking. Rewards accrue via the OLAS staking contract as the daemon completes loops and delivers verdicts; claims are made **automatically** by the daemon's RewardClaimLoop — the operator has no manual claim action.
+The OLAS the operator has earned. Rewards build up automatically as the node completes tasks and delivers verdicts, and the daemon collects them for the operator — there is no manual claim step and nothing the operator needs to do here.
 
 - **State**
   - lifetime OLAS earned (`claimedStakingRewardsWei`)
@@ -178,7 +178,7 @@ OLAS the operator has earned from staking. Rewards accrue via the OLAS staking c
 - **Collections**
   - none
 - **Actions**
-  - none (claims are daemon-automatic)
+  - none (rewards are collected automatically)
 
 ### 2.8 Bootstrap
 

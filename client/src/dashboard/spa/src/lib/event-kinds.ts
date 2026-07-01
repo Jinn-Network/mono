@@ -57,7 +57,7 @@ export const EVENT_KIND_META: Record<LifecycleKind, EventKindMeta> = {
   },
   reward_claimed: {
     label: 'Reward claimed',
-    description: "Staking rewards were claimed to the operator's safe.",
+    description: 'OLAS rewards were collected to your wallet.',
     tone: 'reward',
   },
   balance_topup: {
