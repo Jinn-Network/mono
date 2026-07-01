@@ -3,14 +3,14 @@ id: DR-2026-06-30
 title: Jinn goes tokenless and OLAS-native — drop the JINN token and the sovereign chain; operators earn OLAS for completed-loop work
 date: 2026-06-30
 verb: Decide
-status: proposed
-authors: opus (drafted), Ritsu (steer); Oak agreed the direction — formal DR ratification pending
+status: ratified
+authors: opus (drafted), Ritsu (steer); Oak signed off on the conscious trade — DR ratified 2026-07-01
 spec: spec/2026-06-30-tokenless-olas-native.md
 amends: "spec/2026-06-05-independent-blockchain-launch.md (sovereign Cosmos chain — set aside); spec/2026-05-24-phase-2-chain-architecture.md (DAO-on-Ethereum / multi-chain ZK distribution — set aside); spec/2026-06-08-substrate-spike-cosmos-evm.md (substrate choice — moot); spec/2026-06-10-genesis-condition.md (token-on-sovereign-chain genesis gates — moot); DR-2026-06-04 (OLAS staking as non-load-bearing substrate — consciously reversed); spec/2026-04-06-phase-1a-design.md + docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md (fair-launch JINN tokenomics — dropped); SPEC.md §Tokenomics + GROWTH.md §economic framing (JINN-token mechanics — to be rewritten via Discussion + CODEOWNERS)"
 relates-to: spec/2026-06-30-tokenless-olas-native.md (the design); .local/protocol/2026-06-29-tokenless-olas-native.md (private design brief + detailed contributor-risk analysis); .local/protocol/DESIGN-PROPOSAL.md (the superseded converged sovereign-token design); DR-2026-04-30 (knowledge-market substrate framing — preserved); GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM)
 ---
 
-> **DRAFT — not ratified.** This DR records a decision that has already been implemented and proven on testnet (see Consequences → Implementation status) but is **not yet canon**. Per `CLAUDE.md` → Canonical Docs and `spec/2026-04-28-canonical-docs.md`, ratification requires a GitHub Discussion + CODEOWNERS approval, and the canonical-doc rewrites it implies (SPEC.md §Tokenomics, GROWTH.md) route through that same gate. The decision reverses co-converged work and is gated on Oak's formal sign-off (Oak has agreed the direction; the public DR is the ratification artifact).
+> **Ratified 2026-07-01 on Oak's sign-off.** Oak has agreed the conscious trade (rent vs own legitimacy); per this DR's own framing the public DR is the ratification artifact, and the decision was implemented and proven on testnet before ratification (see Consequences → Implementation status). The canonical-doc rewrites it implies (SPEC.md §Economics, GLOSSARY.md, README, CLAUDE.md — GROWTH.md needed none) are drafted in the accompanying PR (#1297 → `next`) and take CODEOWNERS review there; a GitHub Discussion anchors the public record per `spec/2026-04-28-canonical-docs.md`.
 
 ## Context
 
@@ -95,7 +95,7 @@ Recorded here as the **reversals** artifact. The in-place edits below are **appl
 
 ## Open questions to ratify
 
-1. **Oak's formal sign-off on the conscious trade** (rent vs own legitimacy) — *gating*. Oak agreed the direction; this DR is the ratification artifact.
+1. **Oak's formal sign-off on the conscious trade** (rent vs own legitimacy) — *gating*. **Resolved (2026-07-01):** Oak signed off; DR ratified on that basis.
 2. **veOLAS sizing & custody** — who holds and extends the lock funding the emissions nominee. veOLAS economics here are doc-sourced and **not** re-verified on Ethereum L1 — verify before committing the funding plan.
 3. **Evaluator-quality-control timing** — quorum + consensus-outlier are optional at v0 (the gate is "any verdict") but likely needed as volume rises; decide the trigger.
 4. **Mainnet migration** — sequence for moving live mainnet operators from the legacy marketplace-native model to the consolidated (staking + recorder) shape.
@@ -104,4 +104,4 @@ Recorded here as the **reversals** artifact. The in-place edits below are **appl
 
 ## Status / next steps
 
-`proposed`. Implemented and proven on testnet (Tracks 1–3); **uncommitted on `next`** pending pivot completion. Next: (1) Oak ratifies (Q1) via a GitHub Discussion; (2) resolve the §Open questions (notably re-verify veOLAS on L1); (3) on ratification, land the deletion/trim work as PRs onto canon, apply the §Reversal supersession blockquotes, and route the SPEC.md / GROWTH.md rewrites through Discussion + CODEOWNERS.
+`ratified` (2026-07-01, Oak sign-off). Implemented and proven on testnet (Tracks 1–3) and committed on branch `tokenless-olas-native` (draft PR #1297 → `next`). The §Reversal supersession blockquotes are applied and the canonical-doc rewrites (SPEC.md §Economics, GLOSSARY.md, README, CLAUDE.md) are drafted in that PR. Remaining before merge: (1) post the anchoring GitHub Discussion; (2) CODEOWNERS approval on the canonical-doc changes in the PR; (3) resolve the §Open questions that gate **mainnet** (notably re-verify veOLAS on L1, the evaluator-quality trigger, and the mainnet-migration sequence) — these do not block the testnet-scoped merge but must close before mainnet.
