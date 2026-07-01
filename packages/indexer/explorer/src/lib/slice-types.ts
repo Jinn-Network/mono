@@ -39,7 +39,6 @@ export interface SliceSeriesKPIs {
   verdicts: number;
   verdictsPass: number;
   resolvedRate: number | null;
-  jinnEarned: string;
 }
 
 export interface SliceSeries {
@@ -55,7 +54,6 @@ export interface SliceResponseLeaderboardRow {
   verdictsTotal: number;
   verdictsPass: number;
   resolvedRate: number | null;
-  jinnEarned: string;
   dominantMode?: string;
   dominantHarness?: string;
 }

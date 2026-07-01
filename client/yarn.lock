@@ -819,6 +819,7 @@ __metadata:
     "@opentelemetry/sdk-trace-base": "npm:^2.7.1"
     "@playwright/test": "npm:^1.59.1"
     "@safe-global/protocol-kit": "npm:^7.2.0"
+    "@safe-global/safe-deployments": "npm:^1.37.56"
     "@safe-global/types-kit": "npm:^3.0.0"
     "@scure/bip32": "npm:^2.2.0"
     "@scure/bip39": "npm:^1.4.0"

@@ -15,21 +15,10 @@ import {
 describe('JinnRouter contract encoding', () => {
   const taskCidDigest = ('0x' + '11'.repeat(32)) as `0x${string}`;
   const manifestDigest = ('0x' + '22'.repeat(32)) as `0x${string}`;
+  // Tokenless-OLAS pivot: on-chain policy is `maxClaims` + `allowSolverSelfEvaluation`.
   const policy = {
-    claimWindowStart: 1n,
-    claimWindowEnd: 2n,
-    submissionDeadline: 3n,
-    claimLeaseTtlSeconds: 300,
     maxClaims: 25,
-    maxClaimsPerOperator: 1,
-    policyHook: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-    evaluationPolicy: {
-      requiredVerdicts: 1,
-      passThreshold: 1,
-      evaluationDeadline: 4n,
-      maxVerdictsPerEvaluator: 1,
-      disallowSolverSelfEvaluation: true,
-    },
+    allowSolverSelfEvaluation: false,
   };
 
   it('encodes createTask calldata', () => {
@@ -134,12 +123,11 @@ describe('JinnRouter contract encoding', () => {
     const data = encodeAbiParameters(
       [
         { name: 'taskCidDigest', type: 'bytes32' },
-        { name: 'maxClaims', type: 'uint16' },
-        { name: 'requiredVerdicts', type: 'uint16' },
+        { name: 'maxClaims', type: 'uint32' },
         { name: 'solutionBudget', type: 'uint256' },
         { name: 'verdictBudget', type: 'uint256' },
       ],
-      [taskCidDigest, policy.maxClaims, policy.evaluationPolicy.requiredVerdicts, 25_000_000n, 25_000_000n],
+      [taskCidDigest, policy.maxClaims, 25_000_000n, 25_000_000n],
     );
 
     const decoded = decodeEventLog({
@@ -153,7 +141,6 @@ describe('JinnRouter contract encoding', () => {
     expect(decoded.args.taskId).toBe(1n);
     expect(decoded.args.taskCidDigest).toBe(taskCidDigest);
     expect(decoded.args.maxClaims).toBe(policy.maxClaims);
-    expect(decoded.args.requiredVerdicts).toBe(policy.evaluationPolicy.requiredVerdicts);
     expect(decoded.args.solutionBudget).toBe(25_000_000n);
     expect(decoded.args.verdictBudget).toBe(25_000_000n);
   });

@@ -168,26 +168,17 @@ Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
-Testnet JINN (tJINN) and OLAS the operator has earned or is owed. Phase 1 emits testnet JINN only — operator-facing copy must say "testnet JINN" or "tJINN", never bare "JINN".
+The OLAS the operator has earned. Rewards build up automatically as the node completes tasks and delivers verdicts, and the daemon collects them for the operator — there is no manual claim step and nothing the operator needs to do here.
 
-- **Static**
-  - claimable
-    - **Actions**
-      - claim
-  - claimed
-- **Streams**
-  - epoch history
-    - txn
-    - datetime
-    - txn url
-  - claim history
-    - txn
-    - datetime
-    - txn url
+- **State**
+  - lifetime OLAS earned (`claimedStakingRewardsWei`)
+  - OLAS earned in last 24 h (`claimedStakingRewardsLast24hWei`)
 - **State messages**
-  - claim available
-  - claim failed
-  - cross-chain claim pending
+  - none
+- **Collections**
+  - none
+- **Actions**
+  - none (rewards are collected automatically)
 
 ### 2.8 Bootstrap
 

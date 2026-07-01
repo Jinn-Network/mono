@@ -4,72 +4,15 @@
  * Per spec §5.4 and #610, this view no longer ranks operators across
  * SolverNets (a cross-net leaderboard mixes regimes and is not a coherent
  * score). It renders a flat roster: operator (short-address link) /
- * attempts / JINN earned. SolverNet detail views host the train+frozen
- * boards where ranking is meaningful (single regime, single task pool).
+ * attempts. SolverNet detail views host the train+frozen boards where
+ * ranking is meaningful (single regime, single task pool).
  */
 
 import { Link } from 'wouter';
-import { useOperators, type ActiveWindow } from '../lib/api';
+import { useOperators } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Kpi, KpiRow } from '../components/Kpi';
-import { InfoTooltip } from '../components/InfoTooltip';
-import {
-  ActiveOperatorTooltipBody,
-  SustainedOperatorTooltipBody,
-  Milestone3TooltipBody,
-  formatBlockWindow,
-} from '../components/ActiveOperatorTooltip';
-import { shortAddr, int, jinn } from '../lib/format';
-
-// Canonical encoding note for the ACTIVITY BLOCKS column header tooltip.
-// Mirrored verbatim from the acceptance criteria so the header tooltip stays in
-// sync if the criteria are tightened.
-const ACTIVITY_BLOCKS_ENCODING_NOTE =
-  'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned ≥3 tJINN in that block; N = did not.';
-
-// ── Activity-blocks cell ──────────────────────────────────────────────────────
-
-/**
- * Per-row "Activity blocks" rendering — 8 Y/N glyphs joined by ` | `, each glyph
- * carrying a native `title` describing the block's UTC window.
- *
- * `recentBlocks` may be absent when the server omits it (older response, or
- * a code path that does not populate it); fall back to all-false so the row
- * still renders 8 cells.
- */
-function ActivityBlocksCell({
-  recentBlocks,
-  window,
-}: {
-  recentBlocks: boolean[] | undefined;
-  window: ActiveWindow;
-}) {
-  const blocks =
-    recentBlocks && recentBlocks.length === window.blockCount
-      ? recentBlocks
-      : new Array<boolean>(window.blockCount).fill(false);
-
-  return (
-    <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-      {blocks.map((qualified, i) => (
-        <span key={i}>
-          <span
-            data-testid={`activity-block-cell-${i}`}
-            title={formatBlockWindow(window, i)}
-            style={{
-              color: qualified ? 'var(--vow-green)' : 'var(--break-red)',
-            }}
-          >
-            {qualified ? 'Y' : 'N'}
-          </span>
-          {i < blocks.length - 1 && (
-            <span style={{ color: 'var(--fg-dim)' }}> | </span>
-          )}
-        </span>
-      ))}
-    </span>
-  );
-}
+import { shortAddr, int } from '../lib/format';
 
 // ── Inline table styling ──────────────────────────────────────────────────────
 
@@ -221,38 +164,9 @@ export function OperatorsView() {
       {data && (
         <KpiRow>
           <Kpi
-            label={
-              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                Active operators
-                <InfoTooltip label="Active operators definition">
-                  <ActiveOperatorTooltipBody window={data.activeWindow} />
-                </InfoTooltip>
-              </span>
-            }
+            label="Active operators"
             value={int(data.activeOperators)}
             accent
-          />
-          <Kpi
-            label={
-              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                Sustained (48h)
-                <InfoTooltip label="Sustained operators definition">
-                  <SustainedOperatorTooltipBody window={data.activeWindow} />
-                </InfoTooltip>
-              </span>
-            }
-            value={int(data.sustainedOperators)}
-          />
-          <Kpi
-            label={
-              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                Milestone 3 (≥25 tJINN)
-                <InfoTooltip label="Milestone 3 definition">
-                  <Milestone3TooltipBody />
-                </InfoTooltip>
-              </span>
-            }
-            value={int(data.operatorsAtMilestone3)}
           />
         </KpiRow>
       )}
@@ -271,24 +185,8 @@ export function OperatorsView() {
             <thead>
               <tr>
                 <th style={th}>Operator</th>
-                <th style={th}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    Active?
-                    <InfoTooltip label="Active column definition">
-                      <ActiveOperatorTooltipBody window={data.activeWindow} />
-                    </InfoTooltip>
-                  </span>
-                </th>
-                <th style={th}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    Activity blocks
-                    <InfoTooltip label="Activity blocks definition">
-                      <div>{ACTIVITY_BLOCKS_ENCODING_NOTE}</div>
-                    </InfoTooltip>
-                  </span>
-                </th>
+                <th style={th}>Active?</th>
                 <th style={th}>Attempts</th>
-                <th style={th}>Testnet JINN earned</th>
               </tr>
             </thead>
             <tbody>
@@ -316,14 +214,7 @@ export function OperatorsView() {
                   >
                     {op.active ? 'Yes' : 'No'}
                   </td>
-                  <td style={td}>
-                    <ActivityBlocksCell
-                      recentBlocks={op.recentBlocks}
-                      window={data.activeWindow}
-                    />
-                  </td>
                   <td style={td}>{int(op.attempts)}</td>
-                  <td style={td}>{jinn(op.jinnEarned)}</td>
                 </tr>
               ))}
             </tbody>

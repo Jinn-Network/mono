@@ -93,7 +93,6 @@ function toRankedRow(
     verdictsTotal: r.verdictsTotal,
     verdictsPass: r.verdictsPass,
     resolvedRate: r.resolvedRate,
-    jinnEarned: r.jinnEarned,
     // SliceResponseLeaderboardRow has no `active` flag (slice rows pre-date
     // the active-operator surface). Default to false; the canonical surface
     // lives on /operators and the network view.
@@ -810,8 +809,6 @@ export function SolverNetView() {
                 <Leaderboard
                   ranked={ranked}
                   lowVolume={lowVolume}
-                  // JINN attribution can't be split by mode — show "—" until ebu7.9
-                  meta={{ jinnAttribution: 'pending' }}
                   compact
                   onOperatorClick={(op) => {
                     const current = filters.operator ?? [];

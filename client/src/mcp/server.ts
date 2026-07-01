@@ -67,10 +67,9 @@ const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
 // Build a read-only corpus capability when the daemon supplied the keyless
 // URLs. The MCP subprocess gets only `query` and `fetchManifest`; `read`,
 // `acquire`, and `acquireBySha256` are NOT exposed here, so discovery and
-// inspection can fetch manifests but cannot trigger x402/payment or artifact
-// byte acquisition. `acquire_artifact` proxies to the daemon over
-// DAEMON_API_URL (which holds the agent EOA private key in-process). See spec
-// §4.
+// inspection can fetch manifests but cannot trigger artifact byte acquisition.
+// `acquire_artifact` proxies to the daemon over DAEMON_API_URL so the byte
+// cache lives in one place. See spec §4.
 //
 // `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
 // but unused by corpus.query/fetchManifest. Placeholder values are confined
@@ -469,7 +468,7 @@ server.tool(
 
 server.tool(
   'acquire_artifact',
-  'Download the actual bytes of a corpus artifact by its sha256, paying the operator who hosts it. Use this only after inspecting a record\'s index card and confirming the content is worth the cost. The daemon handles x402 payment from your agent EOA, hits any local-cache fast path first, and returns the artifact as base64. Side effect: spends USDC according to the access price you pass in. If you have not yet inspected the record, do that first to avoid wasted spend.',
+  'Download the bytes of a corpus artifact by its sha256. The daemon hits any local-cache fast path first and returns the artifact as base64. Acquisition is free.',
   {
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     access: z.object({

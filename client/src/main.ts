@@ -54,7 +54,7 @@ import { applyPidfileLivenessGate } from './preflight/pidfile-liveness.js';
 import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
+import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import {
@@ -71,11 +71,7 @@ import { Daemon } from './daemon/daemon.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
-import {
-  buildJinnClaimLoopConfig,
-  shouldWireJinnClaimL1Signer,
-} from './daemon/jinn-claim-loop-wiring.js';
-import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
+import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
 import {
@@ -238,35 +234,8 @@ const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
   minEoaGasWei: config.minEoaGasWei,
   minSafeEthWei: config.minSafeEthWei,
 });
-const MESSENGER_MODE_EXPLICIT =
-  process.env['JINN_MESSENGER_MODE'] !== undefined ||
-  configFileHasTopLevelKey(CONFIG_PATH, 'jinnMessengerMode');
-const JINN_MVI_CONFIG = loadJinnMviConfig({
-  l1ArtifactPath:
-    config.jinnMviL1DeploymentPath ??
-    (config.network === 'testnet' ? DEFAULT_TESTNET_ARTIFACTS.jinnMviL1 : undefined),
-  l2ArtifactPath:
-    config.jinnMviL2DeploymentPath ??
-    (config.network === 'testnet' ? DEFAULT_TESTNET_ARTIFACTS.jinnMviL2 : undefined),
-  distributorAddress: config.jinnDistributorAddress,
-  messengerAddress: config.jinnMessengerAddress,
-  claimEmitterAddress: config.jinnClaimEmitterAddress,
-  messengerMode: MESSENGER_MODE_EXPLICIT ? config.jinnMessengerMode : undefined,
-});
-const JINN_CLAIM_MESSENGER_MODE = JINN_MVI_CONFIG.messengerMode ?? config.jinnMessengerMode;
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
-
-function configFileHasTopLevelKey(configPath: string | undefined, key: string): boolean {
-  const filePath = configPath ?? join(process.env['HOME'] ?? '', '.jinn-client', 'config.json');
-  if (!filePath || !existsSync(filePath)) return false;
-  try {
-    const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
-    return !!raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
-  } catch {
-    return false;
-  }
-}
 
 class EnsurePendingCaptureProcessor implements SpanProcessor {
   constructor(private readonly captures: CapturesStore) {}
@@ -881,10 +850,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // fail-loud on chain-id mismatch against the head provider.
   await probeFallbackChain(config.rpcUrls, config.network, 'L2');
   console.error(summarizeFallbackChain('L2', config.rpcUrls));
-  if (config.jinnClaimLoopEnabled && config.ethereumRpcUrls) {
-    await probeFallbackChain(config.ethereumRpcUrls, config.network, 'L1');
-    console.error(summarizeFallbackChain('L1', config.ethereumRpcUrls));
-  }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
   if (!portPreflight.ok) {
@@ -1359,12 +1324,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       status: {
         earningDir: config.earningDir,
         rpcUrl: config.rpcUrl,
-        // tJINN identity comes from the bundled JINN MVI L1 artifact
-        // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
-        // is read from `config.ethereumRpcUrl` via the threaded `config`.
-        tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
-        tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
-        tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
         network: config.network,
         pollIntervalMs: config.pollIntervalMs,
         masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -1878,70 +1837,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const agentChain = config.network === 'testnet'
     ? viemChains.baseSepolia
     : viemChains.base;
-  const l1Chain = config.jinnL1Network === 'sepolia' ? viemChains.sepolia : viemChains.mainnet;
-  const agentChainContracts = agentChain.contracts as {
-    portal?: Record<number, { address: `0x${string}` }>;
-    disputeGameFactory?: Record<number, { address: `0x${string}` }>;
-  } | undefined;
-  const optimismPortalAddress =
-    agentChainContracts?.portal?.[l1Chain.id]?.address;
-  const disputeGameFactoryAddress =
-    agentChainContracts?.disputeGameFactory?.[l1Chain.id]?.address;
-  const l2ProofClient = config.l2ProofRpcUrls
-    ? createJinnPublicClient(config.l2ProofRpcUrls, NETWORK_CHAIN)
-    : undefined;
   const agentClients = createClients(config.rpcUrls, agentPrivateKey, agentChain);
-
-  // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
-  // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
-  // Same key as L2; only the chain differs.
-  const shouldWireJinnClaimL1 = shouldWireJinnClaimL1Signer({
-    enabled: config.jinnClaimLoopEnabled,
-    intervalMs: config.jinnClaimLoopIntervalMs,
-    submissionMode: config.jinnClaimSubmissionMode,
-    distributorAddress: JINN_MVI_CONFIG.distributor,
-    ethereumRpcUrl: config.ethereumRpcUrl,
-  });
-  const l1ClientsForJinnClaim =
-    shouldWireJinnClaimL1 && config.ethereumRpcUrls
-      ? {
-          public: createJinnL1PublicClient(config.ethereumRpcUrls, config.jinnL1Network),
-          wallet: createJinnL1WalletClient(
-            config.ethereumRpcUrls,
-            config.jinnL1Network,
-            privateKeyToAccount(agentPrivateKey),
-          ),
-        }
-      : undefined;
-  const jinnClaimLoopConfig = buildJinnClaimLoopConfig({
-    enabled: config.jinnClaimLoopEnabled,
-    intervalMs: config.jinnClaimLoopIntervalMs,
-    submissionMode: config.jinnClaimSubmissionMode,
-    messengerMode: JINN_CLAIM_MESSENGER_MODE,
-    mvi: JINN_MVI_CONFIG,
-    l2Client: agentClients.publicClient,
-    l2ProofClient,
-    l2Wallet: agentClients.walletClient,
-    l1Clients: l1ClientsForJinnClaim,
-    store: earningStore,
-    chain: NETWORK_CHAIN,
-    optimismPortalAddress,
-    disputeGameFactoryAddress,
-  });
-  if (jinnClaimLoopConfig) {
-    console.log(
-      `[main] JinnClaimLoop: enabled (submission=${config.jinnClaimSubmissionMode}, ` +
-      `mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
-      `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${JINN_MVI_CONFIG.distributor}, ` +
-      `emitter=${JINN_MVI_CONFIG.claimEmitter})`,
-    );
-  } else if (!config.jinnClaimLoopEnabled) {
-    console.log('[main] JinnClaimLoop: disabled (jinnClaimLoopEnabled=false)');
-  } else {
-    console.log(
-      `[main] JinnClaimLoop: disabled (missing claim-loop artifacts, interval disabled, or L1 submit wiring)`,
-    );
-  }
 
   // ── Harness registry ─────────────────────────────────────────────────────────
 
@@ -2575,12 +2471,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
-      // tJINN identity comes from the bundled JINN MVI L1 artifact
-      // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
-      // is read from `config.ethereumRpcUrl` via the threaded `config`.
-      tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
-      tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
-      tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
       // stOLAS L2 distributor — mirrors `CHAIN_CONFIG.distributorAddress`
       // used to gate the EvictionLoop (issue #651). Threaded through so the
       // SPA's autoRestake predicate keys off the same on-chain artifact as
@@ -2615,7 +2505,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    jinnClaim: jinnClaimLoopConfig,
     restorationEngine: {
       paths: {
         workingDirRoot: config.engine.workingDirRoot,
@@ -2759,14 +2648,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     {
       stateDir: config.stateDir,
       earningDir: config.earningDir,
-      relayerUrl: undefined,
       runtimeMode: config.runtimeMode,
     },
     {
       env: process.env,
       getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
       detectAuthContext,
-      fetch,
     },
   );
 

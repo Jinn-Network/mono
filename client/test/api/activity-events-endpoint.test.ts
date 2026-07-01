@@ -45,18 +45,18 @@ describe('GET /v1/activity-events', () => {
     expect(body.nextCursor).toBeNull();
   });
 
-  it('filters by valid lifecycle kinds and keeps jinn claim ticket events', async () => {
+  it('filters by valid lifecycle kinds and rejects unknown kinds', async () => {
     const store = memoryStore();
     store.recordActivityEvent({ ts: '2026-05-01T00:00:00Z', kind: 'task_posted' });
-    store.recordActivityEvent({ ts: '2026-05-01T00:00:01Z', kind: 'jinn_claim_ticket_recorded' });
-    store.recordActivityEvent({ ts: '2026-05-01T00:00:02Z', kind: 'reward_claimed' });
+    store.recordActivityEvent({ ts: '2026-05-01T00:00:01Z', kind: 'reward_claimed' });
+    store.recordActivityEvent({ ts: '2026-05-01T00:00:02Z', kind: 'balance_topup' });
 
     const res = await appFor(store).request(
-      '/v1/activity-events?kinds=jinn_claim_ticket_recorded,not_a_real_kind',
+      '/v1/activity-events?kinds=reward_claimed,not_a_real_kind',
     );
     expect(res.status).toBe(200);
     const body = await res.json() as PageResponse;
-    expect(body.events.map((e) => e.kind)).toEqual(['jinn_claim_ticket_recorded']);
+    expect(body.events.map((e) => e.kind)).toEqual(['reward_claimed']);
   });
 
   it('filters by outcome query param', async () => {

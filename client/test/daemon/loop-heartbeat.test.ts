@@ -50,7 +50,7 @@ describe('#1043 loop-heartbeat helper', () => {
     expect(getLoopTick(store, 'creator')).toBeNull();
   });
 
-  it('enumerates the eight canonical watchdog loops', () => {
+  it('enumerates the seven canonical watchdog loops', () => {
     expect([...LOOP_NAMES].sort()).toEqual(
       [
         'balance-topup',
@@ -58,7 +58,6 @@ describe('#1043 loop-heartbeat helper', () => {
         'delivery-watcher',
         'engine-tick',
         'engine-watcher',
-        'jinn-claim',
         'peer-sync',
         'reward-claim',
       ].sort(),

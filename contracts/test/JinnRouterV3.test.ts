@@ -3,7 +3,6 @@ import { network } from "hardhat";
 
 describe("JinnRouterV3", function () {
   let ethers: Awaited<ReturnType<typeof network.connect>>["ethers"];
-  let networkHelpers: Awaited<ReturnType<typeof network.connect>>["networkHelpers"];
 
   let TASK_CID: string;
   let EVAL_TASK_CID: string;
@@ -13,7 +12,7 @@ describe("JinnRouterV3", function () {
   const NATIVE_PAYMENT_TYPE = "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1";
 
   before(async () => {
-    ({ ethers, networkHelpers } = await network.connect());
+    ({ ethers } = await network.connect());
     TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("task-cid"));
     EVAL_TASK_CID = ethers.keccak256(ethers.toUtf8Bytes("evaluation-task-cid"));
     SOLVER_TYPE = ethers.keccak256(ethers.toUtf8Bytes("prediction.v1"));
@@ -21,24 +20,8 @@ describe("JinnRouterV3", function () {
     VERDICT_DIGEST = ethers.keccak256(ethers.toUtf8Bytes("verdict-envelope"));
   });
 
-  async function policy(maxClaims = 2, maxClaimsPerOperator = 1, ttl = 300, requiredVerdicts = 1) {
-    const now = await networkHelpers.time.latest();
-    return {
-      claimWindowStart: now,
-      claimWindowEnd: now + 600,
-      submissionDeadline: now + 1800,
-      claimLeaseTtlSeconds: ttl,
-      maxClaims,
-      maxClaimsPerOperator,
-      policyHook: ethers.ZeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts,
-        passThreshold: 1,
-        evaluationDeadline: now + 2400,
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
-      },
-    };
+  function policy(maxClaims = 2, allowSolverSelfEvaluation = false) {
+    return { maxClaims, allowSolverSelfEvaluation };
   }
 
   async function deploy(solutionRate = ethers.parseEther("0.01"), verdictRate = ethers.parseEther("0.005")) {
@@ -95,7 +78,7 @@ describe("JinnRouterV3", function () {
   }
 
   async function createTask(router: any, creator: any, p: any, solutionRate: bigint, verdictRate: bigint) {
-    const value = solutionRate * BigInt(p.maxClaims) + verdictRate * BigInt(p.maxClaims) * BigInt(p.evaluationPolicy.requiredVerdicts || 1);
+    const value = solutionRate * BigInt(p.maxClaims) + verdictRate * BigInt(p.maxClaims);
     await router.connect(creator).createTask(TASK_CID, SOLVER_TYPE, p, solutionRate, verdictRate, 3600, { value });
     return value;
   }
@@ -130,7 +113,7 @@ describe("JinnRouterV3", function () {
 
   it("creates a Task with split Solution and Verdict budgets", async function () {
     const { router, coordinator, creator, solutionRate, verdictRate } = await deploy();
-    const p = await policy(2, 1);
+    const p = policy(2);
     const value = solutionRate * 2n + verdictRate * 2n;
 
     await expect(
@@ -141,7 +124,6 @@ describe("JinnRouterV3", function () {
       SOLVER_TYPE,
       TASK_CID,
       2,
-      1,
       solutionRate * 2n,
       verdictRate * 2n
     );
@@ -155,9 +137,19 @@ describe("JinnRouterV3", function () {
     expect(task.claimCount).to.equal(0);
   });
 
+  it("rejects a Task whose msg.value does not match the split budget", async function () {
+    const { router, creator, solutionRate, verdictRate } = await deploy();
+    const p = policy(2);
+    const wrong = solutionRate * 2n; // missing the verdict budget
+
+    await expect(
+      router.connect(creator).createTask(TASK_CID, SOLVER_TYPE, p, solutionRate, verdictRate, 3600, { value: wrong })
+    ).to.be.revertedWithCustomError(router, "RouterInsufficientTaskBudget");
+  });
+
   it("creates a lazy Solution request on claim and decrements only Solution budget", async function () {
     const { router, coordinator, marketplace, creator, solver, solverMech, solutionRate, verdictRate } = await deploy();
-    await createTask(router, creator, await policy(2, 1), solutionRate, verdictRate);
+    await createTask(router, creator, policy(2), solutionRate, verdictRate);
 
     const claim = await claimSolution(router, solver, 1, solverMech);
     const payment = await router.taskPayments(1);
@@ -186,7 +178,7 @@ describe("JinnRouterV3", function () {
       solutionRate,
       verdictRate,
     } = await deploy();
-    await createTask(router, creator, await policy(1, 1), solutionRate, verdictRate);
+    await createTask(router, creator, policy(1), solutionRate, verdictRate);
 
     const solution = await claimSolution(router, solver, 1, solverMech);
     await marketplace.markDelivered(solution.requestId, await solverMech.getAddress());
@@ -196,8 +188,9 @@ describe("JinnRouterV3", function () {
       .withArgs(await solver.getAddress(), solution.requestId, 1, 0);
 
     expect(await router.solutionDeliveryClaimed(solution.requestId)).to.equal(true);
-    expect(await activity.solutionDeliveryWeight(await solver.getAddress())).to.equal(ethers.parseEther("1"));
-    expect(await activity.lastSolutionDigest(await solver.getAddress())).to.equal(SOLUTION_DIGEST);
+    // Tokenless-OLAS loop-completion gate: solver activity is credited on the first
+    // verdict (loop completion), NOT at solution-delivery — so it is still zero here.
+    expect(await activity.solutionDeliveryWeight(await solver.getAddress())).to.equal(0n);
 
     const verdict = await claimVerdict(router, evaluator, 1, 0, evaluatorMech);
     await marketplace.markDelivered(verdict.requestId, await evaluatorMech.getAddress());
@@ -206,19 +199,21 @@ describe("JinnRouterV3", function () {
       .to.emit(router, "VerdictDeliveryClaimed")
       .withArgs(await evaluator.getAddress(), verdict.requestId, 1, 0, 0, 1);
 
+    // The solver's activity is credited now (on the verdict), with the stored solution digest.
+    expect(await activity.solutionDeliveryWeight(await solver.getAddress())).to.equal(ethers.parseEther("1"));
+    expect(await activity.lastSolutionDigest(await solver.getAddress())).to.equal(SOLUTION_DIGEST);
     expect(await activity.verdictDeliveryWeight(await evaluator.getAddress())).to.equal(ethers.parseEther("1"));
     expect(await activity.taskCreationWeight(await creator.getAddress())).to.equal(ethers.parseEther("1"));
     expect(await activity.taskCreationFinalized(1)).to.equal(true);
 
     const attempt = await coordinator.getAttempt(1, 0);
-    expect(attempt.status).to.equal(3);
-    expect(attempt.finalization).to.equal(2);
+    expect(attempt.status).to.equal(4); // Finalized
     expect(attempt.solutionCidDigest).to.equal(SOLUTION_DIGEST);
   });
 
-  it("rejects solver self-evaluation and duplicate over-quorum evaluator claims", async function () {
-    const { router, marketplace, creator, solver, evaluator, solverMech, evaluatorMech, solutionRate, verdictRate } = await deploy();
-    await createTask(router, creator, await policy(1, 1), solutionRate, verdictRate);
+  it("rejects solver self-evaluation when the policy disallows it (default)", async function () {
+    const { router, marketplace, creator, solver, solverMech, solutionRate, verdictRate } = await deploy();
+    await createTask(router, creator, policy(1), solutionRate, verdictRate);
     const solution = await claimSolution(router, solver, 1, solverMech);
     await marketplace.markDelivered(solution.requestId, await solverMech.getAddress());
     await router.connect(solver).claimSolutionDelivery(solution.requestId, SOLUTION_DIGEST);
@@ -226,19 +221,14 @@ describe("JinnRouterV3", function () {
     await expect(
       router.connect(solver).claimEvaluation(1, 0, await solverMech.getAddress(), EVAL_TASK_CID)
     ).to.be.revertedWithCustomError(await ethers.getContractAt("TaskCoordinator", await router.taskCoordinator()), "TCSolverSelfEvaluation");
-
-    await claimVerdict(router, evaluator, 1, 0, evaluatorMech);
-    await expect(
-      router.connect(evaluator).claimEvaluation(1, 0, await evaluatorMech.getAddress(), EVAL_TASK_CID)
-    ).to.be.revertedWithCustomError(await ethers.getContractAt("TaskCoordinator", await router.taskCoordinator()), "TCMaxVerdictsReached");
   });
 
-  it("refunds unused split budget when each refund path is eligible", async function () {
+  it("refunds the unused split budget at the creator's discretion", async function () {
     const { router, creator, solver, solverMech, solutionRate, verdictRate } = await deploy();
-    const p = await policy(2, 1);
+    const p = policy(2);
     await createTask(router, creator, p, solutionRate, verdictRate);
+    // Claim one of two solution slots, leaving one unclaimed solution slot and all verdict budget.
     await claimSolution(router, solver, 1, solverMech);
-    await networkHelpers.time.increase(2401);
 
     await expect(router.connect(creator).refundUnusedTaskBudget(1))
       .to.changeEtherBalances(ethers, [router, creator], [-(solutionRate + verdictRate * 2n), solutionRate + verdictRate * 2n]);
@@ -248,5 +238,10 @@ describe("JinnRouterV3", function () {
     expect(payment.verdictBudgetRemaining).to.equal(0);
     expect(payment.solutionBudgetRefunded).to.equal(true);
     expect(payment.verdictBudgetRefunded).to.equal(true);
+
+    // A second refund is a no-op and reverts (nothing left to refund).
+    await expect(
+      router.connect(creator).refundUnusedTaskBudget(1)
+    ).to.be.revertedWithCustomError(router, "RouterTaskNotRefundable");
   });
 });

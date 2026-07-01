@@ -8,7 +8,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
-import type { SolverNetsCatalogResponse, TjinnStatus } from '../api/types.js';
+import type { SolverNetsCatalogResponse } from '../api/types.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -65,10 +65,12 @@ interface OverviewStatusV1 {
     }>;
   };
   /**
-   * Real Sepolia tJINN ERC-20 Safe balance (#406, daemon half PR #447).
-   * Optional: older daemons predate this field.
+   * stOLAS staking rewards surfaced on /v1/status.rewards.
    */
-  tJinn?: TjinnStatus;
+  rewards?: {
+    claimedStakingRewardsWei?: string;
+    claimedStakingRewardsLast24hWei?: string | null;
+  };
   /** Security metadata. Not yet surfaced by the daemon — field absent until added. */
   security?: {
     lastPasswordRotationAt?: string | null;
@@ -236,21 +238,15 @@ export function OverviewPage(): JSX.Element {
   // through `jinn status`.
   const primaryServiceId = services.find((s) => s.serviceId !== null)?.serviceId ?? null;
 
-  // tJINN earned — the real Sepolia ERC-20 Safe balance (#406). When the read
-  // has resolved (`state === 'ready'`) a null `safeBalanceWei` is a
-  // confirmed-empty balance, so format it as '0' rather than the bare '—'
-  // `formatEth` returns for missing input. `pending`/`error` keep '—'; the
-  // state copy handled by WalletCard's `tjinnDisplay` carries the meaning.
-  const tjinnState = status?.tJinn?.state ?? 'pending';
-  const tjinnEarned =
-    status?.tJinn?.state === 'ready'
-      ? formatEth(status.tJinn.safeBalanceWei ?? '0')
-      : formatEth(status?.tJinn?.safeBalanceWei ?? undefined);
-  const tjinnEarnedLast24h =
-    status?.tJinn?.operatorMintedLast24hWei != null
-      ? formatEth(status.tJinn.operatorMintedLast24hWei)
-      : null;
-  const tjinnError = status?.tJinn?.error ?? null;
+  const olasState = status ? 'ready' : 'pending';
+  const olasEarned = formatEth(status?.rewards?.claimedStakingRewardsWei ?? '0');
+  const olasEarnedLast24h =
+    status?.rewards?.claimedStakingRewardsLast24hWei != null
+      ? formatEth(status.rewards.claimedStakingRewardsLast24hWei)
+      : status
+        ? '0.0000'
+        : null;
+  const olasError = null;
 
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
@@ -455,10 +451,10 @@ export function OverviewPage(): JSX.Element {
             agent: perRoleAgentEth,
             safe: perRoleSafeEth,
           }}
-          tjinnEarned={tjinnEarned}
-          tjinnEarnedLast24h={tjinnEarnedLast24h}
-          tjinnState={tjinnState}
-          tjinnError={tjinnError}
+          olasEarned={olasEarned}
+          olasEarnedLast24h={olasEarnedLast24h}
+          olasState={olasState}
+          olasError={olasError}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
           topupDailyCap={dripQuota?.dailyCap}
           topupCallsRemaining={dripQuota?.callsRemaining}

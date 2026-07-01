@@ -11,7 +11,6 @@ import {
   keccak256,
   parseEther,
   toBytes,
-  zeroAddress,
   type Address,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -128,33 +127,22 @@ export async function postJinnRepoTask(
   const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
   const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
 
-  // ── Step 5: On-chain claim/evaluation policy matching the task doc ─────────
-  const latestBlock = await fixture.publicClient.getBlock();
-  const chainNowSec = Number(latestBlock.timestamp);
-  const onchainPolicy = {
-    claimWindowStart: BigInt(chainNowSec - 5),
-    claimWindowEnd: BigInt(chainNowSec + 3_600),
-    submissionDeadline: BigInt(chainNowSec + 7_200),
-    claimLeaseTtlSeconds: 3600,
-    maxClaims: 10,
-    maxClaimsPerOperator: 1,
-    policyHook: zeroAddress,
-    evaluationPolicy: {
-      requiredVerdicts: 1,
-      passThreshold: 1,
-      evaluationDeadline: BigInt(chainNowSec + 7_200),
-      maxVerdictsPerEvaluator: 1,
-      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
-    },
-  };
+  // ── Step 5: On-chain task policy ───────────────────────────────────────────
+  // Tokenless-OLAS pivot: the on-chain TaskCoordinator.TaskPolicy is now just
+  // `maxClaims`. Windows / lease / quorum / self-eval gating no longer cross the
+  // wire; that off-chain scheduling intent stays on the signed task.v1
+  // `claimPolicy` field. (`opts.disallowSolverSelfEvaluation` is moot — the
+  // coordinator rejects self-evaluation unconditionally now.)
+  void opts.disallowSolverSelfEvaluation;
+  const onchainPolicy = { maxClaims: 10 };
 
   // ── Step 6: Post task on-chain via the locally-deployed V3 JinnRouter ──────
-  // value = solutionBudget + verdictBudget = rate*maxClaims + rate*maxClaims*requiredVerdicts.
+  // Trimmed createTask escrows rate*maxClaims per side (solution + verdict); no
+  // requiredVerdicts multiplier.
   const MAX_CLAIMS = 10n;
-  const REQUIRED_VERDICTS = 1n;
   const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
   const solutionBudget = rateArg * MAX_CLAIMS;
-  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
+  const verdictBudget = rateArg * MAX_CLAIMS;
   const value = solutionBudget + verdictBudget;
 
   const created = await writeContractTx({

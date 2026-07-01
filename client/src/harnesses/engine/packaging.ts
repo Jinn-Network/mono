@@ -39,11 +39,11 @@ import {
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
 //
 // OUTPUTS.json access descriptor shape (no `kind` field):
-//   { "endpoint": "https://…", "priceUsdc": "0" }       — free
-//   { "endpoint": "https://…", "priceUsdc": "0.001" }   — x402-gated
+//   { "endpoint": "https://…", "priceUsdc": "0" }       — free fetch
 //
-// Use explicit priceUsdc: "0" for free artifacts.
-// Omit the access object entirely to inherit the operator default price.
+// `priceUsdc` is retained as an artifact-metadata field but acquisition is a
+// free fetch (no payment layer). Omit the access object entirely to inherit
+// the operator default.
 
 const OutputEntrySchema = z.object({
   path: z.string(),

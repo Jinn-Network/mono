@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Forward roadmap is the **Phase A umbrella** under the knowledge-market substrate framing — see `spec/2026-04-30-phase-a-umbrella.md`, `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md`, `log/decisions/2026-04-30-knowledge-market-vision-framing.md` (DR-2026-04-30), and GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM). The original Phase 1b roadmap (`spec/2026-04-06-phase-1a-design.md` §9, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) is subsumed: anti-farming decay and ve-JINN are shipped, evidence-schema work executes through Phase A.1, the residual challenge mechanism is re-homed to Phase B.2.
+Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a shipped a JINN token + DAO + distribution on Sepolia/Base Sepolia, but that token stack is **superseded by DR-2026-06-30 (tokenless, OLAS-native)** — Jinn no longer launches its own token or runs its own chain; OLAS (Base) is the permanent unit of both stake and reward, and operators earn OLAS for verified completed-loop work. See `spec/2026-06-30-tokenless-olas-native.md` and `log/decisions/2026-06-30-tokenless-olas-native-pivot.md` (DR-2026-06-30). Forward roadmap is the **Phase A umbrella** under the knowledge-market substrate framing — see `spec/2026-04-30-phase-a-umbrella.md`, `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md`, `log/decisions/2026-04-30-knowledge-market-vision-framing.md` (DR-2026-04-30), and GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM). The original Phase 1b roadmap (`spec/2026-04-06-phase-1a-design.md` §9, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) is subsumed: anti-farming decay and ve-JINN are shipped, evidence-schema work executes through Phase A.1, the residual challenge mechanism is re-homed to Phase B.2.
 
 Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
@@ -365,15 +365,15 @@ Discovery defaults differ by network: mainnet ships with no `discovery` block an
 
 ## Architecture
 
-Three layers, top to bottom:
+Per DR-2026-06-30 (tokenless, OLAS-native), Jinn has no DAO token, no treasury emissions, and no bespoke distribution contracts. **OLAS (Base) is the economic layer** — it supplies stake, staking emissions, veOLAS nomination, and the stOLAS zero-capital onboarding rail. Jinn's own on-chain surface is deliberately tiny: **one activity checker + one thin recorder**, everything else OLAS-native and unmodified.
 
-1. **DAO Layer (Ethereum Mainnet)** — JINN ERC-20 token, treasury with epoch emissions, ve-JINN gauge for directing emissions to distribution contracts (Phase 1+)
-2. **Distribution Contracts (per-chain)** — Four incentive channels (creation, restoration, outcome, evaluation rewards), distribute JINN to qualifying participants (Phase 1+)
-3. **Execution Layer (Base)** — OLAS Mech Marketplace (request/delivery), JinnRouter (loop enforcement + activity tracking), ERC-8004 (knowledge discovery), x402 (payment-gated knowledge access)
+1. **Economic layer (OLAS, Base)** — OLAS is the unit of both stake and reward. OLAS staking emissions (directed by Jinn's veOLAS nominee) are the bootstrap subsidy; the launcher-escrowed per-task marketplace delivery fee is the demand economy. Zero-capital onboarding via the stOLAS `ExternalStakingDistributor` (bond lent; operator recorded as curating agent, keeps ≈85%).
+2. **Jinn-custom on-chain surface (Base)** — one **activity checker** (counts completed-loop activity toward OLAS staking liveness) + one thin **recorder** (`TaskCoordinator`/`JinnRouterV3`, trimmed: anchors each `(task, solution, verdict)` tuple, enforces self-eval prevention, sequences solver credit; gates no payout). Retains the launcher delivery-fee escrow.
+3. **Execution layer (Base)** — OLAS Mech Marketplace (request/delivery, first-delivery-wins), OLAS service/mech/Safe infra, ERC-8004 (knowledge discovery). Knowledge is recorded on-chain now, priced later.
 
 ### How the daemon works
 
-See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is eight long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, jinn-claim L1↔L2, peer-sync) plus one-shot in-flight recovery on startup. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
+See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is seven long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, peer-sync) plus one-shot in-flight recovery on startup. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
 Generators are **launched-record-driven**, not config-flag-driven (per `spec/2026-05-05-solvernet-creation-and-launch.md` §11). On startup the daemon walks `~/.jinn-client/solvernets/launched/` for records this operator owns; for each record where `status === 'launched'` and `generatorEnabled === true`, it spawns the matching SolverType-specific generator. The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone — gating is "do I have a launched record where I'm the owner." Joining a SolverNet as an operator (writing a `joinedSolverNets[<manifestCid>]` config entry, see §12) never starts a generator; that's launcher-only.
 
@@ -405,12 +405,12 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 ## Phased Rollout
 
 - **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
-- **Phase 1a** (complete): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
+- **Phase 1a** (complete; token stack superseded): Forked OLAS contracts and deployed a JINN token + Treasury + distribution on Sepolia/Base Sepolia with multisig governance. The JINN-token deliverable is dropped by DR-2026-06-30 (tokenless, OLAS-native); the OLAS staking / mech / Safe infra proven here carries forward.
 - **Phase A** (in progress): Knowledge-market substrate framing per DR-2026-04-30. A.1 operational loop (corpus library + gating leak fix + manifest hygiene + cache + MCP rewiring) shipped; A.2 plug-in surface and A.3 campaign infra shipped; A.4 campaign-launch / SolverNet creation + launch experience shipped on testnet (`spec/2026-05-05-solvernet-creation-and-launch.md` v0.2 — Launcher SPA, manifest-anchored registry, operator join flow, manifest-cid claim eligibility). See `spec/2026-04-30-phase-a-umbrella.md`. Subsumes the original Phase 1b roadmap; anti-farming decay + ve-JINN already shipped, residual challenge mechanism re-homed to Phase B.2.
 - **Phase B** (parallel after A.1): Trust infrastructure — B.1 verifiability tier activation, B.2 evaluator economics + signal-design (includes challenge mechanism)
 - **Phase C** (gated by community formation): Flagship marketplace API — the canonical app the team ships in-house
-- **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts
-- **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
+- **Phase 2**: Mainnet — run the tokenless, OLAS-native model on Base mainnet, where real OLAS emissions, veOLAS nomination, and the stOLAS pool exist (per DR-2026-06-30). No fair-launch token and no bespoke multi-chain distribution.
+- **Phase 3**: Autonomous — the launcher-funded demand stream (marketplace delivery fees) sustains the network beyond the OLAS staking subsidy; knowledge-pricing turns the corpus into the get-better incentive.
 
 ## Testing
 

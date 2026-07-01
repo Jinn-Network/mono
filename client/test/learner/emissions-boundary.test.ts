@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
  *   TIER 2 — GENERIC counts `passedCount` / `totalCount`.
  *     These collide with unrelated fields (e.g. StorageSummary.totalCount in
  *     api/operator-artifacts-endpoint.ts), so we scan ONLY the core emissions
- *     dirs (earning/, x402/, distribution/) — never api/, cli/, or daemon/.
+ *     dirs (earning/, distribution/) — never api/, cli/, or daemon/.
  */
 
 // Resolve client/src relative to this test file's location regardless of CWD.
@@ -60,7 +60,7 @@ const isExcluded = (f: string): boolean =>
   f.endsWith('.test.ts');
 
 // Core emissions/reward dirs — fully scanned by BOTH tiers.
-const CORE_DIRS = ['earning', 'x402', 'distribution'];
+const CORE_DIRS = ['earning', 'distribution'];
 
 // Broader dirs — scanned by TIER 1 ONLY (unambiguous identifiers).
 // daemon/ holds reward-claim-loop.ts; api/ and cli/ are full app surfaces where a

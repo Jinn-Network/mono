@@ -59,7 +59,6 @@ const mockState = vi.hoisted(() => {
     'task',
     'attempt',
     'verdict',
-    'rewardDistribution',
     'solverNetManifest',
     'envelope',
     'harnessCheckpoint',

@@ -119,17 +119,6 @@ updates:
 
   # First-party packages
   - package-ecosystem: npm
-    directory: "/packages/claim-relayer"
-    schedule:
-      interval: weekly
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-    ignore: *npm-major-ignores
-
-  - package-ecosystem: npm
     directory: "/packages/indexer"
     schedule:
       interval: weekly

@@ -42,7 +42,6 @@ import {
   keccak256,
   parseEther,
   toBytes,
-  zeroAddress,
   type Address,
   type PublicClient,
 } from 'viem';
@@ -605,26 +604,12 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
     const taskCid = `f01551220${taskCidDigest.slice(2)}`;
     const expectedManifestDigest = keccak256(toBytes(solverNetManifestCid));
 
-    const latestBlock = await publicClient.getBlock();
-    const nowSec = Number(latestBlock.timestamp);
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + 300),
-      submissionDeadline: BigInt(nowSec + 900),
-      claimLeaseTtlSeconds: 120,
-      maxClaims: 5,
-      maxClaimsPerOperator: 5,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 1_020),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
-      },
-    };
+    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
+    const MAX_CLAIMS = 5;
+    const policy = { maxClaims: MAX_CLAIMS };
 
     // ── createTask carries manifestDigest = keccak256(solverNetManifestCid) ──
+    // Trimmed createTask escrows rate*maxClaims per side (solution + verdict).
     const created = await writeContractTx({
       publicClient,
       rpcUrl: anvil.rpcUrl,
@@ -633,7 +618,7 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       abi: artifacts.router.abi,
       functionName: 'createTask',
       args: [taskCidDigest, expectedManifestDigest, policy, rate, rate, 3600n],
-      value: rate * 6n,
+      value: rate * BigInt(MAX_CLAIMS) * 2n,
     });
     const taskCreated = decodeFirstEvent(created.receipt, artifacts.router.abi, 'TaskCreated');
     const taskId = String(taskCreated['taskId']);

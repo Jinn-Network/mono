@@ -17,7 +17,6 @@ import {
   parseAbi,
   parseEther,
   toBytes,
-  zeroAddress,
   type Abi,
   type Address,
   type Hex,
@@ -812,7 +811,7 @@ export interface RunningDaemon {
  *   - apiPort: 0 → OS assigns a free port at daemon-startup time (no TOCTOU race).
  *   - peers: empty (no peer discovery in the test).
  *   - subgraphUrl: omitted (no-subgraph mode is supported).
- *   - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → loops not started).
+ *   - rewardClaim / balanceTopup: omitted (interval 0 → loops not started).
  *   - packagingDeps / envelopeDeps / deliveryDeps: omitted → pack() falls back
  *     to NotImplementedError (Task 4+ will wire delivery deps as needed).
  *   - identityPublisher / reputationFeedback: omitted (no ERC-8004 in test).
@@ -1078,7 +1077,7 @@ export async function startDaemon(
   //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
   //    - taskSources: omitted (no creator-side tasks in Task 5+)
   //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
-  //    - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → no loops)
+  //    - rewardClaim / balanceTopup: omitted (interval 0 → no loops)
   //    - status: omitted (GET /v1/status not exercised here)
   //    - corpusFactory: omitted (no subgraph configured)
   //    - apiServer: the pre-started server from step 2 — Daemon adopts it
@@ -1094,8 +1093,8 @@ export async function startDaemon(
     // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
     creatorSafeAddress: operator.safeAddress,
-    // subgraphUrl / nodeEndpoint / x402 / signer: omitted
-    // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
+    // subgraphUrl / nodeEndpoint / signer: omitted
+    // rewardClaim / balanceTopup: omitted → those loops don't start
     restorationEngine: {
       paths: {
         // Default consumer (daemon-harness-cycle.ts) calls startDaemon with no
@@ -1259,33 +1258,32 @@ async function postSignedTaskOnChain(
   const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
   const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
 
-  const latestBlock = await fixture.publicClient.getBlock();
-  const chainNowSec = Number(latestBlock.timestamp);
+  // Tokenless-OLAS pivot: the on-chain TaskCoordinator.TaskPolicy is `maxClaims`
+  // plus `allowSolverSelfEvaluation` (windows / lease / quorum / EvaluationPolicy
+  // removed). The off-chain scheduling intent still rides on the signed task.v1
+  // `claimPolicy` field; only these two cross the wire into createTask.
+  //
+  // Default `allowSolverSelfEvaluation: true` — this is the single-operator
+  // dogfood path (daemon-harness-cycle.ts): one daemon posts, solves, delivers,
+  // then SELF-evaluates its own attempt to drive the verdict that credits the
+  // solver's activity counter. Without self-eval allowed the coordinator reverts
+  // `claimEvaluation` (evaluator == solver) and the verdict leg never closes, so
+  // the activity counter stays at 0. Multi-operator scenarios (T2.2) pass
+  // `disallowSolverSelfEvaluation: true` to restore the independent-evaluation
+  // invariant so the dedicated evaluator (op-b), not the solver (op-a), settles
+  // the verdict.
   const onchainPolicy = {
-    claimWindowStart: BigInt(chainNowSec - 5),
-    claimWindowEnd: BigInt(chainNowSec + 300),
-    submissionDeadline: BigInt(chainNowSec + 900),
-    claimLeaseTtlSeconds: 600,
     maxClaims: 10,
-    maxClaimsPerOperator: 1,
-    policyHook: zeroAddress,
-    evaluationPolicy: {
-      requiredVerdicts: 1,
-      passThreshold: 1,
-      evaluationDeadline: BigInt(chainNowSec + 1_200),
-      maxVerdictsPerEvaluator: 1,
-      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
-    },
+    allowSolverSelfEvaluation: !opts.disallowSolverSelfEvaluation,
   };
 
-  // The V3 router's createTask requires msg.value == solutionBudget + verdictBudget
-  // where solutionBudget = rate * maxClaims and verdictBudget = rate * maxClaims * requiredVerdicts.
-  // With maxClaims=10 and requiredVerdicts=1: value = rate * 10 + rate * 10 * 1 = rate * 20.
+  // The trimmed JinnRouterV3.createTask requires msg.value == solutionBudget +
+  // verdictBudget where each side = rate * maxClaims (the per-verdict
+  // requiredVerdicts multiplier is gone). With maxClaims=10: value = rate * 20.
   const MAX_CLAIMS = 10n;
-  const REQUIRED_VERDICTS = 1n;
   const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
   const solutionBudget = rateArg * MAX_CLAIMS;
-  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
+  const verdictBudget = rateArg * MAX_CLAIMS;
   const value = solutionBudget + verdictBudget;
 
   const created = await writeContractTx({
@@ -1332,16 +1330,18 @@ export async function postPredictionV1Task(
   /**
    * Optional on-chain policy overrides.
    *
-   * - `disallowSolverSelfEvaluation` — when true, the TaskCoordinator reverts
-   *   `claimEvaluation` if the evaluator equals the solution attempt's operator
-   *   (TaskCoordinator.sol §432-433). Multi-operator scenarios (T2.2) set this
-   *   so the solver (op-a) cannot win the evaluation-claim race against the
-   *   dedicated evaluator (op-b): with `requiredVerdicts: 1`, whichever operator
-   *   claims first settles the single verdict, and if op-a wins, op-b can never
-   *   settle (TCMaxVerdictsReached) — making `waitForVerdict(evaluator=op-b)`
-   *   time out non-deterministically. Defaults to `false` to preserve the
-   *   single-operator consumer (`daemon-harness-cycle.ts`), which never waits
-   *   for a verdict and so is unaffected either way.
+   * - `disallowSolverSelfEvaluation` — when true, the on-chain `TaskPolicy` is
+   *   built with `allowSolverSelfEvaluation: false`, so the TaskCoordinator
+   *   reverts `claimEvaluation` (`TCSolverSelfEvaluation`) if the evaluator
+   *   equals the solution attempt's operator. Multi-operator scenarios (T2.2)
+   *   set this so the solver (op-a) cannot win the evaluation-claim race against
+   *   the dedicated evaluator (op-b): with `requiredVerdicts: 1`, whichever
+   *   operator claims first settles the single verdict, and if op-a wins, op-b
+   *   can never settle — making `waitForVerdict(evaluator=op-b)` time out
+   *   non-deterministically. Defaults to `false` so the single-operator consumer
+   *   (`daemon-harness-cycle.ts`) posts with `allowSolverSelfEvaluation: true`
+   *   and can solve + self-evaluate + close the loop solo (the verdict leg is
+   *   what credits the solver's activity counter).
    */
   opts: { disallowSolverSelfEvaluation?: boolean } = {},
 ): Promise<PostedPredictionTask> {
@@ -1781,9 +1781,13 @@ export async function waitForDaemonClaim(
  * Read the operator's on-chain activity counter from the locally-deployed
  * TaskActivityCheckerV3. The counter (`eligibleActivityWeight`) increments
  * when the V3 router calls `recordSolutionDelivery(safeAddress, solutionDigest)`
- * during `claimSolutionDelivery`. We compare before/after values around
- * `waitForDelivery` to assert the daemon's settle tx actually registered
- * with the activity checker.
+ * — and per the tokenless-OLAS loop-completion gate that call fires on
+ * `claimVerdictDelivery` (the first verdict finalizes the attempt), NOT at
+ * `claimSolutionDelivery`. So crediting the solver's activity requires the
+ * verdict leg to close: in the single-operator dogfood the operator must
+ * self-evaluate its own attempt, which the on-chain policy permits only when
+ * `allowSolverSelfEvaluation: true` (set by `postSignedTaskOnChain`'s default).
+ * We compare before/after values to assert the loop actually closed.
  *
  * Note: this reads from our locally-deployed TaskActivityCheckerV3 (in the V3
  * stack deployed by `deployMinimalV3Stack`), NOT from the production OLAS

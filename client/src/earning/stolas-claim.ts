@@ -20,7 +20,7 @@ import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
 import type { ServiceState, ServiceStep, StakingMode } from './types.js';
 import { STOLAS_DISTRIBUTOR_ABI } from './contracts.js';
-import { JINN_STAKING_ABI } from './jinn-rewards.js';
+import { JINN_STAKING_ABI } from './stolas-staking.js';
 import { executeSafeTxDirect } from './safe-adapter.js';
 import {
   isRecoverableTransactionError,
@@ -185,8 +185,8 @@ export async function tickStolasDistributorClaims(
       });
       console.log(
         `[reward-claim] Submitted distributor.claim for service ${serviceId} ` +
-        `(~${pending.toString()} wei pre-split — actual operator share is the ` +
-        `collector slot only; protocol/curating shares route per stOLAS proxy config)`,
+        `(~${pending.toString()} wei pre-split — operator share is the curating-agent ` +
+        `slot per stOLAS proxy config; collector/protocol route separately)`,
       );
     } catch (err) {
       if (isRecoverableTransactionError(err)) {

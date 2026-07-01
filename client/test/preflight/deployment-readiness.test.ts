@@ -7,7 +7,6 @@ import {
   checkWritableVolume,
   checkStateOnVolume,
   checkCredentialsResolvable,
-  checkRelayerReachable,
   checkAgentCliNonRoot,
   runDeploymentReadinessChecks,
   isDeploymentContext,
@@ -25,9 +24,6 @@ function baseDeps(overrides: Partial<DeploymentReadinessDeps> = {}): DeploymentR
     env: {},
     getuid: () => 1000,
     detectAuthContext: () => 'bare',
-    fetch: (async () => {
-      throw new Error('fetch should be stubbed per-test');
-    }) as unknown as typeof fetch,
     ...overrides,
   };
 }
@@ -105,40 +101,6 @@ describe('checkAgentCliNonRoot', () => {
     expect(result.name).toBe('agent_cli_non_root');
     // A throwing probe must not crash; it degrades to a (conservative) result.
     expect(typeof result.ok).toBe('boolean');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkRelayerReachable
-// ---------------------------------------------------------------------------
-
-describe('checkRelayerReachable', () => {
-  it('skip-ok when no relayer endpoint is configured', async () => {
-    const result = await checkRelayerReachable(undefined, baseDeps().fetch);
-    expect(result.name).toBe('relayer_reachable');
-    expect(result.ok).toBe(true);
-    expect(result.detail).toMatch(/not configured|skip/i);
-  });
-
-  it('ok when the configured relayer is reachable', async () => {
-    const stubFetch = (async () => ({ ok: true, status: 200 })) as unknown as typeof fetch;
-    const result = await checkRelayerReachable('http://relayer.example', stubFetch);
-    expect(result.ok).toBe(true);
-  });
-
-  it('fails when the configured relayer is unreachable', async () => {
-    const stubFetch = (async () => {
-      throw new Error('ECONNREFUSED');
-    }) as unknown as typeof fetch;
-    const result = await checkRelayerReachable('http://relayer.example', stubFetch);
-    expect(result.ok).toBe(false);
-    expect(result.detail).toMatch(/unreachable|ECONNREFUSED|failed/i);
-  });
-
-  it('fails on a non-2xx/3xx relayer response without throwing', async () => {
-    const stubFetch = (async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
-    const result = await checkRelayerReachable('http://relayer.example', stubFetch);
-    expect(result.ok).toBe(false);
   });
 });
 
@@ -272,7 +234,7 @@ describe('runDeploymentReadinessChecks', () => {
 
   it('returns one result per check and is not boot-fatal for a healthy local operator', async () => {
     const report = await runDeploymentReadinessChecks(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
+      { stateDir: undefined, earningDir: tmp, runtimeMode: undefined },
       baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
     );
     expect(report.deployment).toBe(false);
@@ -282,7 +244,6 @@ describe('runDeploymentReadinessChecks', () => {
       [
         'agent_cli_non_root',
         'credentials_resolvable',
-        'relayer_reachable',
         'state_on_volume',
         'writable_volume',
       ].sort(),
@@ -294,7 +255,7 @@ describe('runDeploymentReadinessChecks', () => {
     chmodSync(tmp, 0o500);
     try {
       const report = await runDeploymentReadinessChecks(
-        { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
+        { stateDir: undefined, earningDir: tmp, runtimeMode: undefined },
         baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
       );
       const vol = report.checks.find((c) => c.name === 'writable_volume');
@@ -311,7 +272,7 @@ describe('runDeploymentReadinessChecks', () => {
     chmodSync(tmp, 0o500);
     try {
       const report = await runDeploymentReadinessChecks(
-        { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined, runtimeMode: undefined },
+        { stateDir: tmp, earningDir: join(tmp, 'earning'), runtimeMode: undefined },
         baseDeps({ env: { JINN_STATE_DIR: tmp }, getuid: () => 1000, detectAuthContext: () => 'container' }),
       );
       expect(report.deployment).toBe(true);
@@ -325,7 +286,7 @@ describe('runDeploymentReadinessChecks', () => {
 
   it('deployment context running as root IS boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
-      { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined, runtimeMode: undefined },
+      { stateDir: tmp, earningDir: join(tmp, 'earning'), runtimeMode: undefined },
       baseDeps({ env: { JINN_STATE_DIR: tmp }, getuid: () => 0, detectAuthContext: () => 'container' }),
     );
     expect(report.deployment).toBe(true);
@@ -336,7 +297,7 @@ describe('runDeploymentReadinessChecks', () => {
   it('deployment context with state NOT on the volume IS boot-fatal', async () => {
     const report = await runDeploymentReadinessChecks(
       // env says deployment, but earningDir resolves to the ephemeral default — not under stateDir
-      { stateDir: undefined, earningDir: '/root/.jinn-client/earning', relayerUrl: undefined, runtimeMode: undefined },
+      { stateDir: undefined, earningDir: '/root/.jinn-client/earning', runtimeMode: undefined },
       baseDeps({ env: { JINN_STATE_DIR: '/data' }, getuid: () => 1000, detectAuthContext: () => 'container' }),
     );
     expect(report.deployment).toBe(true);
@@ -350,7 +311,7 @@ describe('runDeploymentReadinessChecks', () => {
     // real detectAuthContext so the configuredMode threading is exercised
     // end-to-end (with dockerenvExists pinned false for hermeticity).
     const report = await runDeploymentReadinessChecks(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: 'docker-compose' },
+      { stateDir: undefined, earningDir: tmp, runtimeMode: 'docker-compose' },
       baseDeps({
         env: {},
         getuid: () => 1000,
@@ -365,7 +326,7 @@ describe('runDeploymentReadinessChecks', () => {
     // Same detection path as above (real detectAuthContext, /.dockerenv absent),
     // but runtimeMode is undefined — the gate must stay disarmed.
     const report = await runDeploymentReadinessChecks(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
+      { stateDir: undefined, earningDir: tmp, runtimeMode: undefined },
       baseDeps({
         env: {},
         getuid: () => 1000,
@@ -379,16 +340,13 @@ describe('runDeploymentReadinessChecks', () => {
 
   it('does not throw even if a dependency throws — aggregate degrades to structured results', async () => {
     const report = await runDeploymentReadinessChecks(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: 'http://relayer.example', runtimeMode: undefined },
+      { stateDir: undefined, earningDir: tmp, runtimeMode: undefined },
       baseDeps({
         env: {},
         getuid: (() => {
           throw new Error('uid boom');
         }) as unknown as () => number,
         detectAuthContext: () => 'bare',
-        fetch: (async () => {
-          throw new Error('net boom');
-        }) as unknown as typeof fetch,
       }),
     );
     // It produced a report rather than throwing.
@@ -416,7 +374,7 @@ describe('applyDeploymentReadinessGate', () => {
     const writes: string[] = [];
     const exits: number[] = [];
     await applyDeploymentReadinessGate(
-      { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
+      { stateDir: undefined, earningDir: tmp, runtimeMode: undefined },
       baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
       { writer: { write: (s: string) => (writes.push(s), true) }, exit: (c: number) => void exits.push(c) },
     );
@@ -430,7 +388,7 @@ describe('applyDeploymentReadinessGate', () => {
     const exits: number[] = [];
     try {
       await applyDeploymentReadinessGate(
-        { stateDir: undefined, earningDir: tmp, relayerUrl: undefined, runtimeMode: undefined },
+        { stateDir: undefined, earningDir: tmp, runtimeMode: undefined },
         baseDeps({ env: {}, getuid: () => 1000, detectAuthContext: () => 'bare' }),
         { writer: { write: () => true }, exit: (c: number) => void exits.push(c) },
       );
@@ -444,7 +402,7 @@ describe('applyDeploymentReadinessGate', () => {
     const writes: string[] = [];
     const exits: number[] = [];
     await applyDeploymentReadinessGate(
-      { stateDir: tmp, earningDir: join(tmp, 'earning'), relayerUrl: undefined, runtimeMode: undefined },
+      { stateDir: tmp, earningDir: join(tmp, 'earning'), runtimeMode: undefined },
       baseDeps({ env: { JINN_STATE_DIR: tmp }, getuid: () => 0, detectAuthContext: () => 'container' }),
       { writer: { write: (s: string) => (writes.push(s), true) }, exit: (c: number) => void exits.push(c) },
     );

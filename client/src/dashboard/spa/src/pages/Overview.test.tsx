@@ -309,73 +309,57 @@ describe('OverviewPage Wallet wiring', () => {
     expect(await screen.findByText(/daily faucet cap reached/i)).toBeTruthy();
   });
 
-  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei', async () => {
+  it('wires OLAS earned from status.rewards.claimedStakingRewardsWei', async () => {
     getStatusMock.mockResolvedValue({
       ...baseStatus,
-      tJinn: {
-        state: 'ready',
-        chainId: 11155111,
-        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
-        safeBalanceWei: '1500000000000000000',
-        operatorClaimedWei: '2750000000000000000',
-        operatorMintedLast24hWei: '250000000000000000',
-        safeCount: 1,
-        services: [],
-        error: null,
+      rewards: {
+        claimedStakingRewardsWei: '1500000000000000000',
+        claimedStakingRewardsLast24hWei: '250000000000000000',
       },
     });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    // The tJINN-earned value derives from status.tJinn.safeBalanceWei
-    // (1.5 tJINN); the OLAS staking collector queue never reaches the SPA (#992).
     await waitFor(() =>
-      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
+      expect(screen.getByTestId('olas-earned-value').textContent).toBe('1.5000'),
     );
-    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
-    expect(screen.getByText(/jinn earned last 24hrs/i)).toBeTruthy();
-    const tjinnValue = screen.getByTestId('tjinn-earned-value');
-    expect(tjinnValue.textContent).not.toBe('999.0000');
+    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('0.2500');
+    expect(screen.getByText(/olas earned last 24hrs/i)).toBeTruthy();
+    const olasValue = screen.getByTestId('olas-earned-value');
+    expect(olasValue.textContent).not.toBe('999.0000');
     expect(screen.queryByText('999.0000')).toBeNull();
     expect(screen.queryByText(/collector/i)).toBeNull();
     expect(screen.queryByTestId('wallet-claim')).toBeNull();
     expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
   });
 
-  it('renders a confirmed-empty tJINN balance (ready + null) as 0', async () => {
+  it('renders zero OLAS earned when rewards are absent', async () => {
     getStatusMock.mockResolvedValue({
       ...baseStatus,
-      tJinn: {
-        state: 'ready',
-        chainId: 11155111,
-        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
-        safeBalanceWei: null,
-        operatorClaimedWei: '0',
-        safeCount: 1,
-        services: [],
-        error: null,
+      rewards: {
+        claimedStakingRewardsWei: '0',
+        claimedStakingRewardsLast24hWei: '0',
       },
     });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('0.0000'),
+      expect(screen.getByTestId('olas-earned-value').textContent).toBe('0.0000'),
     );
-    // A confirmed-empty balance is distinguishable from loading — no state copy.
-    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
+    expect(screen.queryByTestId('olas-earned-state')).toBeNull();
   });
 
-  it('shows pending tJINN copy when status.tJinn is absent (older daemon)', async () => {
-    getStatusMock.mockResolvedValue(baseStatus);
+  it('shows pending OLAS copy when status has not loaded yet', async () => {
+    getStatusMock.mockImplementation(() => new Promise(() => {}));
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending'),
+      expect(screen.getByTestId('olas-earned-value').textContent).toBe('pending'),
     );
-    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
-      /waiting for sepolia balance/i,
+    expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
+      /no rewards yet/i,
     );
   });
 

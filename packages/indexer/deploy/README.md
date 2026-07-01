@@ -142,14 +142,6 @@ The historical sync is noticeably slower with execution enrichment on (one IPFS 
 
 **Deploy sequencing with the enrichment worker (#779):** the verdict path is enriched by `packages/indexer-enrichment`, a separate Railway service on the **same** `DATABASE_URL` + `DATABASE_SCHEMA`. Because adding the worker's `retryCount`/`nextAttemptAt` columns to `verdict_envelope_meta` is an `onchainTable` change (Ponder does not online-migrate), a `DATABASE_SCHEMA` bump + re-sync is required when this version first deploys; repoint **both** the indexer and the worker to the new schema together. See `packages/indexer-enrichment/README.md` for the worker's env, the O2/O3/O4 caveats, and the backfill-drain note.
 
-### Sepolia L1 RPC (`PONDER_RPC_URL_11155111`)
-
-The indexer sources `JinnDistributor.Claimed` events from Sepolia L1 (chain 11155111) in addition to the Base Sepolia chain (84532). A public default RPC is baked into `ponder.config.ts`; **set a real RPC in production** — the public endpoint rate-limits and the Sepolia historical sync from the conservative start block is slow on a public endpoint. A HyperSync-backed RPC (e.g. from Envio) is strongly recommended, the same as for Base. Add it to `.env`:
-
-```
-PONDER_RPC_URL_11155111=https://your-sepolia-hypersync-rpc
-```
-
 ## Zero-downtime rolling deploys (the views pattern)
 
 Ponder's canonical approach for re-deploys without operator-visible downtime:
@@ -168,10 +160,10 @@ This is the recommended pattern when shipping schema changes that would otherwis
 
 ### The all-entities-atomic view swap
 
-`ponder db create-views` rewrites the views for **every entity in the schema in a single transaction** — there is no per-entity flag. The full set of 10 entities the indexer publishes is:
+`ponder db create-views` rewrites the views for **every entity in the schema in a single transaction** — there is no per-entity flag. The full set of 9 entities the indexer publishes is:
 
 ```
-task, attempt, verdict, rewardDistribution, solverNetManifest,
+task, attempt, verdict, solverNetManifest,
 envelope, pluginPublication, harnessCheckpoint, attemptEnvelopeMeta,
 verdictEnvelopeMeta
 ```

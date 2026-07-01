@@ -1,49 +1,10 @@
 export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'error' | 'log';
 
-// ── tJINN status (#406) ───────────────────────────────────────────────────────
+// ── OLAS reward read state ────────────────────────────────────────────────────
 //
-// Mirror of the daemon-side `TjinnStatus` / `TjinnServiceStatus` /
-// `TjinnStatusState` from `client/src/api/status-build.ts`. Surfaced on the
-// `/v1/status` response as `tJinn` (PR #447, daemon half). Mirrored here —
-// rather than imported — to keep the SPA build off the daemon type graph,
-// matching the established pattern for `LauncherStatusResponse` etc.
-
-/** Read state for the Sepolia tJINN ERC-20 Safe balance. */
-export type TjinnStatusState = 'pending' | 'ready' | 'error';
-
-/** Per-service tJINN Safe balance entry. */
-export interface TjinnServiceStatus {
-  index: number;
-  serviceId: number | null;
-  safeAddress: string | null;
-  balanceWei: string | null;
-  operatorClaimedWei: string | null;
-  state: TjinnStatusState;
-  error: string | null;
-}
-
-/**
- * Real Sepolia tJINN ERC-20 Safe balance, summed across the operator's fleet
- * Safes (deduplicated on shared Safe addresses). `safeBalanceWei` is null
- * unless `state === 'ready'`; a `ready` state with a null balance is a
- * confirmed-empty balance and should render as `0`.
- */
-export interface TjinnStatus {
-  state: TjinnStatusState;
-  chainId: number;
-  tokenAddress: string;
-  safeBalanceWei: string | null;
-  operatorClaimedWei: string | null;
-  /**
-   * Sum of `JinnDistributor.Claimed.operatorMinted` across the operator's
-   * services over the last 24 hours, as a base-10 wei string. Null when the
-   * window read failed or has not been resolved yet.
-   */
-  operatorMintedLast24hWei: string | null;
-  safeCount: number;
-  services: TjinnServiceStatus[];
-  error: string | null;
-}
+// Read state for the operator's OLAS (stOLAS) earned figures, consumed by the
+// Wallet card.
+export type StakingRewardReadState = 'pending' | 'ready' | 'error';
 
 // ── cost surface (#474) ─────────────────────────────────────────────────────
 //

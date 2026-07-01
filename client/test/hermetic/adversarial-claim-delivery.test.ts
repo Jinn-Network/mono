@@ -291,35 +291,25 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     const { router } = ctx.artifacts;
     const block = await ctx.publicClient.getBlock();
     const nowSec = Number(block.timestamp);
-    const windowSec = opts.claimWindowSeconds ?? 300;
-    const deadlineSec = opts.submissionDeadlineSeconds ?? 900;
+    // Tokenless-OLAS pivot: claim windows / submission deadlines / per-operator
+    // caps are gone on-chain. These knobs are retained on the opts type for the
+    // scenarios that still reference them, but no longer cross the wire.
+    void opts.claimWindowSeconds;
+    void opts.submissionDeadlineSeconds;
+    void opts.maxClaimsPerOperator;
 
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + windowSec),
-      submissionDeadline: BigInt(nowSec + deadlineSec),
-      claimLeaseTtlSeconds: 600,
-      maxClaims: 10,
-      maxClaimsPerOperator: opts.maxClaimsPerOperator ?? 1,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + deadlineSec + 300),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: false,
-      },
-    };
+    // Tokenless-OLAS pivot: TaskPolicy is { maxClaims, allowSolverSelfEvaluation } (bool, default false → self-eval blocked).
+    const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
 
     // Unique digest per task so requestIds never collide across scenarios.
     const salt = `${nowSec}:${Math.random()}`;
     const taskCidDigest = keccak256(toBytes(`task:${salt}`)) as Hex;
     const manifestDigest = keccak256(toBytes(`manifest:${salt}`)) as Hex;
 
+    // Trimmed createTask escrows rate*maxClaims per side (no requiredVerdicts).
     const MAX_CLAIMS = 10n;
-    const REQUIRED_VERDICTS = 1n;
     const solutionBudget = ctx.mechRate * MAX_CLAIMS;
-    const verdictBudget = ctx.mechRate * MAX_CLAIMS * REQUIRED_VERDICTS;
+    const verdictBudget = ctx.mechRate * MAX_CLAIMS;
 
     const created = await send(
       ctx.operator,
@@ -449,29 +439,19 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     expect(await isClaimed(requestId)).toBe(true);
   }, 60_000);
 
-  it('deadline expired: claimTask is unclaimable after evm_increaseTime past the window', async () => {
+  // Tokenless-OLAS pivot: claim windows / submission deadlines were removed from
+  // TaskCoordinator — a task now stays claimable until its maxClaims slots fill,
+  // and the TCClaimWindowClosed / TCSubmissionDeadlinePassed errors no longer
+  // exist. This scenario asserted the deleted window behavior; skip it pending a
+  // re-scope to whatever (if anything) replaces deadline-based unclaimability.
+  it.skip('deadline expired: claimTask is unclaimable after evm_increaseTime past the window', async () => {
     // Post a task with a short claim window; do NOT claim it. The production
     // canClaimTask() (a real simulateContract against the router) must report
     // the task unclaimable once the coordinator's own claim-window check fails.
     const { router } = ctx.artifacts;
     const block = await ctx.publicClient.getBlock();
     const nowSec = Number(block.timestamp);
-    const policy = {
-      claimWindowStart: BigInt(nowSec - 5),
-      claimWindowEnd: BigInt(nowSec + 60),
-      submissionDeadline: BigInt(nowSec + 120),
-      claimLeaseTtlSeconds: 60,
-      maxClaims: 10,
-      maxClaimsPerOperator: 1,
-      policyHook: zeroAddress,
-      evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 300),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: false,
-      },
-    };
+    const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
     const salt = `deadline:${nowSec}:${Math.random()}`;
     const taskCidDigest = keccak256(toBytes(salt)) as Hex;
     const manifestDigest = keccak256(toBytes(`m:${salt}`)) as Hex;
@@ -510,7 +490,12 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     }
   }, 60_000);
 
-  it('claim contention: a second EOA claims the same slot; the first is rejected at the per-operator limit', async () => {
+  // Tokenless-OLAS pivot: the per-operator claim cap (maxClaimsPerOperator) and
+  // its TCOperatorClaimLimitReached guard were removed from TaskCoordinator — an
+  // operator may now consume multiple of a task's maxClaims slots. This scenario
+  // asserted the deleted per-operator contention guard; skip it pending a
+  // re-scope of multi-claim contention under the trimmed policy.
+  it.skip('claim contention: a second EOA claims the same slot; the first is rejected at the per-operator limit', async () => {
     // maxClaimsPerOperator = 1: the contender claims one slot via its own mech,
     // then a second claim from the SAME operator hits the real coordinator
     // contention guard (TCOperatorClaimLimitReached) — the real two-operator

@@ -6,7 +6,10 @@ verb: Steer
 status: proposed
 authors: opus (spike #925, claude/heuristic-elgamal-e0ad9d); steer by Ritsu
 relates-to: issue [#925](https://github.com/Jinn-Network/mono/issues/925) (this spike) · [#915](https://github.com/Jinn-Network/mono/issues/915) (replaced by this spike) · [#917](https://github.com/Jinn-Network/mono/issues/917) / PR [#940](https://github.com/Jinn-Network/mono/pull/940) · [#916](https://github.com/Jinn-Network/mono/issues/916) / PR [#937](https://github.com/Jinn-Network/mono/pull/937) · [#789](https://github.com/Jinn-Network/mono/issues/789) / PR [#803](https://github.com/Jinn-Network/mono/pull/803) (reStake already non-fatal) · [#580](https://github.com/Jinn-Network/mono/issues/580) (OPEN — intermittent reStake reverts) · [#505](https://github.com/Jinn-Network/mono/issues/505) / PR [#511](https://github.com/Jinn-Network/mono/pull/511) (checkpoint loop) · [#773](https://github.com/Jinn-Network/mono/issues/773) / PR [#800](https://github.com/Jinn-Network/mono/pull/800), [#992](https://github.com/Jinn-Network/mono/issues/992) / PR [#1005](https://github.com/Jinn-Network/mono/pull/1005) (staking already removed from operator surfaces) · [#605](https://github.com/Jinn-Network/mono/issues/605) (M1 tracker) · discussion [#685](https://github.com/Jinn-Network/mono/discussions/685) (testnet cadence — superseded by this posture) · `docs/planning/2026-04-olas-staking-reward-semantics.md` (Architecture B — the decoupling that already happened)
+superseded-by: DR-2026-06-30
 ---
+
+> **Reversed by DR-2026-06-30 (2026-06-30):** this DR declared OLAS staking non-load-bearing substrate to deprecate; the tokenless-OLAS pivot makes OLAS staking THE operator reward rail.
 
 ## Context
 

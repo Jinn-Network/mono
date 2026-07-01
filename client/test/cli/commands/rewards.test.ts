@@ -101,6 +101,6 @@ describe('rewards command', () => {
     const stdout = raw.join('');
     expect(stdout).toContain('Pending staking collector claims:');
     expect(stdout).toContain('collector-token');
-    expect(stdout).toContain('Operator testnet JINN (tJINN) earnings');
+    expect(stdout).toContain('Operator OLAS staking rewards accumulate via the stOLAS curating-agent rail');
   });
 });

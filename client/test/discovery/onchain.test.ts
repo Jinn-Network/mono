@@ -52,8 +52,7 @@ const TASK_CREATED_ABI = [
       { name: 'taskId', type: 'uint256', indexed: true },
       { name: 'manifestDigest', type: 'bytes32', indexed: true },
       { name: 'taskCidDigest', type: 'bytes32', indexed: false },
-      { name: 'maxClaims', type: 'uint16', indexed: false },
-      { name: 'requiredVerdicts', type: 'uint16', indexed: false },
+      { name: 'maxClaims', type: 'uint32', indexed: false },
       { name: 'solutionBudget', type: 'uint256', indexed: false },
       { name: 'verdictBudget', type: 'uint256', indexed: false },
     ],
@@ -108,12 +107,11 @@ function buildTaskCreatedLog(
   const data = encodeAbiParameters(
     [
       { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'maxClaims', type: 'uint16' },
-      { name: 'requiredVerdicts', type: 'uint16' },
+      { name: 'maxClaims', type: 'uint32' },
       { name: 'solutionBudget', type: 'uint256' },
       { name: 'verdictBudget', type: 'uint256' },
     ],
-    [taskCidDigest, maxClaims, 1, 1000n, 500n],
+    [taskCidDigest, maxClaims, 1000n, 500n],
   );
   return {
     address: ROUTER,

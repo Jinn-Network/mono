@@ -33,7 +33,6 @@
  *   - client/src/api/stop-hook-endpoint.ts
  *   - client/src/api/discovery-routes.ts
  *   - client/src/api/launcher-endpoint.ts
- *   - client/src/x402/handler.ts      (x402 routes — called from server.ts:477)
  *   - client/src/trajectory/llm-proxy.ts (standalone Hono instance, not the
  *                                         operator daemon's app)
  *
@@ -59,8 +58,6 @@ const SRC_ROOT = join(SCRIPT_DIR, '..', 'src');
 const ALLOWED_PREFIXES = [
   // Operator daemon API server + its route helpers.
   'api/',
-  // x402 routes registered via addX402Routes from server.ts.
-  'x402/handler.ts',
   // LLM proxy is its own standalone Hono instance, not the operator daemon's.
   'trajectory/llm-proxy.ts',
 ];

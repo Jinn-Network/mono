@@ -8,14 +8,12 @@ import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
-import type { X402Config } from '../x402/handler.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
-import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
 import { recordLoopTick } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
@@ -114,7 +112,6 @@ export interface DaemonConfig {
   signer?: EthHttpSigner;
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint?: string;
-  x402?: X402Config;
 
   /**
    * Periodic stOLAS distributor reward claims (master EOA pays gas).
@@ -143,13 +140,6 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   checkpoint?: CheckpointLoopConfig;
-
-  /**
-   * Cross-chain JINN claim loop (jinn-mono-7x5). Emits ClaimTicket on L2,
-   * waits for finality (canonical) or plants a fixture (mock), and submits
-   * the L1 distributor claim. Omitted or interval 0 → loop not started.
-   */
-  jinnClaim?: JinnClaimLoopConfig;
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
@@ -268,7 +258,6 @@ export class Daemon {
   private balanceTopupLoop?: BalanceTopupLoop;
   private evictionLoop?: EvictionLoop;
   private checkpointLoop?: CheckpointLoop;
-  private jinnClaimLoop?: JinnClaimLoop;
   private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
 
@@ -323,12 +312,6 @@ export class Daemon {
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
       this.checkpointLoop = new CheckpointLoop(config.checkpoint);
     }
-    if (config.jinnClaim && config.jinnClaim.intervalMs > 0) {
-      this.jinnClaimLoop = new JinnClaimLoop({
-        ...config.jinnClaim,
-        jinnStore: this.store,
-      });
-    }
   }
 
   async start(): Promise<void> {
@@ -360,7 +343,6 @@ export class Daemon {
         port: this.apiPort,
         store: this.store,
         apiToken: this.apiToken,
-        x402: this.config.x402,
         status: this.config.status,
         bindHost: this.config.apiBindHost,
         corpus,
@@ -489,20 +471,6 @@ export class Daemon {
         }),
       );
     }
-    if (this.jinnClaimLoop) {
-      this.loopPromises.push(
-        this.jinnClaimLoop.run().catch(err => {
-          console.error('[daemon] jinn-claim crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'jinn-claim loop crashed',
-            errorCode: 'jinn_claim_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
-      );
-    }
-
     // #1043 loop watchdog. Inert unless config.watchdog is supplied.
     //
     // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
@@ -524,7 +492,6 @@ export class Daemon {
       ];
       if (this.rewardClaimLoop) registrations.push({ name: 'reward-claim', intervalMs: this.config.rewardClaim!.intervalMs });
       if (this.balanceTopupLoop) registrations.push({ name: 'balance-topup', intervalMs: this.config.balanceTopup!.intervalMs });
-      if (this.jinnClaimLoop) registrations.push({ name: 'jinn-claim', intervalMs: this.config.jinnClaim!.intervalMs });
       if (peers.length > 0) registrations.push({ name: 'peer-sync', intervalMs: 60_000 });
 
       // Seed every started loop so the watchdog never trips on first boot
@@ -576,7 +543,6 @@ export class Daemon {
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();
     this.checkpointLoop?.stop();
-    this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
     this.watchdogLoop?.stop();
 

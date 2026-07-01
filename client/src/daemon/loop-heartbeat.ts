@@ -30,7 +30,6 @@ export const LOOP_NAMES = [
   'delivery-watcher',
   'reward-claim',
   'balance-topup',
-  'jinn-claim',
   'peer-sync',
 ] as const;
 

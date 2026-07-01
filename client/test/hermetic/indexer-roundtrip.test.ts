@@ -27,7 +27,6 @@ import {
   http,
   keccak256,
   toBytes,
-  zeroAddress,
   type Abi,
   type Address,
   type Hex,
@@ -133,20 +132,8 @@ describeMaybe('hermetic indexer round-trip (spec §6 Home 1 / #341)', () => {
       // ── Post a real task on the snapshot's V3 router ───────────────────────
       const block = await publicClient.getBlock();
       const nowSec = Number(block.timestamp);
-      const policy = {
-        claimWindowStart: BigInt(nowSec - 5),
-        claimWindowEnd: BigInt(nowSec + 600),
-        submissionDeadline: BigInt(nowSec + 1200),
-        claimLeaseTtlSeconds: 600,
-        maxClaims: 10,
-        maxClaimsPerOperator: 1,
-        policyHook: zeroAddress,
-        evaluationPolicy: {
-          requiredVerdicts: 1, passThreshold: 1,
-          evaluationDeadline: BigInt(nowSec + 1500),
-          maxVerdictsPerEvaluator: 1, disallowSolverSelfEvaluation: false,
-        },
-      };
+      // Tokenless-OLAS pivot: TaskPolicy is { maxClaims, allowSolverSelfEvaluation } (bool, default false → self-eval blocked).
+      const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
       const salt = `indexer:${nowSec}:${startBlock}`;
       const taskCidDigest = keccak256(toBytes(`task:${salt}`)) as Hex;
       const manifestDigest = keccak256(toBytes(`manifest:${salt}`)) as Hex;

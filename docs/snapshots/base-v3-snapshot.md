@@ -5,8 +5,10 @@ the per-PR gate run the full V3 loop against **real OLAS bytecode + our deployed
 V3 stack** with **zero live RPC** — deterministic, so a red is always a real
 code regression, never infra flake.
 
-- **Build script:** [`contracts/scripts/build-anvil-snapshot.ts`](../../contracts/scripts/build-anvil-snapshot.ts)
+- **Build entrypoint:** [`contracts/scripts/build-anvil-snapshot.ts`](../../contracts/scripts/build-anvil-snapshot.ts)
+- **Implementation:** [`client/scripts/build-anvil-snapshot.ts`](../../client/scripts/build-anvil-snapshot.ts)
 - **Committed fixture:** `client/test/_support/fixtures/anvil-base-v3-state/state.json`
+- **Committed address manifest:** `client/test/_support/fixtures/anvil-base-v3-state/addresses.json`
 - **Loaded by:** `spawnAnvilFromState({ statePath })` in
   [`client/test/_support/chain/anvil.ts`](../../client/test/_support/chain/anvil.ts)
   (runs `anvil --load-state <path>`)
@@ -32,14 +34,38 @@ factory, and OLAS token, then dump the state and commit it.
 This is an **offline build step. It is NOT run in CI** — it is the one place in
 the whole pipeline that needs a real Base RPC.
 
-Run it from the **client** package: `tsx` + `viem` are client dependencies, and
-the script imports `getChainConfig` from `client/src/earning/contracts.ts`. The
-script itself shells out to `yarn compile` in `contracts/` to build the V3
-artifacts (the same `cwd: CONTRACTS_DIR` pattern the e2e helpers use).
+Post-HH3, the stable contracts path is a **compatibility wrapper**. The real
+builder lives under `client/scripts/` because it imports client-owned
+dependencies (`tsx`, `viem`, `@safe-global/safe-deployments`, and
+`client/src/earning/bootstrap`). Keep invoking the contracts wrapper from the
+**client** package so bare imports resolve through `client/node_modules`.
+
+Install both package dependency sets before a refresh: the client owns the
+builder runtime, and the builder shells out to `yarn compile` in `contracts/` to
+build the V3 artifacts (the same `cwd: CONTRACTS_DIR` pattern the e2e helpers
+use).
+
+```bash
+cd client
+yarn install --immutable
+
+cd ../contracts
+yarn install --immutable
+cd ../client
+```
+
+Before running the long fork/build, run the no-RPC smoke check. It deliberately
+unsets `BASE_RPC_URL` and must fail with the script's own
+`BASE_RPC_URL is required` message — not `ERR_MODULE_NOT_FOUND` / `Cannot find
+package`.
 
 ```bash
 # from the client/ directory
-cd client
+yarn smoke:build-anvil-snapshot
+```
+
+```bash
+# from the client/ directory
 BASE_RPC_URL=https://your-base-mainnet-rpc.example \
   yarn tsx ../contracts/scripts/build-anvil-snapshot.ts
 ```
@@ -72,8 +98,22 @@ OLAS / mech-marketplace addresses are read from `CHAIN_CONFIG`
 (`getChainConfig('base')` in `client/src/earning/contracts.ts`) — never inlined
 in the script — so a chain-config change flows through automatically.
 
-After building, **commit the regenerated `state.json`** in the same PR as the
-contract change that motivated the refresh.
+After building, **commit the regenerated `state.json` and `addresses.json`** in
+the same PR as the contract change that motivated the refresh. Confirm the
+manifest's `router` value changed when the refresh is for a router/ABI update;
+for the post-HH3 trimmed-contract refresh it must no longer be
+`0xbB126c57DEfBD673FB5d94BB50ffD21A931Ba72D`.
+
+For the post-HH3 trimmed-contract refresh, the builder advances the local-only
+deployer nonce before deploying the fixture V3 stack. CREATE addresses depend on
+the deployer nonce, not bytecode, so this prevents a genuine rebuild from
+reusing the stale pre-trim router sentinel address.
+
+The Foundry/Anvil version pin in
+[`hermetic-gate.yml`](../../.github/workflows/hermetic-gate.yml) moves in
+lockstep with this fixture: if you rebuild with a new Anvil version, update the
+workflow pin in the same PR and verify `anvil --load-state` still accepts the
+committed `state.json`.
 
 ## When to refresh
 
@@ -102,9 +142,9 @@ hand-edited or fabricated.
   to a `.gitattributes`, `git lfs track` it, and re-commit. CI that loads the
   fixture must then `git lfs pull` (or use `lfs: true` on the checkout action).
 
-The hermetic gate must **fail loud** with a clear "run
-`contracts/scripts/build-anvil-snapshot.ts` and commit the fixture" message if
-the snapshot is absent — never silently fall back to a live fork.
+The hermetic gate must **fail loud** with a clear "run the contracts wrapper
+from `client/` and commit the fixture" message if the snapshot is absent —
+never silently fall back to a live fork.
 
 ## Rollout order (read before landing the two-gate pipeline)
 

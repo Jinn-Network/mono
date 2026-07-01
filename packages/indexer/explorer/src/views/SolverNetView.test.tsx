@@ -23,7 +23,6 @@ const SLICE_DATA = {
     verdicts: 800,
     verdictsPass: 760,
     resolvedRate: 0.95,
-    jinnEarned: '0',
   },
   series: [
     {
@@ -38,7 +37,6 @@ const SLICE_DATA = {
         verdicts: 800,
         verdictsPass: 760,
         resolvedRate: 0.95,
-        jinnEarned: '0',
       },
     },
   ],
@@ -50,7 +48,6 @@ const SLICE_DATA = {
         verdictsTotal: 180,
         verdictsPass: 171,
         resolvedRate: 0.95,
-        jinnEarned: '1000000000000000000',
       },
     ],
     frozen: [
@@ -60,7 +57,6 @@ const SLICE_DATA = {
         verdictsTotal: 8,
         verdictsPass: 7,
         resolvedRate: 0.875,
-        jinnEarned: '0',
       },
     ],
   },
@@ -492,7 +488,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
         verdicts: 400,
         verdictsPass: 254,
         resolvedRate: 0.635, // aggregate — the headline MUST be 63.5%
-        jinnEarned: '0',
       },
       series: [
         {
@@ -504,7 +499,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
             verdicts: 150,
             verdictsPass: 105,
             resolvedRate: 0.7, // distractor — NOT the headline
-            jinnEarned: '0',
           },
         },
         {
@@ -516,7 +510,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
             verdicts: 130,
             verdictsPass: 52,
             resolvedRate: 0.4,
-            jinnEarned: '0',
           },
         },
         {
@@ -528,7 +521,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
             verdicts: 120,
             verdictsPass: 89,
             resolvedRate: 0.74,
-            jinnEarned: '0',
           },
         },
       ],

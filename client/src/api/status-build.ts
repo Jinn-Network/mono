@@ -25,44 +25,6 @@ import {
 const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
-export type TjinnStatusState = 'pending' | 'ready' | 'error';
-
-export const TJINN_PUBLIC_READ_ERROR = 'Sepolia tJINN balance temporarily unavailable.';
-export const TJINN_PUBLIC_PARTIAL_ERROR = 'Some Safe tJINN balances are temporarily unavailable.';
-export const TJINN_PUBLIC_INVALID_SAFE_ERROR = 'One or more Safe addresses are invalid.';
-
-const TJINN_PUBLIC_ERRORS = new Set([
-  TJINN_PUBLIC_READ_ERROR,
-  TJINN_PUBLIC_PARTIAL_ERROR,
-  TJINN_PUBLIC_INVALID_SAFE_ERROR,
-]);
-
-export interface TjinnServiceStatus {
-  index: number;
-  serviceId: number | null;
-  safeAddress: string | null;
-  balanceWei: string | null;
-  operatorClaimedWei: string | null;
-  state: TjinnStatusState;
-  error: string | null;
-}
-
-export interface TjinnStatus {
-  state: TjinnStatusState;
-  chainId: number;
-  tokenAddress: string;
-  safeBalanceWei: string | null;
-  operatorClaimedWei: string | null;
-  /**
-   * Sum of `JinnDistributor.Claimed.operatorMinted` across the operator's
-   * services over the last 24 hours, as a base-10 wei string. Null when the
-   * window read failed or has not been resolved yet.
-   */
-  operatorMintedLast24hWei: string | null;
-  safeCount: number;
-  services: TjinnServiceStatus[];
-  error: string | null;
-}
 
 export interface ServiceBalanceErrorEntry {
   agent?: string;
@@ -175,26 +137,6 @@ export interface GatheredStatusRaw {
    * /v1/status hot path (#992).
    */
   pendingStakingRewardsWei?: string;
-  /** Sepolia tJINN ERC-20 balances across fleet Safes. */
-  tJinn?: TjinnStatus;
-  /**
-   * tJINN ERC-20 token address — resolved from the bundled JINN MVI L1
-   * deployment artifact (single source of truth) and threaded through from
-   * `main.ts`. Used to build the fallback pending status when `tJinn` is absent.
-   * Optional: not meaningfully present on mainnet/older paths and absent in
-   * many test fixtures — callers must handle `undefined`.
-   */
-  tjinnTokenAddress?: string;
-  /**
-   * tJINN chain id — resolved from the same artifact as `tjinnTokenAddress`.
-   * Optional for the same reasons as `tjinnTokenAddress`.
-   */
-  tjinnChainId?: number;
-  /**
-   * JinnDistributor address on the tJINN chain. Used to expose real
-   * operator lifetime claimed totals via `totalClaimedOperator(serviceId)`.
-   */
-  tjinnDistributorAddress?: string;
   /**
    * ISO timestamp when the staking contract will next accept a checkpoint.
    * Populated only by `jinn rewards` on demand, never on the /v1/status hot
@@ -225,6 +167,8 @@ export interface GatheredStatusRaw {
    */
   pendingByService?: Record<number, string>;
   claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
+  /** Sum of stOLAS reward_claims rows in the last 24 hours (wei). */
+  claimedStakingRewardsLast24hWei?: string;
   migrationArchive?: EarningMigrationArchive;
   /**
    * Harness readiness rollup — single boolean + name + reason summary across
@@ -290,8 +234,8 @@ export interface StatusV1Response {
     claimLoopIntervalMs: number;
     lastClaimTickAt: string | null;
     claimedStakingRewardsWei: string;
+    claimedStakingRewardsLast24hWei: string | null;
   };
-  tJinn: TjinnStatus;
   /** Per-role ETH balance (master / agent / Safe). Wei strings, base-10. */
   balances: {
     eth: {
@@ -432,6 +376,12 @@ function computeRunwayDaysExcess(
   return (balanceWei / daily).toString();
 }
 
+function sumClaimedRewardsLast24hWei(raw: GatheredStatusRaw): string | null {
+  const value = raw.claimedStakingRewardsLast24hWei;
+  if (value === undefined) return null;
+  return value;
+}
+
 function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
   let total = 0n;
   for (const claim of Object.values(raw.claimedByService ?? {})) {
@@ -442,58 +392,6 @@ function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
     }
   }
   return total;
-}
-
-/**
- * Build a `TjinnStatus` in the `pending` state for a given token/chain.
- *
- * Single builder for the near-identical pending `TjinnStatus` literals that
- * gather-status and the status assembler would otherwise hand-roll. Pass
- * `overrides` to set `safeCount`, `services`, `error`, etc. while keeping the
- * token/chain/`pending` defaults.
- *
- * `tokenAddress`/`chainId` are optional: on mainnet/older paths (and many test
- * fixtures) the tJINN identity is not resolved. When absent, a sane empty
- * pending status is produced — empty token address and chain id `0` — rather
- * than a bogus address.
- */
-export function pendingTjinnStatus(
-  tokenAddress: string | undefined,
-  chainId: number | undefined,
-  overrides?: Partial<TjinnStatus>,
-): TjinnStatus {
-  return {
-    state: 'pending',
-    chainId: chainId ?? 0,
-    tokenAddress: tokenAddress ?? '',
-    safeBalanceWei: null,
-    operatorClaimedWei: null,
-    operatorMintedLast24hWei: null,
-    safeCount: 0,
-    services: [],
-    error: null,
-    ...overrides,
-  };
-}
-
-function publicTjinnError(error: string): string {
-  return TJINN_PUBLIC_ERRORS.has(error) ? error : TJINN_PUBLIC_READ_ERROR;
-}
-
-function publicTjinnStatus(
-  status: TjinnStatus | undefined,
-  tokenAddress: string | undefined,
-  chainId: number | undefined,
-): TjinnStatus {
-  if (!status) return pendingTjinnStatus(tokenAddress, chainId);
-  return {
-    ...status,
-    error: status.error ? publicTjinnError(status.error) : null,
-    services: status.services.map((service) => ({
-      ...service,
-      error: service.error ? publicTjinnError(service.error) : null,
-    })),
-  };
 }
 
 function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string {
@@ -631,8 +529,8 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       claimLoopIntervalMs: raw.rewardClaimIntervalMs,
       lastClaimTickAt: raw.lastRewardClaimTickAt,
       claimedStakingRewardsWei: claimedRewardsWei.toString(),
+      claimedStakingRewardsLast24hWei: sumClaimedRewardsLast24hWei(raw),
     },
-    tJinn: publicTjinnStatus(raw.tJinn, raw.tjinnTokenAddress, raw.tjinnChainId),
     balances: { eth: buildEthBalances(raw) },
     masterGas: {
       address: raw.master.address,
