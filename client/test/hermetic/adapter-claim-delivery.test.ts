@@ -127,8 +127,8 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
   async function postAndClaimViaSafe(): Promise<Hex> {
     const block = await publicClient.getBlock();
     const nowSec = Number(block.timestamp);
-    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
-    const policy = { maxClaims: 10 };
+    // Tokenless-OLAS pivot: TaskPolicy is { maxClaims, allowSolverSelfEvaluation } (bool, default false → self-eval blocked).
+    const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
     const salt = `adapterA:${nowSec}:${Math.random()}`;
     const taskCidDigest = keccak256(toBytes(`task:${salt}`)) as Hex;
     const manifestDigest = keccak256(toBytes(`manifest:${salt}`)) as Hex;

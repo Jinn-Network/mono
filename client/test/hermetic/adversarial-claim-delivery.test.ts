@@ -298,8 +298,8 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     void opts.submissionDeadlineSeconds;
     void opts.maxClaimsPerOperator;
 
-    // Tokenless-OLAS pivot: on-chain policy is now just `maxClaims`.
-    const policy = { maxClaims: 10 };
+    // Tokenless-OLAS pivot: TaskPolicy is { maxClaims, allowSolverSelfEvaluation } (bool, default false → self-eval blocked).
+    const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
 
     // Unique digest per task so requestIds never collide across scenarios.
     const salt = `${nowSec}:${Math.random()}`;
@@ -451,7 +451,7 @@ describeMaybe('hermetic adversarial claim/delivery (real bytecode, snapshot)', (
     const { router } = ctx.artifacts;
     const block = await ctx.publicClient.getBlock();
     const nowSec = Number(block.timestamp);
-    const policy = { maxClaims: 10 };
+    const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
     const salt = `deadline:${nowSec}:${Math.random()}`;
     const taskCidDigest = keccak256(toBytes(salt)) as Hex;
     const manifestDigest = keccak256(toBytes(`m:${salt}`)) as Hex;
