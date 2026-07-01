@@ -235,6 +235,18 @@ async function executeSafeTransactionInner(
               null,
             );
           }
+          if (inner.innerSelector) {
+            // Deterministic inner revert with an undecoded selector — terminal.
+            // Surface it structurally so tx-retry does not retry the GS013.
+            throw new SafeInnerRevertError(
+              `Safe execTransaction inner revert (estimate, undecoded selector ${inner.innerSelector})`,
+              inner.innerSelector,
+              inner.innerData,
+              null,
+              null,
+              null,
+            );
+          }
         }
         throw writeErr;
       }
@@ -265,6 +277,24 @@ async function executeSafeTransactionInner(
             hash as Hex,
           );
         }
+        if (inner.innerSelector) {
+          // The inner call reverts deterministically with a selector we don't
+          // decode (e.g. a newer custom error like TACTaskAlreadyCredited).
+          // Surface it as a SafeInnerRevertError — even without a decoded name —
+          // so tx-retry classifies it non-recoverable instead of retrying the
+          // wrapping GS013 forever. Re-running the same inner call reverts
+          // identically.
+          throw new SafeInnerRevertError(
+            `Safe execTransaction inner revert (undecoded selector ${inner.innerSelector}, txHash=${hash})`,
+            inner.innerSelector,
+            inner.innerData,
+            null,
+            null,
+            hash as Hex,
+          );
+        }
+        // No inner revert on re-simulation: the on-chain failure was a
+        // signature/owner (GS026) nonce race — retryable, self-heals on re-sign.
         throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
       }
       await nonceLedger.markResolved();
