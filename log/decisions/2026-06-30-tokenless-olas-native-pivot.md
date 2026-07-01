@@ -4,13 +4,13 @@ title: Jinn goes tokenless and OLAS-native — drop the JINN token and the sover
 date: 2026-06-30
 verb: Decide
 status: ratified
-authors: opus (drafted), Ritsu (steer); Oak signed off on the conscious trade — DR ratified 2026-07-01
+authors: opus (drafted), Ritsu (steer); ratified on a CODEOWNER's sign-off on the conscious trade — 2026-07-01
 spec: spec/2026-06-30-tokenless-olas-native.md
 amends: "spec/2026-06-05-independent-blockchain-launch.md (sovereign Cosmos chain — set aside); spec/2026-05-24-phase-2-chain-architecture.md (DAO-on-Ethereum / multi-chain ZK distribution — set aside); spec/2026-06-08-substrate-spike-cosmos-evm.md (substrate choice — moot); spec/2026-06-10-genesis-condition.md (token-on-sovereign-chain genesis gates — moot); DR-2026-06-04 (OLAS staking as non-load-bearing substrate — consciously reversed); spec/2026-04-06-phase-1a-design.md + docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md (fair-launch JINN tokenomics — dropped); SPEC.md §Tokenomics + GROWTH.md §economic framing (JINN-token mechanics — to be rewritten via Discussion + CODEOWNERS)"
 relates-to: spec/2026-06-30-tokenless-olas-native.md (the design); .local/protocol/2026-06-29-tokenless-olas-native.md (private design brief + detailed contributor-risk analysis); .local/protocol/DESIGN-PROPOSAL.md (the superseded converged sovereign-token design); DR-2026-04-30 (knowledge-market substrate framing — preserved); GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM)
 ---
 
-> **Ratified 2026-07-01 on Oak's sign-off.** Oak has agreed the conscious trade (rent vs own legitimacy); per this DR's own framing the public DR is the ratification artifact, and the decision was implemented and proven on testnet before ratification (see Consequences → Implementation status). The canonical-doc rewrites it implies (SPEC.md §Economics, GLOSSARY.md, README, CLAUDE.md — GROWTH.md needed none) are drafted in the accompanying PR (#1297 → `next`) and take CODEOWNERS review there; a GitHub Discussion anchors the public record per `spec/2026-04-28-canonical-docs.md`.
+> **Ratified 2026-07-01 on a CODEOWNER's sign-off.** A CODEOWNER has agreed the conscious trade (rent vs own legitimacy); per this DR's own framing the public DR is the ratification artifact, and the decision was implemented and proven on testnet before ratification (see Consequences → Implementation status). The canonical-doc rewrites it implies (SPEC.md §Economics, GLOSSARY.md, README, CLAUDE.md — GROWTH.md needed none) are drafted in the accompanying PR (#1297 → `next`) and take CODEOWNERS review there; GitHub Discussion #1299 anchors the public record per `spec/2026-04-28-canonical-docs.md`.
 
 ## Context
 
@@ -19,7 +19,7 @@ For most of 2026 the forward roadmap converged on a **native token on a sovereig
 - **Phase 1a** (`spec/2026-04-06-phase-1a-design.md`, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) shipped a fair-launch JINN token + DAO + distribution contracts on Sepolia / Base Sepolia.
 - **Phase 2 chain architecture** (`spec/2026-05-24-phase-2-chain-architecture.md`) placed the DAO permanently on Ethereum with multi-chain, ZK-requiring distribution.
 - That was then re-opened toward **sovereignty**: an independent JINN chain (`spec/2026-06-05-independent-blockchain-launch.md`), a substrate spike that settled on Cosmos EVM (`spec/2026-06-08-substrate-spike-cosmos-evm.md`), and genesis-condition gates (`spec/2026-06-10-genesis-condition.md`).
-- The fullest expression is the private converged design (`.local/protocol/DESIGN-PROPOSAL.md`, v0.39) — the product of 45+ adversarial design runs plus Oak's parallel convergence. Its standing observer constraints included **contributor safety** (minimise builders' legal / regulatory / financial / physical exposure) and **year-1000 viability**.
+- The fullest expression is the private converged design (`.local/protocol/DESIGN-PROPOSAL.md`, v0.39) — the product of 45+ adversarial design runs plus a parallel design convergence by another contributor. Its standing observer constraints included **contributor safety** (minimise builders' legal / regulatory / financial / physical exposure) and **year-1000 viability**.
 
 Reading the converged design's own residual list surfaces an undeniable pattern: **nearly every hardest-won residual is token-induced legal and operational exposure**, and a large fraction of the design's complexity exists to *temporarily* neutralise risks the token itself creates (cold-start mechanisms that clear those risks "by absence" only at launch). The detailed contributor-risk analysis is held in the private brief (`.local/protocol/2026-06-29-tokenless-olas-native.md` §0) and is deliberately not restated in this public DR.
 
@@ -34,7 +34,7 @@ Meanwhile the execution substrate has, since Phase 0, been **OLAS** (Base): the 
 3. **Reward is for completed-loop activity, gated on a verdict, not on passing.** A solver's OLAS staking-activity counter increments once their solution has *any* verdict (a **loop-completion gate**); an evaluator's increments on delivering a verdict. Pass/Fail is recorded (knowledge + reputation) but does not gate OLAS — so a wrong or malicious Fail can never deny a solver their earnings, and no challenge mechanism is required at v0. Two reward streams: OLAS **staking emissions** (the bootstrap subsidy) and **launcher funding** (the per-task marketplace delivery fee the launcher escrows — the real, demand-funded economy).
 4. **The bespoke on-chain surface collapses to two small contracts** — **one activity checker** + **one thin recorder** — with everything else OLAS-native and unmodified. The recorder anchors each `(task, solution, verdict)` tuple (knowledge + legibility), enforces self-eval prevention, and sequences solver credit (solve → pending → first verdict → credit); it gates no payout. The launcher delivery-fee escrow is retained on the router as the funded-stream mechanism (it is not a quality escrow).
 
-**The conscious trade (the crux to ratify).** Running on OLAS means *renting* legitimacy from the OLAS ecosystem rather than *owning* it via sovereignty. This reverses the prior sovereign-legitimacy position. We accept it deliberately: contributor-safety + shipping-now + radical simplicity over self-rooted legitimacy — *given* that the legitimacy prize was reachable only through a token/chain that carries significant legal and regulatory risk to contributors. This trade is what Oak must agree to for the DR to ratify.
+**The conscious trade (the crux to ratify).** Running on OLAS means *renting* legitimacy from the OLAS ecosystem rather than *owning* it via sovereignty. This reverses the prior sovereign-legitimacy position. We accept it deliberately: contributor-safety + shipping-now + radical simplicity over self-rooted legitimacy — *given* that the legitimacy prize was reachable only through a token/chain that carries significant legal and regulatory risk to contributors. This trade is what a CODEOWNER must sign off on for the DR to ratify.
 
 The full design is `spec/2026-06-30-tokenless-olas-native.md`.
 
@@ -95,7 +95,7 @@ Recorded here as the **reversals** artifact. The in-place edits below are **appl
 
 ## Open questions to ratify
 
-1. **Oak's formal sign-off on the conscious trade** (rent vs own legitimacy) — *gating*. **Resolved (2026-07-01):** Oak signed off; DR ratified on that basis.
+1. **A CODEOWNER's formal sign-off on the conscious trade** (rent vs own legitimacy) — *gating*. **Resolved (2026-07-01):** signed off; DR ratified on that basis.
 2. **veOLAS sizing & custody** — who holds and extends the lock funding the emissions nominee. veOLAS economics here are doc-sourced and **not** re-verified on Ethereum L1 — verify before committing the funding plan.
 3. **Evaluator-quality-control timing** — quorum + consensus-outlier are optional at v0 (the gate is "any verdict") but likely needed as volume rises; decide the trigger.
 4. **Mainnet migration** — sequence for moving live mainnet operators from the legacy marketplace-native model to the consolidated (staking + recorder) shape.
@@ -104,4 +104,4 @@ Recorded here as the **reversals** artifact. The in-place edits below are **appl
 
 ## Status / next steps
 
-`ratified` (2026-07-01, Oak sign-off). Implemented and proven on testnet (Tracks 1–3) and committed on branch `tokenless-olas-native` (draft PR #1297 → `next`). The §Reversal supersession blockquotes are applied and the canonical-doc rewrites (SPEC.md §Economics, GLOSSARY.md, README, CLAUDE.md) are drafted in that PR. Remaining before merge: (1) post the anchoring GitHub Discussion; (2) CODEOWNERS approval on the canonical-doc changes in the PR; (3) resolve the §Open questions that gate **mainnet** (notably re-verify veOLAS on L1, the evaluator-quality trigger, and the mainnet-migration sequence) — these do not block the testnet-scoped merge but must close before mainnet.
+`ratified` (2026-07-01, CODEOWNER sign-off). Implemented and proven on testnet (Tracks 1–3) and committed on branch `tokenless-olas-native` (draft PR #1297 → `next`). The §Reversal supersession blockquotes are applied and the canonical-doc rewrites (SPEC.md §Economics, GLOSSARY.md, README, CLAUDE.md) are drafted in that PR. Remaining before merge: (1) post the anchoring GitHub Discussion; (2) CODEOWNERS approval on the canonical-doc changes in the PR; (3) resolve the §Open questions that gate **mainnet** (notably re-verify veOLAS on L1, the evaluator-quality trigger, and the mainnet-migration sequence) — these do not block the testnet-scoped merge but must close before mainnet.
