@@ -2648,14 +2648,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     {
       stateDir: config.stateDir,
       earningDir: config.earningDir,
-      relayerUrl: undefined,
       runtimeMode: config.runtimeMode,
     },
     {
       env: process.env,
       getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
       detectAuthContext,
-      fetch,
     },
   );
 

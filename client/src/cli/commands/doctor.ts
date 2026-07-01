@@ -362,7 +362,6 @@ configuration:
   - writable_volume             state directory is writable (write+fsync+unlink probe)
   - state_on_volume             state resolves under JINN_STATE_DIR in a deployment context
   - credentials_resolvable      agent-CLI credentials resolvable (presence-only; no secret echo)
-  - relayer_reachable           claim-relayer endpoint reachable (skipped when unconfigured)
   - agent_cli_non_root          daemon not running as root (uid 0)
   - portfolio_impl_state_dir    HL impl state directory present and readable
   - hl_api_wallet               HL API wallet generated and approved by operator
@@ -418,14 +417,12 @@ Examples:
         {
           stateDir: config.stateDir,
           earningDir: config.earningDir,
-          relayerUrl: undefined,
           runtimeMode: config.runtimeMode,
         },
         {
           env: ctx.env,
           getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
           detectAuthContext: deps.detectAuthContext,
-          fetch,
         },
       );
       checks.push(...deploymentReadinessChecksForDoctor(deploymentReport));

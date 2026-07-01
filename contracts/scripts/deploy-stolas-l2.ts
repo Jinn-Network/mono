@@ -7,9 +7,9 @@ import { isRunEntry } from "./lib/run-entry.js";
  * token threaded through this script (`L2_JINN`) is the Phase 1a bridged
  * "Jinn" ERC20 at 0xAB9a01cd... (deployed 2026-04-08) — it has on-chain
  * name="Jinn"/symbol="JINN" but serves as the OLAS-equivalent token here.
- * The actual JINN minted by the v0 cross-chain pipeline is a separate token
- * (tJINN on testnet); see `deploy-jinn-mvi-l2.ts` for the v0 emitter and
- * `deploy-jinn-mvi-l1.ts` for the v0 minter (JinnDistributor).
+ * (The JINN-token distribution economy + its v0 cross-chain pipeline were
+ * removed by DR-2026-06-30; this token is retained only as the testnet OLAS
+ * stand-in.)
  *
  * This replaces the earlier deploy-stolas.ts. All contracts use the L2
  * Phase 1a token at 0xAB9a01cd... (fast-test variant).
