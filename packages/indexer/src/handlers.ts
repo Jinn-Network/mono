@@ -99,7 +99,8 @@ export interface TaskCreatedEvent {
     manifestDigest: `0x${string}`;
     taskCidDigest: `0x${string}`;
     maxClaims: bigint | number;
-    // Not emitted by the trimmed TaskCreated post-DR-2026-06-30; handler defaults to 0.
+    // Tokenless TaskCreated events omit this; handler defaults to 1 for
+    // first-verdict finalization.
     requiredVerdicts?: bigint | number;
   };
   block: BlockShape;
@@ -168,6 +169,16 @@ export interface MetadataSetEvent {
   block: BlockShape;
   transaction: TransactionShape;
   log: LogShape;
+}
+
+const TOKENLESS_FIRST_VERDICT_REQUIRED_VERDICTS = 1;
+
+function requiredVerdictsFromTaskCreated(value: bigint | number | undefined): number {
+  return value === undefined ? TOKENLESS_FIRST_VERDICT_REQUIRED_VERDICTS : Number(value);
+}
+
+function requiredVerdictsForFinalization(value: number): number {
+  return value <= 0 ? TOKENLESS_FIRST_VERDICT_REQUIRED_VERDICTS : value;
 }
 
 // ── ABI tuple for payload decoding ────────────────────────────────────────────
@@ -307,7 +318,7 @@ export async function handleTaskCreated({
       taskCidDigest: event.args.taskCidDigest,
       creator: event.args.creator,
       maxClaims: Number(event.args.maxClaims),
-      requiredVerdicts: Number(event.args.requiredVerdicts ?? 0),
+      requiredVerdicts: requiredVerdictsFromTaskCreated(event.args.requiredVerdicts),
       createdAtBlock: event.block.number,
       createdAtTx: event.transaction.hash,
       // claimWindowStart and claimWindowEnd are not emitted in TaskCreated on
@@ -352,14 +363,19 @@ export async function handleTaskAttemptCreated({
 // Idempotent: a replayed event with the same (taskId, attemptIndex, verdictIndex,
 // chainId) does not clobber the original (onConflictDoNothing).
 //
-// Finalization (issue #530): on JinnRouter V3, on-chain finalization is
-// `attempt.validVerdictCount == requiredVerdicts` (TaskCoordinator.recordVerdict).
+// Finalization (issue #530 / #1304): on the current tokenless JinnRouter V3,
+// TaskCoordinator.recordVerdict finalizes on the first delivered verdict when
+// TaskCreated omits requiredVerdicts. Older rows persisted that omission as 0,
+// so non-positive requiredVerdicts are normalized to 1 for finalization. When a
+// legacy event explicitly carries requiredVerdicts > 1, it still requires that
+// many delivered verdicts.
+//
 // VerdictDeliveryClaimed fires once per *delivered* verdict, so the count of
 // delivered `verdict` rows for this attempt scope equals validVerdictCount.
-// After inserting the verdict row, recompute: finalized iff
-// requiredVerdicts > 0 && deliveredCount >= requiredVerdicts. Mirrors
-// metrics.ts:attemptFinalization. Monotonic — never flips finalized back to
-// false (db.update only ever sets it to true here).
+// After inserting the verdict row, recompute: finalized iff deliveredCount >=
+// normalized requiredVerdicts. Mirrors metrics.ts:attemptFinalization.
+// Monotonic — never flips finalized back to false (db.update only ever sets it
+// to true here).
 //
 // Existence guard (mirrors handleSolutionDeliveryClaimed): the matching
 // TaskCreated may predate `startBlock`, leaving no `task` row. db.update on a
@@ -394,15 +410,14 @@ export async function handleVerdictDeliveryClaimed({
     })
     .onConflictDoNothing();
 
-  // Recompute finalized from the task's requiredVerdicts vs delivered verdicts.
+  // Recompute finalized from normalized requiredVerdicts vs delivered verdicts.
   const existing = (await context.db.find(task, { id: taskId })) as
     | { requiredVerdicts: number; finalized: boolean }
     | null;
   if (!existing) return; // TaskCreated predates startBlock — skip; verdict row already written.
   if (existing.finalized) return; // Monotonic — already final, nothing to do.
 
-  const requiredVerdicts = existing.requiredVerdicts;
-  if (requiredVerdicts <= 0) return; // requiredVerdicts == 0 → never finalizes.
+  const requiredVerdicts = requiredVerdictsForFinalization(existing.requiredVerdicts);
 
   const deliveredCount = await context.db.countVerdicts(verdict, {
     taskId,
@@ -416,8 +431,8 @@ export async function handleVerdictDeliveryClaimed({
 
 // ── JinnRouter: SolutionDeliveryClaimed ──────────────────────────────────────
 // A solution-slot delivery — the START of the evaluation phase, NOT finalization
-// (issue #530). On-chain finalization is `validVerdictCount >= requiredVerdicts`
-// and is handled in handleVerdictDeliveryClaimed. This handler deliberately does
+// (issue #530 / #1304). On-chain finalization happens on verdict delivery and
+// is handled in handleVerdictDeliveryClaimed. This handler deliberately does
 // NOT touch task.finalized.
 //
 // At v0.1 there is nothing for this handler to persist beyond what TaskAttempt /
@@ -439,9 +454,10 @@ export async function handleSolutionDeliveryClaimed({
   const id = event.args.taskId.toString();
   const existing = await context.db.find(task, { id });
   if (!existing) return;
-  // Intentionally a no-op on task.finalized — see issue #530. SolutionDeliveryClaimed
-  // is the start of evaluation; finalization is recomputed in
-  // handleVerdictDeliveryClaimed from delivered-verdict count vs requiredVerdicts.
+  // Intentionally a no-op on task.finalized — see issues #530 and #1304.
+  // SolutionDeliveryClaimed is the start of evaluation; finalization is
+  // recomputed in handleVerdictDeliveryClaimed from delivered-verdict count vs
+  // normalized requiredVerdicts.
 }
 
 // ── JinnRouter: TaskBudgetRefunded → task.refunded = true ────────────────────
@@ -1324,4 +1340,3 @@ export async function handleMetadataSet({
 
   // Any other key (e.g. future metadata types) — no-op.
 }
-

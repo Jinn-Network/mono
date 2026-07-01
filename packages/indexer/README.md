@@ -77,12 +77,15 @@ The `/builders/:agentId/runs` route and `DiscoveryAPI.getPluginScores` return em
 ### No TaskFinalized / TaskRefunded events
 
 JinnRouter V3 does not emit a standalone `TaskFinalized` event. The indexer
-recomputes `task.finalized` in the `VerdictDeliveryClaimed` handler: it sets
-`finalized = true` once the count of delivered `verdict` rows for an attempt
-reaches the task's `requiredVerdicts`, mirroring TaskCoordinator's on-chain
-`validVerdictCount == requiredVerdicts` rule (issue #530). `finalized` is NOT
-set on `SolutionDeliveryClaimed` — that event is the start of the evaluation
-phase, not finalization. When `requiredVerdicts == 0` the task never finalizes.
+recomputes `task.finalized` in the `VerdictDeliveryClaimed` handler. For the
+current tokenless router, `TaskCreated` no longer emits `requiredVerdicts` and
+`TaskCoordinator.recordVerdict` finalizes on the first delivered verdict, so
+new missing values are stored as `1` and any previously persisted
+`requiredVerdicts <= 0` rows are normalized to first-verdict finalization at
+verdict time (issue #1304). Explicit positive values still require that many
+delivered verdicts (issue #530). `finalized` is NOT set on
+`SolutionDeliveryClaimed` — that event is the start of the evaluation phase,
+not finalization.
 
 `task.refunded` is populated from `JinnRouter.TaskBudgetRefunded` (wired in
 `ebu7.2`). `TaskBudgetRefunded` does exist on V3 — the prior comment claiming
@@ -143,7 +146,7 @@ the indexer adapter.
 
 ### Task
 
-One JinnRouter task (created on `TaskCreated`; `finalized` recomputed on `VerdictDeliveryClaimed` when delivered verdicts reach `requiredVerdicts`, issue #530). Primary key: `id` (taskId as decimal string). Supports `findClaimableTasks` filtering by manifest digest, finalized flag, refunded flag, and joining with `Attempt` for attempt counts.
+One JinnRouter task (created on `TaskCreated`; `finalized` recomputed on `VerdictDeliveryClaimed` when delivered verdicts reach normalized `requiredVerdicts`, with tokenless missing/non-positive values finalizing on the first verdict, issues #530/#1304). Primary key: `id` (taskId as decimal string). Supports `findClaimableTasks` filtering by manifest digest, finalized flag, refunded flag, and joining with `Attempt` for attempt counts.
 
 ### Attempt
 

@@ -25,14 +25,14 @@
  *
  * NOTE on Task.finalized / Task.refunded:
  *   JinnRouter does not emit standalone TaskFinalized or TaskRefunded events at
- *   v0.1. `finalized` is recomputed in handleVerdictDeliveryClaimed: it is set to
- *   true once the count of delivered `verdict` rows for an attempt reaches the
- *   task's `requiredVerdicts` — the indexer's proxy for TaskCoordinator's
- *   on-chain `validVerdictCount == requiredVerdicts` finalization rule (issue
- *   #530). It is NOT set on SolutionDeliveryClaimed (that is the start of
+ *   v0.1. `finalized` is recomputed in handleVerdictDeliveryClaimed: for the
+ *   current tokenless router, missing/non-positive `requiredVerdicts` means the
+ *   task finalizes on the first delivered verdict. Explicit positive
+ *   `requiredVerdicts` still require that many delivered verdicts (issue #530 /
+ *   #1304). It is NOT set on SolutionDeliveryClaimed (that is the start of
  *   evaluation, not the end). `refunded` is set from TaskBudgetRefunded. The
- *   daemon's canClaimTask simulation compensates at claim time. See
- *   README.md §Known limitations.
+ *   daemon's canClaimTask simulation compensates at claim time. See README.md
+ *   §Known limitations.
  *
  * NOTE on claimWindowStart / claimWindowEnd:
  *   These fields are not emitted in the TaskCreated event on JinnRouter V3. They
@@ -50,8 +50,8 @@ import { onchainTable, index, relations, primaryKey } from 'ponder';
 
 /**
  * One JinnRouter task. Created on TaskCreated; `finalized` recomputed on
- * VerdictDeliveryClaimed when delivered verdicts reach requiredVerdicts
- * (issue #530).
+ * VerdictDeliveryClaimed when delivered verdicts reach normalized
+ * requiredVerdicts (issue #530 / #1304).
  *
  * Supports findClaimableTasks: filter by manifestDigest, finalized, refunded;
  * join with Attempt for attempt/operatorAttempt counts.
@@ -72,7 +72,11 @@ export const task = onchainTable(
     // If the ABI widens, change this column to t.bigint() and re-sync.
     /** maxClaims from TaskCreated event. */
     maxClaims: t.integer().notNull(),
-    /** requiredVerdicts from the TaskCreated event — verdicts needed before an attempt finalizes. */
+    /**
+     * requiredVerdicts from the TaskCreated event. The tokenless router omits
+     * this field, so the handler stores 1 for new rows; old 0 rows are
+     * normalized to 1 during finalization.
+     */
     requiredVerdicts: t.integer().notNull().default(0),
     /** Block number of the TaskCreated event. */
     createdAtBlock: t.bigint().notNull(),
@@ -89,11 +93,11 @@ export const task = onchainTable(
      */
     claimWindowEnd: t.bigint(),
     /**
-     * True once delivered verdicts for any attempt reach the task's
-     * requiredVerdicts — the indexer's proxy for TaskCoordinator's on-chain
-     * `validVerdictCount == requiredVerdicts` finalization (issue #530).
-     * Recomputed in handleVerdictDeliveryClaimed; NOT set on
-     * SolutionDeliveryClaimed. Monotonic.
+     * True once delivered verdicts for any attempt reach the task's normalized
+     * requiredVerdicts. For the tokenless router, missing/non-positive
+     * requiredVerdicts finalize on the first verdict (#1304). Recomputed in
+     * handleVerdictDeliveryClaimed; NOT set on SolutionDeliveryClaimed.
+     * Monotonic.
      */
     finalized: t.boolean().notNull().default(false),
     /**

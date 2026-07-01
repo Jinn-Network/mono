@@ -93,7 +93,7 @@ The `/explorer/*` routes set `Cache-Control: public, max-age=30, stale-while-rev
 
 ### Monitoring (`/health/task-coverage`)
 
-`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It compares the TaskCoordinator contract's authoritative on-chain `nextTaskId()` view (the storage slot is on `TaskCoordinator`, not JinnRouter — JinnRouterV3 holds a reference to the coordinator but does not re-expose the view) against the indexer's `max(task.id)` and `max(attempt.taskId)` and returns 200 when both gaps are within the configured threshold, 503 otherwise.
+`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It resolves the active JinnRouter's `taskCoordinator()` view, reads that TaskCoordinator contract's authoritative on-chain `nextTaskId()` view (the storage slot is on `TaskCoordinator`, not JinnRouter), compares it against the indexer's `max(task.id)` and `max(attempt.taskId)`, and returns 200 when both gaps are within the configured threshold, 503 otherwise.
 
 ```
 GET /health/task-coverage
@@ -125,6 +125,23 @@ The on-chain lookup is cached for 60 s (both success and null results, to avoid 
 Configuration:
 
 - `JINN_TASK_COVERAGE_GAP_THRESHOLD` — integer, default `5`. The maximum gap allowed before the route returns 503. Set to a higher value if your `PONDER_RPC_URL_84532` latency keeps the indexer naturally a few blocks behind realtime.
+
+#### #1304 tokenless deployment alignment note
+
+The original "GraphQL serves 0 tasks" symptom no longer reproduces on production: raw GraphQL returns operator Safe tasks for the active Base Sepolia router `0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247`. The active causes found during #1304 were deployment-alignment defects:
+
+- `/health/task-coverage` was reading a stale hard-coded coordinator instead of resolving `taskCoordinator()` from the active router, so the route returned `status: "unknown"` even when indexed tasks existed.
+- The tokenless router no longer emits `requiredVerdicts`; `TaskCoordinator.recordVerdict` finalizes on the first delivered verdict, but old indexer rows persisted the missing value as `0` and never finalized.
+
+Fixing existing bad rows requires a clean `DATABASE_SCHEMA` bump and re-sync so `TaskCreated` rows are re-folded with `requiredVerdicts = 1`. The verdict handler also normalizes existing non-positive rows during replay, but the deployment answer should be schema bump plus re-sync for legible state.
+
+Post-deploy smoke for this class of issue:
+
+1. Deploy the indexer and enrichment worker against the same bumped `DATABASE_SCHEMA`.
+2. Wait for `/ready` to return 200 before traffic cutover.
+3. Verify `/health/task-coverage` returns 200 with `status: "ok"` and `taskGap` near 0.
+4. Verify `/graphql` returns non-empty `task` rows for the active router/operator scope being tested.
+5. Verify the daemon discovers claimable attempts and the first delivered verdict finalizes a task on the trimmed tokenless stack.
 
 ### Envelope enrichment (`JINN_INDEXER_ENRICH_ENVELOPES`, `JINN_IPFS_GATEWAY_URL`)
 

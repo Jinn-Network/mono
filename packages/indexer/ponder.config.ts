@@ -53,42 +53,17 @@
  *   IdentityRegistry 8453:    25_000_000
  */
 import { createConfig } from 'ponder';
-import { fallback, http } from 'viem';
 import { JINN_ROUTER_ABI } from './abis/JinnRouter.js';
 import { IDENTITY_REGISTRY_ABI } from './abis/IdentityRegistry.js';
+import {
+  BASE_SEPOLIA_IDENTITY_REGISTRY_ADDRESS,
+  BASE_SEPOLIA_IDENTITY_REGISTRY_START_BLOCK,
+  BASE_SEPOLIA_JINN_ROUTER_ADDRESS,
+  BASE_SEPOLIA_JINN_ROUTER_START_BLOCK,
+} from './src/chain-config.js';
+import { buildIndexerFallback, parseBaseSepoliaRpcChain, parseRpcChain } from './src/rpc-config.js';
 
-/**
- * Hard cap on the number of providers in a single fallback chain (issue #592).
- * Four covers the indexer's intended shape: Envio HyperSync (slot 0) +
- * publicnode (slot 1) + sepolia.base.org (slot 2) + optional Tenderly
- * fallback slot. Beyond that the boot probe gets long and slot 5+ is almost
- * always copy-paste noise.
- */
-const MAX_RPC_CHAIN_LENGTH = 4;
-
-function parseRpcChain(value: string | undefined, fallbackUrl: string): string[] {
-  const raw = (value ?? fallbackUrl).split(',').map((u) => u.trim()).filter(Boolean);
-  if (raw.length === 0) return [fallbackUrl];
-  if (raw.length > MAX_RPC_CHAIN_LENGTH) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[ponder] capped fallback chain to ${MAX_RPC_CHAIN_LENGTH} providers ` +
-        `(dropped ${raw.length - MAX_RPC_CHAIN_LENGTH} extra slots)`,
-    );
-    return raw.slice(0, MAX_RPC_CHAIN_LENGTH);
-  }
-  return raw;
-}
-
-function buildIndexerFallback(urls: readonly string[]) {
-  // `rank: false` preserves operator-supplied slot order. Per the issue
-  // addendum the intended ordering is paid > free-public > free-public-backup
-  // (Envio HyperSync free-tier in slot 0 when set; publicnode + sepolia.base.org
-  // as the no-account-needed backstops).
-  return fallback(urls.map((u) => http(u)), { rank: false });
-}
-
-const baseSepoliaUrls = parseRpcChain(process.env['PONDER_RPC_URL_84532'], 'https://sepolia.base.org');
+const baseSepoliaUrls = parseBaseSepoliaRpcChain();
 
 /**
  * Hermetic snapshot mode (the hermetic snapshot indexer round-trip test,
@@ -147,8 +122,8 @@ const testnetConfig = createConfig({
           // Tokenless-OLAS pivot (DR-2026-06-30): the final trimmed JinnRouterV3
           // the @canary client posts to. Deployed at block 43_523_445 (2026-06-30).
           // Supersedes the earlier trimmed router 0xdC9BCcEB… (iteration 1).
-          address: '0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247',
-          startBlock: 43_523_445,
+          address: BASE_SEPOLIA_JINN_ROUTER_ADDRESS,
+          startBlock: BASE_SEPOLIA_JINN_ROUTER_START_BLOCK,
         },
       },
     },
@@ -156,8 +131,8 @@ const testnetConfig = createConfig({
       abi: IDENTITY_REGISTRY_ABI,
       chain: {
         baseSepolia: {
-          address: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-          startBlock: 41_100_000,
+          address: BASE_SEPOLIA_IDENTITY_REGISTRY_ADDRESS,
+          startBlock: BASE_SEPOLIA_IDENTITY_REGISTRY_START_BLOCK,
         },
       },
     },

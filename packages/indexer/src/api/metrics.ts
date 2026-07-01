@@ -69,7 +69,10 @@ export function resolvedRateFromCounts(pass: number, total: number): number | nu
 /**
  * Derives finalization status and outcome for a single task attempt.
  *
- * `finalized` is true iff `requiredVerdicts > 0 && verdicts.length >= requiredVerdicts`.
+ * `finalized` is true iff `verdicts.length >= normalized requiredVerdicts`.
+ * The current tokenless router omits `requiredVerdicts` and finalizes on the
+ * first delivered verdict; rows that persisted the omission as 0 are normalized
+ * to 1 here to match handler finalization (#1304).
  * When finalized, `passed` is true iff a strict majority of verdicts are Pass
  * (`pass * 2 > verdicts.length`).
  *
@@ -82,7 +85,8 @@ export function attemptFinalization(
   verdicts: { verdictCode: number }[],
   requiredVerdicts: number,
 ): { finalized: boolean; passed: boolean } {
-  if (requiredVerdicts <= 0 || verdicts.length < requiredVerdicts) {
+  const normalizedRequiredVerdicts = requiredVerdicts <= 0 ? 1 : requiredVerdicts;
+  if (verdicts.length < normalizedRequiredVerdicts) {
     return { finalized: false, passed: false };
   }
   const pass = verdicts.filter((v) => v.verdictCode === 1).length;

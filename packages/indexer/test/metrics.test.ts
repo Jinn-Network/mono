@@ -94,8 +94,8 @@ describe('attemptFinalization', () => {
     expect(attemptFinalization([], 2)).toEqual({ finalized: false, passed: false });
   });
 
-  it('not finalized when requiredVerdicts is 0', () => {
-    expect(attemptFinalization([{ verdictCode: 1 }], 0)).toEqual({ finalized: false, passed: false });
+  it('issue #1304: treats persisted requiredVerdicts 0 as first-verdict finalization', () => {
+    expect(attemptFinalization([{ verdictCode: 1 }], 0)).toEqual({ finalized: true, passed: true });
   });
 
   it('not finalized when count is less than requiredVerdicts', () => {

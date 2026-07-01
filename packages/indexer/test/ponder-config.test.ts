@@ -36,6 +36,15 @@ afterEach(() => {
 
 async function loadConfig(): Promise<{
   chains: { baseSepolia: any };
+  contracts: {
+    JinnRouter: {
+      chain: {
+        baseSepolia: {
+          address: string;
+        };
+      };
+    };
+  };
 }> {
   const mod = await import('../ponder.config.js');
   return mod.default;
@@ -79,5 +88,12 @@ describe('ponder.config baseSepolia fallback (AC4)', () => {
   it('declares only the baseSepolia chain (Sepolia L1 / JinnDistributor removed)', async () => {
     const config = await loadConfig();
     expect(Object.keys(config.chains)).toEqual(['baseSepolia']);
+  });
+
+  it('indexes the active tokenless Base Sepolia router from #1304', async () => {
+    const config = await loadConfig();
+    expect(config.contracts.JinnRouter.chain.baseSepolia.address).toBe(
+      '0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247',
+    );
   });
 });

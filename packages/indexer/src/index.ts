@@ -5,8 +5,8 @@
  *
  *   JinnRouter:TaskCreated             → task
  *   JinnRouter:TaskAttemptCreated      → attempt
- *   JinnRouter:SolutionDeliveryClaimed → (no-op; start of evaluation, not finalization — issue #530)
- *   JinnRouter:VerdictDeliveryClaimed  → verdict (+ recompute task.finalized when delivered verdicts reach requiredVerdicts)
+ *   JinnRouter:SolutionDeliveryClaimed → (no-op; start of evaluation, not finalization — issues #530/#1304)
+ *   JinnRouter:VerdictDeliveryClaimed  → verdict (+ recompute task.finalized when delivered verdicts reach normalized requiredVerdicts)
  *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
  *   IdentityRegistry:MetadataSet       → solverNetManifest OR harnessCheckpoint OR envelope (routed by key)
  *                                        the `envelope:` (execution) handler does an IPFS enrichment fetch

@@ -137,6 +137,33 @@ describe('TaskCreated → task', () => {
     expect(db.count(task)).toBe(1);
     expect(db.get(task, { id: '7' })?.maxClaims).toBe(3);
   });
+
+  it('issue #1304: defaults missing tokenless requiredVerdicts to 1', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: undefined }),
+      context,
+      task,
+    });
+
+    expect(db.get(task, { id: '7' })?.requiredVerdicts).toBe(1);
+  });
+
+  it('issue #1304: a tokenless task with missing requiredVerdicts finalizes on the first verdict', async () => {
+    await handleTaskCreated({
+      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: undefined }),
+      context,
+      task,
+    });
+
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
+      context,
+      verdict,
+      task,
+    });
+
+    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
+  });
 });
 
 describe('TaskAttemptCreated → attempt', () => {
@@ -203,11 +230,11 @@ describe('TaskAttemptCreated → attempt', () => {
   });
 });
 
-// ── Area 4: SolutionDeliveryClaimed no longer finalizes (issue #530) ──────────
+// ── Area 4: SolutionDeliveryClaimed no longer finalizes (issues #530/#1304) ───
 // SolutionDeliveryClaimed is a solution-slot delivery — the START of evaluation,
-// not finalization. On-chain finalization is validVerdictCount >= requiredVerdicts
-// (TaskCoordinator.recordVerdict). The finalized flag is recomputed in
-// handleVerdictDeliveryClaimed; this handler must leave finalized untouched.
+// not finalization. The finalized flag is recomputed in
+// handleVerdictDeliveryClaimed from delivered verdicts; this handler must leave
+// finalized untouched.
 
 describe('SolutionDeliveryClaimed', () => {
   it('does NOT mark the task finalized (it is the start of evaluation, not the end)', async () => {
@@ -218,8 +245,8 @@ describe('SolutionDeliveryClaimed', () => {
       context,
       task,
     });
-    // Issue #530: finalized must stay false — the task is still Open until
-    // delivered verdicts reach requiredVerdicts.
+    // finalized must stay false — the task is still Open until a verdict is
+    // delivered and handleVerdictDeliveryClaimed recomputes finalization.
     expect(db.get(task, { id: '7' })?.finalized).toBe(false);
   });
 
@@ -574,7 +601,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
     expect(db.get(task, { id: '7' })?.finalized).toBe(true);
   });
 
-  it('issue #530: never finalizes when requiredVerdicts == 0', async () => {
+  it('issue #1304: normalizes persisted requiredVerdicts == 0 rows to first-verdict finalization', async () => {
     await handleTaskCreated({
       event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 0 }),
       context,
@@ -586,7 +613,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
       verdict,
       task,
     });
-    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
+    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
   });
 
   it('issue #530: skips finalized recompute when the task row is absent (predates startBlock), still writes the verdict', async () => {
