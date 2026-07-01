@@ -4,6 +4,7 @@ import { Router, Switch, Route } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { SolverNetView } from './SolverNetView';
 import { useSlice, useSolverNet } from '../lib/api';
+import { MILESTONE2_MANIFEST_CID } from '../lib/milestone2';
 
 // ── Fixtures (dual-hook: SliceResponse + SolverNetResponse) ──────────────────
 
@@ -875,5 +876,47 @@ describe('SolverNetView — + filter surfaces values on cold landing (#687 bug 2
     expect(
       within(dialog).queryByText(/No values to filter by/i),
     ).toBeNull();
+  });
+});
+
+// ── Milestone 2 gate card (#647) ──────────────────────────────────────────────
+
+describe('SolverNetView — Milestone 2 gate card', () => {
+  // A passing M2 slice: 140 verdicts, trailing-30 = 0.70 now vs 0.50 at t-99.
+  function m2PassingSlice() {
+    const rolling = new Array(140).fill(0.42);
+    rolling[40] = 0.5; // t-99 baseline (index n-100)
+    rolling[139] = 0.7; // current (index n-1)
+    return {
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: {
+        ...SLICE_DATA,
+        kpis: { ...SLICE_DATA.kpis, verdicts: 140 },
+        series: [{ ...SLICE_DATA.series[0], rolling, kpis: { ...SLICE_DATA.series[0].kpis, verdicts: 140 } }],
+      },
+    };
+  }
+
+  it('renders the gate card with PASS on the Milestone 2 SolverNet', async () => {
+    vi.mocked(useSlice).mockReturnValue(m2PassingSlice() as any);
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(MILESTONE2_MANIFEST_CID)}`,
+    );
+    render(<WrappedView />);
+    expect(
+      await screen.findByText(/Milestone 2 — solvers improving/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('PASS')).toBeInTheDocument();
+    expect(screen.getAllByText(/\+20\.0pp/).length).toBeGreaterThan(0);
+  });
+
+  it('does not render the gate card on a non-Milestone-2 SolverNet', async () => {
+    vi.mocked(useSlice).mockReturnValue(m2PassingSlice() as any);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await screen.findByTestId('kpi-hero-resolved-rate');
+    expect(screen.queryByText(/Milestone 2 — solvers improving/i)).toBeNull();
   });
 });

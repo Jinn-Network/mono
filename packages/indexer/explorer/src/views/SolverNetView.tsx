@@ -31,6 +31,7 @@ import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { Kpi, KpiRow } from '../components/Kpi';
 import { StatusChip } from '../components/StatusChip';
+import { Milestone2GateSection } from '../components/Milestone2GateSection';
 import {
   LearningCurve,
   LEARNING_CURVE_SERIES_COLORS,
@@ -56,6 +57,7 @@ import {
 } from '../lib/url-state';
 import { useCountUp } from '../hooks/useCountUp';
 import { pct, int, shortAddr, shortCid } from '../lib/format';
+import { MILESTONE2_MANIFEST_CID } from '../lib/milestone2';
 
 // ── Sentinel & constants ─────────────────────────────────────────────────────
 
@@ -268,6 +270,10 @@ export function SolverNetView() {
     isLoading: metaLoading,
     isError: metaError,
   } = useSolverNet(cid);
+
+  // Milestone 2 gate (#647) renders only on the M2 SolverNet; the section owns
+  // its own pinned slice so the extra fetch never touches other nets.
+  const isMilestone2Net = cid === MILESTONE2_MANIFEST_CID;
 
   const isLoading = sliceLoading || metaLoading;
   const isError = sliceError || metaError;
@@ -495,6 +501,9 @@ export function SolverNetView() {
             <Kpi label="Verdicts" value={int(slice.kpis.verdicts)} />
             <Kpi label="Verdicts passed" value={int(slice.kpis.verdictsPass)} />
           </KpiRow>
+
+          {/* ── Milestone 2 gate (#647) — only on the M2 SolverNet ── */}
+          {isMilestone2Net && <Milestone2GateSection cid={cid} />}
 
           {/* ── Progressive-disclosure filter chrome (spec §3) ──
               - Empty filters: PersistentControlsRow (+ filter chip + Group by ▾).
