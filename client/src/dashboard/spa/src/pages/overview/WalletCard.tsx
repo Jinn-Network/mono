@@ -3,7 +3,7 @@ import { Card } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
 import { Separator } from '../../components/ui/separator.js';
 import { TooltipProvider } from '../../components/ui/tooltip.js';
-import type { TjinnStatusState } from '../../api/types.js';
+import type { StakingRewardReadState } from '../../api/types.js';
 
 import type { JSX } from 'react';
 
@@ -51,7 +51,7 @@ export interface WalletCardProps {
    */
   olasEarnedLast24h: string | null;
   /** Read state for the OLAS earned figures. */
-  olasState: TjinnStatusState;
+  olasState: StakingRewardReadState;
   /** Public read error string when rewards are unavailable. */
   olasError?: string | null;
   // lastClaimAt stays in the props so re-enabling the "last claim" row is
@@ -102,7 +102,7 @@ const statAux = 'font-mono text-[12px] text-[var(--fg-dim)]';
  * state.
  */
 function olasDisplay(
-  state: TjinnStatusState,
+  state: StakingRewardReadState,
   olasEarned: string,
   olasError: string | null | undefined,
 ): { value: string; copy: string | null } {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { claimJinnRewards } from '../../src/earning/jinn-rewards.js';
+import { claimJinnRewards } from '../../src/earning/stolas-staking.js';
 
 describe('claimJinnRewards', () => {
   it('returns early when no staking reward is available', async () => {

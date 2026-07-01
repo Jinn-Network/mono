@@ -20,7 +20,7 @@ import {
   getChainConfig,
 } from '../earning/contracts.js';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
-import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
+import { JINN_STAKING_ABI } from '../earning/stolas-staking.js';
 import type { FleetState } from '../earning/types.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import {

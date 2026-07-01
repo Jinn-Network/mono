@@ -87,10 +87,10 @@ export function mapStatusToDeriveInput(
       eth: masterEth,
       runwayDays: masterRunwayDays,
     },
-    // Staking / OLAS collector-queue values are substrate, not operator tJINN
-    // earning, and are never surfaced as notifications (the daemon no longer
-    // emits them on /v1/status as of #992). tJINN claims are automatic via the
-    // daemon emit loop plus standing relayer.
+    // Staking / OLAS collector-queue values are substrate infrastructure, not
+    // operator-facing notifications (the daemon no longer emits them on
+    // /v1/status as of #992). OLAS staking rewards accumulate automatically
+    // via the stOLAS curating-agent rail.
     // Harness readiness rollup comes from `/v1/status.harness` (#440).
     // `ready !== false` preserves default-ready when the field is absent
     // (older daemons / partial responses); `name`/`reason` accept the

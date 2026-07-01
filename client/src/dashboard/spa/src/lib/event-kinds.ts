@@ -13,10 +13,6 @@ export const LIFECYCLE_KINDS = [
   'evaluation_submitted',
   'reward_claimed',
   'balance_topup',
-  'jinn_claim_emitted',
-  'jinn_claim_ticket_recorded',
-  'jinn_claim_submitted',
-  'jinn_claim_canonical_skip',
   'engine_transition',
   'tick_error',
   'race_lost',
@@ -68,26 +64,6 @@ export const EVENT_KIND_META: Record<LifecycleKind, EventKindMeta> = {
     label: 'Balance top-up',
     description: 'Gas balance was topped up from the faucet.',
     tone: 'info',
-  },
-  jinn_claim_emitted: {
-    label: 'Testnet JINN claim emitted',
-    description: 'A testnet JINN (tJINN) earnings claim was emitted locally.',
-    tone: 'info',
-  },
-  jinn_claim_ticket_recorded: {
-    label: 'Testnet JINN ticket recorded',
-    description: 'A testnet JINN (tJINN) claim ticket was recorded for later submission.',
-    tone: 'info',
-  },
-  jinn_claim_submitted: {
-    label: 'Testnet JINN claim submitted',
-    description: 'A testnet JINN (tJINN) earnings claim was submitted on-chain.',
-    tone: 'success',
-  },
-  jinn_claim_canonical_skip: {
-    label: 'Testnet JINN claim skipped',
-    description: 'A testnet JINN (tJINN) claim was skipped as already canonical.',
-    tone: 'neutral',
   },
   engine_transition: {
     label: 'Engine transition',

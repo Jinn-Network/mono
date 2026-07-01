@@ -22,8 +22,8 @@ const PRODUCTION_DEPS: RewardsDeps = {
 
 function formatRewardAmount(wei: string): string {
   try {
-    // stOLAS / JINN / OLAS all use 18 decimals. This command reports the
-    // staking collector queue, not spendable operator tJINN.
+    // stOLAS / OLAS both use 18 decimals. This command reports the
+    // staking collector queue (OLAS staking rewards via the stOLAS curating-agent rail).
     return `${formatUnits(BigInt(wei), 18)} collector-token`;
   } catch {
     return `${wei} wei`;
@@ -44,7 +44,7 @@ function humanRewards(payload: RewardsV1Response): string {
     for (const s of payload.services) {
       lines.push(`  Service #${s.index}: ${formatRewardAmount(s.pending)} pending · ${formatRewardAmount(s.claimed)} claimed`);
     }
-    lines.push('Operator testnet JINN (tJINN) earnings are reported from the Sepolia tJINN Safe balance, not this collector queue.');
+    lines.push('Operator OLAS staking rewards accumulate via the stOLAS curating-agent rail and are reflected in the Safe balance shown in status / the app.');
   }
   lines.push(
     `Last claim tick: ${payload.lastClaimAt ?? 'never (daemon not yet run the claim loop)'}`,
@@ -61,9 +61,9 @@ export function createRewardsCommand(deps: RewardsDeps = PRODUCTION_DEPS): Comma
     summary: 'Staking collector queue per service; next checkpoint time',
     helpText: `Usage: jinn rewards [--human]
 
-Returns the current staking collector claim queue per service. This is
-the OLAS-style distributor maintenance path; operator testnet JINN (tJINN)
-earnings are the Sepolia tJINN Safe balance shown in status / the app.
+Returns the current OLAS staking collector claim queue per service. This is
+the OLAS staking distributor maintenance path; operator OLAS staking rewards
+accumulate via the stOLAS curating-agent rail and are shown in status / the app.
 
 Examples:
   jinn rewards

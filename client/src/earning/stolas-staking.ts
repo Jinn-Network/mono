@@ -1,7 +1,7 @@
 /**
- * JINN reward claiming helper for the Phase 1a staking contract.
+ * OLAS staking-reward (stOLAS) helper for the curating-agent staking contract.
  *
- * The OLAS-style staking proxy exposes `calculateStakingReward()` plus
+ * The OLAS staking proxy exposes `calculateStakingReward()` plus
  * owner-authorized `claim()` / `checkpointAndClaim()` entrypoints.
  */
 
@@ -85,15 +85,11 @@ export const JINN_STAKING_ABI = [
 // ---------------------------------------------------------------------------
 
 /**
- * Claim JINN rewards from the Phase 1a staking contract.
- *
- * Returns { claimed: false, amount: 0n } until the Phase 1a contract is
- * deployed and the ABI is finalised. Wiring up is a matter of uncommenting
- * the contract call below.
+ * Claim OLAS staking rewards from the stOLAS curating-agent staking contract.
  *
  * @param publicClient  — viem PublicClient for read calls
  * @param walletClient  — viem WalletClient for write calls
- * @param stakingContractAddress — Phase 1a JINN staking contract address
+ * @param stakingContractAddress — OLAS staking contract address
  * @param serviceId     — OLAS service ID registered in the staking contract
  */
 export async function claimJinnRewards(
@@ -128,7 +124,7 @@ export async function claimJinnRewards(
   // Wait for confirmation
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== 'success') {
-    throw new Error(`JINN reward claim tx reverted: ${hash}`);
+    throw new Error(`OLAS staking reward claim tx reverted: ${hash}`);
   }
 
   return { claimed: true, amount: pending };

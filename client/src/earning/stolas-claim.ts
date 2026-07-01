@@ -20,7 +20,7 @@ import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
 import type { ServiceState, ServiceStep, StakingMode } from './types.js';
 import { STOLAS_DISTRIBUTOR_ABI } from './contracts.js';
-import { JINN_STAKING_ABI } from './jinn-rewards.js';
+import { JINN_STAKING_ABI } from './stolas-staking.js';
 import { executeSafeTxDirect } from './safe-adapter.js';
 import {
   isRecoverableTransactionError,

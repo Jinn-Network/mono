@@ -220,7 +220,13 @@ export interface OperatorsResponse extends FreshnessMeta {
   ranked: RankedLeaderboardRow[];
   lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
   minVerdicts: number;
-  /** Distinct operators with ≥1 on-chain attempt. */
+  /**
+   * Distinct operators with ≥1 on-chain attempt or delivery.
+   *
+   * Post tokenless-OLAS pivot: this is purely an activity count — NOT JINN-earning
+   * status. JINN token rewards are gone; there is no jinnEarned / jinnAttribution
+   * surface. An operator is "active" iff it has ≥1 recorded attempt on-chain.
+   */
   activeOperators: number;
   appliedFilters?: {
     mode?: string;

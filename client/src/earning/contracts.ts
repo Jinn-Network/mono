@@ -257,15 +257,15 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   serviceManager: '0x5BA58970c2Ae16Cf6218783018100aF2dCcFc915',
   gnosisSafeSameAddressMultisig: '0x10100e74b7F706222F8A7C0be9FC7Ae1717Ad8B2',
 
-  // Phase 1a uses bridged JINN as the staking/bond token on Base Sepolia.
+  // OLAS token (used as the staking/bond token on Base Sepolia).
   olasToken: '0x4F177E56bd79c169742a1BF8907dB0A5e54F5524',
 
-  // Mech marketplace is out of scope for the staking-only Phase 1a loop.
+  // Mech marketplace is not used in the tokenless-OLAS staking loop.
   mechMarketplace: '0x0000000000000000000000000000000000000000',
   mechFactory: '0x0000000000000000000000000000000000000000',
   mechRequestPrice: 99n,
 
-  // Phase 1a staking proxy (Base Sepolia)
+  // OLAS staking proxy (Base Sepolia) — stOLAS curating-agent contract.
   stakingContract: '0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0',
 
   // ERC-8004 IdentityRegistry (Base Sepolia, vanity 0x8004…)
@@ -276,7 +276,7 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   serviceHash: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
   serviceNft: 'bafybeiaakdeconw7j5z76fgghfdjmsr6tzejotxcwnvmp3nroaw3glgyve',
 
-  // Bond: match the live Phase 1a staking minStakingDeposit.
+  // Bond: match the OLAS staking contract minStakingDeposit.
   bondAmount: 10n * 10n ** 18n,
 
   // Conservative gas estimate

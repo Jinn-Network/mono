@@ -3,10 +3,8 @@ export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'er
 // ── OLAS reward read state ────────────────────────────────────────────────────
 //
 // Read state for the operator's OLAS (stOLAS) earned figures, consumed by the
-// Wallet card. Named `TjinnStatusState` for historical continuity with the
-// retired tJINN surface; the JINN-token balance display itself was removed in
-// the tokenless-OLAS pivot.
-export type TjinnStatusState = 'pending' | 'ready' | 'error';
+// Wallet card.
+export type StakingRewardReadState = 'pending' | 'ready' | 'error';
 
 // ── cost surface (#474) ─────────────────────────────────────────────────────
 //
