@@ -359,7 +359,7 @@ describe('OverviewPage Wallet wiring', () => {
       expect(screen.getByTestId('olas-earned-value').textContent).toBe('pending'),
     );
     expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
-      /waiting for staking rewards/i,
+      /no rewards yet/i,
     );
   });
 
