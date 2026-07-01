@@ -99,7 +99,8 @@ export interface TaskCreatedEvent {
     manifestDigest: `0x${string}`;
     taskCidDigest: `0x${string}`;
     maxClaims: bigint | number;
-    requiredVerdicts: bigint | number;
+    // Not emitted by the trimmed TaskCreated post-DR-2026-06-30; handler defaults to 0.
+    requiredVerdicts?: bigint | number;
   };
   block: BlockShape;
   transaction: TransactionShape;

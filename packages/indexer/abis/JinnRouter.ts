@@ -22,8 +22,10 @@ export const JINN_ROUTER_ABI = [
       { name: 'taskId', type: 'uint256', indexed: true },
       { name: 'manifestDigest', type: 'bytes32', indexed: true },
       { name: 'taskCidDigest', type: 'bytes32', indexed: false },
-      { name: 'maxClaims', type: 'uint16', indexed: false },
-      { name: 'requiredVerdicts', type: 'uint16', indexed: false },
+      // Tokenless-OLAS pivot (DR-2026-06-30): trimmed TaskCreated emits maxClaims
+      // as uint32 and no longer emits requiredVerdicts (the recorder finalizes on
+      // the first verdict — loop completion — not on a required-verdict count).
+      { name: 'maxClaims', type: 'uint32', indexed: false },
       { name: 'solutionBudget', type: 'uint256', indexed: false },
       { name: 'verdictBudget', type: 'uint256', indexed: false },
     ],

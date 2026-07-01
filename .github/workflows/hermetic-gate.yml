@@ -83,6 +83,10 @@ jobs:
         working-directory: client
         run: yarn install --immutable
 
+      - name: Smoke snapshot builder entrypoint
+        working-directory: client
+        run: yarn smoke:build-anvil-snapshot
+
       # Build the indexer (Ponder codegen) so the hermetic snapshot indexer
       # round-trip (test/hermetic/indexer-roundtrip.test.ts, run via
       # `yarn test:hermetic`) can spawn a real indexer against the snapshot chain.
@@ -106,7 +110,7 @@ jobs:
           # dumped state.json is missing or zero-length" (-s is false for both).
           if [ ! -d "$STATE_DIR" ] || [ ! -s "$STATE_DIR/state.json" ]; then
             echo "::error::Hermetic snapshot fixture missing/empty at $STATE_DIR/state.json"
-            echo "Run \`tsx contracts/scripts/build-anvil-snapshot.ts\` (needs BASE_RPC_URL) and commit the fixture."
+            echo "Run \`cd client && BASE_RPC_URL=... yarn tsx ../contracts/scripts/build-anvil-snapshot.ts\` and commit the fixture."
             echo "See docs/snapshots/base-v3-snapshot.md for the rollout order."
             exit 1
           fi
