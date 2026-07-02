@@ -1,6 +1,7 @@
 # Jinn Harness Network — Hermes fork, contribution economy, contributor-steered corpus
 
-- **Version:** 0.2 (draft — open questions resolved in review, 2026-07-02)
+- **Version:** 0.3 (draft — open questions resolved in review, 2026-07-02; spike #1316 findings +
+  envelope schema-review consequences folded into §5/§6.1/§12, 2026-07-02)
 - **Date:** 2026-07-02
 - **Author:** Oak (design session)
 - **Shape:** `design` — output is this spec; implementation lands as per-phase plans and Issues
@@ -111,8 +112,11 @@ to. Nothing in the daemon needs to change for v0; the layer shells out to what e
     with a verifiability tier** (user-accepted < tests-passed < evaluator-verified), cost. Anchored
     as today. v0 freezes only this envelope.
   - **Layer 2 — consumable (what harnesses retrieve):** distilled skills/workflows in a
-    **SKILL.md-compatible format**, with provenance links back to evidence traces. Seeds (§7) land
-    directly at layer 2, so seeded and earned content share one consume path.
+    **SKILL.md-compatible format**, with provenance links back to evidence traces. Seeds (§7)
+    transit the layer-1 publish path carrying `provenance: imported` rather than landing directly
+    at layer 2, and are excluded both from the demand signal (§7) and from emissions eligibility
+    by the activity checker (2026-07-02 envelope schema review, PR #1324); seeded and earned
+    content still share one consume path at layer 2.
   - **Verification is the promotion gate** from layer 1 → layer 2, and the outcome tier is what the
     `ContributionActivityChecker` counts against. **Distillation is itself a network task** (a
     SolverType generators run where steering points): deepening a distribution means distilling its
@@ -144,15 +148,28 @@ Design goal: **no user touches gas until they are earning, and then only cents o
   envelopes, not strangers. Emissions split pool/operator as the price of the bond. User gas: Base
   dust only (testnet faucet; mainnet sponsored initially via the balance-topup pattern). Claiming is
   the existing reward-claim loop. Posture: start conservative (high-ish N, generous pool cut),
-  loosen with slash data — these two knobs are the entire Tier-2 farming defence.
+  loosen with eviction/liveness history — these two knobs are the entire Tier-2 farming defence.
+  (Not "slash data": no native slash data exists — slashing is only callable by a service's own
+  multisig, and the stOLAS MultisigGuard reverts it. The loosening signal is eviction/liveness
+  history, or a Jinn-defined slash once the Tier-3(a) wrapper exists. See
+  `docs/spikes/2026-07-02-stolas-slashing-passthrough.md`, PR #1321, issue #1316.)
 - **Tier 3 — Optional funds, two independent upgrades.** (a) **Co-bond/self-bond:** a small own
   stake that slashes first → pool prices you cheaper → better emissions split; full self-bond exits
-  the pool and keeps 100%. Skin-in-the-game buys margin, never required. (b) **Steering** (§6.2).
+  the pool and keeps 100%. Skin-in-the-game buys margin, never required. "Slashes first" has no
+  native substrate: it needs a wrapper, and the wrapper is mechanism design, not integration — it
+  must introduce the slashing authority, conditions, and evidence itself (nothing in OLAS triggers
+  a slash for bad work) and redesign the MultisigGuard invariant, which hard-requires the operator
+  balance to equal the full security deposit (§12;
+  `docs/spikes/2026-07-02-stolas-slashing-passthrough.md`, PR #1321, issue #1316).
+  (b) **Steering** (§6.2).
 - **Verification before eligibility (unchanged, load-bearing):** only envelopes passing the corpus
   quality gate count. The checker counting *verified* contributions only is the anti-farming line.
 - Naive treasury-fronted bonds are **rejected**: fronting transfers slash exposure to treasury and
-  gives farmers a free option. The stOLAS pool prices and socialises that risk instead, and credit
-  history is the risk model.
+  gives farmers a free option. The stOLAS pool carries that risk instead, and credit history is
+  the risk model — noting the pool's exposure is narrower than a slash: pool principal is
+  currently unslashable by construction (the MultisigGuard reverts the only slash path), so what
+  the pool actually risks on a bad operator is forgone yield on an evicted slot
+  (`docs/spikes/2026-07-02-stolas-slashing-passthrough.md`, PR #1321, issue #1316).
 
 ### 6.2 Steer — staged manual-first (resolved; Gall's Law)
 
@@ -273,8 +290,14 @@ pick-up; each phase's items land as Issues with the appropriate shape (`feat`, m
 
 ## 12. Verifications outstanding (check before the relevant phase commits)
 
-- **stOLAS slashing pass-through** — how a slash on an underlying service hits the pool, and
-  whether an operator co-bond slice is supported natively or needs a thin wrapper (fallback only).
-  Blocks Tier-2/Tier-3 mechanics (v0.5→v1), not v0.
+- **stOLAS slashing pass-through — RESOLVED 2026-07-02** (spike #1316, PR #1321,
+  `docs/spikes/2026-07-02-stolas-slashing-passthrough.md`): no slash reaches the pool because, by
+  construction, no slash exists — slashing is only callable by a service's own multisig, and the
+  stOLAS MultisigGuard reverts it; the only native penalty is eviction (forfeited future rewards,
+  never principal). The operator co-bond slice is NOT natively supported: it **needs a wrapper**,
+  and the wrapper is mechanism design, not integration — it must introduce the slashing authority,
+  conditions, and evidence itself (nothing in OLAS triggers a slash for bad work) and redesign the
+  MultisigGuard invariant, which hard-requires the operator balance to equal the full security
+  deposit. Blocks Tier-2/Tier-3 mechanics (v0.5→v1), not v0.
 - **Ethereum-mainnet Mech Marketplace availability** — gates only the OLAS-native keeper
   experiment (v1b), nothing else.
