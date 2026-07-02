@@ -864,6 +864,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@jinn-network/harness-layer@workspace:packages/harness-layer":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/harness-layer@workspace:packages/harness-layer"
+  languageName: unknown
+  linkType: soft
+
 "@jinn-network/operator-spa@workspace:src/dashboard/spa":
   version: 0.0.0-use.local
   resolution: "@jinn-network/operator-spa@workspace:src/dashboard/spa"

@@ -5,6 +5,9 @@ const nodeInclude = [
   'test/**/*.test.ts',
   // Plugin tests live next to the plugin source under plugins/*/test/.
   'plugins/**/test/**/*.test.ts',
+  // Workspace-package tests live next to the package source under
+  // packages/*/test/ (e.g. @jinn-network/harness-layer).
+  'packages/*/test/**/*.test.ts',
   // SPA unit tests that do not render React components can stay in node.
   'src/dashboard/spa/src/**/*.test.ts',
   // Release-tier scenario tests live in *.test.ts siblings next to the
