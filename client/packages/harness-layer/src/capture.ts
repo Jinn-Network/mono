@@ -13,12 +13,10 @@
  *
  * Scrub pipeline: reuses the seller-side pipeline from
  * `client/src/trajectory/scrub/build.ts` (key-policy → openredaction →
- * secretlint → optional ML PII) via `scrubCaptureSpans()`, then appends two
- * capture-local stages that close gaps the base pipeline demonstrably has on
- * the seeded-secrets fixture: a plain email-shape stage (openredaction's
- * EMAIL pattern misses e.g. `jane.doe@example-corp.com`) and a home-path
- * stage (`/Users/<name>/…`, `/home/<name>/…` → `/users/anon/…`; the base
- * pipeline never touches paths).
+ * plain-patterns → secretlint → optional ML PII) via `scrubCaptureSpans()`.
+ * The email/home-path gap-closers this file originally carried graduated
+ * into the shared plain-patterns stage (#1330), so the daemon publish path
+ * and this capture path share one implementation.
  *
  * Fitting rule (docs/envelope-v0.md): the conversion MUST produce envelopes
  * inside the frozen caps. Over-long sessions are head/tail-sampled to
@@ -166,55 +164,6 @@ export class CaptureScrubError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Capture-local scrub stages
-// ---------------------------------------------------------------------------
-
-const CAPTURE_STAGE_VERSION = '0.1.0';
-
-/** Plain email shape. Deliberately broad — over-redacting an email is cheap. */
-const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/g;
-
-/** POSIX home-dir path segment carrying a username. */
-const HOME_PATH_PATTERN = /\/(?:Users|home)\/[^/\s"'`]+/g;
-
-/**
- * Builds a regex-replacement stage over `content`-classified string values,
- * mirroring the shape of the base-pipeline stages.
- */
-function replacementStage(
-  name: string,
-  policy: KeyPolicy,
-  pattern: RegExp,
-  replacement: string,
-  detail: string,
-): ScrubStage {
-  return {
-    name,
-    version: CAPTURE_STAGE_VERSION,
-    scrub(attributes: Attributes): ScrubResult {
-      const out: Attributes = {};
-      const redactions: RedactionRecord[] = [];
-      for (const [key, value] of Object.entries(attributes)) {
-        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') {
-          out[key] = value;
-          continue;
-        }
-        let hits = 0;
-        const scrubbed = value.replace(pattern, () => {
-          hits += 1;
-          return replacement;
-        });
-        out[key] = scrubbed;
-        for (let i = 0; i < hits; i += 1) {
-          redactions.push({ key, stage: name, kind: 'pii', detail });
-        }
-      }
-      return { attributes: out, redactions };
-    },
-  };
-}
-
 /**
  * ScrubPipeline that chains the base pipeline with the capture-local stages
  * and records each run's input + result, in order. `scrubCaptureSpans()`
@@ -348,11 +297,10 @@ export async function capture(
     policy,
     ...(opts.piiDetector ? { piiDetector: opts.piiDetector } : {}),
   });
-  const captureLocal = new ScrubPipeline([
-    replacementStage('capture-email', policy, EMAIL_PATTERN, '[EMAIL]', 'email'),
-    replacementStage('capture-home-path', policy, HOME_PATH_PATTERN, '/users/anon', 'home-path'),
-  ]);
-  const recorder = new RecordingScrubPipeline([base, captureLocal]);
+  // The email/home-path gap-closers graduated into the shared pipeline
+  // (plain-patterns stage, #1330) — the base pipeline alone now covers the
+  // seeded-secrets fixture. Injected test pipelines take the same path.
+  const recorder = new RecordingScrubPipeline([base]);
 
   let scrubbedSteps;
   let summaryRun: ScrubResult;

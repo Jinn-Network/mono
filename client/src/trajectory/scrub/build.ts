@@ -1,6 +1,7 @@
 import { ScrubPipeline } from './pipeline.js';
 import { keyPolicyStage, type KeyPolicy } from './key-policy.js';
 import { openredactionStage } from './openredaction-stage.js';
+import { plainPatternsStage } from './plain-patterns-stage.js';
 import { secretlintStage } from './secretlint-stage.js';
 import { mlPiiStage, type PiiDetector } from './ml-pii-stage.js';
 
@@ -42,7 +43,14 @@ export interface BuildScrubPipelineOptions {
  */
 export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubPipeline {
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
-  const stages = [keyPolicyStage(policy), openredactionStage(policy), secretlintStage(policy)];
+  // plain-patterns runs after openredaction: deterministic email/home-path
+  // regexes closing gaps the probabilistic stage demonstrably has (#1330).
+  const stages = [
+    keyPolicyStage(policy),
+    openredactionStage(policy),
+    plainPatternsStage(policy),
+    secretlintStage(policy),
+  ];
   if (opts.piiDetector) {
     stages.push(mlPiiStage(policy, opts.piiDetector));
   }
