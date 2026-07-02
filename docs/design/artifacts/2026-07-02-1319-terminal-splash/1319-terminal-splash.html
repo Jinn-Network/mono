@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jinn — 1319 · Terminal splash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* page (design-system dark) */
+    --bg:#0c1628; --bg-elev:#142340; --fg:#f2f7fc; --fg-muted:#a4b0c2; --fg-dim:#7d8ba3;
+    --border:#1f3a66; --gold:#dcb866; --sky:#7aa7dc;
+    /* terminal ANSI mapping — truecolor */
+    --t-bg:#070d18;
+    --t-fg:#d6e0f0;      /* bone default text */
+    --t-dim:#6b7b95;     /* slate — secondary */
+    --t-sky:#7aa7dc;     /* structure */
+    --t-sky-hi:#a8c8ea;  /* bright structure */
+    --t-gold:#dcb866;    /* single accent */
+    --t-green:#7bb0a2;   /* ok / on / running */
+    --t-amber:#cf9a3f;   /* warn / degraded */
+    --t-red:#c07070;     /* error / unreachable */
+    --t-violet:#8a7ec4;  /* info */
+    /* 16-color fallback (xterm basic) */
+    --c-cyan:#00aaaa; --c-cyan-hi:#55ffff; --c-yellow:#aa5500; --c-yellow-hi:#ffff55;
+    --c-green:#00aa00; --c-red:#aa0000; --c-white:#aaaaaa; --c-white-hi:#ffffff; --c-grey:#555555;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+    -webkit-font-smoothing:antialiased;}
+  .page{max-width:1180px;margin:0 auto;padding:56px 32px 120px;}
+
+  /* document header */
+  .doc-head{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:40px;
+    display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;}
+  .doc-title{font-family:'Instrument Serif',serif;font-size:42px;line-height:1.02;margin:0;}
+  .doc-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);
+    margin:0 0 12px;}
+  .doc-sub{font-size:12.5px;line-height:1.6;color:var(--fg-muted);max-width:60ch;margin:10px 0 0;
+    letter-spacing:-.01em;}
+  .doc-meta{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);
+    text-align:right;line-height:1.9;white-space:nowrap;}
+
+  /* section framing */
+  .sec{margin:64px 0 0;}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px;}
+  .sec-num{font-size:11px;letter-spacing:.14em;color:var(--sky);}
+  .sec-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg);margin:0;font-weight:500;}
+  .sec-note{font-size:12px;color:var(--fg-muted);line-height:1.6;max-width:74ch;margin:8px 0 22px;letter-spacing:-.01em;}
+
+  .caption{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);
+    margin:0 0 10px;display:flex;gap:10px;align-items:center;}
+  .caption .dot{width:5px;height:5px;border-radius:50%;background:var(--sky);}
+  .caption.alt .dot{background:var(--gold);}
+
+  /* terminal buffer */
+  .term{background:var(--t-bg);color:var(--t-fg);border:1px solid var(--border);
+    border-radius:10px;padding:26px 30px;white-space:pre;overflow-x:auto;
+    font-size:14px;line-height:1.5;letter-spacing:0;tab-size:2;
+    box-shadow:2px 2px 0 0 #04080f;}
+  .term.small{font-size:12.5px;line-height:1.5;padding:20px 22px;}
+  .term.tight{line-height:1.32;}
+  .sky{color:var(--t-sky);} .skyh{color:var(--t-sky-hi);}
+  .gold{color:var(--t-gold);} .dim{color:var(--t-dim);}
+  .green{color:var(--t-green);} .amber{color:var(--t-amber);}
+  .red{color:var(--t-red);} .violet{color:var(--t-violet);}
+  .fg{color:var(--t-fg);} .b{font-weight:600;}
+  .under{text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--t-dim);}
+
+  /* fallback terminal — 16 colour, flat, no radius, hard edge */
+  .term.fallback{border-radius:2px;background:#050a12;box-shadow:none;}
+  .fb-cyan{color:var(--c-cyan);} .fb-cyanh{color:var(--c-cyan-hi);}
+  .fb-yellow{color:var(--c-yellow);} .fb-yellowh{color:var(--c-yellow-hi);}
+  .fb-green{color:var(--c-green);} .fb-red{color:var(--c-red);}
+  .fb-white{color:var(--c-white);} .fb-whiteh{color:var(--c-white-hi);} .fb-grey{color:var(--c-grey);}
+
+  /* two-up */
+  .twoup{display:grid;grid-template-columns:1fr 1fr;gap:24px;}
+  @media (max-width:900px){.twoup{grid-template-columns:1fr;}}
+
+  /* state matrix */
+  .matrix{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:8px;}
+  @media (max-width:760px){.matrix{grid-template-columns:1fr;}}
+
+  /* design notes */
+  .notes{margin-top:80px;border-top:1px solid var(--border);padding-top:40px;}
+  .notes h2{font-family:'Instrument Serif',serif;font-weight:400;font-size:30px;margin:0 0 6px;}
+  .notes h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);
+    margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--border);}
+  .notes h3:first-of-type{border-top:none;padding-top:0;}
+  .notes p, .notes li{font-size:13px;line-height:1.7;color:var(--fg-muted);letter-spacing:-.01em;max-width:80ch;}
+  .notes ul{padding-left:18px;margin:8px 0;}
+  .notes li{margin:5px 0;}
+  .notes code{font-size:12px;color:var(--sky);background:var(--t-bg);border:1px solid var(--border);
+    border-radius:4px;padding:1px 6px;}
+  .notes strong{color:var(--fg);font-weight:600;}
+  .kv{display:grid;grid-template-columns:200px 1fr;gap:2px 20px;margin:12px 0;font-size:12.5px;}
+  .kv dt{color:var(--fg-dim);letter-spacing:.04em;}
+  .kv dd{margin:0;color:var(--fg-muted);}
+  table.copy{border-collapse:collapse;width:100%;margin:10px 0 4px;font-size:12.5px;}
+  table.copy th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--fg-dim);font-weight:500;padding:8px 14px 8px 0;border-bottom:1px solid var(--border);}
+  table.copy td{padding:9px 14px 9px 0;border-bottom:1px solid var(--border);color:var(--fg-muted);
+    vertical-align:top;line-height:1.5;}
+  table.copy td code{white-space:nowrap;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <div>
+      <p class="doc-kicker">Surface 3 · TUI</p>
+      <h1 class="doc-title">Terminal splash</h1>
+      <p class="doc-sub">Renders at harness launch, before anything else — before first-run consent on first boot. A greeting, not a loading screen: it draws instantly and carries live status, not decoration.</p>
+    </div>
+    <div class="doc-meta">
+      issue&nbsp;1319<br>harness&nbsp;·&nbsp;jinn-layer<br>renders&nbsp;on&nbsp;launch
+    </div>
+  </header>
+
+  <!-- ============ FULL FIDELITY — LINE ART ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">3.1</span><h2 class="sec-title">Full fidelity — line art</h2></div>
+    <p class="sec-note">Truecolor. The Vessel sigil rendered as thin-stroke geometry — circle, inscribed upward triangle, horizon line, center point. Sky for all structure; gold reserved for the single center point and the wordmark rule. Selected in review: it reads as a drawn mark, not a filled logo, which sits better in a fast-drawing greeting.</p>
+    <p class="caption alt"><span class="dot"></span>splash · line-art sigil · corpus connected · contributing</p>
+    <div class="term" id="splash-line"></div>
+  </section>
+
+  <!-- ============ DEGRADED FALLBACK ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">3.2</span><h2 class="sec-title">Degraded — 80 columns · 16 colours</h2></div>
+    <p class="sec-note">The mandatory fallback for non-truecolor and 80-column terminals. ASCII-only (no box-drawing, no braille), basic ANSI palette: cyan for structure, yellow for the accent, green / yellow / red for semantics, grey for dim. Same information, same layout logic, no glyph or colour a 1980s vt100 emulator would choke on. The harness selects this automatically when <code>$COLORTERM</code> is unset or <code>$COLUMNS &lt; 100</code>.</p>
+    <p class="caption"><span class="dot"></span>splash · fallback · fits 80×24</p>
+    <div class="term fallback" id="splash-fallback"></div>
+  </section>
+
+  <!-- ============ STATUS LINE STATES ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">3.3</span><h2 class="sec-title">Status lines — every state</h2></div>
+    <p class="sec-note">Four live lines. Each is polled at launch and re-read on refresh; the splash never blocks on them — an unresolved line renders its <span class="dim">checking…</span> state and settles in place. Exact copy for every state below; the full string table is in the design notes.</p>
+    <div class="matrix" id="status-matrix"></div>
+  </section>
+
+  <!-- ============ DESIGN NOTES ============ -->
+  <section class="notes">
+    <h2>Design notes — 1319 terminal splash</h2>
+
+    <h3>Intent &amp; constraints</h3>
+    <ul>
+      <li><strong>Instant.</strong> The splash is a greeting, not a loading screen. It draws in one paint from static art + a single status snapshot. Status lines that aren't ready yet show <code>checking…</code> and settle without redrawing the frame or shifting layout.</li>
+      <li><strong>No emoji.</strong> Iconography is the sigil, the box glyphs, and the words. Status uses colour + word, never a symbol.</li>
+      <li><strong>Degrades.</strong> Truecolor line-art (3.1) → 16-colour ASCII (3.2) chosen automatically on <code>$COLORTERM</code> unset or <code>$COLUMNS &lt; 100</code>. The fallback fits 80×24 with the four status lines visible without scroll.</li>
+      <li><strong>Sigil is derived, not invented.</strong> Circle (r), inscribed upward triangle (apex top, base bottom), horizon line through centre, centre point — the five elements of <code>assets/logo-sigil.svg</code>, transcribed to a character grid. No new mark.</li>
+    </ul>
+
+    <h3>Colour → ANSI token mapping</h3>
+    <dl class="kv">
+      <dt>structure (circle, triangle, horizon, frame)</dt><dd><span class="sky">sky</span> — <code>--blue-400 #7aa7dc</code> → fallback <span class="fb-cyan">cyan</span></dd>
+      <dt>accent (centre point, wordmark rule, version)</dt><dd><span class="gold">gold</span> — <code>--gold-400 #dcb866</code> → fallback <span class="fb-yellowh">bright yellow</span></dd>
+      <dt>ok / on / running / connected</dt><dd><span class="green">green</span> — <code>--vow-green #6a9b8f</code> → fallback <span class="fb-green">green</span></dd>
+      <dt>warn / degraded</dt><dd><span class="amber">amber</span> — <code>--wane #b8802f</code> → fallback <span class="fb-yellow">yellow</span></dd>
+      <dt>error / unreachable / not running</dt><dd><span class="red">red</span> — <code>--break-red #a85a5a</code> → fallback <span class="fb-red">red</span></dd>
+      <dt>secondary / labels / off</dt><dd><span class="dim">dim</span> — <code>--slate-400 #7d8ba3</code> → fallback <span class="fb-grey">bright-black</span></dd>
+    </dl>
+    <p>Gold appears exactly twice in the full splash: the centre point of the sigil and the version string. That scarcity is the point — one lamplight accent, everything else structure.</p>
+
+    <h3>Status lines — exact copy, every state</h3>
+    <p>Label column is fixed-width, lower-case, dim. Value carries the colour. Ordering is fixed: network, corpus, contribution, node.</p>
+    <table class="copy">
+      <thead><tr><th>Line</th><th>State</th><th>Rendered string</th><th>Colour</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="2"><code>network</code></td><td>testnet</td><td><code>network        base-sepolia · testnet</code></td><td>sky</td></tr>
+        <tr><td>mainnet</td><td><code>network        base · mainnet</code></td><td>gold</td></tr>
+        <tr><td rowspan="3"><code>corpus</code></td><td>connected</td><td><code>corpus         connected · 1,284,902 envelopes</code></td><td>green</td></tr>
+        <tr><td>unreachable</td><td><code>corpus         unreachable — retrying</code></td><td>red</td></tr>
+        <tr><td>checking</td><td><code>corpus         checking…</code></td><td>dim</td></tr>
+        <tr><td rowspan="2"><code>contribution</code></td><td>on</td><td><code>contribution   on · 1,284 traces published</code></td><td>green</td></tr>
+        <tr><td>off</td><td><code>contribution   off · reader only</code></td><td>dim</td></tr>
+        <tr><td rowspan="2"><code>node</code></td><td>running</td><td><code>node           running · vessel-0x91be…44a2</code></td><td>green</td></tr>
+        <tr><td>not running</td><td><code>node           not running</code></td><td>dim</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Pre-consent (first boot).</strong> The <code>contribution</code> line is <em>not shown at all</em> before consent is recorded — the splash simply omits it and shows network, corpus, and node. It appears only once the operator has accepted or declined in the 1312 first-run flow.</p>
+    <p><strong>Contribution count semantics.</strong> The count is <em>traces this machine has published</em>, not the corpus total — the corpus total lives on the <code>corpus</code> line. Both are shown so the operator can see their contribution against the whole at a glance.</p>
+
+    <h3>Wordmark &amp; version</h3>
+    <p>The brand wordmark is italic serif; a terminal can't render it, so the splash uses a lower-case mono <code>jinn</code> with a gold rule beneath, then the tagline and version. Version string format: <code>harness v&lt;semver&gt; · &lt;network&gt;</code>. On an out-of-date build the version renders amber with <code> · update available</code> appended (the only status the wordmark row ever carries).</p>
+
+    <h3>Resolved in review &amp; remaining questions</h3>
+    <ul>
+      <li data-comment-anchor="1a10318114-li"><strong>Resolved.</strong> Splash persistence and clear-on-launch <em>mirror the Hermes agent</em> — jinn-layer inherits whatever Hermes already does at launch; no new rule invented here.</li>
+      <li data-comment-anchor="b6ae26dede-li"><strong>Resolved.</strong> No <code>contribution</code> line pre-consent — the splash omits it entirely until consent is recorded (updated in 3.3 and the status block above). It appears only after the operator accepts or declines in the 1312 flow.</li>
+      <li data-comment-anchor="f65291ef1a-li"><strong>Open — implementer's call.</strong> Fallback trigger threshold (<code>$COLUMNS &lt; 100</code>) is a placeholder; the true minimum for the line-art variant is ~96 columns. Left to the harness's terminal-capability probe.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  // ---- ANSI-ish span helpers -------------------------------------------------
+  const wrap = (cls, s) => `<span class="${cls}">${s}</span>`;
+  const sky=s=>wrap('sky',s), skyh=s=>wrap('skyh',s), gold=s=>wrap('gold',s),
+        dim=s=>wrap('dim',s), green=s=>wrap('green',s), amber=s=>wrap('amber',s),
+        red=s=>wrap('red',s), fg=s=>wrap('fg',s), b=s=>wrap('b',s);
+
+  // ---- Line-art Vessel sigil -------------------------------------------------
+  // circle · inscribed upward triangle · horizon line · centre point (gold)
+  // Built from ASCII + box-drawing only (all fixed-width); whole rows are
+  // colour-wrapped so alignment can never drift. Only the horizon row is split
+  // to place the gold centre point.
+  const lineSigil = [
+    sky("           ╭───────────────╮"),
+    sky("        ╭──╯       ╱╲        ╰──╮"),
+    sky("      ╭─╯        ╱    ╲         ╰─╮"),
+    sky("     ╱         ╱        ╲          ╲"),
+    sky("    │        ╱            ╲         │"),
+    sky("    │       ╱              ╲        │"),
+    sky("  ──┼──────╱────────")+gold("•")+sky("───────╲───────┼──"),
+    sky("    │     ╱                  ╲       │"),
+    sky("    │    ╱____________________╲      │"),
+    sky("     ╲                              ╱"),
+    sky("      ╰─╮                        ╭─╯"),
+    sky("        ╰──╮                  ╭──╯"),
+    sky("           ╰────────────────╯"),
+    "",
+    "              "+b(fg("j i n n")),
+    "           "+gold("──────────────────"),
+    "     "+dim("an open agentic knowledge economy"),
+    "           "+gold("harness v0.4.2")+dim(" · ")+sky("testnet"),
+  ].join("\n");
+
+  const statusBlock = (opts={}) => {
+    const {net='testnet', corpus='connected', contrib='on', node='running'} = opts;
+    const L = s => dim(s.padEnd(15,' '));
+    const lines = [];
+    lines.push(L("network")   + (net==='mainnet' ? gold("base · mainnet") : sky("base-sepolia · testnet")));
+    lines.push(L("corpus")    + (corpus==='connected' ? green("connected · 1,284,902 envelopes")
+                                : corpus==='checking'  ? dim("checking…")
+                                : red("unreachable — retrying")));
+    // Pre-consent (contrib==='unset'): the contribution line is omitted entirely —
+    // it appears only once consent is recorded.
+    if (contrib !== 'unset') {
+      lines.push(L("contribution") + (contrib==='on' ? green("on · 1,284 traces published")
+                                     : dim("off · reader only")));
+    }
+    lines.push(L("node")      + (node==='running' ? green("running · vessel-0x91be…44a2")
+                                : dim("not running")));
+    return lines.join("\n");
+  };
+
+  document.getElementById('splash-line').innerHTML =
+    lineSigil + "\n\n\n" +
+    "     " + dim("────────────────────  the ether  ────────────────────") + "\n\n" +
+    "     " + statusBlock({net:'testnet',corpus:'connected',contrib:'on',node:'running'}).split("\n").join("\n     ");
+
+  // Option B (block/shaded sigil) was dropped in review — line art selected.
+
+
+  // ---- 16-colour ASCII fallback ---------------------------------------------
+  const fb = {
+    cyan:s=>wrap('fb-cyan',s), cyanh:s=>wrap('fb-cyanh',s),
+    yellow:s=>wrap('fb-yellow',s), yellowh:s=>wrap('fb-yellowh',s),
+    green:s=>wrap('fb-green',s), red:s=>wrap('fb-red',s),
+    white:s=>wrap('fb-white',s), whiteh:s=>wrap('fb-whiteh',s), grey:s=>wrap('fb-grey',s),
+  };
+  const c=fb.cyan;
+  const fbSigil = [
+    "            "+c(".-\"\"\"\"\"\"\"-."),
+    "         "+c(".'")+"      "+c("/\\")+"      "+c("'."),
+    "        "+c("/")+"      "+c("/  \\")+"      "+c("\\"),
+    "       "+c("/")+"      "+c("/    \\")+"      "+c("\\"),
+    "      "+c("|")+"      "+c("/      \\")+"      "+c("|"),
+    "  "+c("+---|-----")+c("/")+"---"+fb.yellowh("*")+"---"+c("\\")+c("-----|---+"),
+    "      "+c("|")+"    "+c("/          \\")+"    "+c("|"),
+    "       "+c("\\")+"  "+c("/____________\\")+"  "+c("/"),
+    "        "+c("\\")+"                "+c("/"),
+    "         "+c("'.")+"            "+c(".'"),
+    "           "+c("'-.________.-'"),
+    "",
+    "        "+fb.whiteh("j i n n")+"   "+fb.grey("an open agentic knowledge economy"),
+    "        "+fb.yellowh("harness v0.4.2")+fb.grey(" · ")+fb.cyan("testnet"),
+  ].join("\n");
+  const fbLabel = s => fb.grey(s.padEnd(15,' '));
+  const fbStatus = [
+    fbLabel("network")      + fb.cyan("base-sepolia * testnet"),
+    fbLabel("corpus")       + fb.green("connected * 1,284,902 envelopes"),
+    fbLabel("contribution") + fb.green("on * 1,284 traces published"),
+    fbLabel("node")         + fb.green("running * vessel-0x91be..44a2"),
+  ].join("\n");
+  document.getElementById('splash-fallback').innerHTML =
+    fbSigil + "\n\n" +
+    fb.grey("----------------------  the ether  ----------------------") + "\n\n" +
+    fbStatus;
+
+  // ---- Status state matrix ---------------------------------------------------
+  const matrix = [
+    { cap:'all healthy · contributing', o:{net:'testnet',corpus:'connected',contrib:'on',node:'running'} },
+    { cap:'mainnet · reader only · node running', o:{net:'mainnet',corpus:'connected',contrib:'off',node:'running'} },
+    { cap:'first boot · pre-consent · node down', o:{net:'testnet',corpus:'checking',contrib:'unset',node:'not running'} },
+    { cap:'corpus unreachable · contributing · node down', o:{net:'testnet',corpus:'unreachable',contrib:'on',node:'not running'} },
+  ];
+  document.getElementById('status-matrix').innerHTML = matrix.map(m => `
+    <div>
+      <p class="caption"><span class="dot"></span>${m.cap}</p>
+      <div class="term small">${statusBlock(m.o)}</div>
+    </div>`).join("");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jinn — 1314 · Distribution signal (explorer)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<style>
+  /* ---- design-system tokens (explorer uses colors_and_type.css + foundations.css) ---- */
+  :root{
+    --blue-950:#070d18; --blue-900:#0c1628; --blue-800:#142340; --blue-700:#1f3a66;
+    --blue-400:#7aa7dc; --blue-300:#a8c8ea; --blue-50:#f2f7fc;
+    --gold-600:#a88438; --gold-500:#c9a048; --gold-400:#dcb866; --gold-300:#ead08e;
+    --slate-400:#7d8ba3; --slate-300:#a4b0c2;
+    --vow-green:#6a9b8f; --wane:#b8802f; --break-red:#a85a5a; --seer-violet:#7a6db0;
+    --bg:var(--blue-900); --bg-elevated:var(--blue-800); --bg-sunken:var(--blue-950);
+    --fg:var(--blue-50); --fg-muted:var(--slate-300); --fg-dim:var(--slate-400);
+    --border:var(--blue-700); --border-strong:var(--blue-400); --border-accent:var(--gold-500);
+    --accent:var(--blue-400); --accent-hover:var(--blue-300); --gold:var(--gold-400);
+    --font-display:'Instrument Serif','Times New Roman',serif;
+    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --text-xs:11px; --text-sm:12px; --text-base:14px; --text-4xl:48px;
+    --radius-1:4px; --radius-2:6px; --radius-3:10px; --radius-pill:999px;
+    --dur-fast:80ms; --dur-base:140ms; --dur-slow:240ms; --ease-linear:linear;
+    --z-sticky:10;
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-mono);-webkit-font-smoothing:antialiased;}
+
+  /* doc scaffolding (not part of the app) */
+  .page{max-width:1240px;margin:0 auto;padding:56px 32px 120px;}
+  .doc-head{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:36px;display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;}
+  .doc-title{font-family:var(--font-display);font-size:42px;line-height:1.02;margin:0;font-weight:400;}
+  .doc-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:0 0 12px;}
+  .doc-sub{font-size:12.5px;line-height:1.6;color:var(--fg-muted);max-width:66ch;margin:10px 0 0;letter-spacing:-.01em;}
+  .doc-sub code{color:var(--accent);}
+  .doc-meta{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);text-align:right;line-height:1.9;white-space:nowrap;}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin:56px 0 6px;}
+  .sec-num{font-size:11px;letter-spacing:.14em;color:var(--accent);}
+  .sec-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg);margin:0;font-weight:500;}
+  .sec-note{font-size:12px;color:var(--fg-muted);line-height:1.6;max-width:80ch;margin:8px 0 20px;letter-spacing:-.01em;}
+  .sec-note code{color:var(--accent);}
+  .caption{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);margin:22px 0 10px;display:flex;gap:10px;align-items:center;}
+  .caption .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);}
+
+  .frame{border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:4px 4px 0 0 #04080f;background:var(--bg);}
+  .frame-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-sunken);border-bottom:1px solid var(--border);}
+  .frame-bar .lights{display:flex;gap:6px;}
+  .frame-bar .lights i{width:10px;height:10px;border-radius:50%;background:var(--border);display:block;}
+  .frame-url{margin-left:8px;font-size:11px;color:var(--fg-dim);letter-spacing:.02em;}
+  .app-scroll{position:relative;}
+
+  /* grain overlay omitted — html-to-image paints the scanline ::after opaque; negligible at 2.5% */
+  .grain{position:relative;}
+
+  @keyframes kpiUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .kpi-animate{animation:kpiUp var(--dur-slow) var(--ease-linear) both;}
+  @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+  .skel{background:linear-gradient(90deg,var(--bg-elevated) 25%,#1a2c4d 50%,var(--bg-elevated) 75%);background-size:200% 100%;animation:shimmer 1.4s linear infinite;border:1px solid var(--border);border-radius:var(--radius-3);}
+
+  .notes{margin-top:80px;border-top:1px solid var(--border);padding-top:40px;}
+  .notes h2{font-family:var(--font-display);font-weight:400;font-size:30px;margin:0 0 6px;}
+  .notes h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--border);}
+  .notes h3:first-of-type{border-top:none;padding-top:0;}
+  .notes p,.notes li{font-size:13px;line-height:1.7;color:var(--fg-muted);letter-spacing:-.01em;max-width:82ch;}
+  .notes ul{padding-left:18px;margin:8px 0;}
+  .notes li{margin:5px 0;}
+  .notes code{font-size:12px;color:var(--accent);background:var(--bg-sunken);border:1px solid var(--border);border-radius:4px;padding:1px 6px;}
+  .notes strong{color:var(--fg);font-weight:600;}
+  table.map{border-collapse:collapse;width:100%;margin:10px 0;font-size:12.5px;}
+  table.map th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);font-weight:500;padding:8px 16px 8px 0;border-bottom:1px solid var(--border);}
+  table.map td{padding:9px 16px 9px 0;border-bottom:1px solid var(--border);color:var(--fg-muted);vertical-align:top;line-height:1.5;}
+  table.map td code{white-space:nowrap;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <div>
+      <p class="doc-kicker">Surface 2 · Web · Network explorer</p>
+      <h1 class="doc-title">Distribution signal</h1>
+      <p class="doc-sub">A read-only section of the <strong style="color:var(--fg);font-weight:600">network explorer</strong>, on the <code>Network</code> view — answering one question at a glance: where is real usage concentrating? Built from the explorer's own primitives (Card, HBars, DataTable, StatusChip, StatusBar). Seed exclusion rides the explorer's native <code>envelope-only</code> / <code>?include=raw</code> filter.</p>
+    </div>
+    <div class="doc-meta">issue&nbsp;1314<br>network&nbsp;explorer<br>/ &middot; Network view</div>
+  </header>
+
+  <div class="sec-head"><span class="sec-num">2.1</span><h2 class="sec-title">Loaded — in the explorer, on the Network view</h2></div>
+  <p class="sec-note">Sits below the existing Activity strip on <code>/</code>. Hierarchy heavily favours the top clusters: the leading cluster owns the headline bar (sky accent), the rest fall away underneath. The <code>envelope-only</code> / <code>include seeded</code> control is the explorer's real corpus filter — flip it to watch seeded/imported entries enter every number, live.</p>
+
+  <div class="frame">
+    <div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">explorer.jinn.network / &middot; Network</span></div>
+    <div class="app-scroll grain"><div id="app-root"></div></div>
+  </div>
+
+  <div class="sec-head"><span class="sec-num">2.2</span><h2 class="sec-title">Other states — loading · error · empty</h2></div>
+  <p class="sec-note">The same section in its non-loaded states, in the explorer shell. Error carries a retry (the explorer's Network view already retries its own query, unlike the read-only operator surfaces). The empty copy is fixed.</p>
+
+  <p class="caption"><span class="dot"></span>loading — skeletons</p>
+  <div class="frame"><div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">/ &middot; Network &middot; loading</span></div><div class="grain"><div id="state-loading"></div></div></div>
+
+  <p class="caption"><span class="dot"></span>error — discovery degraded</p>
+  <div class="frame"><div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">/ &middot; Network &middot; error</span></div><div class="grain"><div id="state-error"></div></div></div>
+
+  <p class="caption"><span class="dot"></span>empty — no contributions yet</p>
+  <div class="frame"><div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">/ &middot; Network &middot; empty</span></div><div class="grain"><div id="state-empty"></div></div></div>
+
+  <section class="notes">
+    <h2>Design notes — 1314 distribution signal</h2>
+
+    <h3>Where it lives (changed)</h3>
+    <p>Moved out of the operator app entirely. It now lives in the <strong>network explorer</strong>, on the <code>Network</code> view (<code>/</code>), directly below the Activity strip and above / beside Network composition. Rationale: this answers a <em>protocol-wide</em> question — where incentives should flow — which is the explorer's job (neutral, legible, public), not an operator's node-management surface. It reuses the explorer's exact component set, so it reads as a native part of that view rather than a bolt-on.</p>
+
+    <h3>Seed exclusion = the explorer's native corpus filter</h3>
+    <p>The explorer already excludes seeded/imported corpus entries by default (the strict envelope-only filter; <code>?include=raw</code> opts out — see <code>NetworkView</code> header comment). Rather than invent a "debug toggle", the seed-exclusion requirement rides that existing control: a two-segment switch, <code>envelope-only</code> (default) / <code>include seeded</code>. Default excludes seeded entries from every number and states the excluded total plainly under the control; flipping to <code>include seeded</code> folds them back in live and annotates the delta per cluster. Same demonstrate-it-live behaviour the brief asked for, expressed in the explorer's own vocabulary.</p>
+
+    <h3>Hierarchy — favour the top 1–3</h3>
+    <ul>
+      <li><strong>Headline</strong>: an Activity-strip-style row (serif big numbers) — envelopes, clusters, distinct contributors, top-3 share.</li>
+      <li><strong>Where usage concentrates</strong>: HBars, sorted by volume — the leading cluster takes the sky-accent first bar; the tail recedes to muted fill. This is the same composition idiom the Network view already uses for by-mode / by-harness.</li>
+      <li><strong>Clusters by volume</strong>: a DataTable — top rows full, the long tail folded into the built-in low-volume section. Tags render as bordered chips; verifiability isn't shown here (this is corpus volume, not scored results — kept honest).</li>
+    </ul>
+
+    <h3>Component mapping — explorer primitive per element</h3>
+    <table class="map">
+      <thead><tr><th>Element</th><th>Explorer primitive</th></tr></thead>
+      <tbody>
+        <tr><td>Shell (header, nav, search)</td><td><code>Chrome</code> — reused unchanged; Network tab active</td></tr>
+        <tr><td>Headline stats row</td><td><code>Card</code> + the <code>ActivityStrip</code>/<code>ActivityCell</code> pattern (serif big number, dashed cell dividers)</td></tr>
+        <tr><td>Concentration bars</td><td><code>HBars</code> (first bar sky-accent, rest muted) — unchanged</td></tr>
+        <tr><td>Clusters table</td><td><code>DataTable</code> (sortable head, hairline rows, <code>lowVolumeRows</code> for the tail)</td></tr>
+        <tr><td>Tags</td><td>bordered caps-mono chips (the explorer's filter-chip idiom)</td></tr>
+        <tr><td>envelope-only / include seeded</td><td><code>SegmentedControl</code> (the WINDOW control idiom)</td></tr>
+        <tr><td>Freshness footer</td><td><code>StatusBar</code> — reused; shows indexed block + degraded chip</td></tr>
+        <tr><td>Loading / error / empty</td><td>Skeleton block · inline error + retry (Network view pattern) · <code>DataTable</code> empty-state slot</td></tr>
+      </tbody>
+    </table>
+    <p>Nothing here needs a component the explorer doesn't already ship — the whole section composes from existing primitives. That's the point of attaching it here rather than the operator app.</p>
+
+    <h3>States &amp; copy</h3>
+    <ul>
+      <li><strong>loaded</strong> — as shown; the view refetches on the explorer's standard poll.</li>
+      <li><strong>loading</strong> — skeleton in the shape of the headline + bars + table; no layout shift on settle.</li>
+      <li><strong>error</strong> — inline red row with a <code>Retry</code> action, matching <code>NetworkView</code>'s own error affordance; <code>StatusBar</code> shows <code>Discovery: Degraded</code>.</li>
+      <li><strong>empty</strong> — exact copy, verbatim: <em>"No contributions yet — signal appears as the corpus grows."</em></li>
+    </ul>
+
+    <h3>Legibility &amp; open questions</h3>
+    <ul>
+      <li><strong>Provenance.</strong> Per <em>Legible</em>, each cluster's envelope count should reach its source — a filtered corpus query or an explorer deep-link (e.g. <code>/solvernets?cluster=…</code>). Shown as a hover affordance; the exact target is a flagged open question.</li>
+      <li><strong>Clustering method.</strong> How envelopes group into named clusters (embedding + label, tag rollup, manifest tags) is upstream and undecided; the section renders whatever the clustering endpoint returns, sorted by volume.</li>
+      <li><strong>Distinct-contributor total.</strong> Per-cluster contributor counts overlap and don't sum; the headline shows a separately-computed distinct count, labelled as such.</li>
+      <li><strong>Placement within the Network view.</strong> Shown below Activity and above Network composition. Alternatively it could sit beside composition. Flagging the ordering for the explorer owner.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="distribution.jsx"></script>
+</body>
+</html>

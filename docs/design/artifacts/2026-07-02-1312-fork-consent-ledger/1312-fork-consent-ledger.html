@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jinn — 1312 · Harness consent + ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c1628; --bg-elev:#142340; --fg:#f2f7fc; --fg-muted:#a4b0c2; --fg-dim:#7d8ba3;
+    --border:#1f3a66; --gold:#dcb866; --sky:#7aa7dc;
+    --t-bg:#070d18; --t-fg:#d6e0f0; --t-dim:#6b7b95;
+    --t-sky:#7aa7dc; --t-sky-hi:#a8c8ea; --t-gold:#dcb866;
+    --t-green:#7bb0a2; --t-amber:#cf9a3f; --t-red:#c07070; --t-violet:#8a7ec4;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:'JetBrains Mono',ui-monospace,monospace;-webkit-font-smoothing:antialiased;}
+  .page{max-width:1180px;margin:0 auto;padding:56px 32px 120px;}
+
+  .doc-head{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:40px;
+    display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;}
+  .doc-title{font-family:'Instrument Serif',serif;font-size:42px;line-height:1.02;margin:0;}
+  .doc-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:0 0 12px;}
+  .doc-sub{font-size:12.5px;line-height:1.6;color:var(--fg-muted);max-width:64ch;margin:10px 0 0;letter-spacing:-.01em;}
+  .doc-meta{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);text-align:right;line-height:1.9;white-space:nowrap;}
+
+  .sec{margin:64px 0 0;}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px;}
+  .sec-num{font-size:11px;letter-spacing:.14em;color:var(--sky);}
+  .sec-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg);margin:0;font-weight:500;}
+  .sec-note{font-size:12px;color:var(--fg-muted);line-height:1.6;max-width:76ch;margin:8px 0 22px;letter-spacing:-.01em;}
+  .caption{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);margin:0 0 10px;display:flex;gap:10px;align-items:center;}
+  .caption .dot{width:5px;height:5px;border-radius:50%;background:var(--sky);}
+  .caption.alt .dot{background:var(--gold);}
+
+  .term{background:var(--t-bg);color:var(--t-fg);border:1px solid var(--border);
+    border-radius:10px;padding:22px 26px;white-space:pre;overflow-x:auto;
+    font-size:13.5px;line-height:1.5;box-shadow:2px 2px 0 0 #04080f;}
+  .term.small{font-size:12.5px;padding:18px 20px;}
+  .sky{color:var(--t-sky);} .skyh{color:var(--t-sky-hi);} .gold{color:var(--t-gold);}
+  .dim{color:var(--t-dim);} .green{color:var(--t-green);} .amber{color:var(--t-amber);}
+  .red{color:var(--t-red);} .violet{color:var(--t-violet);} .fg{color:var(--t-fg);} .b{font-weight:600;}
+  .kbd{color:var(--t-gold);font-weight:600;}
+
+  /* interactive console */
+  .console-wrap{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--t-bg);box-shadow:4px 4px 0 0 #04080f;}
+  .console-term{min-height:560px;padding:24px 28px;white-space:pre;overflow-x:auto;font-size:13.5px;line-height:1.5;color:var(--t-fg);}
+  .console-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding:12px 20px;border-top:1px solid var(--border);background:#0a1120;}
+  .lifecycle{display:flex;align-items:center;gap:8px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;}
+  .lifecycle .stage{color:var(--t-dim);}
+  .lifecycle .stage.on{color:var(--t-gold);}
+  .lifecycle .arr{color:var(--border);}
+  .keyhints{display:flex;gap:8px;flex-wrap:wrap;}
+  .keyhint{font-family:inherit;font-size:11px;letter-spacing:.06em;padding:5px 11px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--border);background:transparent;color:var(--fg-muted);transition:all 120ms linear;}
+  .keyhint:hover{border-color:var(--sky);color:var(--fg);}
+  .keyhint .k{color:var(--gold);font-weight:600;margin-right:6px;}
+  .keyhint.ghost{opacity:.55;}
+  .statejump{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;}
+  .statejump button{font-family:inherit;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--fg-dim);cursor:pointer;transition:all 120ms linear;}
+  .statejump button:hover{color:var(--fg);border-color:var(--sky);}
+  .statejump button[data-on="true"]{color:var(--t-bg);background:var(--sky);border-color:var(--sky);}
+  .hint-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);align-self:center;margin-right:4px;}
+
+  .notes{margin-top:80px;border-top:1px solid var(--border);padding-top:40px;}
+  .notes h2{font-family:'Instrument Serif',serif;font-weight:400;font-size:30px;margin:0 0 6px;}
+  .notes h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--border);}
+  .notes h3:first-of-type{border-top:none;padding-top:0;}
+  .notes p, .notes li{font-size:13px;line-height:1.7;color:var(--fg-muted);letter-spacing:-.01em;max-width:82ch;}
+  .notes ul{padding-left:18px;margin:8px 0;}
+  .notes li{margin:5px 0;}
+  .notes code{font-size:12px;color:var(--sky);background:var(--t-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;}
+  .notes strong{color:var(--fg);font-weight:600;}
+  table.copy{border-collapse:collapse;width:100%;margin:10px 0 4px;font-size:12.5px;}
+  table.copy th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);font-weight:500;padding:8px 14px 8px 0;border-bottom:1px solid var(--border);}
+  table.copy td{padding:9px 14px 9px 0;border-bottom:1px solid var(--border);color:var(--fg-muted);vertical-align:top;line-height:1.5;}
+  table.copy td code{white-space:nowrap;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <div>
+      <p class="doc-kicker">Surface 1 · Harness TUI</p>
+      <h1 class="doc-title">First-run consent &amp; contribution ledger</h1>
+      <p class="doc-sub">A CLI coding-agent harness (fork of the Hermes agent). Terminal-rendered, keyboard-driven. Where data leaves the machine, the copy drops all brand metaphor and states exactly what happens.</p>
+    </div>
+    <div class="doc-meta">issue&nbsp;1312<br>harness&nbsp;·&nbsp;jinn-layer<br>consent&nbsp;+&nbsp;ledger</div>
+  </header>
+
+  <!-- ========== 1a — INTERACTIVE CONSENT ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1a</span><h2 class="sec-title">First-run consent — interactive</h2></div>
+    <p class="sec-note">Walk it with the keyboard (click the console first). It leads with <span class="gold">why you'd turn it on</span> — build the open harness, earn OLAS, read the corpus you feed — then states plainly what leaves the machine. The action lifecycle is <span class="gold">idle → confirming → recorded</span>, shown bottom-left. Three paths: <span class="green">accept</span>, <span class="red">decline</span>, <span class="sky">preview-first</span>. Default is decline; nothing publishes until you accept <em>and</em> preview. Jump to any state with the chips below.</p>
+
+    <div class="statejump" id="statejump">
+      <span class="hint-label">Jump to</span>
+    </div>
+
+    <div class="console-wrap">
+      <div class="console-term" id="consent" tabindex="0"></div>
+      <div class="console-bar">
+        <div class="lifecycle" id="lifecycle">
+          <span class="stage" data-s="idle">idle</span><span class="arr">→</span>
+          <span class="stage" data-s="confirming">confirming</span><span class="arr">→</span>
+          <span class="stage" data-s="recorded">recorded</span>
+        </div>
+        <div class="keyhints" id="keyhints"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 1b — LEDGER ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1b</span><h2 class="sec-title">Contribution ledger &mdash; <span class="gold">jinn-layer ledger</span></h2></div>
+    <p class="sec-note">A local record of what this machine contributed. Timestamp, task summary, envelope ref, anchor tx, and a verifiability tier chip. Vetoed tasks stay local; a publish that fails is retained locally with a retry. Three renders below: the populated ledger, the empty state, and the per-task veto confirmation.</p>
+
+    <p class="caption alt"><span class="dot"></span>loaded · a week of activity</p>
+    <div class="term" id="ledger-loaded"></div>
+
+    <div style="height:34px"></div>
+    <p class="caption"><span class="dot"></span>empty state</p>
+    <div class="term small" id="ledger-empty"></div>
+
+    <div style="height:34px"></div>
+    <p class="caption"><span class="dot"></span>per-task veto confirmation &mdash; <span class="gold">jinn-layer veto</span></p>
+    <div class="term small" id="ledger-veto"></div>
+  </section>
+
+  <!-- ========== DESIGN NOTES ========== -->
+  <section class="notes">
+    <h2>Design notes — 1312 consent &amp; ledger</h2>
+
+    <h3>The two hard rules, applied</h3>
+    <ul>
+      <li><strong>No emoji, anywhere.</strong> Status is word + colour, never a glyph. Even the "recorded" confirmation uses the word <code>recorded</code> and a coloured state label — no check-mark, per the brand's ban on <code>✓/✗</code> as UI icons.</li>
+      <li><strong>Plain language on data-leaving-the-machine.</strong> The consent screen never says <em>summon</em>, <em>vessel</em>, <em>smoke</em>, or <em>corpus of wishes</em>. It says "published to a public corpus", "scrubbed of secrets and personal data", "fails closed", "kept on this machine only". The vow-language returns only in the ledger's neutral chrome (<code>vessel-0x91be…</code> as the node id) — never on a consent, veto, or failure line.</li>
+      <li><strong>Lead with the upside, in a flat tone.</strong> Earlier drafts read as all-risk. Per the brand's "lead from structure, not fear", the screen now opens with three plain benefits — the open harness, OLAS on verified contributions, the two-way corpus — before the safety mechanics. Stated clinically, not sold: no urgency, no exclamation, no marketing register.</li>
+    </ul>
+
+    <h3>Consent flow — states &amp; lifecycle</h3>
+    <p>Consent is a three-value machine: <code>unset → accepted | declined</code>. The per-action lifecycle is <code>idle → confirming → recorded</code>, surfaced in the console footer.</p>
+    <ul>
+      <li><strong>unset</strong> (idle) — the explainer: <em>why turn it on</em> (benefits) then <em>what leaves this machine</em> (safety). Keys: <code>A</code> accept · <code>D</code> decline · <code>P</code> preview · <code>?</code> docs. Default on bare <code>Enter</code> is <strong>decline</strong> — the safe default never publishes.</li>
+      <li><strong>preview</strong> (idle) — a real, scrubbed envelope from the last task. Reachable before any publish ever happens (requirement iv). Keys: <code>A</code> accept · <code>B</code> back.</li>
+      <li><strong>confirm-accept / confirm-decline</strong> (confirming) — one deliberate <code>Y/N</code>. Escape or <code>N</code> returns to unset.</li>
+      <li><strong>recorded-accept / recorded-decline</strong> (recorded) — states the resulting behaviour plainly, then the optional node stub.</li>
+      <li><strong>node stub</strong> — "Run a network node?" → <code>L</code> Later (points to docs) or <code>Enter</code> skip. Answer is always <em>later</em>; it never sets anything up here.</li>
+    </ul>
+
+    <h3>Exact copy — consent</h3>
+    <p>Opening line: <em>"jinn-layer is an open coding harness. When it finishes a task it can publish a scrubbed trace of that task to a public corpus — the shared record that trains the harness everyone runs."</em></p>
+    <table class="copy">
+      <thead><tr><th>Group</th><th>String</th></tr></thead>
+      <tbody>
+        <tr><td>why · open harness</td><td>Build the open harness — your tasks improve the agent no one company owns.</td></tr>
+        <tr><td>why · rewards</td><td>Earn rewards — verified contributions earn OLAS.</td></tr>
+        <tr><td>why · two-way</td><td>Two-way — you read from the same corpus you feed.</td></tr>
+        <tr><td>what leaves · scope</td><td>Only traces of tasks this harness runs — never your machine, shell, files, or anything outside a task.</td></tr>
+        <tr><td>what leaves · scrub</td><td>Every trace is scrubbed of secrets and personal data here, first. If scrubbing can't finish, nothing sends. It fails closed.</td></tr>
+        <tr><td>what leaves · control</td><td>You can veto any task, and preview the exact payload before the first send.</td></tr>
+        <tr><td>decline</td><td>Decline and jinn-layer still works fully — as a reader.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Exact copy — confirmations &amp; results</h3>
+    <table class="copy">
+      <thead><tr><th>Moment</th><th>String</th></tr></thead>
+      <tbody>
+        <tr><td>confirm accept</td><td>Turn on contribution? Every task this harness runs will be scrubbed and published to the public corpus. You can veto any task and turn this off any time. [Y] Yes · [N] No</td></tr>
+        <tr><td>confirm decline</td><td>Decline contribution? The harness stays fully functional — it will read the corpus and publish nothing. [Y] Yes · [N] No</td></tr>
+        <tr><td>recorded · on</td><td>Contribution is ON. Scrubbed task traces will publish to the public corpus. Nothing publishes until after you preview once.</td></tr>
+        <tr><td>recorded · off</td><td>Contribution is OFF — reader only. No trace leaves this machine. Turn on any time: jinn-layer contribute --on</td></tr>
+        <tr><td>node stub</td><td>Run a network node? Running a node executes tasks for others and earns rewards. Separate setup; not needed to contribute or read. [L] Later — show docs · [Enter] Skip</td></tr>
+        <tr><td>node stub → later</td><td>See docs.jinn.network/run-a-node when you're ready. Nothing to do now.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Ledger — columns, tiers, state messages</h3>
+    <p>Command: <code>jinn-layer ledger</code>. Columns: <strong>time</strong>, <strong>task</strong>, <strong>envelope</strong> (content-addressed ref), <strong>anchor</strong> (short on-chain tx hash), <strong>tier</strong>. Verifiability tier is a status chip in three levels of confidence:</p>
+    <ul>
+      <li><code class="sky">user-accepted</code> — the operator marked the task complete; no automated check. Lowest tier — rendered <span class="sky">sky</span>.</li>
+      <li><code>tests-passed</code> — the task's own test suite passed. Rendered <span class="green">green</span>.</li>
+      <li><code>evaluator-verified</code> — a SolverNet evaluator scored it under bond. Highest tier — rendered <span class="gold">gold</span>.</li>
+      <li><strong>vetoed (local only)</strong> — withheld; envelope + anchor show <code>—</code>. Rendered <span class="amber">amber</span>.</li>
+      <li><strong>publish failed — retained locally</strong> — the one state message. Envelope assembled, anchor not written; a sub-line offers <code>[r] retry</code> and <code>[v] veto instead</code>. Rendered <span class="red">red</span>.</li>
+    </ul>
+    <p><strong>Empty state:</strong> "Nothing published yet. Traces appear here after your first task publishes. Vetoed and retained-local tasks are listed too."</p>
+    <p><strong>Veto confirmation</strong> is honest about the limits of removal: a not-yet-published task simply won't send; an already-published one can be pulled from the corpus index and de-served, but copies others already trained on can't be recalled. Stated plainly, not softened.</p>
+
+    <h3>Open questions (flagged, not decided)</h3>
+    <ul>
+      <li>Does <code>preview</code> need its own network fetch, or is the "last task" always available locally at first run (before any task has run, there is nothing to preview)? Assumed: on a truly fresh machine with zero tasks, <code>P</code> shows a representative fixture labelled "example — no task run yet" rather than an empty preview. Confirm with harness owner.</li>
+      <li>Whether declining should still show the node stub. Assumed yes — running a node is orthogonal to contributing traces. Flagging in case product wants the stub only on accept.</li>
+      <li>Anchor-tx column for <code>user-accepted</code> tier: is an un-evaluated trace anchored at all, or only indexed in the corpus? Shown here as anchored (every published envelope gets an anchor tx; the tier reflects verification, not anchoring). Confirm against SPEC anchoring model.</li>
+      <li>Ledger pagination / windowing for long histories (shown here as a single scroll). Out of scope for the mock; flag for implementation.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const W = (cls,s) => `<span class="${cls}">${s}</span>`;
+  const sky=s=>W('sky',s), skyh=s=>W('skyh',s), gold=s=>W('gold',s), dim=s=>W('dim',s),
+        green=s=>W('green',s), amber=s=>W('amber',s), red=s=>W('red',s), b=s=>W('b',s),
+        fg=s=>W('fg',s), kbd=s=>W('kbd',s);
+
+  // ---------- boxed panel helper (aligned) ----------
+  // inner content width = IW; total line = IW+4
+  function boxTop(IW, title){
+    if(!title) return sky('┌'+'─'.repeat(IW+2)+'┐');
+    const t=' '+title+' ';
+    return sky('┌─'+t+'─'.repeat(Math.max(0,IW+1-t.length))+'┐');
+  }
+  function boxMid(IW, title){
+    if(!title) return sky('├'+'─'.repeat(IW+2)+'┤');
+    const t=' '+title+' ';
+    return sky('├─'+t+'─'.repeat(Math.max(0,IW+1-t.length))+'┤');
+  }
+  function boxBot(IW){ return sky('└'+'─'.repeat(IW+2)+'┘'); }
+  // segs: [ [text, cls?], ... ]  → padded to IW
+  function boxLine(IW, segs){
+    const raw = segs.map(s=>s[0]).join('');
+    const pad = ' '.repeat(Math.max(0, IW - raw.length));
+    const html = segs.map(s=> s[1] ? W(s[1], esc(s[0])) : esc(s[0])).join('');
+    return sky('│ ')+html+pad+sky(' │');
+  }
+
+  // =========================================================================
+  // 1a — CONSENT STATE MACHINE
+  // =========================================================================
+  const promptSigil = sky('◇')+' '+b(fg('jinn-layer'))+dim('  ·  first run  ·  fork of hermes-agent');
+  const rule = dim('─'.repeat(66));
+
+  const S = {};
+
+  S.unset = {
+    lifecycle:'idle',
+    keys:[['A','accept'],['D','decline'],['P','preview'],['?','docs']],
+    render:()=>[
+      promptSigil,
+      '',
+      fg('  Contribute to the open corpus?'),
+      '',
+      dim('  jinn-layer is an open coding harness. When it finishes a task it can'),
+      dim('  publish a scrubbed trace of that task to a public corpus — the shared'),
+      dim('  record that trains the harness everyone runs.'),
+      '',
+      sky('  WHY TURN IT ON'),
+      '  '+dim('· ')+fg('Build the open harness')+dim(' — your tasks improve the agent no one company owns.'),
+      '  '+dim('· ')+fg('Earn rewards')+dim(' — verified contributions earn ')+gold('OLAS')+dim('.'),
+      '  '+dim('· ')+fg('Two-way')+dim(' — you read from the same corpus you feed.'),
+      '',
+      sky('  WHAT LEAVES THIS MACHINE'),
+      '  '+dim('· Only traces of tasks ')+fg('this harness runs')+dim(' — never your machine, shell,'),
+      '  '+dim('  files, or anything outside a task.'),
+      '  '+dim('· Every trace is scrubbed of secrets and personal data ')+fg('here, first')+dim('.'),
+      '  '+dim('  If scrubbing can’t finish, nothing sends. It ')+fg('fails closed')+dim('.'),
+      '  '+dim('· You can ')+fg('veto any task')+dim(', and ')+fg('preview')+dim(' the exact payload before the first send.'),
+      '',
+      dim('  Decline and jinn-layer still works fully — as a reader.'),
+      '',
+      rule,
+      '  '+kbd('[A]')+fg(' Accept & contribute')+'      '+kbd('[P]')+fg(' Preview a real payload'),
+      '  '+kbd('[D]')+dim(' Decline · read only')+'      '+kbd('[?]')+dim(' Docs'),
+      '',
+      dim('  consent: ')+amber('unset')+dim('   ·   default is decline'),
+    ].join('\n'),
+    on:{ a:'confirmAccept', d:'confirmDecline', p:'preview', '?':'docs', enter:'confirmDecline' }
+  };
+
+  S.docs = {
+    lifecycle:'idle',
+    keys:[['B','back']],
+    render:()=>[
+      promptSigil, '',
+      gold('DOCS'),
+      dim('Full detail on what is published, how scrubbing works, and how to'),
+      dim('audit the corpus:'),
+      '',
+      '  '+sky('docs.jinn.network/contribute'),
+      '  '+sky('docs.jinn.network/scrubbing')+dim('   — the scrubber & fail-closed guarantee'),
+      '  '+sky('docs.jinn.network/veto'),
+      '',
+      dim('Nothing has been decided. Consent is still ')+amber('unset')+dim('.'),
+      '',
+      '  '+kbd('[B]')+fg(' Back to consent'),
+    ].join('\n'),
+    on:{ b:'unset', enter:'unset' }
+  };
+
+  S.preview = {
+    lifecycle:'idle',
+    keys:[['A','accept'],['B','back']],
+    render:()=>{
+      const IW=60;
+      const box=[
+        boxTop(IW,'envelope · exactly what would be sent'),
+        boxLine(IW,[['schema      ','',],['jinn.trace/v1','sky']]),
+        boxLine(IW,[['task        ',''],['fix flaky retry in http client','fg']]),
+        boxLine(IW,[['harness     ',''],['codex · gpt-5.4-mini','fg']]),
+        boxLine(IW,[['solvernet   ',''],['swe-rebench-v2','fg']]),
+        boxLine(IW,[['tier        ',''],['tests-passed','green']]),
+        boxLine(IW,[['scrub       ',''],['12 secrets removed · 3 paths anonymised · ','dim'],['ok','green']]),
+        boxMid(IW,'redacted before send'),
+        boxLine(IW,[['  export OPENAI_API_KEY=',''],['«redacted:secret»','amber']]),
+        boxLine(IW,[['  /home/',''],['«redacted:user»','amber'],['/work/http/client.py','']]),
+        boxLine(IW,[['  db=postgres://',''],['«redacted:credential»','amber'],['@localhost','']]),
+        boxMid(IW,'content that ships (scrubbed)'),
+        boxLine(IW,[['  prompt   "the retry loop drops the 429 backoff…"','dim']]),
+        boxLine(IW,[['  diff     +14 −6  http/client.py','dim']]),
+        boxLine(IW,[['  result   3 tests added · suite green','dim']]),
+        boxBot(IW),
+      ].join('\n');
+      return [
+        promptSigil, '',
+        gold('PREVIEW — NOTHING IS SENT FROM THIS SCREEN'),
+        dim('A real trace from your last task, scrubbed and assembled into the'),
+        dim('envelope that would be published. This is the whole payload.'),
+        '',
+        box,
+        '',
+        dim('  Everything inside the box is what leaves the machine. Nothing else does.'),
+        '',
+        '  '+kbd('[A]')+fg(' Accept & contribute')+'    '+kbd('[B]')+dim(' Back'),
+      ].join('\n');
+    },
+    on:{ a:'confirmAccept', b:'unset' }
+  };
+
+  S.confirmAccept = {
+    lifecycle:'confirming',
+    keys:[['Y','yes'],['N','no']],
+    render:()=>[
+      promptSigil, '',
+      gold('CONFIRM'),
+      '',
+      fg('  Turn on contribution?'),
+      '',
+      dim('  Every task this harness runs will be scrubbed and published to the'),
+      dim('  public corpus. You can veto any task, and turn this off any time.'),
+      '',
+      '  '+kbd('[Y]')+fg(' Yes, turn on contribution')+'     '+kbd('[N]')+dim(' No, go back'),
+      '',
+      dim('  consent: ')+amber('unset')+dim('  →  action: ')+gold('confirming'),
+    ].join('\n'),
+    on:{ y:'recordedAccept', n:'unset', escape:'unset' }
+  };
+
+  S.confirmDecline = {
+    lifecycle:'confirming',
+    keys:[['Y','yes'],['N','no']],
+    render:()=>[
+      promptSigil, '',
+      gold('CONFIRM'),
+      '',
+      fg('  Decline contribution?'),
+      '',
+      dim('  The harness stays fully functional. It will run tasks and read the'),
+      dim('  corpus, and will publish nothing. No trace will leave this machine.'),
+      '',
+      '  '+kbd('[Y]')+fg(' Yes, decline')+'     '+kbd('[N]')+dim(' No, go back'),
+      '',
+      dim('  consent: ')+amber('unset')+dim('  →  action: ')+gold('confirming'),
+    ].join('\n'),
+    on:{ y:'recordedDecline', n:'unset', escape:'unset' }
+  };
+
+  S.recordedAccept = {
+    lifecycle:'recorded',
+    keys:[['Enter','continue'],['P','preview next envelope']],
+    render:()=>[
+      promptSigil, '',
+      green('  recorded')+dim(' — contribution is ')+green('ON'),
+      '',
+      dim('  Scrubbed task traces will publish to the public corpus. Nothing'),
+      dim('  publishes until you preview once — press ')+kbd('P')+dim(' any time to see the'),
+      dim('  next payload before it sends.'),
+      '',
+      dim('  Verified traces earn ')+gold('OLAS')+dim(' as the corpus is trained on them.'),
+      '',
+      dim('  Manage:  ')+sky('jinn-layer contribute --off')+dim('  |  ')+sky('veto <task>')+dim('  |  ')+sky('ledger'),
+      '',
+      rule,
+      '  '+kbd('[Enter]')+fg(' Continue'),
+    ].join('\n'),
+    on:{ enter:'nodeStubAccept', p:'preview' }
+  };
+
+  S.recordedDecline = {
+    lifecycle:'recorded',
+    keys:[['Enter','continue']],
+    render:()=>[
+      promptSigil, '',
+      sky('  recorded')+dim(' — contribution is ')+fg('OFF · reader only'),
+      '',
+      dim('  This harness will run tasks and read the corpus, and will publish'),
+      dim('  nothing. No trace leaves this machine.'),
+      '',
+      dim('  Turn on any time:  ')+sky('jinn-layer contribute --on'),
+      '',
+      rule,
+      '  '+kbd('[Enter]')+fg(' Continue'),
+    ].join('\n'),
+    on:{ enter:'nodeStubDecline' }
+  };
+
+  function nodeStub(back){
+    return {
+      lifecycle:'recorded',
+      keys:[['L','later'],['Enter','skip']],
+      render:()=>[
+        promptSigil, '',
+        dim('  One more, optional —'),
+        '',
+        gold('  RUN A NETWORK NODE?'),
+        dim('  Running a node executes tasks for others and earns rewards. It is a'),
+        dim('  separate setup and is not needed to contribute or to read.'),
+        '',
+        '  '+kbd('[L]')+fg(' Later — show me the docs')+dim('  (recommended)')+'     '+kbd('[Enter]')+dim(' Skip for now'),
+      ].join('\n'),
+      on:{ l:'nodeLater', enter:'launch' }, _back:back
+    };
+  }
+  S.nodeStubAccept = nodeStub('recordedAccept');
+  S.nodeStubDecline = nodeStub('recordedDecline');
+
+  S.nodeLater = {
+    lifecycle:'recorded',
+    keys:[['Enter','launch harness']],
+    render:()=>[
+      promptSigil, '',
+      dim('  See ')+sky('docs.jinn.network/run-a-node')+dim(' when you\'re ready.'),
+      dim('  Nothing to do now.'),
+      '',
+      dim('  Launching harness…'),
+      '',
+      '  '+kbd('[Enter]')+fg(' Continue'),
+    ].join('\n'),
+    on:{ enter:'launch' }
+  };
+
+  S.launch = {
+    lifecycle:'recorded',
+    keys:[['R','restart flow']],
+    render:()=>[
+      promptSigil, '',
+      dim('  $ ')+fg('jinn-layer run'),
+      dim('  harness ready · reading corpus · ')+green('contribution set'),
+      '',
+      dim('  [ end of first-run consent — the harness is now live ]'),
+      '',
+      '  '+kbd('[R]')+dim(' Replay the consent flow from the start'),
+    ].join('\n'),
+    on:{ r:'unset' }
+  };
+
+  // ---------- driver ----------
+  const termEl = document.getElementById('consent');
+  const keyhintsEl = document.getElementById('keyhints');
+  const lifecycleEl = document.getElementById('lifecycle');
+  const jumpEl = document.getElementById('statejump');
+  let cur = 'unset';
+
+  const JUMPS = [
+    ['unset','consent'],['preview','preview'],['confirmAccept','confirm · accept'],
+    ['recordedAccept','recorded · on'],['confirmDecline','confirm · decline'],
+    ['recordedDecline','recorded · off'],['nodeStubAccept','node stub'],['launch','live'],
+  ];
+
+  function draw(){
+    const st = S[cur];
+    termEl.innerHTML = st.render();
+    // keyhints
+    keyhintsEl.innerHTML = st.keys.map(([k,label])=>
+      `<button class="keyhint" data-key="${k.toLowerCase()}"><span class="k">${k}</span>${label}</button>`).join('');
+    keyhintsEl.querySelectorAll('.keyhint').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ fire(btn.dataset.key); termEl.focus(); });
+    });
+    // lifecycle
+    lifecycleEl.querySelectorAll('.stage').forEach(s=>{
+      s.classList.toggle('on', s.dataset.s===st.lifecycle);
+    });
+    // jump chips
+    jumpEl.querySelectorAll('button').forEach(b=> b.dataset.on = (b.dataset.state===cur)?'true':'false');
+  }
+  function fire(key){
+    const st = S[cur];
+    const next = st.on[key];
+    if(next && S[next]){ cur = next; draw(); }
+  }
+  function keymap(e){
+    const k = e.key;
+    if(k==='Enter'){ e.preventDefault(); return fire('enter'); }
+    if(k==='Escape'){ return fire('escape'); }
+    const lk = k.toLowerCase();
+    if(/^[a-z?]$/.test(lk)){ fire(lk); }
+  }
+  termEl.addEventListener('keydown', keymap);
+  // build jump chips
+  JUMPS.forEach(([state,label])=>{
+    const btn=document.createElement('button');
+    btn.textContent=label; btn.dataset.state=state;
+    btn.addEventListener('click', ()=>{ cur=state; draw(); termEl.focus(); });
+    jumpEl.appendChild(btn);
+  });
+  draw();
+
+  // =========================================================================
+  // 1b — LEDGER
+  // =========================================================================
+  // column widths (chars)
+  const COL = { time:12, task:32, env:11, anchor:12 };
+  function cell(text, w, cls, align){
+    text = text==null?'':String(text);
+    if(text.length>w) text = text.slice(0,w-1)+'…';
+    let padded = align==='right' ? text.padStart(w) : text.padEnd(w);
+    return cls ? W(cls, esc(padded)) : esc(padded);
+  }
+  function ledgerRow(r){
+    const time = cell(r.time, COL.time, 'dim');
+    const task = cell(r.task, COL.task, 'fg');
+    let tierCls = {'user-accepted':'sky','tests-passed':'green','evaluator-verified':'gold'}[r.tier] || 'dim';
+    if(r.state==='vetoed'){
+      const env = cell('—', COL.env, 'dim');
+      const anc = cell('—', COL.anchor, 'dim');
+      return time+'  '+task+'  '+env+'  '+anc+'  '+amber('vetoed (local only)');
+    }
+    if(r.state==='failed'){
+      const env = cell(r.env, COL.env, 'sky');
+      const anc = cell('pending', COL.anchor, 'dim');
+      const main = time+'  '+task+'  '+env+'  '+anc+'  '+red('publish failed — retained locally');
+      const indent = ' '.repeat(COL.time+2+COL.task+2);
+      const sub = indent+dim('└ kept on this machine · anchor not written · ')+kbd('[r]')+dim(' retry   ')+kbd('[v]')+dim(' veto instead');
+      return main+'\n'+sub;
+    }
+    const env = cell(r.env, COL.env, 'sky');
+    const anc = cell(r.anchor, COL.anchor, 'dim');
+    return time+'  '+task+'  '+env+'  '+anc+'  '+W(tierCls, r.tier);
+  }
+
+  const ROWS = [
+    {time:'05-26 06:41', task:'fix flaky retry in http client',   env:'env-8f21c2', anchor:'0x7a2f…c019', tier:'evaluator-verified'},
+    {time:'05-26 05:12', task:'null-deref in markdown parser',    env:'env-7d0a55', anchor:'0x91be…44a2', tier:'evaluator-verified'},
+    {time:'05-25 23:58', task:'add pagination to results view',   env:'env-6c93e1', anchor:'0x33de…0f17', tier:'tests-passed'},
+    {time:'05-25 22:41', task:'refactor auth middleware',         env:null, anchor:null, tier:null, state:'vetoed'},
+    {time:'05-25 21:40', task:'add rate-limit headers',           env:'env-5b17aa', anchor:null, tier:null, state:'failed'},
+    {time:'05-25 20:05', task:'migrate config to toml',           env:'env-4e60cd', anchor:'0x26e9…0638', tier:'tests-passed'},
+    {time:'05-25 18:22', task:'fix off-by-one in paginator',      env:'env-4102b8', anchor:'0x0e76…24fc', tier:'evaluator-verified'},
+    {time:'05-25 16:47', task:'tidy dead imports across pkg',     env:'env-3ff019', anchor:'0xaea9…3e0b', tier:'user-accepted'},
+    {time:'05-25 15:03', task:'harden json schema validation',   env:'env-3a55f2', anchor:'0x7828…43f4', tier:'tests-passed'},
+    {time:'05-25 12:19', task:'add retry budget to client',       env:'env-2d81c0', anchor:'0x4b90…a1d2', tier:'evaluator-verified'},
+    {time:'05-25 10:58', task:'document env vars in readme',      env:'env-2611af', anchor:'0x1c34…88be', tier:'user-accepted'},
+    {time:'05-25 09:31', task:'wire up structured logging',       env:'env-1f7d3e', anchor:'0x9d02…c7a1', tier:'tests-passed'},
+    {time:'05-24 23:14', task:'patch panic on empty payload',     env:'env-1a0f9d', anchor:'0x55ab…0e39', tier:'evaluator-verified'},
+    {time:'05-24 21:02', task:'notes on local vault paths',       env:null, anchor:null, tier:null, state:'vetoed'},
+    {time:'05-24 19:47', task:'add graceful shutdown hook',       env:'env-0e22b7', anchor:'0x7d61…4f80', tier:'tests-passed'},
+    {time:'05-24 17:20', task:'fix flaky timezone test',          env:'env-08f4a1', anchor:'0x2ffa…9b6c', tier:'user-accepted'},
+  ];
+
+  function ledgerHeader(){
+    const h = dim('TIME'.padEnd(COL.time))+'  '+dim('TASK'.padEnd(COL.task))+'  '+
+              dim('ENVELOPE'.padEnd(COL.env))+'  '+dim('ANCHOR'.padEnd(COL.anchor))+'  '+dim('TIER');
+    return h;
+  }
+  const ruleFull = dim('─'.repeat(88));
+  document.getElementById('ledger-loaded').innerHTML = [
+    dim('$ ')+fg('jinn-layer ledger'),
+    '',
+    '  '+fg('contribution ledger')+dim('  ·  ')+sky('vessel-0x91be…44a2')+dim('  ·  ')+
+      green('14 published')+dim('  ·  ')+amber('2 vetoed')+dim('  ·  ')+red('1 retained'),
+    '  '+ruleFull,
+    '  '+ledgerHeader(),
+    '  '+ruleFull,
+    ...ROWS.map(r=>'  '+ledgerRow(r)),
+    '  '+ruleFull,
+    '  '+dim('tier:  ')+sky('user-accepted')+dim('  <  ')+green('tests-passed')+dim('  <  ')+gold('evaluator-verified')+dim('   ·  every published envelope is anchored on-chain'),
+  ].join('\n');
+
+  document.getElementById('ledger-empty').innerHTML = [
+    dim('$ ')+fg('jinn-layer ledger'),
+    '',
+    '  '+fg('contribution ledger')+dim('  ·  ')+sky('vessel-0x91be…44a2'),
+    '',
+    dim('  Nothing published yet. Traces appear here after your first task'),
+    dim('  publishes. Vetoed and retained-local tasks are listed here too.'),
+    '',
+    '  '+dim('contribution is ')+green('ON')+dim('  ·  run a task to begin.'),
+  ].join('\n');
+
+  const IW2=58;
+  document.getElementById('ledger-veto').innerHTML = [
+    dim('$ ')+fg('jinn-layer veto env-5b17aa'),
+    '',
+    gold('  VETO THIS TASK’S PUBLICATION?'),
+    '',
+    boxTop(IW2,''),
+    boxLine(IW2,[['  task       ',''],['add rate-limit headers','fg']]),
+    boxLine(IW2,[['  envelope   ',''],['env-5b17aa','sky'],['  (assembled, not yet anchored)','dim']]),
+    boxLine(IW2,[['  status     ',''],['will be withheld — kept on this machine only','amber']]),
+    boxBot(IW2),
+    '',
+    dim('  This task is not yet published, so it simply won’t send. If a task'),
+    dim('  is already published, veto pulls it from the corpus index and stops'),
+    dim('  it being served — but copies others already trained on cannot be'),
+    dim('  recalled. Stated plainly so there is no surprise.'),
+    '',
+    '  '+kbd('[Y]')+fg(' Veto · keep local')+'     '+kbd('[N]')+dim(' Cancel'),
+  ].join('\n');
+})();
+</script>
+</body>
+</html>
