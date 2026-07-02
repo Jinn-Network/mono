@@ -56,6 +56,7 @@ import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
 import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
+import { addRewardsRoutes } from './rewards-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -477,6 +478,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/activity-events', requireUiToken(config.ui.token));
     app.use('/v1/activity-events/*', requireUiToken(config.ui.token));
     app.use('/v1/bootstrap', requireUiToken(config.ui.token));
+    app.use('/v1/rewards', requireUiToken(config.ui.token));
     app.use('/v1/solvernets', requireUiToken(config.ui.token));
     app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
     app.use('/v1/auth/*', requireUiToken(config.ui.token));
@@ -510,6 +512,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.bootstrap) {
     addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.ui) {
+    addRewardsRoutes(app, {
+      store,
+      getStatus: () => liveStatus,
+    });
   }
 
   if (config.discovery) {

@@ -1443,9 +1443,55 @@ describe('MechAdapter TaskCoordinator flow', () => {
       fromBlock: 101n,
       toBlock: 110n,
     });
+    expect(store.values.get('mech_router_request_block_cursor_v1')).toBeUndefined();
+
+    const drain = gen.next();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('110');
+    await adapter.stop();
+    await drain;
+  });
+
+  it('does not persist the router cursor until a yielded task has been consumed', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const store = makeConfigStore({}, 100n);
+
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
+      taskId: '7',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      transactionHash: TX_HASH,
+      blockNumber: 105,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'deferred-cursor-task' }));
+
+    const adapter = new MechAdapter(
+      { ...TEST_CONFIG, pollIntervalMs: 0 },
+      store as any,
+    );
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(110n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: '7',
+      task: { id: 'deferred-cursor-task' },
+    });
+    expect((adapter as any).requestBlockCursor).toBe(100n);
+    expect(store.values.get('mech_router_request_block_cursor_v1')).toBeUndefined();
+
+    const drain = gen.next();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect((adapter as any).requestBlockCursor).toBe(110n);
     expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('110');
 
     await adapter.stop();
+    await drain;
   });
 
   it('rescans the canonical on-chain backlog on restart even after a previous scan marker', async () => {
@@ -1496,9 +1542,14 @@ describe('MechAdapter TaskCoordinator flow', () => {
       fromBlock: 100n,
       toBlock: 120n,
     });
+    expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('119');
+
+    const drain = gen.next();
+    await new Promise((resolve) => setImmediate(resolve));
     expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('120');
 
     await adapter.stop();
+    await drain;
   });
 
   // #116: event-specific router log filters in the Task-native poll path.

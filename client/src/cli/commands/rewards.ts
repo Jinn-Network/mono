@@ -22,9 +22,7 @@ const PRODUCTION_DEPS: RewardsDeps = {
 
 function formatRewardAmount(wei: string): string {
   try {
-    // stOLAS / OLAS both use 18 decimals. This command reports the
-    // staking collector queue (OLAS staking rewards via the stOLAS curating-agent rail).
-    return `${formatUnits(BigInt(wei), 18)} collector-token`;
+    return `${formatUnits(BigInt(wei), 18)} OLAS`;
   } catch {
     return `${wei} wei`;
   }
@@ -38,16 +36,22 @@ function humanRewards(payload: RewardsV1Response): string {
     const anyPending = payload.services.some((s) => s.pending !== '0');
     lines.push(
       anyPending
-        ? 'Pending staking collector claims:'
-        : 'Pending staking collector claims: none yet.',
+        ? 'Pending OLAS rewards:'
+        : 'Pending OLAS rewards: none yet.',
     );
     for (const s of payload.services) {
       lines.push(`  Service #${s.index}: ${formatRewardAmount(s.pending)} pending · ${formatRewardAmount(s.claimed)} claimed`);
     }
-    lines.push('Operator OLAS staking rewards accumulate via the stOLAS curating-agent rail and are reflected in the Safe balance shown in status / the app.');
+    if (payload.readState === 'error') {
+      lines.push(`Reward read unavailable: ${payload.error ?? 'unknown error'}`);
+    }
+    lines.push('Operator OLAS rewards accrue through staking and can be claimed when pending.');
   }
   lines.push(
-    `Last claim tick: ${payload.lastClaimAt ?? 'never (daemon not yet run the claim loop)'}`,
+    `Last successful claim: ${payload.lastClaimAt ?? 'never'}`,
+  );
+  lines.push(
+    `Last claim tick: ${payload.lastClaimTickAt ?? 'never (daemon not yet run the claim loop)'}`,
   );
   lines.push(
     `Next checkpoint: ${payload.nextCheckpointAt ?? 'not reported by the staking contract'}`,
@@ -109,12 +113,11 @@ Examples:
             raw.pendingStakingRewardsWei = pr.sum;
             raw.pendingByService = pr.pendingByService;
             if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
+          } else {
+            raw.pendingStakingRewardsError = pr.error;
           }
-          // pr.error path: leave the staking fields unset — assembleRewardsV1
-          // degrades to pending=0 / nextCheckpointAt=null (same as the catch).
-        } catch {
-          // Config unreadable or RPC error — assembleRewardsV1 degrades to
-          // pending=0 / nextCheckpointAt=null, which the human renderer handles.
+        } catch (err) {
+          raw.pendingStakingRewardsError = err instanceof Error ? err.message : String(err);
         }
       }
       const payload = deps.assembleRewardsV1(raw);

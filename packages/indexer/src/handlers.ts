@@ -89,6 +89,7 @@ export interface TransactionShape {
   transactionIndex?: number;
 }
 export interface LogShape {
+  address?: `0x${string}`;
   logIndex?: number;
 }
 
@@ -154,6 +155,45 @@ export interface TaskBudgetRefundedEvent {
     creator: `0x${string}`;
     solutionAmount: bigint;
     verdictAmount: bigint;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
+export interface RewardsDistributedEvent {
+  args: {
+    serviceId: bigint;
+    multisig: `0x${string}`;
+    collectorAmount: bigint;
+    protocolAmount: bigint;
+    curatingAgentAmount: bigint;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
+export interface ServiceStakedEvent {
+  args: {
+    epoch: bigint;
+    serviceId: bigint;
+    owner: `0x${string}`;
+    multisig: `0x${string}`;
+    nonces: readonly bigint[];
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
+export interface StakingCheckpointEvent {
+  args: {
+    epoch: bigint;
+    availableRewards: bigint;
+    serviceIds: readonly bigint[];
+    rewards: readonly bigint[];
+    epochLength: bigint;
   };
   block: BlockShape;
   transaction: TransactionShape;
@@ -477,6 +517,120 @@ export async function handleTaskBudgetRefunded({
   const existing = await context.db.find(task, { id });
   if (!existing) return;
   await context.db.update(task, { id }).set({ refunded: true });
+}
+
+// ── ExternalStakingDistributor: RewardsDistributed → rewardDistribution ─────
+
+export async function handleRewardsDistributed({
+  event,
+  context,
+  rewardDistribution,
+}: {
+  event: RewardsDistributedEvent;
+  context: HandlerContext;
+  rewardDistribution: unknown;
+}): Promise<void> {
+  await context.db
+    .insert(rewardDistribution)
+    .values({
+      serviceId: event.args.serviceId.toString(),
+      multisig: event.args.multisig,
+      operatorRewarded: event.args.collectorAmount,
+      protocolRewarded: event.args.protocolAmount,
+      curatingAgentRewarded: event.args.curatingAgentAmount,
+      claimedAtBlock: event.block.number,
+      claimedAtTimestamp: event.block.timestamp,
+      logIndex: event.log.logIndex ?? 0,
+      claimedAtTx: event.transaction.hash,
+      chainId: context.chain.id,
+    })
+    .onConflictDoNothing();
+}
+
+// ── StolasStakingProxy: ServiceStaked → stakingService ───────────────────────
+
+export async function handleServiceStaked({
+  event,
+  context,
+  stakingService,
+}: {
+  event: ServiceStakedEvent;
+  context: HandlerContext;
+  stakingService: unknown;
+}): Promise<void> {
+  const stakingProxy = event.log.address;
+  if (!stakingProxy) return;
+
+  await context.db
+    .insert(stakingService)
+    .values({
+      serviceId: event.args.serviceId.toString(),
+      stakingProxy,
+      owner: event.args.owner,
+      multisig: event.args.multisig,
+      stakedAtBlock: event.block.number,
+      stakedAtTimestamp: event.block.timestamp,
+      stakedAtTx: event.transaction.hash,
+      chainId: context.chain.id,
+    })
+    .onConflictDoUpdate({
+      owner: event.args.owner,
+      multisig: event.args.multisig,
+      stakedAtBlock: event.block.number,
+      stakedAtTimestamp: event.block.timestamp,
+      stakedAtTx: event.transaction.hash,
+    });
+}
+
+// ── StolasStakingProxy: Checkpoint → stakingRewardCheckpoint ─────────────────
+
+export async function handleStakingCheckpoint({
+  event,
+  context,
+  stakingService,
+  stakingRewardCheckpoint,
+}: {
+  event: StakingCheckpointEvent;
+  context: HandlerContext;
+  stakingService: unknown;
+  stakingRewardCheckpoint: unknown;
+}): Promise<void> {
+  const stakingProxy = event.log.address;
+  if (!stakingProxy) return;
+
+  const chainId = context.chain.id;
+  const logIndex = event.log.logIndex ?? 0;
+  const count = Math.min(event.args.serviceIds.length, event.args.rewards.length);
+
+  for (let i = 0; i < count; i++) {
+    const serviceId = event.args.serviceIds[i]?.toString();
+    const reward = event.args.rewards[i];
+    if (!serviceId || reward === undefined) continue;
+
+    const service = (await context.db.find(stakingService, {
+      chainId,
+      stakingProxy,
+      serviceId,
+    })) as { multisig?: `0x${string}` } | null;
+    if (!service?.multisig) continue;
+
+    await context.db
+      .insert(stakingRewardCheckpoint)
+      .values({
+        serviceId,
+        stakingProxy,
+        multisig: service.multisig,
+        epoch: event.args.epoch.toString(),
+        reward,
+        epochLength: event.args.epochLength,
+        checkpointAtBlock: event.block.number,
+        checkpointAtTimestamp: event.block.timestamp,
+        logIndex,
+        checkpointAtTx: event.transaction.hash,
+        chainId,
+      })
+      .onConflictDoNothing();
+  }
 }
 
 // ── CheckpointManifest lite parser ───────────────────────────────────────────

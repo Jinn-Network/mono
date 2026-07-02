@@ -6,6 +6,39 @@ export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'er
 // Wallet card.
 export type StakingRewardReadState = 'pending' | 'ready' | 'error';
 
+export interface RewardsServiceEntry {
+  index: number;
+  pending: string;
+  claimed: string;
+  asset: 'OLAS';
+  lastClaimAt: string | null;
+  lastClaimTxHash: string | null;
+}
+
+export interface RewardsResponse {
+  schemaVersion: 1;
+  generatedAt: string;
+  readState: 'ready' | 'error';
+  totalPending: string;
+  totalClaimed: string;
+  lastClaimAt: string | null;
+  lastClaimTickAt: string | null;
+  nextCheckpointAt: string | null;
+  error?: string;
+  services: RewardsServiceEntry[];
+}
+
+export interface ClaimRewardsResponse {
+  ok: boolean;
+  result?: {
+    submitted?: number;
+    skippedNoPending?: number;
+    claims?: Array<{ txHash?: string; amountWei?: string; serviceId?: number }>;
+  };
+  exitCode?: number | null;
+  error?: string;
+}
+
 // ── cost surface (#474) ─────────────────────────────────────────────────────
 //
 // Mirror of `CostSurfaceStatus` from `client/src/spend/cost-surface-status.ts`.

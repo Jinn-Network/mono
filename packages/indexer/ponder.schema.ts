@@ -17,6 +17,12 @@
  *                           keyed by (requestId, chainId). The on-chain verdictCode
  *                           defaults to Pass(1) for failed evaluations (daemon bug); this table
  *                           holds the evaluator's real judgment from the off-chain envelope.
+ *   RewardDistribution    — from Base Sepolia ExternalStakingDistributor.RewardsDistributed;
+ *                           claimed OLAS/JINN staking rewards by service multisig.
+ *   StakingService        — from active stOLAS staking proxy ServiceStaked;
+ *                           serviceId -> multisig mapping.
+ *   StakingRewardCheckpoint — from active stOLAS staking proxy Checkpoint;
+ *                             earned/checkpointed OLAS by service multisig.
  *
  * Schema-version policy: any breaking change to an existing entity (rename,
  * remove, or type-change of a column) bumps the schema version and triggers a
@@ -191,6 +197,110 @@ export const verdict = onchainTable(
     evaluatorIdx: index().on(table.evaluator),
     codeIdx: index().on(table.verdictCode),
     blockIdx: index().on(table.createdAtBlock),
+  }),
+);
+
+// ── RewardDistribution ───────────────────────────────────────────────────────
+
+/**
+ * One OLAS/JINN staking reward distribution. From
+ * ExternalStakingDistributor.RewardsDistributed on Base Sepolia. In this
+ * testnet setup, the token named JINN represents OLAS.
+ *
+ * `operatorRewarded` stores the event's collectorAmount, which is the
+ * operator-facing reward reserve in the current stOLAS configuration.
+ */
+export const rewardDistribution = onchainTable(
+  'reward_distribution',
+  (t) => ({
+    serviceId: t.text().notNull(),
+    /** The service Safe / operator multisig that earned the reward. */
+    multisig: t.hex().notNull(),
+    /** OLAS amount attributed to the operator-facing collector slot (wei). */
+    operatorRewarded: t.bigint().notNull(),
+    /** OLAS amount routed to protocol (wei). */
+    protocolRewarded: t.bigint().notNull(),
+    /** OLAS amount routed to curating agent (wei). */
+    curatingAgentRewarded: t.bigint().notNull(),
+    claimedAtBlock: t.bigint().notNull(),
+    claimedAtTimestamp: t.bigint().notNull(),
+    logIndex: t.integer().notNull(),
+    claimedAtTx: t.hex().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.chainId, table.serviceId, table.claimedAtBlock, table.logIndex] }),
+    multisigIdx: index().on(table.multisig),
+    blockIdx: index().on(table.claimedAtBlock),
+    timestampIdx: index().on(table.claimedAtTimestamp),
+  }),
+);
+
+// ── StakingService ───────────────────────────────────────────────────────────
+
+/**
+ * Latest serviceId -> multisig mapping from the active stOLAS staking proxy.
+ * Checkpoint events only carry serviceIds, so this table lets the indexer
+ * attribute earned rewards to the public operator multisig without requiring a
+ * claim transaction.
+ */
+export const stakingService = onchainTable(
+  'staking_service',
+  (t) => ({
+    serviceId: t.text().notNull(),
+    stakingProxy: t.hex().notNull(),
+    owner: t.hex().notNull(),
+    multisig: t.hex().notNull(),
+    stakedAtBlock: t.bigint().notNull(),
+    stakedAtTimestamp: t.bigint().notNull(),
+    stakedAtTx: t.hex().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.chainId, table.stakingProxy, table.serviceId] }),
+    multisigIdx: index().on(table.multisig),
+    serviceIdx: index().on(table.serviceId),
+    blockIdx: index().on(table.stakedAtBlock),
+  }),
+);
+
+// ── StakingRewardCheckpoint ──────────────────────────────────────────────────
+
+/**
+ * Earned OLAS allocation from the active stOLAS Checkpoint event. This is the
+ * activity signal for `/operators`: earning during the bucket matters, while
+ * claiming/cashing out is operator-controlled and should not affect liveness.
+ */
+export const stakingRewardCheckpoint = onchainTable(
+  'staking_reward_checkpoint',
+  (t) => ({
+    serviceId: t.text().notNull(),
+    stakingProxy: t.hex().notNull(),
+    multisig: t.hex().notNull(),
+    epoch: t.text().notNull(),
+    reward: t.bigint().notNull(),
+    epochLength: t.bigint().notNull(),
+    checkpointAtBlock: t.bigint().notNull(),
+    checkpointAtTimestamp: t.bigint().notNull(),
+    logIndex: t.integer().notNull(),
+    checkpointAtTx: t.hex().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({
+      columns: [
+        table.chainId,
+        table.stakingProxy,
+        table.epoch,
+        table.serviceId,
+        table.checkpointAtBlock,
+        table.logIndex,
+      ],
+    }),
+    multisigIdx: index().on(table.multisig),
+    serviceIdx: index().on(table.serviceId),
+    timestampIdx: index().on(table.checkpointAtTimestamp),
+    blockIdx: index().on(table.checkpointAtBlock),
   }),
 );
 

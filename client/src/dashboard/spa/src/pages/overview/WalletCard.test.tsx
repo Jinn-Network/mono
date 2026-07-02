@@ -15,13 +15,15 @@ function defaultProps(): WalletCardProps {
     totalEth: '0.0088',
     runwayDays: 1,
     perRole: { master: '0.0088', agent: '—', safe: '—' },
-    olasEarned: '0.0000',
-    olasEarnedLast24h: '0.0000',
+    olasPending: '0.0000',
+    olasClaimed: '0.0000',
+    olasClaimedLast24h: '0.0000',
     olasState: 'ready',
     olasError: null,
     lastClaimAt: null,
     lastPasswordRotationAt: null,
     onTopUp: vi.fn(),
+    onClaim: vi.fn(),
   };
 }
 
@@ -52,51 +54,58 @@ describe('WalletCard', () => {
     expect(screen.queryByRole('button', { name: /per role/i })).toBeNull();
   });
 
-  it('does not show collector reward rows or claim actions', () => {
-    const { ui } = wrap(<WalletCard {...defaultProps()} olasEarned="1.2500" />);
+  it('shows pending OLAS, claimed OLAS, and a manual Claim action without legacy reward copy', () => {
+    const { ui } = wrap(
+      <WalletCard
+        {...defaultProps()}
+        olasPending="1.2500"
+        olasClaimed="3.5000"
+        olasClaimedLast24h="0.2500"
+      />,
+    );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/lifetime/i);
+    expect(rewards.textContent).toMatch(/pending olas/i);
     expect(rewards.textContent).toContain('1.2500');
-    expect(rewards.textContent).toMatch(/olas earned last 24hrs/i);
-    expect(rewards.textContent).not.toMatch(/lifetime claimed/i);
+    expect(rewards.textContent).toMatch(/claimed last 24hrs/i);
+    expect(rewards.textContent).toMatch(/lifetime claimed/i);
     expect(rewards.textContent).not.toMatch(/collector pending/i);
     expect(rewards.textContent).not.toMatch(/collector claimed/i);
     expect(rewards.textContent).not.toMatch(/collector-token/i);
-    expect(screen.queryByTestId('wallet-claim')).toBeNull();
-    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
+    expect(screen.getByTestId('wallet-claim').textContent).toMatch(/claim olas/i);
+    expect(screen.getByRole('button', { name: /claim olas/i })).toBeTruthy();
   });
 
-  it('shows the lifetime OLAS stat in the Rewards section when the read is ready', () => {
+  it('shows the pending OLAS stat in the Rewards section when the read is ready', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasEarned="1.5000"
+        olasPending="1.5000"
         olasState="ready"
       />,
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/lifetime/i);
-    const olasValue = screen.getByTestId('olas-earned-value');
+    expect(rewards.textContent).toMatch(/pending olas/i);
+    const olasValue = screen.getByTestId('olas-pending-value');
     expect(olasValue.textContent).toBe('1.5000');
     expect(rewards.textContent).toContain('OLAS');
-    expect(screen.queryByTestId('olas-earned-state')).toBeNull();
+    expect(screen.queryByTestId('olas-pending-state')).toBeNull();
   });
 
-  it('shows OLAS earned in the last 24hrs above the lifetime balance', () => {
+  it('shows OLAS claimed in the last 24hrs below pending rewards', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasEarned="1.5000"
-        olasEarnedLast24h="0.2500"
+        olasPending="1.5000"
+        olasClaimedLast24h="0.2500"
         olasState="ready"
       />,
     );
     render(ui);
-    const region = screen.getByTestId('olas-earned-24h-region');
-    expect(region.textContent).toMatch(/olas earned last 24hrs/i);
-    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('0.2500');
+    const region = screen.getByTestId('olas-claimed-24h-region');
+    expect(region.textContent).toMatch(/claimed last 24hrs/i);
+    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('0.2500');
     expect(region.textContent).toContain('OLAS');
   });
 
@@ -104,41 +113,43 @@ describe('WalletCard', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasEarned="—"
-        olasEarnedLast24h={null}
+        olasPending="—"
+        olasClaimedLast24h={null}
         olasState="pending"
       />,
     );
     render(ui);
-    expect(screen.getByTestId('olas-earned-value').textContent).toBe('pending');
-    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('pending');
-    expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
+    expect(screen.getByTestId('olas-pending-value').textContent).toBe('pending');
+    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('pending');
+    expect(screen.getByTestId('olas-pending-state').textContent).toMatch(
       /no rewards yet/i,
     );
+    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('shows the error string when the OLAS read failed', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasEarned="—"
-        olasEarnedLast24h={null}
+        olasPending="—"
+        olasClaimedLast24h={null}
         olasState="error"
         olasError="OLAS staking rewards temporarily unavailable."
       />,
     );
     render(ui);
-    expect(screen.getByTestId('olas-earned-value').textContent).toBe('unavailable');
-    expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
+    expect(screen.getByTestId('olas-pending-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('olas-pending-state').textContent).toMatch(
       /temporarily unavailable/i,
     );
-    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('unavailable');
+    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('wraps the OLAS-earned row in a polite live region', () => {
+  it('wraps the pending OLAS row in a polite live region', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} />);
     render(ui);
-    const region = screen.getByTestId('olas-earned-region');
+    const region = screen.getByTestId('olas-pending-region');
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.getAttribute('aria-atomic')).toBe('true');
   });
@@ -158,6 +169,27 @@ describe('WalletCard', () => {
     render(ui);
     fireEvent.click(screen.getByTestId('wallet-topup'));
     expect(onTopUp).toHaveBeenCalledOnce();
+  });
+
+  it('invokes onClaim when Claim OLAS is clicked', () => {
+    const onClaim = vi.fn();
+    const { ui } = wrap(<WalletCard {...defaultProps()} olasPending="0.0100" onClaim={onClaim} />);
+    render(ui);
+    fireEvent.click(screen.getByTestId('wallet-claim'));
+    expect(onClaim).toHaveBeenCalledOnce();
+  });
+
+  it('disables Claim OLAS when there is no pending OLAS or another action is running', () => {
+    const { ui: zeroPending } = wrap(<WalletCard {...defaultProps()} olasPending="0.0000" />);
+    const first = render(zeroPending);
+    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
+    first.unmount();
+
+    const { ui: activeAction } = wrap(
+      <WalletCard {...defaultProps()} olasPending="0.0100" actionsDisabled />,
+    );
+    render(activeAction);
+    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('surfaces remaining top-ups for today when quota is partially used (issue #560)', () => {

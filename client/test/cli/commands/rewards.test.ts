@@ -11,6 +11,13 @@ const mockRaw: GatheredStatusRaw = {
   recentActivity: [],
   lastRewardClaimTickAt: '2026-04-14T11:00:00.000Z',
   rewardClaimIntervalMs: 1,
+  claimedByService: {
+    0: {
+      total: '44',
+      lastAt: '2026-04-14T10:45:00.000Z',
+      lastTxHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
+    },
+  },
   fleet: {
     master_address: null,
     chain: 'base-sepolia',
@@ -51,9 +58,16 @@ describe('rewards command', () => {
     const { envelopes, exits } = await runCommand(cmd);
     expect(exits).toEqual([]);
     expect(envelopes).toHaveLength(1);
-    const parsed = envelopes[0] as { lastClaimAt: string; services: Array<{ pending: string }> };
-    expect(parsed.lastClaimAt).toBe('2026-04-14T11:00:00.000Z');
+    const parsed = envelopes[0] as {
+      lastClaimAt: string | null;
+      lastClaimTickAt: string | null;
+      services: Array<{ pending: string; claimed: string; asset: string }>;
+    };
+    expect(parsed.lastClaimAt).toBe('2026-04-14T10:45:00.000Z');
+    expect(parsed.lastClaimTickAt).toBe('2026-04-14T11:00:00.000Z');
     expect(parsed.services[0].pending).toBe('1000');
+    expect(parsed.services[0].claimed).toBe('44');
+    expect(parsed.services[0].asset).toBe('OLAS');
   });
 
   it('invokes the on-demand staking extractor and renders its pending value (#992)', async () => {
@@ -95,12 +109,14 @@ describe('rewards command', () => {
     expect(exits).toEqual([11]);
   });
 
-  it('labels human output as staking collector claims, not operator tJINN', async () => {
+  it('labels human output as pending OLAS rewards, not collector tokens or tJINN', async () => {
     const cmd = createRewardsCommand(fakeDeps);
     const { raw } = await runCommand(cmd, { argv: ['--human'], tty: true });
     const stdout = raw.join('');
-    expect(stdout).toContain('Pending staking collector claims:');
-    expect(stdout).toContain('collector-token');
-    expect(stdout).toContain('Operator OLAS staking rewards accumulate via the stOLAS curating-agent rail');
+    expect(stdout).toContain('Pending OLAS rewards:');
+    expect(stdout).toContain('Service #0: 0.000000000000001 OLAS pending');
+    expect(stdout).toContain('Operator OLAS rewards accrue through staking');
+    expect(stdout).not.toContain('collector-token');
+    expect(stdout).not.toContain('tJINN');
   });
 });

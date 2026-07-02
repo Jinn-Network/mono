@@ -137,6 +137,8 @@ export interface GatheredStatusRaw {
    * /v1/status hot path (#992).
    */
   pendingStakingRewardsWei?: string;
+  /** Error from the on-demand staking reward read. Kept off /v1/status hot path. */
+  pendingStakingRewardsError?: string;
   /**
    * ISO timestamp when the staking contract will next accept a checkpoint.
    * Populated only by `jinn rewards` on demand, never on the /v1/status hot

@@ -96,4 +96,20 @@ describe('ponder.config baseSepolia fallback (AC4)', () => {
       '0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247',
     );
   });
+
+  it('indexes the Base Sepolia OLAS/JINN ExternalStakingDistributor rewards contract', async () => {
+    const config = await loadConfig() as any;
+    expect(config.contracts.ExternalStakingDistributor.chain.baseSepolia).toMatchObject({
+      address: '0x20951FBDb4F9cB1f051ef416BCB11A9Cfe3CEf81',
+      startBlock: 41_000_000,
+    });
+  });
+
+  it('indexes the active Base Sepolia stOLAS staking proxy checkpoint events', async () => {
+    const config = await loadConfig() as any;
+    expect(config.contracts.StolasStakingProxy.chain.baseSepolia).toMatchObject({
+      address: '0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39',
+      startBlock: 41_000_000,
+    });
+  });
 });

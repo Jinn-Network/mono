@@ -1071,10 +1071,6 @@ export class MechAdapter implements ExecutionAdapter {
           for (const solution of submittedSolutions) {
             this.rememberPendingEvaluationSolution(solution);
           }
-          this.requestBlockCursor = currentBlock;
-          if (this.store) {
-            this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
-          }
 
           const joinedManifestDigests = this.joinedManifestDigestSet();
           const createdTasks = decodeTaskCreatedLogs(logs);
@@ -1104,6 +1100,10 @@ export class MechAdapter implements ExecutionAdapter {
           }
           for await (const announcement of this.retryPendingEvaluationSolutions()) {
             yield announcement;
+          }
+          this.requestBlockCursor = currentBlock;
+          if (this.store) {
+            this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
           }
         }
       } catch (err) {

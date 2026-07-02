@@ -35,6 +35,8 @@ import type {
   HarnessAuthStatusResponse,
   CodexDoctorResponse,
   DebugReportManifest,
+  RewardsResponse,
+  ClaimRewardsResponse,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -81,6 +83,7 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getStatus: () => jfetch<unknown>('/v1/status'),
+  getRewards: () => jfetch<RewardsResponse>('/v1/rewards'),
   getBootstrap: () => jfetch<BootstrapState>('/v1/bootstrap'),
   getRecentEvents: (kinds?: string[], limit = 100) => {
     const q = new URLSearchParams();
@@ -195,6 +198,10 @@ export const api = {
    */
   stopDaemon: () =>
     jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/stop', {
+      method: 'POST',
+    }),
+  claimRewards: () =>
+    jfetch<ClaimRewardsResponse>('/api/admin/claim-rewards', {
       method: 'POST',
     }),
   getSolverNets: () => jfetch<SolverNetsCatalogResponse>('/v1/solvernets'),

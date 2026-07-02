@@ -55,6 +55,8 @@
 import { createConfig } from 'ponder';
 import { JINN_ROUTER_ABI } from './abis/JinnRouter.js';
 import { IDENTITY_REGISTRY_ABI } from './abis/IdentityRegistry.js';
+import { EXTERNAL_STAKING_DISTRIBUTOR_ABI } from './abis/ExternalStakingDistributor.js';
+import { STOLAS_STAKING_PROXY_ABI } from './abis/StolasStakingProxy.js';
 import {
   BASE_SEPOLIA_IDENTITY_REGISTRY_ADDRESS,
   BASE_SEPOLIA_IDENTITY_REGISTRY_START_BLOCK,
@@ -97,6 +99,14 @@ function buildSnapshotConfig(): ReturnType<typeof createConfig> {
         abi: IDENTITY_REGISTRY_ABI,
         chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
       },
+      ExternalStakingDistributor: {
+        abi: EXTERNAL_STAKING_DISTRIBUTOR_ABI,
+        chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
+      },
+      StolasStakingProxy: {
+        abi: STOLAS_STAKING_PROXY_ABI,
+        chain: { snapshot: { address: DEAD_ADDRESS, startBlock } },
+      },
     },
   });
 }
@@ -133,6 +143,24 @@ const testnetConfig = createConfig({
         baseSepolia: {
           address: BASE_SEPOLIA_IDENTITY_REGISTRY_ADDRESS,
           startBlock: BASE_SEPOLIA_IDENTITY_REGISTRY_START_BLOCK,
+        },
+      },
+    },
+    ExternalStakingDistributor: {
+      abi: EXTERNAL_STAKING_DISTRIBUTOR_ABI,
+      chain: {
+        baseSepolia: {
+          address: '0x20951FBDb4F9cB1f051ef416BCB11A9Cfe3CEf81',
+          startBlock: 41_000_000,
+        },
+      },
+    },
+    StolasStakingProxy: {
+      abi: STOLAS_STAKING_PROXY_ABI,
+      chain: {
+        baseSepolia: {
+          address: '0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39',
+          startBlock: 41_000_000,
         },
       },
     },

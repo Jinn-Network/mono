@@ -40,27 +40,23 @@ export interface WalletCardProps {
     agent: string;
     safe: string;
   };
-  /**
-   * Lifetime stOLAS curating-agent rewards claimed via the distributor (wei
-   * string formatted for display). Meaningful when `olasState === 'ready'`.
-   */
-  olasEarned: string;
-  /**
-   * Sum of distributor.claim reward_claims recorded in the last 24 hours,
-   * formatted as a decimal string when available.
-   */
-  olasEarnedLast24h: string | null;
-  /** Read state for the OLAS earned figures. */
+  /** Pending OLAS available to claim, formatted for display. */
+  olasPending: string;
+  /** Lifetime claimed OLAS, formatted for display. */
+  olasClaimed: string;
+  /** Claimed OLAS recorded in the last 24 hours, formatted for display. */
+  olasClaimedLast24h: string | null;
+  /** Read state for the OLAS reward figures. */
   olasState: StakingRewardReadState;
   /** Public read error string when rewards are unavailable. */
   olasError?: string | null;
-  // lastClaimAt stays in the props so re-enabling the "last claim" row is
-  // a one-block restore.
-  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+  /** Last successful claim timestamp, if any. */
   lastClaimAt?: string | null;
   /** ISO timestamp of last password rotation, or null if never rotated */
   lastPasswordRotationAt: string | null;
   onTopUp: () => void;
+  onClaim: () => void;
+  claimPending?: boolean;
   /** When true, action buttons are disabled (e.g. another action is in flight). */
   actionsDisabled?: boolean;
   /**
@@ -98,17 +94,17 @@ const statUnit = 'font-mono text-[12px] font-medium text-[var(--fg-muted)]';
 const statAux = 'font-mono text-[12px] text-[var(--fg-dim)]';
 
 /**
- * Display value + supporting copy for the OLAS-earned row, keyed on the read
+ * Display value + supporting copy for the pending OLAS row, keyed on the read
  * state.
  */
 function olasDisplay(
   state: StakingRewardReadState,
-  olasEarned: string,
+  olasPending: string,
   olasError: string | null | undefined,
 ): { value: string; copy: string | null } {
   switch (state) {
     case 'ready':
-      return { value: olasEarned, copy: null };
+      return { value: olasPending, copy: null };
     case 'error':
       return {
         value: 'unavailable',
@@ -122,12 +118,16 @@ function olasDisplay(
 export function WalletCard({
   totalEth,
   runwayDays,
-  olasEarned,
-  olasEarnedLast24h,
+  olasPending,
+  olasClaimed,
+  olasClaimedLast24h,
   olasState,
   olasError,
+  lastClaimAt,
   lastPasswordRotationAt,
   onTopUp,
+  onClaim,
+  claimPending = false,
   actionsDisabled = false,
   topupDailyCap,
   topupCallsRemaining,
@@ -136,9 +136,12 @@ export function WalletCard({
   const [, navigate] = useLocation();
   const { value: olasValue, copy: olasStateCopy } = olasDisplay(
     olasState,
-    olasEarned,
+    olasPending,
     olasError,
   );
+  const pendingOlasNumber = Number.parseFloat(olasPending);
+  const hasPendingOlas = Number.isFinite(pendingOlasNumber) && pendingOlasNumber > 0;
+  const claimDisabled = actionsDisabled || claimPending || olasState !== 'ready' || !hasPendingOlas;
 
   // Issue #560: quota copy + disable. When the cap is reached the button is
   // disabled until the cooldown resets; while quota remains we show how many
@@ -168,46 +171,19 @@ export function WalletCard({
         <div className="flex flex-col gap-3" data-testid="wallet-section-rewards">
           <span className={sectionLabel}>Rewards</span>
 
-          {/*
-            24h-window claimed rewards is the operationally meaningful number.
-            Lifetime (`rewards.claimedStakingRewardsWei`) is shown below.
-          */}
           <div
             className="flex flex-col gap-1"
-            data-testid="olas-earned-24h-region"
+            data-testid="olas-pending-region"
             aria-live="polite"
             aria-atomic="true"
           >
             <p className="text-sm font-medium text-muted-foreground">
-              OLAS earned last 24hrs
+              Pending OLAS
             </p>
             <div className="flex items-baseline gap-2">
               <span
                 className="text-2xl font-bold tracking-tight"
-                data-testid="olas-earned-24h-value"
-                style={olasState === 'error' ? { color: 'var(--break-red)' } : undefined}
-              >
-                {olasEarnedLast24h ?? (olasState === 'error' ? 'unavailable' : 'pending')}
-              </span>
-              {olasEarnedLast24h !== null && (
-                <span className="text-xs text-muted-foreground">OLAS</span>
-              )}
-            </div>
-          </div>
-
-          <div
-            className="flex flex-col gap-1"
-            data-testid="olas-earned-region"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <p className="text-xs text-muted-foreground" data-testid="olas-earned-state-prefix">
-              Lifetime
-            </p>
-            <div className="flex items-baseline gap-2">
-              <span
-                className="text-base font-medium"
-                data-testid="olas-earned-value"
+                data-testid="olas-pending-value"
                 style={olasState === 'error' ? { color: 'var(--break-red)' } : undefined}
               >
                 {olasValue}
@@ -217,11 +193,61 @@ export function WalletCard({
               )}
             </div>
             {olasStateCopy && (
-              <span className="text-xs text-muted-foreground" data-testid="olas-earned-state">
+              <span className="text-xs text-muted-foreground" data-testid="olas-pending-state">
                 {olasStateCopy}
               </span>
             )}
           </div>
+
+          <div
+            className="flex flex-col gap-1"
+            data-testid="olas-claimed-24h-region"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <p className="text-xs text-muted-foreground">
+              Claimed last 24hrs
+            </p>
+            <div className="flex items-baseline gap-2">
+              <span
+                className="text-base font-medium"
+                data-testid="olas-claimed-24h-value"
+                style={olasState === 'error' ? { color: 'var(--break-red)' } : undefined}
+              >
+                {olasClaimedLast24h ?? (olasState === 'error' ? 'unavailable' : 'pending')}
+              </span>
+              {olasClaimedLast24h !== null && (
+                <span className="text-xs text-muted-foreground">OLAS</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs text-muted-foreground">Lifetime claimed</span>
+              <span className="text-base font-medium" data-testid="olas-claimed-value">
+                {olasState === 'error' ? 'unavailable' : olasClaimed}
+              </span>
+              {olasState !== 'error' && <span className="text-xs text-muted-foreground">OLAS</span>}
+            </div>
+            {lastClaimAt && (
+              <span className="text-xs text-muted-foreground">
+                last claim <time dateTime={lastClaimAt}>{lastClaimAt}</time>
+              </span>
+            )}
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label="Claim OLAS"
+            onClick={onClaim}
+            disabled={claimDisabled}
+            data-testid="wallet-claim"
+            className="self-start"
+          >
+            {claimPending ? 'Claiming OLAS' : 'Claim OLAS'}
+          </Button>
         </div>
 
         <Separator />

@@ -12,6 +12,7 @@ import {
   rollingResolvedRate,
   rankLeaderboard,
   compareByResolvedRateAttempts,
+  compareByJinnEarnedActive,
   freshness,
   composition,
   detectFreezeViolations,
@@ -282,6 +283,7 @@ describe('rankLeaderboard', () => {
     verdictsTotal: 5,
     verdictsPass: 4,
     resolvedRate: 0.8,
+    jinnEarned: 0n,
     active: false,
     ...overrides,
   });
@@ -353,6 +355,16 @@ describe('rankLeaderboard', () => {
   // symbol is exported.
   it('exports compareByResolvedRateAttempts as a named symbol', () => {
     expect(typeof compareByResolvedRateAttempts).toBe('function');
+  });
+
+  it('compareByJinnEarnedActive sorts by earned OLAS desc, active desc, operator asc', () => {
+    const rows = [
+      makeRow({ operator: '0xCCC' as `0x${string}`, jinnEarned: 5n, active: false }),
+      makeRow({ operator: '0xBBB' as `0x${string}`, jinnEarned: 10n, active: false }),
+      makeRow({ operator: '0xAAA' as `0x${string}`, jinnEarned: 10n, active: true }),
+    ];
+    const { lowVolume } = rankLeaderboard(rows, 100, compareByJinnEarnedActive);
+    expect(lowVolume.map((r) => r.operator)).toEqual(['0xAAA', '0xBBB', '0xCCC']);
   });
 
   it('empty input returns empty ranked and lowVolume', () => {

@@ -75,11 +75,11 @@ export const JinnConfigSchema = z.object({
 
   /**
    * How often the daemon attempts stOLAS ExternalStakingDistributor.claim for each staked
-   * fleet service (ms). Default 600000 (10 min) — well under typical checkpoint liveness windows
-   * on Base while limiting RPC/gas churn. Set to 0 to disable auto-claim.
+   * fleet service (ms). Default 0 so operators claim OLAS manually from the app.
+   * Set JINN_REWARD_CLAIM_INTERVAL_MS=600000 for managed/headless auto-claim.
    * Env: JINN_REWARD_CLAIM_INTERVAL_MS
    */
-  rewardClaimIntervalMs: z.number().int().min(0).default(600_000),
+  rewardClaimIntervalMs: z.number().int().min(0).default(0),
 
   /**
    * How often the daemon checks agent EOA and Safe balances and tops them up from the master

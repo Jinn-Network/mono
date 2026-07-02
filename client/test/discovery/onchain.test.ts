@@ -606,6 +606,7 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
       safeAddress: SAFE_ADDRESS,
       mechAddress: MECH_ADDRESS,
       taskDiscoveryFromBlock: 0,
+      chunkBlocks: 100_000,
       publicClient: mockClient as never,
     });
 
@@ -621,6 +622,14 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
     expect(result[0].createdAtBlock).toBe(5_000);
     expect(result[0].createdAtTx).toBe(txHash);
     expect(result[0].maxClaims).toBe(5);
+    expect(mockClient.getLogs).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      address: ROUTER,
+      event: expect.objectContaining({ name: 'TaskCreated' }),
+    }));
+    expect(mockClient.getLogs).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      address: ROUTER,
+      event: expect.objectContaining({ name: 'TaskAttemptCreated' }),
+    }));
   });
 
   it('filters out a candidate when canClaimTask returns ok=false', async () => {

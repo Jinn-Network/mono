@@ -793,6 +793,10 @@ export interface TaskRecord {
 // so the provider filters by topic0 server-side. `getAbiItem` throws if a name is
 // absent, so a future ABI rename fails loud rather than silently emptying a filter.
 export const ROUTER_TASK_CREATED_EVENT = getAbiItem({ abi: JINN_ROUTER_ABI, name: 'TaskCreated' });
+export const ROUTER_TASK_ATTEMPT_CREATED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'TaskAttemptCreated',
+});
 export const ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'SolutionDeliveryClaimed',

@@ -32,7 +32,11 @@ export interface LeaderboardRow {
   verdictsPass: number;
   /** null when verdictsTotal === 0 */
   resolvedRate: number | null;
-  /** true when the operator has ≥1 on-chain attempt. */
+  /** Decimal wei string; labeled as OLAS in the UI. */
+  jinnEarned: string;
+  /** Oldest-first 8 x 6h reward qualification flags. */
+  recentBlocks?: boolean[];
+  /** true when the newest completed OLAS reward bucket qualifies. */
   active: boolean;
 }
 
@@ -216,18 +220,30 @@ export interface SolverNetResponse extends FreshnessMeta {
 
 // ── GET /explorer/operators ──────────────────────────────────────────────────
 
+export interface ActiveWindow {
+  startTs: number;
+  endTs: number;
+  blockSeconds: number;
+  blockCount: number;
+  requiredOlasPerBlock: string;
+}
+
 export interface OperatorsResponse extends FreshnessMeta {
   ranked: RankedLeaderboardRow[];
   lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
   minVerdicts: number;
   /**
-   * Distinct operators with ≥1 on-chain attempt or delivery.
-   *
-   * Post tokenless-OLAS pivot: this is purely an activity count — NOT JINN-earning
-   * status. JINN token rewards are gone; there is no jinnEarned / jinnAttribution
-   * surface. An operator is "active" iff it has ≥1 recorded attempt on-chain.
+   * Distinct operators that cleared the newest completed 6h OLAS reward bucket.
    */
   activeOperators: number;
+  /** Distinct operators that cleared all 8 completed 6h OLAS reward buckets. */
+  sustainedOperators: number;
+  /** Distinct operators with at least 25 OLAS lifetime. */
+  operatorsAtMilestone3: number;
+  activeWindow: ActiveWindow;
+  meta?: {
+    jinnAttribution?: 'pending' | 'ok';
+  };
   appliedFilters?: {
     mode?: string;
     harness?: string;

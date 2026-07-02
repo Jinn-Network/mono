@@ -36,7 +36,7 @@
  */
 import { ponder } from 'ponder:registry';
 import { and, count, eq } from 'ponder';
-import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta, rewardDistribution, stakingService, stakingRewardCheckpoint } from 'ponder:schema';
 
 // ── Enrichment config (read once at module scope) ─────────────────────────────
 // JINN_INDEXER_ENRICH_ENVELOPES governs in-handler IPFS enrichment. Since #779
@@ -73,6 +73,9 @@ import {
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
+  handleRewardsDistributed,
+  handleServiceStaked,
+  handleStakingCheckpoint,
   type HandlerContext,
   type TaskCreatedEvent,
   type TaskAttemptCreatedEvent,
@@ -80,6 +83,9 @@ import {
   type MetadataSetEvent,
   type VerdictDeliveryClaimedEvent,
   type TaskBudgetRefundedEvent,
+  type RewardsDistributedEvent,
+  type ServiceStakedEvent,
+  type StakingCheckpointEvent,
 } from './handlers.js';
 
 ponder.on('JinnRouter:TaskCreated', async ({ event, context }) => {
@@ -143,6 +149,31 @@ ponder.on('JinnRouter:TaskBudgetRefunded', async ({ event, context }) => {
     event: event as unknown as TaskBudgetRefundedEvent,
     context: context as unknown as HandlerContext,
     task,
+  });
+});
+
+ponder.on('ExternalStakingDistributor:RewardsDistributed', async ({ event, context }) => {
+  await handleRewardsDistributed({
+    event: event as unknown as RewardsDistributedEvent,
+    context: context as unknown as HandlerContext,
+    rewardDistribution,
+  });
+});
+
+ponder.on('StolasStakingProxy:ServiceStaked', async ({ event, context }) => {
+  await handleServiceStaked({
+    event: event as unknown as ServiceStakedEvent,
+    context: context as unknown as HandlerContext,
+    stakingService,
+  });
+});
+
+ponder.on('StolasStakingProxy:Checkpoint', async ({ event, context }) => {
+  await handleStakingCheckpoint({
+    event: event as unknown as StakingCheckpointEvent,
+    context: context as unknown as HandlerContext,
+    stakingService,
+    stakingRewardCheckpoint,
   });
 });
 

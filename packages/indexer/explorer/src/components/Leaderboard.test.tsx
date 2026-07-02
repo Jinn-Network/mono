@@ -30,6 +30,7 @@ const RANKED: LeaderboardRankedRow[] = [
     verdictsTotal: 280,
     verdictsPass: 266,
     resolvedRate: 0.95,
+    jinnEarned: '0',
     active: false,
   },
   {
@@ -40,6 +41,7 @@ const RANKED: LeaderboardRankedRow[] = [
     verdictsTotal: 90,
     verdictsPass: 72,
     resolvedRate: 0.80,
+    jinnEarned: '0',
     active: false,
   },
   {
@@ -50,6 +52,7 @@ const RANKED: LeaderboardRankedRow[] = [
     verdictsTotal: 45,
     verdictsPass: 22,
     resolvedRate: 0.49,
+    jinnEarned: '0',
     active: false,
   },
 ];
@@ -62,6 +65,7 @@ const LOW_VOLUME: LeaderboardLowVolumeRow[] = [
     verdictsTotal: 2,
     verdictsPass: 1,
     resolvedRate: 0.5,
+    jinnEarned: '0',
     active: false,
   },
 ];
@@ -253,6 +257,7 @@ describe('Leaderboard hover affordance', () => {
             verdictsTotal: 10,
             verdictsPass: 7,
             resolvedRate: 0.7,
+            jinnEarned: '0',
             active: false,
           },
         ]}

@@ -24,12 +24,13 @@ import schema from 'ponder:schema';
 import { Hono } from 'hono';
 // Drizzle query helpers — re-exported by Ponder so we don't take a direct
 // dep on drizzle-orm (avoids the prod-install resolution miss we hit before).
-import { and, count, countDistinct, eq, inArray, max, sql } from 'ponder';
+import { and, count, countDistinct, eq, inArray, max, sql, sum } from 'ponder';
 import {
   resolvedRateFromCounts,
   bucketResolvedRate,
   rollingResolvedRate,
   rankLeaderboard,
+  compareByJinnEarnedActive,
   freshness,
   composition,
   detectFreezeViolations,
@@ -46,21 +47,101 @@ import {
   loadHeldOutSlate,
   type LoadedHeldOutSlate,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2-held-out-slate';
+import {
+  computeActiveOperators,
+  computeActiveWindow,
+  countOperatorsAtMilestone3,
+  selectRewardActivityRows,
+  type ActiveWindow as ActiveWindowDomain,
+  type RewardActivitySource,
+} from './active-operators.js';
 
-/**
- * Loads the set of operator multisigs that have ever submitted an attempt on
- * EXPLORER_CHAIN_ID. Post-pivot (JINN token economy removed) an operator is
- * "active" iff it has on-chain attempt activity — there is no rolling-window /
- * tJINN-earned qualification any more. Returned as a lowercase-comparable Set
- * of `attempt.operator` (`t.hex()`) values.
- */
-async function loadActiveOperatorAddresses(): Promise<Set<string>> {
+function serialiseActiveWindow(w: ActiveWindowDomain): {
+  startTs: number;
+  endTs: number;
+  blockSeconds: number;
+  blockCount: number;
+  requiredOlasPerBlock: string;
+} {
+  return {
+    startTs: w.startTs,
+    endTs: w.endTs,
+    blockSeconds: w.blockSeconds,
+    blockCount: w.blockCount,
+    requiredOlasPerBlock: w.requiredOlasPerBlock.toString(),
+  };
+}
+
+async function hasCheckpointRewardRows(): Promise<boolean> {
   const rows = await db
-    .select({ operator: schema.attempt.operator })
-    .from(schema.attempt)
-    .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID))
-    .groupBy(schema.attempt.operator);
-  return new Set(rows.map((r) => r.operator));
+    .select({ total: count() })
+    .from(schema.stakingRewardCheckpoint)
+    .where(eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID));
+  return Number(rows[0]?.total ?? 0) > 0;
+}
+
+async function loadActiveOperators(nowSec: number) {
+  const window = computeActiveWindow(nowSec);
+  const checkpointRowsExist = await hasCheckpointRewardRows();
+  if (checkpointRowsExist) {
+    const rewardRows = await db
+      .select({
+        multisig: schema.stakingRewardCheckpoint.multisig,
+        operatorRewarded: schema.stakingRewardCheckpoint.reward,
+        claimedAtTimestamp: schema.stakingRewardCheckpoint.checkpointAtTimestamp,
+      })
+      .from(schema.stakingRewardCheckpoint)
+      .where(
+        and(
+          eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID),
+          sql`${schema.stakingRewardCheckpoint.checkpointAtTimestamp} >= ${BigInt(window.startTs)}`,
+          sql`${schema.stakingRewardCheckpoint.checkpointAtTimestamp} < ${BigInt(window.endTs)}`,
+        ),
+      );
+    const selected = selectRewardActivityRows(rewardRows, [], true);
+    return { result: computeActiveOperators(selected.rows, nowSec), source: selected.source };
+  }
+
+  const rewardRows = await db
+    .select({
+      multisig: schema.rewardDistribution.multisig,
+      operatorRewarded: schema.rewardDistribution.operatorRewarded,
+      claimedAtTimestamp: schema.rewardDistribution.claimedAtTimestamp,
+    })
+    .from(schema.rewardDistribution)
+    .where(
+      and(
+        eq(schema.rewardDistribution.chainId, EXPLORER_CHAIN_ID),
+        sql`${schema.rewardDistribution.claimedAtTimestamp} >= ${BigInt(window.startTs)}`,
+        sql`${schema.rewardDistribution.claimedAtTimestamp} < ${BigInt(window.endTs)}`,
+      ),
+    );
+  const selected = selectRewardActivityRows([], rewardRows, false);
+  return { result: computeActiveOperators(selected.rows, nowSec), source: selected.source };
+}
+
+async function loadLifetimeRewards(
+  source: RewardActivitySource,
+): Promise<Array<{ multisig: `0x${string}`; operatorRewarded: bigint | string | number | null }>> {
+  if (source === 'checkpoint') {
+    return db
+      .select({
+        multisig: schema.stakingRewardCheckpoint.multisig,
+        operatorRewarded: sum(schema.stakingRewardCheckpoint.reward),
+      })
+      .from(schema.stakingRewardCheckpoint)
+      .where(eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID))
+      .groupBy(schema.stakingRewardCheckpoint.multisig);
+  }
+
+  return db
+    .select({
+      multisig: schema.rewardDistribution.multisig,
+      operatorRewarded: sum(schema.rewardDistribution.operatorRewarded),
+    })
+    .from(schema.rewardDistribution)
+    .where(eq(schema.rewardDistribution.chainId, EXPLORER_CHAIN_ID))
+    .groupBy(schema.rewardDistribution.multisig);
 }
 
 // ── Chain scope ───────────────────────────────────────────────────────────────
@@ -218,6 +299,16 @@ async function getIndexedHead(): Promise<{ lastIndexedBlock: bigint; validator: 
       .from(schema.verdictEnvelopeMeta)
       .where(eq(schema.verdictEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))
       .then((r) => ['verdictMeta', r[0]?.v ?? null] as const),
+    db
+      .select({ v: max(schema.rewardDistribution.claimedAtBlock) })
+      .from(schema.rewardDistribution)
+      .where(eq(schema.rewardDistribution.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => ['reward', r[0]?.v ?? null] as const),
+    db
+      .select({ v: max(schema.stakingRewardCheckpoint.checkpointAtBlock) })
+      .from(schema.stakingRewardCheckpoint)
+      .where(eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => ['stakingRewardCheckpoint', r[0]?.v ?? null] as const),
   ]);
   const candidates = entries.map(([, v]) => v).filter((v): v is bigint => v !== null);
   const lastIndexedBlock = candidates.length === 0
@@ -581,9 +672,8 @@ app.get('/network', async (c) => {
     tasksRefunded: Number(tRow?.refunded ?? 0),
     attempts: Number(aRow?.total ?? 0),
     // Distinct operator multisigs that have ever submitted an attempt on
-    // EXPLORER_CHAIN_ID — the post-pivot "active operator" signal (operators
-    // are active iff they have on-chain attempt activity; the JINN-reward
-    // rolling-window / milestone surface was removed with the token economy).
+    // EXPLORER_CHAIN_ID. This network-wide headline remains an ever-attempted
+    // count; /operators owns the OLAS reward-window active/sustained surface.
     everAttemptedOperators: Number(aRow?.distinctOperators ?? 0),
     solverNetsRunning: Number(snRow?.running ?? 0),
     verdicts: verdictsTotal,
@@ -1102,7 +1192,9 @@ app.use('/operators', explorerFreshness());
  *   "ranked": [...],
  *   "lowVolume": [...],
  *   "minVerdicts": 5,
- *   "activeOperators": 3,          // distinct operators with ≥1 on-chain attempt
+ *   "activeOperators": 3,          // operators whose newest OLAS reward bucket qualifies
+ *   "sustainedOperators": 1,       // operators qualified in all 8 completed 6h buckets
+ *   "operatorsAtMilestone3": 2,    // operators with >=25 OLAS lifetime
  *   "appliedFilters": {},          // present when ?mode or ?harness is set
  *   "lastIndexedBlock": "...",
  *   "lastIndexedAt": "...",
@@ -1110,11 +1202,10 @@ app.use('/operators', explorerFreshness());
  * }
  * ```
  *
- * Post-pivot the JINN-token reward surface is gone: there is no per-operator
- * `jinnEarned`, no `jinnAttribution`, and no rolling-window / milestone counts.
- * An operator's `active` flag is now purely on-chain activity — true iff the
- * operator has ≥1 recorded `attempt` on EXPLORER_CHAIN_ID. Ranking falls back
- * to the quality-first default comparator (resolvedRate, attempts, operator).
+ * OLAS is represented by the token named JINN on Base Sepolia. Active and
+ * sustained operators are computed from stOLAS Checkpoint earned-reward
+ * allocations. ExternalStakingDistributor.RewardsDistributed claim rows are
+ * kept only as a temporary fallback while no checkpoint rows have been indexed.
  *
  * Per row (ebu7.6):
  *   `dominantMode`    — modal executor mode among this operator's enriched attempts
@@ -1166,18 +1257,36 @@ app.get('/operators', async (c) => {
   const operatorAddrs = rawRows.map((r) => r.operator);
   const dominantMap = await getDominantModeAndHarness(operatorAddrs);
 
-  // Active-operator overlay (post-pivot): an operator is "active" iff it has ≥1
-  // on-chain attempt on EXPLORER_CHAIN_ID. The JINN rolling-window / tJINN-earned
-  // qualification was removed with the token economy.
-  const activeOperatorAddrs = await loadActiveOperatorAddresses();
-  const isActive = (op: string) => activeOperatorAddrs.has(op);
+  const activeBundle = await loadActiveOperators(Math.floor(Date.now() / 1000));
+  const activeResult = activeBundle.result;
 
-  const rows: LeaderboardRow[] = rawRows.map((r) => ({
+  const lifetimeRewardRows = await loadLifetimeRewards(activeBundle.source);
+
+  const lifetimeRewards = new Map<`0x${string}`, bigint>();
+  for (const r of lifetimeRewardRows) {
+    lifetimeRewards.set(r.multisig, BigInt(r.operatorRewarded ?? 0));
+  }
+
+  const operatorsAtMilestone3 = countOperatorsAtMilestone3(
+    lifetimeRewardRows.map((r) => ({
+      multisig: r.multisig,
+      operatorRewarded: BigInt(r.operatorRewarded ?? 0),
+    })),
+  );
+
+  const isActive = (op: string) => activeResult.active.has(op);
+  const recentBlocksFor = (op: string): boolean[] =>
+    activeResult.perOperator.get(op)?.blocks ??
+    new Array(activeResult.window.blockCount).fill(false);
+
+  const rows: (LeaderboardRow & { recentBlocks: boolean[] })[] = rawRows.map((r) => ({
     ...r,
     active: isActive(r.operator),
+    recentBlocks: recentBlocksFor(r.operator),
+    jinnEarned: lifetimeRewards.get(r.operator) ?? 0n,
   }));
 
-  const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts);
+  const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts, compareByJinnEarnedActive);
 
   // Applied filters — only included when at least one filter is active.
   const appliedFilters: Record<string, string> = {};
@@ -1189,8 +1298,11 @@ app.get('/operators', async (c) => {
   const chainHead = c.get('chainHead');
   const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
-  const serializeRow = (r: LeaderboardRow & { rank?: number }) => ({
+  const allJinnEarnedZero = rows.every((r) => r.jinnEarned === 0n);
+
+  const serializeRow = (r: LeaderboardRow & { rank?: number; recentBlocks: boolean[] }) => ({
     ...r,
+    jinnEarned: r.jinnEarned.toString(),
     dominantMode: dominantMap.get(r.operator)?.mode ?? 'unknown',
     dominantHarness: dominantMap.get(r.operator)?.harness ?? '(unknown)',
   });
@@ -1199,9 +1311,15 @@ app.get('/operators', async (c) => {
     ranked: ranked.map(serializeRow),
     lowVolume: lowVolume.map(serializeRow),
     minVerdicts,
-    // Distinct operators with ≥1 on-chain attempt (the post-pivot active set).
-    activeOperators: activeOperatorAddrs.size,
+    activeOperators: activeResult.active.size,
+    sustainedOperators: activeResult.sustained.size,
+    operatorsAtMilestone3,
+    activeWindow: serialiseActiveWindow(activeResult.window),
     ...(hasFilter ? { appliedFilters } : {}),
+    meta: {
+      jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok',
+      rewardActivitySource: activeBundle.source,
+    },
     ...freshnessFields,
   });
 });
@@ -2111,8 +2229,9 @@ async function buildLeaderboardRows(
       verdictsTotal,
       verdictsPass,
       resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
+      jinnEarned: 0n,
       // Default to inactive; the /operators handler overlays the real value
-      // (active iff the operator has ≥1 on-chain attempt).
+      // from the OLAS reward window.
       active: false,
     });
   }
@@ -2279,8 +2398,9 @@ async function buildLeaderboardRowsWithHarnessFilter(
       verdictsTotal,
       verdictsPass,
       resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
+      jinnEarned: 0n,
       // Mode/harness-filtered boards default `active` to false; the /operators
-      // handler overlays the real value (active iff the operator has ≥1 attempt).
+      // handler overlays the real value from the OLAS reward window.
       active: false,
     });
   }

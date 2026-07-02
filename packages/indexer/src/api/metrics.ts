@@ -26,11 +26,12 @@ export interface LeaderboardRow {
   verdictsPass: number;
   /** Pass / total, or null if verdictsTotal === 0. */
   resolvedRate: number | null;
+  /** Lifetime OLAS/JINN staking rewards attributed to this operator. */
+  jinnEarned: bigint;
   /**
-   * True when the operator has ≥1 recorded on-chain attempt. Defaulted to
-   * `false` by the row builder; the `/operators` handler overlays the real
-   * value. (Post-pivot the JINN-reward rolling-window qualification was
-   * removed; "active" is now pure on-chain activity.)
+   * True when the newest completed OLAS reward bucket qualifies. Defaulted to
+   * `false` by row builders; the `/operators` handler overlays the reward
+   * window value.
    */
   active: boolean;
 }
@@ -184,17 +185,28 @@ export function rollingResolvedRate(passes: boolean[], k: number): number[] {
 // ── rankLeaderboard ───────────────────────────────────────────────────────────
 
 /**
- * Default comparator used by the `/operators` leaderboard and the per-SolverNet
- * train/frozen leaderboards.
+ * Comparator used by the `/operators` roster after the OLAS reward overlay.
+ *
+ * Sort key:
+ *   1. `jinnEarned` desc (the public UI labels this as OLAS)
+ *   2. `active` desc
+ *   3. `operator` asc
+ */
+export function compareByJinnEarnedActive(a: LeaderboardRow, b: LeaderboardRow): number {
+  if (a.jinnEarned !== b.jinnEarned) return a.jinnEarned < b.jinnEarned ? 1 : -1;
+  if (a.active !== b.active) return a.active ? -1 : 1;
+  return a.operator < b.operator ? -1 : a.operator > b.operator ? 1 : 0;
+}
+
+/**
+ * Default comparator used by the per-SolverNet train/frozen leaderboards.
  *
  * Sort key:
  *   1. `resolvedRate` desc (null rates sort last)
  *   2. `attempts` desc
  *   3. `operator` asc (lexicographic)
  *
- * This is the meaningful quality-first ordering. Post-pivot the JINN-reward
- * (`jinnEarned`) sort was removed with the token economy, so `/operators` uses
- * this comparator too.
+ * This is the meaningful quality-first ordering inside a single SolverNet.
  */
 export function compareByResolvedRateAttempts(a: LeaderboardRow, b: LeaderboardRow): number {
   // resolvedRate desc, nulls last.

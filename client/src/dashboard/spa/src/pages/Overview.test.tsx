@@ -18,21 +18,27 @@ import type { JSX } from 'react';
 
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
+const getRewardsMock = vi.fn();
+const claimRewardsMock = vi.fn();
 const triggerDripMock = vi.fn();
 const getDripQuotaMock = vi.fn();
 const restartDaemonMock = vi.fn();
 const stopDaemonMock = vi.fn();
 const retryAgentBindingMock = vi.fn();
+const getSolverNetsMock = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
+    getRewards: () => getRewardsMock(),
+    claimRewards: () => claimRewardsMock(),
     triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean }) => triggerDripMock(opts),
     getDripQuota: () => getDripQuotaMock(),
     restartDaemon: (opts?: { forceRespawn?: boolean }) => restartDaemonMock(opts),
     stopDaemon: () => stopDaemonMock(),
     retryAgentBinding: (opts: { serviceIndex: number }) => retryAgentBindingMock(opts),
+    getSolverNets: () => getSolverNetsMock(),
   },
 }));
 
@@ -42,11 +48,32 @@ const { OverviewPage } = await import('./Overview.js');
 beforeEach(() => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
+  getRewardsMock.mockReset();
+  claimRewardsMock.mockReset();
   triggerDripMock.mockReset();
   getDripQuotaMock.mockReset();
   restartDaemonMock.mockReset();
   stopDaemonMock.mockReset();
   retryAgentBindingMock.mockReset();
+  getSolverNetsMock.mockReset();
+  getRewardsMock.mockResolvedValue({
+    schemaVersion: 1,
+    generatedAt: '2026-04-14T12:00:00.000Z',
+    readState: 'ready',
+    totalPending: '0',
+    totalClaimed: '0',
+    lastClaimAt: null,
+    lastClaimTickAt: null,
+    nextCheckpointAt: null,
+    services: [],
+  });
+  claimRewardsMock.mockResolvedValue({
+    ok: true,
+    result: {
+      submitted: 1,
+      claims: [{ txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234' }],
+    },
+  });
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
   getDripQuotaMock.mockResolvedValue({
     ok: true,
@@ -54,6 +81,7 @@ beforeEach(() => {
     callsRemaining: 10,
     cooldownExpiresAt: null,
   });
+  getSolverNetsMock.mockResolvedValue({ nets: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
   stopDaemonMock.mockResolvedValue({ ok: true });
 });
@@ -309,31 +337,42 @@ describe('OverviewPage Wallet wiring', () => {
     expect(await screen.findByText(/daily faucet cap reached/i)).toBeTruthy();
   });
 
-  it('wires OLAS earned from status.rewards.claimedStakingRewardsWei', async () => {
+  it('wires pending and lifetime OLAS from /v1/rewards', async () => {
     getStatusMock.mockResolvedValue({
       ...baseStatus,
       rewards: {
-        claimedStakingRewardsWei: '1500000000000000000',
+        claimedStakingRewardsWei: '999000000000000000000',
         claimedStakingRewardsLast24hWei: '250000000000000000',
       },
+    });
+    getRewardsMock.mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '2026-04-14T12:00:00.000Z',
+      readState: 'ready',
+      totalPending: '1500000000000000000',
+      totalClaimed: '3500000000000000000',
+      lastClaimAt: '2026-04-14T10:45:00.000Z',
+      lastClaimTickAt: null,
+      nextCheckpointAt: null,
+      services: [],
     });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByTestId('olas-earned-value').textContent).toBe('1.5000'),
+      expect(screen.getByTestId('olas-pending-value').textContent).toBe('1.5000'),
     );
-    expect(screen.getByTestId('olas-earned-24h-value').textContent).toBe('0.2500');
-    expect(screen.getByText(/olas earned last 24hrs/i)).toBeTruthy();
-    const olasValue = screen.getByTestId('olas-earned-value');
+    expect(screen.getByTestId('olas-claimed-value').textContent).toBe('3.5000');
+    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('0.2500');
+    expect(screen.getByText(/claimed last 24hrs/i)).toBeTruthy();
+    const olasValue = screen.getByTestId('olas-pending-value');
     expect(olasValue.textContent).not.toBe('999.0000');
     expect(screen.queryByText('999.0000')).toBeNull();
     expect(screen.queryByText(/collector/i)).toBeNull();
-    expect(screen.queryByTestId('wallet-claim')).toBeNull();
-    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /claim olas/i })).toBeTruthy();
   });
 
-  it('renders zero OLAS earned when rewards are absent', async () => {
+  it('renders zero pending OLAS when rewards are absent', async () => {
     getStatusMock.mockResolvedValue({
       ...baseStatus,
       rewards: {
@@ -345,22 +384,59 @@ describe('OverviewPage Wallet wiring', () => {
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByTestId('olas-earned-value').textContent).toBe('0.0000'),
+      expect(screen.getByTestId('olas-pending-value').textContent).toBe('0.0000'),
     );
-    expect(screen.queryByTestId('olas-earned-state')).toBeNull();
+    expect(screen.queryByTestId('olas-pending-state')).toBeNull();
+    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('shows pending OLAS copy when status has not loaded yet', async () => {
-    getStatusMock.mockImplementation(() => new Promise(() => {}));
+  it('shows pending OLAS copy when the rewards query has not loaded yet', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getRewardsMock.mockImplementation(() => new Promise(() => {}));
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByTestId('olas-earned-value').textContent).toBe('pending'),
+      expect(screen.getByTestId('olas-pending-value').textContent).toBe('pending'),
     );
-    expect(screen.getByTestId('olas-earned-state').textContent).toMatch(
+    expect(screen.getByTestId('olas-pending-state').textContent).toMatch(
       /no rewards yet/i,
     );
+  });
+
+  it('wires Claim OLAS to api.claimRewards and refreshes rewards/status/activity queries', async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      rewards: {
+        claimedStakingRewardsWei: '0',
+        claimedStakingRewardsLast24hWei: '0',
+      },
+    });
+    getRewardsMock.mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '2026-04-14T12:00:00.000Z',
+      readState: 'ready',
+      totalPending: '10000000000000000',
+      totalClaimed: '0',
+      lastClaimAt: null,
+      lastClaimTickAt: null,
+      nextCheckpointAt: null,
+      services: [],
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    const claimButton = await screen.findByTestId('wallet-claim') as HTMLButtonElement;
+    await waitFor(() => expect(claimButton.disabled).toBe(false));
+    fireEvent.click(claimButton);
+    await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activity-events'] }),
+    );
+    await waitFor(() => expect(getRewardsMock.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(getStatusMock.mock.calls.length).toBeGreaterThan(1));
+    invalidateSpy.mockRestore();
   });
 
   it('surfaces a one-line gas top-up confirmation reporting the drip count + last tx (issue #560)', async () => {
@@ -450,4 +526,3 @@ describe('OverviewPage Node Health wiring', () => {
     expect(restartDaemonMock).toHaveBeenCalledWith({ forceRespawn: true });
   });
 });
-

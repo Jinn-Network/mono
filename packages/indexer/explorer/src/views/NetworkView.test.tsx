@@ -148,7 +148,7 @@ describe('NetworkView', () => {
     expect(screen.getByText('7')).toBeInTheDocument();
   });
 
-  it('does NOT render the `last 8 × 6h, ≥3 tJINN each` subtitle on the Active operators cell (issue #905)', async () => {
+  it('does NOT render the old reward-window subtitle on the Network active-operators cell', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
@@ -156,7 +156,7 @@ describe('NetworkView', () => {
       expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
     expect(screen.queryByText(/last 8/i)).toBeNull();
-    expect(screen.queryByText(/≥3 tJINN each/)).toBeNull();
+    expect(screen.queryByText(/at least 3 OLAS/i)).toBeNull();
   });
 
   it('renders the NETWORK COMPOSITION eyebrow on the composition card (#610)', async () => {

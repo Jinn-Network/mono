@@ -616,10 +616,9 @@ export class Daemon {
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
       const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
-        this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason);
         // Log once per (taskId, reason) — the engine-watcher re-observes every
         // pending task each pass, so an unguarded log here floods the console.
-        if (this.skipLogDeduper.shouldLog(taskAnnouncement.taskId, accept.reason)) {
+        if (this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason)) {
           console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         }
         continue;

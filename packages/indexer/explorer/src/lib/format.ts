@@ -52,7 +52,7 @@ export function block(s: string | number | null | undefined): string {
 // ── jinn ─────────────────────────────────────────────────────────────────────
 
 /**
- * Format a raw JINN wei string as a decimal JINN amount.
+ * Format a raw Base Sepolia JINN/OLAS wei string as a decimal OLAS amount.
  *
  * Uses BigInt arithmetic for the integer part to avoid precision loss, then
  * derives the fractional display with modulo arithmetic.
@@ -60,21 +60,21 @@ export function block(s: string | number | null | undefined): string {
  * @param weiStr  decimal string e.g. "100500000000000000044"
  * @param decimals token decimals (default 18)
  * @param digits  display decimal places (default 2)
- * @returns e.g. `"100.50 tJINN"` or `"0 tJINN"` for zero/null/empty
+ * @returns e.g. `"100.50 OLAS"` or `"0 OLAS"` for zero/null/empty
  */
 export function jinn(
   weiStr: string | null | undefined,
   decimals = 18,
   digits = 2,
 ): string {
-  if (!weiStr || weiStr === '0') return '0 tJINN';
+  if (!weiStr || weiStr === '0') return '0 OLAS';
   let raw: bigint;
   try {
     raw = BigInt(weiStr);
   } catch {
     return '—';
   }
-  if (raw === 0n) return '0 tJINN';
+  if (raw === 0n) return '0 OLAS';
 
   const divisor = 10n ** BigInt(decimals);
   const wholePart = raw / divisor;
@@ -84,7 +84,11 @@ export function jinn(
   const fracStr = fracRaw.toString().padStart(decimals, '0').slice(0, digits);
 
   const wholeFormatted = intFmt.format(wholePart);
-  return `${wholeFormatted}.${fracStr} tJINN`;
+  if (wholePart === 0n && /^0+$/.test(fracStr)) {
+    const floor = digits <= 0 ? '1' : `0.${'0'.repeat(digits - 1)}1`;
+    return `<${floor} OLAS`;
+  }
+  return `${wholeFormatted}.${fracStr} OLAS`;
 }
 
 // ── shortAddr ─────────────────────────────────────────────────────────────────

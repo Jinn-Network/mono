@@ -68,7 +68,9 @@ export class SkipLogDeduper {
    *
    * `now` is injectable for deterministic tests; defaults to `Date.now()`.
    */
-  recordSkip(taskId: string, reason: string, now: number = Date.now()): void {
+  recordSkip(taskId: string, reason: string, now: number = Date.now()): boolean {
+    const previous = this.entriesByTaskId.get(taskId);
+    const shouldLog = previous?.reason !== reason;
     // Delete-then-set so the entry moves to the end of insertion order, keeping
     // actively-skipped tasks away from the FIFO eviction front.
     this.entriesByTaskId.delete(taskId);
@@ -80,6 +82,7 @@ export class SkipLogDeduper {
         this.entriesByTaskId.delete(oldestKey);
       }
     }
+    return shouldLog;
   }
 
   /**

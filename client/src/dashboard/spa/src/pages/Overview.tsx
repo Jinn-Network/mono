@@ -8,7 +8,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
-import type { SolverNetsCatalogResponse } from '../api/types.js';
+import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../api/types.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -209,6 +209,11 @@ export function OverviewPage(): JSX.Element {
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
     refetchInterval: 5_000,
   });
+  const { data: rewards, isError: rewardsIsError } = useQuery<RewardsResponse>({
+    queryKey: ['rewards'],
+    queryFn: () => api.getRewards(),
+    refetchInterval: 30_000,
+  });
   const { data: bootstrap } = useQuery<BootstrapWithSolverNets>({
     queryKey: ['bootstrap'],
     queryFn: () => api.getBootstrap() as Promise<BootstrapWithSolverNets>,
@@ -238,15 +243,17 @@ export function OverviewPage(): JSX.Element {
   // through `jinn status`.
   const primaryServiceId = services.find((s) => s.serviceId !== null)?.serviceId ?? null;
 
-  const olasState = status ? 'ready' : 'pending';
-  const olasEarned = formatEth(status?.rewards?.claimedStakingRewardsWei ?? '0');
-  const olasEarnedLast24h =
+  const olasState: StakingRewardReadState =
+    rewardsIsError || rewards?.readState === 'error' ? 'error' : rewards ? 'ready' : 'pending';
+  const olasPending = olasState === 'ready' ? formatEth(rewards?.totalPending ?? '0') : '—';
+  const olasClaimed = olasState === 'ready' ? formatEth(rewards?.totalClaimed ?? '0') : '—';
+  const olasClaimedLast24h =
     status?.rewards?.claimedStakingRewardsLast24hWei != null
       ? formatEth(status.rewards.claimedStakingRewardsLast24hWei)
       : status
         ? '0.0000'
         : null;
-  const olasError = null;
+  const olasError = rewards?.error ?? (rewardsIsError ? 'OLAS rewards temporarily unavailable.' : null);
 
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
@@ -451,10 +458,12 @@ export function OverviewPage(): JSX.Element {
             agent: perRoleAgentEth,
             safe: perRoleSafeEth,
           }}
-          olasEarned={olasEarned}
-          olasEarnedLast24h={olasEarnedLast24h}
+          olasPending={olasPending}
+          olasClaimed={olasClaimed}
+          olasClaimedLast24h={olasClaimedLast24h}
           olasState={olasState}
           olasError={olasError}
+          lastClaimAt={rewards?.lastClaimAt ?? null}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
           topupDailyCap={dripQuota?.dailyCap}
           topupCallsRemaining={dripQuota?.callsRemaining}
@@ -492,6 +501,37 @@ export function OverviewPage(): JSX.Element {
               // Confirmation is transient — surface it, then fade after ~5s.
               { autoClearMs: 5_000 },
             )}
+          onClaim={() =>
+            runAction(
+              'Claim OLAS',
+              async () => {
+                const res = await api.claimRewards();
+                if (!res.ok) {
+                  throw new Error(res.error ?? 'Reward claim failed.');
+                }
+                await Promise.all([
+                  queryClient.invalidateQueries({ queryKey: ['rewards'] }),
+                  queryClient.invalidateQueries({ queryKey: ['status'] }),
+                  queryClient.invalidateQueries({ queryKey: ['activity-events'] }),
+                ]);
+                const submitted = res.result?.submitted ?? 0;
+                if (submitted === 0) {
+                  return { message: 'No pending OLAS to claim.' };
+                }
+                const lastTx = res.result?.claims
+                  ?.map((claim) => claim.txHash)
+                  .filter((hash): hash is string => Boolean(hash))
+                  .at(-1);
+                const txLabel = truncTx(lastTx);
+                return {
+                  message: txLabel
+                    ? `Claim submitted · tx ${txLabel}`
+                    : `Claim submitted: ${submitted} claim${submitted === 1 ? '' : 's'}`,
+                };
+              },
+              { autoClearMs: 5_000 },
+            )}
+          claimPending={activeAction === 'Claim OLAS'}
         />
       </aside>
     </div>

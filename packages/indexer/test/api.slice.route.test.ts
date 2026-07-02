@@ -64,6 +64,9 @@ const mockState = vi.hoisted(() => {
     'harnessCheckpoint',
     'attemptEnvelopeMeta',
     'verdictEnvelopeMeta',
+    'rewardDistribution',
+    'stakingService',
+    'stakingRewardCheckpoint',
   ] as const;
 
   const tableIdentity = new WeakMap<object, string>();

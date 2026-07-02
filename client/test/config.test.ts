@@ -52,12 +52,19 @@ describe('loadConfig RPC override handling', () => {
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
   const originalWatchdogAutoRestart = process.env['JINN_WATCHDOG_AUTO_RESTART'];
+  const originalRewardClaimIntervalMs = process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
 
   afterEach(async () => {
     if (originalWatchdogAutoRestart === undefined) {
       delete process.env['JINN_WATCHDOG_AUTO_RESTART'];
     } else {
       process.env['JINN_WATCHDOG_AUTO_RESTART'] = originalWatchdogAutoRestart;
+    }
+
+    if (originalRewardClaimIntervalMs === undefined) {
+      delete process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
+    } else {
+      process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = originalRewardClaimIntervalMs;
     }
 
     if (originalBaseRpcUrl === undefined) {
@@ -525,6 +532,18 @@ describe('loadConfig RPC override handling', () => {
     const config = loadConfig();
     expect(config.faucetDailyTopupCap).toBe(10);
     expect(config.faucetTopupCooldownMs).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('defaults reward auto-claim to disabled so operators claim OLAS manually', () => {
+    delete process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
+    const config = loadConfig();
+    expect(config.rewardClaimIntervalMs).toBe(0);
+  });
+
+  it('keeps reward auto-claim available as an explicit managed-operator opt-in', () => {
+    process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = '600000';
+    const config = loadConfig();
+    expect(config.rewardClaimIntervalMs).toBe(600_000);
   });
 
   it('overrides faucet topup cap and cooldown from env (issue #560)', () => {

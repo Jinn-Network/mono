@@ -66,7 +66,7 @@ export function StatusBar({
           Block{' '}
           <span style={{ color: 'var(--fg)' }}>{blockStr}</span>
           <span style={{ margin: '0 4px' }}>&middot;</span>
-          <span style={{ color: 'var(--fg)' }}>{timeStr} ago</span>
+          <span style={{ color: 'var(--fg)' }}>{timeStr}</span>
           {isBehind && (
             <>
               <span style={{ margin: '0 4px' }}>&middot;</span>

@@ -1,8 +1,9 @@
 /**
  * OperatorsView tests (post-#610 roster).
  *
- * The view is now a flat roster: operator (short-address link) / active? /
- * attempts. No rank, no top-level resolved-rate column, no filter UI.
+ * The view is a flat roster: operator (short-address link) / active? /
+ * activity blocks / attempts / OLAS earned. No rank, no top-level
+ * resolved-rate column, no filter UI.
  */
 
 import { render, screen, waitFor } from '@testing-library/react';
@@ -25,6 +26,8 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       verdictsPass: 7,
       resolvedRate: 7 / 8,
       active: true,
+      recentBlocks: [true, true, true, true, true, true, true, true],
+      jinnEarned: '1000000000000000000',
       dominantMode: 'train',
       dominantHarness: 'swe-bench',
     },
@@ -38,10 +41,21 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       verdictsPass: 1,
       resolvedRate: 0.5,
       active: false,
+      recentBlocks: [false, true, false, true, false, true, false, true],
+      jinnEarned: '500000000000000000',
     },
   ],
   minVerdicts: 5,
   activeOperators: 1,
+  sustainedOperators: 2,
+  operatorsAtMilestone3: 2,
+  activeWindow: {
+    startTs: 1_700_000_000,
+    endTs: 1_700_172_800,
+    blockSeconds: 21_600,
+    blockCount: 8,
+    requiredOlasPerBlock: '3000000000000000000',
+  },
   appliedFilters: {},
   lastIndexedBlock: '12000000',
   lastIndexedAt: new Date().toISOString(),
@@ -147,6 +161,16 @@ describe('OperatorsView', () => {
     expect(screen.getByText(/^attempts$/i)).toBeInTheDocument();
   });
 
+  it('renders the OLAS earned value for each operator', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('1.00 OLAS')).toBeInTheDocument();
+    });
+    expect(screen.getByText('0.50 OLAS')).toBeInTheDocument();
+  });
+
   it('renders loading state initially', () => {
     vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => {}));
     const { Wrapper } = makeWrapper();
@@ -175,7 +199,7 @@ describe('OperatorsView', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
   });
 
-  it('renders Operator | Active? | Attempts column order', async () => {
+  it('renders Operator | Active? | Activity blocks | Attempts | OLAS earned column order', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
@@ -189,28 +213,47 @@ describe('OperatorsView', () => {
       expect.arrayContaining([
         expect.stringMatching(/operator/i),
         expect.stringMatching(/active\?/i),
+        expect.stringMatching(/activity blocks/i),
         expect.stringMatching(/attempts/i),
+        expect.stringMatching(/olas earned/i),
       ]),
     );
     const operatorIdx = headers.findIndex((h) => /operator/i.test(h));
     const activeIdx = headers.findIndex((h) => /active\?/i.test(h));
+    const activityBlocksIdx = headers.findIndex((h) => /activity blocks/i.test(h));
     const attemptsIdx = headers.findIndex((h) => /attempts/i.test(h));
+    const olasEarnedIdx = headers.findIndex((h) => /olas earned/i.test(h));
     expect(operatorIdx).toBeLessThan(activeIdx);
-    expect(activeIdx).toBeLessThan(attemptsIdx);
-    // The JINN-earned and Activity-blocks columns were removed with the token economy.
+    expect(activeIdx).toBeLessThan(activityBlocksIdx);
+    expect(activityBlocksIdx).toBeLessThan(attemptsIdx);
+    expect(attemptsIdx).toBeLessThan(olasEarnedIdx);
     expect(headers.some((h) => /jinn earned/i.test(h))).toBe(false);
-    expect(headers.some((h) => /activity blocks/i.test(h))).toBe(false);
   });
 
-  it('does NOT render the `last 8 × 6h, ≥3 tJINN each` subtitle on the Active operators KPI (issue #905)', async () => {
+  it('does not render tJINN copy on the operators page', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
-    expect(screen.queryByText(/last 8/i)).toBeNull();
-    expect(screen.queryByText(/≥3 tJINN each/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/tJINN/);
+    expect(document.body.textContent).not.toMatch(/Testnet JINN earned/);
+  });
+
+  it('renders 8 Y/N symbols separated by ` | ` per row in the Activity blocks column', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    const rows = Array.from(document.querySelectorAll('tbody tr'));
+    const activityTexts = rows.map((row) => row.querySelectorAll('td')[2]?.textContent);
+    expect(activityTexts).toEqual([
+      'Y | Y | Y | Y | Y | Y | Y | Y',
+      'N | Y | N | Y | N | Y | N | Y',
+    ]);
   });
 
   it('renders Yes/No per row driven by row.active', async () => {
@@ -249,15 +292,15 @@ describe('OperatorsView', () => {
     expect(activeCell?.textContent).toBe('Yes');
   });
 
-  it('does not render Sustained or Milestone-3 KPIs (token economy removed)', async () => {
+  it('renders Sustained and Milestone-3 KPIs from the OLAS reward window', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
     });
-    expect(screen.queryByText(/sustained \(48h\)/i)).toBeNull();
-    expect(screen.queryByText(/milestone 3/i)).toBeNull();
+    expect(screen.getByText(/sustained \(48h\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/milestone 3/i)).toBeInTheDocument();
   });
 
   it('does not pass mode/harness/minVerdicts to useOperators (no filter UI)', async () => {

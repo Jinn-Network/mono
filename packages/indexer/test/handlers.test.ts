@@ -28,7 +28,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta, rewardDistribution, stakingService, stakingRewardCheckpoint } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -36,6 +36,9 @@ import {
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
+  handleRewardsDistributed,
+  handleServiceStaked,
+  handleStakingCheckpoint,
   parseCheckpointManifestLite,
   parseSolverNetManifestLite,
   parseVerdictEnvelopeLite,
@@ -73,6 +76,9 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
   [attemptEnvelopeMeta, ['requestId', 'chainId']],
   [verdictEnvelopeMeta, ['requestId', 'chainId']],
+  [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
+  [stakingService, ['chainId', 'stakingProxy', 'serviceId']],
+  [stakingRewardCheckpoint, ['chainId', 'stakingProxy', 'epoch', 'serviceId', 'checkpointAtBlock', 'logIndex']],
 ]);
 
 let db: InMemoryDb;
@@ -227,6 +233,149 @@ describe('TaskAttemptCreated → attempt', () => {
     });
     expect(db.count(attempt)).toBe(1);
     expect(db.get(attempt, { taskId: '7', attemptIndex: 0, chainId: CHAIN_ID })?.deliveryRate).toBe(10n);
+  });
+});
+
+describe('RewardsDistributed → rewardDistribution', () => {
+  it('records collectorAmount as the operator OLAS reward for the service multisig', async () => {
+    const event = {
+      args: {
+        serviceId: 42n,
+        multisig: '0xabababababababababababababababababababab' as `0x${string}`,
+        collectorAmount: 3n * 10n ** 18n,
+        protocolAmount: 1n,
+        curatingAgentAmount: 2n,
+      },
+      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
+      transaction: { hash: `0x${'77'.repeat(32)}` as `0x${string}` },
+      log: { logIndex: 5 },
+    };
+
+    await handleRewardsDistributed({ event, context, rewardDistribution });
+    await handleRewardsDistributed({ event, context, rewardDistribution });
+
+    expect(db.count(rewardDistribution)).toBe(1);
+    expect(db.get(rewardDistribution, {
+      chainId: CHAIN_ID,
+      serviceId: '42',
+      claimedAtBlock: 41_200_000n,
+      logIndex: 5,
+    })).toMatchObject({
+      serviceId: '42',
+      multisig: '0xabababababababababababababababababababab',
+      operatorRewarded: 3n * 10n ** 18n,
+      protocolRewarded: 1n,
+      curatingAgentRewarded: 2n,
+      claimedAtBlock: 41_200_000n,
+      claimedAtTimestamp: 1_700_000_000n,
+      claimedAtTx: `0x${'77'.repeat(32)}`,
+      chainId: CHAIN_ID,
+    });
+  });
+});
+
+describe('StolasStakingProxy staking activity → earned reward rows', () => {
+  const stakingProxy = '0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39' as `0x${string}`;
+  const multisig = '0xabababababababababababababababababababab' as `0x${string}`;
+
+  it('maps ServiceStaked service ids to the operator multisig', async () => {
+    const event = {
+      args: {
+        epoch: 77n,
+        serviceId: 42n,
+        owner: '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd' as `0x${string}`,
+        multisig,
+        nonces: [1n, 2n],
+      },
+      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
+      transaction: { hash: `0x${'88'.repeat(32)}` as `0x${string}` },
+      log: { address: stakingProxy, logIndex: 3 },
+    };
+
+    await handleServiceStaked({ event, context, stakingService });
+    await handleServiceStaked({ event, context, stakingService });
+
+    expect(db.count(stakingService)).toBe(1);
+    expect(db.get(stakingService, {
+      chainId: CHAIN_ID,
+      stakingProxy,
+      serviceId: '42',
+    })).toMatchObject({
+      serviceId: '42',
+      stakingProxy,
+      owner: '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd',
+      multisig,
+      stakedAtBlock: 41_200_000n,
+      stakedAtTimestamp: 1_700_000_000n,
+      stakedAtTx: `0x${'88'.repeat(32)}`,
+      chainId: CHAIN_ID,
+    });
+  });
+
+  it('stores Checkpoint earned OLAS allocations by mapped service multisig', async () => {
+    await handleServiceStaked({
+      event: {
+        args: {
+          epoch: 77n,
+          serviceId: 42n,
+          owner: '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd' as `0x${string}`,
+          multisig,
+          nonces: [],
+        },
+        block: { number: 41_199_900n, timestamp: 1_699_999_000n },
+        transaction: { hash: `0x${'88'.repeat(32)}` as `0x${string}` },
+        log: { address: stakingProxy, logIndex: 2 },
+      },
+      context,
+      stakingService,
+    });
+
+    const checkpointEvent = {
+      args: {
+        epoch: 78n,
+        availableRewards: 100n * 10n ** 18n,
+        serviceIds: [42n, 43n],
+        rewards: [3n * 10n ** 18n, 5n * 10n ** 18n],
+        epochLength: 86_400n,
+      },
+      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
+      transaction: { hash: `0x${'99'.repeat(32)}` as `0x${string}` },
+      log: { address: stakingProxy, logIndex: 6 },
+    };
+
+    await handleStakingCheckpoint({
+      event: checkpointEvent,
+      context,
+      stakingService,
+      stakingRewardCheckpoint,
+    });
+    await handleStakingCheckpoint({
+      event: checkpointEvent,
+      context,
+      stakingService,
+      stakingRewardCheckpoint,
+    });
+
+    expect(db.count(stakingRewardCheckpoint)).toBe(1);
+    expect(db.get(stakingRewardCheckpoint, {
+      chainId: CHAIN_ID,
+      stakingProxy,
+      epoch: '78',
+      serviceId: '42',
+      checkpointAtBlock: 41_200_000n,
+      logIndex: 6,
+    })).toMatchObject({
+      serviceId: '42',
+      stakingProxy,
+      multisig,
+      epoch: '78',
+      reward: 3n * 10n ** 18n,
+      epochLength: 86_400n,
+      checkpointAtBlock: 41_200_000n,
+      checkpointAtTimestamp: 1_700_000_000n,
+      checkpointAtTx: `0x${'99'.repeat(32)}`,
+      chainId: CHAIN_ID,
+    });
   });
 });
 

@@ -69,29 +69,28 @@ describe('block', () => {
 
 describe('jinn', () => {
   it('formats a large wei value correctly without precision loss', () => {
-    // 100.50 JINN = 100500000000000000000 wei
-    expect(jinn('100500000000000000000')).toBe('100.50 tJINN');
+    expect(jinn('100500000000000000000')).toBe('100.50 OLAS');
   });
   it('formats a value with trailing zeros in fraction', () => {
-    // 1.00 JINN = 1000000000000000000 wei
-    expect(jinn('1000000000000000000')).toBe('1.00 tJINN');
+    expect(jinn('1000000000000000000')).toBe('1.00 OLAS');
   });
-  it('returns 0 JINN for "0"', () => {
-    expect(jinn('0')).toBe('0 tJINN');
+  it('returns 0 OLAS for "0"', () => {
+    expect(jinn('0')).toBe('0 OLAS');
   });
-  it('returns 0 JINN for null', () => {
-    expect(jinn(null)).toBe('0 tJINN');
+  it('returns 0 OLAS for null', () => {
+    expect(jinn(null)).toBe('0 OLAS');
   });
-  it('returns 0 JINN for empty string', () => {
-    expect(jinn('')).toBe('0 tJINN');
+  it('returns 0 OLAS for empty string', () => {
+    expect(jinn('')).toBe('0 OLAS');
   });
   it('handles a number in the thousands', () => {
-    // 5000 JINN
-    expect(jinn('5000000000000000000000')).toBe('5,000.00 tJINN');
+    expect(jinn('5000000000000000000000')).toBe('5,000.00 OLAS');
   });
   it('respects custom digits', () => {
-    // 1.5 JINN
-    expect(jinn('1500000000000000000', 18, 1)).toBe('1.5 tJINN');
+    expect(jinn('1500000000000000000', 18, 1)).toBe('1.5 OLAS');
+  });
+  it('does not round nonzero sub-cent OLAS down to displayed zero', () => {
+    expect(jinn('1775660000000000')).toBe('<0.01 OLAS');
   });
   it('returns dash for non-numeric string', () => {
     expect(jinn('not-a-number')).toBe('—');

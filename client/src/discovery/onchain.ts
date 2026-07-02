@@ -45,7 +45,11 @@ import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCount
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
 import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
-import { canClaimTask } from '../adapters/mech/contracts.js';
+import {
+  canClaimTask,
+  ROUTER_TASK_ATTEMPT_CREATED_EVENT,
+  ROUTER_TASK_CREATED_EVENT,
+} from '../adapters/mech/contracts.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
 import { isRateLimitedEthReadError, withTransientEthReadRetry } from '../chain-read-errors.js';
@@ -652,6 +656,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
         async (start, end) => {
           const logs = await (client as PublicClient).getLogs({
             address: routerAddress,
+            event: ROUTER_TASK_CREATED_EVENT,
             fromBlock: start,
             toBlock: end,
           });
@@ -751,6 +756,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
         async (start, end) => {
           const logs = await (client as PublicClient).getLogs({
             address: routerAddress,
+            event: ROUTER_TASK_ATTEMPT_CREATED_EVENT,
             fromBlock: start,
             toBlock: end,
           });
