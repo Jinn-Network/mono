@@ -54,7 +54,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
     endTs: 1_700_172_800,
     blockSeconds: 21_600,
     blockCount: 8,
-    requiredOlasPerBlock: '3000000000000000000',
+    requiredOlasPerBlock: '1',
   },
   appliedFilters: {},
   lastIndexedBlock: '12000000',
@@ -245,6 +245,22 @@ describe('OperatorsView', () => {
     expect(document.body.textContent).not.toMatch(/\bJINN\b/);
     expect(document.body.textContent).not.toMatch(/tJINN/);
     expect(document.body.textContent).not.toMatch(/collector-token/i);
+  });
+
+  it('defines activity as earning any OLAS in a completed bucket', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/active operators/i)).toBeInTheDocument();
+    });
+
+    for (const trigger of screen.getAllByRole('button', { name: /definition/i })) {
+      fireEvent.click(trigger);
+    }
+
+    expect(document.body.textContent).toMatch(/earned any OLAS/i);
+    expect(document.body.textContent).not.toMatch(/at least 3 OLAS/i);
   });
 
   it('renders 8 Y/N symbols separated by ` | ` per row in the Activity blocks column', async () => {

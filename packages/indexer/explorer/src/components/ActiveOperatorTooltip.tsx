@@ -18,7 +18,7 @@ export function ActiveOperatorTooltipBody({ window }: { window: ActiveWindow }) 
   return (
     <>
       <div>
-        Earned at least 3 OLAS in the most recent completed UTC 6-hour block.
+        Earned any OLAS in the most recent completed UTC 6-hour block.
         The in-progress block is excluded.
       </div>
       <div style={{ marginTop: 6 }}>
@@ -33,7 +33,7 @@ export function SustainedOperatorTooltipBody({ window }: { window: ActiveWindow 
   return (
     <>
       <div>
-        Earned at least 3 OLAS in each of the last 8 completed UTC 6-hour
+        Earned any OLAS in each of the last 8 completed UTC 6-hour
         blocks. The in-progress block is excluded.
       </div>
       <div style={{ marginTop: 6 }}>

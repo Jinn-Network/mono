@@ -12,8 +12,8 @@ export const BLOCK_SECONDS = 6 * 3600;
 /** Number of completed buckets the window spans (= 8 -> 48 hours). */
 export const BLOCK_COUNT = 8;
 
-/** Per-block OLAS earning floor in wei. */
-export const REQUIRED_OLAS_PER_BLOCK = 3n * 10n ** 18n;
+/** Per-block OLAS earning floor in wei: any positive earned reward qualifies. */
+export const REQUIRED_OLAS_PER_BLOCK = 1n;
 
 /** Lifetime OLAS floor for the Milestone-3 count. */
 export const MILESTONE_3_OLAS_FLOOR = 25n * 10n ** 18n;
@@ -50,9 +50,9 @@ export function selectRewardActivityRows(
 
 export interface ActiveOperatorResult {
   window: ActiveWindow;
-  /** Operators whose newest completed bucket clears the OLAS floor. */
+  /** Operators whose newest completed bucket has any earned OLAS. */
   active: Set<string>;
-  /** Operators whose every bucket in the 48h window clears the OLAS floor. */
+  /** Operators whose every bucket in the 48h window has any earned OLAS. */
   sustained: Set<string>;
   /** Per-operator bucket qualification, oldest bucket first. */
   perOperator: Map<string, { blocks: boolean[]; blocksQualified: number }>;

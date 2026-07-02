@@ -81,7 +81,7 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
     endTs: 1_700_172_800,
     blockSeconds: 21_600,
     blockCount: 8,
-    requiredOlasPerBlock: '3000000000000000000',
+    requiredOlasPerBlock: '1',
   },
   lastIndexedBlock: '100',
   lastIndexedAt: new Date().toISOString(),

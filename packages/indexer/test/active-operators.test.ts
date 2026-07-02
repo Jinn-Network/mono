@@ -40,7 +40,7 @@ describe('computeActiveWindow', () => {
   it('exposes the OLAS protocol constants', () => {
     expect(BLOCK_SECONDS).toBe(6 * HOUR);
     expect(BLOCK_COUNT).toBe(8);
-    expect(REQUIRED_OLAS_PER_BLOCK).toBe(3n * OLAS);
+    expect(REQUIRED_OLAS_PER_BLOCK).toBe(1n);
   });
 
   it('anchors endTs to the most-recent completed UTC 6h boundary', () => {
@@ -64,12 +64,12 @@ describe('computeActiveOperators', () => {
     expect(r.window.startTs).toBe(r.window.endTs - SIX_H * BLOCK_COUNT);
   });
 
-  it('an operator with at least 3 OLAS in every block is active and sustained', () => {
+  it('an operator with any OLAS in every block is active and sustained', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);
     const rewards = [];
     for (let i = 0; i < BLOCK_COUNT; i++) {
-      rewards.push(mkReward(OP_A, 3n * OLAS, w.startTs + i * SIX_H + HOUR));
+      rewards.push(mkReward(OP_A, 1n, w.startTs + i * SIX_H + HOUR));
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(true);
@@ -104,7 +104,7 @@ describe('computeActiveOperators', () => {
     const rewards = [];
     for (let i = 0; i < BLOCK_COUNT; i++) {
       if (!qualifying.has(i)) continue;
-      rewards.push(mkReward(OP_A, 3n * OLAS, w.startTs + i * SIX_H + HOUR));
+      rewards.push(mkReward(OP_A, 1n, w.startTs + i * SIX_H + HOUR));
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.perOperator.get(OP_A)?.blocks).toEqual([
@@ -121,14 +121,14 @@ describe('computeActiveOperators', () => {
     expect(r.sustained.has(OP_A)).toBe(false);
   });
 
-  it('multiple reward events in one block sum to the 3 OLAS threshold', () => {
+  it('multiple reward events in one block qualify when the summed reward is positive', () => {
     const now = alignedNow(T0);
     const w = computeActiveWindow(now);
     const rewards = [];
     for (let i = 0; i < BLOCK_COUNT; i++) {
       const ts = w.startTs + i * SIX_H + 100;
-      rewards.push(mkReward(OP_A, 15n * 10n ** 17n, ts));
-      rewards.push(mkReward(OP_A, 15n * 10n ** 17n, ts + 60));
+      rewards.push(mkReward(OP_A, 0n, ts));
+      rewards.push(mkReward(OP_A, 1n, ts + 60));
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(true);
@@ -140,7 +140,7 @@ describe('computeActiveOperators', () => {
     const w = computeActiveWindow(now);
     const rewards = [];
     for (let i = 0; i < BLOCK_COUNT - 1; i++) {
-      rewards.push(mkReward(OP_A, 3n * OLAS, w.startTs + i * SIX_H + 100));
+      rewards.push(mkReward(OP_A, 1n, w.startTs + i * SIX_H + 100));
     }
     rewards.push(mkReward(OP_A, 100n * OLAS, w.endTs));
     const r = computeActiveOperators(rewards, now);
@@ -154,8 +154,8 @@ describe('computeActiveOperators', () => {
     const rewards = [];
     for (let i = 0; i < BLOCK_COUNT; i++) {
       const ts = w.startTs + i * SIX_H + 100;
-      rewards.push(mkReward(OP_A, 3n * OLAS, ts));
-      if (i < 5) rewards.push(mkReward(OP_B, 1n * OLAS, ts));
+      rewards.push(mkReward(OP_A, 1n, ts));
+      if (i < 5) rewards.push(mkReward(OP_B, 1n, ts));
     }
     const r = computeActiveOperators(rewards, now);
     expect(r.active.has(OP_A)).toBe(true);

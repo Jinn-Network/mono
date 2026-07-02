@@ -20,7 +20,7 @@ import {
 import { shortAddr, int, jinn } from '../lib/format';
 
 const ACTIVITY_BLOCKS_ENCODING_NOTE =
-  'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned at least 3 OLAS in that block; N = did not.';
+  'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned any OLAS in that block; N = did not.';
 
 function ActivityBlocksCell({
   recentBlocks,
