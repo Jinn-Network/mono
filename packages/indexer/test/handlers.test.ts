@@ -390,7 +390,7 @@ describe('StolasStakingProxy staking activity → earned reward rows', () => {
             args: [42n],
             blockNumber: 41_200_000n,
           });
-          return [multisig, recoveredOwner, [1n], 1_700_000_000n, 0n];
+          return [multisig, recoveredOwner, 1_700_000_000n, 0n];
         },
       },
     };

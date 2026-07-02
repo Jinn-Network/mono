@@ -13,7 +13,6 @@ export const STOLAS_STAKING_PROXY_ABI = [
     outputs: [
       { name: 'multisig', type: 'address' },
       { name: 'owner', type: 'address' },
-      { name: 'nonces', type: 'uint256[]' },
       { name: 'tsStart', type: 'uint256' },
       { name: 'reward', type: 'uint256' },
     ],
