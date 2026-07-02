@@ -6,13 +6,18 @@
  *
  *   jinn-layer corpus search "<query>" [--limit N] [--json]
  *   jinn-layer corpus get <ref> [--json] [--out <dir>]
+ *   jinn-layer capture preview <task-file> [--json]
  *
  * Output is human-readable by default (this is a discovery surface);
  * --json emits the typed result as JSON (artifact content base64-encoded).
+ * `capture preview` renders the scrub report: the redaction diff (original
+ * values shown on the terminal only — they never leave the machine) and the
+ * envelope exactly as it would publish. Its --json output strips the
+ * original values so it stays persistence-safe.
  */
 
 import { parseArgs } from 'node:util';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   createHarnessLayer,
@@ -20,6 +25,8 @@ import {
   type CorpusSearchHit,
   type HarnessLayer,
 } from './consume.js';
+import { capture, parseCapturedTask, type ScrubRedaction } from './capture.js';
+import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -28,6 +35,9 @@ Commands:
                                                  solverType / role / artifactType / refs)
   corpus get <ref> [--json] [--out <dir>]        Fetch a record by ref (manifest CID from a
                                                  search result), including artifact content
+  capture preview <task-file> [--json]           Scrub a captured task and show exactly what
+                                                 would leave this machine: the redaction diff
+                                                 plus the envelope as it would publish
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -115,6 +125,75 @@ function recordToJson(record: CorpusRecord): unknown {
   };
 }
 
+/** Cap displayed before/after values so one huge attribute stays readable. */
+const DIFF_VALUE_PREVIEW_CHARS = 400;
+
+function renderDiffValue(value: unknown): string {
+  if (value === undefined) return '(dropped — field is not published at all)';
+  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  const flat = s.replace(/\n/g, '\\n');
+  return flat.length > DIFF_VALUE_PREVIEW_CHARS
+    ? `${flat.slice(0, DIFF_VALUE_PREVIEW_CHARS)}… (${flat.length} chars)`
+    : flat;
+}
+
+/**
+ * Group redaction entries by field: the pipeline reports one entry per
+ * detection, so a busy attribute produces many entries with identical
+ * before/after — one block per field with the union of firing stages is the
+ * readable audit view.
+ */
+function renderRedactionsByField(redactions: ScrubRedaction[]): string[] {
+  const byField = new Map<string, ScrubRedaction[]>();
+  for (const r of redactions) {
+    const group = byField.get(r.field) ?? [];
+    group.push(r);
+    byField.set(r.field, group);
+  }
+  const lines: string[] = [];
+  for (const [field, group] of byField) {
+    const stages = [...new Set(group.map((r) => `${r.stage}${r.detail ? ` (${r.detail})` : ''}`))];
+    const first = group[0]!;
+    const last = group[group.length - 1]!;
+    lines.push(`  ${field}`);
+    lines.push(`    stages   ${stages.join(', ')}`);
+    if ('before' in first) lines.push(`    before   ${renderDiffValue(first.before)}`);
+    lines.push(`    after    ${renderDiffValue(last.after)}`);
+    lines.push('');
+  }
+  lines.pop(); // trailing blank
+  return lines;
+}
+
+function renderScrubReport(report: ScrubReport): string {
+  const truncated = report.envelope.steps.reduce(
+    (n, s) => n + (s.truncatedKeys?.length ?? 0),
+    0,
+  );
+  const lines = [
+    'scrub preview — what would leave this machine',
+    `  task     ${report.envelope.task.summary}`,
+    `  steps    ${report.envelope.steps.length}`,
+    `  scrub    ${report.redactions.length} redaction(s), ${truncated} truncation receipt(s)`,
+    '',
+  ];
+  if (report.redactions.length === 0) {
+    lines.push('no redactions — the scrub pipeline found nothing to remove');
+  } else {
+    lines.push(
+      `${report.redactions.length} redaction(s) — "before" is shown here only and never leaves this machine`,
+      '',
+      ...renderRedactionsByField(report.redactions),
+    );
+  }
+  lines.push(
+    '',
+    'envelope as it would publish:',
+    JSON.stringify(report.envelope, null, 2),
+  );
+  return lines.join('\n');
+}
+
 function buildDefaultLayer(): HarnessLayer {
   return createHarnessLayer({
     ...(process.env['JINN_DISCOVERY_URL'] ? { discoveryUrl: process.env['JINN_DISCOVERY_URL'] } : {}),
@@ -130,7 +209,9 @@ export async function runJinnLayerCli(
   const writer = opts.writer ?? process.stdout;
   const [verb, subverb, ...rest] = argv;
 
-  if (verb !== 'corpus' || (subverb !== 'search' && subverb !== 'get')) {
+  const isCorpus = verb === 'corpus' && (subverb === 'search' || subverb === 'get');
+  const isCapturePreview = verb === 'capture' && subverb === 'preview';
+  if (!isCorpus && !isCapturePreview) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -149,6 +230,28 @@ export async function runJinnLayerCli(
   } catch (err) {
     writer.write(`error: ${err instanceof Error ? err.message : String(err)}\n\n${USAGE}`);
     return 2;
+  }
+
+  if (isCapturePreview) {
+    const taskFile = parsed.positionals[0];
+    if (taskFile === undefined) {
+      writer.write(`error: capture preview requires a <task-file> argument (a captured-task JSON file)\n\n${USAGE}`);
+      return 2;
+    }
+    const task = parseCapturedTask(JSON.parse(readFileSync(taskFile, 'utf-8')));
+    const report = preview(await capture(task));
+    if (parsed.values.json) {
+      // Persistence-safe projection: --json output may be piped to disk, so
+      // the original (pre-scrub) values are stripped — they are for the
+      // operator's eyes on their own terminal only.
+      writer.write(JSON.stringify({
+        envelope: report.envelope,
+        redactions: stripBeforeValues(report.redactions),
+      }) + '\n');
+    } else {
+      writer.write(renderScrubReport(report) + '\n');
+    }
+    return 0;
   }
 
   const layer = opts.layer ?? buildDefaultLayer();

@@ -1,8 +1,9 @@
 /**
  * @jinn-network/harness-layer — embeddable harness-layer surface.
  *
- * v0 exposes the corpus consume path (search/get) and the frozen layer-1
- * trace envelope schema. Capture / publish paths are later plan tasks.
+ * v0 exposes the corpus consume path (search/get), the frozen layer-1 trace
+ * envelope schema, and the capture path (scrub + preview). The publish path
+ * is a later plan task.
  */
 
 export {
@@ -15,6 +16,24 @@ export {
   type CorpusRecord,
   type CorpusArtifact,
 } from './consume.js';
+
+export {
+  capture,
+  parseCapturedTask,
+  CapturedTaskSchema,
+  CaptureScrubError,
+  PENDING_ENVELOPE_KIND,
+  type CapturedTask,
+  type CaptureOptions,
+  type PendingEnvelope,
+  type ScrubRedaction,
+} from './capture.js';
+
+export {
+  preview,
+  stripBeforeValues,
+  type ScrubReport,
+} from './preview.js';
 
 export {
   TraceEnvelopeV0Schema,

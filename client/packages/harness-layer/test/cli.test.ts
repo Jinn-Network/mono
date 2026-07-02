@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { fileURLToPath } from 'node:url';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
 import { runJinnLayerCli } from '../src/cli.js';
 
@@ -102,6 +103,56 @@ describe('jinn-layer CLI', () => {
     const layer = fakeLayer({});
     const code = await runJinnLayerCli(['bogus'], { layer, writer });
     expect(code).not.toBe(0);
+    expect(out()).toContain('Usage');
+  });
+});
+
+describe('jinn-layer capture preview', () => {
+  const fixturePath = fileURLToPath(
+    new URL('./fixtures/seeded-secrets-task.json', import.meta.url),
+  );
+
+  it('renders the redaction diff and the envelope as it would publish', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['capture', 'preview', fixturePath], { writer });
+    expect(code).toBe(0);
+    const text = out();
+    // The before → after diff is local display; the seeded secrets appear
+    // there (that IS the audit surface) with their scrubbed replacements.
+    expect(text).toContain('never leaves this machine');
+    expect(text).toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(text).toContain('jane.doe@example-corp.com');
+    expect(text).toContain('[EMAIL]');
+    expect(text).toContain('/users/anon');
+    // The envelope section — what would actually publish — carries none of them.
+    const marker = 'envelope as it would publish';
+    expect(text).toContain(marker);
+    const envelopeSection = text.slice(text.indexOf(marker));
+    expect(envelopeSection).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(envelopeSection).not.toContain('ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789');
+    expect(envelopeSection).not.toContain('jane.doe@example-corp.com');
+    expect(envelopeSection).not.toContain('janedoe');
+  });
+
+  it('--json emits the report with before values stripped (persistence-safe)', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['capture', 'preview', fixturePath, '--json'], { writer });
+    expect(code).toBe(0);
+    const report = JSON.parse(out());
+    expect(report.envelope.schemaVersion).toBe('jinn.trace-envelope.v0');
+    expect(report.redactions.length).toBeGreaterThan(0);
+    for (const r of report.redactions) {
+      expect(r).not.toHaveProperty('before');
+    }
+    // No seeded secret anywhere in the serialisable output.
+    expect(out()).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(out()).not.toContain('jane.doe@example-corp.com');
+  });
+
+  it('capture preview without a task file exits 2 with usage', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['capture', 'preview'], { writer });
+    expect(code).toBe(2);
     expect(out()).toContain('Usage');
   });
 });
