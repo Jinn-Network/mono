@@ -1,0 +1,6 @@
+# Disclosed seed list (spec §7 / D8-D9) — one skill per line, owner/repo[#path].
+# The path points at the directory containing SKILL.md (repo root when omitted).
+# This is an EXAMPLE list: `seed plan` fetches licence + SKILL.md for each entry
+# and produces the report a human approves before `seed execute` publishes anything.
+vercel-labs/skills#skills/find-skills
+anthropics/skills#skills/doc-coauthoring

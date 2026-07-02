@@ -30,6 +30,14 @@ import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
 import { DEFAULT_LEDGER_PATH, ledger, type LedgerEntry } from './ledger.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
 import { createLivePublishDeps } from './publish-live.js';
+import {
+  createGithubSeedSource,
+  parseSeedListEntry,
+  type SeedSource,
+} from './seed-import/fetch.js';
+import { plan as seedPlan } from './seed-import/plan.js';
+import { execute as seedExecute } from './seed-import/execute.js';
+import { parseImportReport, renderImportReport } from './seed-import/report.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -46,6 +54,14 @@ Commands:
   publish <task-file> [--veto] [--json]          Scrub, consent, publish and anchor a captured
                                                  task on testnet (--veto records locally and
                                                  publishes nothing)
+  seed plan --source <list-file> [--out <report-file>] [--json]
+                                                 Fetch + licence-check the disclosed seed list
+                                                 (owner/repo[#path] per line); ZERO writes —
+                                                 the report is what a human approves
+  seed execute <report-file> --source <list-file> [--json]
+                                                 Publish the approved import rows (APPROVAL
+                                                 GATE: run only after the plan report is
+                                                 signed off)
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -67,6 +83,8 @@ export interface RunJinnLayerCliOptions {
   layer?: HarnessLayer;
   /** Injectable publish deps (tests). Default: live testnet wiring from env. */
   publishDeps?: HarnessPublishDeps;
+  /** Injectable seed source (tests). Default: GitHub source over --source list. */
+  seedSource?: SeedSource;
   writer?: { write: (s: string) => boolean };
 }
 
@@ -271,7 +289,8 @@ export async function runJinnLayerCli(
   const isCapturePreview = verb === 'capture' && subverb === 'preview';
   const isLedger = verb === 'ledger';
   const isPublish = verb === 'publish';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish) {
+  const isSeed = verb === 'seed' && (subverb === 'plan' || subverb === 'execute');
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -288,6 +307,7 @@ export async function runJinnLayerCli(
         out: { type: 'string' },
         path: { type: 'string' },
         veto: { type: 'boolean', default: false },
+        source: { type: 'string' },
       },
       allowPositionals: true,
     });
@@ -316,6 +336,64 @@ export async function runJinnLayerCli(
       writer.write(renderScrubReport(report) + '\n');
     }
     return 0;
+  }
+
+  if (isSeed) {
+    const buildSource = (): SeedSource => {
+      if (opts.seedSource) return opts.seedSource;
+      const listFile = parsed.values.source as string | undefined;
+      if (!listFile) {
+        throw new Error('seed commands require --source <list-file> (owner/repo[#path] per line) or an injected source');
+      }
+      const entries = readFileSync(listFile, 'utf-8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !l.startsWith('#'))
+        .map(parseSeedListEntry);
+      return createGithubSeedSource({
+        entries,
+        ...(process.env['GITHUB_TOKEN'] ? { token: process.env['GITHUB_TOKEN'] } : {}),
+      });
+    };
+
+    if (subverb === 'plan') {
+      const report = await seedPlan(buildSource());
+      const outFile = parsed.values.out as string | undefined;
+      if (outFile) writeFileSync(outFile, JSON.stringify(report, null, 2) + '\n');
+      if (parsed.values.json) {
+        writer.write(JSON.stringify(report) + '\n');
+      } else {
+        writer.write(renderImportReport(report) + '\n');
+        writer.write(outFile
+          ? `\nReport written to ${outFile}. APPROVAL GATE: review (edit verdicts if needed), then run seed execute ${outFile}.\n`
+          : '\nAPPROVAL GATE: re-run with --out <report-file>, review, then seed execute.\n');
+      }
+      return 0;
+    }
+
+    // seed execute <report-file>
+    const reportFile = parsed.positionals[0];
+    if (reportFile === undefined) {
+      writer.write(`error: seed execute requires a <report-file> argument (the approved plan report)\n\n${USAGE}`);
+      return 2;
+    }
+    const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
+    const deps = opts.publishDeps ?? buildLivePublishDepsFromEnv();
+    const result = await seedExecute(report, buildSource(), deps);
+    if (parsed.values.json) {
+      writer.write(JSON.stringify(result) + '\n');
+    } else {
+      const lines = [
+        `${result.imported.length} imported, ${result.skipped.length} skipped, ${result.errors.length} error(s)`,
+      ];
+      for (const row of result.imported) {
+        lines.push(`  IMPORTED ${row.skill}`, `    ref     ${row.envelopeRef}`, `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`);
+      }
+      for (const row of result.skipped) lines.push(`  skipped  ${row.skill} — ${row.reason}`);
+      for (const row of result.errors) lines.push(`  ERROR    ${row.skill} — ${row.error}`);
+      writer.write(lines.join('\n') + '\n');
+    }
+    return result.errors.length > 0 ? 1 : 0;
   }
 
   if (isPublish) {

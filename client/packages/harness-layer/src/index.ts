@@ -62,6 +62,24 @@ export {
 } from './ledger.js';
 
 export {
+  createGithubSeedSource,
+  parseSeedListEntry,
+  type SeedSkill,
+  type SeedSource,
+  type SeedListEntry,
+} from './seed-import/fetch.js';
+export { checkLicence, IMPORT_LICENCE_ALLOWLIST, type LicenceVerdict } from './seed-import/licence.js';
+export { plan } from './seed-import/plan.js';
+export { execute, type ImportResult } from './seed-import/execute.js';
+export {
+  parseImportReport,
+  renderImportReport,
+  ImportReportSchema,
+  type ImportReport,
+  type ImportReportRow,
+} from './seed-import/report.js';
+
+export {
   TraceEnvelopeV0Schema,
   TraceStepSchema,
   VerifiabilityTierSchema,
