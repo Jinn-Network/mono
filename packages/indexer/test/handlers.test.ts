@@ -377,6 +377,79 @@ describe('StolasStakingProxy staking activity → earned reward rows', () => {
       chainId: CHAIN_ID,
     });
   });
+
+  it('recovers checkpoint multisig from mapServiceInfo when ServiceStaked was missed', async () => {
+    const recoveredOwner = '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd' as `0x${string}`;
+    const fallbackContext: HandlerContext = {
+      ...context,
+      client: {
+        readContract: async (opts) => {
+          expect(opts).toMatchObject({
+            address: stakingProxy,
+            functionName: 'mapServiceInfo',
+            args: [42n],
+            blockNumber: 41_200_000n,
+          });
+          return [multisig, recoveredOwner, [1n], 1_700_000_000n, 0n];
+        },
+      },
+    };
+
+    const checkpointEvent = {
+      args: {
+        epoch: 78n,
+        availableRewards: 100n * 10n ** 18n,
+        serviceIds: [42n],
+        rewards: [3n * 10n ** 18n],
+        epochLength: 86_400n,
+      },
+      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
+      transaction: { hash: `0x${'99'.repeat(32)}` as `0x${string}` },
+      log: { address: stakingProxy, logIndex: 6 },
+    };
+
+    await handleStakingCheckpoint({
+      event: checkpointEvent,
+      context: fallbackContext,
+      stakingService,
+      stakingRewardCheckpoint,
+    });
+
+    expect(db.get(stakingService, {
+      chainId: CHAIN_ID,
+      stakingProxy,
+      serviceId: '42',
+    })).toMatchObject({
+      serviceId: '42',
+      stakingProxy,
+      owner: recoveredOwner,
+      multisig,
+      stakedAtBlock: 41_200_000n,
+      stakedAtTimestamp: 1_700_000_000n,
+      stakedAtTx: `0x${'99'.repeat(32)}`,
+      chainId: CHAIN_ID,
+    });
+
+    expect(db.get(stakingRewardCheckpoint, {
+      chainId: CHAIN_ID,
+      stakingProxy,
+      epoch: '78',
+      serviceId: '42',
+      checkpointAtBlock: 41_200_000n,
+      logIndex: 6,
+    })).toMatchObject({
+      serviceId: '42',
+      stakingProxy,
+      multisig,
+      epoch: '78',
+      reward: 3n * 10n ** 18n,
+      epochLength: 86_400n,
+      checkpointAtBlock: 41_200_000n,
+      checkpointAtTimestamp: 1_700_000_000n,
+      checkpointAtTx: `0x${'99'.repeat(32)}`,
+      chainId: CHAIN_ID,
+    });
+  });
 });
 
 // ── Area 4: SolutionDeliveryClaimed no longer finalizes (issues #530/#1304) ───

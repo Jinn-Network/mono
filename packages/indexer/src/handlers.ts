@@ -17,7 +17,8 @@
  * — this is a refactor, not a behaviour change. See `src/index.ts` for the
  * Ponder docs links and the schema rationale.
  */
-import { decodeAbiParameters, keccak256, toBytes, type Hex } from 'viem';
+import { decodeAbiParameters, isAddress, keccak256, toBytes, type Hex } from 'viem';
+import { STOLAS_STAKING_PROXY_ABI } from '../abis/StolasStakingProxy.js';
 import {
   parseEnvelopeKey,
   parsePluginKey,
@@ -78,6 +79,9 @@ export interface HandlerDb {
 export interface HandlerContext {
   db: HandlerDb;
   chain: { id: number };
+  client?: {
+    readContract: (opts: Record<string, unknown>) => Promise<unknown>;
+  };
 }
 
 export interface BlockShape {
@@ -584,6 +588,73 @@ export async function handleServiceStaked({
 
 // ── StolasStakingProxy: Checkpoint → stakingRewardCheckpoint ─────────────────
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
+
+function parseServiceInfoAddress(value: unknown): `0x${string}` | null {
+  if (typeof value !== 'string' || !isAddress(value) || value.toLowerCase() === ZERO_ADDRESS) {
+    return null;
+  }
+  return value as `0x${string}`;
+}
+
+async function resolveCheckpointService({
+  context,
+  stakingService,
+  stakingProxy,
+  serviceId,
+  event,
+}: {
+  context: HandlerContext;
+  stakingService: unknown;
+  stakingProxy: `0x${string}`;
+  serviceId: string;
+  event: StakingCheckpointEvent;
+}): Promise<{ multisig: `0x${string}` } | null> {
+  const chainId = context.chain.id;
+  const existing = (await context.db.find(stakingService, {
+    chainId,
+    stakingProxy,
+    serviceId,
+  })) as { multisig?: `0x${string}` } | null;
+  if (existing?.multisig) return { multisig: existing.multisig };
+
+  if (!context.client?.readContract) return null;
+
+  try {
+    const serviceInfo = await context.client.readContract({
+      address: stakingProxy,
+      abi: STOLAS_STAKING_PROXY_ABI,
+      functionName: 'mapServiceInfo',
+      args: [BigInt(serviceId)],
+      blockNumber: event.block.number,
+    });
+
+    const tuple = serviceInfo as readonly unknown[];
+    const object = serviceInfo as { multisig?: unknown; owner?: unknown };
+    const multisig = parseServiceInfoAddress(Array.isArray(tuple) ? tuple[0] : object.multisig);
+    if (!multisig) return null;
+
+    const owner = parseServiceInfoAddress(Array.isArray(tuple) ? tuple[1] : object.owner) ?? ZERO_ADDRESS;
+    await context.db
+      .insert(stakingService)
+      .values({
+        serviceId,
+        stakingProxy,
+        owner,
+        multisig,
+        stakedAtBlock: event.block.number,
+        stakedAtTimestamp: event.block.timestamp,
+        stakedAtTx: event.transaction.hash,
+        chainId,
+      })
+      .onConflictDoNothing();
+
+    return { multisig };
+  } catch {
+    return null;
+  }
+}
+
 export async function handleStakingCheckpoint({
   event,
   context,
@@ -607,11 +678,13 @@ export async function handleStakingCheckpoint({
     const reward = event.args.rewards[i];
     if (!serviceId || reward === undefined) continue;
 
-    const service = (await context.db.find(stakingService, {
-      chainId,
+    const service = await resolveCheckpointService({
+      context,
+      stakingService,
       stakingProxy,
       serviceId,
-    })) as { multisig?: `0x${string}` } | null;
+      event,
+    });
     if (!service?.multisig) continue;
 
     await context.db
