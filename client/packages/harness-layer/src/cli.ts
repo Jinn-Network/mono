@@ -27,6 +27,9 @@ import {
 } from './consume.js';
 import { capture, parseCapturedTask, type ScrubRedaction } from './capture.js';
 import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
+import { DEFAULT_LEDGER_PATH, ledger, type LedgerEntry } from './ledger.js';
+import { publish, type HarnessPublishDeps } from './publish.js';
+import { createLivePublishDeps } from './publish-live.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -38,15 +41,32 @@ Commands:
   capture preview <task-file> [--json]           Scrub a captured task and show exactly what
                                                  would leave this machine: the redaction diff
                                                  plus the envelope as it would publish
+  ledger [--path <file>] [--json]                The contribution ledger: what left this
+                                                 machine, with anchor tx explorer links
+  publish <task-file> [--veto] [--json]          Scrub, consent, publish and anchor a captured
+                                                 task on testnet (--veto records locally and
+                                                 publishes nothing)
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
   JINN_IPFS_GATEWAY_URL    Override the IPFS gateway (default: https://gateway.autonolas.tech)
+
+Environment (publish — testnet anchor identity):
+  JINN_LAYER_PRIVATE_KEY        Operator agent EOA key (required; signs envelope + anchor tx)
+  JINN_LAYER_SAFE_ADDRESS       Operator Safe address (required)
+  JINN_LAYER_AGENT_ID           ERC-8004 agent NFT id (required)
+  JINN_RPC_URL                  Base Sepolia RPC (default: publicnode)
+  JINN_LAYER_IDENTITY_REGISTRY  IdentityRegistry address (default: Base Sepolia 0x8004A818…BD9e)
+  JINN_IPFS_REGISTRY_URL        IPFS registry for uploads (default: https://registry.autonolas.tech)
+  JINN_LAYER_ENDPOINT           Artifact access endpoint recorded on publish (default: http://127.0.0.1:7331)
+  JINN_LAYER_LEDGER_PATH        Ledger file (default: ~/.jinn-client/harness-layer/ledger.jsonl)
 `;
 
 export interface RunJinnLayerCliOptions {
   /** Injectable layer (tests). Default: createHarnessLayer() with env overrides. */
   layer?: HarnessLayer;
+  /** Injectable publish deps (tests). Default: live testnet wiring from env. */
+  publishDeps?: HarnessPublishDeps;
   writer?: { write: (s: string) => boolean };
 }
 
@@ -194,6 +214,44 @@ function renderScrubReport(report: ScrubReport): string {
   return lines.join('\n');
 }
 
+/** Base Sepolia explorer — the testnet all v0 anchors land on. */
+const TESTNET_EXPLORER_TX_URL = 'https://sepolia.basescan.org/tx/';
+
+function renderLedgerEntry(entry: LedgerEntry): string {
+  const lines = [
+    `${entry.ts}  ${entry.status}`,
+    `  task      ${entry.taskSummary}`,
+    `  tier      ${entry.verifiabilityTier}`,
+    `  ref       ${entry.envelopeRef ?? '- (not published)'}`,
+    `  anchor    ${entry.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${entry.anchorTx}` : '-'}`,
+  ];
+  return lines.join('\n');
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`publish requires ${name} to be set (see \`jinn-layer help\` for the publish environment)`);
+  }
+  return value;
+}
+
+/** Live testnet publish deps from JINN_LAYER_* env (see USAGE). */
+function buildLivePublishDepsFromEnv(): HarnessPublishDeps {
+  return createLivePublishDeps({
+    privateKey: requireEnv('JINN_LAYER_PRIVATE_KEY') as `0x${string}`,
+    safeAddress: requireEnv('JINN_LAYER_SAFE_ADDRESS') as `0x${string}`,
+    agentId: BigInt(requireEnv('JINN_LAYER_AGENT_ID')),
+    ...(process.env['JINN_RPC_URL'] ? { rpcUrl: process.env['JINN_RPC_URL'] } : {}),
+    ...(process.env['JINN_LAYER_IDENTITY_REGISTRY']
+      ? { identityRegistry: process.env['JINN_LAYER_IDENTITY_REGISTRY'] as `0x${string}` }
+      : {}),
+    ...(process.env['JINN_IPFS_REGISTRY_URL'] ? { ipfsRegistryUrl: process.env['JINN_IPFS_REGISTRY_URL'] } : {}),
+    ...(process.env['JINN_LAYER_ENDPOINT'] ? { endpoint: process.env['JINN_LAYER_ENDPOINT'] } : {}),
+    ...(process.env['JINN_LAYER_LEDGER_PATH'] ? { ledgerPath: process.env['JINN_LAYER_LEDGER_PATH'] } : {}),
+  });
+}
+
 function buildDefaultLayer(): HarnessLayer {
   return createHarnessLayer({
     ...(process.env['JINN_DISCOVERY_URL'] ? { discoveryUrl: process.env['JINN_DISCOVERY_URL'] } : {}),
@@ -211,19 +269,25 @@ export async function runJinnLayerCli(
 
   const isCorpus = verb === 'corpus' && (subverb === 'search' || subverb === 'get');
   const isCapturePreview = verb === 'capture' && subverb === 'preview';
-  if (!isCorpus && !isCapturePreview) {
+  const isLedger = verb === 'ledger';
+  const isPublish = verb === 'publish';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
 
+  // `ledger` and `publish` have no subverb — their args start at argv[1].
+  const flat = isLedger || isPublish;
   let parsed;
   try {
     parsed = parseArgs({
-      args: rest,
+      args: flat ? (subverb === undefined ? rest : [subverb, ...rest]) : rest,
       options: {
         limit: { type: 'string', default: String(DEFAULT_CLI_SEARCH_LIMIT) },
         json: { type: 'boolean', default: false },
         out: { type: 'string' },
+        path: { type: 'string' },
+        veto: { type: 'boolean', default: false },
       },
       allowPositionals: true,
     });
@@ -250,6 +314,45 @@ export async function runJinnLayerCli(
       }) + '\n');
     } else {
       writer.write(renderScrubReport(report) + '\n');
+    }
+    return 0;
+  }
+
+  if (isPublish) {
+    const taskFile = subverb;
+    if (taskFile === undefined || taskFile.startsWith('--')) {
+      writer.write(`error: publish requires a <task-file> argument (a captured-task JSON file)\n\n${USAGE}`);
+      return 2;
+    }
+    const task = parseCapturedTask(JSON.parse(readFileSync(taskFile, 'utf-8')));
+    const pending = await capture(task);
+    const deps = opts.publishDeps ?? buildLivePublishDepsFromEnv();
+    const result = await publish(pending, deps, { veto: parsed.values.veto as boolean });
+    if (parsed.values.json) {
+      writer.write(JSON.stringify(result) + '\n');
+    } else if (result.vetoed) {
+      writer.write('Vetoed — nothing published; recorded in the ledger as vetoed (local only).\n');
+    } else {
+      writer.write([
+        'Published.',
+        `  ref       ${result.envelopeRef}`,
+        `  anchor    ${result.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${result.anchorTx}` : '- (anchor tx pending)'}`,
+        `  fetch it  jinn-layer corpus get ${result.envelopeRef}`,
+        '',
+      ].join('\n'));
+    }
+    return 0;
+  }
+
+  if (isLedger) {
+    const path = (parsed.values.path as string | undefined) ?? DEFAULT_LEDGER_PATH;
+    const entries = ledger(path);
+    if (parsed.values.json) {
+      writer.write(JSON.stringify(entries) + '\n');
+    } else if (entries.length === 0) {
+      writer.write(`No contributions yet — the ledger at ${path} is empty.\n`);
+    } else {
+      writer.write(`${entries.length} contribution(s)\n\n${entries.map(renderLedgerEntry).join('\n\n')}\n`);
     }
     return 0;
   }
