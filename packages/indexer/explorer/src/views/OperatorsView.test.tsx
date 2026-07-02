@@ -6,7 +6,7 @@
  * resolved-rate column, no filter UI.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -230,15 +230,21 @@ describe('OperatorsView', () => {
     expect(headers.some((h) => /jinn earned/i.test(h))).toBe(false);
   });
 
-  it('does not render tJINN copy on the operators page', async () => {
+  it('does not render legacy token copy on the operators page or tooltips', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
+
+    for (const trigger of screen.getAllByRole('button', { name: /definition/i })) {
+      fireEvent.click(trigger);
+    }
+
+    expect(document.body.textContent).not.toMatch(/\bJINN\b/);
     expect(document.body.textContent).not.toMatch(/tJINN/);
-    expect(document.body.textContent).not.toMatch(/Testnet JINN earned/);
+    expect(document.body.textContent).not.toMatch(/collector-token/i);
   });
 
   it('renders 8 Y/N symbols separated by ` | ` per row in the Activity blocks column', async () => {

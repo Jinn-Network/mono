@@ -19,7 +19,7 @@ export function ActiveOperatorTooltipBody({ window }: { window: ActiveWindow }) 
     <>
       <div>
         Earned at least 3 OLAS in the most recent completed UTC 6-hour block.
-        The in-progress block is excluded. JINN on Base Sepolia represents OLAS.
+        The in-progress block is excluded.
       </div>
       <div style={{ marginTop: 6 }}>
         Latest completed block: {formatWindowTs(window.endTs - window.blockSeconds)}{' -> '}
