@@ -808,6 +808,54 @@ export const verdictEnvelopeMeta = onchainTable(
   }),
 );
 
+// ── CaptureEnvelopeMeta ──────────────────────────────────────────────────────
+/**
+ * Envelope-sourced metadata for a published capture (harness trace), populated
+ * by the IPFS enrichment pass (issue #1314): for each indexed `capture:<cid>`
+ * MetadataSet event, fetch the wrapper envelope body, then the
+ * `jinn.trace-envelope.v0` artifact it carries, and project the fields the
+ * distribution signal reads: distribution tags, provenance, contributor.
+ *
+ * Seeds (`provenance: 'imported'`) are stored but EXCLUDED from the signal's
+ * default counts — the API filters on this column (spec §7).
+ *
+ * Resilient: on IPFS fetch/parse failure no row is written; Ponder reprocesses
+ * on the next sync giving a natural retry.
+ *
+ * Primary key: (manifestCid, chainId) — the wrapper envelope CID is the
+ * corpus ref, one meta row per published capture.
+ */
+export const captureEnvelopeMeta = onchainTable(
+  'capture_envelope_meta',
+  (t) => ({
+    /** The wrapper envelope CID (the corpus ref) — part of the metadataKey after `capture:`. */
+    manifestCid: t.text().notNull(),
+    /** Chain ID. */
+    chainId: t.integer().notNull(),
+    /** agentId of the publisher (decimal string). */
+    agentId: t.text().notNull(),
+    /** Contributor identity: participant.safeAddress from the wrapper envelope. */
+    contributor: t.text().notNull().default(''),
+    /** Scrubbed one-line task summary from the trace envelope. */
+    taskSummary: t.text().notNull().default(''),
+    /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
+    tagsJson: t.text().notNull().default('[]'),
+    /** 'contributed' | 'imported' — the signal's seed-exclusion filter column. */
+    provenance: t.text().notNull().default('contributed'),
+    /** outcome.verifiabilityTier from the trace envelope. */
+    verifiabilityTier: t.text().notNull().default(''),
+    /** 'ok' | 'failed'. */
+    enrichmentStatus: t.text().notNull().default('ok'),
+    /** Block number of the MetadataSet event that triggered enrichment. */
+    enrichedAtBlock: t.bigint().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.manifestCid, table.chainId] }),
+    provenanceIdx: index().on(table.provenance),
+    contributorIdx: index().on(table.contributor),
+  }),
+);
+
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const taskRelations = relations(task, ({ many }) => ({

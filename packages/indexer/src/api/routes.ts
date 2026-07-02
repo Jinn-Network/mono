@@ -275,3 +275,107 @@ export function listBuilderScores(args: {
   const builderPubs = publications.filter((p) => p.builderAgentId === builderAgentId);
   return buildScoreRows(builderPubs, attemptEnvelopeMetas, verdicts);
 }
+
+// ── Route 6: GET /distribution-signal (#1314) ────────────────────────────────
+
+/** Row type matching ponder.schema.ts captureEnvelopeMeta columns the route reads. */
+export interface CaptureEnvelopeMetaRow {
+  manifestCid: string;
+  chainId: number;
+  contributor: string;
+  taskSummary: string;
+  /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
+  tagsJson: string;
+  provenance: string;
+  verifiabilityTier: string;
+}
+
+export interface DistributionSignalRow {
+  cluster: string;
+  envelopeCount: number;
+  contributorCount: number;
+  /** Co-occurring tags in the cluster, most frequent first (primary excluded). */
+  topTags: string[];
+}
+
+export interface DistributionSignalOutput {
+  rows: DistributionSignalRow[];
+  /** Total envelopes counted (post-filter). */
+  envelopeTotal: number;
+  /** Distinct contributors across all counted envelopes (clusters overlap; rows don't sum). */
+  contributorTotal: number;
+  /** How many seeded (provenance=imported) envelopes the default filter excluded. */
+  seedsExcluded: number;
+  includeSeeds: boolean;
+}
+
+/**
+ * v0 tag-rollup clustering over enriched capture envelopes: an envelope's
+ * first distribution tag is its cluster; topTags are the co-occurring tags.
+ * Seeds (provenance=imported) are excluded from every number unless
+ * `includeSeeds` — the explorer's demonstrate-it-live toggle (spec §7).
+ * Mirrors client/packages/harness-layer/src/signal.ts computeSignal.
+ */
+export function buildDistributionSignal(
+  metas: CaptureEnvelopeMetaRow[],
+  opts: { includeSeeds?: boolean; topTagsLimit?: number } = {},
+): DistributionSignalOutput {
+  const includeSeeds = opts.includeSeeds ?? false;
+  const topTagsLimit = opts.topTagsLimit ?? 5;
+  const clusters = new Map<
+    string,
+    { envelopes: number; contributors: Set<string>; tagCounts: Map<string, number> }
+  >();
+  const allContributors = new Set<string>();
+  let envelopeTotal = 0;
+  let seedsExcluded = 0;
+
+  for (const meta of metas) {
+    if (meta.provenance === 'imported' && !includeSeeds) {
+      seedsExcluded += 1;
+      continue;
+    }
+    let tags: string[] = [];
+    try {
+      const parsed = JSON.parse(meta.tagsJson) as unknown;
+      if (Array.isArray(parsed)) tags = parsed.filter((t): t is string => typeof t === 'string');
+    } catch {
+      // Malformed tagsJson: the envelope is counted nowhere (no primary tag).
+    }
+    const primary = tags[0];
+    if (!primary) continue;
+    envelopeTotal += 1;
+    allContributors.add(meta.contributor);
+    const cluster = clusters.get(primary) ?? {
+      envelopes: 0,
+      contributors: new Set<string>(),
+      tagCounts: new Map<string, number>(),
+    };
+    cluster.envelopes += 1;
+    cluster.contributors.add(meta.contributor);
+    for (const tag of tags.slice(1)) {
+      cluster.tagCounts.set(tag, (cluster.tagCounts.get(tag) ?? 0) + 1);
+    }
+    clusters.set(primary, cluster);
+  }
+
+  const rows = [...clusters.entries()]
+    .map(([cluster, agg]) => ({
+      cluster,
+      envelopeCount: agg.envelopes,
+      contributorCount: agg.contributors.size,
+      topTags: [...agg.tagCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, topTagsLimit)
+        .map(([tag]) => tag),
+    }))
+    .sort((a, b) => b.envelopeCount - a.envelopeCount || a.cluster.localeCompare(b.cluster));
+
+  return {
+    rows,
+    envelopeTotal,
+    contributorTotal: allContributors.size,
+    seedsExcluded,
+    includeSeeds,
+  };
+}

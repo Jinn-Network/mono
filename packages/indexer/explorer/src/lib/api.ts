@@ -322,6 +322,33 @@ export function useNetwork(params?: NetworkParams) {
   });
 }
 
+// ── Distribution signal (#1314) ──────────────────────────────────────────────
+
+export interface DistributionSignalRow {
+  cluster: string;
+  envelopeCount: number;
+  contributorCount: number;
+  topTags: string[];
+}
+
+export interface DistributionSignalResponse {
+  rows: DistributionSignalRow[];
+  envelopeTotal: number;
+  contributorTotal: number;
+  seedsExcluded: number;
+  includeSeeds: boolean;
+}
+
+export function useDistributionSignal(includeSeeds: boolean) {
+  return useQuery({
+    queryKey: ['distribution-signal', includeSeeds],
+    queryFn: () =>
+      fetchJson<DistributionSignalResponse>(
+        `/distribution-signal${qs({ include: includeSeeds ? 'seeded' : undefined })}`,
+      ),
+  });
+}
+
 export function useSolverNets() {
   return useQuery({
     queryKey: ['solvernets'],

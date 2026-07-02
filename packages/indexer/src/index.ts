@@ -36,7 +36,7 @@
  */
 import { ponder } from 'ponder:registry';
 import { and, count, eq } from 'ponder';
-import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta, rewardDistribution, stakingService, stakingRewardCheckpoint } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta, captureEnvelopeMeta, rewardDistribution, stakingService, stakingRewardCheckpoint } from 'ponder:schema';
 
 // ── Enrichment config (read once at module scope) ─────────────────────────────
 // JINN_INDEXER_ENRICH_ENVELOPES governs in-handler IPFS enrichment. Since #779
@@ -63,6 +63,10 @@ const enrichEnvelopes =
 const enrichVerdicts =
   process.env['JINN_INDEXER_ENRICH_ENVELOPES'] === 'true' ||
   process.env['JINN_INDEXER_ENRICH_ENVELOPES'] === '1';
+// Capture path (#1314, distribution signal): same lever as the execution
+// path — DEFAULT ENABLED, opt out with JINN_INDEXER_ENRICH_ENVELOPES=false.
+// Two IPFS fetches per capture anchor; capture volume is v0-small.
+const enrichCaptures = enrichEnvelopes;
 // JINN_IPFS_GATEWAY_URL: IPFS gateway for envelope enrichment.
 // Empty → fetchIpfsJson falls back to https://gateway.autonolas.tech.
 const ipfsGateway = process.env['JINN_IPFS_GATEWAY_URL'] ?? '';
@@ -187,8 +191,10 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     harnessCheckpoint,
     attemptEnvelopeMeta,
     verdictEnvelopeMeta,
+    captureEnvelopeMeta,
     enrichEnvelopes,
     enrichVerdicts,
+    enrichCaptures,
     ipfsGateway,
   });
 });

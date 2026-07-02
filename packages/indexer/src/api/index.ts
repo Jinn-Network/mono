@@ -40,9 +40,11 @@ import {
   getPluginScores,
   listBuilderArtifacts,
   listBuilderScores,
+  buildDistributionSignal,
   type PluginPublicationRow,
   type AttemptEnvelopeMetaRow,
   type VerdictRow,
+  type CaptureEnvelopeMetaRow,
 } from './routes.js';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync } from 'node:fs';
@@ -244,6 +246,25 @@ app.get('/builders/:address/scores', async (c) => {
     return c.json(listBuilderScores({ publications: rows, builderAgentId, attemptEnvelopeMetas: metas, verdicts }));
   } catch (err) {
     return c.json({ error: 'builder-scores unavailable', detail: String(err) }, 503);
+  }
+});
+
+// ── GET /distribution-signal (#1314) ──────────────────────────────────────────
+//   v0 tag-rollup distribution signal over enriched capture envelopes.
+//   Seeds (provenance=imported) excluded by default; ?include=seeded folds
+//   them back in (the explorer's demonstrate-it-live toggle, spec §7).
+
+app.get('/distribution-signal', async (c) => {
+  const includeSeeds = c.req.query('include') === 'seeded';
+  try {
+    const s = schema as { captureEnvelopeMeta?: unknown };
+    if (!s.captureEnvelopeMeta) return c.json(buildDistributionSignal([], { includeSeeds }));
+    const metas = (await db
+      .select()
+      .from(s.captureEnvelopeMeta as never)) as unknown as CaptureEnvelopeMetaRow[];
+    return c.json(buildDistributionSignal(metas, { includeSeeds }));
+  } catch (err) {
+    return c.json({ error: 'distribution-signal unavailable', detail: String(err) }, 503);
   }
 });
 

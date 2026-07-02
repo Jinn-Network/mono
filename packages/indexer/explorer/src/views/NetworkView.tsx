@@ -25,6 +25,7 @@ import type { NetworkResponse } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { HBars } from '../components/HBars';
+import { DistributionSignal } from '../components/DistributionSignal';
 import { pct, int, block } from '../lib/format';
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -217,6 +218,10 @@ export function NetworkView() {
       {data && (
         <>
           <ActivityStrip data={data} />
+
+          {/* Distribution signal (#1314) — below Activity, above composition
+              per the design (docs/design/artifacts/2026-07-02-1314-…). */}
+          <DistributionSignal />
 
           <Card title="Network composition">
             <div

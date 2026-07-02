@@ -935,6 +935,96 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
 // standalone enrichment worker shares one definition with this handler and they
 // cannot drift. They are imported + re-exported at the top of this file.
 
+// ── Capture-envelope signal parsers (#1314) ──────────────────────────────────
+// Dep-free defensive parsers for the two-hop capture enrichment: the wrapper
+// envelope (capture:<cid>) carries a `jinn.trace-envelope.v0` artifact whose
+// IPFS body (donation encoding, base64 `data`) is the trace envelope holding
+// the fields the distribution signal reads.
+
+export interface CaptureWrapperLite {
+  /** participant.safeAddress — the contributor identity. */
+  contributor: string;
+  /** IPFS cid of the jinn.trace-envelope.v0 artifact. */
+  traceArtifactCid: string;
+}
+
+export function parseCaptureWrapperLite(body: unknown): CaptureWrapperLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+
+  const participant = b['participant'];
+  const participantObj: Record<string, unknown> =
+    participant !== null && typeof participant === 'object'
+      ? (participant as Record<string, unknown>)
+      : {};
+  const contributor = safeStr(participantObj['safeAddress']);
+
+  if (!Array.isArray(b['artifacts'])) return null;
+  for (const artifact of b['artifacts'] as unknown[]) {
+    if (artifact === null || typeof artifact !== 'object') continue;
+    const a = artifact as Record<string, unknown>;
+    if (a['artifactType'] !== 'jinn.trace-envelope.v0') continue;
+    if (!Array.isArray(a['sources'])) continue;
+    for (const source of a['sources'] as unknown[]) {
+      if (source === null || typeof source !== 'object') continue;
+      const cid = safeStr((source as Record<string, unknown>)['cid']);
+      if (cid) return { contributor, traceArtifactCid: cid };
+    }
+  }
+  return null;
+}
+
+export interface TraceEnvelopeSignalLite {
+  taskSummary: string;
+  /** JSON.stringify(task.distributionTags) — '[]' when absent. */
+  tagsJson: string;
+  provenance: 'contributed' | 'imported';
+  verifiabilityTier: string;
+}
+
+export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignalLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+
+  // The artifact body is the donation encoding: { data: base64(trace JSON) }.
+  // Tolerate a raw trace-envelope body too (direct gateway reads).
+  let trace: Record<string, unknown> = b;
+  const data = b['data'];
+  if (typeof data === 'string' && data) {
+    try {
+      trace = JSON.parse(Buffer.from(data, 'base64').toString('utf-8')) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  if (trace === null || typeof trace !== 'object') return null;
+
+  const task = trace['task'];
+  const taskObj: Record<string, unknown> =
+    task !== null && typeof task === 'object' ? (task as Record<string, unknown>) : {};
+  const taskSummary = safeStr(taskObj['summary']);
+
+  let tagsJson = '[]';
+  if (Array.isArray(taskObj['distributionTags'])) {
+    try {
+      tagsJson = JSON.stringify(
+        (taskObj['distributionTags'] as unknown[]).filter((t) => typeof t === 'string'),
+      );
+    } catch {
+      tagsJson = '[]';
+    }
+  }
+
+  const provenance = trace['provenance'] === 'imported' ? 'imported' : 'contributed';
+
+  const outcome = trace['outcome'];
+  const outcomeObj: Record<string, unknown> =
+    outcome !== null && typeof outcome === 'object' ? (outcome as Record<string, unknown>) : {};
+  const verifiabilityTier = safeStr(outcomeObj['verifiabilityTier']);
+
+  return { taskSummary, tagsJson, provenance, verifiabilityTier };
+}
+
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
 // Routes by key prefix:
 //   solvernet-manifest:<cid>  → upsert SolverNetManifest (most-recent-wins)
@@ -952,8 +1042,10 @@ export async function handleMetadataSet({
   harnessCheckpoint,
   attemptEnvelopeMeta,
   verdictEnvelopeMeta,
+  captureEnvelopeMeta,
   enrichEnvelopes = false,
   enrichVerdicts = false,
+  enrichCaptures = false,
   ipfsGateway = '',
   fetchImpl,
 }: {
@@ -965,6 +1057,7 @@ export async function handleMetadataSet({
   harnessCheckpoint?: unknown;
   attemptEnvelopeMeta?: unknown;
   verdictEnvelopeMeta?: unknown;
+  captureEnvelopeMeta?: unknown;
   /**
    * Governs in-handler IPFS enrichment of the execution-envelope
    * (attemptEnvelopeMeta), solverNetManifest, and harnessCheckpoint paths.
@@ -981,6 +1074,12 @@ export async function handleMetadataSet({
    * but defaulting off.
    */
   enrichVerdicts?: boolean;
+  /**
+   * Governs in-handler IPFS enrichment of the CAPTURE path →
+   * captureEnvelopeMeta (#1314, the distribution signal's data). Two IPFS
+   * fetches per capture anchor (wrapper envelope, then its trace artifact).
+   */
+  enrichCaptures?: boolean;
   ipfsGateway?: string;
   fetchImpl?: FetchLike;
 }): Promise<void> {
@@ -1446,6 +1545,73 @@ export async function handleMetadataSet({
       } catch (err) {
         console.warn(`[indexer] verdict envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
         // no row — we have no requestId without the body; Ponder reprocesses on next sync.
+      }
+    }
+
+    // ── Capture envelope enrichment → captureEnvelopeMeta (#1314) ──────────
+    // Only for capture envelopes (kind === 'capture'). Two-hop: the wrapper
+    // envelope body names the jinn.trace-envelope.v0 artifact; the artifact
+    // body carries the distribution tags / provenance / summary the signal
+    // reads. captureEnvelopeMeta is optional for backward compat.
+    if (envelopeKey.kind === 'capture' && enrichCaptures && captureEnvelopeMeta) {
+      try {
+        const wrapperBody = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
+          timeoutMs: 5000,
+          fetchImpl,
+        });
+        const wrapper = parseCaptureWrapperLite(wrapperBody);
+        if (wrapper) {
+          const artifactBody = await fetchIpfsJson(ipfsGateway, wrapper.traceArtifactCid, {
+            timeoutMs: 5000,
+            fetchImpl,
+          });
+          const signalMeta = parseTraceEnvelopeSignalLite(artifactBody);
+          if (signalMeta) {
+            await context.db
+              .insert(captureEnvelopeMeta)
+              .values({
+                manifestCid: envelopeKey.cid,
+                chainId,
+                agentId,
+                contributor: wrapper.contributor,
+                taskSummary: signalMeta.taskSummary,
+                tagsJson: signalMeta.tagsJson,
+                provenance: signalMeta.provenance,
+                verifiabilityTier: signalMeta.verifiabilityTier,
+                enrichmentStatus: 'ok',
+                enrichedAtBlock: blockNumber,
+              })
+              .onConflictDoUpdate((row) => {
+                // Most-recent-wins, mirroring the other meta tables.
+                if (blockNumber >= row.enrichedAtBlock) {
+                  return {
+                    agentId,
+                    contributor: wrapper.contributor,
+                    taskSummary: signalMeta.taskSummary,
+                    tagsJson: signalMeta.tagsJson,
+                    provenance: signalMeta.provenance,
+                    verifiabilityTier: signalMeta.verifiabilityTier,
+                    enrichmentStatus: 'ok',
+                    enrichedAtBlock: blockNumber,
+                  };
+                }
+                // No-op: return existing row fields so Drizzle generates valid SQL.
+                return {
+                  agentId: row.agentId,
+                  contributor: row.contributor,
+                  taskSummary: row.taskSummary,
+                  tagsJson: row.tagsJson,
+                  provenance: row.provenance,
+                  verifiabilityTier: row.verifiabilityTier,
+                  enrichmentStatus: row.enrichmentStatus,
+                  enrichedAtBlock: row.enrichedAtBlock,
+                };
+              });
+          }
+        }
+      } catch (err) {
+        console.warn(`[indexer] capture envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
+        // no row — Ponder reprocesses on the next sync giving a natural retry.
       }
     }
 

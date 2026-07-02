@@ -36,6 +36,13 @@ export {
 } from './preview.js';
 
 export {
+  computeSignal,
+  type SignalInput,
+  type SignalRow,
+  type SignalOptions,
+} from './signal.js';
+
+export {
   publish,
   toTraceEnvelope,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
