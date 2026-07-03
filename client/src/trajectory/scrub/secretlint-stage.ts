@@ -3,7 +3,7 @@ import { creator } from '@secretlint/secretlint-rule-preset-recommend';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
 import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0'; // 0.3.0: entropy replacement preserves wrapping delimiters (#1378)
 const PRESET_RULE_ID = '@secretlint/secretlint-rule-preset-recommend';
 
 // Entropy fallback thresholds. Conservative on purpose: a long token whose
@@ -109,6 +109,18 @@ function shortRule(ruleId: string): string {
   return ruleId.replace(/^@secretlint\/secretlint-rule-/, '').replace(/^@secretlint\//, '');
 }
 
+// #1378 cosmetic: a `\S+` token inside serialised JSON drags its wrapping
+// delimiters along (`"…/blob",` is one whitespace-delimited token), so
+// replacing the whole token swallowed the quotes/comma and left malformed
+// JSON (`"resolved_path": [SECRET:high-entropy] "files_modified": …`). Split
+// each token into leading punctuation / core / trailing punctuation, gate on
+// the core, and reattach the punctuation around the placeholder. None of the
+// stripped characters belong to SECRET_CHARSET (`=` deliberately excluded —
+// base64 padding), so no secret material is ever preserved; if anything,
+// stripping the wrapper improves detection (the 16–19 char shape gate
+// previously failed on quoted tokens because the quotes broke the charset).
+const TOKEN_WRAPPING = /^([("'`[{,;:]*)([\s\S]*?)([)"'`\]},;:.]*)$/;
+
 /**
  * Secrets stage. Two passes over each `content`-classified string value:
  *  1. secretlint preset-recommend rules (AWS, GitHub, Slack, GCP, npm, …) —
@@ -153,10 +165,12 @@ export function secretlintStage(policy: KeyPolicy): ScrubStage {
         }
 
         // Pass 2 — entropy + secret-shape fallback on whatever survived.
+        // Wrapping punctuation is preserved around the placeholder (#1378).
         text = text.replace(/\S+/g, (token) => {
-          if (isSecretShapedToken(token)) {
+          const [, lead = '', core = token, trail = ''] = TOKEN_WRAPPING.exec(token) ?? [];
+          if (isSecretShapedToken(core)) {
             redactions.push({ key, stage: 'secretlint', kind: 'secret', detail: 'high-entropy' });
-            return '[SECRET:high-entropy]';
+            return `${lead}[SECRET:high-entropy]${trail}`;
           }
           return token;
         });

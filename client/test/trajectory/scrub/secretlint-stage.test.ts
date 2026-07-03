@@ -155,6 +155,25 @@ describe('secretlintStage', () => {
     expect(result.redactions.some((r) => r.kind === 'secret' && r.detail === 'high-entropy')).toBe(true);
   });
 
+  // #1378 cosmetic: a `\S+` token inside serialised JSON drags its wrapping
+  // delimiters along (`"…/blob",` is one token), so the entropy replacement
+  // swallowed the quotes and comma and left malformed JSON
+  // (`"resolved_path": [SECRET:high-entropy] "files_modified": …`). Wrapping
+  // punctuation is preserved around the placeholder.
+  test('entropy redaction inside serialised JSON preserves structure (#1378)', async () => {
+    const stage = secretlintStage(policy);
+    const blob = 'Zk3pQ9wX7vR2sT8yU1nB6mC4dF0gH5jL';
+    const json = `{"resolved_path": "${blob}", "files_modified": 1}`;
+    const result = await stage.scrub({ 'tool.result': json });
+    const out = result.attributes['tool.result'] as string;
+
+    expect(out).not.toContain(blob);
+    expect(JSON.parse(out)).toEqual({
+      resolved_path: '[SECRET:high-entropy]',
+      files_modified: 1,
+    });
+  });
+
   // #1348 guardrail: the path carve-out must NOT weaken genuine secret
   // coverage — a secret embedded as a path segment still redacts.
   test('path-embedded secrets still redact (#1348 guardrail)', async () => {

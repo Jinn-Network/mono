@@ -37,6 +37,32 @@ describe('ScrubPipeline', () => {
     ]);
   });
 
+  // #1378: nested attribute values (e.g. `tool.args` as an object) must go
+  // through the same stages as flat string values — string leaves inside
+  // objects/arrays are scrubbed under their top-level key's classification.
+  test('scrubs string leaves inside nested object/array values (#1378)', async () => {
+    const pipeline = new ScrubPipeline([upper]);
+    const result = await pipeline.run({
+      'tool.args': { path: 'secret', list: ['a', { deep: 'b' }], n: 1, ok: true, none: null },
+      'plain': 'flat',
+    });
+
+    expect(result.attributes['tool.args']).toEqual({
+      path: 'SECRET',
+      list: ['A', { deep: 'B' }],
+      n: 1,
+      ok: true,
+      none: null,
+    });
+    expect(result.attributes['plain']).toBe('FLAT');
+  });
+
+  test('a stage-dropped key is dropped before its nested values are walked (#1378)', async () => {
+    const pipeline = new ScrubPipeline([dropX]);
+    const result = await pipeline.run({ x: { nested: 'gone' }, y: 'keep' });
+    expect(result.attributes).toEqual({ y: 'keep' });
+  });
+
   test('exposes stage name+version pairs for the provenance manifest', () => {
     const pipeline = new ScrubPipeline([upper, dropX]);
     expect(pipeline.components).toEqual([

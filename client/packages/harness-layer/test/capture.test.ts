@@ -127,6 +127,45 @@ describe('capture() on the seeded-secrets fixture', () => {
   });
 });
 
+describe('capture() nested step attributes (#1378)', () => {
+  // The published-envelope leak: `tool.result` (a string) was scrubbed but
+  // `tool.args` (a nested object) published verbatim — the value-scrubbing
+  // stages skipped every non-string attribute value. On a real machine the
+  // leaked string is `/Users/<realname>/…`, a username leaving the machine.
+  it('redacts a home-dir path in BOTH tool.args (nested) and tool.result (string)', async () => {
+    const homePath = '/Users/janedoe/projects/demo/secretish.py';
+    const task = validTask();
+    task.steps[0]!.attributes = {
+      'tool.args': {
+        path: homePath,
+        command: `python ${homePath} --check`,
+        flags: ['--file', homePath],
+      },
+      'tool.result': `{"resolved_path": "${homePath}", "files_modified": 1}`,
+    };
+    const pending = await capture(task);
+    const report = preview(pending);
+
+    const step = report.envelope.steps[0]!;
+    expect(String(step.attributes['tool.result']), 'tool.result leaked the username').not.toContain('janedoe');
+    expect(JSON.stringify(step.attributes['tool.args']), 'tool.args leaked the username').not.toContain('janedoe');
+    expect(JSON.stringify(report.envelope), 'published envelope leaked the username').not.toContain('janedoe');
+    // The redaction is a visible receipt on the step, like any other.
+    expect(step.redactedKeys).toContain('tool.args');
+  });
+
+  it('redacts a seeded secret inside a nested args value', async () => {
+    const ghToken = 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789';
+    const task = validTask();
+    task.steps[0]!.attributes = {
+      'tool.args': { env: { setup: `export GH_TOKEN=${ghToken}` } },
+    };
+    const pending = await capture(task);
+    const report = preview(pending);
+    expect(JSON.stringify(report.envelope)).not.toContain(ghToken);
+  });
+});
+
 describe('capture() slug-like task summaries (#1348)', () => {
   it('keeps a seed-import slug summary verbatim — paths are not secrets', async () => {
     const summary = 'Seed import: obra/superpowers/skills/test-driven-development';
