@@ -190,6 +190,63 @@ describe('execute()', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.status).toBe('published');
   });
+
+  // ── Tagging (#1343) — tags freeze into published envelopes ────────────────
+
+  it('tags carry the skill slug, not just the repo', async () => {
+    const source = mockSource([skill({ skill: 'acme/skills/write-tests' })]);
+    const { deps, published } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    expect(envelope.task.distributionTags).toContain('write-tests');
+    expect(envelope.task.distributionTags).toContain('seed-import');
+    expect(envelope.task.distributionTags).toContain('skills');
+  });
+
+  it('a SKILL.md frontmatter name becomes a tag', async () => {
+    const source = mockSource([
+      skill({
+        skill: 'acme/skills/tdd-dir',
+        skillMd: '---\nname: test-driven-development\ndescription: Red, green, refactor.\n---\n\n# TDD\n',
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    expect(envelope.task.distributionTags).toContain('test-driven-development');
+    expect(envelope.task.distributionTags).toContain('tdd-dir');
+  });
+
+  it('frontmatter name matching the slug does not duplicate; quoted names unquote', async () => {
+    const source = mockSource([
+      skill({
+        skill: 'acme/skills/tdd',
+        skillMd: '---\nname: "tdd"\n---\n# tdd\n',
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const tags = envelope.task.distributionTags;
+    expect(tags.filter((t) => t === 'tdd')).toHaveLength(1);
+  });
+
+  it('tags respect the frozen schema caps (64 chars each, 16 max) with no frontmatter', async () => {
+    const longName = 'x'.repeat(80);
+    const source = mockSource([
+      skill({
+        skill: `acme/skills/${longName}`,
+        skillMd: `---\nname: ${longName}\n---\n# long\n`,
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    for (const tag of envelope.task.distributionTags) {
+      expect(tag.length).toBeLessThanOrEqual(64);
+    }
+    expect(envelope.task.distributionTags.length).toBeLessThanOrEqual(16);
+  });
 });
 
 describe('jinn-layer seed CLI', () => {

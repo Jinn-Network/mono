@@ -30,9 +30,51 @@ export interface ImportResult {
   errors: Array<{ skill: string; error: string }>;
 }
 
+/** Caps from the frozen envelope schema (envelope-v0.md size limits). */
+const MAX_TAG_CHARS = 64;
+const MAX_TAGS = 16;
+
+/**
+ * Extract `name:` from a SKILL.md YAML frontmatter block, if present.
+ * Deliberately a line-parser, not a YAML dependency — skill frontmatter
+ * names are plain scalars; anything more exotic simply yields no tag.
+ */
+export function frontmatterName(skillMd: string): string | null {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(skillMd);
+  if (!match) return null;
+  for (const line of match[1]!.split(/\r?\n/)) {
+    const kv = /^name:\s*(.+)$/.exec(line.trim());
+    if (kv) {
+      const value = kv[1]!.trim().replace(/^["']|["']$/g, '').trim();
+      return value || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Seed tags (#1343): the seed marker, the repo, the skill slug (last path
+ * segment), and the SKILL.md frontmatter name when it declares one. Tags are
+ * freeform under the frozen schema (envelope-v0.md: no fixed taxonomy) but
+ * the size caps are structural — dedupe, clamp to 64 chars, cap at 16.
+ * The signal's authoritative seed marker stays `provenance: 'imported'`;
+ * `seed-import` is honest labelling on top.
+ */
+function seedTags(skill: SeedSkill): string[] {
+  const segments = skill.skill.split('/').filter((s) => s.length > 0);
+  const repoName = segments[1] ?? skill.skill;
+  const slug = segments[segments.length - 1] ?? skill.skill;
+  const name = frontmatterName(skill.skillMd);
+  const tags: string[] = [];
+  for (const candidate of ['seed-import', repoName, slug, ...(name ? [name] : [])]) {
+    const tag = candidate.trim().slice(0, MAX_TAG_CHARS);
+    if (tag && !tags.includes(tag)) tags.push(tag);
+  }
+  return tags.slice(0, MAX_TAGS);
+}
+
 function toCapturedTask(skill: SeedSkill, now: Date): CapturedTask {
   const nano = `${now.getTime()}000000`;
-  const repoName = skill.skill.split('/')[1] ?? skill.skill;
   return {
     session: {
       sessionId: `seed:${skill.skill}`,
@@ -40,7 +82,7 @@ function toCapturedTask(skill: SeedSkill, now: Date): CapturedTask {
     },
     task: {
       summary: `Seed import: ${skill.skill}${skill.description ? ` — ${skill.description}` : ''}`,
-      distributionTags: ['seed-import', repoName],
+      distributionTags: seedTags(skill),
     },
     environment: {
       harness: { name: 'jinn-layer-seed-import', version: '0.1.0' },
