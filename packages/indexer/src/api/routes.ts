@@ -379,3 +379,58 @@ export function buildDistributionSignal(
     includeSeeds,
   };
 }
+
+// ── Route 7: GET /capture-meta (#1344) ───────────────────────────────────────
+
+export interface CaptureMetaSearchHit {
+  manifestCid: string;
+  chainId: number;
+  contributor: string;
+  taskSummary: string;
+  /** Parsed distribution tags ([] when tagsJson is malformed). */
+  tags: string[];
+  provenance: string;
+  verifiabilityTier: string;
+}
+
+const CAPTURE_META_SEARCH_DEFAULT_LIMIT = 50;
+
+/**
+ * Content-aware substring search over enriched capture metadata — the
+ * consume path's fast path (`corpus search "tdd"` finds a seed tagged `tdd`
+ * without any artifact fetch). Case-insensitive match on tags and task
+ * summary; empty query returns everything up to `limit`. Seeds are
+ * INCLUDED — search is the consume surface and seeds exist to be consumed;
+ * the demand signal's seed exclusion is a different reader.
+ */
+export function searchCaptureMeta(
+  metas: CaptureEnvelopeMetaRow[],
+  q: string,
+  opts: { limit?: number } = {},
+): CaptureMetaSearchHit[] {
+  const limit = opts.limit ?? CAPTURE_META_SEARCH_DEFAULT_LIMIT;
+  const needle = q.trim().toLowerCase();
+  const hits: CaptureMetaSearchHit[] = [];
+  for (const meta of metas) {
+    let tags: string[] = [];
+    try {
+      const parsed = JSON.parse(meta.tagsJson) as unknown;
+      if (Array.isArray(parsed)) tags = parsed.filter((t): t is string => typeof t === 'string');
+    } catch {
+      // Malformed tagsJson: the row is only findable via its summary.
+    }
+    const haystack = [meta.taskSummary, ...tags].join('\n').toLowerCase();
+    if (needle !== '' && !haystack.includes(needle)) continue;
+    hits.push({
+      manifestCid: meta.manifestCid,
+      chainId: meta.chainId,
+      contributor: meta.contributor,
+      taskSummary: meta.taskSummary,
+      tags,
+      provenance: meta.provenance,
+      verifiabilityTier: meta.verifiabilityTier,
+    });
+    if (hits.length >= limit) break;
+  }
+  return hits;
+}

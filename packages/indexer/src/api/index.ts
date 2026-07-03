@@ -41,6 +41,7 @@ import {
   listBuilderArtifacts,
   listBuilderScores,
   buildDistributionSignal,
+  searchCaptureMeta,
   type PluginPublicationRow,
   type AttemptEnvelopeMetaRow,
   type VerdictRow,
@@ -265,6 +266,27 @@ app.get('/distribution-signal', async (c) => {
     return c.json(buildDistributionSignal(metas, { includeSeeds }));
   } catch (err) {
     return c.json({ error: 'distribution-signal unavailable', detail: String(err) }, 503);
+  }
+});
+
+// ── GET /capture-meta (#1344) ─────────────────────────────────────────────────
+//   Content-aware substring search over enriched capture metadata (tags +
+//   task summary) — the harness-layer consume path's fast path. Seeds are
+//   included: search is the consume surface.
+
+app.get('/capture-meta', async (c) => {
+  const q = c.req.query('q') ?? '';
+  const limitRaw = Number.parseInt(c.req.query('limit') ?? '50', 10);
+  const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 50, 1), 200);
+  try {
+    const s = schema as { captureEnvelopeMeta?: unknown };
+    if (!s.captureEnvelopeMeta) return c.json([]);
+    const metas = (await db
+      .select()
+      .from(s.captureEnvelopeMeta as never)) as unknown as CaptureEnvelopeMetaRow[];
+    return c.json(searchCaptureMeta(metas, q, { limit }));
+  } catch (err) {
+    return c.json({ error: 'capture-meta unavailable', detail: String(err) }, 503);
   }
 });
 

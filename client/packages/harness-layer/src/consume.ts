@@ -41,6 +41,14 @@ export interface HarnessLayerConfig {
   ipfsGatewayUrl?: string;
   /** SQLite path for the artifact cache. Default: ~/.jinn-client/harness-layer/corpus-cache.db */
   dbPath?: string;
+  /**
+   * Capture-meta search endpoint (#1344) — the content-aware fast path.
+   * Default: `<discoveryUrl base>/capture-meta` (the indexer serves it next
+   * to /graphql). Set to '' to disable.
+   */
+  captureMetaUrl?: string;
+  /** Injectable HTTP fetch for the capture-meta fast path (tests). */
+  fetchImpl?: typeof fetch;
   /** Injectable DiscoveryAPI (tests). Overrides discoveryUrl. */
   discovery?: DiscoveryAPI;
   /** Injectable Store (tests). Overrides dbPath. */
@@ -55,6 +63,8 @@ export interface ResolvedHarnessLayerConfig {
   discoveryUrl: string;
   ipfsGatewayUrl: string;
   dbPath: string;
+  /** '' when the content-aware fast path is disabled. */
+  captureMetaUrl: string;
 }
 
 /** One search result — a corpus record ref plus its provenance fields. */
@@ -72,6 +82,19 @@ export interface CorpusSearchHit {
   publishedAt: number;
   operator: { agentId: string; safeAddress: string };
   task: { cid: string; requestId: string } | null;
+  /** Distribution tags, when the hit came via the capture-meta fast path. */
+  tags?: string[];
+  /** Scrubbed task summary, when the hit came via the capture-meta fast path. */
+  summary?: string;
+}
+
+/** Shape served by the indexer's GET /capture-meta (#1344). */
+interface CaptureMetaHit {
+  manifestCid: string;
+  taskSummary: string;
+  tags: string[];
+  provenance: string;
+  verifiabilityTier: string;
 }
 
 export interface CorpusArtifact {
@@ -156,13 +179,17 @@ function refForCid(manifestCid: string): EnvelopeRef {
 }
 
 export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLayer {
+  const discoveryUrl = config.discoveryUrl ?? DEFAULT_TESTNET_DISCOVERY_URL;
   const resolved: ResolvedHarnessLayerConfig = {
-    discoveryUrl: config.discoveryUrl ?? DEFAULT_TESTNET_DISCOVERY_URL,
+    discoveryUrl,
     ipfsGatewayUrl: config.ipfsGatewayUrl ?? DEFAULT_IPFS_GATEWAY_URL,
     dbPath: config.store?.path
       ?? config.dbPath
       ?? join(homedir(), '.jinn-client', 'harness-layer', 'corpus-cache.db'),
+    captureMetaUrl: config.captureMetaUrl
+      ?? `${discoveryUrl.replace(/\/graphql\/?$/, '').replace(/\/$/, '')}/capture-meta`,
   };
+  const fetchImpl = config.fetchImpl ?? globalThis.fetch;
 
   const store = config.store ?? new Store(resolved.dbPath);
   const discovery = config.discovery ?? createDiscoveryAPI(
@@ -188,11 +215,56 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
     },
   );
 
+  /**
+   * Content-aware fast path (#1344): substring search over the indexer's
+   * enriched capture metadata (tags + task summary) — finds by content
+   * without any artifact fetch. Degrades to [] on any failure (older
+   * indexer, onchain mode, network error) so the manifest scan below is
+   * always the floor.
+   */
+  async function queryCaptureMeta(query: string, limit: number): Promise<CaptureMetaHit[]> {
+    if (!resolved.captureMetaUrl || query === '') return [];
+    try {
+      const url = `${resolved.captureMetaUrl}?q=${encodeURIComponent(query)}&limit=${limit}`;
+      const res = await fetchImpl(url);
+      if (!res.ok) return [];
+      const body = (await res.json()) as unknown;
+      if (!Array.isArray(body)) return [];
+      return body.filter(
+        (h): h is CaptureMetaHit =>
+          h !== null && typeof h === 'object' && typeof (h as CaptureMetaHit).manifestCid === 'string',
+      );
+    } catch {
+      return [];
+    }
+  }
+
   async function search(query: string, opts: { limit?: number } = {}): Promise<CorpusSearchHit[]> {
     const limit = opts.limit ?? DEFAULT_SEARCH_LIMIT;
-    const refs = await corpus.query({ limit });
     const hits: CorpusSearchHit[] = [];
+    const seen = new Set<string>();
+
+    // Fast path: content matches from indexed capture meta. Manifest fetch
+    // per hit only (never artifact bodies).
+    for (const metaHit of await queryCaptureMeta(query, limit)) {
+      if (hits.length >= limit) break;
+      try {
+        const preview = await corpus.fetchManifest(refForCid(metaHit.manifestCid));
+        const hit = toSearchHit(preview.ref, preview.envelope);
+        hits.push({
+          ...hit,
+          tags: Array.isArray(metaHit.tags) ? metaHit.tags : [],
+          summary: metaHit.taskSummary,
+        });
+        seen.add(metaHit.manifestCid);
+      } catch (err) {
+        console.warn(`[harness-layer] skipping capture-meta hit ${metaHit.manifestCid}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    const refs = await corpus.query({ limit });
     for (const ref of refs) {
+      if (seen.has(ref.manifestCid)) continue;
       let preview;
       try {
         preview = await corpus.fetchManifest(ref);

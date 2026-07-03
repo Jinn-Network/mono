@@ -171,3 +171,99 @@ describe('createHarnessLayer', () => {
     expect(record.artifacts[0]!.sizeBytes).toBe(realBytes.length);
   });
 });
+
+describe('content-aware search via capture meta (#1344)', () => {
+  let store: Store;
+  beforeEach(() => { store = new Store(':memory:'); });
+  afterEach(() => store.close());
+
+  function metaFetch(hits: unknown[]): typeof fetch {
+    return vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).includes('/capture-meta')) {
+        return new Response(JSON.stringify(hits), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  it('search("tdd") finds a seed tagged tdd via meta, with zero artifact fetches', async () => {
+    const seedCid = 'bafySeedTdd';
+    const envelope = fakeEnvelope({
+      solverType: 'capture',
+      sha256: 'a'.repeat(64),
+      endpoint: 'http://127.0.0.1:7331',
+      participantSafe: '0x' + '1'.repeat(40),
+    });
+    const fetchFromIpfs = vi.fn(async (_g: string, cid: string) => {
+      if (cid === seedCid) return envelope;
+      throw new Error(`unexpected ipfs fetch: ${cid}`);
+    });
+    const acquireFn = vi.fn(async () => { throw new Error('artifact fetch must not happen'); });
+    // Discovery returns nothing — the old manifest-scan path cannot find this.
+    const layer = createHarnessLayer({
+      store,
+      discovery: stubDiscovery([]),
+      fetchFromIpfs,
+      acquireFn,
+      fetchImpl: metaFetch([{
+        manifestCid: seedCid,
+        taskSummary: 'Seed import: obra/superpowers/skills/test-driven-development',
+        tags: ['seed-import', 'superpowers', 'test-driven-development', 'tdd'],
+        provenance: 'imported',
+        verifiabilityTier: 'user-accepted',
+      }]),
+    });
+    const hits = await layer.corpus.search('tdd');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.ref).toBe(seedCid);
+    expect(hits[0]!.tags).toContain('tdd');
+    expect(hits[0]!.summary).toContain('test-driven-development');
+    expect(acquireFn).not.toHaveBeenCalled();
+  });
+
+  it('degrades to the manifest scan when the meta endpoint is unavailable', async () => {
+    const cid = 'bafyManifestOnly';
+    const envelope = fakeEnvelope({
+      solverType: 'prediction.v0',
+      sha256: 'b'.repeat(64),
+      endpoint: 'http://127.0.0.1:7331',
+      participantSafe: '0x' + '1'.repeat(40),
+    });
+    const fetchFromIpfs = vi.fn(async () => envelope);
+    const failingFetch = vi.fn(async () => { throw new Error('connection refused'); }) as unknown as typeof fetch;
+    const layer = createHarnessLayer({
+      store,
+      discovery: stubDiscovery([fakeEnvelopeRef(cid)]),
+      fetchFromIpfs,
+      fetchImpl: failingFetch,
+    });
+    const hits = await layer.corpus.search('prediction');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.ref).toBe(cid);
+  });
+
+  it('meta hits and manifest hits dedupe by ref', async () => {
+    const cid = 'bafyBoth';
+    const envelope = fakeEnvelope({
+      solverType: 'capture',
+      sha256: 'c'.repeat(64),
+      endpoint: 'http://127.0.0.1:7331',
+      participantSafe: '0x' + '1'.repeat(40),
+    });
+    const fetchFromIpfs = vi.fn(async () => envelope);
+    const layer = createHarnessLayer({
+      store,
+      discovery: stubDiscovery([fakeEnvelopeRef(cid)]),
+      fetchFromIpfs,
+      fetchImpl: metaFetch([{
+        manifestCid: cid,
+        taskSummary: 'a capture task',
+        tags: ['capture'],
+        provenance: 'contributed',
+        verifiabilityTier: 'user-accepted',
+      }]),
+    });
+    const hits = await layer.corpus.search('capture');
+    expect(hits.filter((h) => h.ref === cid)).toHaveLength(1);
+  });
+});
