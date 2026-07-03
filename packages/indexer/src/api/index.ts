@@ -25,9 +25,11 @@
  *   GET /builders/:address/artifacts    — unified artifact list for a builder (ttz8)
  *   GET /builders/:address/scores       — per-artifact score history for a builder (ttz8, ebu7 dep)
  *
- * Route-registration order matters in Hono: `/graphql` and `/explorer` are
- * registered before the static catch-all so exact-match routes are not
- * shadowed.
+ * Route-registration order matters in Hono: the SPA static handler + `*`
+ * fallback are registered LAST, after every API route — a route registered
+ * after the catch-all is shadowed in production (where the SPA build always
+ * exists) while staying green in CI (where it doesn't). See #1363 and
+ * test/api.spa-route-order.test.ts.
  */
 import { db } from 'ponder:api';
 import schema, { pluginPublication } from 'ponder:schema';
@@ -62,22 +64,6 @@ app.route('/explorer', explorer);
 // under /health rather than /explorer so monitoring tooling can scope a
 // liveness check to the health namespace.
 app.route('/health', taskCoverage);
-
-// Serve the built explorer SPA from ./public if it exists; otherwise fall back
-// to the placeholder page so the indexer is never broken without a frontend build.
-const hasSpaBuild = existsSync('./public/index.html');
-
-if (hasSpaBuild) {
-  // First pass: try to serve the file directly from public/ (assets, sigils, etc.).
-  // serveStatic calls next() when no matching file exists, so the SPA fallback below
-  // handles all client-side routes.
-  app.use('*', serveStatic({ root: './public' }));
-  // SPA shell fallback: any non-API path that wasn't a real file returns index.html
-  // so client-side routing works.
-  app.get('*', serveStatic({ path: 'index.html', root: './public' }));
-} else {
-  app.get('/', (c) => c.html(PLACEHOLDER_HTML));
-}
 
 // ── Shared ebu7-schema probe ──────────────────────────────────────────────────
 // Routes 3 and 5 join against ebu7's `attemptEnvelopeMeta` + `verdict`
@@ -289,5 +275,28 @@ app.get('/capture-meta', async (c) => {
     return c.json({ error: 'capture-meta unavailable', detail: String(err) }, 503);
   }
 });
+
+// ── Explorer SPA — MUST stay the last registration in this file (#1363) ──────
+// Serve the built explorer SPA from ./public if it exists; otherwise fall back
+// to the placeholder page so the indexer is never broken without a frontend build.
+//
+// Hono matches in registration order, so the `*` catch-all below swallows any
+// route registered after it. CI and the vitest suite run without an explorer
+// build (hasSpaBuild=false → no catch-all), while the production image always
+// ships one — a route added below this block passes every test and is dead in
+// production. test/api.spa-route-order.test.ts pins this.
+const hasSpaBuild = existsSync('./public/index.html');
+
+if (hasSpaBuild) {
+  // First pass: try to serve the file directly from public/ (assets, sigils, etc.).
+  // serveStatic calls next() when no matching file exists, so the SPA fallback below
+  // handles all client-side routes.
+  app.use('*', serveStatic({ root: './public' }));
+  // SPA shell fallback: any non-API path that wasn't a real file returns index.html
+  // so client-side routing works.
+  app.get('*', serveStatic({ path: 'index.html', root: './public' }));
+} else {
+  app.get('/', (c) => c.html(PLACEHOLDER_HTML));
+}
 
 export default app;
