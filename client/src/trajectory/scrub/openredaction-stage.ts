@@ -43,6 +43,71 @@ export const BARE_WORD_PATTERN_DENYLIST: readonly string[] = [
 ];
 
 /**
+ * Trigger-word patterns excluded for #1372 (kept as a separate block from the
+ * bare-word denylist above so parallel denylist additions merge cleanly).
+ *
+ * These share one pathology: an ordinary English trigger word (`TO`,
+ * `APPROVAL`, `PROJECT`, `ORDER`, `REVIEW`, `PASS`, `LOT`, `SO`, `REG`, `WO`,
+ * `MISSING`, `RETURN`, `user`, `prod`, `ice`…), case-insensitive, followed by
+ * a bare `[A-Z0-9]{n,m}` tail with no intrinsic shape. On the published seed
+ * skills' SKILL.md prose every one of them fired — all 42 seed bodies were
+ * defaced ("project context" → `project [PROJECT_3875]`, "get your approval
+ * before" → `approval [AUTH_5211]`), several mid-word ("something" →
+ * `so[SO_1826]`, "workflow" → `wo[WO_3602]`, "regressions" →
+ * `[REG]ressions`). Observed trigger words per pattern, from the #1372
+ * characterisation over five real seed bodies:
+ *
+ * - `USERNAME` — "user intent", "user has"; a bare word after "user"/"login"
+ *   is not a credential. Credentials keep their shaped patterns; person
+ *   names are the ML PII stage's job (see the `NAME` note above).
+ * - `PROJECT_CODE` — "project context", "project goes through".
+ * - `CARD_AUTH_CODE` — "approval before" (card auth codes travel with card
+ *   numbers, which `CREDIT_CARD` still catches).
+ * - `IATA_AIRPORT_CODE` — "to use" ("TO" + any 3 capitalisable letters).
+ * - `JUDGMENT_NUMBER` — "order should".
+ * - `STANDING_ORDER_REF` — "SO" matches inside "something"/"solution".
+ * - `PRODUCTION_ID` — "production classes"; nested self-replacement
+ *   corrupted "NO PRODUCTION CODE" into `PROD[PROD[PROD…`.
+ * - `WORK_ORDER_NUMBER` — "wo" matches inside "workflow"/"worktree".
+ * - `PERFORMANCE_REVIEW_ID` — "performance problems", "evaluation between".
+ * - `TNT_TRACKING` — every clause optional except the tail, so ANY 9- or
+ *   13-character word matches ("variation", "statement").
+ * - `THEME_PARK_TICKET` — "pass immediately".
+ * - `TOURNAMENT_REGISTRATION_ID` — "REG" matches inside "regressions".
+ * - `MISSING_PERSON_CASE` — "missing requirements".
+ * - `RMA_NUMBER` — "return expected".
+ * - `BATCH_LOT_NUMBER` — "a lot faster".
+ * - `EMERGENCY_CONTACT` — "ice" (unanchored, matches inside "practice")
+ *   followed by any 2–4 words.
+ *
+ * Lab-grade coverage loss is acceptable: these label niche reference numbers
+ * (parcel tracking, theme-park tickets, tournament brackets, standing
+ * orders, RMAs…) that are implausible in agent-trajectory content and carry
+ * no shape of their own beyond the trigger word. Genuinely secret-shaped
+ * content keeps its dedicated patterns (emails, cards, SSNs, API keys —
+ * pinned below and by the harness-layer seeded-secrets fixture), and the
+ * secretlint + plain-patterns stages still run behind this one.
+ */
+export const PROSE_TRIGGER_PATTERN_DENYLIST: readonly string[] = [
+  'USERNAME',
+  'PROJECT_CODE',
+  'CARD_AUTH_CODE',
+  'IATA_AIRPORT_CODE',
+  'JUDGMENT_NUMBER',
+  'STANDING_ORDER_REF',
+  'PRODUCTION_ID',
+  'WORK_ORDER_NUMBER',
+  'PERFORMANCE_REVIEW_ID',
+  'TNT_TRACKING',
+  'THEME_PARK_TICKET',
+  'TOURNAMENT_REGISTRATION_ID',
+  'MISSING_PERSON_CASE',
+  'RMA_NUMBER',
+  'BATCH_LOT_NUMBER',
+  'EMERGENCY_CONTACT',
+];
+
+/**
  * Default detector: openredaction's full pattern set minus the audited
  * bare-word matchers. Built via the `patterns` whitelist option (the
  * library has no exclude option), so a version bump that renames patterns
@@ -51,7 +116,9 @@ export const BARE_WORD_PATTERN_DENYLIST: readonly string[] = [
 export function buildDefaultDetector(): OpenRedaction {
   const allTypes = [...new Set(new OpenRedaction().getPatterns().map((p) => p.type))];
   return new OpenRedaction({
-    patterns: allTypes.filter((t) => !BARE_WORD_PATTERN_DENYLIST.includes(t)),
+    patterns: allTypes.filter(
+      (t) => !BARE_WORD_PATTERN_DENYLIST.includes(t) && !PROSE_TRIGGER_PATTERN_DENYLIST.includes(t),
+    ),
   });
 }
 

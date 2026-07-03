@@ -19,10 +19,11 @@ import { describe, expect, it } from 'vitest';
 import { OpenRedaction } from 'openredaction';
 import {
   BARE_WORD_PATTERN_DENYLIST,
+  PROSE_TRIGGER_PATTERN_DENYLIST,
   buildDefaultDetector,
   openredactionStage,
 } from '../../../src/trajectory/scrub/openredaction-stage.js';
-import { DEFAULT_KEY_POLICY } from '../../../src/trajectory/scrub/build.js';
+import { buildScrubPipeline, DEFAULT_KEY_POLICY } from '../../../src/trajectory/scrub/build.js';
 
 const PROSE = 'Update the staging bucket config in src/app.tsx and rerun the suite.';
 
@@ -102,5 +103,62 @@ describe('openredaction stage tuning (#1331)', () => {
     expect(result.attributes['task.summary']).toBe(
       'Fix the failing test suite after the zod upgrade. The Quick start guide is stale.',
     );
+  });
+});
+
+/**
+ * Skill-body prose defacement — regression net for issue #1372.
+ *
+ * The 42 published seed skills' SKILL.md bodies came back mangled by
+ * trigger-word patterns: an ordinary English trigger (`TO`, `APPROVAL`,
+ * `PROJECT`, `ORDER`, `REVIEW`, `PASS`, `LOT`, `SO`, `REG`, `WO`, `MISSING`,
+ * `RETURN`, `user`, `prod`…) followed by a bare `[A-Z0-9]{n,m}` tail,
+ * case-insensitive — so "project context" → `project [PROJECT_3875]`,
+ * "something" → `so[SO_1826]` (mid-word), "workflow" → `wo[WO_3602]`.
+ * Every phrase below was observed defaced in a published seed skill.
+ */
+const SKILL_PROSE = [
+  'You MUST use this before any creative work. Learn how to use the skill first.',
+  'First get your approval before merging; understand user intent and the project context.',
+  'Every project goes through this process, so something like a workflow or worktree helps.',
+  'The order should be: fix regressions, review performance problems, then note the variation.',
+  'No production classes ship without a failing test; expect a pass immediately or return expected errors.',
+  'Missing requirements cause the most wasted work. Practice questions when possible, a lot faster.',
+].join('\n');
+
+describe('openredaction stage tuning (#1372): skill-body prose survives', () => {
+  it('representative skill prose passes through the stage unchanged', async () => {
+    const stage = openredactionStage(DEFAULT_KEY_POLICY);
+    const result = await stage.scrub({ 'skill.body': SKILL_PROSE });
+    expect(result.attributes['skill.body']).toBe(SKILL_PROSE);
+    expect(result.redactions).toHaveLength(0);
+  });
+
+  it('representative skill prose survives the full pipeline verbatim', async () => {
+    const pipeline = buildScrubPipeline();
+    const result = await pipeline.run({ 'skill.body': SKILL_PROSE });
+    expect(result.attributes['skill.body']).toBe(SKILL_PROSE);
+  });
+
+  it('the prose-trigger denylist entries all exist upstream', () => {
+    const upstream = new Set(new OpenRedaction().getPatterns().map((p) => p.type));
+    for (const type of PROSE_TRIGGER_PATTERN_DENYLIST) {
+      expect(upstream.has(type), `${type} not in openredaction`).toBe(true);
+    }
+    expect(PROSE_TRIGGER_PATTERN_DENYLIST).toContain('PROJECT_CODE');
+    expect(PROSE_TRIGGER_PATTERN_DENYLIST).toContain('IATA_AIRPORT_CODE');
+  });
+
+  it('genuine secret-shaped content still redacts with the wider denylist', async () => {
+    const stage = openredactionStage(DEFAULT_KEY_POLICY);
+    const result = await stage.scrub({
+      'llm.prompt':
+        'Email jane.doe@corp.com, card 4111 1111 1111 1111, key AKIAIOSFODNN7EXAMPLE, SSN 078-05-1120.',
+    });
+    const out = String(result.attributes['llm.prompt']);
+    expect(out).not.toContain('jane.doe@corp.com');
+    expect(out).not.toContain('4111 1111 1111 1111');
+    expect(out).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(out).not.toContain('078-05-1120');
   });
 });
