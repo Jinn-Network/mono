@@ -2,7 +2,7 @@ import { OpenRedaction } from 'openredaction';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
 import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 /**
  * Patterns excluded from the default detector (#1331). All three ship with a
@@ -24,12 +24,22 @@ const VERSION = '0.2.0';
  * stage's job (GLiNER, `mlPiiStage`), which the daemon wires when the model
  * is available; a bare unlabelled name in prose is not regex-detectable at
  * acceptable precision.
+ *
+ * `LAB_TEST_ID` and `EXAM_ID` are denylisted for the same reason (#1348):
+ * both trigger on ubiquitous software words (`\b(?:LAB|TEST|SAMPLE)…` and
+ * `\b(?:EXAM|TEST|QUIZ|ASSESSMENT)…`, case-insensitive, same bare
+ * `[A-Z0-9]{6,12}` tail) — "test-driven-development" came back as
+ * `test-[LAB_8465]-development` — and lab-specimen / exam IDs are not
+ * plausible in agent-trajectory content. Nothing in the seeded-secrets
+ * fixture pins either pattern.
  */
 export const BARE_WORD_PATTERN_DENYLIST: readonly string[] = [
   'INSTAGRAM_USERNAME',
   'XBOX_GAMERTAG',
   'PSN_ID',
   'NAME',
+  'LAB_TEST_ID',
+  'EXAM_ID',
 ];
 
 /**

@@ -127,6 +127,20 @@ describe('capture() on the seeded-secrets fixture', () => {
   });
 });
 
+describe('capture() slug-like task summaries (#1348)', () => {
+  it('keeps a seed-import slug summary verbatim — paths are not secrets', async () => {
+    const summary = 'Seed import: obra/superpowers/skills/test-driven-development';
+    const task = validTask();
+    task.task.summary = summary;
+    const pending = await capture(task);
+    const report = preview(pending);
+
+    expect(report.envelope.task.summary).toBe(summary);
+    const summaryRedactions = report.redactions.filter((r) => r.field.includes('summary'));
+    expect(summaryRedactions).toEqual([]);
+  });
+});
+
 describe('capture() fail-closed behaviour', () => {
   it('throws when a scrub stage fails — never a silent pass', async () => {
     const exploding = new ScrubPipeline([

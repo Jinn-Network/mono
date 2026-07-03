@@ -3,7 +3,7 @@ import { creator } from '@secretlint/secretlint-rule-preset-recommend';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
 import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const PRESET_RULE_ID = '@secretlint/secretlint-rule-preset-recommend';
 
 // Entropy fallback thresholds. Conservative on purpose: a long token whose
@@ -27,6 +27,22 @@ const ENTROPY_STRICT_LEN = 20;
 // characters only (letters, digits, and the `+/=_-` set), with NO natural-language
 // punctuation or spaces.
 const SECRET_CHARSET = /^[A-Za-z0-9+/=_-]+$/;
+
+// Tuning note (#1348): a path-shaped token — slug segments joined by `/`,
+// e.g. `obra/superpowers/skills/test-driven-development` — is judged
+// per-SEGMENT, not whole-token, but ONLY when the whole token mixes at most
+// 2 character classes. Concatenating several short human-readable slugs
+// inflates whole-token Shannon entropy past 4.0 bits/char purely by
+// length/variety, which was redacting seed-import task summaries as
+// `[SECRET:high-entropy]`; real slugs are overwhelmingly lowercase (1–2
+// classes), while secrets that merely contain `/` or `.` (AWS-style base64
+// keys, `dir/<blob>.tar.gz` filenames) almost always mix 3 classes and keep
+// the original whole-token entropy behaviour. The segment charset excludes
+// `+` and `=`, so base64 blobs containing either are never path-shaped.
+// Residual exposure: a secret with ≤ 2 whole-token character classes whose
+// every `[/.]`-split segment is under 16 chars (or below the entropy bar)
+// qualifies as a path and escapes the fallback.
+const PATH_SHAPED = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
 
 function shannonEntropy(s: string): number {
   const freq: Record<string, number> = {};
@@ -57,9 +73,32 @@ function charClassCount(s: string): number {
  *    classes (so dictionary words + a trailing suffix like `authentication123`,
  *    which sit below 4.0 bits/char anyway, are not swept in).
  * Never fires below ENTROPY_MIN_LEN.
+ *
+ * Path carve-out (#1348): a PATH_SHAPED token whose WHOLE-token character-
+ * class count is ≤ 2 is redacted only when at least one `[/.]`-delimited
+ * segment independently passes the strict shape gate (length ≥
+ * ENTROPY_MIN_LEN, entropy ≥ ENTROPY_MIN_BITS, secret charset, ≥ 2 character
+ * classes) — applied at ALL lengths, so a long path of short slugs never
+ * trips the whole-token entropy bar, while a real key embedded as a path
+ * segment (`api/v1/ghp_…`) still redacts. A path-shaped token mixing ≥ 3
+ * whole-token classes never takes the carve-out — real slugs are 1–2
+ * classes, and 3-class "paths" are secrets wearing slashes/dots (#1348
+ * review finding) — it falls through to the whole-token logic below.
+ * Splitting on dots as well as slashes means a sentence full stop or a file
+ * extension yields its own (failing) segment instead of poisoning the
+ * secret blob next to it. Non-path tokens are unaffected.
  */
 function isSecretShapedToken(token: string): boolean {
   if (token.length < ENTROPY_MIN_LEN) return false;
+  if (PATH_SHAPED.test(token) && charClassCount(token) <= 2) {
+    return token.split(/[/.]/).some(
+      (segment) =>
+        segment.length >= ENTROPY_MIN_LEN &&
+        shannonEntropy(segment) >= ENTROPY_MIN_BITS &&
+        SECRET_CHARSET.test(segment) &&
+        charClassCount(segment) >= 2,
+    );
+  }
   if (shannonEntropy(token) < ENTROPY_MIN_BITS) return false;
   if (token.length >= ENTROPY_STRICT_LEN) return true;
   return SECRET_CHARSET.test(token) && charClassCount(token) >= 2;
@@ -78,6 +117,9 @@ function shortRule(ruleId: string): string {
  *     near-random tokens no specific rule matched (≥ 20 chars by entropy alone,
  *     or 16–19 chars when the token is a single high-density secret-charset run
  *     mixing multiple character classes), replaced with `[SECRET:high-entropy]`.
+ *     Path-shaped tokens (`owner/repo/slug` and friends, #1348) are judged
+ *     per-segment rather than whole-token, so slug identifiers survive while a
+ *     secret embedded as a path segment still redacts.
  * `safe` and non-string values pass through untouched.
  */
 export function secretlintStage(policy: KeyPolicy): ScrubStage {

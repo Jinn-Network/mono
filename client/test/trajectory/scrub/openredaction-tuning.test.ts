@@ -76,6 +76,21 @@ describe('openredaction stage tuning (#1331)', () => {
     expect(BARE_WORD_PATTERN_DENYLIST).toContain('INSTAGRAM_USERNAME');
   });
 
+  it('slug segments with lab/test/sample trigger words survive (the LAB_TEST_ID / EXAM_ID FPs, #1348)', async () => {
+    // openredaction's LAB_TEST_ID (`\b(?:LAB|TEST|SAMPLE)[-\s]?…\b`) and
+    // EXAM_ID (`\b(?:EXAM|TEST|QUIZ|ASSESSMENT)[-\s]?…\b`) patterns, both
+    // case-insensitive with a bare `[A-Z0-9]{6,12}` tail, rewrote
+    // "test-driven-development" to "test-[LAB_8465]-development". Their
+    // trigger words are ubiquitous in software slugs and prose; lab-specimen
+    // and exam IDs are not plausible in agent-trajectory content.
+    const stage = openredactionStage(DEFAULT_KEY_POLICY);
+    const summary =
+      'Seed import: obra/superpowers/skills/test-driven-development plus the sample-config fixture.';
+    const result = await stage.scrub({ 'task.summary': summary });
+    expect(result.attributes['task.summary']).toBe(summary);
+    expect(result.redactions).toHaveLength(0);
+  });
+
   it('sentence-initial capitalised phrases survive (the NAME follower-branch FP)', async () => {
     // "Fix the failing test" matched openredaction's NAME pattern (its
     // follower branch accepts lowercase words). Person names are the ML PII
