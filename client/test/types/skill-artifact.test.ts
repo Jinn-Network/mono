@@ -87,6 +87,16 @@ describe('SkillArtifactV1Schema', () => {
     }
   });
 
+  it('rejects backslash companion paths (POSIX-only relative paths)', () => {
+    // On Windows path.join treats `\` as a separator, so a backslash segment
+    // would bypass the '/'-split traversal refine.
+    for (const path of ['..\\escape.md', 'a\\..\\..\\b.md', 'reference\\EXAMPLES.md']) {
+      const input = valid();
+      input.files[0]!.path = path;
+      expect(() => SkillArtifactV1Schema.parse(input)).toThrow();
+    }
+  });
+
   it('rejects when total decoded content exceeds the 1 MiB cap', () => {
     const input = valid();
     const big = Buffer.alloc(MAX_SKILL_TOTAL_DECODED_BYTES + 1, 'x').toString('base64');

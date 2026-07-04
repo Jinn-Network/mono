@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -161,7 +161,7 @@ describe('jinn-layer capture preview', () => {
   });
 });
 
-function skillRecord(): CorpusRecord {
+function skillRecord(payloadOverrides: Record<string, unknown> = {}): CorpusRecord {
   const companion = Buffer.from('# examples\n', 'utf-8');
   const payload = {
     schemaVersion: 'jinn.skill.v1',
@@ -173,6 +173,7 @@ function skillRecord(): CorpusRecord {
         sha256: createHash('sha256').update(companion).digest('hex'),
       },
     ],
+    ...payloadOverrides,
     provenance: {
       kind: 'imported',
       sourceEnvelopeCids: [],
@@ -242,5 +243,90 @@ describe('jinn-layer skills install', () => {
     const code = await runJinnLayerCli(['skills', 'install'], { layer: fakeLayer({}), writer });
     expect(code).toBe(2);
     expect(out()).toContain('skills install requires a <ref>');
+  });
+
+  it('defaults the install directory to a safe slug of the skill name', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const cwd = join(base, 'a', 'b');
+    mkdirSync(cwd, { recursive: true });
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    try {
+      // Publisher-controlled name shaped as a traversal — the default dir
+      // must be a slug inside cwd, never the literal path.
+      const record = skillRecord({
+        skill: { name: '../../.config/pwn', skillMd: '# pwn\n' },
+        files: [],
+      });
+      const code = await runJinnLayerCli(
+        ['skills', 'install', 'bafySkill'],
+        { layer: fakeLayer({ record }), writer },
+      );
+      expect(code).toBe(0);
+      expect(readFileSync(join(cwd, 'config-pwn', 'SKILL.md'), 'utf-8')).toBe('# pwn\n');
+      expect(existsSync(join(base, '.config'))).toBe(false);
+      expect(out()).toContain(join(cwd, 'config-pwn'));
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
+  it('verifies all companion digests before writing anything', async () => {
+    const { writer, out } = capture();
+    const dir = join(mkdtempSync(join(tmpdir(), 'jinn-skills-')), 'skill');
+    const good = Buffer.from('good\n', 'utf-8');
+    const record = skillRecord({
+      files: [
+        {
+          path: 'a.md',
+          contentBase64: good.toString('base64'),
+          sha256: createHash('sha256').update(good).digest('hex'),
+        },
+        {
+          path: 'b.md',
+          contentBase64: Buffer.from('tampered\n', 'utf-8').toString('base64'),
+          sha256: 'd'.repeat(64),
+        },
+      ],
+    });
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record }), writer },
+    );
+    expect(code).toBe(1);
+    expect(out()).toContain('sha256 mismatch');
+    // All-or-nothing: the aborted install leaves no partial tree on disk.
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('reports a corrupt jinn.skill.v1 artifact cleanly instead of throwing', async () => {
+    const { writer, out } = capture();
+    const record = skillRecord();
+    record.artifacts[0]!.content = Buffer.from('not json', 'utf-8');
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', mkdtempSync(join(tmpdir(), 'jinn-skills-'))],
+      { layer: fakeLayer({ record }), writer },
+    );
+    expect(code).toBe(1);
+    expect(out()).toContain('error: record bafySkill carries a malformed jinn.skill.v1 artifact');
+  });
+
+  it('reports a schema-invalid jinn.skill.v1 artifact cleanly instead of throwing', async () => {
+    const { writer, out } = capture();
+    const record = skillRecord({
+      files: [
+        {
+          path: '../escape.md',
+          contentBase64: Buffer.from('x', 'utf-8').toString('base64'),
+          sha256: createHash('sha256').update('x').digest('hex'),
+        },
+      ],
+    });
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', mkdtempSync(join(tmpdir(), 'jinn-skills-'))],
+      { layer: fakeLayer({ record }), writer },
+    );
+    expect(code).toBe(1);
+    expect(out()).toContain('malformed jinn.skill.v1');
   });
 });

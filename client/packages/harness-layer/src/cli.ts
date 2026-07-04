@@ -40,6 +40,7 @@ import { plan as seedPlan } from './seed-import/plan.js';
 import { execute as seedExecute } from './seed-import/execute.js';
 import { parseImportReport, renderImportReport } from './seed-import/report.js';
 import { extractSkill } from './skill.js';
+import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -51,7 +52,7 @@ Commands:
   skills install <ref> [--out <dir>] [--json]    Install the skill carried by a corpus record
                                                  (jinn.skill.v1 artifact, or the legacy seeded
                                                  trace shape): writes SKILL.md + companion files
-                                                 to <dir> (default ./<skill-name>)
+                                                 to <dir> (default ./<skill-name slug>)
   capture preview <task-file> [--json]           Scrub a captured task and show exactly what
                                                  would leave this machine: the redaction diff
                                                  plus the envelope as it would publish
@@ -95,6 +96,20 @@ export interface RunJinnLayerCliOptions {
 }
 
 const DEFAULT_CLI_SEARCH_LIMIT = 20;
+
+/**
+ * Default install directory name for `skills install`: a safe slug of the
+ * publisher-controlled skill name (#1394). The name is corpus data, never a
+ * path — anything outside [a-z0-9._-] collapses to '-', leading/trailing
+ * dots and dashes are stripped, and an empty result falls back to 'skill'.
+ */
+function skillDirSlug(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  return slug === '' ? 'skill' : slug;
+}
 
 /**
  * Render an envelope `generatedAt` as ISO. Producers are inconsistent about
@@ -451,15 +466,30 @@ export async function runJinnLayerCli(
       return 2;
     }
     const record = await layer.corpus.get(ref);
-    const extracted = extractSkill(record);
+    let extracted;
+    try {
+      extracted = extractSkill(record);
+    } catch (err) {
+      writer.write(`error: record ${ref} carries a malformed jinn.skill.v1 artifact — ${err instanceof Error ? err.message : String(err)}\n`);
+      return 1;
+    }
     if (extracted === null) {
       writer.write(`error: record ${ref} carries no skill (neither a jinn.skill.v1 artifact nor the seeded trace shape)\n`);
       return 1;
     }
     const { skill } = extracted;
-    const dir = (parsed.values.out as string | undefined) ?? join(process.cwd(), skill.skill.name);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'SKILL.md'), skill.skill.skillMd);
+    // Default dir: a safe slug of the publisher-controlled name, contained
+    // in cwd (containment is belt-and-suspenders alongside the slug; --out
+    // is operator-chosen and taken as given).
+    const outFlag = parsed.values.out as string | undefined;
+    const dir = outFlag ?? join(process.cwd(), skillDirSlug(skill.skill.name));
+    if (outFlag === undefined && !isInsidePackageDir(process.cwd(), dir)) {
+      writer.write(`error: skill name ${JSON.stringify(skill.skill.name)} does not resolve to a directory inside the current directory — pass --out <dir>\n`);
+      return 1;
+    }
+    // Verify every companion digest and resolved target BEFORE any write —
+    // an aborted install must leave nothing on disk.
+    const companions: { target: string; bytes: Buffer }[] = [];
     for (const file of skill.files) {
       const bytes = Buffer.from(file.contentBase64, 'base64');
       const digest = createHash('sha256').update(bytes).digest('hex');
@@ -468,6 +498,15 @@ export async function runJinnLayerCli(
         return 1;
       }
       const target = join(dir, file.path);
+      if (!isInsidePackageDir(dir, target)) {
+        writer.write(`error: companion file ${file.path} escapes the install directory\n`);
+        return 1;
+      }
+      companions.push({ target, bytes });
+    }
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), skill.skill.skillMd);
+    for (const { target, bytes } of companions) {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, bytes);
     }

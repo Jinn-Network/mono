@@ -29,17 +29,22 @@ export const MAX_SKILL_TOTAL_DECODED_BYTES = 1024 * 1024;
 
 const HexAddressSchema = z.string().regex(/^0x[0-9a-fA-F]*$/);
 
-/** Relative, traversal-free path — this is written to disk on install. */
+/**
+ * Relative, traversal-free POSIX path — this is written to disk on install.
+ * Backslashes are rejected outright: on Windows `path.join` treats `\` as a
+ * separator, so a `..\` segment would bypass the '/'-split traversal check.
+ */
 const CompanionPathSchema = z
   .string()
   .min(1)
   .refine(
     (p) =>
+      !p.includes('\\') &&
       !p.startsWith('/') &&
       !/^[A-Za-z]:/.test(p) &&
       !p.split('/').includes('..') &&
       !p.split('/').includes(''),
-    { message: 'companion file path must be relative and traversal-free' },
+    { message: 'companion file path must be a relative, traversal-free POSIX path' },
   );
 
 export const SkillCompanionFileSchema = z.object({
