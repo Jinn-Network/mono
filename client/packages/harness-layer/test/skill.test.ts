@@ -16,6 +16,8 @@ import {
   type HarnessPublishDeps,
 } from '../src/publish.js';
 import { createMemoryLedger } from '../src/ledger.js';
+import type { CorpusRecord } from '../src/consume.js';
+import { extractSkill } from '../src/skill.js';
 
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
 const TEST_PRIVATE_KEY =
@@ -157,5 +159,122 @@ describe('publish() with opts.skill (dual-carriage)', () => {
     expect(result.vetoed).toBe(true);
     expect(published).toHaveLength(0);
     expect(envelopes).toHaveLength(0);
+  });
+});
+
+/** Reconstruct the CorpusRecord `corpus get` would return for a publish. */
+function toRecord(
+  envelope: SignedEnvelope,
+  published: Array<{ artifactType: string; payload: unknown }>,
+  ref: string,
+): CorpusRecord {
+  return {
+    ref,
+    envelope,
+    provenance: {
+      operator: { agentId: '7', safeAddress: TEST_SAFE },
+      evidenceTier: 'self-signed',
+      publishedAt: 1,
+    },
+    artifacts: envelope.artifacts.map((a) => {
+      const p = published.find((x) => x.artifactType === a.artifactType);
+      if (!p) throw new Error(`no published payload for ${a.artifactType}`);
+      const content = Buffer.from(JSON.stringify(p.payload), 'utf-8');
+      return {
+        sha256: a.sha256,
+        artifactType: a.artifactType,
+        content,
+        source: 'origin' as const,
+        sizeBytes: content.length,
+      };
+    }),
+  };
+}
+
+/** The seeded shape exactly as seed-import/execute.ts publishes it today. */
+function legacySeededTask(): CapturedTask {
+  const nano = '1751587200000000000';
+  return {
+    session: { sessionId: 'seed:acme/skills/write-tests', capturedAt: '2026-07-04T00:00:00.000Z' },
+    task: { summary: 'Seed import: acme/skills/write-tests', distributionTags: ['seed-import', 'skills', 'write-tests'] },
+    environment: { harness: { name: 'jinn-layer-seed-import', version: '0.1.0' }, model: 'none', tools: [] },
+    steps: [
+      {
+        spanId: 'seed-1',
+        parentSpanId: null,
+        name: 'seed:skill-md',
+        startTimeUnixNano: nano,
+        endTimeUnixNano: nano,
+        attributes: {
+          'skill.md': '# write-tests\n\nAlways write a failing test first.',
+          'seed.attribution': {
+            skill: 'acme/skills/write-tests',
+            source: 'https://github.com/acme/skills',
+            licence: 'MIT',
+          },
+        },
+        redactedKeys: [],
+      },
+    ],
+    outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+    cost: { durationMs: 0 },
+    provenance: 'imported',
+  };
+}
+
+describe('extractSkill()', () => {
+  it('round-trips a published jinn.skill.v1 artifact (publish -> record -> extract)', async () => {
+    const input = skillArtifact();
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(await capture(capturedTask()), deps, { skill: input });
+    if (result.vetoed) throw new Error('unexpected veto');
+
+    const record = toRecord(envelopes[0]!, published, result.envelopeRef);
+    const extracted = extractSkill(record);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.shape).toBe('jinn.skill.v1');
+    expect(extracted!.skill).toEqual(input);
+  });
+
+  it('recognises the legacy seeded shape and synthesises equivalent provenance', async () => {
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(await capture(legacySeededTask()), deps); // no opts.skill
+    if (result.vetoed) throw new Error('unexpected veto');
+
+    const record = toRecord(envelopes[0]!, published, result.envelopeRef);
+    const extracted = extractSkill(record);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.shape).toBe('seeded-trace');
+    expect(extracted!.skill.skill.name).toBe('write-tests');
+    expect(extracted!.skill.skill.skillMd).toContain('failing test first');
+    expect(extracted!.skill.files).toEqual([]);
+    expect(extracted!.skill.provenance).toMatchObject({
+      kind: 'imported',
+      sourceEnvelopeCids: [record.ref],
+      operator: { safeAddress: TEST_SAFE },
+      seed: {
+        skill: 'acme/skills/write-tests',
+        source: 'https://github.com/acme/skills',
+        licence: 'MIT',
+      },
+    });
+  });
+
+  it('prefers the jinn.skill.v1 artifact when both shapes are present', async () => {
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(await capture(legacySeededTask()), deps, {
+      skill: skillArtifact(),
+    });
+    if (result.vetoed) throw new Error('unexpected veto');
+    const record = toRecord(envelopes[0]!, published, result.envelopeRef);
+    expect(extractSkill(record)!.shape).toBe('jinn.skill.v1');
+  });
+
+  it('returns null for a record with no skill in either shape', async () => {
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(await capture(capturedTask()), deps);
+    if (result.vetoed) throw new Error('unexpected veto');
+    const record = toRecord(envelopes[0]!, published, result.envelopeRef);
+    expect(extractSkill(record)).toBeNull();
   });
 });
