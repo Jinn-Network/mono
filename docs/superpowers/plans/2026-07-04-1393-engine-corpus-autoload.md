@@ -1425,3 +1425,39 @@ Re-read the diff (`git diff origin/next...HEAD --stat` then per-file) against th
 - **Deviations from the design note** are listed under "Verified reality vs the design note" (event-kind union + detail string; no `taskCid` arg to `projectEnvelope`; no helper-file changes).
 - **Type consistency:** `CorpusKnowledgeRecordRef` (T3) is what T4 persists (`consumedRefsJson = JSON.stringify(records)`) and what T7 parses (`envelopeCid`, `artifacts[].sha256`). The event `detail` uses the trimmed `{ envelopeCid, artifacts: string[] }` shape in both T4's emit and T4's test.
 - **Existing-test blast radius:** default-on knowledge in engines without seeded projections injects nothing (no behaviour change); `daemon-start-order.test.ts` marker moves earlier but stays before all store mutations; `pack()` projections are additive in packaging suites.
+
+---
+
+## Paused state (2026-07-04, stand-down)
+
+Implementation complete through Stage 4 review; pipeline paused before the
+findings below were fixed. Tests 5481 passed, typecheck clean at HEAD.
+
+Outstanding review findings (fix before opening a PR):
+
+1. Projection tier mis-stamping — pack() saves the envelope projection at
+   sign time, when v2/v3 envelopes are already stamped `committed`; a
+   race-lost/failed delivery leaves a `committed` projection that outranks
+   delivered `self-signed` work. Move the save to the deliver() success path
+   (or downgrade tier at pack time).
+2. Artifact join degrades on real stores — handleSearchRecords joins only the
+   12 most-recent served/cached artifact rows of any type, so top-ranked
+   records inject with empty artifact lists once the store has >12 recent
+   rows; the ranking pool itself is the 12 newest projections, so older
+   attested records fall out before the tier sort. Raise the pool and
+   backfill refs by envelopeCid in corpus-knowledge.ts (do not touch MCP code).
+3. Retry re-drive waste — the lookup re-runs in full on every RUNNING
+   retry/recovery re-drive (duplicate corpus_knowledge events, repeated
+   timeout charge). Reuse persisted consumedRefsJson.
+4. Sick corpus beats no corpus — a hung network corpus times out the whole
+   search, discarding local rows; fall back to a local-only pass. The timed-
+   out query is also uncancelled (no AbortSignal).
+5. Defanged #649 regression test — daemon-start-order.test.ts used
+   corpusFactory invocation as its ordering marker; the constructor hoist
+   makes its assertions unfalsifiable. Re-marker the test.
+6. (Note) Knowledge keyed on solverType only — SolverNets sharing a
+   solverType cross-pollinate; EnvelopeProjection has no manifest-cid
+   dimension yet.
+7. (Note) corpusKnowledge flows into published trajectories via the hermes
+   prompt serialisation of ctx.task — refs-only today; treat as provenance,
+   but any future payload field ships through this side door.
