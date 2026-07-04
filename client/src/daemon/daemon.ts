@@ -270,6 +270,7 @@ export class Daemon {
   private checkpointLoop?: CheckpointLoop;
   private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
+  private corpus?: Corpus;
 
   constructor(private readonly config: DaemonConfig) {
     if (config.store) {
@@ -279,6 +280,11 @@ export class Daemon {
       this.store = new Store(config.dbPath);
       this.ownsStore = true;
     }
+    // #1393: build the corpus once, at construction time, so the TaskEngine
+    // (knowledge autoload) and the API server share one instance. Safe w.r.t.
+    // the #649 start() ordering constraint: createCorpus is pure closure
+    // construction — no store writes, no network I/O.
+    this.corpus = config.corpusFactory?.(this.store);
     this.adapter = config.adapter;
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
     // When the embedder didn't supply a token (e.g. a unit test that doesn't
@@ -299,6 +305,10 @@ export class Daemon {
     this.restorationEngine = new TaskEngine({
       ...config.restorationEngine,
       store: this.store,
+      knowledge: {
+        ...config.restorationEngine.knowledge,
+        ...(this.corpus ? { corpus: this.corpus } : {}),
+      },
       packagingDeps: config.restorationEngine.packagingDeps
         ? { ...config.restorationEngine.packagingDeps, store: this.store }
         : undefined,
@@ -344,9 +354,9 @@ export class Daemon {
     // activity-events log. See issue #649.
     //
     // DO NOT add store mutations above this line — see #649.
-    const corpus = this.config.corpusFactory
-      ? this.config.corpusFactory(this.store)
-      : undefined;
+    // Corpus is constructed in the constructor (#1393) so the engine's
+    // knowledge autoload and the API server share one instance.
+    const corpus = this.corpus;
     if (this.config.apiServer) {
       this.apiServer = this.config.apiServer;
       this.ownsApiServer = false;
