@@ -138,6 +138,7 @@ import {
   type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
+import { makeIntentInput } from '../../_support/engine.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
 import type { Task } from '../../../src/types/task.js';
@@ -200,17 +201,15 @@ function engineOpts(store: Store, tmp: string, impl: Harness, knowledge?: TaskEn
 
 function runInput(requestId: string, role: 'restoration' | 'evaluation' = 'restoration'): PersistedTaskRunInput {
   const now = Date.now() - 1000;
-  return {
+  return makeIntentInput({
     requestId,
-    taskCid: 'bafyintent123',
-    onchainCreationTx: '0xdeadbeef',
-    onchainCreationBlock: 100,
     solverType: SOLVER_TYPE,
     taskRole: role,
+    // Window already open (the shared fixture defaults to a future start).
     windowStartTs: now,
     windowEndTs: now + 86_400_000,
     task: { id: requestId, description: 'test', solverType: SOLVER_TYPE, role },
-  };
+  });
 }
 
 /** observe → CLAIMED → WAITING, then one process() to drive the real runImpl. */
