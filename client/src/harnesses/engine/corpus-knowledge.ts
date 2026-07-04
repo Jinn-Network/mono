@@ -65,7 +65,7 @@ export interface LoadCorpusKnowledgeOptions {
   log?: (msg: string) => void;
 }
 
-export const CORPUS_KNOWLEDGE_GUIDANCE =
+const CORPUS_KNOWLEDGE_GUIDANCE =
   'Prior solution records for this solverType, ranked by evidence tier then recency. '
   + 'Full artifact content is acquirable via the MCP tools: inspect_record (pass the '
   + 'envelopeCid) and acquire_artifact (pass each artifact\'s acquisition arguments).';
