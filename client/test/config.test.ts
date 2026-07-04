@@ -1544,3 +1544,50 @@ describe('migrateLegacySolverNets', () => {
       .toEqual({ id: 'broken-net', version: 'v1' });
   });
 });
+
+describe('engine.knowledgeAutoload (#1393)', () => {
+  const dirs: string[] = [];
+  const originalEnv = process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+
+  afterEach(async () => {
+    if (originalEnv === undefined) {
+      delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    } else {
+      process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = originalEnv;
+    }
+    await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    dirs.length = 0;
+  });
+
+  const writeConfig = async (body: Record<string, unknown>): Promise<string> => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-test-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(body));
+    return configPath;
+  };
+
+  it('defaults to true when neither file nor env sets it', async () => {
+    delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    const config = loadConfig(await writeConfig({}));
+    expect(config.engine.knowledgeAutoload).toBe(true);
+  });
+
+  it('respects engine.knowledgeAutoload: false from the config file', async () => {
+    delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
+    expect(config.engine.knowledgeAutoload).toBe(false);
+  });
+
+  it('JINN_ENGINE_KNOWLEDGE_AUTOLOAD=0 overrides a file-set true', async () => {
+    process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = '0';
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: true } }));
+    expect(config.engine.knowledgeAutoload).toBe(false);
+  });
+
+  it('JINN_ENGINE_KNOWLEDGE_AUTOLOAD=true enables it over a file-set false', async () => {
+    process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = 'true';
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
+    expect(config.engine.knowledgeAutoload).toBe(true);
+  });
+});

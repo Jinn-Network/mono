@@ -467,6 +467,12 @@ export const JinnConfigSchema = z.object({
     .object({
       workingDirRoot: z.string().optional(),
       implStateDirRoot: z.string().optional(),
+      /**
+       * Auto-load top-3 corpus solution records for the task's solverType
+       * into task.context.corpusKnowledge before each restoration harness
+       * spawn (#1393). Default true; env JINN_ENGINE_KNOWLEDGE_AUTOLOAD.
+       */
+      knowledgeAutoload: z.boolean().optional(),
     })
     .optional(),
 
@@ -694,7 +700,7 @@ export type JinnConfig = Omit<
   archiveRpcUrl?: string;
   archiveRpcUrls?: readonly string[];
   tasks: Task[];
-  engine: { workingDirRoot: string; implStateDirRoot: string };
+  engine: { workingDirRoot: string; implStateDirRoot: string; knowledgeAutoload: boolean };
 };
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -1139,7 +1145,11 @@ export function loadConfig(configPath?: string): JinnConfig {
     };
   }
 
-  if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
+  if (
+    env['JINN_ENGINE_WORKING_DIR_ROOT'] ||
+    env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ||
+    env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] !== undefined
+  ) {
     const prev = typeof merged['engine'] === 'object' && merged['engine'] !== null
       ? (merged['engine'] as Record<string, unknown>)
       : {};
@@ -1147,6 +1157,9 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...prev,
       ...(env['JINN_ENGINE_WORKING_DIR_ROOT'] ? { workingDirRoot: env['JINN_ENGINE_WORKING_DIR_ROOT'] } : {}),
       ...(env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ? { implStateDirRoot: env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] } : {}),
+      ...(env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] !== undefined
+        ? { knowledgeAutoload: ['1', 'true', 'yes'].includes(env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'].trim().toLowerCase()) }
+        : {}),
     };
   }
 
@@ -1338,6 +1351,7 @@ export function loadConfig(configPath?: string): JinnConfig {
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
+      knowledgeAutoload: parsed.engine?.knowledgeAutoload ?? true,
     },
   };
 }
@@ -1453,6 +1467,7 @@ const TRACKED_ENV_VARS = [
   'JINN_TASKS',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_ENGINE_KNOWLEDGE_AUTOLOAD',
   'JINN_SWE_REBENCH_V2_STATE_DIR',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',
