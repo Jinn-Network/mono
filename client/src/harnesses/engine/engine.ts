@@ -36,6 +36,7 @@ import {
 } from './packaging.js';
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import { loadCorpusKnowledge } from './corpus-knowledge.js';
+import { projectEnvelope } from '../../corpus/envelope-projection.js';
 import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
 import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
 import {
@@ -1912,12 +1913,31 @@ export class TaskEngine {
       generatedAt,
     };
 
-    const { envelopeCid, envelopeHash } = await assembleAndSignEnvelope(
+    const { envelope, envelopeCid, envelopeHash } = await assembleAndSignEnvelope(
       envelopeInputs,
       this.envelopeDeps,
     );
     const manifestCid = envelopeCid;
     const signatureHash = envelopeHash;
+
+    // #1393: project the just-published envelope into the local corpus index
+    // so the operator's own work is discoverable as knowledge on the next
+    // run (and by MCP search_records). Upsert keyed on envelope_id — a
+    // pack() retry overwrites idempotently. Never fatal: a projection
+    // failure must not fail packaging.
+    // NOTE: taskCid is deliberately NOT passed — projectEnvelope resolves it
+    // from options.task.context.solutionTaskCid (verdicts) or
+    // envelope.task.cid (solutions), both already correct here.
+    try {
+      this.store.saveEnvelopeProjection(
+        projectEnvelope(envelope, { envelopeCid, task: task.task }),
+      );
+    } catch (err) {
+      console.warn(
+        `[harness-engine] ${task.requestId}: envelope projection failed (non-fatal): `
+        + `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     // 6. ERC-8004 IdentityRegistry per-execution `setMetadata` fires in
     //    deliver() AFTER claimDelivery succeeds. 'committed' must mean

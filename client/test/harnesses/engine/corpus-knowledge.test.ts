@@ -306,3 +306,47 @@ describe('#1393 corpus knowledge injection in runImpl', () => {
     expect(p.getByRequestId('req-know-4')!.state).toBe(TaskRunState.POST_SNAPSHOT);
   });
 });
+
+describe('#1393 pack() saves the envelope projection', () => {
+  let store: Store;
+  let tmp: string;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    tmp = mkTmp();
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    store.close();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('a completed pack leaves a solution projection queryable by solverType', async () => {
+    const captured: { task?: Task } = {};
+    const engine = new TaskEngine(engineOpts(store, tmp, makeCapturingImpl(captured)));
+    const p = await driveToPostSnapshot(engine, store, 'req-proj-1');
+    // Second process(): POST_SNAPSHOT → PACKAGING → real pack() (uploadToIpfs mocked).
+    await engine.process('req-proj-1');
+    expect(p.getByRequestId('req-proj-1')!.state).toBe(TaskRunState.DELIVERING);
+
+    const projections = store.queryEnvelopeProjections({ solverType: SOLVER_TYPE, role: 'solution' });
+    expect(projections).toHaveLength(1);
+    expect(projections[0]!.envelopeCid).toBe('bafymock123'); // the mocked uploadToIpfs CID
+    expect(projections[0]!.requestId).toBe('req-proj-1');
+  });
+
+  it('a second run of the same solverType sees the first run\'s projection as knowledge', async () => {
+    const first: { task?: Task } = {};
+    const engine1 = new TaskEngine(engineOpts(store, tmp, makeCapturingImpl(first)));
+    await driveToPostSnapshot(engine1, store, 'req-chain-1');
+    await engine1.process('req-chain-1'); // pack → projection saved
+
+    const second: { task?: Task } = {};
+    const engine2 = new TaskEngine(engineOpts(store, tmp, makeCapturingImpl(second)));
+    await driveToPostSnapshot(engine2, store, 'req-chain-2');
+
+    const payload = second.task?.context?.['corpusKnowledge'] as { records: Array<{ envelopeCid: string }> };
+    expect(payload).toBeDefined();
+    expect(payload.records.map((r) => r.envelopeCid)).toContain('bafymock123');
+  });
+});
