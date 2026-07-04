@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
 import { runJinnLayerCli } from '../src/cli.js';
 
@@ -154,5 +158,89 @@ describe('jinn-layer capture preview', () => {
     const code = await runJinnLayerCli(['capture', 'preview'], { writer });
     expect(code).toBe(2);
     expect(out()).toContain('Usage');
+  });
+});
+
+function skillRecord(): CorpusRecord {
+  const companion = Buffer.from('# examples\n', 'utf-8');
+  const payload = {
+    schemaVersion: 'jinn.skill.v1',
+    skill: { name: 'write-tests', skillMd: '# write-tests\n\nAlways write a failing test first.' },
+    files: [
+      {
+        path: 'reference/EXAMPLES.md',
+        contentBase64: companion.toString('base64'),
+        sha256: createHash('sha256').update(companion).digest('hex'),
+      },
+    ],
+    provenance: {
+      kind: 'imported',
+      sourceEnvelopeCids: [],
+      operator: { safeAddress: '0x' + 'a'.repeat(40) },
+      seed: { skill: 'acme/skills/write-tests', source: 'https://github.com/acme/skills', licence: 'MIT' },
+    },
+  };
+  const content = Buffer.from(JSON.stringify(payload), 'utf-8');
+  return {
+    ref: 'bafySkill',
+    envelope: {
+      solverType: 'capture.v0',
+      role: 'capture',
+      participant: { safeAddress: '0x' + 'a'.repeat(40), agentEoa: '0x' + 'b'.repeat(40) },
+      artifacts: [],
+    } as unknown as CorpusRecord['envelope'],
+    provenance: {
+      operator: { agentId: '7', safeAddress: '0x' + 'a'.repeat(40) },
+      evidenceTier: 'self-signed',
+      publishedAt: 1745978400,
+    },
+    artifacts: [
+      {
+        sha256: 'c'.repeat(64),
+        artifactType: 'jinn.skill.v1',
+        content,
+        source: 'origin',
+        sizeBytes: content.length,
+      },
+    ],
+  };
+}
+
+describe('jinn-layer skills install', () => {
+  it('installs SKILL.md and companion files from a jinn.skill.v1 record', async () => {
+    const { writer, out } = capture();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const layer = fakeLayer({ record: skillRecord() });
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer, writer },
+    );
+    expect(code).toBe(0);
+    expect(layer.corpus.get).toHaveBeenCalledWith('bafySkill');
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf-8')).toContain('failing test first');
+    expect(readFileSync(join(dir, 'reference', 'EXAMPLES.md'), 'utf-8')).toBe('# examples\n');
+    const text = out();
+    expect(text).toContain(dir);
+    expect(text).toContain('imported');
+    expect(text).toContain('https://github.com/acme/skills');
+  });
+
+  it('exits 1 with a clear message when the record carries no skill', async () => {
+    const { writer, out } = capture();
+    const record = skillRecord();
+    record.artifacts = []; // neither shape present
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', mkdtempSync(join(tmpdir(), 'jinn-skills-'))],
+      { layer: fakeLayer({ record }), writer },
+    );
+    expect(code).toBe(1);
+    expect(out()).toContain('no skill');
+  });
+
+  it('requires a <ref> argument', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['skills', 'install'], { layer: fakeLayer({}), writer });
+    expect(code).toBe(2);
+    expect(out()).toContain('skills install requires a <ref>');
   });
 });

@@ -18,7 +18,8 @@
 
 import { parseArgs } from 'node:util';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import {
   createHarnessLayer,
   type CorpusRecord,
@@ -38,6 +39,7 @@ import {
 import { plan as seedPlan } from './seed-import/plan.js';
 import { execute as seedExecute } from './seed-import/execute.js';
 import { parseImportReport, renderImportReport } from './seed-import/report.js';
+import { extractSkill } from './skill.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -46,6 +48,10 @@ Commands:
                                                  solverType / role / artifactType / refs)
   corpus get <ref> [--json] [--out <dir>]        Fetch a record by ref (manifest CID from a
                                                  search result), including artifact content
+  skills install <ref> [--out <dir>] [--json]    Install the skill carried by a corpus record
+                                                 (jinn.skill.v1 artifact, or the legacy seeded
+                                                 trace shape): writes SKILL.md + companion files
+                                                 to <dir> (default ./<skill-name>)
   capture preview <task-file> [--json]           Scrub a captured task and show exactly what
                                                  would leave this machine: the redaction diff
                                                  plus the envelope as it would publish
@@ -290,7 +296,8 @@ export async function runJinnLayerCli(
   const isLedger = verb === 'ledger';
   const isPublish = verb === 'publish';
   const isSeed = verb === 'seed' && (subverb === 'plan' || subverb === 'execute');
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed) {
+  const isSkillsInstall = verb === 'skills' && subverb === 'install';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -436,6 +443,56 @@ export async function runJinnLayerCli(
   }
 
   const layer = opts.layer ?? buildDefaultLayer();
+
+  if (isSkillsInstall) {
+    const ref = parsed.positionals[0];
+    if (ref === undefined) {
+      writer.write(`error: skills install requires a <ref> argument (a manifest CID from a search result)\n\n${USAGE}`);
+      return 2;
+    }
+    const record = await layer.corpus.get(ref);
+    const extracted = extractSkill(record);
+    if (extracted === null) {
+      writer.write(`error: record ${ref} carries no skill (neither a jinn.skill.v1 artifact nor the seeded trace shape)\n`);
+      return 1;
+    }
+    const { skill } = extracted;
+    const dir = (parsed.values.out as string | undefined) ?? join(process.cwd(), skill.skill.name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), skill.skill.skillMd);
+    for (const file of skill.files) {
+      const bytes = Buffer.from(file.contentBase64, 'base64');
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      if (digest !== file.sha256) {
+        writer.write(`error: companion file ${file.path} sha256 mismatch (expected ${file.sha256}, got ${digest})\n`);
+        return 1;
+      }
+      const target = join(dir, file.path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+    }
+    if (parsed.values.json) {
+      writer.write(JSON.stringify({
+        dir,
+        name: skill.skill.name,
+        shape: extracted.shape,
+        files: skill.files.map((f) => f.path),
+        provenance: skill.provenance,
+      }) + '\n');
+    } else {
+      const p = skill.provenance;
+      writer.write([
+        `Installed ${skill.skill.name} (${extracted.shape}) to ${dir}`,
+        `  files       SKILL.md${skill.files.length > 0 ? `, ${skill.files.map((f) => f.path).join(', ')}` : ''}`,
+        `  provenance  ${p.kind}${p.solverType ? ` (${p.solverType})` : ''}`,
+        `  operator    ${p.operator.safeAddress}`,
+        `  sources     ${p.sourceEnvelopeCids.join(', ') || '-'}`,
+        ...(p.seed ? [`  seed        ${p.seed.skill} — ${p.seed.source} (${p.seed.licence ?? 'no licence'})`] : []),
+        '',
+      ].join('\n'));
+    }
+    return 0;
+  }
 
   if (subverb === 'search') {
     const query = parsed.positionals[0];
