@@ -32,6 +32,11 @@ import { buildUnsignedCaptureEnvelope, sha256Hex } from '../../../src/captures/p
 import type { PendingCaptureRow } from '../../../src/store/captures.js';
 import type { Artifact, SignedEnvelope, UnsignedEnvelope } from '../../../src/types/envelope.js';
 import { SignedEnvelopeSchema } from '../../../src/types/envelope.js';
+import {
+  SKILL_ARTIFACT_TYPE,
+  SkillArtifactV1Schema,
+  type SkillArtifactV1,
+} from '../../../src/types/skill-artifact.js';
 import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import { signCanonical } from '../../../src/harnesses/engine/signing.js';
 import { EMPTY_BUNDLE_SHA256 } from '../../../src/trajectory/schema.js';
@@ -70,6 +75,12 @@ export interface HarnessPublishDeps {
 export interface PublishOptions {
   /** Per-task veto: record locally, publish nothing. */
   veto?: boolean;
+  /**
+   * First-class skill artifact (#1394): validated against
+   * SkillArtifactV1Schema and published as a second artifact on the SAME
+   * wrapper envelope, alongside (never instead of) the trace envelope.
+   */
+  skill?: SkillArtifactV1;
 }
 
 export type PublishResult =
@@ -152,6 +163,7 @@ export async function publish(
   }
 
   const trace = toTraceEnvelope(pending);
+  const skill = opts.skill === undefined ? undefined : SkillArtifactV1Schema.parse(opts.skill);
 
   const blob = await deps.publishArtifact({
     artifactType: TRACE_ENVELOPE_ARTIFACT_TYPE,
@@ -170,13 +182,36 @@ export async function publish(
     sources: [{ kind: 'ipfs', cid: blob.cid, sha256, encoding: DONATION_ARTIFACT_ENCODING }],
   };
 
+  const artifacts: Artifact[] = [artifact];
+  if (skill) {
+    const skillBlob = await deps.publishArtifact({
+      artifactType: SKILL_ARTIFACT_TYPE,
+      payload: skill,
+    });
+    const skillSha = skillBlob.sha256 ?? sha256Hex(canonicalJson(skill));
+    const skillEndpoint = skillBlob.endpoint ?? deps.defaultArtifactEndpoint;
+    if (!skillEndpoint) {
+      throw new Error(`published skill artifact ${skillBlob.cid} has no access endpoint (set defaultArtifactEndpoint)`);
+    }
+    artifacts.push({
+      artifactType: SKILL_ARTIFACT_TYPE,
+      sha256: skillSha,
+      metadata: {
+        description: `Skill: ${skill.skill.name}`,
+        tags: trace.task.distributionTags,
+      },
+      access: { endpoint: skillEndpoint, priceUsdc: skillBlob.priceUsdc ?? DEFAULT_PRICE_USDC },
+      sources: [{ kind: 'ipfs', cid: skillBlob.cid, sha256: skillSha, encoding: DONATION_ARTIFACT_ENCODING }],
+    });
+  }
+
   const unsigned = buildUnsignedCaptureEnvelope({
     capture: toCaptureRow(trace),
     now,
     participant: deps.participant,
     signerAddress: deps.signer.address,
     clientGitSha: deps.clientGitSha,
-    artifacts: [artifact],
+    artifacts,
     harnessBundleSha: EMPTY_BUNDLE_SHA256,
   });
   const signature = deps.signEnvelope
