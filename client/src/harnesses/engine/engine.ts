@@ -35,6 +35,9 @@ import {
   type PackagingDeps,
 } from './packaging.js';
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
+import { loadCorpusKnowledge } from './corpus-knowledge.js';
+import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
+import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -409,6 +412,23 @@ export interface TaskEngineOptions {
      */
     disabled?: boolean;
   };
+
+  /**
+   * Corpus knowledge autoload (#1393). Before each restoration harness
+   * spawn, the engine queries the corpus for prior solution records of the
+   * task's solverType and injects the top few into
+   * task.context.corpusKnowledge (a runtime side-channel, same as evaluation
+   * tasks' context.restorationResult — never persisted into the signed Task,
+   * never re-hashed).
+   *
+   * - `corpus`: read-only corpus for network results; when absent/null the
+   *   lookup is store-only (local envelope projections + served artifacts).
+   * - `enabled`: opt-out; defaults to true (config: engine.knowledgeAutoload).
+   *
+   * Failures never block the solve path: the lookup is time-bounded and
+   * error-swallowing (loadCorpusKnowledge never throws).
+   */
+  knowledge?: { corpus?: ReadOnlyCorpus | null; enabled?: boolean };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -489,6 +509,11 @@ export class TaskEngine {
   // Keyed by requestId; cleared after successful pack.
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
+
+  // Corpus knowledge refs injected into the current run's task context
+  // (#1393). Keyed by requestId; persisted as consumed_refs_json at the
+  // RUNNING → POST_SNAPSHOT transition; cleared after successful pack.
+  private readonly consumedRefsByRequest = new Map<string, CorpusKnowledgeRecordRef[]>();
   private readonly processingRequestIds = new Set<string>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
@@ -500,6 +525,9 @@ export class TaskEngine {
 
   /** Working-dir reaper tuning (issue #320). */
   protected readonly workDirReaperOpts: { orphanMaxAgeMs: number; disabled: boolean };
+
+  /** Corpus knowledge autoload options (#1393). */
+  protected readonly knowledge: TaskEngineOptions['knowledge'];
 
   constructor(opts: TaskEngineOptions) {
     this.persistence = new TaskRunPersistence(opts.store.db);
@@ -520,6 +548,7 @@ export class TaskEngine {
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
     this.harnessMode = opts.harnessMode ?? 'train';
+    this.knowledge = opts.knowledge;
     this.workDirReaperOpts = {
       orphanMaxAgeMs: opts.workDirReaper?.orphanMaxAgeMs ?? DEFAULT_ORPHAN_MAX_AGE_MS,
       disabled: opts.workDirReaper?.disabled ?? false,
@@ -1267,6 +1296,38 @@ export class TaskEngine {
     ];
     this.runtimePluginsByRequest.set(task.requestId, attributedPlugins);
 
+    // #1393: corpus knowledge autoload. Restoration runs only — never bias
+    // evaluators with prior solutions. The lookup is bounded (10 s) and
+    // never throws; failure or an empty result simply injects nothing.
+    let taskForCtx = task.task;
+    if (role === 'restoration' && solverType && this.knowledge?.enabled !== false && taskForCtx) {
+      const knowledgePayload = await loadCorpusKnowledge({
+        corpus: this.knowledge?.corpus ?? null,
+        store: this.store,
+        solverType,
+      });
+      if (knowledgePayload) {
+        // Shallow clone: the injected context lives only in the runtime Task
+        // handed to the harness. Envelope integrity references taskCid, so
+        // nothing signed or hashed changes.
+        taskForCtx = {
+          ...taskForCtx,
+          context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
+        };
+        this.consumedRefsByRequest.set(task.requestId, knowledgePayload.records);
+        emitEvent(this.store, {
+          kind: 'corpus_knowledge',
+          requestId: task.requestId,
+          solverType,
+          outcome: 'ok',
+          detail: JSON.stringify(knowledgePayload.records.map((record) => ({
+            envelopeCid: record.envelopeCid,
+            artifacts: record.artifacts.map((artifact) => artifact.sha256),
+          }))),
+        }, 'harness-engine');
+      }
+    }
+
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
     const kindSeg = solverType.replace(/[.:]/g, '_');
     const implStateDir = task.implStateDir ?? (
@@ -1288,7 +1349,7 @@ export class TaskEngine {
 
     try {
       const ctx: HarnessContext = {
-        task: (task.task ?? {
+        task: (taskForCtx ?? {
           id: task.requestId,
           description: '',
           ...(task.solverType ? { solverType: task.solverType, spec: {} } : {}),
@@ -1359,6 +1420,9 @@ export class TaskEngine {
             solutionOutputsJson: JSON.stringify(skippedOutput),
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
+            consumedRefsJson: this.consumedRefsByRequest.has(task.requestId)
+              ? JSON.stringify(this.consumedRefsByRequest.get(task.requestId))
+              : null,
           });
           console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name} (skipped)`);
           return;
@@ -1411,6 +1475,9 @@ export class TaskEngine {
         solutionOutputsJson: JSON.stringify(output),
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
+        consumedRefsJson: this.consumedRefsByRequest.has(task.requestId)
+          ? JSON.stringify(this.consumedRefsByRequest.get(task.requestId))
+          : null,
       });
     } finally {
       clearTimeout(endTimer);
@@ -1897,6 +1964,7 @@ export class TaskEngine {
     this.trajectoryRefs.delete(task.requestId);
     this.modesByRequest.delete(task.requestId);
     this.codeDigestsByRequest.delete(task.requestId);
+    this.consumedRefsByRequest.delete(task.requestId);
   }
 
   /**

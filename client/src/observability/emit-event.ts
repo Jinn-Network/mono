@@ -10,6 +10,7 @@ export const ALLOWED_LIFECYCLE_KINDS = [
   'reward_claimed',
   'balance_topup',
   'engine_transition',
+  'corpus_knowledge',
   'tick_error',
   'race_lost',
   'spend_cap_reached',
