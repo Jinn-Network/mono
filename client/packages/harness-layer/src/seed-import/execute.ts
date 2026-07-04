@@ -17,6 +17,7 @@
  * report-file edit.
  */
 
+import type { SkillArtifactV1 } from '../../../../src/types/skill-artifact.js';
 import { capture } from '../capture.js';
 import type { CapturedTask } from '../capture.js';
 import { publish, type HarnessPublishDeps } from '../publish.js';
@@ -52,6 +53,12 @@ export function frontmatterName(skillMd: string): string | null {
   return null;
 }
 
+/** Last path segment of a registry-style skill id (`owner/repo/slug`). */
+export function skillSlug(skillId: string): string {
+  const segments = skillId.split('/').filter((s) => s.length > 0);
+  return segments[segments.length - 1] ?? skillId;
+}
+
 /**
  * Seed tags (#1343): the seed marker, the repo, the skill slug (last path
  * segment), and the SKILL.md frontmatter name when it declares one. Tags are
@@ -63,7 +70,7 @@ export function frontmatterName(skillMd: string): string | null {
 function seedTags(skill: SeedSkill): string[] {
   const segments = skill.skill.split('/').filter((s) => s.length > 0);
   const repoName = segments[1] ?? skill.skill;
-  const slug = segments[segments.length - 1] ?? skill.skill;
+  const slug = skillSlug(skill.skill);
   const name = frontmatterName(skill.skillMd);
   const tags: string[] = [];
   for (const candidate of ['seed-import', repoName, slug, ...(name ? [name] : [])]) {
@@ -117,6 +124,25 @@ function toCapturedTask(skill: SeedSkill, now: Date): CapturedTask {
   };
 }
 
+/** First-class skill artifact for a seed (#1394). Companion-file fetch is #1381. */
+function toSkillArtifact(skill: SeedSkill, safeAddress: `0x${string}`): SkillArtifactV1 {
+  return {
+    schemaVersion: 'jinn.skill.v1',
+    skill: {
+      name: frontmatterName(skill.skillMd) ?? skillSlug(skill.skill),
+      ...(skill.description !== undefined ? { description: skill.description } : {}),
+      skillMd: skill.skillMd,
+    },
+    files: [],
+    provenance: {
+      kind: 'imported',
+      sourceEnvelopeCids: [],
+      operator: { safeAddress },
+      seed: { skill: skill.skill, source: skill.source, licence: skill.licence },
+    },
+  };
+}
+
 export async function execute(
   report: ImportReport,
   source: SeedSource,
@@ -139,7 +165,9 @@ export async function execute(
         throw new Error(`licence gate refused ${row.skill}: ${licence.reason}`);
       }
       const pending = await capture(toCapturedTask(skill, now));
-      const published = await publish(pending, deps);
+      const published = await publish(pending, deps, {
+        skill: toSkillArtifact(skill, deps.participant.safeAddress),
+      });
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
       result.imported.push({
         skill: row.skill,

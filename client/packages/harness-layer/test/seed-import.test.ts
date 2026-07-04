@@ -17,6 +17,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SignedEnvelope } from '../../../src/types/envelope.js';
+import { SKILL_ARTIFACT_TYPE, SkillArtifactV1Schema } from '../../../src/types/skill-artifact.js';
 import { parseTraceEnvelopeV0 } from '../src/envelope.js';
 import { createMemoryLedger } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
@@ -62,8 +64,10 @@ function mockSource(skills: SeedSkill[]): SeedSource & { listCalls: number } {
 function mockPublishDeps(): {
   deps: HarnessPublishDeps;
   published: Array<{ artifactType: string; payload: unknown }>;
+  envelopes: SignedEnvelope[];
 } {
   const published: Array<{ artifactType: string; payload: unknown }> = [];
+  const envelopes: SignedEnvelope[] = [];
   const deps: HarnessPublishDeps = {
     participant: { safeAddress: TEST_SAFE, agentEoa: TEST_ADDRESS },
     signer: { address: TEST_ADDRESS, privateKey: TEST_PRIVATE_KEY },
@@ -74,13 +78,13 @@ function mockPublishDeps(): {
       published.push(input);
       return { cid: `bafy-artifact-${published.length}`, sha256: 'a'.repeat(64) };
     },
-    publishEnvelope: async () => ({
-      cid: `bafy-envelope-${published.length}`,
-      sha256: 'b'.repeat(64),
-    }),
+    publishEnvelope: async (envelope) => {
+      envelopes.push(envelope);
+      return { cid: `bafy-envelope-${envelopes.length}`, sha256: 'b'.repeat(64) };
+    },
     anchorEnvelope: async () => ({ txHash: `0x${'cd'.repeat(32)}` as `0x${string}`, blockNumber: 7 }),
   };
-  return { deps, published };
+  return { deps, published, envelopes };
 }
 
 describe('licence checker', () => {
@@ -150,8 +154,10 @@ describe('execute()', () => {
     const { deps, published } = mockPublishDeps();
     const result = await execute(report, source, deps);
 
-    expect(published).toHaveLength(1);
-    expect(published[0]!.artifactType).toBe(TRACE_ENVELOPE_ARTIFACT_TYPE);
+    expect(published.map((p) => p.artifactType)).toEqual([
+      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      SKILL_ARTIFACT_TYPE,
+    ]);
     const envelope = parseTraceEnvelopeV0(published[0]!.payload);
     expect(envelope.provenance).toBe('imported');
     const attrs = envelope.steps[0]!.attributes as Record<string, unknown>;
@@ -247,6 +253,61 @@ describe('execute()', () => {
     }
     expect(envelope.task.distributionTags.length).toBeLessThanOrEqual(16);
   });
+
+  // ── First-class skill artifact (#1394) — dual-carriage ────────────────────
+
+  it('attaches a jinn.skill.v1 artifact to the SAME wrapper envelope as the trace', async () => {
+    const source = mockSource([skill()]);
+    const { deps, published, envelopes } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.artifacts.map((a) => a.artifactType)).toEqual([
+      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      SKILL_ARTIFACT_TYPE,
+    ]);
+
+    const skillPayload = SkillArtifactV1Schema.parse(
+      published.find((p) => p.artifactType === SKILL_ARTIFACT_TYPE)!.payload,
+    );
+    expect(skillPayload.skill.skillMd).toContain('failing test first');
+    expect(skillPayload.skill.name).toBe('write-tests'); // slug (no frontmatter name)
+    expect(skillPayload.files).toEqual([]); // companion fetch is #1381's work
+    expect(skillPayload.provenance).toMatchObject({
+      kind: 'imported',
+      sourceEnvelopeCids: [],
+      operator: { safeAddress: TEST_SAFE },
+      seed: {
+        skill: 'acme/skills/write-tests',
+        source: 'https://github.com/acme/skills',
+        licence: 'MIT',
+      },
+    });
+  });
+
+  it('a frontmatter name wins over the slug for the skill artifact name', async () => {
+    const source = mockSource([
+      skill({
+        skill: 'acme/skills/tdd-dir',
+        skillMd: '---\nname: test-driven-development\n---\n\n# TDD\n',
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+    const payload = SkillArtifactV1Schema.parse(
+      published.find((p) => p.artifactType === SKILL_ARTIFACT_TYPE)!.payload,
+    );
+    expect(payload.skill.name).toBe('test-driven-development');
+  });
+
+  it('the skill Artifact entry mirrors distribution tags into metadata.tags', async () => {
+    const source = mockSource([skill()]);
+    const { deps, envelopes } = mockPublishDeps();
+    await execute(await plan(source), source, deps);
+    const entry = envelopes[0]!.artifacts.find((a) => a.artifactType === SKILL_ARTIFACT_TYPE)!;
+    expect(entry.metadata?.tags).toContain('seed-import');
+    expect(entry.metadata?.tags).toContain('write-tests');
+  });
 });
 
 describe('jinn-layer seed CLI', () => {
@@ -293,7 +354,10 @@ describe('jinn-layer seed CLI', () => {
       publishDeps: deps,
     });
     expect(code).toBe(0);
-    expect(published).toHaveLength(1);
+    expect(published.map((p) => p.artifactType)).toEqual([
+      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      SKILL_ARTIFACT_TYPE,
+    ]);
     expect(sink.output()).toContain('bafy-envelope');
   });
 });
