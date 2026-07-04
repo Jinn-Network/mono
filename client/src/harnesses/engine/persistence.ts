@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS task_runs (
   solution_outputs_json       TEXT,
   runtime_plugins_json        TEXT,
 
+  -- Additive column (#1393, corpus knowledge autoload):
+  -- consumed_refs_json: JSON array of corpus knowledge record refs injected
+  --   into task.context.corpusKnowledge for this run (envelopeCid + artifact
+  --   sha256s). NULL when no knowledge was injected. Read by the #1397
+  --   consumed-refs hook and the daemon-harness e2e.
+  consumed_refs_json          TEXT,
+
   -- Additive columns for ERC-8004 payload v2 (jinn-mono-9fe5):
   --   executor_mode: 'train' | 'frozen', captured by pack() from the freeze-fence
   --     and reused by deliver() to emit a payload v2 setMetadata.
@@ -189,6 +196,8 @@ export type TaskRunPatch = Partial<{
    */
   solutionOutputsJson: string | null;
   runtimePluginsJson: string | null;
+  /** Corpus knowledge refs consumed by this run (#1393). */
+  consumedRefsJson: string | null;
   /** Executor mode captured from freeze-fence. Reused by deliver() for v2 setMetadata. */
   executorMode: 'train' | 'frozen' | null;
   /** Executor codeDigest captured from freeze-fence. Reused by deliver() for v2 setMetadata. */
@@ -230,6 +239,7 @@ interface RawRow {
   task_payload: string | null;
   solution_outputs_json: string | null;
   runtime_plugins_json: string | null;
+  consumed_refs_json: string | null;
   executor_mode: string | null;
   executor_code_digest: string | null;
   failure_reason: string | null;
@@ -254,6 +264,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     // after a process restart (otherwise in-memory solutionOutputs is lost).
     { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
     { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
+    { column: 'consumed_refs_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN consumed_refs_json TEXT' },
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
     { column: 'task_id',             ddl: 'ALTER TABLE task_runs ADD COLUMN task_id TEXT' },
     { column: 'attempt_index',       ddl: 'ALTER TABLE task_runs ADD COLUMN attempt_index INTEGER' },
@@ -351,6 +362,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     task: parseJson<Task>(row.task_payload),
     solutionOutputsJson: row.solution_outputs_json,
     runtimePluginsJson: row.runtime_plugins_json,
+    consumedRefsJson: row.consumed_refs_json,
     executorMode: (row.executor_mode === 'train' || row.executor_mode === 'frozen')
       ? row.executor_mode
       : null,
@@ -499,6 +511,10 @@ export class TaskRunPersistence {
     if (patch.runtimePluginsJson !== undefined) {
       setClauses.push('runtime_plugins_json = @runtimePluginsJson');
       params['runtimePluginsJson'] = patch.runtimePluginsJson;
+    }
+    if (patch.consumedRefsJson !== undefined) {
+      setClauses.push('consumed_refs_json = @consumedRefsJson');
+      params['consumedRefsJson'] = patch.consumedRefsJson;
     }
     if (patch.executorMode !== undefined) {
       setClauses.push('executor_mode = @executorMode');
