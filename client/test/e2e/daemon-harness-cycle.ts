@@ -29,6 +29,7 @@ import {
   ANVIL_PRIVATE_KEYS,
 } from './_daemon-harness-helpers.js';
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
+import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 
 async function main(): Promise<void> {
   const harness = harnessSelectorFromEnv();
@@ -148,6 +149,85 @@ async function main(): Promise<void> {
       console.log(`  ✓ activity counter incremented (${activityBefore} → ${activityAfter})`);
 
       console.log(`\n=== Task 7 ok — full settlement + activity counter increment for ${harness} ===`);
+
+      // ── #1393: corpus knowledge autoload — second run of the same task type ──
+      //
+      // Run 1's pack() must have projected its envelope into the local corpus
+      // index; run 2 (same solverType) must have consumed it: the injected
+      // refs are persisted as consumed_refs_json and mirrored in a
+      // corpus_knowledge activity event. All assertions read RunningDaemon's
+      // own SQLite store — no discovery/indexer infra (startDaemon omits
+      // corpusFactory, so this exercises the store-only knowledge path).
+      const persistence = new TaskRunPersistence(running.store.db);
+      const row1 = persistence.getByRequestId(claim.requestId);
+      const run1EnvelopeCid = row1?.manifestCid;
+      if (!run1EnvelopeCid) {
+        throw new Error(`run 1 has no manifestCid persisted (requestId=${claim.requestId})`);
+      }
+
+      // (a) run 1's envelope projection exists locally.
+      const projections = running.store.queryEnvelopeProjections({
+        solverType: 'prediction.v1',
+        role: 'solution',
+      });
+      if (!projections.some((p) => p.envelopeCid === run1EnvelopeCid)) {
+        throw new Error(
+          `run 1 envelope projection missing (want envelopeCid=${run1EnvelopeCid}, `
+          + `have ${projections.map((p) => p.envelopeCid).join(', ') || 'none'})`,
+        );
+      }
+      console.log(`  ✓ run 1 envelope projection exists (${run1EnvelopeCid})`);
+
+      // Run 1's solution artifact sha256 (served_artifacts, backfilled with the
+      // envelope CID by pack()).
+      const run1Artifacts = running.store
+        .searchOwnAndCached({ artifactType: 'prediction_v1_solution', limit: 50 })
+        .filter((a) => a.envelopeCid === run1EnvelopeCid);
+      if (run1Artifacts.length === 0) {
+        throw new Error(`run 1 has no prediction_v1_solution artifact for ${run1EnvelopeCid}`);
+      }
+      const run1ArtifactSha = run1Artifacts[0]!.sha256;
+
+      // Post a second prediction.v1 task and drive it to delivery.
+      const posted2 = await postPredictionV1Task(fixture, operator, CREATOR_PRIV_KEY, mockIpfs, v3Env);
+      console.log(`posted task 2: id=${posted2.taskId} cidDigest=${posted2.taskCidDigest}`);
+      const claim2 = await waitForDaemonClaim(fixture, posted2, operator, v3Env);
+      console.log(`daemon claimed task 2: requestId=${claim2.requestId}`);
+      const delivered2 = await waitForDelivery(fixture, claim2, v3Env, mockIpfs);
+      console.log(`delivered task 2: tx=${delivered2.deliveryTxHash}`);
+
+      // (b) run 2 consumed run 1's record: consumed_refs_json references the
+      // first envelope CID and the solution artifact sha256.
+      const row2 = persistence.getByRequestId(claim2.requestId);
+      const consumed = JSON.parse(row2?.consumedRefsJson ?? '[]') as Array<{
+        envelopeCid: string;
+        artifacts: Array<{ sha256: string }>;
+      }>;
+      const consumedRun1 = consumed.find((r) => r.envelopeCid === run1EnvelopeCid);
+      if (!consumedRun1) {
+        throw new Error(
+          `run 2 consumed_refs_json does not reference run 1's envelope `
+          + `(want ${run1EnvelopeCid}, got ${JSON.stringify(consumed)})`,
+        );
+      }
+      if (!consumedRun1.artifacts.some((a) => a.sha256 === run1ArtifactSha)) {
+        throw new Error(
+          `run 2 consumed refs missing run 1's solution artifact sha256 `
+          + `(want ${run1ArtifactSha}, got ${JSON.stringify(consumedRun1.artifacts)})`,
+        );
+      }
+      console.log(`  ✓ run 2 consumed run 1's record (envelope=${run1EnvelopeCid} sha=${run1ArtifactSha})`);
+
+      // (c) the corpus_knowledge event fired for run 2.
+      const knowledgeEvents = running.store.db
+        .prepare(`SELECT detail FROM activity_events WHERE kind = 'corpus_knowledge' AND request_id = ?`)
+        .all(claim2.requestId) as Array<{ detail: string }>;
+      if (knowledgeEvents.length === 0) {
+        throw new Error(`no corpus_knowledge event recorded for run 2 (${claim2.requestId})`);
+      }
+      console.log(`  ✓ corpus_knowledge event recorded for run 2`);
+
+      console.log(`\n=== #1393 ok — second run consumed the first run's published knowledge ===`);
     } finally {
       // Daemon must stop before Anvil tears down (avoids loops throwing on disconnect).
       await running.stop();
