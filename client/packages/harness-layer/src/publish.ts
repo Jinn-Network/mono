@@ -138,6 +138,31 @@ function toCaptureRow(envelope: TraceEnvelopeV0): PendingCaptureRow {
 }
 
 /**
+ * Upload one payload as an artifact blob and build its wrapper-envelope
+ * Artifact entry (shared by the trace and the optional skill artifact).
+ */
+async function publishAsArtifact(
+  deps: HarnessPublishDeps,
+  artifactType: string,
+  payload: unknown,
+  metadata: Artifact['metadata'],
+): Promise<Artifact> {
+  const blob = await deps.publishArtifact({ artifactType, payload });
+  const sha256 = blob.sha256 ?? sha256Hex(canonicalJson(payload));
+  const endpoint = blob.endpoint ?? deps.defaultArtifactEndpoint;
+  if (!endpoint) {
+    throw new Error(`published ${artifactType} artifact ${blob.cid} has no access endpoint (set defaultArtifactEndpoint)`);
+  }
+  return {
+    artifactType,
+    sha256,
+    metadata,
+    access: { endpoint, priceUsdc: blob.priceUsdc ?? DEFAULT_PRICE_USDC },
+    sources: [{ kind: 'ipfs', cid: blob.cid, sha256, encoding: DONATION_ARTIFACT_ENCODING }],
+  };
+}
+
+/**
  * Publish a pending envelope: consent conversion → artifact upload → signed
  * wrapper envelope → ERC-8004 anchor → ledger entry. Returns the corpus ref
  * (the wrapper envelope's CID) and the anchor tx.
@@ -165,44 +190,18 @@ export async function publish(
   const trace = toTraceEnvelope(pending);
   const skill = opts.skill === undefined ? undefined : SkillArtifactV1Schema.parse(opts.skill);
 
-  const blob = await deps.publishArtifact({
-    artifactType: TRACE_ENVELOPE_ARTIFACT_TYPE,
-    payload: trace,
-  });
-  const sha256 = blob.sha256 ?? sha256Hex(canonicalJson(trace));
-  const endpoint = blob.endpoint ?? deps.defaultArtifactEndpoint;
-  if (!endpoint) {
-    throw new Error(`published artifact ${blob.cid} has no access endpoint (set defaultArtifactEndpoint)`);
-  }
-  const artifact: Artifact = {
-    artifactType: TRACE_ENVELOPE_ARTIFACT_TYPE,
-    sha256,
-    metadata: { description: 'Layer-1 harness trace envelope (scrubbed, consented)' },
-    access: { endpoint, priceUsdc: blob.priceUsdc ?? DEFAULT_PRICE_USDC },
-    sources: [{ kind: 'ipfs', cid: blob.cid, sha256, encoding: DONATION_ARTIFACT_ENCODING }],
-  };
-
-  const artifacts: Artifact[] = [artifact];
+  const artifacts: Artifact[] = [
+    await publishAsArtifact(deps, TRACE_ENVELOPE_ARTIFACT_TYPE, trace, {
+      description: 'Layer-1 harness trace envelope (scrubbed, consented)',
+    }),
+  ];
   if (skill) {
-    const skillBlob = await deps.publishArtifact({
-      artifactType: SKILL_ARTIFACT_TYPE,
-      payload: skill,
-    });
-    const skillSha = skillBlob.sha256 ?? sha256Hex(canonicalJson(skill));
-    const skillEndpoint = skillBlob.endpoint ?? deps.defaultArtifactEndpoint;
-    if (!skillEndpoint) {
-      throw new Error(`published skill artifact ${skillBlob.cid} has no access endpoint (set defaultArtifactEndpoint)`);
-    }
-    artifacts.push({
-      artifactType: SKILL_ARTIFACT_TYPE,
-      sha256: skillSha,
-      metadata: {
+    artifacts.push(
+      await publishAsArtifact(deps, SKILL_ARTIFACT_TYPE, skill, {
         description: `Skill: ${skill.skill.name}`,
         tags: trace.task.distributionTags,
-      },
-      access: { endpoint: skillEndpoint, priceUsdc: skillBlob.priceUsdc ?? DEFAULT_PRICE_USDC },
-      sources: [{ kind: 'ipfs', cid: skillBlob.cid, sha256: skillSha, encoding: DONATION_ARTIFACT_ENCODING }],
-    });
+      }),
+    );
   }
 
   const unsigned = buildUnsignedCaptureEnvelope({

@@ -24,7 +24,7 @@ const TEST_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
 const TEST_SAFE = '0x1111111111111111111111111111111111111111' as const;
 
-export function skillArtifact(overrides: Partial<SkillArtifactV1> = {}): SkillArtifactV1 {
+function skillArtifact(overrides: Partial<SkillArtifactV1> = {}): SkillArtifactV1 {
   return {
     schemaVersion: 'jinn.skill.v1',
     skill: {
@@ -49,7 +49,7 @@ export function skillArtifact(overrides: Partial<SkillArtifactV1> = {}): SkillAr
   };
 }
 
-export function capturedTask(): CapturedTask {
+function capturedTask(): CapturedTask {
   const nano = '1751587200000000000';
   return {
     session: { sessionId: 'sess-skill-1', capturedAt: '2026-07-04T00:00:00.000Z' },
@@ -76,7 +76,7 @@ export function capturedTask(): CapturedTask {
   };
 }
 
-export function mockPublishDeps(): {
+function mockPublishDeps(): {
   deps: HarnessPublishDeps;
   published: Array<{ artifactType: string; payload: unknown }>;
   envelopes: SignedEnvelope[];
