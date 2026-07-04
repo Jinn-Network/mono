@@ -2175,6 +2175,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorConfig,
       operatorSafeAddress: safeAddress,
       harnessMode: config.harness.mode,
+      // #1393: corpus knowledge autoload — operator opt-out flag. The corpus
+      // instance itself is injected by the Daemon (built from corpusFactory).
+      knowledge: { enabled: config.engine.knowledgeAutoload },
       // Share the one maintained scrub pipeline (incl. optional ML PII) so task
       // trajectories and captures are scrubbed by the same stack before publish.
       scrubPipeline: sellerScrubPipeline,
