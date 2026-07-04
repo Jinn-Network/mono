@@ -52,6 +52,23 @@ export {
 } from './publish.js';
 
 export {
+  extractSkill,
+  type ExtractedSkill,
+} from './skill.js';
+
+export {
+  SKILL_ARTIFACT_TYPE,
+  SkillArtifactV1Schema,
+  SkillProvenanceSchema,
+  SkillCompanionFileSchema,
+  MAX_SKILL_FILES,
+  MAX_SKILL_TOTAL_DECODED_BYTES,
+  type SkillArtifactV1,
+  type SkillProvenance,
+  type SkillCompanionFile,
+} from '../../../src/types/skill-artifact.js';
+
+export {
   createLivePublishDeps,
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,
@@ -77,7 +94,7 @@ export {
 } from './seed-import/fetch.js';
 export { checkLicence, IMPORT_LICENCE_ALLOWLIST, type LicenceVerdict } from './seed-import/licence.js';
 export { plan } from './seed-import/plan.js';
-export { execute, type ImportResult } from './seed-import/execute.js';
+export { execute, skillSlug, type ImportResult } from './seed-import/execute.js';
 export {
   parseImportReport,
   renderImportReport,
