@@ -37,7 +37,6 @@ import {
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import { loadCorpusKnowledge } from './corpus-knowledge.js';
 import { projectEnvelope } from '../../corpus/envelope-projection.js';
-import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
 import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
 import {
   assembleAndSignEnvelope,
@@ -418,9 +417,12 @@ export interface TaskEngineOptions {
    * Corpus knowledge autoload (#1393). Before each restoration harness
    * spawn, the engine queries the corpus for prior solution records of the
    * task's solverType and injects the top few into
-   * task.context.corpusKnowledge (a runtime side-channel, same as evaluation
-   * tasks' context.restorationResult — never persisted into the signed Task,
-   * never re-hashed).
+   * task.context.corpusKnowledge. The injection exists only in the in-memory
+   * ctx.task handed to the harness — unlike context.restorationResult (which
+   * the adapter attaches at task construction and which persists in
+   * task_payload), it is never persisted into the signed Task and never
+   * re-hashed. The durable record of what was injected is the run's
+   * consumed_refs_json column.
    *
    * - `corpus`: read-only corpus for network results; when absent/null the
    *   lookup is store-only (local envelope projections + served artifacts).
@@ -511,10 +513,6 @@ export class TaskEngine {
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
 
-  // Corpus knowledge refs injected into the current run's task context
-  // (#1393). Keyed by requestId; persisted as consumed_refs_json at the
-  // RUNNING → POST_SNAPSHOT transition; cleared after successful pack.
-  private readonly consumedRefsByRequest = new Map<string, CorpusKnowledgeRecordRef[]>();
   private readonly processingRequestIds = new Set<string>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
@@ -1300,7 +1298,10 @@ export class TaskEngine {
     // #1393: corpus knowledge autoload. Restoration runs only — never bias
     // evaluators with prior solutions. The lookup is bounded (10 s) and
     // never throws; failure or an empty result simply injects nothing.
+    // consumedRefsJson is persisted at the RUNNING → POST_SNAPSHOT transition
+    // below; it stays null when nothing was injected.
     let taskForCtx = task.task;
+    let consumedRefsJson: string | null = null;
     if (role === 'restoration' && solverType && this.knowledge?.enabled !== false && taskForCtx) {
       const knowledgePayload = await loadCorpusKnowledge({
         corpus: this.knowledge?.corpus ?? null,
@@ -1315,7 +1316,7 @@ export class TaskEngine {
           ...taskForCtx,
           context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
         };
-        this.consumedRefsByRequest.set(task.requestId, knowledgePayload.records);
+        consumedRefsJson = JSON.stringify(knowledgePayload.records);
         emitEvent(this.store, {
           kind: 'corpus_knowledge',
           requestId: task.requestId,
@@ -1421,9 +1422,7 @@ export class TaskEngine {
             solutionOutputsJson: JSON.stringify(skippedOutput),
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
-            consumedRefsJson: this.consumedRefsByRequest.has(task.requestId)
-              ? JSON.stringify(this.consumedRefsByRequest.get(task.requestId))
-              : null,
+            consumedRefsJson,
           });
           console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name} (skipped)`);
           return;
@@ -1476,9 +1475,7 @@ export class TaskEngine {
         solutionOutputsJson: JSON.stringify(output),
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
-        consumedRefsJson: this.consumedRefsByRequest.has(task.requestId)
-          ? JSON.stringify(this.consumedRefsByRequest.get(task.requestId))
-          : null,
+        consumedRefsJson,
       });
     } finally {
       clearTimeout(endTimer);
@@ -1984,7 +1981,6 @@ export class TaskEngine {
     this.trajectoryRefs.delete(task.requestId);
     this.modesByRequest.delete(task.requestId);
     this.codeDigestsByRequest.delete(task.requestId);
-    this.consumedRefsByRequest.delete(task.requestId);
   }
 
   /**
