@@ -250,7 +250,9 @@ describe('extractSkill()', () => {
     expect(extracted!.skill.files).toEqual([]);
     expect(extracted!.skill.provenance).toMatchObject({
       kind: 'imported',
-      sourceEnvelopeCids: [record.ref],
+      // [] for seed imports (the documented convention) — the carrying
+      // record's own ref is already record.ref.
+      sourceEnvelopeCids: [],
       operator: { safeAddress: TEST_SAFE },
       seed: {
         skill: 'acme/skills/write-tests',

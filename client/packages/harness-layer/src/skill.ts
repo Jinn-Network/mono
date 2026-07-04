@@ -75,7 +75,9 @@ export function extractSkill(record: CorpusRecord): ExtractedSkill | null {
       files: [],
       provenance: {
         kind: 'imported',
-        sourceEnvelopeCids: [record.ref],
+        // [] for seed imports (the schema's documented convention, matching
+        // first-class seed artifacts) — callers already hold record.ref.
+        sourceEnvelopeCids: [],
         operator: { safeAddress: record.envelope.participant.safeAddress },
         ...(seed ? { seed } : {}),
       },
