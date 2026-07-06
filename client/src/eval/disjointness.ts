@@ -27,6 +27,9 @@ export class CorpusContaminationError extends Error {
  *  empty corpus record into a contamination flag). */
 function sketchJaccard(a: number[], b: number[]): number {
   if (a.length === 0) return 0;
+  if (a.length !== b.length) {
+    throw new Error(`sketchJaccard: sketch length mismatch (${a.length} vs ${b.length})`);
+  }
   if (a.every((x) => x === 0) || b.every((x) => x === 0)) return 0;
   let same = 0;
   for (let i = 0; i < a.length; i++) if (a[i] === b[i]) same++;

@@ -17,7 +17,7 @@ export function pairedRateDiffLowerBound(rates: TaskRates[], opts: RateCIOpts): 
   const means: number[] = [];
   for (let b = 0; b < B; b++) {
     let s = 0;
-    for (let i = 0; i < n; i++) s += deltas[Math.floor(opts.rng() * n)]!;
+    for (let i = 0; i < n; i++) s += deltas[Math.min(n - 1, Math.floor(opts.rng() * n))]!;
     means.push(s / n);
   }
   means.sort((a, b) => a - b);

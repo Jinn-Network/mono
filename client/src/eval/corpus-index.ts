@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 
 export interface CorpusRecord {
   id: string;
@@ -64,6 +65,8 @@ export function buildCorpusIndex(records: CorpusRecord[]): CorpusDerivedIndex {
 }
 
 export function corpusSnapshotCid(index: CorpusDerivedIndex): `sha256:${string}` {
-  // Canonical: index is already fully sorted, so JSON.stringify is stable.
-  return `sha256:${createHash('sha256').update(JSON.stringify(index)).digest('hex')}`;
+  // RFC 8785 canonical JSON (key-sorted, cross-language reproducible) so a third
+  // party can recompute this Merkle root to re-check the disjointness proof (spec §4.3).
+  // Arrays are already fully sorted by buildCorpusIndex; canonicalJson sorts object keys.
+  return `sha256:${createHash('sha256').update(canonicalJson(index)).digest('hex')}`;
 }
