@@ -216,7 +216,10 @@ VoteWeighting today, no new infrastructure. Steering ships in two stages:
   skip incompatible licences.
 - **Provenance:** every seeded entry tagged `imported` — seeds provide day-one usefulness but are
   excluded from the demand signal; deepening decisions read usage only.
-- **Anchoring:** same path as contributions (scrub → IPFS → ERC-8004), no new chain surface.
+- **Anchoring:** same path as contributions (scrub → IPFS → ERC-8004), no new chain surface. Seeds
+  run the seed-profile scrub (deterministic secret patterns only — key policy, plain-patterns,
+  secretlint preset rules; no probabilistic openredaction/entropy stages) because they are public,
+  licence-checked content, not operator trace data (#1409).
 
 ## 8. Phasing
 
