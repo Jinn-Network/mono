@@ -75,6 +75,20 @@ ratified target. Full methodology: `spec/2026-07-06-capability-eval-v0.md`.
    push gate would be a flaky gate (worse than none). Output is a dated, anchored, reproducible
    report.
 
+9. **Build vs adopt — adopt Inspect AI as the outer runner for the rig; no external eval supplies
+   the number.** No public benchmark measures "does *our* corpus help *our* agent" (it is a
+   differential on a slate disjoint from *our* corpus — irreducibly ours). But the plumbing is
+   adoptable: the benchmark + grader are already reused (SWE-rebench-V2 + our scoring corrections),
+   and the follow-on rig should adopt **Inspect AI** ([inspect.aisi.org.uk](https://inspect.aisi.org.uk))
+   for the outer loop — its `sandbox_agent_bridge()` wraps a CLI agent in any language (validated
+   fit for the jinn-agent fork), gives epochs (= our R), a pluggable scorer slot (our grader),
+   and a scoring library with bootstrap CIs. Adoption is **partial** (keep our SWE-rebench-V2
+   grader; do not use Inspect's vanilla SWE-bench scorer). One integration point to settle in the
+   rig: token capture for the bridged CLI agent is not automatic — route its model calls through
+   Inspect's proxy or capture from its own usage output. See `spec/2026-07-06-capability-eval-v0.md`
+   §7.1. Independent corroboration: 2026 agent-ablation work uses the same paired McNemar/Wilcoxon
+   and reports ~+6.4pp context-file effects, reinforcing the contested-band slate choice.
+
 ## Shared interface published by this decision
 
 The **held-out task-set boundary** (the `cap-v0` slate artifact: instance_ids + repos + hash +

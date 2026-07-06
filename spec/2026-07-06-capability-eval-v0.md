@@ -435,6 +435,64 @@ estimand (learner-improvement-from-zero) differs from ours (capability delta whe
 "equal quality, lower cost" is meaningful). We reuse its generator and widen its predicate. This
 divergence is the reuse finding the brief asked to record.
 
+### 7.1 External frameworks considered (build-vs-adopt for the rig)
+
+The reuse above is all *internal*. A separate question is whether an off-the-shelf eval framework
+lets the follow-on rig avoid hand-rolling the two-arm orchestration, token capture, and logging.
+
+**No external eval supplies the number.** No public benchmark or leaderboard measures "does *our*
+corpus help *our* agent" — the bet is a **differential** (ON − OFF) on a slate proven disjoint
+from *our* seeds+traces, and we hold the only copy of the corpus. Off-the-shelf evals give
+*absolute* scaffold scores on a shared task set, not this contrast and not the disjointness proof.
+The experiment (two-arm design, contested-band slate, disjointness proof, joint gate) is
+irreducibly ours. There is no read-the-number-off-a-leaderboard shortcut.
+
+**But the plumbing is adoptable.** The layers separate cleanly:
+
+| Layer | Disposition |
+|---|---|
+| Benchmark (task set) | **Already reused** — SWE-rebench-V2 via HF, maintained + continuously mined |
+| Grader (container pass/fail) | **Already reused, with our corrections** — upstream `scripts/eval.py` + our re-derived "resolved" semantics and ungradeable-≠-fail (§5.1). Keep these; upstream harnesses get them wrong |
+| Runner / orchestration / logging | **Adopt [Inspect AI](https://inspect.aisi.org.uk) (UK AISI)** for the rig — see below |
+| The experiment + gate | **Ours** — no framework supplies the differential, the disjointness proof, or the IUT gate |
+
+**Recommended for the rig `feat`: adopt Inspect AI as the outer runner, keep our grader as a
+custom scorer.** Validated fit (2026-07-06):
+
+- **Arms as solvers over an external CLI agent.** Inspect's `sandbox_agent_bridge()` wraps a CLI
+  agent *running in a sandbox, written in any language* — the doc names Claude Code / Codex / Gemini
+  CLI, which is exactly jinn-agent's shape (a forked Hermes CLI). Arm A / arm B become two solvers
+  (empty loadout vs seeds-installed) over one dataset. This is the load-bearing fit check: Inspect
+  can run the **real product binary**, not an Inspect-native agent loop.
+- **Epochs = our R repeats**, native.
+- **Pluggable scorers** — our SWE-rebench-V2 grader (with rowHash/imageDigest pinning and the
+  resolved/ungradeable corrections) plugs in as a custom scorer; we do **not** adopt Inspect's
+  vanilla SWE-bench scorer, which would lose those corrections and uses the wrong dataset.
+- **Scoring library ships bootstrap CIs + pass/fail gates**, overlapping §6 (the IUT gate remains
+  our policy on top).
+- **HuggingFace dataset bridge** — SWE-rebench-V2 HF rows load directly.
+
+**The one caveat (an integration point, not a blocker):** token/cost capture for a *bridged CLI
+agent* is **not automatic**. Inspect logs model calls only when they route through its model
+proxy; jinn-agent makes its own provider calls. So the rig must either (a) point jinn-agent's
+model client at Inspect's proxy so Inspect logs tokens, or (b) capture tokens from jinn-agent's own
+emitted usage (the path §5.2 already assumes, via `cost-estimates.ts` / #331). Either works;
+which one is a rig decision (§13).
+
+**Net:** adoption is *partial*, not wholesale — Inspect covers the outer loop (arms, epochs,
+token accounting, run store, bootstrap CIs), we keep the SWE-rebench-V2 grader and own the
+experiment. This saves building orchestration/logging/bootstrap from scratch without discarding
+our hard-won scoring corrections.
+
+**Independent corroboration of the design** (not a dependency, just evidence it is standard):
+recent (2026) agent-ablation work pairs per-task comparisons with **McNemar's exact test +
+Wilcoxon signed-rank** — our exact stat choice — and reports config/context-file effects of
+~**+6.4pp** on solve rate ([Harness-Bench](https://arxiv.org/html/2605.27922v1); [Natural-Language
+Agent Harnesses](https://arxiv.org/html/2603.25723v1), whose only-full / only-ablation / both-agree
+coding *is* the McNemar discordant cells). A +6.4pp effect on a *representative* slate needs
+N > 2000 (§6.3) — external evidence that **reinforces the contested-band decision** (§4.2):
+concentrate the slate where the effect is large enough to detect on a sane budget.
+
 ---
 
 ## 8. Extensibility to v1 (distilled > seeds)
@@ -559,6 +617,11 @@ These are implementation choices, not methodology, and are settled when the rig 
 - Bootstrap resample count and BCa vs percentile CI (start BCa, 10k resamples).
 - Parallelism / host orchestration for the grade side.
 - Whether the optional representative sanity sample is run in v0 or deferred.
+- **Adopt Inspect AI as the outer runner** (§7.1) — recommended; validate the `sandbox_agent_bridge`
+  fit against the jinn-agent fork on one instance first.
+- **Token-capture path for the bridged agent** (§7.1 caveat): route jinn-agent's model calls
+  through Inspect's proxy, or capture from jinn-agent's own emitted usage. Start with the latter
+  (matches §5.2 / #331) and cross-check against provider billing on a sample.
 
 ---
 
