@@ -203,8 +203,11 @@ const TOKEN_WRAPPING = /^([("'`[{,;:]*)([\s\S]*?)([)"'`\]},;:.]*)$/;
 
 /**
  * Secrets stage. Two passes over each `content`-classified string value:
- *  1. secretlint preset-recommend rules (AWS, GitHub, Slack, GCP, npm, …) —
- *     each match replaced inline with `[SECRET:<rule>]`.
+ *  1. secretlint preset-recommend rules (AWS secret-key assignments, GitHub,
+ *     Slack, npm, GCP service-account JSON, …) — each match replaced inline
+ *     with `[SECRET:<rule>]`. Note the preset's defaults are narrower than the
+ *     rule names suggest: bare AWS key IDs (AKIA…) and `AIza…` GCP API keys
+ *     are NOT detected in this pass.
  *  2. a conservative Shannon-entropy + secret-shape fallback that catches
  *     near-random tokens no specific rule matched (≥ 20 chars by entropy alone,
  *     or 16–19 chars when the token is a single high-density secret-charset run
@@ -220,7 +223,11 @@ export interface SecretlintStageOptions {
    * profile, unchanged). The seed-import profile sets false: SKILL.md bodies
    * are public licence-checked prose where the probabilistic sweep demonstrably
    * false-positives (env-var assignments with dated slugs, ≥20-char camelCase
-   * identifiers) — pass-1 deterministic rules still run unconditionally.
+   * identifiers) — pass-1 deterministic rules still run unconditionally. With
+   * the fallback off, bare AWS key IDs (AKIA…), `AIza…` GCP API keys, JWTs,
+   * and generic high-entropy blobs pass unredacted (pass-1 catches AWS
+   * secret-key assignments and GCP service-account JSON only) — accepted for
+   * public, licence-checked seed content.
    */
   entropyFallback?: boolean;
 }

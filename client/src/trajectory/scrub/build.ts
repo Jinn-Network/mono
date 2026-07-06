@@ -65,7 +65,11 @@ export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubP
  * false-positive (trigger words, dated env-var slugs, long camelCase
  * identifiers) and deface the corpus. The deterministic detectors stay:
  * structural key policy, plain-patterns (emails, home paths), and secretlint's
- * pass-1 preset rules (AWS / GitHub / Slack / GCP / npm key shapes). The
+ * pass-1 preset rules (AWS secret-key assignments, GitHub / Slack / npm token
+ * shapes, GCP service-account JSON). Accepted residual: bare AWS key IDs
+ * (AKIA…), `AIza…` GCP API keys, JWTs, and unprefixed high-entropy blobs pass
+ * unredacted — acceptable for public, licence-checked seed content; the trace
+ * profile still catches them via the entropy fallback. The
  * reduced stage list is reported via the pipeline's `components` surface
  * (what the signed provenance manifest is specified to record — see
  * pipeline.ts), so the profile is inspectable per pipeline.
