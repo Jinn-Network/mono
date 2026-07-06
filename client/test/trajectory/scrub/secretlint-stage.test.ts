@@ -174,6 +174,98 @@ describe('secretlintStage', () => {
     });
   });
 
+  // #1391: URLs are prose, not secrets. `://` sits outside PATH_SHAPED's
+  // charset, so every URL ≥ 20 chars took the raw whole-token entropy branch
+  // and published as [SECRET:high-entropy] — all 42 seed envelopes lost their
+  // attribution link. URL-shaped (and generally punctuation-structured)
+  // tokens are judged per delimited segment, like paths.
+  test('plain URLs survive verbatim (#1391)', async () => {
+    const stage = secretlintStage(policy);
+    for (const text of [
+      'Attribution: https://github.com/obra/superpowers/tree/main/skills/brainstorming',
+      'See https://docs.n8n.io/code-examples/methods-variables-reference/ for details.',
+      'Costs at https://www.runcomfy.com/models?utm_source=skills.sh&utm_medium=skill&utm_campaign=ace-step today.',
+      'Portal: https://portal.azure.com/#blade/Microsoft_Azure_Capacity/QuotaMenuBlade/myQuotas',
+    ]) {
+      const result = await stage.scrub({ 'skill.body': text });
+      expect(result.attributes['skill.body']).toBe(text);
+      expect(result.redactions).toEqual([]);
+    }
+  });
+
+  test('URL with a CJK path survives verbatim (#1391)', async () => {
+    const stage = secretlintStage(policy);
+    const text = 'Docs: https://open.larksuite.com/document/服务端文档/云文档概述 (Chinese).';
+    const result = await stage.scrub({ 'skill.body': text });
+    expect(result.attributes['skill.body']).toBe(text);
+    expect(result.redactions).toEqual([]);
+  });
+
+  // #1391 guardrail: per-segment gating inside URLs — a genuine token embedded
+  // in a URL must STILL redact. URLs are not blanket-whitelisted.
+  test('a secret embedded in a URL still redacts (#1391 guardrail)', async () => {
+    const stage = secretlintStage(policy);
+    const blob = 'Zk3pQ9wX7vR2sT8yU1nB6mC4dF0gH5jL';
+
+    const ghUrl = `https://api.example.com/v1/${GH}/repos`;
+    const ghResult = await stage.scrub({ 'tool.output': `fetch ${ghUrl} now` });
+    expect(ghResult.attributes['tool.output']).not.toContain(GH);
+    expect(ghResult.redactions.some((r) => r.kind === 'secret')).toBe(true);
+
+    const keyUrl = `https://api.example.com/v1/data?key=${blob}&format=json`;
+    const keyResult = await stage.scrub({ 'tool.output': `curl ${keyUrl} done` });
+    expect(keyResult.attributes['tool.output']).not.toContain(blob);
+    expect(keyResult.redactions.some((r) => r.kind === 'secret' && r.detail === 'high-entropy')).toBe(true);
+  });
+
+  // #1391: CJK prose was shredded — Shannon entropy of a CJK run is far above
+  // 4.0 bits/char (each character is near-unique), but the entropy fallback's
+  // threat model is ASCII key material. Non-ASCII-dominant tokens skip it.
+  test('CJK prose survives verbatim (#1391)', async () => {
+    const stage = secretlintStage(policy);
+    const text =
+      '飞书审批：查询和处理审批待办/已办/实例，搜索可发起审批定义、查看定义详情并发起原生审批实例。' +
+      '当用户要处理审批任务、查看审批实例、搜索或发起审批时使用。审批待办不是飞书任务；非审批类待办走 lark-task。';
+    const result = await stage.scrub({ 'skill.body': text });
+    expect(result.attributes['skill.body']).toBe(text);
+    expect(result.redactions).toEqual([]);
+  });
+
+  // #1391 guardrail: an ASCII secret inside CJK prose still redacts — both a
+  // rule-matched key glued to CJK text and a whitespace-separated generic blob.
+  test('ASCII secrets inside CJK prose still redact (#1391 guardrail)', async () => {
+    const stage = secretlintStage(policy);
+    const blob = 'Zk3pQ9wX7vR2sT8yU1nB6mC4dF0gH5jL';
+
+    const spaced = `密钥 ${blob} 请妥善保管，不要提交到仓库。`;
+    const spacedResult = await stage.scrub({ 'tool.output': spaced });
+    expect(spacedResult.attributes['tool.output']).not.toContain(blob);
+    expect(spacedResult.redactions.some((r) => r.kind === 'secret' && r.detail === 'high-entropy')).toBe(true);
+
+    const glued = `令牌${GH}后续步骤见文档。`;
+    const gluedResult = await stage.scrub({ 'tool.output': glued });
+    expect(gluedResult.attributes['tool.output']).not.toContain(GH);
+    expect(gluedResult.redactions.some((r) => r.kind === 'secret')).toBe(true);
+  });
+
+  // #1391: markdown-link tokens (`text](relative/path.md`) and shell
+  // interpolations (`${VAR}/path`) are single \S+ tokens whose punctuation
+  // breaks PATH_SHAPED, so they fell into the whole-token entropy branch.
+  // Structured tokens are judged per delimited segment.
+  test('markdown-link and shell-interpolation tokens survive verbatim (#1391)', async () => {
+    const stage = secretlintStage(policy);
+    for (const text of [
+      'See [`+fetch`](references/lark-doc-fetch.md) and [`+update`](references/lark-doc-update.md).',
+      'SRC="${RUN_DIR}/cells/row${row}-frame${i}.png" then montage.',
+      'SH="${CLAUDE_SKILL_DIR}/scripts/inject-plan.sh" runs on PreCompact.',
+      'Endpoint /api/v1/projects/:projectId/chat/runs/:runId returns the run.',
+    ]) {
+      const result = await stage.scrub({ 'skill.body': text });
+      expect(result.attributes['skill.body']).toBe(text);
+      expect(result.redactions).toEqual([]);
+    }
+  });
+
   // #1348 guardrail: the path carve-out must NOT weaken genuine secret
   // coverage — a secret embedded as a path segment still redacts.
   test('path-embedded secrets still redact (#1348 guardrail)', async () => {

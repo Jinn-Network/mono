@@ -3,7 +3,7 @@ import { creator } from '@secretlint/secretlint-rule-preset-recommend';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
 import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
 
-const VERSION = '0.3.0'; // 0.3.0: entropy replacement preserves wrapping delimiters (#1378)
+const VERSION = '0.4.0'; // 0.4.0: URL/structured tokens gated per-segment, non-ASCII prose skips the entropy fallback (#1391)
 const PRESET_RULE_ID = '@secretlint/secretlint-rule-preset-recommend';
 
 // Entropy fallback thresholds. Conservative on purpose: a long token whose
@@ -43,6 +43,50 @@ const SECRET_CHARSET = /^[A-Za-z0-9+/=_-]+$/;
 // every `[/.]`-split segment is under 16 chars (or below the entropy bar)
 // qualifies as a path and escapes the fallback.
 const PATH_SHAPED = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
+
+// Tuning note (#1391): the entropy fallback's threat model is ASCII key
+// material — base64 / base64url / hex runs. Natural-language text outside the
+// Latin script (CJK especially) has char-level Shannon entropy far above 4.0
+// bits/char (most characters in a sentence are unique), so whole-token entropy
+// classified ordinary Chinese skill prose as secrets and shredded it. A token
+// whose non-ASCII share exceeds this threshold skips the entropy fallback
+// entirely; the pass-1 secretlint preset rules still run on everything.
+// Residual exposure: a generic (rule-less) secret glued WITHOUT whitespace
+// into a majority-non-ASCII token escapes the fallback — prefixed keys
+// (ghp_…, AKIA…, sk-…) are still caught by pass 1, and CJK prose separates
+// embedded ASCII material with spacing or punctuation in practice.
+const NON_ASCII_MAX_SHARE = 0.3;
+
+// Tuning note (#1391): a STRUCTURED token — one containing characters outside
+// SECRET_CHARSET, i.e. URLs (`://`, `?`, `&`, `#`), markdown links (`](`),
+// shell interpolations (`${…}`), serialised code — cannot itself be a
+// contiguous key: real key material never contains brackets, quotes or `?`.
+// A key can only be EMBEDDED in such a token as a delimited segment, so the
+// token is judged per-segment (mirroring the #1348 PATH_SHAPED carve-out)
+// instead of by whole-token entropy, which URLs and markdown links inflate
+// past 4.0 bits/char purely by punctuation/length variety (every seed
+// envelope's attribution URL published as [SECRET:high-entropy]).
+// Segments split on everything outside `[A-Za-z0-9+=_-]`: `/` and `.` split
+// (slug and query-string segments stay short and human-readable — matching
+// the PATH gate's `[/.]` split), while `-`, `_`, `+`, `=` stay inside a
+// segment because base64url alphabets and key=value pairs use them
+// (`?key=<blob>` gates as one segment; a JWT's `.`-separated base64url
+// segments gate individually). Residual exposure, same shape as the #1348
+// note: a secret whose every delimited segment falls under 16 chars (or the
+// entropy bar, or a single character class) escapes — e.g. a base64 blob
+// with `/` every few chars additionally wrapped in punctuation.
+const STRUCTURED_SEGMENT_DELIMITER = /[^A-Za-z0-9+=_-]+/;
+
+// Tuning note (#1391): a "wordish" segment — two or more purely-alphabetic
+// runs joined by `_` or `-` (`Microsoft_Azure_Capacity`, `backend-refactor`)
+// — is an identifier, not key material, even when its length and character
+// variety clear the entropy bar (the Azure portal URL's
+// `Microsoft_Azure_Capacity` sits at 4.002 bits/char). Key material of
+// segment-gate length (≥ 16 chars) drawn from a base64/base64url alphabet
+// contains a digit with ~94% probability and separator-split all-alphabetic
+// runs almost never; the residual all-alpha, separator-structured key is
+// accepted as out of the fallback's reach.
+const WORDISH_SEGMENT = /^[A-Za-z]+([_-][A-Za-z]+)+$/;
 
 function shannonEntropy(s: string): number {
   const freq: Record<string, number> = {};
@@ -87,21 +131,57 @@ function charClassCount(s: string): number {
  * Splitting on dots as well as slashes means a sentence full stop or a file
  * extension yields its own (failing) segment instead of poisoning the
  * secret blob next to it. Non-path tokens are unaffected.
+ *
+ * #1391 additions, checked in order:
+ *  - a non-ASCII-dominant token (share > NON_ASCII_MAX_SHARE) is prose in a
+ *    non-Latin script, not ASCII key material — never entropy-gated;
+ *  - a structured token (any character outside SECRET_CHARSET: URLs,
+ *    markdown links, shell interpolations) is judged per delimited segment
+ *    via the same strict gate as path segments — see the
+ *    STRUCTURED_SEGMENT_DELIMITER tuning note.
+ * Pure SECRET_CHARSET runs keep the original whole-token behaviour.
  */
 function isSecretShapedToken(token: string): boolean {
   if (token.length < ENTROPY_MIN_LEN) return false;
+  if (nonAsciiShare(token) > NON_ASCII_MAX_SHARE) return false;
   if (PATH_SHAPED.test(token) && charClassCount(token) <= 2) {
-    return token.split(/[/.]/).some(
-      (segment) =>
-        segment.length >= ENTROPY_MIN_LEN &&
-        shannonEntropy(segment) >= ENTROPY_MIN_BITS &&
-        SECRET_CHARSET.test(segment) &&
-        charClassCount(segment) >= 2,
-    );
+    return token.split(/[/.]/).some(passesStrictSegmentGate);
+  }
+  if (!SECRET_CHARSET.test(token)) {
+    // Structured token (#1391) — URL, markdown link, shell interpolation…
+    // A contiguous key can only live inside a delimited segment.
+    return token.split(STRUCTURED_SEGMENT_DELIMITER).some(passesStrictSegmentGate);
   }
   if (shannonEntropy(token) < ENTROPY_MIN_BITS) return false;
   if (token.length >= ENTROPY_STRICT_LEN) return true;
-  return SECRET_CHARSET.test(token) && charClassCount(token) >= 2;
+  return charClassCount(token) >= 2;
+}
+
+/**
+ * The strict per-segment gate shared by the PATH_SHAPED (#1348) and
+ * structured-token (#1391) carve-outs: a segment is secret-shaped only when
+ * it is ≥ ENTROPY_MIN_LEN chars, clears the entropy bar, is a single
+ * secret-charset run, and mixes ≥ 2 character classes.
+ */
+function passesStrictSegmentGate(segment: string): boolean {
+  return (
+    segment.length >= ENTROPY_MIN_LEN &&
+    !WORDISH_SEGMENT.test(segment) &&
+    shannonEntropy(segment) >= ENTROPY_MIN_BITS &&
+    SECRET_CHARSET.test(segment) &&
+    charClassCount(segment) >= 2
+  );
+}
+
+/** Share of characters outside the 7-bit ASCII range (by code point). */
+function nonAsciiShare(s: string): number {
+  let n = 0;
+  let total = 0;
+  for (const ch of s) {
+    total += 1;
+    if ((ch.codePointAt(0) ?? 0) > 0x7f) n += 1;
+  }
+  return total === 0 ? 0 : n / total;
 }
 
 /** Short label from a secretlint ruleId, e.g. `@secretlint/secretlint-rule-github` → `github`. */

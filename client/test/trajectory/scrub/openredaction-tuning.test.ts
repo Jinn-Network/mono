@@ -162,3 +162,88 @@ describe('openredaction stage tuning (#1372): skill-body prose survives', () => 
     expect(out).not.toContain('078-05-1120');
   });
 });
+
+/**
+ * Full-corpus (42 seed bodies) residual bare-word patterns — regression net
+ * for issue #1391. The #1372 characterisation ran 5 sample bodies; the full
+ * 42 carry a longer tail of trigger-word patterns. Every phrase below was
+ * observed defaced in a re-seeded (generation-2) skill envelope.
+ *
+ * The nastiest: every seed's frontmatter contains `license: MIT`, which
+ * LICENSE_PLATE matches (trigger `LICENSE` + `:` + captured value `MIT`) —
+ * and openredaction substitutes the captured VALUE case-insensitively
+ * corpus-wide, so one frontmatter line defaced every "limit(s)"/"submit" in
+ * the body: "service li[PLATE_2299]s".
+ */
+const SKILL_PROSE_1391 = [
+  'license: MIT',
+  'Azure quotas (also called service limits) are the maximum number; check the deny list before scaling.',
+  'Booking a slot needs your reference images and the application gateway; zip the folder, see issues #26251 and #41417.',
+  'Tag-driven composition registers a PreCompact hook.',
+  'Edit existing audio, complex transformations; the terminal status shows false positives; resume caveman after the termination oracle.',
+  'brew install imagemagick, premium brand campaigns, ambient room tone, SKU changes, 0.8 ms overhead.',
+  'The return statement exists; quote the shortest decisive line, obey the routing convention, cite Microsoft documentation.',
+  'Run member-remove, then search operations for the incident investigation; that raises the bar because the paymentGateway is mocked.',
+  'Each user story should be in the format of a user-story-example; if a candidate contradicts an ADR, premium commercial cuts lose.',
+  'Source images live in the source directory; the service discovery audit covers candidate regions.',
+  'The PAYMENT-REQUIRED header and the #FF00FF chroma-key, with @github/copilot-sdk and @n8n/n8n-nodes-langchain.toolCode.',
+].join('\n');
+
+describe('openredaction stage tuning (#1391): full-corpus residual bare words', () => {
+  it('trigger-word prose from the 42-seed sweep passes through the stage unchanged', async () => {
+    const stage = openredactionStage(DEFAULT_KEY_POLICY);
+    const result = await stage.scrub({ 'skill.body': SKILL_PROSE_1391 });
+    expect(result.attributes['skill.body']).toBe(SKILL_PROSE_1391);
+    expect(result.redactions).toEqual([]);
+  });
+
+  it('a `license: MIT` frontmatter line does not deface "limits" in the body', async () => {
+    const stage = openredactionStage(DEFAULT_KEY_POLICY);
+    const body = '---\nname: azure-quotas\nlicense: MIT\n---\n\nCheck service limits and submit increase requests.';
+    const result = await stage.scrub({ 'skill.body': body });
+    expect(result.attributes['skill.body']).toBe(body);
+    expect(result.redactions).toEqual([]);
+  });
+
+  it('genuine PII still redacts with the #1391 denylist additions', async () => {
+    const stage = openredactionStage(DEFAULT_KEY_POLICY);
+    const result = await stage.scrub({
+      'llm.prompt':
+        'Email jane.doe@corp.com, card 4111 1111 1111 1111, key AKIAIOSFODNN7EXAMPLE, SSN 078-05-1120.',
+    });
+    const out = String(result.attributes['llm.prompt']);
+    expect(out).not.toContain('jane.doe@corp.com');
+    expect(out).not.toContain('4111 1111 1111 1111');
+    expect(out).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(out).not.toContain('078-05-1120');
+  });
+});
+
+/**
+ * Representative multilingual skill body — full-pipeline regression net for
+ * issue #1391 (all three residual classes at once: attribution URL, CJK
+ * prose, trigger-word bare words).
+ */
+const MULTILINGUAL_SKILL_BODY = [
+  '---',
+  'name: lark-doc',
+  'license: MIT',
+  'source: https://github.com/larksuite/cli/tree/main/skills/lark-doc',
+  '---',
+  '',
+  '# Lark Doc',
+  '',
+  '飞书云文档：读取、创建、编辑飞书文档。当用户要处理云文档内容时使用本技能。',
+  '编辑已有文档时加读 [`+update`](references/lark-doc-update.md)。',
+  '',
+  'Check the service limits and reference images before you edit existing docs.',
+  'Docs: https://open.larksuite.com/document/服务端文档/云文档概述',
+].join('\n');
+
+describe('full pipeline (#1391): multilingual skill body survives', () => {
+  it('a representative multilingual skill body survives the full pipeline verbatim', async () => {
+    const pipeline = buildScrubPipeline();
+    const result = await pipeline.run({ 'skill.body': MULTILINGUAL_SKILL_BODY });
+    expect(result.attributes['skill.body']).toBe(MULTILINGUAL_SKILL_BODY);
+  });
+});
