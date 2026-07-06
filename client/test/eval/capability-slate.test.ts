@@ -1,0 +1,65 @@
+import { describe, it, expect } from 'vitest';
+import {
+  parseCapabilitySlate,
+  hashCapabilitySlate,
+  CAPABILITY_SLATE_SCHEMA_VERSION,
+  type CapabilitySlateArtifact,
+} from '../../src/eval/capability-slate.js';
+
+const valid: CapabilitySlateArtifact = {
+  schemaVersion: CAPABILITY_SLATE_SCHEMA_VERSION,
+  solverType: 'swe-rebench-v2.v1',
+  version: 'cap-v0',
+  generatedAt: '2026-07-06T00:00:00.000Z',
+  evalSemanticsVersion: '4',
+  instances: [
+    {
+      instance_id: 'astropy__astropy-19438',
+      repo: 'astropy',
+      rowHash: 'sha256:aa',
+      imageDigest: 'sha256:bb',
+      stockPassRate: 0.33,
+      screening: { agentSha: 'deadbeef', emptyLoadout: true, noCorpusTools: true, hostSkillDirHash: 'sha256:empty' },
+    },
+  ],
+  construction: 'contested-band[0.15,0.85], stock=haiku, R=3, repo-stratified',
+  corpusSnapshotCid: 'ipfs://root',
+  corpusDerivedIndexCid: 'ipfs://index',
+  loadoutFrozenBeforeSlate: true,
+  disjointness: {
+    instance: { verdict: 'pass', flaggedPairs: [] },
+    repo: { verdict: 'pass', flaggedPairs: [] },
+    lexical: { verdict: 'pass', flaggedPairs: [], attestation: 'self-attested' },
+    semantic: { verdict: 'n/a-v0', model: null, threshold: null, flaggedPairs: [] },
+  },
+};
+
+describe('capability slate artifact', () => {
+  it('round-trips a valid artifact through parse', () => {
+    expect(parseCapabilitySlate(valid)).toEqual(valid);
+  });
+
+  it('hash is stable under instance reordering (canonical, sorted)', () => {
+    const reordered: CapabilitySlateArtifact = {
+      ...valid,
+      instances: [
+        { ...valid.instances[0]!, instance_id: 'zzz__z-1', repo: 'zzz' },
+        valid.instances[0]!,
+      ],
+    };
+    // same set of instances, different order → same hash
+    const a = hashCapabilitySlate(valid);
+    const b = hashCapabilitySlate({ ...valid, instances: [...valid.instances] });
+    expect(a).toBe(b);
+    expect(hashCapabilitySlate(reordered)).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('rejects a wrong schemaVersion', () => {
+    expect(() => parseCapabilitySlate({ ...valid, schemaVersion: 'nope' })).toThrow(/schemaVersion/);
+  });
+
+  it('rejects an instance missing rowHash', () => {
+    const bad = { ...valid, instances: [{ ...valid.instances[0]!, rowHash: undefined }] };
+    expect(() => parseCapabilitySlate(bad)).toThrow(/rowHash/);
+  });
+});
