@@ -74,6 +74,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Network' },
   { to: '/solvernets', label: 'SolverNets' },
   { to: '/operators', label: 'Operators' },
+  { to: '/corpus', label: 'Corpus' },
 ] as const;
 
 function NavItem({ to, label }: { to: string; label: string }) {

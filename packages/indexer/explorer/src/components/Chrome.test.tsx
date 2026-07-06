@@ -23,11 +23,18 @@ describe('Chrome', () => {
     expect(screen.getByText('explorer')).toBeInTheDocument();
   });
 
-  it('renders all three nav items', () => {
+  it('renders all four nav items', () => {
     renderChrome();
     expect(screen.getByText('Network')).toBeInTheDocument();
     expect(screen.getByText('SolverNets')).toBeInTheDocument();
     expect(screen.getByText('Operators')).toBeInTheDocument();
+    expect(screen.getByText('Corpus')).toBeInTheDocument();
+  });
+
+  it('marks the Corpus link as active on "/corpus" and its deep paths', () => {
+    renderChrome('/corpus/bafkreicorpusitem');
+    const corpusLink = screen.getByText('Corpus');
+    expect(corpusLink).toHaveAttribute('aria-current', 'page');
   });
 
   it('marks the Network link as active on "/"', () => {

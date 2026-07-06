@@ -980,6 +980,14 @@ export interface TraceEnvelopeSignalLite {
   tagsJson: string;
   provenance: 'contributed' | 'imported';
   verifiabilityTier: string;
+  /** environment.harness as "<name> <version>", '' when absent. Corpus detail (#1406). */
+  harness: string;
+  /** environment.model, '' when absent. Corpus detail (#1406). */
+  model: string;
+  /** JSON.stringify(environment.tools) — '[]' when absent. Corpus detail (#1406). */
+  toolsJson: string;
+  /** steps.length — 0 when absent. Corpus index + detail (#1406). */
+  stepCount: number;
 }
 
 export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignalLite | null {
@@ -1022,7 +1030,38 @@ export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignal
     outcome !== null && typeof outcome === 'object' ? (outcome as Record<string, unknown>) : {};
   const verifiabilityTier = safeStr(outcomeObj['verifiabilityTier']);
 
-  return { taskSummary, tagsJson, provenance, verifiabilityTier };
+  // ── Detail-view fields (#1406): environment fingerprint + step count. ──
+  const environment = trace['environment'];
+  const envObj: Record<string, unknown> =
+    environment !== null && typeof environment === 'object'
+      ? (environment as Record<string, unknown>)
+      : {};
+
+  const harnessRaw = envObj['harness'];
+  const harnessObj: Record<string, unknown> =
+    harnessRaw !== null && typeof harnessRaw === 'object'
+      ? (harnessRaw as Record<string, unknown>)
+      : {};
+  const harnessName = safeStr(harnessObj['name']);
+  const harnessVersion = safeStr(harnessObj['version']);
+  const harness = harnessName && harnessVersion ? `${harnessName} ${harnessVersion}` : harnessName;
+
+  const model = safeStr(envObj['model']);
+
+  let toolsJson = '[]';
+  if (Array.isArray(envObj['tools'])) {
+    try {
+      toolsJson = JSON.stringify(
+        (envObj['tools'] as unknown[]).filter((t) => typeof t === 'string'),
+      );
+    } catch {
+      toolsJson = '[]';
+    }
+  }
+
+  const stepCount = Array.isArray(trace['steps']) ? (trace['steps'] as unknown[]).length : 0;
+
+  return { taskSummary, tagsJson, provenance, verifiabilityTier, harness, model, toolsJson, stepCount };
 }
 
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
@@ -1567,6 +1606,10 @@ export async function handleMetadataSet({
           });
           const signalMeta = parseTraceEnvelopeSignalLite(artifactBody);
           if (signalMeta) {
+            // Anchor identity (#1406): the MetadataSet tx hash is the on-chain
+            // anchor link; the block timestamp is the corpus item's createdAt.
+            const anchorTx = event.transaction.hash;
+            const createdAtTimestamp = event.block.timestamp;
             await context.db
               .insert(captureEnvelopeMeta)
               .values({
@@ -1578,6 +1621,12 @@ export async function handleMetadataSet({
                 tagsJson: signalMeta.tagsJson,
                 provenance: signalMeta.provenance,
                 verifiabilityTier: signalMeta.verifiabilityTier,
+                harness: signalMeta.harness,
+                model: signalMeta.model,
+                toolsJson: signalMeta.toolsJson,
+                stepCount: signalMeta.stepCount,
+                anchorTx,
+                createdAtTimestamp,
                 enrichmentStatus: 'ok',
                 enrichedAtBlock: blockNumber,
               })
@@ -1591,6 +1640,12 @@ export async function handleMetadataSet({
                     tagsJson: signalMeta.tagsJson,
                     provenance: signalMeta.provenance,
                     verifiabilityTier: signalMeta.verifiabilityTier,
+                    harness: signalMeta.harness,
+                    model: signalMeta.model,
+                    toolsJson: signalMeta.toolsJson,
+                    stepCount: signalMeta.stepCount,
+                    anchorTx,
+                    createdAtTimestamp,
                     enrichmentStatus: 'ok',
                     enrichedAtBlock: blockNumber,
                   };
@@ -1603,6 +1658,12 @@ export async function handleMetadataSet({
                   tagsJson: row.tagsJson,
                   provenance: row.provenance,
                   verifiabilityTier: row.verifiabilityTier,
+                  harness: row.harness,
+                  model: row.model,
+                  toolsJson: row.toolsJson,
+                  stepCount: row.stepCount,
+                  anchorTx: row.anchorTx,
+                  createdAtTimestamp: row.createdAtTimestamp,
                   enrichmentStatus: row.enrichmentStatus,
                   enrichedAtBlock: row.enrichedAtBlock,
                 };

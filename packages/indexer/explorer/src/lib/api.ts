@@ -349,6 +349,82 @@ export function useDistributionSignal(includeSeeds: boolean) {
   });
 }
 
+// ── Corpus (#1406) ────────────────────────────────────────────────────────────
+
+export interface CorpusItemRow {
+  cid: string;
+  chainId: number;
+  summary: string;
+  /** The primary distribution tag (v0 cluster key); '' when untagged. */
+  cluster: string;
+  /** verifiability tier: user-accepted | tests-passed | evaluator-verified | ''. */
+  tier: string;
+  contributor: string;
+  model: string;
+  stepCount: number;
+  /** Unix-seconds anchor timestamp, or null when un-enriched. */
+  createdAt: number | null;
+}
+
+export interface CorpusListResponse extends FreshnessMeta {
+  items: CorpusItemRow[];
+  total: number;
+  seedsExcluded: number;
+  includeSeeds: boolean;
+}
+
+export interface CorpusItemResponse extends FreshnessMeta {
+  cid: string;
+  chainId: number;
+  summary: string;
+  cluster: string;
+  tags: string[];
+  tier: string;
+  contributor: string;
+  harness: string;
+  model: string;
+  tools: string[];
+  stepCount: number;
+  provenance: string;
+  /** MetadataSet anchor tx hash; '' when un-enriched. */
+  anchorTx: string;
+  createdAt: number | null;
+}
+
+export interface CorpusParams {
+  includeSeeds?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export function useCorpus(params?: CorpusParams) {
+  return useQuery({
+    queryKey: ['corpus', params],
+    queryFn: () =>
+      fetchJson<CorpusListResponse>(
+        `/explorer/corpus${qs({
+          include: params?.includeSeeds ? 'seeded' : undefined,
+          limit: params?.limit,
+          offset: params?.offset,
+        })}`,
+      ),
+  });
+}
+
+export function useCorpusItem(cid: string) {
+  return useQuery({
+    queryKey: ['corpus-item', cid],
+    queryFn: () =>
+      fetchJson<CorpusItemResponse>(
+        `/explorer/corpus/${encodeURIComponent(cid)}`,
+      ),
+    enabled: Boolean(cid),
+    // A 404 for an unknown CID is a terminal answer, not a transient error —
+    // don't retry it (the not-found view is the intended terminal state).
+    retry: false,
+  });
+}
+
 export function useSolverNets() {
   return useQuery({
     queryKey: ['solvernets'],

@@ -844,6 +844,18 @@ export const captureEnvelopeMeta = onchainTable(
     provenance: t.text().notNull().default('contributed'),
     /** outcome.verifiabilityTier from the trace envelope. */
     verifiabilityTier: t.text().notNull().default(''),
+    /** environment.harness — "<name> <version>", empty when absent. Corpus detail (#1406). */
+    harness: t.text().notNull().default(''),
+    /** environment.model, empty when absent. Corpus detail (#1406). */
+    model: t.text().notNull().default(''),
+    /** JSON.stringify(environment.tools) — tool names only. Corpus detail (#1406). */
+    toolsJson: t.text().notNull().default('[]'),
+    /** steps.length — the trace's step count. Corpus index + detail (#1406). */
+    stepCount: t.integer().notNull().default(0),
+    /** Transaction hash of the MetadataSet anchor event — the on-chain anchor link (#1406). */
+    anchorTx: t.hex().notNull().default('0x'),
+    /** Unix-seconds block timestamp of the anchor event — the corpus item's createdAt (#1406). */
+    createdAtTimestamp: t.bigint().notNull().default(0n),
     /** 'ok' | 'failed'. */
     enrichmentStatus: t.text().notNull().default('ok'),
     /** Block number of the MetadataSet event that triggered enrichment. */
@@ -853,6 +865,7 @@ export const captureEnvelopeMeta = onchainTable(
     pk: primaryKey({ columns: [table.manifestCid, table.chainId] }),
     provenanceIdx: index().on(table.provenance),
     contributorIdx: index().on(table.contributor),
+    createdAtIdx: index().on(table.createdAtTimestamp),
   }),
 );
 

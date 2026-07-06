@@ -23,6 +23,8 @@ import { SolverNetsListView } from './views/SolverNetsListView';
 import { SolverNetView } from './views/SolverNetView';
 import { OperatorsView } from './views/OperatorsView';
 import { OperatorView } from './views/OperatorView';
+import { CorpusView } from './views/CorpusView';
+import { CorpusItemView } from './views/CorpusItemView';
 
 /**
  * /explore/<cid> back-compat redirect.
@@ -94,6 +96,8 @@ export function App() {
           <Route path="/solvernet/:cid" component={SolverNetView} />
           <Route path="/operators" component={OperatorsView} />
           <Route path="/operator/:addr" component={OperatorView} />
+          <Route path="/corpus" component={CorpusView} />
+          <Route path="/corpus/:cid" component={CorpusItemView} />
           <Route path="/explore/:cid" component={ExploreRedirect} />
           <Route component={NotFound} />
         </Switch>

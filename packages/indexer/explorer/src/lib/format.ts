@@ -125,6 +125,44 @@ export function shortCid(
   return `${cid.slice(0, head)}…${cid.slice(-tail)}`;
 }
 
+// ── external-link mapping (spec §3.4) ──────────────────────────────────────────
+
+/** Base Sepolia basescan base — the explorer's pinned chain (spec §3.8). */
+const BASESCAN_SEPOLIA = 'https://sepolia.basescan.org';
+
+/** Autonolas IPFS gateway — the corpus content resolver. */
+const IPFS_GATEWAY = 'https://gateway.autonolas.tech/ipfs';
+
+/**
+ * Build a basescan URL for a transaction hash on Base Sepolia, or null when
+ * the hash is absent/degenerate ('0x' placeholder from an un-enriched anchor).
+ */
+export function basescanTxUrl(txHash: string | null | undefined): string | null {
+  if (!txHash || !/^0x[0-9a-fA-F]{2,}$/.test(txHash) || txHash === '0x') return null;
+  return `${BASESCAN_SEPOLIA}/tx/${txHash}`;
+}
+
+/** Build an IPFS gateway URL for a CID, or null when the CID is absent. */
+export function ipfsUrl(cid: string | null | undefined): string | null {
+  if (!cid) return null;
+  return `${IPFS_GATEWAY}/${cid}`;
+}
+
+// ── relUnix ─────────────────────────────────────────────────────────────────
+
+/**
+ * Human-readable relative time from a unix-seconds timestamp (number), or null.
+ * Mirrors relTime but for the numeric block-timestamp the corpus carries.
+ *
+ * @returns e.g. `"just now"`, `"3m ago"`, `"2h ago"`, `"5d ago"`, or `"—"`
+ */
+export function relUnix(unixSeconds: number | null | undefined): string {
+  if (unixSeconds === null || unixSeconds === undefined || !Number.isFinite(unixSeconds) || unixSeconds <= 0) {
+    return '—';
+  }
+  return relTime(new Date(unixSeconds * 1000).toISOString());
+}
+
 // ── relTime ───────────────────────────────────────────────────────────────────
 
 /**

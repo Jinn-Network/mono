@@ -44,6 +44,11 @@ import {
   type SliceResponseLeaderboardRow,
 } from './slice.js';
 import {
+  buildCorpusList,
+  buildCorpusItem,
+  type CaptureEnvelopeMetaRow,
+} from './routes.js';
+import {
   loadHeldOutSlate,
   type LoadedHeldOutSlate,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2-held-out-slate';
@@ -2426,5 +2431,76 @@ function computeDominantDims(
     solverType: modalString(rows.map((r) => r.solverType)) ?? '(unknown)',
   };
 }
+
+// ── GET /explorer/corpus + /explorer/corpus/:cid (#1406) ─────────────────────
+//
+// The browsable corpus: an index of published capture envelopes and a
+// per-item detail read. Reads captureEnvelopeMeta (the same enriched table the
+// #1314 distribution signal rolls into clusters). Seeds excluded by default;
+// ?include=seeded folds them in, mirroring /distribution-signal. Scoped to
+// EXPLORER_CHAIN_ID like every other explorer route. captureEnvelopeMeta is
+// optional (backward compat with schemas predating #1314).
+
+/** Load all capture-envelope-meta rows for the explorer chain; [] when the table is absent. */
+async function loadCaptureMetas(): Promise<CaptureEnvelopeMetaRow[]> {
+  const s = schema as { captureEnvelopeMeta?: unknown };
+  if (!s.captureEnvelopeMeta) return [];
+  const rows = (await db
+    .select()
+    .from(schema.captureEnvelopeMeta)
+    .where(eq(schema.captureEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))) as unknown as CaptureEnvelopeMetaRow[];
+  return rows;
+}
+
+app.use('/corpus', explorerFreshness());
+app.use('/corpus/:cid', explorerFreshness());
+
+/**
+ * GET /explorer/corpus
+ *
+ * Newest-first index of corpus items (published capture envelopes). Seeds
+ * excluded by default. Pagination via ?limit (default 25, max 200) and
+ * ?offset. ?include=seeded folds seeded/imported envelopes back in.
+ */
+app.get('/corpus', async (c) => {
+  const includeSeeds = c.req.query('include') === 'seeded';
+  const limitRaw = Number.parseInt(c.req.query('limit') ?? '', 10);
+  const offsetRaw = Number.parseInt(c.req.query('offset') ?? '', 10);
+  const metas = await loadCaptureMetas();
+  const result = buildCorpusList(metas, {
+    includeSeeds,
+    limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+    offset: Number.isFinite(offsetRaw) ? offsetRaw : undefined,
+  });
+
+  const meta = c.get('indexedHead');
+  const chainHead = c.get('chainHead');
+  return c.json({
+    ...result,
+    ...freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined),
+  });
+});
+
+/**
+ * GET /explorer/corpus/:cid
+ *
+ * One corpus item's detail — the deep-link target the CLI links to. Returns
+ * 404 when the CID is not in the indexed corpus. Seeds are resolvable by
+ * direct CID (the detail is a link target, not a signal reader).
+ */
+app.get('/corpus/:cid', async (c) => {
+  const cid = c.req.param('cid');
+  const metas = await loadCaptureMetas();
+  const item = buildCorpusItem(metas, cid);
+
+  const meta = c.get('indexedHead');
+  const chainHead = c.get('chainHead');
+  const fresh = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
+
+  if (!item) {
+    return c.json({ error: 'unknown corpus item', ...fresh }, 404);
+  }
+  return c.json({ ...item, ...fresh });
+});
 
 export default app;

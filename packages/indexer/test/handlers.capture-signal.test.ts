@@ -42,6 +42,16 @@ function traceEnvelope(overrides: Record<string, unknown> = {}): Record<string, 
       summary: 'Fix failing vitest suite',
       distributionTags: ['typescript', 'testing'],
     },
+    environment: {
+      harness: { name: 'jinn-agent', version: '0.4.2' },
+      model: 'gpt-5.4-mini',
+      tools: ['read', 'edit', 'bash'],
+    },
+    steps: [
+      { spanId: '1', name: 'read' },
+      { spanId: '2', name: 'edit' },
+      { spanId: '3', name: 'bash' },
+    ],
     outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
     provenance: 'contributed',
     ...overrides,
@@ -93,12 +103,20 @@ beforeEach(() => {
   context = { db, chain: { id: CHAIN_ID } } as HandlerContext;
 });
 
-async function runCaptureEvent(bodies: Record<string, unknown>): Promise<void> {
+const ANCHOR_TX = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
+
+async function runCaptureEvent(
+  bodies: Record<string, unknown>,
+  eventOverrides: { timestamp?: bigint; txHash?: `0x${string}` } = {},
+): Promise<void> {
   await handleMetadataSet({
-    event: metadataSetEvent({
-      metadataKey: `capture:${WRAPPER_CID}`,
-      metadataValue: envelopePayloadV2({ tier: 0, manifestHash: MANIFEST_HASH }),
-    }),
+    event: metadataSetEvent(
+      {
+        metadataKey: `capture:${WRAPPER_CID}`,
+        metadataValue: envelopePayloadV2({ tier: 0, manifestHash: MANIFEST_HASH }),
+      },
+      eventOverrides,
+    ),
     context,
     solverNetManifest,
     envelope,
@@ -129,6 +147,24 @@ describe('capture envelope enrichment → captureEnvelopeMeta', () => {
     });
     // The plain envelope anchor row is still written alongside.
     expect(db.rows(envelope)).toHaveLength(1);
+  });
+
+  it('writes the #1406 detail columns: harness, model, tools, stepCount, anchorTx, createdAt', async () => {
+    await runCaptureEvent(
+      {
+        [WRAPPER_CID]: wrapperBody(),
+        [ARTIFACT_CID]: artifactBody(traceEnvelope()),
+      },
+      { timestamp: 1_720_000_000n, txHash: ANCHOR_TX },
+    );
+    expect(db.rows(captureEnvelopeMeta)[0]).toMatchObject({
+      harness: 'jinn-agent 0.4.2',
+      model: 'gpt-5.4-mini',
+      toolsJson: JSON.stringify(['read', 'edit', 'bash']),
+      stepCount: 3,
+      anchorTx: ANCHOR_TX,
+      createdAtTimestamp: 1_720_000_000n,
+    });
   });
 
   it('records imported provenance for seeds', async () => {
@@ -194,6 +230,26 @@ describe('parseTraceEnvelopeSignalLite', () => {
     const lite = parseTraceEnvelopeSignalLite(traceEnvelope());
     expect(lite?.tagsJson).toBe(JSON.stringify(['typescript', 'testing']));
     expect(lite?.provenance).toBe('contributed');
+  });
+
+  it('extracts the #1406 detail fields from environment + steps', () => {
+    const lite = parseTraceEnvelopeSignalLite(artifactBody(traceEnvelope()));
+    expect(lite).toMatchObject({
+      harness: 'jinn-agent 0.4.2',
+      model: 'gpt-5.4-mini',
+      toolsJson: JSON.stringify(['read', 'edit', 'bash']),
+      stepCount: 3,
+    });
+  });
+
+  it('defaults the detail fields when environment/steps are absent', () => {
+    const lite = parseTraceEnvelopeSignalLite({
+      schemaVersion: 'jinn.trace-envelope.v0',
+      task: { summary: 's', distributionTags: ['x'] },
+      outcome: { verifiabilityTier: 'user-accepted' },
+      provenance: 'contributed',
+    });
+    expect(lite).toMatchObject({ harness: '', model: '', toolsJson: '[]', stepCount: 0 });
   });
 
   it('rejects undecodable data', () => {
