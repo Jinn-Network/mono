@@ -281,4 +281,39 @@ describe('secretlintStage', () => {
     expect(akiaResult.attributes['tool.output']).not.toContain('AKIAIOSFODNN7EXAMPLE1234');
     expect(akiaResult.redactions.some((r) => r.kind === 'secret')).toBe(true);
   });
+
+  // #1409: seed-profile scrub disables the probabilistic pass-2 entropy sweep.
+  // The three observed seed false positives (env-var assignment with a dated
+  // slug; ≥20-char camelCase identifiers) must survive byte-identical when the
+  // fallback is off, while pass-1 rule-based detection still fires.
+  describe('entropyFallback option (#1409)', () => {
+    const seedProse = [
+      'Run export PLAN_ID=2026-01-10-backend-refactor before starting.',
+      'Set PublicNetworkAccessDisabled on the storage account.',
+      'Check IPv4StandardSkuPublicIpAddresses quota first.',
+    ].join('\n');
+
+    test('entropyFallback: false leaves the observed seed FP shapes byte-identical', async () => {
+      const stage = secretlintStage(policy, { entropyFallback: false });
+      const result = await stage.scrub({ 'skill.md': seedProse });
+      expect(result.attributes['skill.md']).toBe(seedProse);
+      expect(result.redactions).toEqual([]);
+    });
+
+    test('entropyFallback: false still redacts rule-detected secrets (pass 1 intact)', async () => {
+      const stage = secretlintStage(policy, { entropyFallback: false });
+      const result = await stage.scrub({ 'skill.md': `token is ${GH} ok` });
+      expect(result.attributes['skill.md']).not.toContain(GH);
+      expect(result.attributes['skill.md']).toContain('[SECRET:');
+      expect(result.redactions.some((r) => r.kind === 'secret')).toBe(true);
+    });
+
+    test('entropyFallback defaults ON — omitted option keeps sweeping high-entropy blobs', async () => {
+      const blob = 'Zk3pQ9wX7vR2sT8yU1nB6mC4dF0gH5jL';
+      const stage = secretlintStage(policy);
+      const result = await stage.scrub({ 'tool.output': `value ${blob} end` });
+      expect(result.attributes['tool.output']).not.toContain(blob);
+      expect(result.redactions.some((r) => r.detail === 'high-entropy')).toBe(true);
+    });
+  });
 });

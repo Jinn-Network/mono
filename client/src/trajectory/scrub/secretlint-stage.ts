@@ -214,7 +214,22 @@ const TOKEN_WRAPPING = /^([("'`[{,;:]*)([\s\S]*?)([)"'`\]},;:.]*)$/;
  *     secret embedded as a path segment still redacts.
  * `safe` and non-string values pass through untouched.
  */
-export function secretlintStage(policy: KeyPolicy): ScrubStage {
+export interface SecretlintStageOptions {
+  /**
+   * Gate for the pass-2 Shannon-entropy fallback (#1409). Default true (trace
+   * profile, unchanged). The seed-import profile sets false: SKILL.md bodies
+   * are public licence-checked prose where the probabilistic sweep demonstrably
+   * false-positives (env-var assignments with dated slugs, ≥20-char camelCase
+   * identifiers) — pass-1 deterministic rules still run unconditionally.
+   */
+  entropyFallback?: boolean;
+}
+
+export function secretlintStage(
+  policy: KeyPolicy,
+  opts: SecretlintStageOptions = {},
+): ScrubStage {
+  const entropyFallback = opts.entropyFallback ?? true;
   const config = { rules: [{ id: PRESET_RULE_ID, rule: creator }] };
 
   return {
@@ -246,14 +261,17 @@ export function secretlintStage(policy: KeyPolicy): ScrubStage {
 
         // Pass 2 — entropy + secret-shape fallback on whatever survived.
         // Wrapping punctuation is preserved around the placeholder (#1378).
-        text = text.replace(/\S+/g, (token) => {
-          const [, lead = '', core = token, trail = ''] = TOKEN_WRAPPING.exec(token) ?? [];
-          if (isSecretShapedToken(core)) {
-            redactions.push({ key, stage: 'secretlint', kind: 'secret', detail: 'high-entropy' });
-            return `${lead}[SECRET:high-entropy]${trail}`;
-          }
-          return token;
-        });
+        // Skipped entirely under the seed profile (#1409).
+        if (entropyFallback) {
+          text = text.replace(/\S+/g, (token) => {
+            const [, lead = '', core = token, trail = ''] = TOKEN_WRAPPING.exec(token) ?? [];
+            if (isSecretShapedToken(core)) {
+              redactions.push({ key, stage: 'secretlint', kind: 'secret', detail: 'high-entropy' });
+              return `${lead}[SECRET:high-entropy]${trail}`;
+            }
+            return token;
+          });
+        }
 
         out[key] = text;
       }
