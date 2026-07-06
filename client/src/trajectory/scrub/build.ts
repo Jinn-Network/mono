@@ -66,8 +66,9 @@ export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubP
  * identifiers) and deface the corpus. The deterministic detectors stay:
  * structural key policy, plain-patterns (emails, home paths), and secretlint's
  * pass-1 preset rules (AWS / GitHub / Slack / GCP / npm key shapes). The
- * reduced stage list is what the provenance manifest records for seed
- * envelopes, so the profile is auditable per envelope.
+ * reduced stage list is reported via the pipeline's `components` surface
+ * (what the signed provenance manifest is specified to record — see
+ * pipeline.ts), so the profile is inspectable per pipeline.
  */
 export function buildSeedScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
   return new ScrubPipeline([
