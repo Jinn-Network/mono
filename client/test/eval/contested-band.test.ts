@@ -29,4 +29,7 @@ describe('contested band', () => {
   it('throws when the host skill dir hash does not match the empty-dir hash', () => {
     expect(() => assertBlindScreen({ ...cleanFidelity, hostSkillDirHash: 'sha256:nonempty' })).toThrow(BlindScreenViolation);
   });
+  it('throws when corpus tools were available during the screen', () => {
+    expect(() => assertBlindScreen({ ...cleanFidelity, noCorpusTools: false })).toThrow(BlindScreenViolation);
+  });
 });
