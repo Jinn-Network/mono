@@ -362,6 +362,75 @@ describe('jinn-layer seed CLI', () => {
   });
 });
 
+// ── Seed-profile scrub (#1409) — regression: seeds anchored but defaced ─────
+
+describe('execute() seed-profile scrub (#1409)', () => {
+  // The three observed entropy-fallback false positives plus the openredaction
+  // trigger-word shapes (#1372/#1391) in one synthetic SKILL.md. AC1: the
+  // published envelope carries this byte-identical.
+  const SEED_SKILL_MD = [
+    '---',
+    'name: backend-refactor-helper',
+    'license: MIT',
+    '---',
+    '# backend-refactor-helper',
+    '',
+    'Use this skill before touching the backend. It reads user intent first.',
+    '',
+    'Run export PLAN_ID=2026-01-10-backend-refactor to pin the plan.',
+    'Set PublicNetworkAccessDisabled on the account.',
+    'Check the IPv4StandardSkuPublicIpAddresses quota.',
+  ].join('\n');
+
+  const report: ImportReport = [
+    {
+      skill: 'acme/skills/backend-refactor-helper',
+      source: 'https://github.com/acme/skills',
+      licence: 'MIT',
+      verdict: 'import',
+      reason: 'licence MIT is allowlisted',
+    },
+  ];
+
+  it('publishes seed SKILL.md prose byte-identical — no placeholder substitution (AC1)', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/backend-refactor-helper', skillMd: SEED_SKILL_MD }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    const result = await execute(report, source, deps);
+
+    expect(result.errors).toEqual([]);
+    expect(result.imported).toHaveLength(1);
+    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const attrs = envelope.steps[0]!.attributes as Record<string, unknown>;
+    expect(attrs['skill.md']).toBe(SEED_SKILL_MD);
+  });
+
+  it('still redacts a genuine secret in a seed — GitHub PAT and email (AC2)', async () => {
+    const pat = 'ghp_016C7e0aBcDeFgHiJkLmNoPqRsTuVwXyZ012';
+    const leaky = `# leaky\n\nUse token ${pat} and mail alice@example.com.`;
+    const leakyReport: ImportReport = [
+      {
+        skill: 'acme/skills/leaky',
+        source: 'https://github.com/acme/skills',
+        licence: 'MIT',
+        verdict: 'import',
+        reason: 'licence MIT is allowlisted',
+      },
+    ];
+    const source = mockSource([skill({ skill: 'acme/skills/leaky', skillMd: leaky })]);
+    const { deps, published } = mockPublishDeps();
+    const result = await execute(leakyReport, source, deps);
+
+    expect(result.errors).toEqual([]);
+    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const text = String((envelope.steps[0]!.attributes as Record<string, unknown>)['skill.md']);
+    expect(text).not.toContain(pat);
+    expect(text).not.toContain('alice@example.com');
+    expect(text).toContain('[SECRET:');
+  });
+});
+
 function readFileSyncUtf8(path: string): string {
   return readFileSync(path, 'utf-8');
 }

@@ -20,6 +20,7 @@
 import type { SkillArtifactV1 } from '../../../../src/types/skill-artifact.js';
 import { capture } from '../capture.js';
 import type { CapturedTask } from '../capture.js';
+import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
 import { publish, type HarnessPublishDeps } from '../publish.js';
 import { checkLicence } from './licence.js';
 import type { SeedSkill, SeedSource } from './fetch.js';
@@ -164,7 +165,13 @@ export async function execute(
       if (licence.verdict !== 'import') {
         throw new Error(`licence gate refused ${row.skill}: ${licence.reason}`);
       }
-      const pending = await capture(toCapturedTask(skill, now));
+      // Seed profile (#1409): deterministic secret detectors only. Seeds are
+      // public licence-checked prose, not operator trace data — the
+      // probabilistic stages false-positive on SKILL.md content and defaced
+      // the anchored corpus. Capture stays mandatory and fail-closed.
+      const pending = await capture(toCapturedTask(skill, now), {
+        pipeline: buildSeedScrubPipeline(),
+      });
       const published = await publish(pending, deps, {
         skill: toSkillArtifact(skill, deps.participant.safeAddress),
       });

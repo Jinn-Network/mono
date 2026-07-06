@@ -150,7 +150,11 @@ export interface CaptureOptions {
   policy?: KeyPolicy;
   /** When provided, the base pipeline gains the ML PII (GLiNER) stage. */
   piiDetector?: PiiDetector;
-  /** Injectable base pipeline (tests). Overrides policy/piiDetector. */
+  /**
+   * Injectable base pipeline. Production consumer: seed import passes
+   * buildSeedScrubPipeline() (#1409); also used by tests. Overrides
+   * policy/piiDetector.
+   */
   pipeline?: ScrubPipeline;
 }
 
