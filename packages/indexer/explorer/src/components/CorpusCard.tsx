@@ -68,7 +68,7 @@ function ClusterRowCells({ row }: { row: DistributionSignalRow }) {
     <>
       <td style={cellStyle}>
         <Link
-          href={`/corpus?cluster=${encodeURIComponent(row.cluster)}`}
+          href="/corpus"
           style={{ color: 'var(--accent)', textDecoration: 'none' }}
         >
           {row.cluster}
@@ -179,7 +179,7 @@ export function CorpusCard() {
                 <span
                   className="data"
                   style={{
-                    color: 'var(--gold)',
+                    color: 'var(--accent-gold)',
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >

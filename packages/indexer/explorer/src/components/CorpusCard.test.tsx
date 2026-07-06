@@ -90,7 +90,7 @@ describe('CorpusCard', () => {
     expect(text).toContain('14 task traces contributed by 4 operators, in 3 clusters.');
     // The corpus total takes gold — the Network view's single hero (spec §3.5).
     const total = screen.getByText('14');
-    expect(total).toHaveStyle({ color: 'var(--gold)' });
+    expect(total).toHaveStyle({ color: 'var(--accent-gold)' });
     // "Where contributions concentrate" — the analytical framing survives as
     // the bars' eyebrow (design §1407).
     expect(screen.getByText(/where contributions concentrate/i)).toBeInTheDocument();
@@ -122,9 +122,10 @@ describe('CorpusCard', () => {
     // Footer link → /corpus
     const browse = screen.getByText('Browse the corpus →').closest('a');
     expect(browse).toHaveAttribute('href', '/corpus');
-    // Cluster name → /corpus (filtered)
+    // Cluster name → /corpus (plain; pre-filtered link is a follow-up once the
+    // index gains a cluster filter param — see #1414)
     const cluster = screen.getByRole('link', { name: 'typescript' });
-    expect(cluster).toHaveAttribute('href', '/corpus?cluster=typescript');
+    expect(cluster).toHaveAttribute('href', '/corpus');
   });
 
   it('has no seed toggle on this surface (retired per design)', async () => {
