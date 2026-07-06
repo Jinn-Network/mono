@@ -25,7 +25,7 @@ import type { NetworkResponse } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { HBars } from '../components/HBars';
-import { DistributionSignal } from '../components/DistributionSignal';
+import { CorpusCard } from '../components/CorpusCard';
 import { pct, int, block } from '../lib/format';
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -219,9 +219,10 @@ export function NetworkView() {
         <>
           <ActivityStrip data={data} />
 
-          {/* Distribution signal (#1314) — below Activity, above composition
-              per the design (docs/design/artifacts/2026-07-02-1314-…). */}
-          <DistributionSignal />
+          {/* Corpus summary (#1407, spec §2.4) — below Activity, above
+              composition. Renamed + restructured from the "Distribution
+              signal" card (#1314); links into the Corpus tab (#1406). */}
+          <CorpusCard />
 
           <Card title="Network composition">
             <div
