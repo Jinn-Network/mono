@@ -49,6 +49,45 @@ function reqString(o: Record<string, unknown>, k: string): string {
   return o[k] as string;
 }
 
+function parseAxis(o: unknown, name: string): AxisResult {
+  if (!isObject(o)) throw new Error(`capability slate: disjointness.${name} must be an object`);
+  const verdict = o['verdict'];
+  if (verdict !== 'pass' && verdict !== 'fail' && verdict !== 'n/a-v0') {
+    throw new Error(`capability slate: disjointness.${name}.verdict must be pass|fail|n/a-v0`);
+  }
+  if (!Array.isArray(o['flaggedPairs'])) {
+    throw new Error(`capability slate: disjointness.${name}.flaggedPairs must be an array`);
+  }
+  return { verdict, flaggedPairs: o['flaggedPairs'] as Array<[string, string]> };
+}
+
+function parseDisjointness(raw: unknown): CapabilitySlateArtifact['disjointness'] {
+  if (!isObject(raw)) throw new Error('capability slate: disjointness must be an object');
+  const instance = parseAxis(raw['instance'], 'instance');
+  const repo = parseAxis(raw['repo'], 'repo');
+  const lexical = parseAxis(raw['lexical'], 'lexical');
+  const lexRaw = raw['lexical'] as Record<string, unknown>;
+  if (lexRaw['attestation'] !== 'self-attested') {
+    throw new Error('capability slate: disjointness.lexical.attestation must be "self-attested"');
+  }
+  const semantic = parseAxis(raw['semantic'], 'semantic');
+  const semRaw = raw['semantic'] as Record<string, unknown>;
+  const model = semRaw['model'];
+  const threshold = semRaw['threshold'];
+  if (model !== null && typeof model !== 'string') {
+    throw new Error('capability slate: disjointness.semantic.model must be string|null');
+  }
+  if (threshold !== null && typeof threshold !== 'number') {
+    throw new Error('capability slate: disjointness.semantic.threshold must be number|null');
+  }
+  return {
+    instance,
+    repo,
+    lexical: { ...lexical, attestation: 'self-attested' },
+    semantic: { ...semantic, model: model as string | null, threshold: threshold as number | null },
+  };
+}
+
 export function parseCapabilitySlate(raw: unknown): CapabilitySlateArtifact {
   if (!isObject(raw)) throw new Error('capability slate must be an object');
   if (raw['schemaVersion'] !== CAPABILITY_SLATE_SCHEMA_VERSION) {
@@ -85,7 +124,7 @@ export function parseCapabilitySlate(raw: unknown): CapabilitySlateArtifact {
     corpusSnapshotCid: reqString(raw, 'corpusSnapshotCid'),
     corpusDerivedIndexCid: reqString(raw, 'corpusDerivedIndexCid'),
     loadoutFrozenBeforeSlate: raw['loadoutFrozenBeforeSlate'] === true,
-    disjointness: raw['disjointness'] as CapabilitySlateArtifact['disjointness'],
+    disjointness: parseDisjointness(raw['disjointness']),
   };
 }
 

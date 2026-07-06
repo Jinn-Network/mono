@@ -62,4 +62,19 @@ describe('capability slate artifact', () => {
     const bad = { ...valid, instances: [{ ...valid.instances[0]!, rowHash: undefined }] };
     expect(() => parseCapabilitySlate(bad)).toThrow(/rowHash/);
   });
+
+  it('rejects a disjointness axis with a bad verdict', () => {
+    const bad = { ...valid, disjointness: { ...valid.disjointness, instance: { verdict: 'maybe', flaggedPairs: [] } } };
+    expect(() => parseCapabilitySlate(bad)).toThrow(/verdict/);
+  });
+
+  it('rejects a missing disjointness object', () => {
+    const bad = { ...valid, disjointness: undefined };
+    expect(() => parseCapabilitySlate(bad)).toThrow(/disjointness/);
+  });
+
+  it('rejects a lexical axis missing the self-attested attestation', () => {
+    const bad = { ...valid, disjointness: { ...valid.disjointness, lexical: { verdict: 'pass', flaggedPairs: [] } } };
+    expect(() => parseCapabilitySlate(bad)).toThrow(/attestation/);
+  });
 });
