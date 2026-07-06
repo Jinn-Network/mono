@@ -72,3 +72,51 @@ function invNorm(p: number): number {
   q = p - 0.5; r = q * q;
   return (((((a[0]!*r+a[1]!)*r+a[2]!)*r+a[3]!)*r+a[4]!)*r+a[5]!)*q / (((((b[0]!*r+b[1]!)*r+b[2]!)*r+b[3]!)*r+b[4]!)*r+1);
 }
+
+// --- cost leg (append to capability-stats.ts) ---
+
+/** One-sided Wilcoxon signed-rank test that the median paired difference < 0,
+ *  using a normal approximation with tie + continuity correction. */
+export function pairedCostVerdict(
+  costDiffs: number[],
+  opts: { minN?: number; alpha?: number } = {},
+): { verdict: 'lower' | 'not-lower' | 'inconclusive'; pValue: number | null; n: number } {
+  const minN = opts.minN ?? 10;
+  const alpha = opts.alpha ?? 0.05;
+  const nonzero = costDiffs.filter((d) => d !== 0);
+  if (nonzero.length < minN) return { verdict: 'inconclusive', pValue: null, n: nonzero.length };
+
+  const ranks = rankAbs(nonzero.map(Math.abs));
+  let wMinus = 0; // sum of ranks for NEGATIVE diffs (corpus cheaper)
+  let wPlus = 0;
+  nonzero.forEach((d, i) => { if (d < 0) wMinus += ranks[i]!; else wPlus += ranks[i]!; });
+  const n = nonzero.length;
+  const meanW = (n * (n + 1)) / 4;
+  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
+  // Test statistic: is W+ (evidence AGAINST cheaper) improbably small?
+  const z = (wPlus - meanW + 0.5) / sdW;
+  const pValue = normCdfLocal(z); // one-sided: P(W+ ≤ observed)
+  const verdict = pValue < alpha ? 'lower' : 'not-lower';
+  return { verdict, pValue, n };
+}
+
+function rankAbs(absVals: number[]): number[] {
+  const idx = absVals.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const ranks = new Array<number>(absVals.length);
+  let i = 0;
+  while (i < idx.length) {
+    let j = i;
+    while (j + 1 < idx.length && idx[j + 1]!.v === idx[i]!.v) j++;
+    const avg = (i + j + 2) / 2; // average rank (1-based) for ties
+    for (let k = i; k <= j; k++) ranks[idx[k]!.i] = avg;
+    i = j + 1;
+  }
+  return ranks;
+}
+
+function normCdfLocal(x: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp((-x * x) / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x >= 0 ? 1 - p : p;
+}
