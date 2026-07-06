@@ -22,6 +22,12 @@ harness at **equal quality, lower total cost** on the coding distribution
 number and the load-bearing methodology choices, so the follow-on rig (`feat`) is built against a
 ratified target. Full methodology: `spec/2026-07-06-capability-eval-v0.md`.
 
+The gate and choices below survived a 6-lens adversarial review (2026-07-06): the core design
+(contested-band, seeds-only, IUT gate, reuse posture) is unchanged; the review hardened the gate's
+inputs (relative-regression guard, provider-actual cost precondition, pre-registration + neutral
+verification), named residual limits honestly (technique-leak, both-solve collider, pretraining
+interaction), and scoped what a v0 result licenses against §8. Spec v0.2 folds in 23 findings.
+
 ## Decisions
 
 1. **The gate (met/not-met-able).** On a frozen contested-band coding slate, arm A = stock
@@ -30,11 +36,21 @@ ratified target. Full methodology: `spec/2026-07-06-capability-eval-v0.md`.
 
    > **PASS** iff, at α = 0.05 as an **intersection-union test** —
    > (1) **quality non-inferior**: Δ_quality = rate(B) − rate(A) > −δ, **δ = 5 percentage
-   > points**; **AND**
-   > (2) **cost strictly lower** on the tasks both arms solve: Δ_cost < 0.
+   > points** (pre-registered with a stated basis; PASS additionally blocked when the relative
+   > regression exceeds **15% of the stock base rate**, so a large relative drop at a low band base
+   > rate cannot pass on the absolute margin); **AND**
+   > (2) **cost strictly lower** on the tasks both arms solve: Δ_cost < 0, decided on
+   > **provider-actual** token counts (heuristic-only cost → cost UNMEASURED → INCONCLUSIVE).
 
    Otherwise **FAIL** (clear regression or no cost win) or **INCONCLUSIVE** (underpowered at the
-   achieved N — reported with its MDE, and treated as **not a pass**).
+   achieved N, cost unmeasured, or the both-solve set below its pre-registered floor — reported with
+   its MDE, treated as **not a pass**, and **terminal**: never silently re-screened into a PASS).
+
+   **Scope (what a v0 result licenses against §8).** v0 is a seeds-only, no-live-retrieval,
+   Haiku-class, contested-band **pre-gate**. A v0 PASS *supports* but does not fully discharge §8;
+   a v0 FAIL/null does NOT by itself trigger §8's "stop and rethink" — a null is confounded between
+   the corpus mechanism not helping and the generic skills.sh seeds being irrelevant to these
+   contested tasks. A decisive §8 FAIL needs the deferred live-retrieval or distilled arm.
 
 2. **Why an IUT and no multiplicity correction.** The gate fires only when *both* component nulls
    are rejected; an intersection-union test of two level-α tests is itself level α (Berger 1982).
@@ -55,10 +71,18 @@ ratified target. Full methodology: `spec/2026-07-06-capability-eval-v0.md`.
    tasks where the stock agent is neither saturated nor hopeless.*
 
 5. **Contamination control is the load-bearing risk.** The slate is proven disjoint from a frozen,
-   content-addressed corpus snapshot along three axes — instance_id, **repo**, and lexical
-   gold-patch scan — via a fail-loud extension of `assertNoOverlap`. Model-pretraining
-   contamination is *not* controlled for because it cancels in the paired difference (shared by
-   both arms); **corpus** contamination is what the proof targets, because it helps only arm B.
+   content-addressed corpus snapshot along three content axes — instance_id, **repo**, and lexical
+   gold-patch scan — via a fail-loud extension of `assertNoOverlap`, plus a per-record derived index
+   so the instance/repo axes are **externally re-checkable** (the lexical axis is self-attested; raw
+   corpus text stays private). These content axes prove the corpus lacks the *answer*; they
+   **cannot** prove absence of a generic seed that supplies a slate task's *fix as a technique* —
+   bounded only structurally by the distribution-matched, slate-blind, fixed seed loadout (attested
+   in the artifact), with a semantic (embedding) axis optional at v0 and **mandatory at v1 arm C**.
+   Model-pretraining contamination's **main effect** cancels in the paired difference (shared by both
+   arms); its residual **skill×memorization interaction** (an arm-B-only cue that unlocks a memorized
+   gold solution) does NOT cancel, and is bounded by the distribution-matched loadout + a pilot
+   memorization-exposure probe (SWE-Bench Illusion, arXiv 2506.12286). **Corpus** contamination is
+   what the proof targets, because it helps only arm B.
 
 6. **Reuse, do not reinvent the statistics.** Gate-primary quality test = paired per-task
    pass-rate difference with a one-sided BCa bootstrap CI (the R>1 path `paired.ts` already names
@@ -88,6 +112,18 @@ ratified target. Full methodology: `spec/2026-07-06-capability-eval-v0.md`.
    Inspect's proxy or capture from its own usage output. See `spec/2026-07-06-capability-eval-v0.md`
    §7.1. Independent corroboration: 2026 agent-ablation work uses the same paired McNemar/Wilcoxon
    and reports ~+6.4pp context-file effects, reinforcing the contested-band slate choice.
+
+10. **Neutral verification + pre-registration (the team measures its own bet).** Recomputing the
+    statistic from our records checks arithmetic, not fidelity — and every discretionary choice
+    (band edges, ungradeable drops, when to stop) is made by the party who benefits from a PASS
+    (PRINCIPLES → Neutral: the operator cannot be the house). Two binding requirements (spec §10.1):
+    (a) a **pre-registered stopping rule** — band edges, candidate pool, screening model+R, δ + the
+    relative cap, α, and the both-solve floor are content-addressed/signed **before** the pilot; the
+    first run at the pilot-set N is the run of record; any re-screen/re-draw mints a new anchored
+    slate version, published with its reason; an INCONCLUSIVE is never silently re-rolled into a
+    PASS; the pilot feeds N/R sizing only, never band-edge selection. (b) an **independent fidelity
+    re-run** of a random ≥20% pair subset by a party with no authorship stake, confirming re-run
+    rates fall inside the published CIs; absent it, the report is labelled self-attested.
 
 ## Shared interface published by this decision
 
