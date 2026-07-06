@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pct, int, block, jinn, shortAddr, shortCid, relTime } from './format';
+import { pct, int, block, jinn, shortAddr, shortCid, relTime, ipfsUrl } from './format';
 
 // ── pct ──────────────────────────────────────────────────────────────────────
 
@@ -174,5 +174,30 @@ describe('relTime', () => {
   });
   it('returns dash for invalid date string', () => {
     expect(relTime('not-a-date')).toBe('—');
+  });
+});
+
+// ── ipfsUrl ────────────────────────────────────────────────────────────────────
+
+describe('ipfsUrl', () => {
+  it('builds a gateway URL for a normal CID', () => {
+    expect(ipfsUrl('bafkreiabc123')).toBe(
+      'https://gateway.autonolas.tech/ipfs/bafkreiabc123',
+    );
+  });
+  it('returns null for null/undefined/empty', () => {
+    expect(ipfsUrl(null)).toBeNull();
+    expect(ipfsUrl(undefined)).toBeNull();
+    expect(ipfsUrl('')).toBeNull();
+  });
+  it('percent-encodes an attacker-influenceable cid so it cannot break out of the path', () => {
+    // A cid carrying path/query metacharacters must not alter the gateway path.
+    expect(ipfsUrl('../../evil?x=1')).toBe(
+      `https://gateway.autonolas.tech/ipfs/${encodeURIComponent('../../evil?x=1')}`,
+    );
+    // No raw slash, dot-segment, or query separator survives into the URL.
+    const url = ipfsUrl('a/b#frag')!;
+    expect(url).toBe('https://gateway.autonolas.tech/ipfs/a%2Fb%23frag');
+    expect(url.startsWith('https://gateway.autonolas.tech/ipfs/')).toBe(true);
   });
 });

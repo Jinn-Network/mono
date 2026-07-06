@@ -142,10 +142,15 @@ export function basescanTxUrl(txHash: string | null | undefined): string | null 
   return `${BASESCAN_SEPOLIA}/tx/${txHash}`;
 }
 
-/** Build an IPFS gateway URL for a CID, or null when the CID is absent. */
+/**
+ * Build an IPFS gateway URL for a CID, or null when the CID is absent. The cid
+ * is attacker-influenceable (it comes from an on-chain key), so it is
+ * percent-encoded before interpolation into the gateway path — matching the
+ * internal-link treatment (scheme + host are fixed, so this is low-risk).
+ */
 export function ipfsUrl(cid: string | null | undefined): string | null {
   if (!cid) return null;
-  return `${IPFS_GATEWAY}/${cid}`;
+  return `${IPFS_GATEWAY}/${encodeURIComponent(cid)}`;
 }
 
 // ── relUnix ─────────────────────────────────────────────────────────────────

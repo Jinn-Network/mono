@@ -98,6 +98,38 @@ export function useEnumParam(
   return [value, setRaw];
 }
 
+// ── usePatchParams ───────────────────────────────────────────────────────────
+
+/**
+ * Write several query-string keys in a SINGLE history update.
+ *
+ * The per-key setters returned by `useQueryParam` / `useEnumParam` /
+ * `useNumParam` each own their own `useSearchParams` instance, so calling two
+ * of them in the same synchronous event handler clobbers each other: wouter's
+ * functional updater receives the render-time params (not the accumulated
+ * in-batch state), and the last write wins. When keys are coupled — e.g. a
+ * sort change that must also reset the page — route them through this single
+ * setter instead so all keys land in one atomic write.
+ *
+ * `null` values delete their key; everything else is stringified.
+ */
+export function usePatchParams(): (patch: Record<string, string | number | null>) => void {
+  const [, setSearchParams] = useSearchParams();
+  return function patch(next: Record<string, string | number | null>) {
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        for (const [key, v] of Object.entries(next)) {
+          if (v === null || v === '') out.delete(key);
+          else out.set(key, String(v));
+        }
+        return out;
+      },
+      { replace: true },
+    );
+  };
+}
+
 // ── useStringArrayParam ──────────────────────────────────────────────────────
 
 /** Parse a `"a,b , c"` query value into a trimmed, non-empty string array. */

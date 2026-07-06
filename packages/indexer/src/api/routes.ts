@@ -497,18 +497,72 @@ export interface CorpusListOutput {
   includeSeeds: boolean;
 }
 
+/** Sortable columns the corpus index exposes (mirrors the SPA header). */
+export type CorpusSortKey = 'createdAt' | 'cluster' | 'tier' | 'stepCount';
+
+const CORPUS_SORT_KEYS: readonly CorpusSortKey[] = [
+  'createdAt',
+  'cluster',
+  'tier',
+  'stepCount',
+];
+
 export interface CorpusListOpts {
   includeSeeds?: boolean;
   /** Page size (default 25, max 200). */
   limit?: number;
   /** Zero-based offset for pagination. */
   offset?: number;
+  /** Sort column (default `createdAt`). Unknown values fall back to the default. */
+  sort?: string;
+  /** Sort direction (default `desc`). */
+  dir?: 'asc' | 'desc';
 }
 
 /**
- * Build the corpus index: newest-first list of published capture envelopes.
- * Seeds excluded by default. Ordering is `createdAt` desc (nulls last — an
- * un-enriched item sorts to the bottom), tie-broken by cid for determinism.
+ * Ordered comparison of two corpus rows for the given key and direction.
+ * `createdAt` sorts nulls last regardless of direction (the roster
+ * convention — the direction factor is not applied to null placement); all
+ * keys tie-break by cid for a deterministic total order.
+ */
+function compareCorpus(
+  a: CorpusItemRow,
+  b: CorpusItemRow,
+  key: CorpusSortKey,
+  factor: 1 | -1,
+): number {
+  if (key === 'createdAt') {
+    // nulls always last, direction-independent.
+    if (a.createdAt === null && b.createdAt === null) return a.cid.localeCompare(b.cid);
+    if (a.createdAt === null) return 1;
+    if (b.createdAt === null) return -1;
+    if (a.createdAt !== b.createdAt) return (a.createdAt - b.createdAt) * factor;
+    return a.cid.localeCompare(b.cid);
+  }
+
+  let primary = 0;
+  switch (key) {
+    case 'cluster':
+      primary = a.cluster.localeCompare(b.cluster);
+      break;
+    case 'tier':
+      primary = a.tier.localeCompare(b.tier);
+      break;
+    case 'stepCount':
+      primary = a.stepCount - b.stepCount;
+      break;
+  }
+  if (primary !== 0) return primary * factor;
+  // Deterministic tie-break — cid order is stable under both directions.
+  return a.cid.localeCompare(b.cid);
+}
+
+/**
+ * Build the corpus index: a sorted, paginated list of published capture
+ * envelopes. Seeds excluded by default. Ordering is server-side over the FULL
+ * corpus before pagination (the URL is the state, spec §3.3) — default
+ * `createdAt` desc, with un-enriched (null-timestamp) items sorting last and a
+ * cid tie-break for determinism.
  */
 export function buildCorpusList(
   metas: CaptureEnvelopeMetaRow[],
@@ -517,6 +571,11 @@ export function buildCorpusList(
   const includeSeeds = opts.includeSeeds ?? false;
   const limit = Math.min(Math.max(opts.limit ?? 25, 1), 200);
   const offset = Math.max(opts.offset ?? 0, 0);
+  const sortKey: CorpusSortKey = CORPUS_SORT_KEYS.includes(opts.sort as CorpusSortKey)
+    ? (opts.sort as CorpusSortKey)
+    : 'createdAt';
+  const dir = opts.dir === 'asc' ? 'asc' : 'desc';
+  const factor: 1 | -1 = dir === 'desc' ? -1 : 1;
 
   let seedsExcluded = 0;
   const all: CorpusItemRow[] = [];
@@ -539,14 +598,7 @@ export function buildCorpusList(
     });
   }
 
-  all.sort((a, b) => {
-    // newest first; nulls last
-    if (a.createdAt === null && b.createdAt === null) return a.cid.localeCompare(b.cid);
-    if (a.createdAt === null) return 1;
-    if (b.createdAt === null) return -1;
-    if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt;
-    return a.cid.localeCompare(b.cid);
-  });
+  all.sort((a, b) => compareCorpus(a, b, sortKey, factor));
 
   return {
     items: all.slice(offset, offset + limit),

@@ -6,10 +6,12 @@
  * DataTable + StatusBar. No gold accent on this surface (the roster surfaces
  * carry none; spec §3.5).
  *
- * Sort + page live in URL state (spec §3.3) so a row's list position is
- * shareable. The backend is the source of newest-first ordering and
- * pagination; client-side sort re-orders the current page for the
- * cluster/tier/steps columns (the roster tables sort client-side too).
+ * Sort, seed-filter, and page all live in URL state (spec §3.3) so a row's
+ * list position is shareable. The backend is the source of ordering AND
+ * pagination: sort is server-side over the FULL corpus before slicing, so a
+ * sort claim holds across pages (not just the fetched page). Changing sort or
+ * the seed filter resets the page to avoid stranding the viewer at a stale
+ * offset.
  *
  * Empty state: "No contributions yet…" in the explorer's voice.
  */
@@ -20,38 +22,15 @@ import type { CorpusItemRow } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { DataTable, cellStyle, cellNumStyle, cellMutedStyle } from '../components/DataTable';
 import { CorpusTierChip, CorpusTagChip } from '../components/CorpusChips';
-import { useEnumParam, useNumParam } from '../lib/url-state';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { useEnumParam, useNumParam, usePatchParams } from '../lib/url-state';
 import { int, shortCid, shortAddr, relUnix } from '../lib/format';
 
 const PAGE_SIZE = 25;
 
-// ── Sort ────────────────────────────────────────────────────────────────────
+// ── Seed filter (spec §2.4) ───────────────────────────────────────────────────
 
-type SortKey = 'createdAt' | 'cluster' | 'tier' | 'stepCount';
-
-function sortRows(rows: CorpusItemRow[], key: SortKey, dir: 'asc' | 'desc'): CorpusItemRow[] {
-  const factor = dir === 'desc' ? -1 : 1;
-  return [...rows].sort((a, b) => {
-    switch (key) {
-      case 'createdAt': {
-        const av = a.createdAt;
-        const bv = b.createdAt;
-        if (av === null && bv === null) return 0;
-        if (av === null) return 1; // nulls last
-        if (bv === null) return -1;
-        return (av - bv) * factor;
-      }
-      case 'cluster':
-        return a.cluster.localeCompare(b.cluster) * factor;
-      case 'tier':
-        return a.tier.localeCompare(b.tier) * factor;
-      case 'stepCount':
-        return (a.stepCount - b.stepCount) * factor;
-      default:
-        return 0;
-    }
-  });
-}
+type SeedFilter = 'envelope-only' | 'include-seeded';
 
 // ── Columns ───────────────────────────────────────────────────────────────────
 
@@ -172,30 +151,52 @@ function Pager({
 // ── CorpusView ────────────────────────────────────────────────────────────────
 
 export function CorpusView() {
-  const [page, setPage] = useNumParam('page', 0);
-  const [sort, setSort] = useEnumParam('sort', 'createdAt', [
+  const [page] = useNumParam('page', 0);
+  const [sort] = useEnumParam('sort', 'createdAt', [
     'createdAt',
     'cluster',
     'tier',
     'stepCount',
   ]);
-  const [dir, setDir] = useEnumParam('dir', 'desc', ['asc', 'desc']);
+  const [dir] = useEnumParam('dir', 'desc', ['asc', 'desc']);
+  const [seedFilter] = useEnumParam('include', 'envelope-only', [
+    'envelope-only',
+    'include-seeded',
+  ]);
+  const includeSeeds = seedFilter === 'include-seeded';
+  // Coupled writes (sort/dir/filter all reset the page) go through one atomic
+  // patch — the per-key setters clobber each other in a single handler (see
+  // usePatchParams).
+  const patchParams = usePatchParams();
 
   const { data, isLoading, isError, refetch } = useCorpus({
     limit: PAGE_SIZE,
     offset: Math.max(page, 0) * PAGE_SIZE,
+    // Sort is server-side over the full corpus (not the fetched page) so the
+    // ordering holds across pages.
+    sort,
+    dir: dir as 'asc' | 'desc',
+    includeSeeds,
   });
 
   function handleSort(key: string) {
-    if (key === sort) {
-      setDir(dir === 'desc' ? 'asc' : 'desc');
-    } else {
-      setSort(key);
-      setDir('desc');
-    }
+    const nextDir = key === sort ? (dir === 'desc' ? 'asc' : 'desc') : 'desc';
+    // Re-ordering the whole corpus invalidates the current offset — reset the
+    // page in the SAME write so the viewer isn't stranded mid-list.
+    patchParams({ sort: key, dir: nextDir, page: null });
   }
 
-  const sorted = data ? sortRows(data.items, sort as SortKey, dir as 'asc' | 'desc') : [];
+  function handleSeedFilter(next: SeedFilter) {
+    // The filtered set changes size; a stale offset could point past the end,
+    // so drop the page in the same atomic write as the filter change.
+    patchParams({ include: next === 'envelope-only' ? null : next, page: null });
+  }
+
+  function goToPage(next: number | null) {
+    patchParams({ page: next === null || next <= 0 ? null : next });
+  }
+
+  const rows = data?.items ?? [];
   const total = data?.total ?? 0;
   const pageCount = Math.max(Math.ceil(total / PAGE_SIZE), 1);
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
@@ -212,38 +213,58 @@ export function CorpusView() {
       }}
     >
       {/* Page header */}
-      <div>
-        <h1
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontStyle: 'italic',
-            fontSize: 'var(--text-4xl)',
-            lineHeight: 1.05,
-            color: 'var(--fg)',
-            margin: 0,
-            marginBottom: 4,
-            fontWeight: 400,
-          }}
-        >
-          Corpus
-        </h1>
-        <div
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--text-xs)',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-dim)',
-          }}
-        >
-          {data ? `${int(total)} contributed task traces` : 'loading…'}
-          {data && data.seedsExcluded > 0 && (
-            <>
-              <span style={{ margin: '0 8px' }}>·</span>
-              {int(data.seedsExcluded)} seeds excluded
-            </>
-          )}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontStyle: 'italic',
+              fontSize: 'var(--text-4xl)',
+              lineHeight: 1.05,
+              color: 'var(--fg)',
+              margin: 0,
+              marginBottom: 4,
+              fontWeight: 400,
+            }}
+          >
+            Corpus
+          </h1>
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 'var(--text-xs)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--fg-dim)',
+            }}
+          >
+            {data
+              ? `${int(total)} ${includeSeeds ? 'task traces (seeded included)' : 'contributed task traces'}`
+              : 'loading…'}
+            {data && !includeSeeds && data.seedsExcluded > 0 && (
+              <>
+                <span style={{ margin: '0 8px' }}>·</span>
+                {int(data.seedsExcluded)} seeds excluded
+              </>
+            )}
+          </div>
         </div>
+        <SegmentedControl<SeedFilter>
+          options={[
+            { label: 'envelope-only', value: 'envelope-only' },
+            { label: 'include seeded', value: 'include-seeded' },
+          ]}
+          value={seedFilter as SeedFilter}
+          onChange={handleSeedFilter}
+        />
       </div>
 
       {/* Loading skeleton */}
@@ -341,7 +362,7 @@ export function CorpusView() {
         <>
           <DataTable
             columns={COLUMNS}
-            rows={sorted}
+            rows={rows}
             sortKey={sort}
             sortDir={dir as 'asc' | 'desc'}
             onSort={handleSort}
@@ -354,8 +375,8 @@ export function CorpusView() {
             rangeStart={rangeStart}
             rangeEnd={rangeEnd}
             total={total}
-            onPrev={() => setPage(page - 1 <= 0 ? null : page - 1)}
-            onNext={() => setPage(page + 1)}
+            onPrev={() => goToPage(page - 1)}
+            onNext={() => goToPage(page + 1)}
           />
         </>
       )}

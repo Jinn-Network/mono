@@ -2458,19 +2458,25 @@ app.use('/corpus/:cid', explorerFreshness());
 /**
  * GET /explorer/corpus
  *
- * Newest-first index of corpus items (published capture envelopes). Seeds
- * excluded by default. Pagination via ?limit (default 25, max 200) and
- * ?offset. ?include=seeded folds seeded/imported envelopes back in.
+ * Sorted, paginated index of corpus items (published capture envelopes).
+ * Sort is server-side over the full corpus (?sort=createdAt|cluster|tier|
+ * stepCount, ?dir=asc|desc; default createdAt desc). Pagination via ?limit
+ * (default 25, max 200) and ?offset. Seeds excluded by default;
+ * ?include=seeded folds seeded/imported envelopes back in.
  */
 app.get('/corpus', async (c) => {
   const includeSeeds = c.req.query('include') === 'seeded';
   const limitRaw = Number.parseInt(c.req.query('limit') ?? '', 10);
   const offsetRaw = Number.parseInt(c.req.query('offset') ?? '', 10);
+  const sort = c.req.query('sort');
+  const dir = c.req.query('dir') === 'asc' ? 'asc' : 'desc';
   const metas = await loadCaptureMetas();
   const result = buildCorpusList(metas, {
     includeSeeds,
     limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
     offset: Number.isFinite(offsetRaw) ? offsetRaw : undefined,
+    sort,
+    dir,
   });
 
   const meta = c.get('indexedHead');

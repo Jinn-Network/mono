@@ -395,6 +395,10 @@ export interface CorpusParams {
   includeSeeds?: boolean;
   limit?: number;
   offset?: number;
+  /** Server-side sort column; omit for the backend default (createdAt). */
+  sort?: string;
+  /** Server-side sort direction; omit for the backend default (desc). */
+  dir?: 'asc' | 'desc';
 }
 
 export function useCorpus(params?: CorpusParams) {
@@ -406,6 +410,8 @@ export function useCorpus(params?: CorpusParams) {
           include: params?.includeSeeds ? 'seeded' : undefined,
           limit: params?.limit,
           offset: params?.offset,
+          sort: params?.sort,
+          dir: params?.dir,
         })}`,
       ),
   });

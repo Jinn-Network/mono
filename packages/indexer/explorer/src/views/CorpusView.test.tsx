@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -53,11 +53,11 @@ const EMPTY_FIXTURE: CorpusListResponse = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeWrapper(path = '/corpus') {
+function makeWrapper(path = '/corpus', opts: { static?: boolean } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
   });
-  const { hook } = memoryLocation({ path, static: true });
+  const { hook } = memoryLocation({ path, static: opts.static ?? true });
 
   function Wrapper({ children }: { children: React.ReactNode }) {
     return (
@@ -77,6 +77,30 @@ function mockFetch(fixture: CorpusListResponse) {
       headers: { 'Content-Type': 'application/json' },
     }),
   );
+}
+
+/**
+ * URL-capturing mock: records every requested URL and returns the seeded or
+ * envelope-only fixture based on the `include` query param. Lets tests assert
+ * the exact query string the view drove.
+ */
+function mockFetchCapturing(): string[] {
+  const calls: string[] = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+    const u = String(url);
+    calls.push(u);
+    const seeded = u.includes('include=seeded');
+    const body: CorpusListResponse = seeded
+      ? { ...FIXTURE, includeSeeds: true, seedsExcluded: 0, total: 5 }
+      : FIXTURE;
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  });
+  return calls;
 }
 
 function mockFetchError() {
@@ -172,5 +196,58 @@ describe('CorpusView', () => {
       // block("43611254") → "43,611,254"
       expect(screen.getByText('43,611,254')).toBeInTheDocument();
     });
+  });
+
+  it('drives sort server-side: the request carries sort + dir query params', async () => {
+    const calls = mockFetchCapturing();
+    const { Wrapper } = makeWrapper();
+    render(<CorpusView />, { wrapper: Wrapper });
+    // Default landing sort is createdAt desc — sent to the backend, not applied page-locally.
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls[0]).toContain('sort=createdAt');
+    expect(calls[0]).toContain('dir=desc');
+  });
+
+  it('clicking a sort header refetches with the new sort key (server-side sort)', async () => {
+    const calls = mockFetchCapturing();
+    const { Wrapper } = makeWrapper('/corpus', { static: false });
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(screen.getByText('Steps')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Steps'));
+    // A new request goes out keyed on the stepCount column.
+    await waitFor(() => expect(calls.some((u) => u.includes('sort=stepCount'))).toBe(true));
+  });
+
+  it('changing sort resets pagination to the first page (offset=0)', async () => {
+    const calls = mockFetchCapturing();
+    // Land on page 2 (offset 50).
+    const { Wrapper } = makeWrapper('/corpus?page=2', { static: false });
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(calls.some((u) => u.includes('offset=50'))).toBe(true));
+    // Wait for the header row to render before interacting with it.
+    await waitFor(() => expect(screen.getByText('Cluster')).toBeInTheDocument());
+
+    // Switch sort column; the follow-up request must be back at offset 0.
+    fireEvent.click(screen.getByText('Cluster'));
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('sort=cluster') && u.includes('offset=0'))).toBe(true),
+    );
+  });
+
+  it('the include-seeded toggle refetches with ?include=seeded and resets the page', async () => {
+    const calls = mockFetchCapturing();
+    const { Wrapper } = makeWrapper('/corpus?page=2', { static: false });
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(calls.some((u) => u.includes('offset=50'))).toBe(true));
+    await waitFor(() => expect(screen.getByText('include seeded')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('include seeded'));
+    // New query carries include=seeded AND is reset to the first page.
+    await waitFor(() =>
+      expect(
+        calls.some((u) => u.includes('include=seeded') && u.includes('offset=0')),
+      ).toBe(true),
+    );
   });
 });
