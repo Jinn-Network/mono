@@ -44,4 +44,17 @@ describe('corpus disjointness', () => {
     const task = { ...cleanTask, repo: 'django' };
     expect(() => assertCorpusDisjoint([task], buildCorpusIndex(corpus))).toThrow(CorpusContaminationError);
   });
+
+  it('does not false-positive when gold tokens or corpus text are empty (all-zero sketches)', () => {
+    const emptyGold: SlateTaskForDisjointness = { instance_id: 'x__y-1', repo: 'x', goldPatchTokens: [] };
+    const emptyCorpus: CorpusRecord[] = [{ id: 'skill:empty', repos: ['zzz'], instanceIdsReferenced: [], text: '' }];
+    const r = checkCorpusDisjoint([emptyGold], buildCorpusIndex(emptyCorpus));
+    expect(r.lexical.verdict).toBe('pass');
+    expect(() => assertCorpusDisjoint([emptyGold], buildCorpusIndex(emptyCorpus))).not.toThrow();
+  });
+
+  it('assertCorpusDisjoint throws on an instance-only overlap (fail-loud on a non-repo axis)', () => {
+    const withRef: CorpusRecord[] = [{ id: 'skill:ref', repos: ['zzz'], instanceIdsReferenced: ['astropy__astropy-19438'], text: 'unrelated text' }];
+    expect(() => assertCorpusDisjoint([cleanTask], buildCorpusIndex(withRef))).toThrow(CorpusContaminationError);
+  });
 });

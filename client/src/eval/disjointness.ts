@@ -20,9 +20,14 @@ export class CorpusContaminationError extends Error {
   }
 }
 
-/** MinHash Jaccard estimate between two equal-length sketches. */
+/** MinHash Jaccard estimate between two equal-length sketches. An all-zero
+ *  sketch is corpus-index's empty-token-set sentinel; a set with no tokens has
+ *  no meaningful overlap, so return 0 rather than letting the sentinel zeros
+ *  count as matches (which would false-positive a degenerate gold patch or an
+ *  empty corpus record into a contamination flag). */
 function sketchJaccard(a: number[], b: number[]): number {
   if (a.length === 0) return 0;
+  if (a.every((x) => x === 0) || b.every((x) => x === 0)) return 0;
   let same = 0;
   for (let i = 0; i < a.length; i++) if (a[i] === b[i]) same++;
   return same / a.length;
