@@ -57,7 +57,9 @@ export function buildCorpusIndex(records: CorpusRecord[]): CorpusDerivedIndex {
       sketch: minhashSketch(tokenize(r.text)),
     });
   }
-  indexed.sort((a, b) => a.id.localeCompare(b.id));
+  // Deterministic total order: primary by id, tiebreak by canonical content so
+  // duplicate ids never make the cid input-order-dependent (spec §4.3).
+  indexed.sort((a, b) => a.id.localeCompare(b.id) || JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return { repos: [...repos].sort(), instanceIds: [...instanceIds].sort(), records: indexed };
 }
 

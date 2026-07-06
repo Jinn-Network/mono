@@ -34,4 +34,14 @@ describe('corpus derived index', () => {
     expect(a).toBe(b);
     expect(a).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
+
+  it('cid is stable under reordering even when two records share an id', () => {
+    const dup: CorpusRecord[] = [
+      { id: 'x', repos: ['a'], instanceIdsReferenced: [], text: 'alpha text one' },
+      { id: 'x', repos: ['b'], instanceIdsReferenced: [], text: 'beta text two' },
+    ];
+    const a = corpusSnapshotCid(buildCorpusIndex(dup));
+    const b = corpusSnapshotCid(buildCorpusIndex([dup[1]!, dup[0]!]));
+    expect(a).toBe(b);
+  });
 });
