@@ -23,10 +23,15 @@ describe('pilot tally', () => {
     expect(rep.cost.verdict).toBe('lower');                // B cheaper on both-solve tasks
     expect(rep.bothSolveTasks).toBeGreaterThan(0);
   });
-  it('excludes ungradeable (passed:null) task-repeats from the pairing, never scores them as fail', () => {
+  it('excludes a task with a fully-ungradeable arm; keeps a partially-null but still-scorable task', () => {
     const o = mk(4);
-    o[0]!.passed = null; // one ungradeable arm-A repeat
+    // t0: arm B fully ungradeable → the whole task is excluded (out of n, counted in excluded)
+    for (const x of o) if (x.instance_id === 't0' && x.arm === 'B') x.passed = null;
+    // t1: one arm-A repeat null but a gradeable repeat remains → still scored, NOT excluded
+    const t1a0 = o.find((x) => x.instance_id === 't1' && x.arm === 'A' && x.repeat === 0)!;
+    t1a0.passed = null;
     const rep = tallyPilot(o, { rng: lcg(2) });
-    expect(rep.excluded).toBeGreaterThan(0);
+    expect(rep.excluded).toBe(1);   // only t0
+    expect(rep.n).toBe(4);          // 3 scored (t1,t2,t3) + 1 excluded (t0)
   });
 });

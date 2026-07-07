@@ -1,4 +1,4 @@
-import { pairedRateDiffLowerBound, nonInferiorityVerdict, pairedCostVerdict, type TaskRates } from '../eval/capability-stats.js';
+import { nonInferiorityVerdict, pairedCostVerdict, type TaskRates } from '../eval/capability-stats.js';
 
 export interface SolveOutcome { instance_id: string; arm: 'A' | 'B'; repeat: number; passed: boolean | null; costUsd: number; }
 
@@ -21,17 +21,12 @@ export function tallyPilot(outcomes: SolveOutcome[], opts: { rng: () => number }
   let excluded = 0;
   let aPassTot = 0, aTot = 0, bPassTot = 0, bTot = 0, bothSolve = 0;
 
-  // Count excluded (ungradeable) outcomes
-  for (const o of outcomes) {
-    if (o.passed === null) excluded++;
-  }
-
   for (const [, os] of byTask) {
     const A = os.filter((o) => o.arm === 'A');
     const B = os.filter((o) => o.arm === 'B');
     const gradedA = A.filter((o) => o.passed !== null);
     const gradedB = B.filter((o) => o.passed !== null);
-    if (gradedA.length === 0 || gradedB.length === 0) { continue; }
+    if (gradedA.length === 0 || gradedB.length === 0) { excluded++; continue; }
     const pA = gradedA.filter((o) => o.passed === true).length / gradedA.length;
     const pB = gradedB.filter((o) => o.passed === true).length / gradedB.length;
     rates.push({ pA, pB });
@@ -51,11 +46,12 @@ export function tallyPilot(outcomes: SolveOutcome[], opts: { rng: () => number }
   const ni = rates.length
     ? nonInferiorityVerdict(rates, { rng: opts.rng, stockBaseRate: Math.max(stockBaseRate, 1e-9) })
     : { pass: false, lowerBound: NaN, relativeRegression: NaN, reasons: ['no gradeable pairs'] } as ReturnType<typeof nonInferiorityVerdict>;
+  // pilot scale — small both-solve sets are expected; minN:1 lets the cost verdict go live rather than always 'inconclusive'.
   const cost = pairedCostVerdict(costDiffs, { minN: 1 });
   const median = (xs: number[]): number => { if (!xs.length) return NaN; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2; };
 
   return {
-    n: rates.length,
+    n: rates.length + excluded,
     armA: { resolveRate: stockBaseRate },
     armB: { resolveRate: bTot > 0 ? bPassTot / bTot : 0 },
     bothSolveTasks: bothSolve,
