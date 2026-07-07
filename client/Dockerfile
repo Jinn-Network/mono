@@ -26,12 +26,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # repository root as their build context.
 COPY client/package.json client/yarn.lock client/.yarnrc.yml ./client/
 COPY client/src/dashboard/spa/package.json ./client/src/dashboard/spa/package.json
+COPY client/packages/harness-layer/package.json ./client/packages/harness-layer/package.json
 COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/README.md ./packages/sdk/
 RUN corepack enable && cd client && yarn install --immutable
 
 # Copy SDK sources before the client build; `yarn build` builds the SDK first.
 COPY packages/sdk/tsconfig.json ./packages/sdk/
 COPY packages/sdk/src/ ./packages/sdk/src/
+
+# client/packages/harness-layer is a client-local workspace (bundled into
+# dist/scripts/jinn-layer.mjs by scripts/bundle-jinn-layer.mjs and type-checked
+# by `yarn build`/`yarn typecheck`) — needs its own source ahead of the build.
+COPY client/packages/harness-layer/ ./client/packages/harness-layer/
 
 # Copy source and bundled deployment artifacts. `client/docs/` is needed at
 # build time because the /build SPA page (hfmf) embeds `quickstart.md` via a
