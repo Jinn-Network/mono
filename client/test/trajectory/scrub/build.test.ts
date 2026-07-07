@@ -16,6 +16,21 @@ describe('pipeline builders (#1409)', () => {
     expect(names).toEqual(['key-policy', 'plain-patterns', 'secretlint']);
   });
 
+  // #1415 regression: secretlint pass-1 does not detect bare AWS access-key
+  // IDs (the aws rule ships enableIDScanRule: false) or GCP `AIza…` API keys,
+  // so with the entropy fallback off the seed profile must catch these
+  // deterministic prefix shapes itself.
+  test('seed pipeline redacts bare AWS access-key IDs and GCP AIza API keys (#1415)', async () => {
+    const pipeline = buildSeedScrubPipeline();
+    const result = await pipeline.run({
+      'skill.md':
+        'Set AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE then call ?key=AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe',
+    });
+    const text = String(result.attributes['skill.md']);
+    expect(text).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(text).not.toContain('AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe');
+  });
+
   test('seed pipeline keeps deterministic redaction (email) and skips entropy sweep', async () => {
     const pipeline = buildSeedScrubPipeline();
     const result = await pipeline.run({

@@ -64,20 +64,21 @@ export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubP
  * catch unknown-shape PII/secrets in private traces are dropped: on prose they
  * false-positive (trigger words, dated env-var slugs, long camelCase
  * identifiers) and deface the corpus. The deterministic detectors stay:
- * structural key policy, plain-patterns (emails, home paths), and secretlint's
- * pass-1 preset rules (AWS secret-key assignments, GitHub / Slack / npm token
- * shapes, GCP service-account JSON). Accepted residual: bare AWS key IDs
- * (AKIA…), `AIza…` GCP API keys, JWTs, and unprefixed high-entropy blobs pass
- * unredacted — acceptable for public, licence-checked seed content; the trace
- * profile still catches them via the entropy fallback. The
- * reduced stage list is reported via the pipeline's `components` surface
+ * structural key policy, plain-patterns (emails, home paths, and — seed-only,
+ * #1415 — bare AWS access-key IDs and GCP `AIza…` API keys, deterministic
+ * prefix shapes secretlint pass-1 does not cover), and secretlint's pass-1
+ * preset rules (AWS secret-key assignments, GitHub / Slack / npm token
+ * shapes, GCP service-account JSON). Accepted residual: JWTs and unprefixed
+ * high-entropy blobs pass unredacted — acceptable for public, licence-checked
+ * seed content; the trace profile still catches them via the entropy fallback.
+ * The reduced stage list is reported via the pipeline's `components` surface
  * (what the signed provenance manifest is specified to record — see
  * pipeline.ts), so the profile is inspectable per pipeline.
  */
 export function buildSeedScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
   return new ScrubPipeline([
     keyPolicyStage(policy),
-    plainPatternsStage(policy),
+    plainPatternsStage(policy, { credentialIds: true }),
     secretlintStage(policy, { entropyFallback: false }),
   ]);
 }
