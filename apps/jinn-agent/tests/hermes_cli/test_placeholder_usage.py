@@ -37,7 +37,7 @@ def test_show_config_marks_placeholders(tmp_path, capsys):
         show_config()
 
     out = capsys.readouterr().out
-    assert "hermes config set <key> <value>" in out
+    assert "jinn-agent config set <key> <value>" in out
 
 
 def test_setup_summary_marks_placeholders(tmp_path, capsys):
