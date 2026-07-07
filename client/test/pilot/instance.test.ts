@@ -14,4 +14,10 @@ describe('pilot instance parse', () => {
   it('throws when base_commit or problem_statement is missing', () => {
     expect(() => parsePilotInstanceRow({ instance_id: 'x', repo: 'a/b', base_commit: 'c' }, { hf_dataset: 'ds', hf_split: 't' })).toThrow(/problem_statement/);
   });
+  it('extracts the optional interface (acceptance spec) when present, omits it when absent', () => {
+    const base = { instance_id: 'x', repo: 'a/b', base_commit: 'c', problem_statement: 'p' };
+    expect(parsePilotInstanceRow({ ...base, interface: 'get-headers must return ...' }, { hf_dataset: 'ds', hf_split: 't' }).interface)
+      .toBe('get-headers must return ...');
+    expect(parsePilotInstanceRow(base, { hf_dataset: 'ds', hf_split: 't' })).not.toHaveProperty('interface');
+  });
 });

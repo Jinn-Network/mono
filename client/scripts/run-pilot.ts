@@ -143,9 +143,16 @@ async function fetchRawRow(ref: PilotInstanceRef): Promise<Record<string, unknow
 // One solve: spawn jinn-agent, recover patch + tokens
 // ---------------------------------------------------------------------------
 
-function buildPrompt(problemStatement: string): string {
+function buildPrompt(instance: PilotInstance): string {
+  // The `interface` field is the acceptance SPEC (the API contract the solution
+  // must satisfy) — NOT the hidden test. Fed to both arms when present, it removes
+  // "correct behavior, wrong surface detail" failures (e.g. header casing).
+  const spec = instance.interface && instance.interface.trim()
+    ? `\n\n## Required interface (the contract your fix must satisfy)\n${instance.interface.trim()}`
+    : '';
   return `You are fixing a bug in this repository. Make the minimal source change needed. ` +
-    `Do not add explanatory files or scripts outside the repo's existing structure.\n\n${problemStatement}`;
+    `Do not add explanatory files or scripts outside the repo's existing structure.\n\n` +
+    `${instance.problem_statement}${spec}`;
 }
 
 async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, repeat: number, baseDir: string): Promise<SolveOutcome & { patch: string }> {
@@ -153,7 +160,7 @@ async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, rep
   await rm(armDir, { recursive: true, force: true });
   await cp(baseDir, armDir, { recursive: true });
 
-  const prompt = buildPrompt(instance.problem_statement);
+  const prompt = buildPrompt(instance);
   const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns });
   console.log(`[pilot] solving ${instance.instance_id} arm=${arm.name} repeat=${repeat}...`);
   const { stderr, exitCode } = await run(cfg.jinnAgentBin, args, { cwd: armDir });
