@@ -7488,10 +7488,25 @@ def show_config():
     """Display current configuration."""
     config = load_config()
 
+    # `config` is reached without going through cli.py's module-level skin
+    # init — pick up config.yaml's skin choice on demand (idempotent,
+    # degrades to the upstream literal on any error). Mirrors setup.py's
+    # _setup_cli_names. titled_box/get_active_skin are imported locally:
+    # hermes_cli.status imports from this module at top level, so a
+    # module-level import here would be circular.
+    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    from hermes_cli.status import titled_box
+
+    try:
+        if get_active_skin_name() == "default":
+            init_skin_from_config(config)
+    except Exception:
+        pass
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+
     print()
-    print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│              ⚕ Hermes Configuration                    │", Colors.CYAN))
-    print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
+    for _line in titled_box(f"{_brand} Configuration"):
+        print(color(_line, Colors.CYAN))
 
     # Managed scope: surface that some settings are administrator-pinned so the
     # user understands why their config.yaml value may not be the effective one.
@@ -7563,7 +7578,7 @@ def show_config():
         if _env_ghost is not None and str(_env_ghost).strip() != str(_cfg_max_turns).strip():
             print(color(
                 f"                ⚠ .env has stale HERMES_MAX_ITERATIONS={_env_ghost} "
-                f"(run 'hermes doctor --fix' to remove)",
+                f"(run 'jinn-agent doctor --fix' to remove)",
                 Colors.YELLOW,
             ))
     except Exception:
@@ -7685,9 +7700,9 @@ def show_config():
 
     print()
     print(color("─" * 60, Colors.DIM))
-    print(color("  hermes config edit     # Edit config file", Colors.DIM))
-    print(color("  hermes config set <key> <value>", Colors.DIM))
-    print(color("  hermes setup           # Run setup wizard", Colors.DIM))
+    print(color("  jinn-agent config edit     # Edit config file", Colors.DIM))
+    print(color("  jinn-agent config set <key> <value>", Colors.DIM))
+    print(color("  jinn-agent setup           # Run setup wizard", Colors.DIM))
     print()
 
 

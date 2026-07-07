@@ -150,6 +150,8 @@ from hermes_cli.config import (
 # display_hermes_home imported lazily at call sites (stale-module safety during hermes update)
 
 from hermes_cli.colors import Colors, color
+from hermes_cli.skin_engine import get_active_skin
+from hermes_cli.status import titled_box
 
 
 def print_header(title: str):
@@ -208,6 +210,27 @@ def _setup_cli_names() -> tuple[str, str]:
     if cli and cli != "hermes":
         return cli, cli
     return "hermes", "Hermes"
+
+
+def _ensure_skin_initialised() -> None:
+    """Idempotently pick up config.yaml's skin choice on demand.
+
+    Mirrors ``_setup_cli_names`` above: the wizard's boxed headers are
+    printed from entry points reached before ``cli.py``'s module-level
+    ``init_skin_from_config`` runs, so ``get_active_skin()`` would otherwise
+    silently return the default-skin fallback even when ``config.yaml`` says
+    otherwise. Bare ``try/except: pass`` — never blocks setup on a
+    config/skin error.
+    """
+    try:
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
 
 
 def print_noninteractive_setup_guidance(reason: str | None = None) -> None:
@@ -2685,24 +2708,16 @@ def _run_portal_one_shot(config: dict) -> None:
     """
     from hermes_cli.config import load_config
 
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+    _portal_label = get_active_skin().get_branding("portal_label", "Nous Portal")
     print()
-    print(
-        color(
-            "┌─────────────────────────────────────────────────────────┐",
-            Colors.MAGENTA,
-        )
-    )
-    print(color("│     ⚕ Hermes Setup — Nous Portal (one-shot)             │", Colors.MAGENTA))
-    print(
-        color(
-            "└─────────────────────────────────────────────────────────┘",
-            Colors.MAGENTA,
-        )
-    )
+    for _line in titled_box(f"{_brand} Setup — {_portal_label} (one-shot)"):
+        print(color(_line, Colors.MAGENTA))
     print()
     print_info("  One subscription, 300+ models, plus the Tool Gateway:")
     print_info("    web search, image generation, TTS, browser automation")
-    print_info("    — all routed through your Nous Portal sub.")
+    print_info(f"    — all routed through your {_portal_label} sub.")
     print()
     print_info("  Sign up: https://portal.nousresearch.com/manage-subscription")
     print()
@@ -2724,13 +2739,13 @@ def _run_portal_one_shot(config: dict) -> None:
         # Treat all of these as a graceful cancel/abort for the portal flow.
         print()
         print_info("  Setup cancelled.")
-        print_info("  You can retry later with `hermes portal`.")
+        print_info("  You can retry later with `jinn-agent portal`.")
         return
     except Exception as exc:
         logger.debug("_model_flow_nous error during `hermes portal`: %s", exc)
         print()
-        print_error(f"  Nous Portal setup encountered an error: {exc}")
-        print_info("  You can retry later with `hermes portal`.")
+        print_error(f"  {_portal_label} setup encountered an error: {exc}")
+        print_info("  You can retry later with `jinn-agent portal`.")
         return
 
     # Re-sync the in-memory config from disk — _model_flow_nous (and the
@@ -2746,8 +2761,8 @@ def _run_portal_one_shot(config: dict) -> None:
 
     print()
     print_success("Portal setup complete.")
-    print_info("  Run `hermes portal info` to inspect routing.")
-    print_info("  Run `hermes` to start chatting.")
+    print_info("  Run `jinn-agent portal info` to inspect routing.")
+    print_info("  Run `jinn-agent` to start chatting.")
 
 
 def run_setup_wizard(args):
@@ -2815,20 +2830,11 @@ def run_setup_wizard(args):
     if section:
         for key, label, func in SETUP_SECTIONS:
             if key == section:
+                _ensure_skin_initialised()
+                _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
                 print()
-                print(
-                    color(
-                        "┌─────────────────────────────────────────────────────────┐",
-                        Colors.MAGENTA,
-                    )
-                )
-                print(color(f"│     ⚕ Hermes Setup — {label:<34s} │", Colors.MAGENTA))
-                print(
-                    color(
-                        "└─────────────────────────────────────────────────────────┘",
-                        Colors.MAGENTA,
-                    )
-                )
+                for _line in titled_box(f"{_brand} Setup — {label}"):
+                    print(color(_line, Colors.MAGENTA))
                 func(config)
                 save_config(config)
                 print()
@@ -2849,6 +2855,19 @@ def run_setup_wizard(args):
         or active_provider is not None
     )
 
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+    # Inner content is 56 chars wide (1 narrower than the 57-wide border —
+    # a pre-existing upstream quirk, left alone; only the brand token and
+    # its padding are recomputed here). The "⚕" glyph is dropped rather than
+    # gated per-skin: it's emoji, and the jinn brand rule bans emoji
+    # regardless of skin (see hermes_cli/status.py's titled_box headers).
+    _title_text = f"{_brand} Setup Wizard"
+    _title_pad = 56 - len(_title_text)
+    _title_left = _title_pad // 2
+    _body1_text = f"  Let's configure your {_brand} installation."
+    _body1_pad = 56 - len(_body1_text)
+
     print()
     print(
         color(
@@ -2858,7 +2877,8 @@ def run_setup_wizard(args):
     )
     print(
         color(
-            "│             ⚕ Hermes Agent Setup Wizard                │", Colors.MAGENTA
+            "│" + " " * _title_left + _title_text + " " * (_title_pad - _title_left) + "│",
+            Colors.MAGENTA,
         )
     )
     print(
@@ -2869,7 +2889,7 @@ def run_setup_wizard(args):
     )
     print(
         color(
-            "│  Let's configure your Hermes Agent installation.       │", Colors.MAGENTA
+            "│" + _body1_text + " " * _body1_pad + "│", Colors.MAGENTA
         )
     )
     print(
@@ -2898,11 +2918,11 @@ def run_setup_wizard(args):
 
         print()
         print_header("Reconfigure")
-        print_success("You already have Hermes configured.")
+        print_success(f"You already have {_brand} configured.")
         print_info("Running the full wizard — each prompt shows your current value.")
         print_info("Press Enter to keep it, or type a new value to change it.")
         print_info("")
-        print_info("Tip: jump straight to a section with 'hermes setup model|terminal|")
+        print_info("Tip: jump straight to a section with 'jinn-agent setup model|terminal|")
         print_info("     gateway|tools|agent', or fill only missing items with --quick.")
         # Fall through to the "Full Setup — run all sections" block below.
         # --reconfigure is now the default on existing installs; the flag
