@@ -49,3 +49,9 @@ def test_allows_backup_filename_stem():
     # ~/hermes-backup-<timestamp>.zip is the literal filename backup --help
     # prints — filesystem truth, not a branding choice.
     assert_no_upstream_brand("default: ~/hermes-backup-<timestamp>.zip")
+
+def test_allows_backup_filename_stem_when_argparse_wraps_it():
+    # argparse's help formatter line-wraps long strings wherever it likes,
+    # and does split this filename right after the hyphen in practice
+    # (`backup --help`'s real output). The exemption must survive that.
+    assert_no_upstream_brand("default: ~/hermes-\n                        backup-<timestamp>.zip")
