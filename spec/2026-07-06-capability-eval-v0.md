@@ -190,6 +190,12 @@ Everything else is pinned and recorded in the run report so the number is reprod
 - **No live `corpus_search`/`corpus_fetch`.** Arm B has an empty tool surface for corpus
   retrieval. v0 measures the value of *installed* seeds only. (v1 may add a live-retrieval arm;
   the rig supports it as another loadout parameter — §8.)
+- **Arm A's "empty loadout" is enforced, not assumed** (spike finding,
+  `docs/spikes/2026-07-07-jinn-agent-headless-spike.md`). jinn-agent injects the operator's memory,
+  any cwd `AGENTS.md`/`SOUL.md`, and preloaded skills by default; **arm A must run with
+  `--ignore-rules`** so none of that leaks, or the A/B contrast is confounded. Arm B is *exactly*
+  arm A plus the seed loadout (`-s <skill>`), so the loadout is the sole varied input. Enforcing
+  this is a treatment-fidelity check (§11).
 
 ---
 
@@ -717,9 +723,13 @@ signed measurement, reproducible by re-running the pinned rig against the pinned
   (e.g. N = 200 at ~15% yield ≈ 1,333 candidates × R ≈ **4,000 screening solves+grades**). The
   screen, not the measurement, dominates host-hours — this is where the cheaper-leading-indicator
   option (§13) pays off.
-- **Cost (solve side, `deepseek-v4-flash`, decision E):** at $0.09/$0.18 per M tokens and ~50k in /
-  20k out per solve (~$0.008/solve), the combined solve side (≈1,200 measurement + ≈4,000 screening
-  solves) is **~$40 total** — cost stops being the binding constraint; Docker/disk/wall-clock do.
+- **Cost (solve side, `deepseek-v4-flash`, decision E):** the spike measured real solves at ~186k in /
+  6k out (arm A, ~$0.023) and ~303k in / 6k out (arm B, ~$0.034) — the ~186k input is the
+  system-prompt+tools baseline every solve carries, and the seed loadout added ~117k input (it
+  changed *behavior*, not just added text). So per solve is **~$0.025–0.034**, and the combined solve
+  side (≈1,200 measurement + ≈4,000 screening solves) is **~$150 total** — still cheap; Docker/disk/
+  wall-clock remain the binding constraint. (Corollary: the "lower cost" bar is genuinely demanding —
+  a loadout that adds ~117k input must save more than it costs to carry, §2.1.)
   (OpenRouter's credit check requires the key to *afford* the worst-case `max_tokens` up front but
   bills **actual** tokens; keep `max_tokens` generous so no legitimate solve is truncated — a
   truncated solve is a spurious fail — and size the key's limit to cover the reservation.)
@@ -800,7 +810,7 @@ requirements:
 | **Consensus-collapse noise floor** | Ties→fail is a no-op at odd R; the ≥⌈R/2⌉ polarisation injects symmetric spurious discordance the Connor table ignores — so consensus-McNemar is a direction-only corroborator and N is sized from the pilot bootstrap, not the table (§6.2, §6.3) |
 | **Multiple comparisons / forking paths** | The gate is a single IUT on two pre-registered tests (§2.2); corroborators carry no decision rule and cannot license a PASS (§6.2); the Sonnet replication has its own α |
 | **Regression to the mean** | Periodic re-run of the stock arm during the campaign (runbook guard) rules out drift masquerading as effect |
-| **Treatment fidelity** (is "corpus ON" really on? is the screen really blind?) | Arm-B runs assert the loadout loaded and content-hashes to `corpusSnapshotCid` (§4.3); screening runs attest empty-loadout / no-corpus-tools / empty-host-skill-dir (§4.2); a fidelity-failed run is excluded, not scored |
+| **Treatment fidelity** (is "corpus ON" really on? is arm A really empty? is the screen really blind?) | **Arm A runs with `--ignore-rules`** so no operator memory / `AGENTS.md` / preloaded skill leaks into the "empty" arm (spike-confirmed, §3.1); arm-B runs assert the loadout loaded and content-hashes to `corpusSnapshotCid` (§4.3); screening runs attest empty-loadout / no-corpus-tools / empty-host-skill-dir (§4.2); a fidelity-failed run is excluded, not scored |
 | **Cost-capture path** (Inspect proxy vs native usage) | Gate decided on provider-actual usage (§5.2); UNMEASURED → INCONCLUSIVE, never PASS on heuristic constants; option-(a) proxy diverges the measured agent's network path from the production binary — prefer option (b); billing cross-check mandatory pre-run (§7.1, §13) |
 | **Conflict of interest** (team measures its own bet) | Pre-registered stopping rule + independent fidelity re-run (§10.1); PRINCIPLES → Neutral |
 
