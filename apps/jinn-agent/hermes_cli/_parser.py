@@ -39,45 +39,45 @@ def _inherited_flag(parser, *args, **kwargs):
 
 _EPILOGUE = """
 Examples:
-    hermes                        Start interactive chat
-    hermes chat -q "Hello"        Single query mode
-    hermes --tui                  Launch the modern TUI (or set display.interface: tui)
-    hermes --cli                  Force the classic REPL (overrides display.interface: tui)
-    hermes -c                     Resume the most recent session
-    hermes -c "my project"        Resume a session by name (latest in lineage)
-    hermes --resume <session_id>  Resume a specific session by ID
-    hermes setup                  Run setup wizard
-    hermes logout                 Clear stored authentication
-    hermes auth add <provider>    Add a pooled credential
-    hermes auth list              List pooled credentials
-    hermes auth remove <p> <t>    Remove pooled credential by index, id, or label
-    hermes auth reset <provider>  Clear exhaustion status for a provider
-    hermes model                  Select default model
-    hermes fallback [list]        Show fallback provider chain
-    hermes fallback add           Add a fallback provider (same picker as `hermes model`)
-    hermes fallback remove        Remove a fallback provider from the chain
-    hermes config                 View configuration
-    hermes config edit            Edit config in $EDITOR
-    hermes config set model gpt-4 Set a config value
-    hermes gateway                Run messaging gateway
-    hermes -s hermes-agent-dev,github-auth
-    hermes -w                     Start in isolated git worktree
-    hermes gateway install        Install gateway background service
-    hermes sessions list          List past sessions
-    hermes sessions browse        Interactive session picker
-    hermes sessions rename ID T   Rename/title a session
-    hermes logs                   View agent.log (last 50 lines)
-    hermes logs -f                Follow agent.log in real time
-    hermes logs errors            View errors.log
-    hermes logs --since 1h        Lines from the last hour
-    hermes debug share             Upload debug report for support
-    hermes update                 Update to latest version
-    hermes dashboard              Start web UI dashboard (port 9119)
-    hermes dashboard --stop       Stop running dashboard processes
-    hermes dashboard --status     List running dashboard processes
+    jinn-agent                        Start interactive chat
+    jinn-agent chat -q "Hello"        Single query mode
+    jinn-agent --tui                  Launch the modern TUI (or set display.interface: tui)
+    jinn-agent --cli                  Force the classic REPL (overrides display.interface: tui)
+    jinn-agent -c                     Resume the most recent session
+    jinn-agent -c "my project"        Resume a session by name (latest in lineage)
+    jinn-agent --resume <session_id>  Resume a specific session by ID
+    jinn-agent setup                  Run setup wizard
+    jinn-agent logout                 Clear stored authentication
+    jinn-agent auth add <provider>    Add a pooled credential
+    jinn-agent auth list              List pooled credentials
+    jinn-agent auth remove <p> <t>    Remove pooled credential by index, id, or label
+    jinn-agent auth reset <provider>  Clear exhaustion status for a provider
+    jinn-agent model                  Select default model
+    jinn-agent fallback [list]        Show fallback provider chain
+    jinn-agent fallback add           Add a fallback provider (same picker as `jinn-agent model`)
+    jinn-agent fallback remove        Remove a fallback provider from the chain
+    jinn-agent config                 View configuration
+    jinn-agent config edit            Edit config in $EDITOR
+    jinn-agent config set model gpt-4 Set a config value
+    jinn-agent gateway                Run messaging gateway
+    jinn-agent -s dev-tools,github-auth
+    jinn-agent -w                     Start in isolated git worktree
+    jinn-agent gateway install        Install gateway background service
+    jinn-agent sessions list          List past sessions
+    jinn-agent sessions browse        Interactive session picker
+    jinn-agent sessions rename ID T   Rename/title a session
+    jinn-agent logs                   View agent.log (last 50 lines)
+    jinn-agent logs -f                Follow agent.log in real time
+    jinn-agent logs errors            View errors.log
+    jinn-agent logs --since 1h        Lines from the last hour
+    jinn-agent debug share             Upload debug report for support
+    jinn-agent update                 Update to latest version
+    jinn-agent dashboard              Start web UI dashboard (port 9119)
+    jinn-agent dashboard --stop       Stop running dashboard processes
+    jinn-agent dashboard --status     List running dashboard processes
 
 For more help on a command:
-    hermes <command> --help
+    jinn-agent <command> --help
 """
 
 
@@ -89,8 +89,8 @@ def build_top_level_parser():
     other subparsers via ``subparsers.add_parser(...)``.
     """
     parser = argparse.ArgumentParser(
-        prog="hermes",
-        description="Hermes Agent - AI assistant with tool-calling capabilities",
+        prog="jinn-agent",
+        description="jinn-agent - AI assistant with tool-calling capabilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EPILOGUE,
     )
@@ -132,7 +132,7 @@ def build_top_level_parser():
         help=(
             "Provider override for this invocation (e.g. openrouter, anthropic). "
             "Applies to -z/--oneshot and --tui. The persistent provider lives in config.yaml "
-            "under model.provider — use `hermes setup` or edit the file to change it."
+            "under model.provider — use `jinn-agent setup` or edit the file to change it."
         ),
     )
     parser.add_argument(
@@ -251,7 +251,7 @@ def build_top_level_parser():
     chat_parser = subparsers.add_parser(
         "chat",
         help="Interactive chat with the agent",
-        description="Start an interactive chat session with Hermes Agent",
+        description="Start an interactive chat session with the agent",
     )
     chat_parser.add_argument(
         "-q", "--query", help="Single query (non-interactive mode)"
@@ -378,7 +378,7 @@ def build_top_level_parser():
         "--safe-mode",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Troubleshooting mode: disable ALL customizations — user config, AGENTS.md/memory injection, plugins, and MCP servers (implies --ignore-user-config and --ignore-rules). Use to isolate whether a problem comes from your setup or from Hermes itself.",
+        help="Troubleshooting mode: disable ALL customizations — user config, AGENTS.md/memory injection, plugins, and MCP servers (implies --ignore-user-config and --ignore-rules). Use to isolate whether a problem comes from your setup or from the agent itself.",
     )
     chat_parser.add_argument(
         "--source",
