@@ -37,6 +37,7 @@ export function tierFromRaw(value: number): 'self-signed' | 'committed' | 'attes
  *   `envelope:<cid>`    — execution evidence
  *   `evaluation:<cid>`  — evaluation verdict
  *   `capture:<cid>`     — capture
+ *   `skill:<cid>`       — layer-2 skill (no capture-enrichment)
  */
 export function parseEnvelopeKey(key: string): { kind: string; cid: string } | null {
   const colon = key.indexOf(':');

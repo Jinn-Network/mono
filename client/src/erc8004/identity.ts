@@ -86,7 +86,14 @@ export { IDENTITY_REGISTRY_SET_METADATA_ABI, PAYLOAD_TUPLE, PAYLOAD_TUPLE_V2 };
 export type ExecutionTier = 0 | 1 | 3;
 
 /** Metadata key prefix. See payload-schema §6.1. */
-export type ContentKind = 'envelope' | 'evaluation' | 'capture';
+export type ContentKind = 'envelope' | 'evaluation' | 'capture' | 'skill';
+
+const CONTENT_KINDS: readonly ContentKind[] = [
+  'envelope',
+  'evaluation',
+  'capture',
+  'skill',
+] as const;
 
 /**
  * v1 payload as caller-friendly hex strings. The encoder validates and
@@ -427,6 +434,33 @@ export function encodeExecutionPayloadV2(payload: ExecutionPayloadV2): Hex {
 /** Build the `<kind>:<cid>` metadata key per payload-schema §6.1. */
 export function buildMetadataKey(kind: ContentKind, cid: string): string {
   return `${kind}:${cid}`;
+}
+
+/** Parse a `<kind>:<cid>` metadata key. Returns null when kind is unknown. */
+export function parseMetadataKey(key: string): { kind: ContentKind; cid: string } | null {
+  const colon = key.indexOf(':');
+  if (colon <= 0 || colon === key.length - 1) return null;
+  const kind = key.slice(0, colon);
+  if (!(CONTENT_KINDS as readonly string[]).includes(kind)) return null;
+  return { kind: kind as ContentKind, cid: key.slice(colon + 1) };
+}
+
+/**
+ * Resolve the anchor ContentKind from a caller-supplied metadataKey and the
+ * published envelope CID. Live publish paths pass metadataKey through from
+ * capture (`capture:<cid>`) or skill (`skill:<cid>`) callers.
+ */
+export function contentKindForAnchor(metadataKey: string, envelopeCid: string): ContentKind {
+  const parsed = parseMetadataKey(metadataKey);
+  if (!parsed) {
+    throw new Error(`invalid metadataKey for anchor: ${metadataKey}`);
+  }
+  if (parsed.cid !== envelopeCid) {
+    throw new Error(
+      `metadataKey cid ${parsed.cid} does not match envelopeCid ${envelopeCid}`,
+    );
+  }
+  return parsed.kind;
 }
 
 // ── Publisher ────────────────────────────────────────────────────────────────

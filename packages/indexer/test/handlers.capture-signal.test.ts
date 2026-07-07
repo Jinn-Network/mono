@@ -105,14 +105,15 @@ beforeEach(() => {
 
 const ANCHOR_TX = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
 
-async function runCaptureEvent(
+async function runMetadataEvent(
+  metadataKey: string,
   bodies: Record<string, unknown>,
   eventOverrides: { timestamp?: bigint; txHash?: `0x${string}` } = {},
 ): Promise<void> {
   await handleMetadataSet({
     event: metadataSetEvent(
       {
-        metadataKey: `capture:${WRAPPER_CID}`,
+        metadataKey,
         metadataValue: envelopePayloadV2({ tier: 0, manifestHash: MANIFEST_HASH }),
       },
       eventOverrides,
@@ -125,6 +126,13 @@ async function runCaptureEvent(
     ipfsGateway: 'https://gw.example',
     fetchImpl: ipfsFetch(bodies),
   });
+}
+
+async function runCaptureEvent(
+  bodies: Record<string, unknown>,
+  eventOverrides: { timestamp?: bigint; txHash?: `0x${string}` } = {},
+): Promise<void> {
+  await runMetadataEvent(`capture:${WRAPPER_CID}`, bodies, eventOverrides);
 }
 
 describe('capture envelope enrichment → captureEnvelopeMeta', () => {
@@ -197,6 +205,19 @@ describe('capture envelope enrichment → captureEnvelopeMeta', () => {
         [WRAPPER_CID]: wrapperBody(),
         [ARTIFACT_CID]: artifactBody(traceEnvelope()),
       }),
+    });
+    expect(db.rows(captureEnvelopeMeta)).toHaveLength(0);
+  });
+
+  it('does not capture-enrich skill anchors (#1439)', async () => {
+    await runMetadataEvent(`skill:${WRAPPER_CID}`, {
+      [WRAPPER_CID]: wrapperBody(),
+      [ARTIFACT_CID]: artifactBody(traceEnvelope()),
+    });
+    expect(db.rows(envelope)).toHaveLength(1);
+    expect(db.rows(envelope)[0]).toMatchObject({
+      metadataKey: `skill:${WRAPPER_CID}`,
+      kind: 'skill',
     });
     expect(db.rows(captureEnvelopeMeta)).toHaveLength(0);
   });

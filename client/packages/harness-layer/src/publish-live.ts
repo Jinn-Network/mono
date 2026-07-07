@@ -16,7 +16,7 @@ import { uploadToIpfs } from '../../../src/adapters/mech/ipfs.js';
 import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import {
   codeDigestSha256ToBytes32,
-  encodeExecutionPayloadV2,
+  contentKindForAnchor,
   IdentityPublisher,
   modeStringToFlag,
   type ExecutionPayloadV2,
@@ -89,7 +89,7 @@ export function createLivePublishDeps(config: LivePublishConfig): HarnessPublish
       const cid = await uploadToIpfs(ipfsRegistryUrl, envelope);
       return { cid, sha256: sha256Hex(canonicalJson(envelope)), endpoint, priceUsdc: '0' };
     },
-    anchorEnvelope: async ({ envelopeCid, envelopeHash, envelope }) => {
+    anchorEnvelope: async ({ metadataKey, envelopeCid, envelopeHash, envelope }) => {
       const payload: ExecutionPayloadV2 = {
         version: 2,
         tier: 0,
@@ -100,8 +100,9 @@ export function createLivePublishDeps(config: LivePublishConfig): HarnessPublish
         implName: envelope.executor.implName,
         modeFlag: modeStringToFlag(envelope.executor.mode ?? 'train'),
       };
+      const contentKind = contentKindForAnchor(metadataKey, envelopeCid);
       const { txHash, blockNumber } = await identityPublisher.publishContentV2({
-        kind: 'capture',
+        kind: contentKind,
         cid: envelopeCid,
         payload,
       });

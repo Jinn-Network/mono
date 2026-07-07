@@ -28,6 +28,8 @@ export {
   IdentityPublisher,
   PayloadValidationError,
   buildMetadataKey,
+  parseMetadataKey,
+  contentKindForAnchor,
   encodeExecutionPayload,
   encodeExecutionPayloadV2,
   validatePayload,

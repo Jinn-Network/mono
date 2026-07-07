@@ -7,6 +7,7 @@ import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import type { IdentityPublisher, ExecutionPayloadV2 } from '../erc8004/index.js';
 import {
   codeDigestSha256ToBytes32,
+  contentKindForAnchor,
   encodeExecutionPayloadV2,
   modeStringToFlag,
 } from '../erc8004/index.js';
@@ -137,8 +138,9 @@ export function createLiveCapturePublisher(options: LiveCapturePublisherOptions)
           };
           const payloadHex = encodeExecutionPayloadV2(payload);
           const publisher = options.identityPublisher!;
+          const contentKind = contentKindForAnchor(metadataKey, envelopeCid);
           const { txHash, blockNumber } = await publisher.publishContentV2({
-            kind: 'capture',
+            kind: contentKind,
             cid: envelopeCid,
             payload,
           });
@@ -146,7 +148,7 @@ export function createLiveCapturePublisher(options: LiveCapturePublisherOptions)
             options.store.saveErc8004Anchor({
               envelopeId: envelopeHash,
               envelopeCid,
-              contentKind: 'capture',
+              contentKind,
               metadataKey,
               agentId: publisher.agent.toString(),
               chainId: publisher.chainId,

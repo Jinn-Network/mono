@@ -13,6 +13,8 @@ import {
   IDENTITY_REGISTRY_SET_METADATA_ABI,
   PayloadValidationError,
   buildMetadataKey,
+  contentKindForAnchor,
+  parseMetadataKey,
   encodeExecutionPayload,
   encodeExecutionPayloadV2,
   validatePayload,
@@ -253,6 +255,34 @@ describe('buildMetadataKey', () => {
     expect(buildMetadataKey('evaluation', 'bafyverdict001'))
       .toBe('evaluation:bafyverdict001');
   });
+
+  it('builds skill key as "skill:<cid>"', () => {
+    expect(buildMetadataKey('skill', 'bafyskill001'))
+      .toBe('skill:bafyskill001');
+  });
+});
+
+describe('parseMetadataKey', () => {
+  it('parses skill keys', () => {
+    expect(parseMetadataKey('skill:bafyskill001')).toEqual({
+      kind: 'skill',
+      cid: 'bafyskill001',
+    });
+  });
+
+  it('rejects unknown kinds', () => {
+    expect(parseMetadataKey('plugin:bafyplugin')).toBeNull();
+  });
+});
+
+describe('contentKindForAnchor', () => {
+  it('returns skill for skill metadata keys', () => {
+    expect(contentKindForAnchor('skill:bafyskill001', 'bafyskill001')).toBe('skill');
+  });
+
+  it('rejects cid mismatch', () => {
+    expect(() => contentKindForAnchor('skill:bafy-a', 'bafy-b')).toThrow(/does not match/);
+  });
 });
 
 // ── publishContent — calldata + lifecycle ─────────────────────────────────────
@@ -457,5 +487,26 @@ describe('IdentityPublisher.publishContentV2', () => {
 
     const call = decodeSetMetadataCall(sendTransaction.mock.calls[0]![0] as { to: Hex; data: Hex });
     expect(call.args[1]).toBe('envelope:bafyenvelope004');
+  });
+
+  it('uses "skill:" prefix when kind=skill (#1439)', async () => {
+    const { walletClient, publicClient, sendTransaction } = makeMocks();
+    const publisher = new IdentityPublisher({
+      identityRegistryAddress: REGISTRY,
+      agentId: AGENT_ID,
+      walletClient,
+      publicClient,
+    });
+
+    const cid = 'bafyskill005';
+    await publisher.publishContentV2({
+      kind: 'skill',
+      cid,
+      payload: V2_VECTOR_INPUT,
+    });
+
+    const call = decodeSetMetadataCall(sendTransaction.mock.calls[0]![0] as { to: Hex; data: Hex });
+    expect(call.args[1]).toBe(`skill:${cid}`);
+    expect(call.args[2]).toBe(encodeExecutionPayloadV2(V2_VECTOR_INPUT));
   });
 });
