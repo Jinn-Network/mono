@@ -22,6 +22,7 @@ branding:
   help_header: "Available Commands"
   prompt_symbol: "❯"
   credit: "Jinn Network"
+  portal_label: "Provider Portal"
 
 banner_logo: |-
   [bold #a8c8ea]     ██╗ ██╗ ███╗   ██╗ ███╗   ██╗         █████╗   ██████╗  ███████╗ ███╗   ██╗ ████████╗[/]

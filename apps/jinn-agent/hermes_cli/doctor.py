@@ -1118,13 +1118,15 @@ def run_doctor(args):
         )
 
         nous_status = get_nous_auth_status()
-        # Default skin's `credit` key is unset, so this falls back to "Nous" —
-        # reconstructing the original literal "Nous Portal auth" byte-for-byte.
-        _portal_brand = get_active_skin().get_branding("credit", "Nous")
+        # `portal_label` is the FULL phrase ("Nous Portal" upstream, "Provider
+        # Portal" under the jinn skin) — the portal is Nous Research's own
+        # third-party service, not our brand, so this is a neutral label
+        # rather than a reuse of the `credit` ("Jinn Network") key.
+        _portal_label = get_active_skin().get_branding("portal_label", "Nous Portal")
         if nous_status.get("logged_in"):
-            check_ok(f"{_portal_brand} Portal auth", "(logged in)")
+            check_ok(f"{_portal_label} auth", "(logged in)")
         else:
-            check_warn(f"{_portal_brand} Portal auth", "(not logged in)")
+            check_warn(f"{_portal_label} auth", "(not logged in)")
 
         codex_status = get_codex_auth_status()
         if codex_status.get("logged_in"):

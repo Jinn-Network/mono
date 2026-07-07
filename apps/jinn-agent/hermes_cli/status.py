@@ -254,9 +254,12 @@ def show_status(args):
         or (nous_account_info and nous_account_info.inference_credential_present)
     )
     nous_error = nous_status.get("error")
-    # Default skin's `credit` key is unset, so this falls back to "Nous" —
-    # reconstructing the original literal "Nous Portal" byte-for-byte.
-    _portal_brand = get_active_skin().get_branding("credit", "Nous")
+    # `portal_label` is the FULL phrase ("Nous Portal" upstream, "Provider
+    # Portal" under the jinn skin) — the portal is Nous Research's own
+    # third-party service, not our brand, so this is a neutral label rather
+    # than a reuse of the `credit` ("Jinn Network") key.
+    _portal_label = get_active_skin().get_branding("portal_label", "Nous Portal")
+    _portal_brand = _portal_label.rsplit(" ", 1)[0]  # "Nous" / "Provider" — bare noun form
     if nous_logged_in:
         nous_label = "logged in"
     elif nous_inference_present:
@@ -264,7 +267,7 @@ def show_status(args):
     else:
         nous_label = "not logged in (run: jinn-agent portal)"
     print(
-        f"  {f'{_portal_brand} Portal':<12}  {check_mark(nous_logged_in)} "
+        f"  {_portal_label:<12}  {check_mark(nous_logged_in)} "
         f"{nous_label}"
     )
     portal_url = nous_status.get("portal_base_url") or "(unknown)"
@@ -360,9 +363,9 @@ def show_status(args):
         print()
         print(color(f"◆ {_portal_brand} Tool Gateway", Colors.CYAN, Colors.BOLD))
         if not features.nous_auth_present:
-            print(f"  {_portal_brand} Portal   ✗ not logged in")
+            print(f"  {_portal_label}   ✗ not logged in")
         else:
-            print(f"  {_portal_brand} Portal   ✓ managed tools available")
+            print(f"  {_portal_label}   ✓ managed tools available")
         for feature in features.items():
             if feature.managed_by_nous:
                 state = f"active via {_portal_brand} subscription"
