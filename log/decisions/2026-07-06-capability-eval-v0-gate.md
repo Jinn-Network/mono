@@ -3,7 +3,7 @@ id: DR-2026-07-06
 title: Capability-eval v0 gate — corpus-connected harness PASSES iff quality non-inferior (δ=5pp) AND cost strictly lower (both-solve set), as an intersection-union test at α=0.05, on a new power-sized contested-band held-out slate; reuse the DR-2026-06-02-b stat/slate machinery, do not rebuild
 date: 2026-07-06
 verb: Design
-status: draft
+status: ratified
 authors: Ritsu (design session — own the v0 capability gate for the harness network)
 relates-to: >
   spec/2026-07-06-capability-eval-v0.md (the methodology this DR ratifies the gate for),
@@ -141,6 +141,6 @@ freeze corpus → draw slate disjoint from it → publish → distillation exclu
 
 ## Status / next
 
-Draft. Ratifies the gate for review before the rig is built. The rig is a follow-on `feat` gated
-on sign-off of the spec; a pilot (N≈20–30, R=3) to estimate effect size for the final power calc
-is in-scope for that `feat`.
+**Ratified** 2026-07-07 (operator sign-off). The rig and pilot harness are in progress on
+`claude/gallant-dijkstra-768dc8`. Distillation MUST consume the published `cap-v0` slate boundary
+via `excludeHeldOutSlate` once the slate artifact lands (tracking: filed at ratification).
