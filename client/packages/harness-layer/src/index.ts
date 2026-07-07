@@ -114,6 +114,16 @@ export {
 } from './distill.js';
 
 export {
+  threeArmMeasurement,
+  pilotPower,
+  type ArmResult,
+  type ArmComparison,
+  type PilotPower,
+  type ThreeArmResult,
+  type ShipVerdict,
+} from './measurement.js';
+
+export {
   createLivePublishDeps,
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,
