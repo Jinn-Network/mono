@@ -51,6 +51,12 @@ export interface PilotConfig {
   maxInstances: number;
   upstreamRepoDir: string;
   jinnAgentBin: string;
+  /** Hard cap per grade (ms). Default 10 min: amd64 SWE-rebench images can wedge
+   *  indefinitely under Apple-Silicon emulation, and the eval runner's own default
+   *  is 2h — far too long for a pilot. A timed-out grade becomes ungradeable and
+   *  the run CONTINUES (it never hangs the whole pilot). Real runs on a Linux
+   *  amd64 host can raise this. */
+  gradeTimeoutMs: number;
   dryRun: boolean;
 }
 
@@ -69,6 +75,7 @@ function parseArgs(argv: string[]): PilotConfig {
     maxInstances: Infinity,
     upstreamRepoDir: join(homedir(), '.jinn-client', 'SWE-rebench-V2-upstream'),
     jinnAgentBin: join(homedir(), '.local', 'bin', 'jinn-agent'),
+    gradeTimeoutMs: 600_000,
     dryRun: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -81,6 +88,7 @@ function parseArgs(argv: string[]): PilotConfig {
       case '--max-instances': cfg.maxInstances = Number(argv[++i]); break;
       case '--upstream-repo-dir': cfg.upstreamRepoDir = String(argv[++i]); break;
       case '--jinn-agent-bin': cfg.jinnAgentBin = String(argv[++i]); break;
+      case '--grade-timeout-ms': cfg.gradeTimeoutMs = Number(argv[++i]); break;
       case '--instances': {
         // JSON array of {instance_id, hf_dataset, hf_split}
         cfg.instances = JSON.parse(String(argv[++i])) as PilotInstanceRef[];
@@ -192,7 +200,7 @@ async function gradeOne(cfg: PilotConfig, row: HfRow, patch: string): Promise<bo
     console.warn(`[pilot]   empty patch for ${row.instance_id} — agent produced no diff; scoring as not-resolved`);
     return false; // empty patch never resolves
   }
-  const runner = new PythonEvalRunner({ upstreamRepoDir: cfg.upstreamRepoDir });
+  const runner = new PythonEvalRunner({ upstreamRepoDir: cfg.upstreamRepoDir, evalTimeoutMs: cfg.gradeTimeoutMs });
   try {
     const result = await runner.runEval({
       instance_id: row.instance_id,
