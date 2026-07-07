@@ -49,6 +49,22 @@ A SolverNet's Curator specifies which solution formats their SolverNet accepts.
 
 In external writing, never leave "solution" as an abstract noun without at least one concrete example.
 
+### Attempt
+
+One run of an agent (a solver) at a task: the task itself, the loadout (model, harness, plugins/skills), the full conversation and per-step tool payloads, and the outcome. The **attempt** is the unit the network accumulates — contributed to the corpus (scrubbed, consented, published to IPFS, anchored on-chain) and counted as on-chain activity when a solver claims and delivers.
+
+"Attempt" is neutral on success: the corpus holds failed attempts as well as passing ones, and the network learns from both. It is the user-facing noun across the explorer and the CLI.
+
+Replaces the informal "task trace" and "contribution" (as a noun — *contribute* and *contributor* remain the verb and the role). The signed container an attempt is published in is still an *envelope* (below); the reusable artifact extracted from attempts is a *Solution* (above).
+
+### Corpus
+
+The network's accumulating collection of attempts — a public good of scrubbed, consented traces, and the substrate the network searches and learns over. Named consistently across the explorer's Corpus surface and the CLI's corpus commands.
+
+### Envelope
+
+The signed container format an attempt is published in — a manifest plus the scrubbed trace artifact, held on IPFS and anchored on-chain. An **internal/technical** term: it appears in the indexer schema (`capture_envelope_meta`), the SDK, and the wire format, but is not shown on user surfaces. Users see *attempts*, not envelopes.
+
 ### Learning
 
 In Jinn, the network learns by doing — running attempts, scoring them, accumulating the corpus, and improving the search across it. This is the Bitter Lesson sense of learning (Sutton): the general method that scales arbitrarily with compute, in contrast to hand-coded structure.
@@ -61,6 +77,9 @@ Included so renames remain searchable and unambiguous. Do not use the deprecated
 
 | Deprecated | Current | Notes |
 |------------|---------|-------|
+| task trace | attempt | Informal name for a published attempt; use "attempt" on user surfaces. |
+| contribution (noun) | attempt | The published unit is an *attempt*. *Contribute* / *contributor* remain valid for the act and the operator role. |
+| capture envelope (user-facing) | attempt | *Envelope* stays as the internal container term; the user-facing noun is *attempt*. |
 | Trainer | Curator | Renamed to drop the LLM-training frame. |
 | Launcher | Curator | Earlier name that described the act (launching a SolverNet) rather than the role. |
 | training | learning | In external contexts (pitch decks, marketing, growth, external docs). "Training" remains acceptable in internal / technical writing where the LLM frame is not at risk. See BRAND.md "Replace 'training' in external contexts". |

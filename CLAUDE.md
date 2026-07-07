@@ -484,6 +484,21 @@ A component may have zero entries on any axis (e.g. a read-only component has no
 
 Snowflake approvals are recorded in the PR thread; recurring patterns should graduate to a shared internal package rather than living as one-offs per app.
 
+### Show, don't narrate — no helper-text cruft
+
+**A frontend shows data; it does not narrate it.** Do not add caption, subtitle, legend, or footnote text whose only job is to describe, restate, or hedge what the UI already displays. A label plus its value is enough. This is a standing rule: remove such text on sight, and never add it.
+
+"Helper-text cruft" is any of:
+
+- **Restating the numbers as a sentence.** A card that already shows the stats does not also need "6 attempts contributed by 1 operator, in 2 clusters." Show the stats.
+- **Narrating where the data lives or what a link does.** "Both links leave the explorer." / "the full payloads live in the IPFS envelope below." / "every trace: summary · steps · IPFS ref · anchor." The link and the section already say this.
+- **Decorative status captions.** "launched · accepting tasks" under a running count; "newest first" is fine (it states the sort), but a mood caption is not.
+- **Instructions for self-evident controls.** A Prev/Next pager needs no "click to page."
+
+The test: if you deleted the sentence, would the user lose any *information they can't already see*? If no, delete it.
+
+**If a term genuinely needs explaining, use a tooltip, not permanent caption text.** An `InfoTooltip` (or equivalent) puts the explanation one click away for the person who needs it and out of the way for everyone else. Reserve prose for empty states (which must say what fills them) and error states (which must say what failed and how to retry) — there, plain words are the content, not cruft.
+
 ### Design system
 
 See §Design System below — `BRAND.md` for voice and posture, `DESIGN.md` / `DESIGN.json` for tokens, and the non-negotiables (no emoji, no decorative gradients, softened-brutalist corners).

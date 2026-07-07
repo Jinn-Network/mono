@@ -14,12 +14,14 @@ import type { ReactNode, CSSProperties } from 'react';
 export interface CardProps {
   /** Optional caps-mono label shown at top with a hairline divider below */
   title?: string;
+  /** Optional element pinned to the right of the title row (e.g. a link/button) */
+  action?: ReactNode;
   children?: ReactNode;
   style?: CSSProperties;
   className?: string;
 }
 
-export function Card({ title, children, style, className }: CardProps) {
+export function Card({ title, action, children, style, className }: CardProps) {
   return (
     <section
       className={className}
@@ -42,6 +44,10 @@ export function Card({ title, children, style, className }: CardProps) {
         <>
           <div
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
               fontFamily: 'var(--font-mono)',
               fontSize: 11,
               fontWeight: 500,
@@ -51,7 +57,8 @@ export function Card({ title, children, style, className }: CardProps) {
               marginBottom: 16,
             }}
           >
-            {title}
+            <span>{title}</span>
+            {action}
           </div>
           <hr
             style={{

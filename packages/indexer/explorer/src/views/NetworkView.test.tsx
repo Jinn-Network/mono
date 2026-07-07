@@ -63,19 +63,33 @@ function makeWrapper() {
   return { Wrapper, qc };
 }
 
+const json = (body: unknown, status = 200) =>
+  Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+
+// The Dashboard renders CorpusCard, which fetches /distribution-signal and
+// /explorer/corpus. Serve those an empty corpus so the card stays quiet and
+// only the Network surface under test drives the assertions.
+const EMPTY_SIGNAL = { rows: [], envelopeTotal: 0, contributorTotal: 0, seedsExcluded: 0, includeSeeds: false };
+const EMPTY_CORPUS = { items: [], total: 0, seedsExcluded: 0, includeSeeds: false, lastIndexedBlock: '0', lastIndexedAt: new Date().toISOString(), behindHead: null };
+
 function mockFetchNetwork(fixture: NetworkResponse) {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(JSON.stringify(fixture), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  vi.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+    const u = String(url);
+    if (u.includes('/distribution-signal')) return json(EMPTY_SIGNAL);
+    if (u.includes('/explorer/corpus')) return json(EMPTY_CORPUS);
+    return json(fixture);
+  });
 }
 
 function mockFetchNetworkError() {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response('Internal Server Error', { status: 500 }),
-  );
+  vi.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+    const u = String(url);
+    // Only the network endpoint fails; the card's endpoints resolve empty so
+    // the ONLY retry button on the page is the Network view's.
+    if (u.includes('/distribution-signal')) return json(EMPTY_SIGNAL);
+    if (u.includes('/explorer/corpus')) return json(EMPTY_CORPUS);
+    return Promise.resolve(new Response('Internal Server Error', { status: 500 }));
+  });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -121,7 +135,7 @@ describe('NetworkView', () => {
     // render shares as percentages. The text-match above is the load-bearing assertion.)
   });
 
-  it('renders the Activity strip with operators/SolverNets/settlement', async () => {
+  it('renders the Activity strip with operators + SolverNets (no Last settlement)', async () => {
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
@@ -129,7 +143,9 @@ describe('NetworkView', () => {
       expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/solvernets running/i)).toBeInTheDocument();
-    expect(screen.getByText(/last settlement/i)).toBeInTheDocument();
+    // Last settlement + the "launched · accepting tasks" caption were removed.
+    expect(screen.queryByText(/last settlement/i)).toBeNull();
+    expect(screen.queryByText(/launched · accepting tasks/i)).toBeNull();
     // everAttemptedOperators = 7 (the surviving operator-count signal)
     expect(screen.getByText('7')).toBeInTheDocument();
     // solverNetsRunning = 2

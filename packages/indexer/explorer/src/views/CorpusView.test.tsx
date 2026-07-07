@@ -79,22 +79,13 @@ function mockFetch(fixture: CorpusListResponse) {
   );
 }
 
-/**
- * URL-capturing mock: records every requested URL and returns the seeded or
- * envelope-only fixture based on the `include` query param. Lets tests assert
- * the exact query string the view drove.
- */
+/** URL-capturing mock: records every requested URL, always returns FIXTURE. */
 function mockFetchCapturing(): string[] {
   const calls: string[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((url) => {
-    const u = String(url);
-    calls.push(u);
-    const seeded = u.includes('include=seeded');
-    const body: CorpusListResponse = seeded
-      ? { ...FIXTURE, includeSeeds: true, seedsExcluded: 0, total: 5 }
-      : FIXTURE;
+    calls.push(String(url));
     return Promise.resolve(
-      new Response(JSON.stringify(body), {
+      new Response(JSON.stringify(FIXTURE), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -123,19 +114,17 @@ describe('CorpusView', () => {
     });
   });
 
-  it('renders a row per corpus item with summary + tier chip', async () => {
+  it('renders a row per attempt with its summary', async () => {
     mockFetch(FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<CorpusView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText('fix flaky retry in http client')).toBeInTheDocument();
       expect(screen.getByText('null-deref in markdown table parser')).toBeInTheDocument();
-      expect(screen.getByText('tests-passed')).toBeInTheDocument();
-      expect(screen.getByText('evaluator-verified')).toBeInTheDocument();
     });
   });
 
-  it('renders each row as a deep-link to /corpus/:cid', async () => {
+  it('renders each attempt summary as a deep-link to /corpus/:cid', async () => {
     mockFetch(FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<CorpusView />, { wrapper: Wrapper });
@@ -145,22 +134,37 @@ describe('CorpusView', () => {
     });
   });
 
-  it('states the total and the seeds-excluded count', async () => {
+  it('links each contributor out to the on-chain record on basescan', async () => {
     mockFetch(FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<CorpusView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText(/2 contributed task traces/i)).toBeInTheDocument();
-      expect(screen.getByText(/3 seeds excluded/i)).toBeInTheDocument();
+      const link = screen.getByText(/0x91be…44a2/).closest('a');
+      expect(link).toHaveAttribute(
+        'href',
+        `https://sepolia.basescan.org/address/${ITEM_A.contributor}`,
+      );
+      expect(link).toHaveAttribute('target', '_blank');
     });
   });
 
-  it('renders the empty state in the explorer voice when there are no items', async () => {
+  it('states the attempt total (no seed cruft)', async () => {
+    mockFetch(FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText(/^2 attempts$/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/seeds excluded/i)).toBeNull();
+    expect(screen.queryByText(/task traces/i)).toBeNull();
+  });
+
+  it('renders the empty state in the explorer voice when there are no attempts', async () => {
     mockFetch(EMPTY_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<CorpusView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText(/No contributions yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/No attempts yet/i)).toBeInTheDocument();
     });
   });
 
@@ -174,18 +178,28 @@ describe('CorpusView', () => {
     expect(screen.getByText('Retry')).toBeInTheDocument();
   });
 
-  it('renders the column headers', async () => {
+  it('renders the pruned column headers (Attempt · Cluster · Contributor · Age; no Tier/Steps)', async () => {
     mockFetch(FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<CorpusView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('Contribution')).toBeInTheDocument();
+      expect(screen.getByText('Attempt')).toBeInTheDocument();
       expect(screen.getByText('Cluster')).toBeInTheDocument();
-      expect(screen.getByText('Tier')).toBeInTheDocument();
       expect(screen.getByText('Contributor')).toBeInTheDocument();
-      expect(screen.getByText('Steps')).toBeInTheDocument();
       expect(screen.getByText('Age')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Tier')).toBeNull();
+    expect(screen.queryByText('Steps')).toBeNull();
+    expect(screen.queryByText('Contribution')).toBeNull();
+  });
+
+  it('has no seed filter on this surface', async () => {
+    mockFetch(FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(screen.getByText('Cluster')).toBeInTheDocument());
+    expect(screen.queryByText('include seeded')).toBeNull();
+    expect(screen.queryByText('envelope-only')).toBeNull();
   });
 
   it('renders StatusBar with last indexed block', async () => {
@@ -202,52 +216,33 @@ describe('CorpusView', () => {
     const calls = mockFetchCapturing();
     const { Wrapper } = makeWrapper();
     render(<CorpusView />, { wrapper: Wrapper });
-    // Default landing sort is createdAt desc — sent to the backend, not applied page-locally.
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     expect(calls[0]).toContain('sort=createdAt');
     expect(calls[0]).toContain('dir=desc');
   });
 
-  it('clicking a sort header refetches with the new sort key (server-side sort)', async () => {
+  it('clicking the Age header toggles the sort direction (server-side)', async () => {
     const calls = mockFetchCapturing();
     const { Wrapper } = makeWrapper('/corpus', { static: false });
     render(<CorpusView />, { wrapper: Wrapper });
-    await waitFor(() => expect(screen.getByText('Steps')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Age')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByText('Steps'));
-    // A new request goes out keyed on the stepCount column.
-    await waitFor(() => expect(calls.some((u) => u.includes('sort=stepCount'))).toBe(true));
+    fireEvent.click(screen.getByText('Age'));
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('sort=createdAt') && u.includes('dir=asc'))).toBe(true),
+    );
   });
 
   it('changing sort resets pagination to the first page (offset=0)', async () => {
     const calls = mockFetchCapturing();
-    // Land on page 2 (offset 50).
     const { Wrapper } = makeWrapper('/corpus?page=2', { static: false });
     render(<CorpusView />, { wrapper: Wrapper });
     await waitFor(() => expect(calls.some((u) => u.includes('offset=50'))).toBe(true));
-    // Wait for the header row to render before interacting with it.
     await waitFor(() => expect(screen.getByText('Cluster')).toBeInTheDocument());
 
-    // Switch sort column; the follow-up request must be back at offset 0.
     fireEvent.click(screen.getByText('Cluster'));
     await waitFor(() =>
       expect(calls.some((u) => u.includes('sort=cluster') && u.includes('offset=0'))).toBe(true),
-    );
-  });
-
-  it('the include-seeded toggle refetches with ?include=seeded and resets the page', async () => {
-    const calls = mockFetchCapturing();
-    const { Wrapper } = makeWrapper('/corpus?page=2', { static: false });
-    render(<CorpusView />, { wrapper: Wrapper });
-    await waitFor(() => expect(calls.some((u) => u.includes('offset=50'))).toBe(true));
-    await waitFor(() => expect(screen.getByText('include seeded')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByText('include seeded'));
-    // New query carries include=seeded AND is reset to the first page.
-    await waitFor(() =>
-      expect(
-        calls.some((u) => u.includes('include=seeded') && u.includes('offset=0')),
-      ).toBe(true),
     );
   });
 });

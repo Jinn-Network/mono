@@ -2,7 +2,7 @@
  * NetworkView — protocol-wide stats.
  *
  * Layout:
- *   1. Activity strip — distinct operators / SolverNets running / last settlement block.
+ *   1. Activity strip — distinct operators / SolverNets running.
  *   2. Network composition — HBars by mode / harness / model / plugin under an
  *      ALL-CAPS-MONO `NETWORK COMPOSITION` eyebrow.
  *   3. Enrichment coverage line + status bar.
@@ -26,7 +26,7 @@ import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { HBars } from '../components/HBars';
 import { CorpusCard } from '../components/CorpusCard';
-import { pct, int, block } from '../lib/format';
+import { pct, int } from '../lib/format';
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
@@ -67,25 +67,11 @@ function ActivityStrip({ data }: { data: NetworkResponse }) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(2, 1fr)',
         }}
       >
-        <ActivityCell
-          k="Active operators"
-          v={int(data.everAttemptedOperators)}
-          first
-        />
-        <ActivityCell
-          k="SolverNets running"
-          v={int(data.solverNetsRunning)}
-          sub="launched · accepting tasks"
-        />
-        <ActivityCell
-          k="Last settlement"
-          v={block(data.mostRecentSettlementBlock)}
-          sub={data.mostRecentSettlementBlock ? 'block' : 'no settled tasks yet'}
-          smaller
-        />
+        <ActivityCell k="Active operators" v={int(data.everAttemptedOperators)} first />
+        <ActivityCell k="SolverNets running" v={int(data.solverNetsRunning)} />
       </div>
     </Card>
   );
@@ -171,8 +157,8 @@ export function NetworkView() {
         gap: 28,
       }}
     >
-      {/* No page header — the chrome's Network tab is the wayfinder. The
-          per-SolverNet detail view is where coherent per-regime rates live. */}
+      {/* No page header — the logo is the wayfinder home. The per-SolverNet
+          detail view is where coherent per-regime rates live. */}
 
       {/* Loading state */}
       {isLoading && <NetworkSkeleton />}

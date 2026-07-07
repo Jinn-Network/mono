@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -16,7 +16,7 @@ const NETWORK_FIXTURE = {
   verdictsPass: 16,
   resolvedRate: 0.8,
   mostRecentSettlementBlock: null,
-  composition: { byMode: [], byHarness: [] },
+  composition: { byMode: [], byHarness: [], byModel: [], byPlugin: [] },
   enrichmentCoverage: { enrichedAttempts: 20, totalAttempts: 25, share: 0.8 },
   lastIndexedBlock: '12000000',
   lastIndexedAt: new Date().toISOString(),
@@ -89,15 +89,15 @@ describe('App', () => {
     render(<App />, { wrapper: Wrapper });
     // Logo wordmark
     expect(screen.getByText('jinn')).toBeInTheDocument();
-    // "Network" may appear in nav and view heading — both are fine
-    expect(screen.getAllByText('Network').length).toBeGreaterThan(0);
+    // Corpus leads the nav (Network is the logo's job now)
+    expect(screen.getAllByText('Corpus').length).toBeGreaterThan(0);
   });
 
-  it('renders NetworkView stub at "/"', () => {
+  it('renders the Dashboard at "/"', async () => {
     const { Wrapper } = makeWrapper('/');
     render(<App />, { wrapper: Wrapper });
-    // Both the nav link and the view heading say "Network"
-    expect(screen.getAllByText('Network').length).toBeGreaterThan(0);
+    // The dashboard's Activity strip lands once the network hook resolves.
+    await waitFor(() => expect(screen.getByText(/active operators/i)).toBeInTheDocument());
   });
 
   it('renders OperatorsView stub at "/operators"', () => {
@@ -120,15 +120,14 @@ describe('App', () => {
     expect(screen.getByText('404')).toBeInTheDocument();
   });
 
-  it('marks the correct nav item active for "/"', () => {
+  it('marks no nav item active on the Dashboard "/" (the logo is home)', () => {
     const { Wrapper } = makeWrapper('/');
     render(<App />, { wrapper: Wrapper });
-    // Find the nav link with aria-current (may be multiple "Network" elements)
-    const networkLinks = screen.getAllByText('Network');
-    const navLink = networkLinks.find(
-      (el) => el.getAttribute('aria-current') === 'page',
-    );
-    expect(navLink).toBeTruthy();
+    // No nav item owns "/", so none is aria-current there.
+    const active = screen
+      .getAllByText(/Corpus|SolverNets|Operators/)
+      .filter((el) => el.getAttribute('aria-current') === 'page');
+    expect(active).toHaveLength(0);
   });
 
   it('marks the correct nav item active for "/operators"', () => {

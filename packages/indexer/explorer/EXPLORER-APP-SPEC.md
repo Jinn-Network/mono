@@ -28,8 +28,8 @@ This is **UI domain modelling** with a state-machine flavour. Adding a route, ta
 The persistent shell: sticky header (logo, primary nav, search) plus the routing that switches the surface below it.
 
 - **Static**
-  - logo — Instrument Serif italic "jinn" + caps-mono "explorer"; links home
-  - nav items — `Network` (`/`), `SolverNets` (`/solvernets`), `Operators` (`/operators`); active-route detection is exact for `/`, prefix-match for deeper paths
+  - logo — Instrument Serif italic "jinn" + caps-mono "explorer"; links to the Dashboard (`/`)
+  - nav items — `Corpus` (`/corpus`), `SolverNets` (`/solvernets`), `Operators` (`/operators`); Corpus leads; active-route detection is prefix-match. There is **no `Network`/`Dashboard` nav item** — the logo is the way home, so a separate `/` item would be a duplicate.
   - active route
 - **Actions**
   - navigate — via nav item or logo
@@ -39,7 +39,7 @@ The persistent shell: sticky header (logo, primary nav, search) plus the routing
   - no such route — inline 404 for an unmatched path
 - **Collections** — none
 
-**Routes.** `/` → Network · `/solvernets` → SolverNets · `/solvernet/:cid` → SolverNet · `/operators` → Operators · `/operator/:addr` → Operator · `/explore/:cid` → redirect to `/solvernet/:cid` preserving the query string (back-compat) · fallback → 404.
+**Routes.** `/` → Dashboard (the Network aggregates surface, §2.3) · `/corpus` → Corpus index · `/corpus/:cid` → Corpus item · `/solvernets` → SolverNets · `/solvernet/:cid` → SolverNet · `/operators` → Operators · `/operator/:addr` → Operator · `/explore/:cid` → redirect to `/solvernet/:cid` preserving the query string (back-compat) · fallback → 404.
 
 ### 2.2 Freshness
 
@@ -56,20 +56,19 @@ How current the indexed data is. A single cross-cutting surface rendered as the 
 - **Actions** — none
 - **Collections** — none
 
-### 2.3 Network
+### 2.3 Network (the Dashboard)
 
-Protocol-wide aggregates across every SolverNet and operator. The home surface.
+Protocol-wide aggregates across every SolverNet and operator. The home surface, reached via the logo (`/`).
 
 - **Static**
   - headline rates — `resolvedRate`, `onChainResolvedRate` (envelope-truth vs on-chain raw; §3.2), both `number | null`
   - totals — `tasksPosted`, `tasksSettled`, `tasksRefunded`, `attempts`, `verdicts`, `verdictsPass`
   - `everAttemptedOperators` — distinct operators who ever attempted on this chain
   - `solverNetsRunning`
-  - `mostRecentSettlementBlock` (`string | null`)
   - verdict consistency — `{ matched, disagreed, total, agreementShare }`
   - enrichment coverage — `{ enrichedAttempts, totalAttempts, share }`
 - **Collections**
-  - activity strip — 3 cells: `everAttemptedOperators`, `solverNetsRunning`, `mostRecentSettlementBlock`
+  - activity strip — 2 cells: `everAttemptedOperators`, `solverNetsRunning`. (The former `mostRecentSettlementBlock` "Last settlement" cell and the "launched · accepting tasks" caption were removed as helper-text cruft — CLAUDE.md §Frontends "Show, don't narrate".)
   - composition — four rollups, each a list of `{ value, count, share }` sorted by count: `byMode`, `byHarness`, `byModel` (hidden until ≥1 real model name), `byPlugin`
 - **Actions**
   - retry — re-fetch on error
@@ -81,32 +80,35 @@ Protocol-wide aggregates across every SolverNet and operator. The home surface.
 
 ### 2.4 Corpus
 
-The network's accumulating body of contributed task-trace envelopes — the public good the loop produces. Distinct from Network aggregates (§2.3): Network counts on-chain task/verdict activity; Corpus is the contributed-envelope record and its content.
+The network's accumulating collection of **attempts** — the public good the loop produces. An *attempt* is one agent's run at a task: its task, loadout, conversation, per-step payloads, and outcome (canonical: [`../../../GLOSSARY.md`](../../../GLOSSARY.md) → *Attempt*, *Corpus*). Distinct from Network aggregates (§2.3): Network counts on-chain task/verdict activity; Corpus is the attempt record and its content.
 
-**Scope.** The **summary card** (clusters over enriched capture envelopes, seed-exclusion toggle) ships today as the "Distribution Signal" card on the Network view (#1314). Renaming/restructuring it to **Corpus** is [#1407](https://github.com/Jinn-Network/mono/issues/1407); the browsable **index + detail** views and the top-level tab are [#1406](https://github.com/Jinn-Network/mono/issues/1406). Fields below marked *(target)* are specified here so the model already reflects the intended state; they are not yet built.
+**Terminology.** This surface says **attempt** throughout — the term the rest of the explorer already uses (the Leaderboard/SolverNets/Operators "Attempts" column). The older surface-local names *task trace*, *capture envelope*, and *contribution* (as a noun) are retired; *contribute* / *contributor* remain for the act and the operator. *Envelope* stays the internal container term (the indexer's `capture_envelope_meta`, the IPFS wire format) and is not shown to viewers.
 
+The Corpus is three surfaces: the Dashboard **summary card**, the **index** (`/corpus`), and the **item detail** (`/corpus/:cid`).
+
+**Verifiability tier — deferred, not shown.** An attempt carries a `tier` (`user-accepted` | `tests-passed` | `evaluator-verified`), the Phase-B verifiability signal. On a pre-evaluator testnet every attempt is `user-accepted`, so a tier column/chip is monotone noise; it is **removed from every Corpus surface** and returns as a filter once evaluators populate the other tiers (Phase B.1). The `CorpusTierChip` primitive is retained unused for that return.
+
+**Summary card (Dashboard, §2.3).**
+- **Static** — two stats: attempt total (`envelopeTotal`, the Dashboard's one gold hero, §3.5) and distinct-cluster count. No operator count, no seed toggle.
+- **Collections** — latest 5 attempts, rendered with the **shared corpus table** (the same columns + row renderer as the index, so preview and roster read identically).
+- **Actions** — Browse the corpus → the index (a button in the card header); open attempt → detail.
+- **State messages** — empty ("No attempts yet — the corpus grows as operators publish them."); loading / error (shared, §3.1). No HBars, no cluster breakdown table, no footer legend.
+
+**Index (`/corpus`).**
+- **Static** — attempt total (`N attempts`). No seeds-excluded line, no seed filter — imported seeds stay excluded by the backend default, silently.
+- **Collections** — attempts, item shape `{ cid, summary, cluster, contributor, createdAt }` (plus `tier`, `model`, `stepCount` carried but not columned); newest-first; server-side sort over the full corpus before slicing; paginated consistent with §2.5/§2.7. Columns: **Attempt** (summary, 2-line clamp, → detail) · **Cluster** · **Contributor** (→ basescan address) · **Age**. Sortable: Cluster, Age. Removed from the roster: Tier, Steps, the content-hash subline.
+- **Actions** — open attempt → detail; sort (Cluster / Age); page; follow contributor → basescan address.
+- **State messages** — empty ("No attempts yet…"); loading / error (shared, §3.1).
+
+**Item detail (`/corpus/:cid`).** A single attempt at a stable, deep-linkable URL — the target the CLI's ledger and preview link to. Two columns: the attempt (left), its provenance + metadata (right).
 - **Static**
-  - total corpus items (`envelopeTotal`)
-  - seeds-excluded count — imported seeds are excluded from every number by default and the excluded total is stated plainly
-  - current seed filter — `envelope-only` (default) | `include-seeded`
-- **Collections**
-  - corpus clusters (summary card) — rows `{ cluster, envelopeCount, contributorCount, topTags[] }`, sorted by volume; low-volume clusters (< `LOW_VOLUME_THRESHOLD`) sectioned separately
-  - corpus items *(target — #1406, index view)* — item shape `{ cid, summary, cluster/harness, tier, contributor, tools[], model, createdAt }`; newest-first; paginated consistent with §2.5/§2.7 tables
-- **Actions**
-  - toggle seed filter — `envelope-only` / `include-seeded`, folds seeds back in live
-  - open item *(target)* — → detail
-  - view full corpus *(target)* — summary card → the Corpus tab
-  - follow IPFS ref *(target)* — external link to the envelope content
-  - follow on-chain anchor *(target)* — external link to the Base Sepolia ERC-8004 tx on basescan
-- **State messages**
-  - empty — "No contributions yet — signal appears as the corpus grows."
-  - loading / stale / error — shared with §3.1
-
-**Corpus item (detail — target, #1406).** A single envelope at a stable URL (e.g. `/corpus/:cid`), deep-linkable from the CLI's `/jinn ledger` and `/jinn preview`.
-- **Static** — full envelope: summary, model, tier (e.g. `user-accepted`), tags, contributor, tool steps/sequence, IPFS `ref`, on-chain `anchor`.
-- **Actions** — open IPFS content, open basescan anchor, back to index.
-- **Collections** — the tool steps of the trace.
-- **State messages** — not-found (unknown CID), loading, error.
+  - header — the summary as a one-line clamped headline, age, short CID. No tier chip.
+  - Task (left) — the full task text.
+  - Details (right) — Cluster (with an `InfoTooltip` explainer), Harness, Model, Contributor (→ basescan address), Tags.
+  - Provenance (right) — Origin (`contributed` | `imported seed`), IPFS content ref, on-chain anchor (Base Sepolia ERC-8004 tx on basescan).
+- **Collections** — **Steps** (left): every step's *full scrubbed payloads* — tool name, `args`, `result`, redacted-key count. The full payloads are **not indexed**; the detail view fetches them client-side from the IPFS trace artifact (manifest → public `ipfs` source → base64-decoded donation artifact; see §3.4). When no public source exists or the gateway is unreachable, it **falls back** to the indexed tool-name list.
+- **Actions** — open IPFS content, open basescan anchor, follow contributor → basescan, back to index.
+- **State messages** — not-found (unknown CID), loading, error; a payload-fetch miss degrades to the tool-name fallback (not an error).
 
 ### 2.5 SolverNets
 
@@ -209,7 +211,9 @@ All viewer-adjustable state (sort, direction, window, group, filters, raw, bucke
 
 ### 3.4 Deep links and external links
 
-Internal navigation uses the §2.1 routes; `/explore/:cid` preserves history deep-links. External links leave the explorer: a corpus item (§2.4) links to its IPFS content and its Base Sepolia ERC-8004 anchor on basescan. Constructing an explorer-or-basescan URL from a hash/CID is a single mapping concern, not a per-surface one — surfaces reference the mapping rather than baking literal URLs into their shapes.
+Internal navigation uses the §2.1 routes; `/explore/:cid` preserves history deep-links. External links leave the explorer: a corpus attempt (§2.4) links to its IPFS content, its Base Sepolia ERC-8004 anchor on basescan, and its **contributor** to the basescan address page (Legibility — the address is the independently verifiable receipt). Constructing an explorer-or-basescan URL from a hash/CID/address is a single mapping concern, not a per-surface one — surfaces reference the mapping (`basescanTxUrl`, `basescanAddressUrl`, `ipfsUrl`) rather than baking literal URLs into their shapes.
+
+The detail view's **client-side trace fetch** is a second, richer use of the IPFS mapping: to show an attempt's full per-step payloads (not indexed), it fetches the manifest at `ipfsUrl(cid)`, finds the public `kind: 'ipfs'` trace source, fetches and base64-decodes that donation artifact, and renders the scrubbed `args`/`result` per step. All rendered content is React text (auto-escaped) — the payloads are scrubbed but attacker-influenceable, so nothing is treated as HTML — and a byte cap bounds a hostile artifact. Any failure degrades to the indexed tool-name list.
 
 ### 3.5 One gold per surface
 
@@ -231,8 +235,7 @@ The explorer is pinned to `EXPLORER_CHAIN_ID` (Base Sepolia, 84532) for testnet.
 
 These are unresolved spec questions, not implementation TODOs.
 
-- **Corpus item detail (#1406).** Which envelope fields render in the detail view, and whether the tool steps show raw (args/results, scrubbed) or a summarised sequence. Ties to the #1406 design pass.
-- **Corpus as top-level nav.** Whether Corpus becomes a fourth primary nav item (#1406) or stays a Network-view card that links to a sub-route. The summary card (§2.4) and the tab may co-exist.
+- **Verifiability-tier return (Phase B.1).** When evaluators activate and `tests-passed` / `evaluator-verified` populate, how tier re-enters the Corpus surface — a filter, a column, or a chip — is an open design question. Until then tier is deferred (§2.4).
 - **Wired search (§2.1).** The search box is deferred; its result model (what a "SolverNet, operator, block" hit resolves to) is unspecified.
 - **Mainnet chain scope (§3.8).** Single-chain assumptions to unwind before a mainnet explorer.
 

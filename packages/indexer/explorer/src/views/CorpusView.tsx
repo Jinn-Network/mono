@@ -1,89 +1,31 @@
 /**
  * CorpusView — the corpus index (#1406).
  *
- * A browsable, sortable, paginated list of corpus items (published capture
- * envelopes). Matches the SolverNets / Operators roster idiom: page header +
- * DataTable + StatusBar. No gold accent on this surface (the roster surfaces
- * carry none; spec §3.5).
+ * A browsable, sortable, paginated list of attempts (published, scrubbed,
+ * consented task traces). Matches the SolverNets / Operators roster idiom: page
+ * header + DataTable + StatusBar. No gold accent on this surface (the roster
+ * surfaces carry none; spec §3.5).
  *
- * Sort, seed-filter, and page all live in URL state (spec §3.3) so a row's
- * list position is shareable. The backend is the source of ordering AND
- * pagination: sort is server-side over the FULL corpus before slicing, so a
- * sort claim holds across pages (not just the fetched page). Changing sort or
- * the seed filter resets the page to avoid stranding the viewer at a stale
- * offset.
+ * Columns are the shared corpus row (Attempt · Cluster · Contributor · Age);
+ * tier, step count, and the content-hash subline were dropped from the roster
+ * (tier is monotone on a pre-evaluator testnet; the rest live on the detail
+ * view). Sort and page live in URL state (spec §3.3) so a row's list position
+ * is shareable; sort is server-side over the FULL corpus before slicing, so a
+ * sort claim holds across pages. Changing sort resets the page to avoid
+ * stranding the viewer at a stale offset.
  *
- * Empty state: "No contributions yet…" in the explorer's voice.
+ * Empty state: "No attempts yet…" in the explorer's voice.
  */
 
-import { Link } from 'wouter';
 import { useCorpus } from '../lib/api';
 import type { CorpusItemRow } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
-import { DataTable, cellStyle, cellNumStyle, cellMutedStyle } from '../components/DataTable';
-import { CorpusTierChip, CorpusTagChip } from '../components/CorpusChips';
-import { SegmentedControl } from '../components/SegmentedControl';
+import { DataTable } from '../components/DataTable';
+import { corpusColumns, renderCorpusRow } from '../components/CorpusTable';
 import { useEnumParam, useNumParam, usePatchParams } from '../lib/url-state';
-import { int, shortCid, shortAddr, relUnix } from '../lib/format';
+import { int } from '../lib/format';
 
 const PAGE_SIZE = 25;
-
-// ── Seed filter (spec §2.4) ───────────────────────────────────────────────────
-
-type SeedFilter = 'envelope-only' | 'include-seeded';
-
-// ── Columns ───────────────────────────────────────────────────────────────────
-
-const COLUMNS = [
-  { key: 'summary', label: 'Contribution', sortable: false },
-  { key: 'cluster', label: 'Cluster', sortable: true },
-  { key: 'tier', label: 'Tier', sortable: true },
-  { key: 'contributor', label: 'Contributor', sortable: false },
-  { key: 'stepCount', label: 'Steps', numeric: true, sortable: true },
-  { key: 'createdAt', label: 'Age', numeric: true, sortable: true },
-];
-
-// ── Row renderer ──────────────────────────────────────────────────────────────
-
-function renderRow(row: CorpusItemRow) {
-  return (
-    <>
-      <td style={cellStyle}>
-        <Link
-          href={`/corpus/${encodeURIComponent(row.cid)}`}
-          style={{
-            color: 'var(--accent)',
-            textDecoration: 'none',
-            display: 'block',
-            lineHeight: 1.3,
-          }}
-        >
-          <span style={{ fontSize: 12.5 }}>{row.summary || '(no summary)'}</span>
-          <span
-            style={{
-              display: 'block',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              color: 'var(--fg-dim)',
-              marginTop: 2,
-            }}
-          >
-            {shortCid(row.cid)}
-          </span>
-        </Link>
-      </td>
-      <td style={cellStyle}>
-        {row.cluster ? <CorpusTagChip>{row.cluster}</CorpusTagChip> : <span style={{ color: 'var(--fg-dim)' }}>—</span>}
-      </td>
-      <td style={cellStyle}>
-        <CorpusTierChip tier={row.tier} />
-      </td>
-      <td style={cellMutedStyle}>{shortAddr(row.contributor)}</td>
-      <td className="data" style={cellNumStyle}>{int(row.stepCount)}</td>
-      <td className="data" style={{ ...cellNumStyle, color: 'var(--fg-muted)' }}>{relUnix(row.createdAt)}</td>
-    </>
-  );
-}
 
 // ── Pager ─────────────────────────────────────────────────────────────────────
 
@@ -152,21 +94,10 @@ function Pager({
 
 export function CorpusView() {
   const [page] = useNumParam('page', 0);
-  const [sort] = useEnumParam('sort', 'createdAt', [
-    'createdAt',
-    'cluster',
-    'tier',
-    'stepCount',
-  ]);
+  const [sort] = useEnumParam('sort', 'createdAt', ['createdAt', 'cluster']);
   const [dir] = useEnumParam('dir', 'desc', ['asc', 'desc']);
-  const [seedFilter] = useEnumParam('include', 'envelope-only', [
-    'envelope-only',
-    'include-seeded',
-  ]);
-  const includeSeeds = seedFilter === 'include-seeded';
-  // Coupled writes (sort/dir/filter all reset the page) go through one atomic
-  // patch — the per-key setters clobber each other in a single handler (see
-  // usePatchParams).
+  // Coupled writes (sort/dir both reset the page) go through one atomic patch —
+  // the per-key setters clobber each other in a single handler (usePatchParams).
   const patchParams = usePatchParams();
 
   const { data, isLoading, isError, refetch } = useCorpus({
@@ -176,7 +107,6 @@ export function CorpusView() {
     // ordering holds across pages.
     sort,
     dir: dir as 'asc' | 'desc',
-    includeSeeds,
   });
 
   function handleSort(key: string) {
@@ -184,12 +114,6 @@ export function CorpusView() {
     // Re-ordering the whole corpus invalidates the current offset — reset the
     // page in the SAME write so the viewer isn't stranded mid-list.
     patchParams({ sort: key, dir: nextDir, page: null });
-  }
-
-  function handleSeedFilter(next: SeedFilter) {
-    // The filtered set changes size; a stale offset could point past the end,
-    // so drop the page in the same atomic write as the filter change.
-    patchParams({ include: next === 'envelope-only' ? null : next, page: null });
   }
 
   function goToPage(next: number | null) {
@@ -213,58 +137,32 @@ export function CorpusView() {
       }}
     >
       {/* Page header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'space-between',
-          gap: 16,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontStyle: 'italic',
-              fontSize: 'var(--text-4xl)',
-              lineHeight: 1.05,
-              color: 'var(--fg)',
-              margin: 0,
-              marginBottom: 4,
-              fontWeight: 400,
-            }}
-          >
-            Corpus
-          </h1>
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--fg-dim)',
-            }}
-          >
-            {data
-              ? `${int(total)} ${includeSeeds ? 'task traces (seeded included)' : 'contributed task traces'}`
-              : 'loading…'}
-            {data && !includeSeeds && data.seedsExcluded > 0 && (
-              <>
-                <span style={{ margin: '0 8px' }}>·</span>
-                {int(data.seedsExcluded)} seeds excluded
-              </>
-            )}
-          </div>
+      <div>
+        <h1
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontStyle: 'italic',
+            fontSize: 'var(--text-4xl)',
+            lineHeight: 1.05,
+            color: 'var(--fg)',
+            margin: 0,
+            marginBottom: 4,
+            fontWeight: 400,
+          }}
+        >
+          Corpus
+        </h1>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-xs)',
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--fg-dim)',
+          }}
+        >
+          {data ? `${int(total)} attempts` : 'loading…'}
         </div>
-        <SegmentedControl<SeedFilter>
-          options={[
-            { label: 'envelope-only', value: 'envelope-only' },
-            { label: 'include seeded', value: 'include-seeded' },
-          ]}
-          value={seedFilter as SeedFilter}
-          onChange={handleSeedFilter}
-        />
       </div>
 
       {/* Loading skeleton */}
@@ -287,7 +185,7 @@ export function CorpusView() {
                 background: 'var(--bg-elevated)',
               }}
             >
-              {Array.from({ length: 6 }).map((__, j) => (
+              {Array.from({ length: 4 }).map((__, j) => (
                 <div
                   key={j}
                   style={{
@@ -353,7 +251,7 @@ export function CorpusView() {
             color: 'var(--fg)',
           }}
         >
-          No contributions yet — the corpus grows as operators publish task traces.
+          No attempts yet — the corpus grows as operators publish them.
         </div>
       )}
 
@@ -361,13 +259,13 @@ export function CorpusView() {
       {data && !isEmpty && (
         <>
           <DataTable
-            columns={COLUMNS}
+            columns={corpusColumns(true)}
             rows={rows}
             sortKey={sort}
             sortDir={dir as 'asc' | 'desc'}
             onSort={handleSort}
-            renderRow={(row) => renderRow(row as CorpusItemRow)}
-            emptyState="No contributions on this page."
+            renderRow={(row) => renderCorpusRow(row as CorpusItemRow)}
+            emptyState="No attempts on this page."
           />
           <Pager
             page={page}

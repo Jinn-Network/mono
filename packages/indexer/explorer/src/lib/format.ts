@@ -143,6 +143,16 @@ export function basescanTxUrl(txHash: string | null | undefined): string | null 
 }
 
 /**
+ * Build a basescan URL for an account address on Base Sepolia, or null when the
+ * address is absent/degenerate. Links a contributor straight to the on-chain
+ * record (Legibility — every claim independently verifiable on chain).
+ */
+export function basescanAddressUrl(address: string | null | undefined): string | null {
+  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return null;
+  return `${BASESCAN_SEPOLIA}/address/${address}`;
+}
+
+/**
  * Build an IPFS gateway URL for a CID, or null when the CID is absent. The cid
  * is attacker-influenceable (it comes from an on-chain key), so it is
  * percent-encoded before interpolation into the gateway path — matching the
