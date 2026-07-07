@@ -17,11 +17,13 @@
  */
 
 import { parseArgs } from 'node:util';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createHarnessLayer,
+  DEFAULT_IPFS_GATEWAY_URL,
   type CorpusRecord,
   type CorpusSearchHit,
   type HarnessLayer,
@@ -41,6 +43,18 @@ import { execute as seedExecute } from './seed-import/execute.js';
 import { parseImportReport, renderImportReport } from './seed-import/report.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
+import { runDistillationPipeline } from './pipeline.js';
+import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
+import { createEvidenceFetcher } from './bridge-fetch-evidence.js';
+import { createClaudeDistiller } from './distill-llm.js';
+import { buildSkillMarkdown } from './skill-package.js';
+import type { AttemptRef, BridgeEvidence } from './bridge.js';
+import type { DistillCluster, DistillLLMOutput } from './distill.js';
+import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
+import {
+  loadActiveHeldOutSlateIds,
+  ACTIVE_HELD_OUT_SLATE_VERSIONS,
+} from '../../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -69,6 +83,11 @@ Commands:
                                                  Publish the approved import rows (APPROVAL
                                                  GATE: run only after the plan report is
                                                  signed off)
+  distill run [--limit N] [--out <dir>]          Run the distillation pipeline over the
+                                                 swe-rebench-v2 verdict ledger: verdict→solution
+                                                 join → distil (claude) → local SKILL.md packages.
+                                                 Held-out slate instances are excluded. Writes
+                                                 <out>/<name>/SKILL.md and prints the summary.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -83,7 +102,27 @@ Environment (publish — testnet anchor identity):
   JINN_IPFS_REGISTRY_URL        IPFS registry for uploads (default: https://registry.autonolas.tech)
   JINN_LAYER_ENDPOINT           Artifact access endpoint recorded on publish (default: http://127.0.0.1:7331)
   JINN_LAYER_LEDGER_PATH        Ledger file (default: ~/.jinn-client/harness-layer/ledger.jsonl)
+
+Environment (distill — reads the testnet ledger + spends claude solves):
+  JINN_DISCOVERY_URL       Ponder indexer base (default: testnet jinn-indexer)
+  JINN_IPFS_GATEWAY_URL    IPFS gateway for envelope fetches (default: https://gateway.autonolas.tech)
+  JINN_DISTILL_MODEL       Distiller model (default: claude-haiku-4-5-20251001)
+  (publish env above)      distill also captures + anchors the bridged evidence on testnet
 `;
+
+/** Injectable deps for `distill run` (tests). Production defaults build the live wiring. */
+export interface DistillCliDeps {
+  /** Ledger verdict-row source (both polarities). Default: live indexer. */
+  verdictSource?: VerdictSource;
+  /** Fetch the patch + problem statement for an attempt. Default: live gateway + indexer. */
+  fetchEvidence?: (ref: AttemptRef) => Promise<BridgeEvidence>;
+  /** The LLM distill port. Default: createClaudeDistiller. */
+  distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
+  /** Layer-1 evidence publish deps. Default: live testnet wiring from env. */
+  publishDeps?: HarnessPublishDeps;
+  /** Held-out slate instance ids. Default: the active swe-rebench-v2 slate. */
+  slateInstanceIds?: Set<string>;
+}
 
 export interface RunJinnLayerCliOptions {
   /** Injectable layer (tests). Default: createHarnessLayer() with env overrides. */
@@ -92,8 +131,13 @@ export interface RunJinnLayerCliOptions {
   publishDeps?: HarnessPublishDeps;
   /** Injectable seed source (tests). Default: GitHub source over --source list. */
   seedSource?: SeedSource;
+  /** Injectable distill-pipeline deps (tests). Default: live wiring per field. */
+  distillDeps?: DistillCliDeps;
   writer?: { write: (s: string) => boolean };
 }
+
+/** Default distiller model — the daemon-wide cheap default (see CLAUDE.md config). */
+const DEFAULT_DISTILL_MODEL = 'claude-haiku-4-5-20251001';
 
 const DEFAULT_CLI_SEARCH_LIMIT = 20;
 
@@ -312,7 +356,8 @@ export async function runJinnLayerCli(
   const isPublish = verb === 'publish';
   const isSeed = verb === 'seed' && (subverb === 'plan' || subverb === 'execute');
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall) {
+  const isDistill = verb === 'distill' && subverb === 'run';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistill) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -416,6 +461,91 @@ export async function runJinnLayerCli(
       writer.write(lines.join('\n') + '\n');
     }
     return result.errors.length > 0 ? 1 : 0;
+  }
+
+  if (isDistill) {
+    const dd = opts.distillDeps ?? {};
+
+    const n = Number.parseInt(parsed.values.limit as string, 10);
+    const limit = Number.isFinite(n) && n > 0 ? n : undefined;
+
+    const outDir = (parsed.values.out as string | undefined) ?? mkdtempSync(join(tmpdir(), 'jinn-distill-'));
+    mkdirSync(outDir, { recursive: true });
+
+    const slateInstanceIds =
+      dd.slateInstanceIds ?? loadActiveHeldOutSlateIds('swe-rebench-v2.v1', ACTIVE_HELD_OUT_SLATE_VERSIONS);
+
+    // Verdict source over the testnet indexer (default) unless one is injected.
+    const verdictSource =
+      dd.verdictSource ??
+      createVerdictSource({
+        graphqlUrl: process.env['JINN_DISCOVERY_URL'] ?? DEFAULT_TESTNET_DISCOVERY_URL,
+      });
+
+    // The evidence fetcher's live ports: autonolas gateway + Ponder GraphQL.
+    // Injected in tests; built from env here (mirrors distill-run-live.ts).
+    const fetchEvidence =
+      dd.fetchEvidence ??
+      (() => {
+        const gateway = (process.env['JINN_IPFS_GATEWAY_URL'] ?? DEFAULT_IPFS_GATEWAY_URL).replace(/\/$/, '');
+        const base = (process.env['JINN_DISCOVERY_URL'] ?? DEFAULT_TESTNET_DISCOVERY_URL).replace(/\/$/, '');
+        const graphqlUrl = base.endsWith('/graphql') ? base : `${base}/graphql`;
+        return createEvidenceFetcher({
+          ipfs: async (cid: string) => {
+            const res = await fetch(`${gateway}/ipfs/${cid}`, { signal: AbortSignal.timeout(30_000) });
+            if (!res.ok) throw new Error(`ipfs ${cid}: HTTP ${res.status}`);
+            return res.json();
+          },
+          gql: async (query: string) => {
+            const res = await fetch(graphqlUrl, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ query }),
+            });
+            const body = (await res.json()) as { data?: unknown; errors?: unknown };
+            if (body.errors) throw new Error(`gql: ${JSON.stringify(body.errors)}`);
+            return body.data;
+          },
+        });
+      })();
+
+    const distill = dd.distill ?? createClaudeDistiller({ model: process.env['JINN_DISTILL_MODEL'] ?? DEFAULT_DISTILL_MODEL });
+    const publishDeps = dd.publishDeps ?? buildLivePublishDepsFromEnv();
+
+    // Local-fs publishSkill: write <out>/<name>/SKILL.md (mirror distill-run-live.ts).
+    const publishSkill = async (pkg: Parameters<typeof buildSkillMarkdown>[0]) => {
+      const dir = join(outDir, pkg.name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), buildSkillMarkdown(pkg));
+      return { envelopeRef: `local:${pkg.name}`, anchorTx: null };
+    };
+
+    const result = await runDistillationPipeline({
+      verdictSource,
+      fetchEvidence,
+      distill,
+      publishDeps,
+      publishSkill,
+      slate: { instanceIds: slateInstanceIds },
+      distribution: 'coding',
+      ...(limit !== undefined ? { limit } : {}),
+    });
+
+    if (parsed.values.json) {
+      writer.write(JSON.stringify({ ...result, outDir }) + '\n');
+    } else {
+      const lines = [
+        `distilled: published ${result.distilled.published.length}, rejected ${result.distilled.rejected.length}, errors ${result.distilled.errors.length}`,
+        `bridge: ${result.bridge.bridged.length} bridged, ${result.bridge.excludedHeldOut.length} held-out, ${result.bridge.deduped.length} deduped, ${result.bridge.errors.length} error(s)`,
+        `clusters: ${result.clusterCount}`,
+      ];
+      for (const p of result.distilled.published) lines.push(`  PUBLISHED ${p.skillKind} ${p.envelopeRef} (${p.clusterId})`);
+      for (const r of result.distilled.rejected) lines.push(`  rejected  ${r.clusterId} — ${r.reason}`);
+      for (const e of result.distilled.errors) lines.push(`  ERROR     ${e.clusterId} — ${e.error}`);
+      lines.push('', `skills written under: ${outDir}`);
+      writer.write(lines.join('\n') + '\n');
+    }
+    return result.distilled.errors.length > 0 ? 1 : 0;
   }
 
   if (isPublish) {

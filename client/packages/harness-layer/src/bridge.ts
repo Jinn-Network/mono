@@ -34,6 +34,14 @@ export interface AttemptRef {
   manifestCid: string;
   /** `pass` = verified solve (→ pattern); `fail` = evaluator-confirmed FAIL (→ lesson). */
   polarity: 'pass' | 'fail';
+  /**
+   * The VERDICT envelope CID — the entry point of the verified 3-hop join to
+   * the solver's solution patch (verdict envelope → task doc
+   * `restorationRequestId` → attemptEnvelopeMeta → solution envelope). The
+   * verdict-source populates it; callers that already carry a resolved
+   * `manifestCid` (e.g. the corpus fetcher) do not need it.
+   */
+  verdictManifestCid?: string;
 }
 
 /** Evidence fetched for one attempt (the injected IPFS/corpus port). */

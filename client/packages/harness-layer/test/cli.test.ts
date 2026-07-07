@@ -1,11 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
-import { runJinnLayerCli } from '../src/cli.js';
+import { runJinnLayerCli, type DistillCliDeps } from '../src/cli.js';
+import { createMemoryLedger } from '../src/ledger.js';
+import type { HarnessPublishDeps } from '../src/publish.js';
+import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
+import type { DistillCluster, DistillLLMOutput } from '../src/distill.js';
+import { parseSkillMarkdown } from '../src/skill-package.js';
 
 function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
   return {
@@ -328,5 +333,102 @@ describe('jinn-layer skills install', () => {
     );
     expect(code).toBe(1);
     expect(out()).toContain('malformed jinn.skill.v1');
+  });
+});
+
+describe('jinn-layer distill run', () => {
+  function dref(instanceId: string, polarity: 'pass' | 'fail'): AttemptRef {
+    return {
+      requestId: `0x${instanceId}`,
+      chainId: 84532,
+      instanceId,
+      model: '',
+      manifestCid: '',
+      polarity,
+      verdictManifestCid: `bafyVerdict-${instanceId}`,
+    };
+  }
+
+  function fakePublishDeps(): HarnessPublishDeps {
+    let n = 0;
+    return {
+      participant: { safeAddress: `0x${'1'.repeat(40)}`, agentEoa: `0x${'2'.repeat(40)}` },
+      signer: { address: `0x${'2'.repeat(40)}`, privateKey: `0x${'a'.repeat(64)}` },
+      clientGitSha: 'sha',
+      defaultArtifactEndpoint: 'http://127.0.0.1:7331',
+      ledger: createMemoryLedger(),
+      publishArtifact: async () => ({ cid: `bafyArt${++n}`, sha256: 'a'.repeat(64) }),
+      publishEnvelope: async () => ({ cid: `bafyEnv${++n}`, sha256: 'b'.repeat(64) }),
+      anchorEnvelope: async () => ({ txHash: `0x${'e'.repeat(64)}`, blockNumber: 1 }),
+    };
+  }
+
+  function stubDeps(over: Partial<DistillCliDeps> = {}): DistillCliDeps {
+    return {
+      verdictSource: {
+        list: async () => [
+          dref('flask__flask-1', 'pass'),
+          dref('pytest__pytest-2', 'fail'),
+          dref('django__django-99999', 'pass'), // held-out → excluded
+        ],
+      },
+      fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
+        taskSummary: `fix the bug in ${r.instanceId}`,
+        patch: `diff --git a/x.py b/x.py\n+ return qs.distinct()  # for ${r.instanceId}\n`,
+      }),
+      distill: async (c: DistillCluster): Promise<DistillLLMOutput> => ({
+        name: `orm-${c.tier}-${c.instanceIds[0]!.replace(/[^a-z0-9]+/g, '-')}`,
+        description: `Use when working on a queryset ${c.tier === 'lesson' ? 'that may return duplicates' : 'join'}.`,
+        body: `# ${c.tier}\n\nApply distinct after a join; verify with a count assertion.\n`,
+      }),
+      publishDeps: fakePublishDeps(),
+      slateInstanceIds: new Set(['django__django-99999']),
+      ...over,
+    };
+  }
+
+  it('runs the pipeline under stubs and writes SKILL.md packages', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const code = await runJinnLayerCli(['distill', 'run', '--out', outDir], {
+      writer,
+      distillDeps: stubDeps(),
+    });
+    expect(code).toBe(0);
+
+    const text = out();
+    expect(text).toContain('distilled: published 2');
+    expect(text).toContain('PUBLISHED strategic-pattern');
+    expect(text).toContain('PUBLISHED failure-lesson');
+    expect(text).toContain(outDir);
+
+    // One directory per published skill, each with a conformant SKILL.md.
+    const dirs = readdirSync(outDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+    expect(dirs).toHaveLength(2);
+    for (const d of dirs) {
+      const md = readFileSync(join(outDir, d.name, 'SKILL.md'), 'utf-8');
+      const pkg = parseSkillMarkdown(md);
+      expect(pkg.name).toBe(d.name);
+      expect(['strategic-pattern', 'failure-lesson']).toContain(pkg.jinn.skillKind);
+      expect(pkg.jinn.distribution).toBe('coding');
+      // The held-out instance never surfaces in a distilled body.
+      expect(md).not.toContain('django__django-99999');
+    }
+  });
+
+  it('--json emits the pipeline result with the out dir', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const code = await runJinnLayerCli(['distill', 'run', '--out', outDir, '--json'], {
+      writer,
+      distillDeps: stubDeps(),
+    });
+    expect(code).toBe(0);
+    const result = JSON.parse(out());
+    expect(result.outDir).toBe(outDir);
+    expect(result.distilled.published).toHaveLength(2);
+    expect(result.clusterCount).toBe(2);
+    // The held-out instance is excluded at the bridge.
+    expect(result.bridge.excludedHeldOut.length).toBeGreaterThan(0);
   });
 });
