@@ -18,7 +18,7 @@ def build_tools_parser(subparsers, *, cmd_tools: Callable) -> None:
             "Enable, disable, or list tools for CLI, Telegram, Discord, etc.\n\n"
             "Built-in toolsets use plain names (e.g. web, memory).\n"
             "MCP tools use server:tool notation (e.g. github:create_issue).\n\n"
-            "Run 'hermes tools' with no subcommand for the interactive configuration UI."
+            "Run 'jinn-agent tools' with no subcommand for the interactive configuration UI."
         ),
     )
     tools_parser.add_argument(

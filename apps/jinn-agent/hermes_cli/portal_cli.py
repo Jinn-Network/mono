@@ -214,10 +214,11 @@ def add_parser(subparsers) -> None:
         "portal",
         help="Set up provider portal authentication (login, model pick, Tool Gateway); see also `portal info`",
         description=(
-            "Run `hermes portal` with no subcommand to log in to Nous Portal "
-            "and set it up — pick a model, set Nous as your provider, and offer "
-            "the Tool Gateway (the human-readable alias for `hermes auth add "
-            "nous --type oauth`, identical to `hermes setup --portal`). "
+            "Run `jinn-agent portal` with no subcommand to log in to the "
+            "provider portal and set it up — pick a model, set that provider "
+            "as your default, and offer the Tool Gateway (the human-readable "
+            "alias for `jinn-agent auth add nous --type oauth`, identical to "
+            "`jinn-agent setup --portal`). "
             "Subcommands: login (default), info, open, tools."
         ),
     )
@@ -225,7 +226,7 @@ def add_parser(subparsers) -> None:
 
     portal_sub.add_parser(
         "login",
-        help="Log in to Nous Portal + set it up (default; one-shot onboarding)",
+        help="Log in to the provider portal + set it up (default; one-shot onboarding)",
     )
     portal_sub.add_parser(
         "info",
@@ -239,7 +240,7 @@ def add_parser(subparsers) -> None:
     )
     portal_sub.add_parser(
         "tools",
-        help="List Tool Gateway tools and which are routed via Nous",
+        help="List Tool Gateway tools and which are routed via the provider portal",
     )
 
     portal_parser.set_defaults(func=portal_command)

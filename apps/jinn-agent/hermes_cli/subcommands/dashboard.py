@@ -159,10 +159,10 @@ def build_dashboard_parser(
     )
     dashboard_register_parser = dashboard_subparsers.add_parser(
         "register",
-        help="Register a self-hosted dashboard with Nous Portal (writes the OAuth client ID to .env)",
+        help="Register a self-hosted dashboard with the provider portal (writes the OAuth client ID to .env)",
         description=(
-            "Register this install as a self-hosted dashboard with your Nous "
-            "Portal account. Creates an OAuth client, writes "
+            "Register this install as a self-hosted dashboard with your provider "
+            "portal account. Creates an OAuth client, writes "
             "HERMES_DASHBOARD_OAUTH_CLIENT_ID into ~/.hermes/.env, and prints "
             "how to engage the login gate. Requires being logged in (jinn-agent setup)."
         ),

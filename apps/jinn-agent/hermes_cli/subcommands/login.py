@@ -32,8 +32,8 @@ def build_login_parser(subparsers, *, cmd_login: Callable) -> None:
     login_parser = subparsers.add_parser(
         "login",
         description=(
-            "Deprecated. Use `hermes auth` to manage credentials, "
-            "`hermes model` to select a provider, or `hermes setup` for full setup."
+            "Deprecated. Use `jinn-agent auth` to manage credentials, "
+            "`jinn-agent model` to select a provider, or `jinn-agent setup` for full setup."
         ),
     )
     # No ``choices=`` on purpose — the handler is a deprecation notice that
@@ -43,7 +43,7 @@ def build_login_parser(subparsers, *, cmd_login: Callable) -> None:
     login_parser.add_argument(
         "--provider",
         default=None,
-        help="(deprecated) Provider name; ignored — see `hermes model`",
+        help="(deprecated) Provider name; ignored — see `jinn-agent model`",
     )
     login_parser.add_argument(
         "--portal-url", help="Portal base URL (default: production portal)"

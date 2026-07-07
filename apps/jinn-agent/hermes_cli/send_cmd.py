@@ -376,7 +376,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         "send",
         help="Send a message to a configured platform (scripts, cron jobs, CI).",
         description=(
-            "Pipe text from any shell script to any messaging platform Hermes "
+            "Pipe text from any shell script to any messaging platform jinn-agent "
             "is already configured for. Reuses the gateway's platform "
             "credentials (~/.hermes/.env + ~/.hermes/config.yaml) — no LLM, "
             "no agent loop, no running gateway required for bot-token "
@@ -384,13 +384,13 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         ),
         epilog=(
             "Examples:\n"
-            "  hermes send --to telegram \"deploy finished\"\n"
-            "  echo \"RAM 92%\" | hermes send --to telegram:-1001234567890\n"
-            "  hermes send --to discord:#ops --file /tmp/report.md\n"
-            "  hermes send --to slack:#eng --subject \"[CI]\" --file build.log\n"
-            "  hermes send --to telegram \"MEDIA:/tmp/chart.png\"   # send a media attachment\n"
-            "  hermes send --list                  # all platforms\n"
-            "  hermes send --list telegram         # filter by platform\n"
+            "  jinn-agent send --to telegram \"deploy finished\"\n"
+            "  echo \"RAM 92%\" | jinn-agent send --to telegram:-1001234567890\n"
+            "  jinn-agent send --to discord:#ops --file /tmp/report.md\n"
+            "  jinn-agent send --to slack:#eng --subject \"[CI]\" --file build.log\n"
+            "  jinn-agent send --to telegram \"MEDIA:/tmp/chart.png\"   # send a media attachment\n"
+            "  jinn-agent send --list                  # all platforms\n"
+            "  jinn-agent send --list telegram         # filter by platform\n"
             "\n"
             "Exit codes: 0 ok, 1 delivery/backend error, 2 usage error."
         ),
@@ -446,7 +446,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         dest="list_targets",
         action="store_true",
         default=False,
-        help="List available targets. Optional positional filter: `hermes send --list telegram`.",
+        help="List available targets. Optional positional filter: `jinn-agent send --list telegram`.",
     )
 
     parser.add_argument(

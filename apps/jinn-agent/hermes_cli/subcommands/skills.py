@@ -183,11 +183,11 @@ def build_skills_parser(subparsers, *, cmd_skills: Callable) -> None:
 
     skills_list_modified = skills_subparsers.add_parser(
         "list-modified",
-        help="List bundled skills you've edited (which `hermes update` keeps)",
+        help="List bundled skills you've edited (which `jinn-agent update` keeps)",
         description=(
             "Show the bundled skills whose local copy differs from the version last "
-            "synced, i.e. the ones `hermes update` reports as user-modified and skips. "
-            "Use `hermes skills diff <name>` to see changes and `hermes skills reset "
+            "synced, i.e. the ones `jinn-agent update` reports as user-modified and skips. "
+            "Use `jinn-agent skills diff <name>` to see changes and `jinn-agent skills reset "
             "<name>` to resume updates."
         ),
     )
