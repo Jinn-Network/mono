@@ -379,7 +379,24 @@ export class Daemon {
     }
 
     const engine = this.restorationEngine;
-    await engine.recoverInFlight();
+    // #1422: recovery must NOT gate loop startup. RUNNING-state recovery
+    // re-executes the task's impl and awaits it — for a swe-rebench-v2
+    // evaluation that is a full Docker test-suite run, potentially hours —
+    // and awaiting it here silenced every loop AND the #1043 watchdog for
+    // the duration (zero heartbeats, zero log output). Recovery runs
+    // concurrently instead; the engine's processingRequestIds guard keeps
+    // the tick/watcher loops from double-driving a task recovery is still
+    // executing. Deliberately not in loopPromises either, so stop()'s
+    // loop-drain never waits on an in-flight impl re-execution.
+    void engine.recoverInFlight().catch(err => {
+      console.error('[daemon] in-flight recovery failed:', err);
+      emitStructured({
+        kind: 'error',
+        message: 'in-flight recovery failed',
+        errorCode: 'recovery_failed',
+        details: { error: err instanceof Error ? err.message : String(err) },
+      });
+    });
     this.loopPromises.push(
       this.creatorLoop.run().catch(err => {
         console.error('[daemon] creator crashed:', err);

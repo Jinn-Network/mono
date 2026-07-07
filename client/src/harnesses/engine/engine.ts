@@ -547,13 +547,25 @@ export class TaskEngine {
 
   /**
    * Recover all in-flight tasks from persisted state.
-   * Called at daemon startup before beginning normal event processing.
+   * Started at daemon startup; runs concurrently with the daemon loops
+   * (#1422 — startup must not block on a recovered impl re-execution).
    * Returns a per-task report for each task attempted.
    */
   async recoverInFlight(): Promise<RecoveryReport[]> {
     const inflight = this.persistence.getInFlight();
     const results = await Promise.allSettled(
-      inflight.map((task) => this._recoverOne(task)),
+      // #1422: recovery runs concurrently with the tick/watcher loops, so
+      // each task must hold the same in-flight guard `scheduleProcess` uses —
+      // otherwise a tick fired mid-recovery double-drives the task's impl.
+      inflight.map((task) => {
+        if (this.processingRequestIds.has(task.requestId)) {
+          return Promise.resolve();
+        }
+        this.processingRequestIds.add(task.requestId);
+        return this._recoverOne(task).finally(() => {
+          this.processingRequestIds.delete(task.requestId);
+        });
+      }),
     );
 
     const reports: RecoveryReport[] = results.map((result, i) => {

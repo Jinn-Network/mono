@@ -283,6 +283,61 @@ describe('recoverInFlight', () => {
   });
 });
 
+// ── #1422: recovery participates in the processingRequestIds dedupe ──────────
+//
+// Recovery now runs concurrently with the daemon loops (Daemon.start no longer
+// awaits it), so it must register each task in the same in-flight guard that
+// `scheduleProcess` uses — otherwise the tick loop double-drives a task whose
+// recovered impl is still executing.
+
+describe('#1422 — recoverInFlight dedupes against the tick loop', () => {
+  it('tick() skips a task whose recovery is still executing runImpl', async () => {
+    const store = new Store(':memory:');
+    let releaseRunImpl: (() => void) | undefined;
+    let runImplCalls = 0;
+
+    class HangingEngine extends TaskEngine {
+      get testPersistence(): TaskRunPersistence { return this.persistence; }
+      override async runImpl(): Promise<void> {
+        runImplCalls++;
+        await new Promise<void>((resolve) => { releaseRunImpl = resolve; });
+      }
+    }
+
+    try {
+      const engine = new HangingEngine(makeOpts(store));
+      const p = engine.testPersistence;
+      const now = Date.now();
+      p.insertDiscovered(makeInput('r-hang', { windowStartTs: now - 1000, windowEndTs: now + 86_400_000 }));
+      p.transition('r-hang', TaskRunState.CLAIMED);
+      p.transition('r-hang', TaskRunState.WAITING);
+      p.transition('r-hang', TaskRunState.PRE_SNAPSHOT);
+      p.transition('r-hang', TaskRunState.RUNNING);
+
+      // Kick off recovery WITHOUT awaiting — it parks inside runImpl.
+      const recovery = recoverInFlight(engine);
+      await new Promise((r) => setImmediate(r));
+      expect(runImplCalls).toBe(1);
+
+      // A concurrent tick must skip the task (dedupe), not re-run it.
+      await engine.tick({ wait: false });
+      await new Promise((r) => setImmediate(r));
+      expect(runImplCalls).toBe(1);
+
+      // Once recovery settles, the guard is released: the next tick may
+      // legitimately re-drive the (still-RUNNING) task.
+      releaseRunImpl?.();
+      await recovery;
+      await engine.tick({ wait: false });
+      await new Promise((r) => setImmediate(r));
+      expect(runImplCalls).toBe(2);
+      releaseRunImpl?.();
+    } finally {
+      store.close();
+    }
+  });
+});
+
 // ── PACKAGING recovery: solutionOutputs hydrated from DB (#6) ─────────────────
 
 describe('PACKAGING recovery: solutionOutputs persisted and hydrated on restart', () => {
