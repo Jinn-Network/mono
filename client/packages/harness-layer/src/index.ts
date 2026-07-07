@@ -97,6 +97,14 @@ export {
 } from './bridge.js';
 
 export {
+  evaluateEligibility,
+  redactionHealth,
+  type EligibilityTier,
+  type EligibilityResult,
+  type RedactionHealth,
+} from './gate.js';
+
+export {
   createLivePublishDeps,
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,
