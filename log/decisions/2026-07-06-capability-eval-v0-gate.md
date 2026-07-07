@@ -91,9 +91,14 @@ interaction), and scoped what a v0 result licenses against §8. Spec v0.2 folds 
    both-solve set. Power/N via the Connor (1987) McNemar formula + a pilot bootstrap sim —
    **explicitly not N=10/R=1** (DR-2026-06-02-b proved that cannot detect < +60pp).
 
-7. **Pinned model = Haiku-class** for the primary run (cheapest; matches the v2 screening base).
-   Its low ceiling is a named external-validity threat, mitigated by an optional Sonnet-class
-   replication (the methodology is model-agnostic; only the pinned id changes).
+7. **Pinned model = `deepseek/deepseek-v4-flash` on OpenRouter** for the primary run — ~$0.09/$0.18
+   per M (~11–28× cheaper than Haiku) and a capable agentic coder, so cheaper *and* more
+   representative of a cost-conscious fork user. **OpenRouter (metered) is required**: the cost gate
+   needs provider-actual tokens, which a flat-rate subscription cannot supply. The pilot confirms
+   the contested band is non-empty and tool-use holds (v4-flash is a 13B-activated efficiency tier);
+   `deepseek-v4-pro` is the fallback if too weak. Screening must run on the SAME harness+endpoint as
+   the arms (jinn-agent/OpenRouter), not the legacy claude-code/Haiku base. The methodology is
+   model-agnostic; only the pinned id changes.
 
 8. **Human-run measurement, not a CI gate.** Heavy, Docker/disk-bound, stochastic; wiring it to a
    push gate would be a flaky gate (worse than none). Output is a dated, anchored, reproducible

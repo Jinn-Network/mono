@@ -49,7 +49,7 @@ and the joint gate. §7 records the reuse-vs-rebuild decision line-by-line.
 | **B** | **Corpus ON = seeds pre-installed only.** Arm B is a static, distribution-matched skill loadout installed once via `/jinn skills install` before the per-task meter starts. **No live `corpus_search`/`corpus_fetch` mid-task.** This isolates the "skills in context" value, simplifies contamination control (no dynamic retrieval to audit), and extends cleanly to v1 (swap seeds → distilled skills in the loadout). Live-retrieval value is explicitly **out of scope for v0** — see §2.3 for what a v0 result does and does not license against §8. |
 | **C** | **Gate = non-inferior quality AND strictly-lower cost**, combined as an intersection-union test (§2). |
 | **D** | **Held-out slate = new, power-sized, contested-band construction** (§4). The existing v1 (N=10) and v2 (N=9) slates are reused as *format and tooling precedent only* — they are the very N≈10 artifacts DR-2026-06-02-b diagnosed as underpowered, not the measurement slate. |
-| **E** | **Pinned model = Haiku-class** for the primary run (matches the existing v2 screening base `claude-code/Haiku`; cheapest run). Threats to external validity from the low ceiling are named in §11, with an optional Sonnet-class replication as the mitigation. |
+| **E** | **Pinned model = `deepseek/deepseek-v4-flash`** on OpenRouter for the primary run — ~$0.09/$0.18 per M tokens (~11–28× cheaper than Haiku) and a capable agentic coder, so it is both cheaper and more representative of what a cost-conscious fork user runs. **It runs on OpenRouter (metered), which is required** — the cost gate needs provider-actual tokens (§5.2), which a flat-rate subscription cannot supply. Two guards: the pilot confirms the contested band is non-empty and tool-use holds (v4-flash is a 13B-activated efficiency tier); if it is too weak, `deepseek/deepseek-v4-pro` ($0.435/$0.87, still ~10× under Haiku) is the fallback. External-validity threats named in §11; optional stronger-model replication as mitigation. |
 | **F** | This is a **human-run measurement, not a CI gate** (§9). |
 
 ---
@@ -234,8 +234,11 @@ selection predicate**. The generator's existing three layers become:
    (the existing gate — a raw sample admits ungradeable instances that make the denominator
    measure noise; see the v1 slate comment and `eval-runner.ts`).
 2. **Contested band (widened from v2's `0/R`).** Screen each candidate with the **pinned stock
-   arm** (Haiku-class, corpus OFF), frozen, R ≥ 3 runs. Keep instances whose stock pass-rate is
-   in a **contested band** — target `[0.15, 0.85]` — measured **blind to corpus**. This is the
+   arm** (corpus OFF), frozen, R ≥ 3 runs. **Screen on the SAME harness + endpoint + model the arms
+   use** — jinn-agent (the Hermes fork) on OpenRouter at the pinned model — *not* the legacy
+   `claude-code/Haiku` screening base: a contested band measured with a different scaffold does not
+   transfer to the agent under test. Keep instances whose stock pass-rate is in a **contested
+   band** — target `[0.15, 0.85]` — measured **blind to corpus**. This is the
    generalisation of v2's "base fails 0/R" predicate into the regime where "equal quality, lower
    cost" is actually testable: the stock agent is neither saturated (would give arm B no room)
    nor hopeless (would collapse the claim to "rescues failures").
@@ -714,9 +717,12 @@ signed measurement, reproducible by re-running the pinned rig against the pinned
   (e.g. N = 200 at ~15% yield ≈ 1,333 candidates × R ≈ **4,000 screening solves+grades**). The
   screen, not the measurement, dominates host-hours — this is where the cheaper-leading-indicator
   option (§13) pays off.
-- **Cost (solve side, Haiku-class, decision E):** Haiku is ~1–2 orders cheaper than Opus; the
-  combined solve side (measurement + screen) is on the order of **low thousands of dollars** at
-  Haiku rates (vs ~10× that at Opus). This is the reason for decision E.
+- **Cost (solve side, `deepseek-v4-flash`, decision E):** at $0.09/$0.18 per M tokens and ~50k in /
+  20k out per solve (~$0.008/solve), the combined solve side (≈1,200 measurement + ≈4,000 screening
+  solves) is **~$40 total** — cost stops being the binding constraint; Docker/disk/wall-clock do.
+  (OpenRouter's credit check requires the key to *afford* the worst-case `max_tokens` up front but
+  bills **actual** tokens; keep `max_tokens` generous so no legitimate solve is truncated — a
+  truncated solve is a spurious fail — and size the key's limit to cover the reservation.)
 - **Grade side (Docker):** each grade minutes-to-tens-of-minutes wall-clock, up to a **2-hour**
   hard timeout per instance (`DEFAULT_EVAL_TIMEOUT_MS`); images are linux/amd64 (slow/crash-prone
   under Apple-Silicon emulation — run on amd64 hosts). Serialised grades ≈ many hundreds of
@@ -787,7 +793,7 @@ requirements:
 | **Model-pretraining contamination** | **Main effect** cancels in the paired difference (§4.1). The residual **skill×memorization interaction** (an arm-B-only cue-unlock) does NOT cancel; bounded by the distribution-matched (not task-matched) loadout and flagged by the pilot's memorization-exposure probe (§4.1, §6.4) |
 | **Both-solve conditioning = selection on a post-treatment outcome (collider)** | Bounded: paired cost compares same-task B-vs-A (no set-composition win); the quality NI leg caps the driving regression channel; the both-solve composition delta + the §5.2 all-tasks cost secondary are published as a sanity check (§2.1) |
 | **δ mis-calibration / base-rate sensitivity** | δ = 5pp absolute pre-registered with a stated basis (§2.1); PASS additionally blocked if relative regression > 15% of stock base rate, so a large relative drop at a low band base rate cannot pass on the absolute margin |
-| **Haiku ceiling → thin contested band / weak external validity** (decision E) | Named. Pilot measures band width + yield (§4.2, §6.4); mitigation is widening the candidate pool and an optional Sonnet-class replication (pre-registered, own α) — the methodology is model-agnostic, only the pinned id changes |
+| **Pinned-model ceiling → thin/empty contested band or weak tool-use** (decision E; `deepseek-v4-flash` is a 13B-activated efficiency tier) | Named. Pilot measures band width + yield (§4.2, §6.4); if too weak (empty band or flaky agentic tool-use), fall back to `deepseek-v4-pro`; mitigation also includes widening the candidate pool and an optional stronger-model replication (pre-registered, own α) — the methodology is model-agnostic, only the pinned id changes |
 | **Contested-band ≠ full distribution / selection-on-baseline** | The claim is *explicitly scoped* to the contested region (§2.3); screening runs are not gate data, so RTM biases only the non-gating marginal rate, not the fresh paired difference (§4.2) |
 | **Ungradeable runs biasing quality** | Never scored as FAIL; re-run K=2 then symmetric drop-the-pair; drop count published (§5.1, §10.1) |
 | **Per-task skill cherry-picking / loadout-composition tuned to the task family** | Loadout is the whole imported seed set or a published fixed rule, frozen *before* slate ids are drawn (§3.1); per-task hand-picking forbidden |
