@@ -44,4 +44,16 @@ describe('verdictEnvelopeMeta schema (#779 retry columns)', () => {
       'dueIdx: index().on(table.enrichmentStatus, table.nextAttemptAt)',
     );
   });
+
+  it('declares a solutionRequestId text column defaulting to "" (the (task, solution, verdict) join key, #1433)', () => {
+    expect(verdictEnvelopeMetaBlock()).toContain(
+      "solutionRequestId: t.text().notNull().default('')",
+    );
+  });
+
+  it('declares an index on solutionRequestId for the tuple join', () => {
+    expect(verdictEnvelopeMetaBlock()).toContain(
+      'solutionRequestIdIdx: index().on(table.solutionRequestId)',
+    );
+  });
 });

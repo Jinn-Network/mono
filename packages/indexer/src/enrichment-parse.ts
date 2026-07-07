@@ -159,19 +159,32 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
 
 // ── swe-rebench-v2 task-body resolver ─────────────────────────────────────────
 // Given an already-fetched task.v1 body (client/src/types/task-document.ts),
-// resolve the two enrichment fields the launcher's getInstanceSuccessCounts
-// relies on (#669): spec.instance_id and the top-level solverNetManifestCid.
-// Both default to '' when absent/non-string. Pure — the IPFS fetch is the
+// resolve the enrichment fields the indexer reads off the task body:
+//   - spec.instance_id                — launcher getInstanceSuccessCounts (#669)
+//   - top-level solverNetManifestCid  — manifest-scoped success counts (#669)
+//   - top-level restorationRequestId  — the SOLVE-request id, persisted so the
+//                                       (task, solution, verdict) tuple joins
+//                                       first-class (#1433)
+// All default to '' when absent/non-string. Pure — the IPFS fetch is the
 // caller's job (handler + worker), so this function cannot drift between them.
 
 export interface InstanceFields {
   instanceId: string;
   solverNetManifestCid: string;
+  /**
+   * The SOLVE-request id — the task body's top-level `restorationRequestId`
+   * (task.v1 schema; see client/src/types/task.ts). Equals the solution
+   * attempt's `attemptEnvelopeMeta.requestId`, so persisting it makes
+   * `verdictEnvelopeMeta.solutionRequestId = attemptEnvelopeMeta.requestId`
+   * a single GraphQL join (#1433).
+   */
+  solutionRequestId: string;
 }
 
 export function resolveInstanceFields(taskBody: unknown): InstanceFields {
   let instanceId = '';
   let solverNetManifestCid = '';
+  let solutionRequestId = '';
   if (taskBody && typeof taskBody === 'object') {
     const spec = (taskBody as Record<string, unknown>)['spec'];
     if (spec && typeof spec === 'object') {
@@ -182,6 +195,10 @@ export function resolveInstanceFields(taskBody: unknown): InstanceFields {
     if (typeof cidRaw === 'string' && cidRaw.length > 0) {
       solverNetManifestCid = cidRaw;
     }
+    const solveRaw = (taskBody as Record<string, unknown>)['restorationRequestId'];
+    if (typeof solveRaw === 'string' && solveRaw.length > 0) {
+      solutionRequestId = solveRaw;
+    }
   }
-  return { instanceId, solverNetManifestCid };
+  return { instanceId, solverNetManifestCid, solutionRequestId };
 }

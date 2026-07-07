@@ -1795,15 +1795,19 @@ describe('parseVerdictEnvelopeLite', () => {
 // the worker and the legacy in-handler path cannot drift.
 
 describe('resolveInstanceFields', () => {
-  it('reads spec.instance_id and top-level solverNetManifestCid from a task.v1 body', () => {
+  it('reads spec.instance_id, top-level solverNetManifestCid and restorationRequestId from a task.v1 body', () => {
     const taskBody = {
       schemaVersion: 'task.v1',
       solverNetManifestCid: 'bafyManifestSweA',
+      // top-level restorationRequestId — the SOLVE-request id persisted as
+      // solutionRequestId so the (task, solution, verdict) tuple joins (#1433).
+      restorationRequestId: `0x${'99'.repeat(32)}`,
       spec: { instance_id: 'sympy__sympy-27510' },
     };
     expect(resolveInstanceFields(taskBody)).toEqual({
       instanceId: 'sympy__sympy-27510',
       solverNetManifestCid: 'bafyManifestSweA',
+      solutionRequestId: `0x${'99'.repeat(32)}`,
     });
   });
 
@@ -1811,23 +1815,26 @@ describe('resolveInstanceFields', () => {
     expect(resolveInstanceFields({ spec: {} })).toEqual({
       instanceId: '',
       solverNetManifestCid: '',
+      solutionRequestId: '',
     });
   });
 
   it('returns empty strings for a non-object body', () => {
-    expect(resolveInstanceFields(null)).toEqual({ instanceId: '', solverNetManifestCid: '' });
-    expect(resolveInstanceFields('nope')).toEqual({ instanceId: '', solverNetManifestCid: '' });
-    expect(resolveInstanceFields(undefined)).toEqual({ instanceId: '', solverNetManifestCid: '' });
+    expect(resolveInstanceFields(null)).toEqual({ instanceId: '', solverNetManifestCid: '', solutionRequestId: '' });
+    expect(resolveInstanceFields('nope')).toEqual({ instanceId: '', solverNetManifestCid: '', solutionRequestId: '' });
+    expect(resolveInstanceFields(undefined)).toEqual({ instanceId: '', solverNetManifestCid: '', solutionRequestId: '' });
   });
 
-  it('ignores a non-string / empty instance_id', () => {
+  it('ignores a non-string / empty instance_id and non-string restorationRequestId', () => {
     expect(resolveInstanceFields({ spec: { instance_id: '' }, solverNetManifestCid: 'cid' })).toEqual({
       instanceId: '',
       solverNetManifestCid: 'cid',
+      solutionRequestId: '',
     });
-    expect(resolveInstanceFields({ spec: { instance_id: 123 } })).toEqual({
+    expect(resolveInstanceFields({ spec: { instance_id: 123 }, restorationRequestId: 42 })).toEqual({
       instanceId: '',
       solverNetManifestCid: '',
+      solutionRequestId: '',
     });
   });
 });
@@ -2161,8 +2168,98 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     // solverNetManifestCid comes from the same task body fetch as instanceId;
     // an unfetchable task body leaves both empty (#669 Finding 2).
     expect(row?.solverNetManifestCid).toBe('');
+    // solutionRequestId shares the same task body fetch — empty when unfetchable (#1433).
+    expect(row?.solutionRequestId).toBe('');
     expect(row?.actualPassed).toBe(false);  // verdict row still written
     expect(calls).toBeGreaterThanOrEqual(2); // verdict + task body attempt
+  });
+
+  // #1433: the verdict's own requestId is the EVALUATION request and does NOT
+  // cross-match attempt.requestId (the SOLVE request). The link is the task
+  // body's top-level restorationRequestId, persisted here as solutionRequestId,
+  // so `verdictEnvelopeMeta.solutionRequestId = attemptEnvelopeMeta.requestId`
+  // resolves the (task, solution, verdict) tuple in a single join.
+  it('persists solutionRequestId from the task body so it joins attemptEnvelopeMeta.requestId (#1433)', async () => {
+    const TASK_CID = 'bafytaskbody-1433';
+    const SOLVE_REQUEST_ID = `0x${'ee'.repeat(32)}` as `0x${string}`;
+    // The verdict's own (evaluation) requestId — deliberately DIFFERENT from the
+    // solve requestId to prove the two do not cross-match (0-intersection).
+    const EVAL_REQUEST_ID = REQUEST_ID;
+    expect(SOLVE_REQUEST_ID).not.toBe(EVAL_REQUEST_ID);
+
+    // Seed the solution attempt's envelope-meta row keyed by the SOLVE request.
+    await context.db
+      .insert(attemptEnvelopeMeta)
+      .values({
+        requestId: SOLVE_REQUEST_ID,
+        manifestCid: 'bafy-solution-envelope',
+        solverType: 'swe-rebench-v2.v1',
+        implName: 'claude-code-learner',
+        implVersion: '1.2.3',
+        codeDigest: `sha256:${'bb'.repeat(32)}`,
+        mode: 'frozen',
+        pluginsJson: '[]',
+        model: '',
+        language: '',
+        evidenceTier: 'committed',
+        sourcePublished: false,
+        enrichmentStatus: 'ok',
+        enrichedAtBlock: 41_400_000n,
+        chainId: CHAIN_ID,
+      })
+      .onConflictDoNothing();
+
+    const verdictBody = {
+      ...SWE_REBENCH_FAIL_BODY,
+      task: { requestId: EVAL_REQUEST_ID, taskId: '42', attemptIndex: 1, cid: TASK_CID },
+      payload: { passed_match: true, score: 1 },
+    };
+    const taskBody = {
+      schemaVersion: 'task.v1',
+      id: 'task-uuid',
+      solverType: 'swe-rebench-v2.v1',
+      // The SOLVE-request id lives on the task body's top-level
+      // restorationRequestId (task.v1; client/src/types/task.ts).
+      restorationRequestId: SOLVE_REQUEST_ID,
+      solverNetManifestCid: 'bafyManifestSweA',
+      spec: { instance_id: 'sympy__sympy-27510' },
+    };
+    const stubFetch: FetchLike = async (url) => {
+      const u = String(url);
+      if (u.includes(TASK_CID)) {
+        return { ok: true, status: 200, json: async () => taskBody };
+      }
+      return { ok: true, status: 200, json: async () => verdictBody };
+    };
+    await handleMetadataSet({
+      event: metadataSetEvent({
+        agentId: 5n,
+        metadataKey: evalKey,
+        metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }),
+      }, { block: 41_500_003n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      enrichVerdicts: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    const verdictRow = db.get(verdictEnvelopeMeta, { requestId: EVAL_REQUEST_ID, chainId: CHAIN_ID });
+    expect(verdictRow?.solutionRequestId).toBe(SOLVE_REQUEST_ID);
+    // The join resolves: the verdict's solutionRequestId equals the solution
+    // attempt's requestId, and that attemptEnvelopeMeta row is retrievable.
+    const attemptRow = db.get(attemptEnvelopeMeta, {
+      requestId: verdictRow!.solutionRequestId as `0x${string}`,
+      chainId: CHAIN_ID,
+    });
+    expect(attemptRow).toBeDefined();
+    expect(attemptRow?.requestId).toBe(verdictRow?.solutionRequestId);
+    expect(attemptRow?.manifestCid).toBe('bafy-solution-envelope');
   });
 });
 

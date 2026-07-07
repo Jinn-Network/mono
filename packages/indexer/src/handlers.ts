@@ -1498,6 +1498,12 @@ export async function handleMetadataSet({
           // (#669 Finding 2). Same IPFS fetch, no extra round-trip.
           let instanceId = '';
           let bodySolverNetManifestCid = '';
+          // The SOLVE-request id from the task body's top-level
+          // `restorationRequestId`. The verdict's own requestId is the
+          // EVALUATION request and does NOT cross-match attempt.requestId; this
+          // field is the link that makes the (task, solution, verdict) tuple a
+          // first-class join (#1433). Same task-body fetch, no extra round-trip.
+          let solutionRequestId = '';
           if (meta.solverType.startsWith('swe-rebench-v2') && meta.taskCid) {
             try {
               const taskBody = await fetchIpfsJson(ipfsGateway, meta.taskCid, {
@@ -1507,6 +1513,7 @@ export async function handleMetadataSet({
               const resolved = resolveInstanceFields(taskBody);
               instanceId = resolved.instanceId;
               bodySolverNetManifestCid = resolved.solverNetManifestCid;
+              solutionRequestId = resolved.solutionRequestId;
             } catch (err) {
               console.warn(
                 `[indexer] task body fetch failed for verdict ${meta.requestId.slice(0, 10)}... cid=${meta.taskCid}: ${String(err)}`,
@@ -1531,6 +1538,7 @@ export async function handleMetadataSet({
               totalCount: meta.totalCount,
               instanceId,
               solverNetManifestCid: bodySolverNetManifestCid,
+              solutionRequestId,
               evaluatorVerdict: meta.evaluatorVerdict,
               enrichmentStatus: 'ok',
               enrichedAtBlock: blockNumber,
@@ -1553,6 +1561,7 @@ export async function handleMetadataSet({
                   totalCount: meta.totalCount,
                   instanceId,
                   solverNetManifestCid: bodySolverNetManifestCid,
+                  solutionRequestId,
                   evaluatorVerdict: meta.evaluatorVerdict,
                   enrichmentStatus: 'ok',
                   enrichedAtBlock: blockNumber,
@@ -1574,6 +1583,7 @@ export async function handleMetadataSet({
                 totalCount: row.totalCount,
                 instanceId: row.instanceId,
                 solverNetManifestCid: row.solverNetManifestCid,
+                solutionRequestId: row.solutionRequestId,
                 evaluatorVerdict: row.evaluatorVerdict,
                 enrichmentStatus: row.enrichmentStatus,
                 enrichedAtBlock: row.enrichedAtBlock,

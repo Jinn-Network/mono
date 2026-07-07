@@ -757,6 +757,25 @@ export const verdictEnvelopeMeta = onchainTable(
      */
     solverNetManifestCid: t.text().notNull().default(''),
     /**
+     * The SOLVE-request id (MechMarketplace requestId of the solution attempt),
+     * read from the task body's top-level `restorationRequestId` field (task.v1
+     * schema; see `client/src/types/task.ts`). Makes the knowledge tuple
+     * `(task, solution, verdict)` a first-class GraphQL join:
+     * `verdictEnvelopeMeta.solutionRequestId = attemptEnvelopeMeta.requestId`
+     * resolves a verified verdict to its solution envelope with no extra IPFS
+     * fetches.
+     *
+     * The verdict's own `requestId` is the EVALUATION request and does NOT
+     * cross-match `attempt.requestId` (the SOLVE request) — verified live, 0
+     * intersection. The link is this field. Populated in the same IPFS
+     * task-body fetch that resolves `instanceId` / `solverNetManifestCid`, so
+     * the read pays no extra round-trip. Empty string when the enrichment branch
+     * did not run (non-swe-rebench-v2 solverTypes), the task body was
+     * unfetchable, or the task body omitted `restorationRequestId`. Spec: issue
+     * #1433.
+     */
+    solutionRequestId: t.text().notNull().default(''),
+    /**
      * Normalized off-chain verdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN'.
      * 'UNKNOWN' when the envelope body lacks a recognizable verdict field.
      */
@@ -793,6 +812,10 @@ export const verdictEnvelopeMeta = onchainTable(
     actualPassedIdx: index().on(table.actualPassed),
     evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
     taskIdIdx: index().on(table.taskId),
+    // Join key for the (task, solution, verdict) tuple: pairs a verified
+    // verdict to its solution envelope via
+    // solutionRequestId == attemptEnvelopeMeta.requestId (#1433).
+    solutionRequestIdIdx: index().on(table.solutionRequestId),
     // Supports worker discovery for any pre-existing row-keyed pending/retry
     // verdict rows.
     dueIdx: index().on(table.enrichmentStatus, table.nextAttemptAt),
