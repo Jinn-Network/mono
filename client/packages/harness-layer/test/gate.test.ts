@@ -104,14 +104,17 @@ describe('redaction-health guard (§6 — intra-value depth, all placeholder sha
   });
 
   it('flags a defaced task.summary — the field the distiller reads first (not just step attributes)', () => {
-    const defacedSummary = '[AIRPORT_2765] [AUTH_5211] '.repeat(10).slice(0, 480); // long, ~all placeholder, ≤500
+    // long, ~all placeholder, ≤500; trimmed — the envelope's TrimmedString
+    // rejects surrounding whitespace, and the fixture must be a VALID envelope
+    // so the failure it exercises is the density guard, not schema parse.
+    const defacedSummary = '[AIRPORT_2765] [AUTH_5211] '.repeat(10).slice(0, 480).trim();
     const r = evaluateEligibility(env({ patch: 'diff --git a/x b/x\n+ ok', summary: defacedSummary }));
     expect(r.redactionHealth.defaced).toBe(true);
     expect(r.eligible).toBe(false);
   });
 
   it('flags a defaced outcome.summary (lesson free-text is also scrubbed prose)', () => {
-    const defaced = '[SECRET:x] [PII:y] '.repeat(15).slice(0, 480);
+    const defaced = '[SECRET:x] [PII:y] '.repeat(15).slice(0, 480).trim();
     const r = evaluateEligibility(env({ status: 'failed', outcomeSummary: defaced }));
     expect(r.redactionHealth.defaced).toBe(true);
     expect(r.eligible).toBe(false);
