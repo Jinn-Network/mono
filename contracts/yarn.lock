@@ -22,6 +22,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@adraffy/ens-normalize@npm:1.11.1":
+  version: 1.11.1
+  resolution: "@adraffy/ens-normalize@npm:1.11.1"
+  checksum: 10c0/b364e2a57131db278ebf2f22d1a1ac6d8aea95c49dd2bbbc1825870b38aa91fd8816aba580a1f84edc50a45eb6389213dacfd1889f32893afc8549a82d304767
+  languageName: node
+  linkType: hard
+
 "@esbuild/aix-ppc64@npm:0.28.0":
   version: 0.28.0
   resolution: "@esbuild/aix-ppc64@npm:0.28.0"
@@ -1712,7 +1719,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ethers@npm:^6.14.0, ethers@npm:^6.16.0":
+"ethers@npm:^6.14.0":
   version: 6.16.0
   resolution: "ethers@npm:6.16.0"
   dependencies:
@@ -1724,6 +1731,21 @@ __metadata:
     tslib: "npm:2.7.0"
     ws: "npm:8.17.1"
   checksum: 10c0/65c0ff7016b1592b1961c3b68508902b89fc75e1ad025bab3a722df1b5699fd077551875a7285e65b2d0cfea9a85b2459bb84010a0fa4e4494d231848aee3a73
+  languageName: node
+  linkType: hard
+
+"ethers@npm:^6.17.0":
+  version: 6.17.0
+  resolution: "ethers@npm:6.17.0"
+  dependencies:
+    "@adraffy/ens-normalize": "npm:1.11.1"
+    "@noble/curves": "npm:1.2.0"
+    "@noble/hashes": "npm:1.3.2"
+    "@types/node": "npm:22.7.5"
+    aes-js: "npm:4.0.0-beta.5"
+    tslib: "npm:2.7.0"
+    ws: "npm:8.21.0"
+  checksum: 10c0/0a75f3b4cedaaddb95ba31fecdfca04202735564e66512f202069dd1a11946e01c310a158e3a1299b994274e9d9fe11db10c6f7997222a28d79dfecb8f1fd162
   languageName: node
   linkType: hard
 
@@ -2109,7 +2131,7 @@ __metadata:
     "@types/mocha": "npm:^10.0.10"
     chai: "npm:^5.3.3"
     dotenv: "npm:^17.3.1"
-    ethers: "npm:^6.16.0"
+    ethers: "npm:^6.17.0"
     hardhat: "npm:3.9.0"
     mocha: "npm:^11.7.6"
     typescript: "npm:6.0"
@@ -3138,7 +3160,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ws@npm:^8.18.0":
+"ws@npm:8.21.0, ws@npm:^8.18.0":
   version: 8.21.0
   resolution: "ws@npm:8.21.0"
   peerDependencies:
