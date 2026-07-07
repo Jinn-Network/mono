@@ -1,7 +1,7 @@
 /**
  * Milestone2GateSection — data container for the M2 gate card.
  *
- * Fetches the #647-pinned slice (harness=codex, model=gpt-5.4-mini, window=30),
+ * Fetches the #647-pinned slice (harness=claude-code, model=claude-haiku-4-5-20251001, window=30),
  * computes the gate, and renders the presentational Milestone2GateCard. Kept
  * separate from SolverNetView (and rendered only on the M2 SolverNet) so its
  * extra slice fetch never runs — nor pollutes slice-arg assertions — on other

@@ -2,8 +2,12 @@
  * Milestone 2 gate — the #647 acceptance condition, computed from the slice
  * engine's per-verdict rolling resolved-rate series.
  *
- * #647: on the swe-rebench-v2 SolverNet at harness=codex + model=gpt-5.4-mini,
- * the trailing-30 envelope verdict-success rate over the most recent 30
+ * #647: on the swe-rebench-v2 SolverNet at harness=claude-code +
+ * model=claude-haiku-4-5-20251001 (retargeted from codex + gpt-5.4-mini —
+ * the codex harness has no valid OAuth credentials to run with, so it can
+ * produce zero attempts regardless of any other fix; claude-code/haiku is
+ * the harness+model actually producing completed, evaluatable runs), the
+ * trailing-30 envelope verdict-success rate over the most recent 30
  * verdicts must be >= 10pp above its value over the 30 verdicts ending 99
  * verdicts earlier, with >= 130 envelope-enriched verdicts.
  *
@@ -30,8 +34,8 @@ export const MILESTONE2_WINDOW = 30;
  */
 export const MILESTONE2_MANIFEST_CID =
   'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi';
-export const MILESTONE2_HARNESS = 'codex';
-export const MILESTONE2_MODEL = 'gpt-5.4-mini';
+export const MILESTONE2_HARNESS = 'claude-code';
+export const MILESTONE2_MODEL = 'claude-haiku-4-5-20251001';
 
 export type Milestone2Status = 'pass' | 'below' | 'ineligible';
 

@@ -5,10 +5,11 @@ import {
   MILESTONE2_GATE_PP,
 } from './milestone2';
 
-// The #647 condition: on the swe-rebench-v2 SolverNet at harness=codex,
-// model=gpt-5.4-mini, the trailing-30 envelope verdict-success rate over the
-// most recent 30 verdicts must be >= 10pp above its value over the 30 verdicts
-// ending 99 verdicts earlier, with >= 130 envelope-enriched verdicts.
+// The #647 condition: on the swe-rebench-v2 SolverNet at harness=claude-code,
+// model=claude-haiku-4-5-20251001, the trailing-30 envelope verdict-success
+// rate over the most recent 30 verdicts must be >= 10pp above its value over
+// the 30 verdicts ending 99 verdicts earlier, with >= 130 envelope-enriched
+// verdicts.
 //
 // `rolling` is the per-verdict trailing-window resolved-rate series from the
 // slice engine (rollingResolvedRate: element i = trailing-k mean ending at
