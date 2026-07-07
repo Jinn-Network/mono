@@ -204,6 +204,20 @@ export function Chrome() {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <SearchBox />
+        <a
+          href="https://jinn.network"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            textDecoration: 'none',
+            color: 'var(--fg-muted)',
+          }}
+        >
+          jinn.network
+        </a>
       </div>
     </header>
   );

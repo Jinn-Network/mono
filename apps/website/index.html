@@ -180,6 +180,7 @@
   }
   .footer__sigil { color: var(--fg-dim); }
   .footer__sigil svg { height: 22px; width: 22px; display: block; }
+  .footer__links { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
   .footer__link { font-size: 12px; color: var(--fg-dim); }
   .footer__link:hover { color: var(--sky-hover); }
 </style>
@@ -300,7 +301,7 @@
             <div><span class="t-dim">scrubbed · nothing sent back · sharing off</span></div>
           </div>
         </div>
-        <p class="signal__caption">Every fetched skill carries a ref that traces to the verified run it came from.</p>
+        <p class="signal__caption">Every fetched skill carries a ref that traces to the verified run it came from. <a href="https://explorer.jinn.network">See the network live in the explorer.</a></p>
       </div>
     </div>
   </section>
@@ -370,7 +371,10 @@
           <circle cx="24" cy="24" r="1.6" fill="currentColor"/>
         </svg>
       </div>
-      <a class="footer__link" href="https://github.com/Jinn-Network">github.com/Jinn-Network</a>
+      <div class="footer__links">
+        <a class="footer__link" href="https://explorer.jinn.network">explorer.jinn.network</a>
+        <a class="footer__link" href="https://github.com/Jinn-Network">github.com/Jinn-Network</a>
+      </div>
     </div>
   </footer>
 

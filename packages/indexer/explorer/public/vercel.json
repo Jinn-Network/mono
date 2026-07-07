@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/explorer/:path*", "destination": "https://jinn-indexer-production.up.railway.app/explorer/:path*" },
+    { "source": "/distribution-signal", "destination": "https://jinn-indexer-production.up.railway.app/distribution-signal" },
+    { "source": "/:path*", "destination": "/index.html" }
+  ]
+}

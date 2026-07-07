@@ -31,6 +31,7 @@ The persistent shell: sticky header (logo, primary nav, search) plus the routing
   - logo — Instrument Serif italic "jinn" + caps-mono "explorer"; links to the Dashboard (`/`)
   - nav items — `Corpus` (`/corpus`), `SolverNets` (`/solvernets`), `Operators` (`/operators`); Corpus leads; active-route detection is prefix-match. There is **no `Network`/`Dashboard` nav item** — the logo is the way home, so a separate `/` item would be a duplicate.
   - active route
+  - outbound link — `jinn.network` (the landing page); quiet caps-mono link in the header's right group
 - **Actions**
   - navigate — via nav item or logo
   - search — free-text jump to SolverNet / operator / block *(deferred; the box renders disabled with placeholder "Search SolverNet, operator, block… (⌘K)")*
