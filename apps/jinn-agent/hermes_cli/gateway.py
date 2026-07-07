@@ -4687,12 +4687,27 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
 
     from gateway.run import start_gateway
 
-    print("┌─────────────────────────────────────────────────────────┐")
-    print("│           ⚕ Hermes Gateway Starting...                 │")
+    try:
+        from hermes_cli.config import load_config
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+
+    from hermes_cli.skin_engine import get_active_skin
+    from hermes_cli.status import titled_box
+
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+    _box = titled_box(f"{_brand} Gateway Starting...")
+
+    print(_box[0])
+    print(_box[1])
     print("├─────────────────────────────────────────────────────────┤")
     print("│  Messaging platforms + cron scheduler                    │")
     print("│  Press Ctrl+C to stop                                   │")
-    print("└─────────────────────────────────────────────────────────┘")
+    print(_box[2])
     print()
 
     # Exit with code 1 if gateway fails to connect any platform,

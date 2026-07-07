@@ -16,19 +16,19 @@ def build_mcp_parser(subparsers, *, cmd_mcp: Callable) -> None:
     """Attach the ``mcp`` subcommand to ``subparsers``."""
     mcp_parser = subparsers.add_parser(
         "mcp",
-        help="Manage MCP servers and run Hermes as an MCP server",
+        help="Manage MCP servers and run jinn-agent as an MCP server",
         description=(
-            "Manage MCP server connections and run Hermes as an MCP server.\n\n"
+            "Manage MCP server connections and run jinn-agent as an MCP server.\n\n"
             "MCP servers provide additional tools via the Model Context Protocol.\n"
-            "Use 'hermes mcp add' to connect to a new server, or\n"
-            "'hermes mcp serve' to expose Hermes conversations over MCP."
+            "Use 'jinn-agent mcp add' to connect to a new server, or\n"
+            "'jinn-agent mcp serve' to expose jinn-agent conversations over MCP."
         ),
     )
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_action")
 
     mcp_serve_p = mcp_sub.add_parser(
         "serve",
-        help="Run Hermes as an MCP server (expose conversations to other agents)",
+        help="Run jinn-agent as an MCP server (expose conversations to other agents)",
     )
     mcp_serve_p.add_argument(
         "-v",
@@ -102,7 +102,7 @@ def build_mcp_parser(subparsers, *, cmd_mcp: Callable) -> None:
     # ── Catalog (Nous-approved MCPs shipped with the repo) ─────────────────
     mcp_sub.add_parser(
         "picker",
-        help="Interactive catalog picker (also the default for `hermes mcp`)",
+        help="Interactive catalog picker (also the default for `jinn-agent mcp`)",
     )
     mcp_sub.add_parser(
         "catalog",
@@ -110,7 +110,7 @@ def build_mcp_parser(subparsers, *, cmd_mcp: Callable) -> None:
     )
     mcp_install_p = mcp_sub.add_parser(
         "install",
-        help="Install a catalog MCP by name (e.g. `hermes mcp install n8n`)",
+        help="Install a catalog MCP by name (e.g. `jinn-agent mcp install n8n`)",
     )
     mcp_install_p.add_argument(
         "identifier",

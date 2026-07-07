@@ -1,5 +1,5 @@
 """
-Hermes Agent Uninstaller.
+jinn-agent Uninstaller.
 
 Provides options for:
 - Full uninstall: Remove everything including configs and data
@@ -15,6 +15,7 @@ from pathlib import Path
 from hermes_constants import get_hermes_home
 
 from hermes_cli.colors import Colors, color
+from hermes_cli.status import titled_box
 
 def log_info(msg: str):
     print(f"{color('→', Colors.CYAN)} {msg}")
@@ -599,10 +600,26 @@ def run_uninstall(args):
         )
         return
 
+    # Reached without going through cli.py's module-level skin init — pick up
+    # config.yaml's skin choice on demand (idempotent, degrades to the
+    # upstream literal on any error). Mirrors status.py::show_status.
+    try:
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+
+    from hermes_cli.skin_engine import get_active_skin
+
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+
     print()
-    print(color("┌─────────────────────────────────────────────────────────┐", Colors.MAGENTA, Colors.BOLD))
-    print(color("│            ⚕ Hermes Agent Uninstaller                  │", Colors.MAGENTA, Colors.BOLD))
-    print(color("└─────────────────────────────────────────────────────────┘", Colors.MAGENTA, Colors.BOLD))
+    for _line in titled_box(f"{_brand} Uninstaller"):
+        print(color(_line, Colors.MAGENTA, Colors.BOLD))
     print()
     
     # Show what will be affected
@@ -879,7 +896,21 @@ def _perform_uninstall(
         print(color("Reload your shell to complete the process:", Colors.YELLOW))
         print("  source ~/.bashrc  # or ~/.zshrc")
     print()
-    print("Thank you for using Hermes Agent! ⚕")
+
+    try:
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+
+    from hermes_cli.skin_engine import get_active_skin
+
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+    print(f"Thank you for using {_brand}!")
     print()
 
 

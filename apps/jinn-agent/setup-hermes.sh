@@ -425,31 +425,31 @@ echo "Next steps:"
 echo ""
 if is_termux; then
     echo "  1. Run the setup wizard to configure API keys:"
-    echo "     hermes setup"
+    echo "     jinn-agent setup"
     echo ""
     echo "  2. Start chatting:"
-    echo "     hermes"
+    echo "     jinn-agent"
     echo ""
 else
     echo "  1. Reload your shell:"
     echo "     source $SHELL_CONFIG"
     echo ""
     echo "  2. Run the setup wizard to configure API keys:"
-    echo "     hermes setup"
+    echo "     jinn-agent setup"
     echo ""
     echo "  3. Start chatting:"
-    echo "     hermes"
+    echo "     jinn-agent"
     echo ""
 fi
 echo "Other commands:"
-echo "  hermes status        # Check configuration"
+echo "  jinn-agent status        # Check configuration"
 if is_termux; then
-    echo "  hermes gateway       # Run gateway in foreground"
+    echo "  jinn-agent gateway       # Run gateway in foreground"
 else
-    echo "  hermes gateway install # Install gateway service (messaging + cron)"
+    echo "  jinn-agent gateway install # Install gateway service (messaging + cron)"
 fi
-echo "  hermes cron list     # View scheduled jobs"
-echo "  hermes doctor        # Diagnose issues"
+echo "  jinn-agent cron list     # View scheduled jobs"
+echo "  jinn-agent doctor        # Diagnose issues"
 echo ""
 
 # Ask if they want to run setup wizard now

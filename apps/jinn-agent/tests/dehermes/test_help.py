@@ -1,19 +1,6 @@
-import pytest
-
 from tests.dehermes.brandcheck import assert_no_upstream_brand, run_cli
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Top-level --help aggregates one-line help= strings from subcommand "
-        "modules (subcommands/backup.py, portal_cli.py, subcommands/uninstall.py, "
-        "subcommands/profile.py, subcommands/dashboard.py, ...) that still say "
-        "Hermes/Nous. Those are de-hermes tasks 6-9; this test is the sweep's "
-        "acceptance test and flips to pass when they land. Task 5 cleaned "
-        "everything _parser.py owns: prog, description, epilog, flag help."
-    ),
-)
 def test_top_level_help_is_hermes_free(tmp_path):
     out = run_cli("--help", home=str(tmp_path))
     assert_no_upstream_brand(out)

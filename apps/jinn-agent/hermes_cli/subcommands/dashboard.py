@@ -74,12 +74,12 @@ def _add_server_runtime_args(parser) -> None:
     parser.add_argument(
         "--stop",
         action="store_true",
-        help="Stop all running Hermes web server processes and exit",
+        help="Stop all running jinn-agent web server processes and exit",
     )
     parser.add_argument(
         "--status",
         action="store_true",
-        help="List running Hermes web server processes and exit",
+        help="List running jinn-agent web server processes and exit",
     )
 
 
@@ -100,7 +100,7 @@ def build_dashboard_parser(
     dashboard_parser = subparsers.add_parser(
         "dashboard",
         help="Start the web UI dashboard",
-        description="Launch the Hermes Agent web dashboard for managing config, API keys, and sessions",
+        description="Launch the jinn-agent web dashboard for managing config, API keys, and sessions",
     )
     _add_server_runtime_args(dashboard_parser)
     dashboard_parser.add_argument(
@@ -134,9 +134,9 @@ def build_dashboard_parser(
     # =========================================================================
     serve_parser = subparsers.add_parser(
         "serve",
-        help="Start the Hermes backend server (headless; powers the desktop app and remote backends)",
+        help="Start the jinn-agent backend server (headless; powers the desktop app and remote backends)",
         description=(
-            "Run the Hermes backend server — the JSON-RPC/WebSocket gateway the "
+            "Run the jinn-agent backend server — the JSON-RPC/WebSocket gateway the "
             "desktop app and remote clients connect to. Headless: it never opens "
             "a browser UI."
         ),
@@ -164,7 +164,7 @@ def build_dashboard_parser(
             "Register this install as a self-hosted dashboard with your Nous "
             "Portal account. Creates an OAuth client, writes "
             "HERMES_DASHBOARD_OAUTH_CLIENT_ID into ~/.hermes/.env, and prints "
-            "how to engage the login gate. Requires being logged in (hermes setup)."
+            "how to engage the login gate. Requires being logged in (jinn-agent setup)."
         ),
     )
     dashboard_register_parser.add_argument(
