@@ -795,6 +795,20 @@ export class MechAdapter implements ExecutionAdapter {
     return announcement;
   }
 
+  /**
+   * #1412: a task's execution window (task.window.endTs) is only known after
+   * IPFS hydration, not from any on-chain/discovery candidate shape. The
+   * engine kills the harness subprocess the instant this window is in the
+   * past (engine.ts: setTimeout(abort, max(0, endTs - now)) fires at 0ms), so
+   * claiming an already-expired task always fails with no chance of a real
+   * solve. Both discovery paths (DiscoveryAPI and the on-chain TaskCreated
+   * backlog scan) must skip these before spending a claim tx on a doomed run.
+   */
+  private hasExpiredExecutionWindow(announcement: TaskAnnouncement): boolean {
+    const windowEndTs = announcement.task.window?.endTs;
+    return windowEndTs !== undefined && windowEndTs <= Date.now();
+  }
+
   private async *discoverSubgraphRestorationTasks(): AsyncIterable<TaskAnnouncement> {
     const discovery = this.config.taskDiscovery;
     const discoveryApi: DiscoveryAPI | undefined = discovery?.discoveryApi;
@@ -870,12 +884,16 @@ export class MechAdapter implements ExecutionAdapter {
         // cycle we let the engine apply its gate to each one, preserving the
         // round-robin fairness across joined SolverNets. See task 212 live
         // verification in the fix's commit body.
-        yield await this.restorationAnnouncementFromDigest({
+        const announcement = await this.restorationAnnouncementFromDigest({
           taskId: candidate.taskId,
           taskCidDigest: candidate.taskCidDigest,
           transactionHash: candidate.createdAtTx,
           blockNumber: candidate.createdAtBlock,
         });
+
+        if (this.hasExpiredExecutionWindow(announcement)) continue;
+
+        yield announcement;
       } catch (err) {
         console.error(
           `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
@@ -1093,6 +1111,7 @@ export class MechAdapter implements ExecutionAdapter {
                 transactionHash,
                 blockNumber,
               });
+              if (this.hasExpiredExecutionWindow(announcement)) continue;
               yield announcement;
             } catch (err) {
               console.error(`[mech] Failed to parse task ${taskId}:`, err);

@@ -22,7 +22,10 @@ const HOISTED = vi.hoisted(() => {
     solverNetManifestCid: 'bafyfixturecid',
     role: 'restoration',
     description: 'Will the test market resolve YES?',
-    window: { startTs: 1_775_000_000_000, endTs: 1_775_000_600_000 },
+    // Relative to the real clock (not a fixed past timestamp) so the fixture
+    // never rots into an "already expired" execution window as time passes —
+    // see #1412, where an expired window causes discovery to skip the task.
+    window: { startTs: Date.now() - 600_000, endTs: Date.now() + 3_600_000 },
     spec: {
       venue: 'polymarket',
       marketId: 'market-1',
@@ -371,6 +374,67 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG.mechContractAddress,
       undefined,
     );
+
+    await adapter.stop();
+  });
+
+  it('discovery skips a candidate whose execution window has already expired (#1412)', async () => {
+    // Regression: the engine kills the harness subprocess the instant its
+    // execution window (task.window.endTs) is in the past — see
+    // engine.ts's setTimeout(abort, max(0, windowEndTs - now)), which fires
+    // at 0ms for an already-expired window. Claiming such a task always
+    // produces a harvest failure (missing .orient/summary.json) with no
+    // chance of a real solve. Discovery must skip expired-window candidates
+    // before claiming rather than let them fail downstream.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const expiredCandidate: ClaimableTaskCandidate = {
+      taskId: '42',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      createdAtBlock: 80,
+      createdAtTx: TX_HASH,
+      attemptCount: 0,
+      operatorAttemptCount: 0,
+    };
+    const freshCandidate: ClaimableTaskCandidate = {
+      ...expiredCandidate,
+      taskId: '43',
+    };
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([expiredCandidate, freshCandidate]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs)
+      .mockResolvedValueOnce(signedTask({
+        id: 'expired-task',
+        window: { startTs: Date.now() - 60_000, endTs: Date.now() - 1_000 },
+      }))
+      .mockResolvedValueOnce(signedTask({
+        id: 'fresh-task',
+        window: { startTs: Date.now(), endTs: Date.now() + 3_600_000 },
+      }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 0,
+      },
+    });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(100n);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({ taskId: '43', task: { id: 'fresh-task' } });
+    expect(claimTask).not.toHaveBeenCalled();
 
     await adapter.stop();
   });
@@ -881,6 +945,74 @@ describe('MechAdapter TaskCoordinator flow', () => {
       task: { id: 'fallback-task' },
       taskCid: TASK_CID,
     });
+
+    await adapter.stop();
+  });
+
+  it('canonical TaskCreated scan also skips a candidate whose execution window has already expired (#1412)', async () => {
+    // Regression: the on-chain TaskCreated backlog-scan path (used as a
+    // discoveryApi fallback/backstop) hydrates and yields tasks via a
+    // separate code path from discoverSubgraphRestorationTasks — it must
+    // apply the same expired-execution-window skip, not just the primary
+    // DiscoveryAPI path.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs, claimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const manifestCid = 'bafyfixturecid';
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockRejectedValueOnce(
+        new DiscoveryUnavailableError('discovery HTTP 429'),
+      ),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([
+      {
+        taskId: '44',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        creator: TEST_CONFIG.safeAddress,
+        transactionHash: TX_HASH,
+        blockNumber: 101,
+      },
+      {
+        taskId: '45',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        creator: TEST_CONFIG.safeAddress,
+        transactionHash: TX_HASH,
+        blockNumber: 101,
+      },
+    ]);
+    vi.mocked(fetchSignedTaskFromIpfs)
+      .mockResolvedValueOnce(signedTask({
+        id: 'expired-task',
+        window: { startTs: Date.now() - 60_000, endTs: Date.now() - 1_000 },
+      }))
+      .mockResolvedValueOnce(signedTask({
+        id: 'fresh-task',
+        window: { startTs: Date.now(), endTs: Date.now() + 3_600_000 },
+      }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: [manifestCid],
+        onchainFromBlock: 100,
+      },
+    });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({ taskId: '45', task: { id: 'fresh-task' } });
+    expect(claimTask).not.toHaveBeenCalled();
 
     await adapter.stop();
   });
