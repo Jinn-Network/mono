@@ -46,7 +46,7 @@ export interface PilotInstanceRef {
 export interface PilotConfig {
   instances: PilotInstanceRef[];
   repeats: number;
-  skill: string;
+  skills: string[];
   maxTurns: number;
   maxInstances: number;
   upstreamRepoDir: string;
@@ -70,7 +70,7 @@ function parseArgs(argv: string[]): PilotConfig {
   const cfg: PilotConfig = {
     instances: [DEFAULT_INSTANCE],
     repeats: 1,
-    skill: 'systematic-debugging',
+    skills: ['systematic-debugging'],
     maxTurns: 20,
     maxInstances: Infinity,
     upstreamRepoDir: join(homedir(), '.jinn-client', 'SWE-rebench-V2-upstream'),
@@ -83,7 +83,7 @@ function parseArgs(argv: string[]): PilotConfig {
     switch (a) {
       case '--dry-run': cfg.dryRun = true; break;
       case '--repeats': cfg.repeats = Number(argv[++i]); break;
-      case '--skill': cfg.skill = String(argv[++i]); break;
+      case '--skill': cfg.skills = String(argv[++i]).split(',').map((s) => s.trim()).filter(Boolean); break;
       case '--max-turns': cfg.maxTurns = Number(argv[++i]); break;
       case '--max-instances': cfg.maxInstances = Number(argv[++i]); break;
       case '--upstream-repo-dir': cfg.upstreamRepoDir = String(argv[++i]); break;
@@ -311,7 +311,7 @@ async function main(): Promise<void> {
 
         const arms: Arm[] = [
           { name: 'A', skills: [] },
-          { name: 'B', skills: [cfg.skill] },
+          { name: 'B', skills: cfg.skills },
         ];
 
         for (const arm of arms) {
