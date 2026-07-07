@@ -105,6 +105,15 @@ export {
 } from './gate.js';
 
 export {
+  distillClusters,
+  lexicalContaminationScan,
+  type DistillCluster,
+  type DistillLLMOutput,
+  type DistillDeps,
+  type DistillResult,
+} from './distill.js';
+
+export {
   createLivePublishDeps,
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,
