@@ -86,6 +86,17 @@ export {
 } from './publish-skill.js';
 
 export {
+  bridgeAttempts,
+  toBridgeCapturedTask,
+  repoFromInstanceId,
+  buildBridgeEvidencePublisher,
+  type AttemptRef,
+  type BridgeEvidence,
+  type BridgeDeps,
+  type BridgeResult,
+} from './bridge.js';
+
+export {
   createLivePublishDeps,
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,
