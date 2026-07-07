@@ -1,0 +1,45 @@
+# jinn-agent skin (Jinn-Network/mono#1358).
+#
+# Installed to $HERMES_HOME/skins/jinn.yaml by bin/jinn-agent on every launch
+# and set as the default skin for fresh installs (explicit user skin choices
+# are never overwritten). This is what makes a cold clone's first screen say
+# jinn-agent instead of the upstream branding.
+#
+# banner_logo / banner_hero must stay non-empty: skin art fields do not
+# inherit — an empty field falls back to the upstream art at render time.
+# Colours follow the Jinn design tokens (sky blues + golds); the colour
+# section is deliberately omitted so UI colours inherit the defaults.
+# No emoji anywhere in this file — Jinn brand non-negotiable.
+name: jinn
+description: "jinn-agent — the Jinn harness"
+
+branding:
+  agent_name: "jinn-agent"
+  cli_name: "jinn-agent"
+  welcome: "Welcome to jinn-agent! Type your message or /help for commands."
+  goodbye: "Goodbye."
+  response_label: " jinn-agent "
+  help_header: "Available Commands"
+  prompt_symbol: "❯"
+  credit: "Jinn Network"
+
+banner_logo: |-
+  [bold #a8c8ea]     ██╗ ██╗ ███╗   ██╗ ███╗   ██╗         █████╗   ██████╗  ███████╗ ███╗   ██╗ ████████╗[/]
+  [bold #7aa7dc]     ██║ ██║ ████╗  ██║ ████╗  ██║        ██╔══██╗ ██╔════╝  ██╔════╝ ████╗  ██║ ╚══██╔══╝[/]
+  [#dcb866]     ██║ ██║ ██╔██╗ ██║ ██╔██╗ ██║ █████╗ ███████║ ██║  ███╗ █████╗   ██╔██╗ ██║    ██║   [/]
+  [#c9a048]██   ██║ ██║ ██║╚██╗██║ ██║╚██╗██║ ╚════╝ ██╔══██║ ██║   ██║ ██╔══╝   ██║╚██╗██║    ██║   [/]
+  [#7aa7dc]╚█████╔╝ ██║ ██║ ╚████║ ██║ ╚████║        ██║  ██║ ╚██████╔╝ ███████╗ ██║ ╚████║    ██║   [/]
+  [#7d8ba3] ╚════╝  ╚═╝ ╚═╝  ╚═══╝ ╚═╝  ╚═══╝        ╚═╝  ╚═╝  ╚═════╝  ╚══════╝ ╚═╝  ╚═══╝    ╚═╝   [/]
+
+banner_hero: |-
+  [#dcb866]            ◆[/]
+  [#7aa7dc]          ╱   ╲[/]
+  [#7aa7dc]        ╱       ╲[/]
+  [#7aa7dc]      ╱           ╲[/]
+  [#dcb866]    ◆               ◆[/]
+  [#7aa7dc]      ╲           ╱[/]
+  [#7aa7dc]        ╲       ╱[/]
+  [#7aa7dc]          ╲   ╱[/]
+  [#dcb866]            ◆[/]
+
+  [dim #7d8ba3]         the loop[/]
