@@ -181,7 +181,10 @@ async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, rep
 }
 
 async function gradeOne(cfg: PilotConfig, row: HfRow, patch: string): Promise<boolean | null> {
-  if (!patch.trim()) return false; // empty patch never resolves
+  if (!patch.trim()) {
+    console.warn(`[pilot]   empty patch for ${row.instance_id} — agent produced no diff; scoring as not-resolved`);
+    return false; // empty patch never resolves
+  }
   const runner = new PythonEvalRunner({ upstreamRepoDir: cfg.upstreamRepoDir });
   try {
     const result = await runner.runEval({
@@ -277,36 +280,64 @@ async function main(): Promise<void> {
   const instances = cfg.instances.slice(0, Number.isFinite(cfg.maxInstances) ? cfg.maxInstances : cfg.instances.length);
 
   for (const ref of instances) {
-    console.log(`[pilot] fetching instance ${ref.instance_id}...`);
-    const [rawRow, hfRow] = await Promise.all([
-      fetchRawRow(ref),
-      hfFetcher.fetchTaskRow(ref),
-    ]);
-    const instance = parsePilotInstanceRow(rawRow, ref);
+    try {
+      console.log(`[pilot] fetching instance ${ref.instance_id}...`);
+      const [rawRow, hfRow] = await Promise.all([
+        fetchRawRow(ref),
+        hfFetcher.fetchTaskRow(ref),
+      ]);
+      const instance = parsePilotInstanceRow(rawRow, ref);
 
-    const baseDir = await mkdtemp(join(tmpdir(), `pilot-base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`));
-    console.log(`[pilot] cloning ${instance.repo} @ ${instance.base_commit}...`);
-    await run('git', ['clone', `https://github.com/${instance.repo}.git`, baseDir]);
-    await run('git', ['checkout', instance.base_commit], { cwd: baseDir });
+      const baseDir = await mkdtemp(join(tmpdir(), `pilot-base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`));
+      try {
+        console.log(`[pilot] cloning ${instance.repo} @ ${instance.base_commit}...`);
+        await run('git', ['clone', `https://github.com/${instance.repo}.git`, baseDir]);
+        await run('git', ['checkout', instance.base_commit], { cwd: baseDir });
 
-    const arms: Arm[] = [
-      { name: 'A', skills: [] },
-      { name: 'B', skills: [cfg.skill] },
-    ];
+        const arms: Arm[] = [
+          { name: 'A', skills: [] },
+          { name: 'B', skills: [cfg.skill] },
+        ];
 
-    for (const arm of arms) {
-      for (let repeat = 0; repeat < cfg.repeats; repeat++) {
-        const { patch, ...outcome } = await solveOne(cfg, instance, arm, repeat, baseDir);
-        const passed = await gradeOne(cfg, hfRow, patch);
-        const finalOutcome: SolveOutcome = { ...outcome, passed };
-        outcomes.push(finalOutcome);
-        console.log(`[pilot] result ${instance.instance_id} arm=${arm.name} repeat=${repeat}: passed=${passed} cost=$${finalOutcome.costUsd.toFixed(4)}`);
+        for (const arm of arms) {
+          for (let repeat = 0; repeat < cfg.repeats; repeat++) {
+            // Per-solve containment: a failed solve or grade is recorded as an
+            // ungradeable datapoint (passed:null, NEVER a fail) and the run
+            // CONTINUES. A single transient error (bad clone, ENOENT, the
+            // eval runner's own InsufficientDiskError) must not abort the run
+            // or discard prior real spend (brief: "record it and continue").
+            try {
+              const { patch, ...outcome } = await solveOne(cfg, instance, arm, repeat, baseDir);
+              let passed: boolean | null;
+              try {
+                passed = await gradeOne(cfg, hfRow, patch);
+              } catch (gradeErr) {
+                console.warn(`[pilot]   grade error for ${instance.instance_id}/${arm.name}/${repeat}: ${(gradeErr as Error).message} — recording ungradeable`);
+                passed = null;
+              }
+              const finalOutcome: SolveOutcome = { ...outcome, passed };
+              outcomes.push(finalOutcome);
+              console.log(`[pilot] result ${instance.instance_id} arm=${arm.name} repeat=${repeat}: passed=${passed} cost=$${finalOutcome.costUsd.toFixed(4)}`);
+            } catch (solveErr) {
+              console.warn(`[pilot]   solve error for ${instance.instance_id}/${arm.name}/${repeat}: ${(solveErr as Error).message} — recording ungradeable, continuing`);
+              outcomes.push({ instance_id: instance.instance_id, arm: arm.name, repeat, passed: null, costUsd: 0 });
+            }
+          }
+        }
+      } finally {
+        await rm(baseDir, { recursive: true, force: true });
       }
+    } catch (instErr) {
+      console.warn(`[pilot] instance ${ref.instance_id} failed (${(instErr as Error).message}) — skipping, continuing`);
     }
-
-    await rm(baseDir, { recursive: true, force: true });
   }
 
+  // Always report whatever was collected — a partial run still yields a
+  // (clearly partial) report rather than discarding real spend.
+  if (outcomes.length === 0) {
+    console.log('[pilot] no outcomes collected — nothing to report.');
+    return;
+  }
   const report = tallyPilot(outcomes, { rng });
   printReport(report, outcomes);
 }
