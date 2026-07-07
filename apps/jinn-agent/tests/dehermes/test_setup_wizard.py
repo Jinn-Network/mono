@@ -33,3 +33,26 @@ def test_tools_config_header_is_hermes_free_in_source():
     # captured via subprocess in a test harness — assert on the source.
     src = (_REPO / "hermes_cli" / "tools_config.py").read_text()
     assert "Hermes Tool Configuration" not in src
+
+
+def test_setup_wizard_interior_copy_is_hermes_free_in_source():
+    # Wizard interior copy (mode prompt, terminal-backend line, telegram/
+    # bluebubbles/gateway body copy, OpenClaw migration warnings + command
+    # hints) only renders on an interactive TTY or during a real OpenClaw
+    # migration — assert on the source constants instead.
+    src = (_REPO / "hermes_cli" / "setup.py").read_text()
+    for line in (
+        "How would you like to set up Hermes?",
+        "Choose where Hermes runs shell commands and code.",
+        "Home Channel: where Hermes delivers cron job results,",
+        "Connects Hermes to iMessage via BlueBubbles",
+        "Connect to messaging platforms to chat with Hermes from anywhere.",
+        "Would overwrite (conflicts with existing Hermes config):",
+        "OpenClaw config values may have different semantics in Hermes.",
+        "Hermes's yolo mode",
+        "Hermes can preview what would be imported before making any changes.",
+        "You can run it later with: hermes claw migrate --dry-run",
+        "You can run it later with: hermes claw migrate",
+        "already exist in Hermes (use hermes claw migrate --overwrite to force)",
+    ):
+        assert line not in src, f"leftover wizard interior branding: {line!r}"

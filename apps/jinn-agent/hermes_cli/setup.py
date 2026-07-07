@@ -1228,8 +1228,10 @@ def setup_tts(config: dict):
 def setup_terminal_backend(config: dict):
     """Configure the terminal execution backend."""
     import platform as _platform
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print_header("Terminal Backend")
-    print_info("Choose where Hermes runs shell commands and code.")
+    print_info(f"Choose where {_brand} runs shell commands and code.")
     print_info("This affects tool execution, file access, and isolation.")
     print_info(f"   Guide: {_DOCS_BASE}/user-guide/configuration#terminal-backend-configuration")
     print()
@@ -1787,6 +1789,8 @@ def _prompt_telegram_bot_token() -> str | None:
 
 def _setup_telegram():
     """Configure Telegram bot credentials and allowlist."""
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print_header("Telegram")
     existing = get_env_value("TELEGRAM_BOT_TOKEN")
     if existing:
@@ -1875,7 +1879,7 @@ def _setup_telegram():
         print_info("⚠️  No allowlist set - anyone who finds your bot can use it!")
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results,")
+    print_info(f"📬 Home Channel: where {_brand} delivers cron job results,")
     print_info("   cross-platform messages, and notifications.")
     print_info("   For Telegram DMs, this is your user ID (same as above).")
 
@@ -1906,6 +1910,8 @@ def _setup_telegram():
 
 def _setup_bluebubbles():
     """Configure BlueBubbles iMessage gateway."""
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print_header("BlueBubbles (iMessage)")
     existing = get_env_value("BLUEBUBBLES_SERVER_URL")
     if existing:
@@ -1913,7 +1919,7 @@ def _setup_bluebubbles():
         if not prompt_yes_no("Reconfigure BlueBubbles?", False):
             return
 
-    print_info("Connects Hermes to iMessage via BlueBubbles — a free, open-source")
+    print_info(f"Connects {_brand} to iMessage via BlueBubbles — a free, open-source")
     print_info("macOS server that bridges iMessage to any device.")
     print_info("   Requires a Mac running BlueBubbles Server v1.0.0+")
     print_info("   Download: https://bluebubbles.app/")
@@ -2026,8 +2032,10 @@ def setup_gateway(config: dict):
     """Configure messaging platform integrations."""
     from hermes_cli.gateway import _all_platforms, _platform_status, _configure_platform
 
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print_header("Messaging Platforms")
-    print_info("Connect to messaging platforms to chat with Hermes from anywhere.")
+    print_info(f"Connect to messaging platforms to chat with {_brand} from anywhere.")
     print_info("Toggle with Space, confirm with Enter.")
     print()
 
@@ -2463,15 +2471,21 @@ def _load_openclaw_migration_module():
 
 # Item kinds that represent high-impact changes warranting explicit warnings.
 # Gateway tokens/channels can hijack messaging platforms from the old agent.
-# Config values may have different semantics between OpenClaw and Hermes.
+# Config values may have different semantics between OpenClaw and {brand}.
 # Instruction/context files (.md) can contain incompatible setup procedures.
+#
+# Templated on "{brand}" rather than resolved here: this dict is built at
+# import time, before cli.py's module-level skin init has run from
+# config.yaml, so get_active_skin() would always return the fallback
+# default regardless of the user's actual skin. Formatted with
+# .format(brand=_brand) at print time in _print_migration_preview instead.
 _HIGH_IMPACT_KIND_KEYWORDS = {
-    "gateway": "⚠ Gateway/messaging — this will configure Hermes to use your OpenClaw messaging channels",
-    "telegram": "⚠ Telegram — this will point Hermes at your OpenClaw Telegram bot",
-    "slack": "⚠ Slack — this will point Hermes at your OpenClaw Slack workspace",
-    "discord": "⚠ Discord — this will point Hermes at your OpenClaw Discord bot",
-    "whatsapp": "⚠ WhatsApp — this will point Hermes at your OpenClaw WhatsApp connection",
-    "config": "⚠ Config values — OpenClaw settings may not map 1:1 to Hermes equivalents",
+    "gateway": "⚠ Gateway/messaging — this will configure {brand} to use your OpenClaw messaging channels",
+    "telegram": "⚠ Telegram — this will point {brand} at your OpenClaw Telegram bot",
+    "slack": "⚠ Slack — this will point {brand} at your OpenClaw Slack workspace",
+    "discord": "⚠ Discord — this will point {brand} at your OpenClaw Discord bot",
+    "whatsapp": "⚠ WhatsApp — this will point {brand} at your OpenClaw WhatsApp connection",
+    "config": "⚠ Config values — OpenClaw settings may not map 1:1 to {brand} equivalents",
     "soul": "⚠ Instruction file — may contain OpenClaw-specific setup/restart procedures",
     "memory": "⚠ Memory/context file — may reference OpenClaw-specific infrastructure",
     "context": "⚠ Context file — may contain OpenClaw-specific instructions",
@@ -2484,6 +2498,8 @@ def _print_migration_preview(report: dict):
     Groups items by category and adds explicit warnings for high-impact
     changes like gateway token takeover and config value differences.
     """
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     items = report.get("items", [])
     if not items:
         print_info("Nothing to migrate.")
@@ -2511,11 +2527,11 @@ def _print_migration_preview(report: dict):
             dest_lower = str(dest).lower()
             for keyword, warning in _HIGH_IMPACT_KIND_KEYWORDS.items():
                 if keyword in kind_lower or keyword in dest_lower:
-                    warnings_shown.add(warning)
+                    warnings_shown.add(warning.format(brand=_brand))
         print()
 
     if conflict_items:
-        print(color("  Would overwrite (conflicts with existing Hermes config):", Colors.YELLOW))
+        print(color(f"  Would overwrite (conflicts with existing {_brand} config):", Colors.YELLOW))
         for item in conflict_items:
             kind = item.get("kind", "unknown")
             reason = item.get("reason", "already exists")
@@ -2536,8 +2552,8 @@ def _print_migration_preview(report: dict):
         for warning in sorted(warnings_shown):
             print(color(f"    {warning}", Colors.YELLOW))
         print()
-        print(color("  Note: OpenClaw config values may have different semantics in Hermes.", Colors.YELLOW))
-        print(color("  For example, OpenClaw's tool_call_execution: \"auto\" ≠ Hermes's yolo mode.", Colors.YELLOW))
+        print(color(f"  Note: OpenClaw config values may have different semantics in {_brand}.", Colors.YELLOW))
+        print(color(f"  For example, OpenClaw's tool_call_execution: \"auto\" ≠ {_brand}'s yolo mode.", Colors.YELLOW))
         print(color("  Instruction files (.md) from OpenClaw may contain incompatible procedures.", Colors.YELLOW))
         print()
 
@@ -2557,15 +2573,18 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
     if not _OPENCLAW_SCRIPT.exists():
         return False
 
+    _ensure_skin_initialised()
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+
     print()
     print_header("OpenClaw Installation Detected")
     print_info(f"Found OpenClaw data at {openclaw_dir}")
-    print_info("Hermes can preview what would be imported before making any changes.")
+    print_info(f"{_brand} can preview what would be imported before making any changes.")
     print()
 
     if not prompt_yes_no("Would you like to see what can be imported?", default=True):
         print_info(
-            "Skipping migration. You can run it later with: hermes claw migrate --dry-run"
+            "Skipping migration. You can run it later with: jinn-agent claw migrate --dry-run"
         )
         return False
 
@@ -2623,7 +2642,7 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
     # ── Phase 2: Confirm and execute ──
     if not prompt_yes_no("Proceed with migration?", default=False):
         print_info(
-            "Migration cancelled. You can run it later with: hermes claw migrate"
+            "Migration cancelled. You can run it later with: jinn-agent claw migrate"
         )
         print_info(
             "Use --dry-run to preview again, or --preset minimal for a lighter import."
@@ -2661,7 +2680,7 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
     if migrated:
         print_success(f"Imported {migrated} item(s) from OpenClaw.")
     if conflicts:
-        print_info(f"Skipped {conflicts} item(s) that already exist in Hermes (use hermes claw migrate --overwrite to force).")
+        print_info(f"Skipped {conflicts} item(s) that already exist in {_brand} (use jinn-agent claw migrate --overwrite to force).")
     if skipped:
         print_info(f"Skipped {skipped} item(s) (not found or unchanged).")
     if errors:
@@ -2942,10 +2961,11 @@ def run_setup_wizard(args):
         if migration_ran:
             config = load_config()
 
+        _portal_label = get_active_skin().get_branding("portal_label", "Nous Portal")
         setup_mode = prompt_choice(
-            "How would you like to set up Hermes?",
+            f"How would you like to set up {_brand}?",
             [
-                "Quick Setup (Nous Portal) — free OAuth login, no API keys, model + tools (recommended)",
+                f"Quick Setup ({_portal_label}) — free OAuth login, no API keys, model + tools (recommended)",
                 "Full setup — configure every provider, tool & option yourself (bring your own keys)",
                 "Blank Slate — everything off except the bare minimum; opt in to each capability",
             ],
