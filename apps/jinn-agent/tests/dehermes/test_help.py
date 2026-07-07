@@ -4,7 +4,7 @@ from tests.dehermes.brandcheck import assert_no_upstream_brand, run_cli
 
 
 @pytest.mark.xfail(
-    strict=False,
+    strict=True,
     reason=(
         "Top-level --help aggregates one-line help= strings from subcommand "
         "modules (subcommands/backup.py, portal_cli.py, subcommands/uninstall.py, "
