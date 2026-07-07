@@ -8,7 +8,7 @@
  * PortfolioV0RestorationPayloadSchema / PortfolioV0VerdictPayloadSchema instead.
  */
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { WindowSchema } from './task.js';
 
 // ── Shared primitives ────────────────────────────────────────────────────────

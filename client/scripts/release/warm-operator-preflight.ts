@@ -110,9 +110,8 @@ async function faucetTopUp(jinnClientDir: string): Promise<void> {
   for (const addr of [master, agent].filter((a): a is string => Boolean(a))) {
     await drip(addr, 'eth');
   }
-  // USDC on the operating Safe (legacy substrate balance; checkSubstrateTopup's
-  // USDC target is the same Safe). Not consumed by artifact acquisition, which
-  // is now a free fetch.
+  // USDC on the operating Safe (x402 / cross-op donation; checkSubstrateTopup's
+  // USDC target is the same Safe).
   if (safe) {
     await drip(safe, 'usdc');
   }

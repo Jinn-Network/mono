@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { App } from './App';
-import type { NetworkResponse, OperatorsResponse, OperatorResponse, SolverNetsResponse, SolverNetResponse, CorpusListResponse, CorpusItemResponse } from './lib/api';
+import type { NetworkResponse, OperatorsResponse, OperatorResponse, SolverNetsResponse, SolverNetResponse } from './lib/api';
 
 // ── Minimal fixtures ──────────────────────────────────────────────────────────
 
@@ -20,6 +20,15 @@ const NETWORK_FIXTURE: NetworkResponse = {
   tasksRefunded: 0,
   attempts: 10,
   everAttemptedOperators: 1,
+  activeOperators: 0,
+  sustainedOperators: 0,
+  activeWindow: {
+    startTs: 0,
+    endTs: 48 * 3600,
+    blockSeconds: 6 * 3600,
+    blockCount: 8,
+    requiredTjinnPerBlock: '3000000000000000000',
+  },
   solverNetsRunning: 1,
   verdicts: 8,
   verdictsPass: 7,
@@ -28,6 +37,8 @@ const NETWORK_FIXTURE: NetworkResponse = {
   onChainResolvedRate: null,
   verdictConsistency: { matched: 0, disagreed: 0, total: 0, agreementShare: null },
   enrichmentCoverageVerdicts: { enriched: 0, total: 0, share: 0 },
+  jinnDistributedOperator: '0',
+  jinnDistributedDao: '0',
   mostRecentSettlementBlock: null,
   composition: { byMode: [], byHarness: [], byModel: [], byPlugin: [] },
   enrichmentCoverage: { enrichedAttempts: 8, totalAttempts: 10, share: 0.8 },
@@ -75,14 +86,14 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
   minVerdicts: 5,
   activeOperators: 0,
   sustainedOperators: 0,
-  operatorsAtMilestone3: 0,
   activeWindow: {
-    startTs: 1_700_000_000,
-    endTs: 1_700_172_800,
-    blockSeconds: 21_600,
+    startTs: 0,
+    endTs: 48 * 3600,
+    blockSeconds: 6 * 3600,
     blockCount: 8,
-    requiredOlasPerBlock: '1',
+    requiredTjinnPerBlock: '3000000000000000000',
   },
+  meta: { jinnAttribution: 'pending' },
   lastIndexedBlock: '100',
   lastIndexedAt: new Date().toISOString(),
   behindHead: null,
@@ -100,49 +111,9 @@ const OPERATOR_FIXTURE: OperatorResponse = {
     verdictsTotal: 0,
     verdictsPass: 0,
     resolvedRate: null,
+    jinnEarned: '0',
   },
-  lastIndexedBlock: '100',
-  lastIndexedAt: new Date().toISOString(),
-  behindHead: null,
-};
-
-const CORPUS_LIST_FIXTURE: CorpusListResponse = {
-  items: [
-    {
-      cid: 'bafkreicorpusroutingaaaaaaaaaaaaaaaaaaaa1',
-      chainId: 84532,
-      summary: 'fix flaky retry in http client',
-      cluster: 'jinn-agent',
-      tier: 'tests-passed',
-      contributor: '0x123',
-      model: 'gpt-5.4-mini',
-      stepCount: 6,
-      createdAt: Math.floor(Date.now() / 1000) - 120,
-    },
-  ],
-  total: 1,
-  seedsExcluded: 0,
-  includeSeeds: false,
-  lastIndexedBlock: '100',
-  lastIndexedAt: new Date().toISOString(),
-  behindHead: null,
-};
-
-const CORPUS_ITEM_FIXTURE: CorpusItemResponse = {
-  cid: 'abc',
-  chainId: 84532,
-  summary: 'fix flaky retry in http client',
-  cluster: 'jinn-agent',
-  tags: ['cli', 'retry'],
-  tier: 'tests-passed',
-  contributor: '0x123',
-  harness: 'jinn-agent 0.4.2',
-  model: 'gpt-5.4-mini',
-  tools: ['read', 'bash'],
-  stepCount: 6,
-  provenance: 'contributed',
-  anchorTx: '0x' + 'cd'.repeat(32),
-  createdAt: Math.floor(Date.now() / 1000) - 120,
+  meta: { jinnAttribution: 'pending' },
   lastIndexedBlock: '100',
   lastIndexedAt: new Date().toISOString(),
   behindHead: null,
@@ -173,13 +144,13 @@ function setupMockFetch() {
           bucket: 'auto',
         },
         enrichmentCoverage: 1,
-        kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null },
+        kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null, jinnEarned: '0' },
         series: [
           {
             groupValue: null,
             buckets: [],
             rolling: [],
-            kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null },
+            kpis: { attempts: 0, verdicts: 0, verdictsPass: 0, resolvedRate: null, jinnEarned: '0' },
           },
         ],
         leaderboard: { train: [], frozen: [] },
@@ -191,8 +162,6 @@ function setupMockFetch() {
     if (u.match(/\/explorer\/solvernet\//)) return json(SOLVERNET_FIXTURE);
     if (u.match(/\/explorer\/operators$/)) return json(OPERATORS_FIXTURE);
     if (u.match(/\/explorer\/operator\//)) return json(OPERATOR_FIXTURE);
-    if (u.match(/\/explorer\/corpus\/.+/)) return json(CORPUS_ITEM_FIXTURE);
-    if (u.match(/\/explorer\/corpus(\?|$)/)) return json(CORPUS_LIST_FIXTURE);
     return json({});
   });
 }
@@ -300,25 +269,6 @@ describe('App routing', () => {
       // active-slice-chips testid-anchored strip).
       const chips = screen.getByRole('region', { name: 'Active filters' });
       expect(chips).toHaveTextContent(/harness:codex/i);
-    });
-  });
-
-  it('/corpus → CorpusView mounts (index of corpus items)', async () => {
-    const Wrapper = makeWrapper('/corpus');
-    render(<App />, { wrapper: Wrapper });
-    await waitFor(() => {
-      // "Corpus" appears in the nav and the view heading; the item summary is unique to the view.
-      expect(screen.getByText('fix flaky retry in http client')).toBeInTheDocument();
-    });
-    expect(screen.getAllByText('Corpus').length).toBeGreaterThan(0);
-  });
-
-  it('/corpus/abc → CorpusItemView mounts with the cid (deep-link target)', async () => {
-    const Wrapper = makeWrapper('/corpus/abc');
-    render(<App />, { wrapper: Wrapper });
-    await waitFor(() => {
-      // The detail renders the envelope harness fingerprint, unique to the item view.
-      expect(screen.getByText('jinn-agent 0.4.2')).toBeInTheDocument();
     });
   });
 

@@ -1,5 +1,5 @@
 /**
- * Env-gated stub harness for the T2.4 producer/evaluator gate.
+ * Env-gated stub harness for the T2.2 producer/evaluator gate.
  *
  * When JINN_HARNESS_STUB_INSTANCE is set, the canned patch at
  * <fixturesDir>/<instanceMatcher>.patch is returned as a SWE-rebench v2
@@ -36,7 +36,7 @@ export interface StubHarnessConfig {
 
 /**
  * A zero-LLM Harness that returns a canned patch for a specific SWE-rebench v2
- * instance. Intended exclusively for T2.4 release-gate automation.
+ * instance. Intended exclusively for T2.2 release-gate automation.
  */
 export class StubHarness implements Harness {
   readonly name = 'harness:stub';

@@ -27,7 +27,6 @@ import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
 import { BuildPage } from './pages/Build.js';
 import { getFeatures } from './lib/features.js';
-import { OfflineNotice } from './notifications/components/OfflineNotice.js';
 import { TooltipProvider } from './components/ui/tooltip.js';
 import { Toaster } from './components/ui/sonner.js';
 
@@ -85,21 +84,9 @@ export default function App(): JSX.Element {
     );
   }
 
-  // #983: keep the onboarding takeover until the operator finishes the guided
-  // flow. The daemon flips mode→running on the earning state machine alone; a
-  // node that finished bootstrap but has not completed onboarding (joined ≥1
-  // SolverNet AND readied a solver harness AND selected a model) is not yet
-  // usable. The first join populates joinedSolverNets mid-flow, so gating on
-  // that map ejected the operator before the harness step (#983 MEDIUM). We
-  // gate instead on an explicit completion flag the daemon surfaces from its
-  // in-memory config, set by POST /v1/operator/onboarding-complete when the
-  // operator clicks "Enter dashboard". The harness-ready and model-selected
-  // legs are enforced inside <Onboarding>'s own Enter-dashboard gate.
-  const onboardingComplete = data?.onboardingComplete === true;
-  if (data && (data.mode !== 'running' || !onboardingComplete)) {
+  if (data && data.mode !== 'running') {
     return (
       <TooltipProvider delayDuration={150}>
-        <OfflineNotice />
         <Onboarding />
         <Toaster />
       </TooltipProvider>

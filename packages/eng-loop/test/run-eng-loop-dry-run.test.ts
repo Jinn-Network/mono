@@ -63,7 +63,6 @@ describe('printReport — dispatched session log path + pid (#533 AC#2)', () => 
       backpressureTripped: false,
       paused: [],
       skippedForAuthor: [],
-      collected: [],
     };
   }
 

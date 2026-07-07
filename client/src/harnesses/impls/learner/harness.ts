@@ -1,6 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type {
   Harness,
   HarnessContext,
@@ -8,7 +6,6 @@ import type {
   RuntimePlugin,
   Solution,
 } from '../../types.js';
-import { displayPath, type HarnessAuthSource } from '../../auth-source.js';
 import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
@@ -132,38 +129,6 @@ export class LearnerHarness implements Harness {
       return await this.codexIsReady();
     }
     return this.claudeIsReady(ctx);
-  }
-
-  /**
-   * #564 — auth source depends on the backing CLI:
-   *   - claude-code → session auth (`claude auth status`), no stat-able file.
-   *   - codex       → `OPENAI_API_KEY` env if set, else `auth.json` at
-   *                   `CODEX_HOME` or `~/.codex/auth.json`.
-   * The daemon's resolver reads only a masked suffix; codex `auth.json` is JSON
-   * (no plain key field), so the resolver reports `loaded` from file existence
-   * but masks the suffix to null — the operator still sees the path, mtime, and
-   * state.
-   */
-  async getAuthSource(): Promise<HarnessAuthSource> {
-    if (canonicalHarnessName(this.name) === CODEX_HARNESS) {
-      if ((process.env['OPENAI_API_KEY']?.trim() ?? '').length > 0) {
-        return { sourceKind: 'env', envKey: 'OPENAI_API_KEY', docAnchor: 'codex' };
-      }
-      const codexHome = process.env['CODEX_HOME']?.trim();
-      const absolutePath = codexHome
-        ? join(codexHome, 'auth.json')
-        : join(homedir(), '.codex', 'auth.json');
-      return {
-        sourceKind: 'file',
-        sourcePath: displayPath(absolutePath),
-        absolutePath,
-        envKey: 'OPENAI_API_KEY',
-        docAnchor: 'codex',
-        credentialIsJson: true,
-      };
-    }
-    // claude-code (default)
-    return { sourceKind: 'session', docAnchor: 'claude-code' };
   }
 
   /**

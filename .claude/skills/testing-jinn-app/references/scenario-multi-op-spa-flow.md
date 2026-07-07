@@ -1,20 +1,14 @@
 # Paired (two-operator) SPA flow — manual runbook
 
-**Type:** human-run check, NOT an automated test. Run as a **soft, human-judgment
-gate on the Monday named cut** (DR-2026-06-08) — Captain runs it before publishing
-and records a verdict (see [Recording the verdict](#recording-the-verdict-release-gate)
-below). Soft means nothing in `npm-publish.yml` blocks; the human is the classifier.
+**Type:** human-run spot check, NOT an automated/gating test.
 **Why manual:** this flow drives two real daemons against real Base Sepolia + a
 shared rate-limited RPC + IPFS + the indexer. Its timing is inherently
 non-deterministic (launch confirmation, IPFS metadata resolution, cross-op
 indexer propagation, RPC throttling), so as an automated test it can only ever
 be flaky. A flaky red can't be distinguished from a real bug, so it would either
 block nothing (and be ignored) or block on infra — exactly the un-gateable shape
-the two-gate redesign (#960) deleted T2.3 to escape. So it stays off *automated*
-gates. It IS run as a *soft, human-judgment* gate on the Monday cut (DR-2026-06-08):
-a person runs it by hand, classifies the outcome (a human can tell an RPC 429 from a
-real bug — an automated test can't), and records a verdict. Read the screenshots;
-never wire it onto an automated or publish-guard-queried gate.
+the two-gate redesign (#960) deleted T2.3 to escape. Run it by hand when you want
+end-to-end confidence; read the screenshots; don't wire it onto a gate.
 
 **Gating coverage already exists, deterministically:** `join.e2e.test.ts`
 (discover→join, mocked daemon) + `solvernet-flow.e2e.test.ts` (create→launch)
@@ -130,27 +124,6 @@ daemon does not hot-reload SolverNet config).
 Screenshots of op-a's launched dashboard (LAUNCHED, generator enabled) and op-b's
 catalog (op-a's card discoverable) + join success card. The point is human
 eyeballing, not an automated pass/fail.
-
-## Recording the verdict (release gate)
-
-When run as the Monday-cut soft gate (DR-2026-06-08), classify the outcome into one
-of three and record it in **two places**: the paired-flow checklist line on the
-standing **release-review PR** (the operational gate Captain fills before clicking
-Publish), and a one-line append to
-[`log/decisions/release-readiness-runs.md`](../../../../log/decisions/release-readiness-runs.md)
-(the durable receipt).
-
-| Verdict | When | Action |
-|---|---|---|
-| ✅ **pass** | both screenshots clean — op-a LAUNCHED, op-b discovered + joined | tick the PR line, proceed to publish |
-| ⚠️ **infra-blocked** | failed on RPC 429 / IPFS lag / warm-operator lapse — *you judge it's the environment, not the product* | tick the PR line noting the symptom, **proceed** (this is why it's human-run, not automated) |
-| ❌ **product-red** | *you judge a real app / cross-op regression* (e.g. a launched SolverNet never becomes discoverable; JoinFlow breaks) | **hold the cut** — don't publish; file a `fix`; re-run before publishing |
-
-This gate is **Monday named cut only**; hotfixes are exempt (they open no
-release-review PR). It is **soft** — nothing in `npm-publish.yml` blocks, and the
-publish guard's two SHA-bound check-runs (`hermetic-gate` + `environment-suite`) are
-untouched. See `docs/engineering/handbook.md` §Cadence → "Paired-flow pre-publish
-gate".
 
 ## Real-world gotchas (each cost a debugging cycle)
 

@@ -10,7 +10,7 @@
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { keccak256, toBytes } from 'viem';
-import type { ZodIssue } from 'zod/v3';
+import type { ZodIssue } from 'zod';
 import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
@@ -65,8 +65,6 @@ import {
 import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
-import { buildScrubPipeline } from '../../trajectory/scrub/build.js';
-import type { ScrubPipeline } from '../../trajectory/scrub/pipeline.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
@@ -76,7 +74,6 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
-import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { harnessStateDirName } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 
@@ -139,8 +136,6 @@ export interface JoinedSolverNetsView {
   get(manifestCid: string): { roles: Array<'solver' | 'evaluator'> } | undefined;
   /** Enumerate all joined manifest CIDs (used for digest-based filtering). */
   manifestCids(): string[];
-  /** Add/replace one joined entry live (used by the hot-apply join applier, #1037). */
-  set(manifestCid: string, entry: { roles: Array<'solver' | 'evaluator'> }): void;
 }
 
 /** Map task role to the operator role it requires in `joinedSolverNets`. */
@@ -169,28 +164,6 @@ export function joinedSolverNetsViewFromConfig(
   return {
     get: (cid: string) => map.get(cid),
     manifestCids: () => [...map.keys()],
-    set: (cid, entry) => { map.set(cid, entry); },
-  };
-}
-
-/**
- * Mutable `JoinedSolverNetsView` for the running daemon. Unlike
- * `joinedSolverNetsViewFromConfig` (boot snapshot), the applier
- * (`daemon/join-applier.ts`, #1037) keeps a handle and calls `set()` when a
- * join is hot-applied, so the engine's per-task eligibility check sees the new
- * cid on its next call without a restart.
- */
-export function createMutableJoinedSolverNetsView(
-  initial: Record<string, { manifestCid: string; roles: Array<'solver' | 'evaluator'> }> | undefined,
-): JoinedSolverNetsView {
-  const map = new Map<string, { roles: Array<'solver' | 'evaluator'> }>();
-  for (const [key, entry] of Object.entries(initial ?? {})) {
-    map.set(entry.manifestCid ?? key, { roles: entry.roles });
-  }
-  return {
-    get: (cid: string) => map.get(cid),
-    manifestCids: () => [...map.keys()],
-    set: (cid, entry) => { map.set(cid, entry); },
   };
 }
 
@@ -251,12 +224,6 @@ export interface TaskEngineOptions {
    */
   implRegistry?: ImplRegistry;
   solverNetRegistry?: SolverNetRegistryLike;
-  /**
-   * Seller-side scrub pipeline applied to trajectory spans at emit time. When
-   * absent, the engine builds the default (openredaction + secretlint); supply
-   * one to add the ML PII detector.
-   */
-  scrubPipeline?: ScrubPipeline;
   /**
    * Per-launch operator eligibility filter (Task 28 of
    * `spec/2026-05-05-solvernet-creation-and-launch.md`).
@@ -415,7 +382,6 @@ export class TaskEngine {
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
-  protected readonly scrubPipeline: ScrubPipeline;
   protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
@@ -476,7 +442,6 @@ export class TaskEngine {
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
-    this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
     this.joinedSolverNets = opts.joinedSolverNets;
     this.manifestResolver = opts.manifestResolver;
     this.identityPublisher = opts.identityPublisher;
@@ -660,7 +625,6 @@ export class TaskEngine {
       } catch (err) {
         console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
       }
-      recordLoopTick(this.store, 'engine-tick'); // #1043 loop watchdog
       if (this.stopped) break;
       await Promise.race([
         new Promise((resolve) => setTimeout(resolve, intervalMs)),
@@ -1465,7 +1429,6 @@ export class TaskEngine {
           signerAddress: account.address as `0x${string}`,
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
           scrub: packagingDepsWithReq.donation?.scrub,
-          scrubPipeline: this.scrubPipeline,
         });
         const sources: ArtifactSource[] = [];
         if (packagingDepsWithReq.donation?.enabled) {

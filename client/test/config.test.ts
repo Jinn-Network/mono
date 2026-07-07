@@ -4,38 +4,11 @@ import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TESTNET_DISCOVERY_URL,
-  DEFAULT_TESTNET_RPC_URLS,
-  DEFAULT_MAINNET_RPC_URLS,
+  DEFAULT_TESTNET_ETHEREUM_RPC_URL,
   loadConfig,
   buildConfigProvenance,
   migrateLegacySolverNets,
 } from '../src/config.js';
-
-/**
- * Issue #911 — ≥5 distinct free RPC providers default per supported chain.
- * Structural invariants: every default list ships ≥5 distinct, parseable URLs,
- * with the no-auth publicnode endpoint pinned to slot 0 (the #835 slot-0 guard).
- */
-describe('default RPC provider lists (#911)', () => {
-  const assertChain = (list: readonly string[], slot0Substr?: string) => {
-    expect(list.length).toBeGreaterThanOrEqual(5);
-    expect(new Set(list).size).toBe(list.length); // distinct
-    for (const u of list) {
-      expect(new URL(u).host.length).toBeGreaterThan(0); // parseable
-    }
-    if (slot0Substr !== undefined) {
-      expect(list[0]).toContain(slot0Substr);
-    }
-  };
-
-  it('Base Sepolia (84532) ships ≥5 distinct free providers, publicnode at slot 0', () => {
-    assertChain(DEFAULT_TESTNET_RPC_URLS, 'base-sepolia.publicnode.com');
-  });
-
-  it('Base mainnet (8453) ships ≥5 distinct free providers, mainnet.base.org at slot 0', () => {
-    assertChain(DEFAULT_MAINNET_RPC_URLS, 'mainnet.base.org');
-  });
-});
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -43,30 +16,20 @@ describe('loadConfig RPC override handling', () => {
   const originalBaseSepoliaRpcUrl = process.env['BASE_SEPOLIA_RPC_URL'];
   const originalJinnRpcUrl = process.env['JINN_RPC_URL'];
   const originalJinnNetwork = process.env['JINN_NETWORK'];
+  const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
   const originalJinnSubgraphUrl = process.env['JINN_SUBGRAPH_URL'];
   const originalJinnDiscoveryMode = process.env['JINN_DISCOVERY_MODE'];
   const originalJinnDiscoveryUrl = process.env['JINN_DISCOVERY_URL'];
   const originalJinnDiscoveryFallback = process.env['JINN_DISCOVERY_FALLBACK'];
+  const originalJinnEthereumRpcUrl = process.env['JINN_ETHEREUM_RPC_URL'];
+  const originalJinnClaimSubmissionMode = process.env['JINN_CLAIM_SUBMISSION_MODE'];
+  const originalJinnClaimLoopEnabled = process.env['JINN_CLAIM_LOOP_ENABLED'];
   const originalJinnTaskDiscoveryAllowedTaskIds = process.env['JINN_TASK_DISCOVERY_ALLOWED_TASK_IDS'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
-  const originalWatchdogAutoRestart = process.env['JINN_WATCHDOG_AUTO_RESTART'];
-  const originalRewardClaimIntervalMs = process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
 
   afterEach(async () => {
-    if (originalWatchdogAutoRestart === undefined) {
-      delete process.env['JINN_WATCHDOG_AUTO_RESTART'];
-    } else {
-      process.env['JINN_WATCHDOG_AUTO_RESTART'] = originalWatchdogAutoRestart;
-    }
-
-    if (originalRewardClaimIntervalMs === undefined) {
-      delete process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
-    } else {
-      process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = originalRewardClaimIntervalMs;
-    }
-
     if (originalBaseRpcUrl === undefined) {
       delete process.env['BASE_RPC_URL'];
     } else {
@@ -91,6 +54,12 @@ describe('loadConfig RPC override handling', () => {
       process.env['JINN_NETWORK'] = originalJinnNetwork;
     }
 
+    if (originalJinnL2ProofRpcUrl === undefined) {
+      delete process.env['JINN_L2_PROOF_RPC_URL'];
+    } else {
+      process.env['JINN_L2_PROOF_RPC_URL'] = originalJinnL2ProofRpcUrl;
+    }
+
     if (originalJinnSubgraphUrl === undefined) {
       delete process.env['JINN_SUBGRAPH_URL'];
     } else {
@@ -113,6 +82,24 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_DISCOVERY_FALLBACK'];
     } else {
       process.env['JINN_DISCOVERY_FALLBACK'] = originalJinnDiscoveryFallback;
+    }
+
+    if (originalJinnEthereumRpcUrl === undefined) {
+      delete process.env['JINN_ETHEREUM_RPC_URL'];
+    } else {
+      process.env['JINN_ETHEREUM_RPC_URL'] = originalJinnEthereumRpcUrl;
+    }
+
+    if (originalJinnClaimSubmissionMode === undefined) {
+      delete process.env['JINN_CLAIM_SUBMISSION_MODE'];
+    } else {
+      process.env['JINN_CLAIM_SUBMISSION_MODE'] = originalJinnClaimSubmissionMode;
+    }
+
+    if (originalJinnClaimLoopEnabled === undefined) {
+      delete process.env['JINN_CLAIM_LOOP_ENABLED'];
+    } else {
+      process.env['JINN_CLAIM_LOOP_ENABLED'] = originalJinnClaimLoopEnabled;
     }
 
     if (originalJinnTaskDiscoveryAllowedTaskIds === undefined) {
@@ -251,11 +238,10 @@ describe('loadConfig RPC override handling', () => {
     // `config.rpcUrl` is the head URL for display continuity; `config.rpcUrls`
     // is the full chain used by buildFallbackTransport().
     expect(config.rpcUrl).toBe('https://base-sepolia.publicnode.com');
-    // #911: ≥5 distinct free providers, publicnode slot 0, base.org last.
-    expect(config.rpcUrls.length).toBeGreaterThanOrEqual(5);
-    expect(config.rpcUrls[0]).toBe('https://base-sepolia.publicnode.com');
-    expect(config.rpcUrls[config.rpcUrls.length - 1]).toBe('https://sepolia.base.org');
-    expect(config.rpcUrls).toEqual([...DEFAULT_TESTNET_RPC_URLS]);
+    expect(config.rpcUrls).toEqual([
+      'https://base-sepolia.publicnode.com',
+      'https://sepolia.base.org',
+    ]);
   });
 
   it('accepts rpcUrl as an array in the config file (AC1)', async () => {
@@ -317,11 +303,28 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrls[1]).toBe('https://b.example');
   });
 
-  it('accepts archiveRpcUrl as an array (AC1)', async () => {
+  it('accepts ethereumRpcUrl as a comma-separated env var (AC1)', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_ETHEREUM_RPC_URL'] = 'https://x.example,https://y.example';
+
+    const config = loadConfig(configPath);
+
+    expect(config.ethereumRpcUrl).toBe('https://x.example');
+    expect(config.ethereumRpcUrls).toEqual(['https://x.example', 'https://y.example']);
+
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+  });
+
+  it('accepts archiveRpcUrl and l2ProofRpcUrl as arrays (AC1)', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       rpcUrl: 'https://primary.example',
       archiveRpcUrl: ['https://archive-a.example', 'https://archive-b.example'],
+      l2ProofRpcUrl: ['https://proof-a.example', 'https://proof-b.example'],
     });
     delete process.env['BASE_RPC_URL'];
     delete process.env['BASE_SEPOLIA_RPC_URL'];
@@ -334,6 +337,11 @@ describe('loadConfig RPC override handling', () => {
     expect(config.archiveRpcUrls).toEqual([
       'https://archive-a.example',
       'https://archive-b.example',
+    ]);
+    expect(config.l2ProofRpcUrl).toBe('https://proof-a.example');
+    expect(config.l2ProofRpcUrls).toEqual([
+      'https://proof-a.example',
+      'https://proof-b.example',
     ]);
   });
 
@@ -526,44 +534,6 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
-  it('defaults faucet topup cap to 10 and cooldown to 24h (issue #560)', () => {
-    delete process.env['JINN_FAUCET_DAILY_TOPUP_CAP'];
-    delete process.env['JINN_FAUCET_TOPUP_COOLDOWN_MS'];
-    const config = loadConfig();
-    expect(config.faucetDailyTopupCap).toBe(10);
-    expect(config.faucetTopupCooldownMs).toBe(24 * 60 * 60 * 1000);
-  });
-
-  it('defaults reward auto-claim to disabled so operators claim OLAS manually', () => {
-    delete process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
-    const config = loadConfig();
-    expect(config.rewardClaimIntervalMs).toBe(0);
-  });
-
-  it('keeps reward auto-claim available as an explicit managed-operator opt-in', () => {
-    process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = '600000';
-    const config = loadConfig();
-    expect(config.rewardClaimIntervalMs).toBe(600_000);
-  });
-
-  it('overrides faucet topup cap and cooldown from env (issue #560)', () => {
-    process.env['JINN_FAUCET_DAILY_TOPUP_CAP'] = '3';
-    process.env['JINN_FAUCET_TOPUP_COOLDOWN_MS'] = '60000';
-    try {
-      const config = loadConfig();
-      expect(config.faucetDailyTopupCap).toBe(3);
-      expect(config.faucetTopupCooldownMs).toBe(60000);
-    } finally {
-      delete process.env['JINN_FAUCET_DAILY_TOPUP_CAP'];
-      delete process.env['JINN_FAUCET_TOPUP_COOLDOWN_MS'];
-    }
-  });
-
-  it('rejects a non-positive faucet topup cap (issue #560)', async () => {
-    const configPath = await writeConfigFile({ faucetDailyTopupCap: 0 });
-    expect(() => loadConfig(configPath)).toThrow();
-  });
-
   it('defaults tasks to an empty list', () => {
     return writeConfigFile({}).then((configPath) => {
       const config = loadConfig(configPath);
@@ -606,42 +576,171 @@ describe('loadConfig RPC override handling', () => {
     expect(ds!.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 
-  it('defaults Base mainnet L2 RPC to the ≥5-provider free chain (#911)', async () => {
-    const configPath = await writeConfigFile({ network: 'mainnet' });
+  it('defaults testnet L1 RPC and enables the claim loop in emit-only mode', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
 
     delete process.env['BASE_RPC_URL'];
     delete process.env['BASE_SEPOLIA_RPC_URL'];
     delete process.env['JINN_RPC_URL'];
     delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+    delete process.env['JINN_CLAIM_SUBMISSION_MODE'];
+    delete process.env['JINN_CLAIM_LOOP_ENABLED'];
 
     const config = loadConfig(configPath);
 
-    expect(config.rpcUrl).toBe('https://mainnet.base.org');
-    expect(config.rpcUrls.length).toBeGreaterThanOrEqual(5);
-    expect(config.rpcUrls).toEqual([...DEFAULT_MAINNET_RPC_URLS]);
+    expect(config.ethereumRpcUrl).toBe(DEFAULT_TESTNET_ETHEREUM_RPC_URL);
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.jinnClaimLoopEnabled).toBe(true);
   });
 
-  it('defaults watchdogAutoRestart to false when unset', async () => {
-    const configPath = await writeConfigFile({ network: 'testnet' });
-    delete process.env['JINN_WATCHDOG_AUTO_RESTART'];
+  it('preserves an explicit testnet claim-loop opt-out', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      jinnClaimLoopEnabled: false,
+    });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_CLAIM_LOOP_ENABLED'];
 
     const config = loadConfig(configPath);
-    expect(config.watchdogAutoRestart).toBe(false);
+
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.jinnClaimLoopEnabled).toBe(false);
   });
 
-  it('enables watchdogAutoRestart from a truthy JINN_WATCHDOG_AUTO_RESTART env', async () => {
+  it('does not default ethereumRpcUrl on mainnet', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.network).toBe('mainnet');
+    expect(config.ethereumRpcUrl).toBeUndefined();
+    expect(config.jinnClaimLoopEnabled).toBe(false);
+  });
+
+  it('loads claim submission mode and loop enabled gate from env', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
-    process.env['JINN_WATCHDOG_AUTO_RESTART'] = '1';
 
-    expect(loadConfig(configPath).watchdogAutoRestart).toBe(true);
+    process.env['JINN_CLAIM_SUBMISSION_MODE'] = 'submit';
+    process.env['JINN_CLAIM_LOOP_ENABLED'] = 'yes';
+
+    const config = loadConfig(configPath);
+
+    expect(config.jinnClaimSubmissionMode).toBe('submit');
+    expect(config.jinnClaimLoopEnabled).toBe(true);
   });
 
-  it('treats falsy JINN_WATCHDOG_AUTO_RESTART values as off', async () => {
-    for (const value of ['0', 'false', 'no']) {
-      const configPath = await writeConfigFile({ network: 'testnet' });
-      process.env['JINN_WATCHDOG_AUTO_RESTART'] = value;
-      expect(loadConfig(configPath).watchdogAutoRestart).toBe(false);
+  it('rejects mainnet partial L1 cross-chain config (distributor without ethereumRpcUrl)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'mainnet',
+      jinnClaimSubmissionMode: 'submit',
+      jinnDistributorAddress: '0x1111111111111111111111111111111111111111',
+      // ethereumRpcUrl intentionally missing
+    });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+
+    let caught: any;
+    try {
+      loadConfig(configPath);
+    } catch (e) {
+      caught = e;
     }
+    expect(caught).toBeDefined();
+    expect(caught.code).toBe('config_invalid');
+    const issues: Array<{ path: string; message: string }> = caught.details?.issues ?? [];
+    const hit = issues.find((i) => i.path === 'ethereumRpcUrl');
+    expect(hit).toBeDefined();
+    expect(hit!.message).toMatch(/ethereumRpcUrl/);
+  });
+
+  it('does not require ethereumRpcUrl for emit-only config', async () => {
+    const configPath = await writeConfigFile({
+      network: 'mainnet',
+      jinnClaimSubmissionMode: 'emit-only',
+      jinnDistributorAddress: '0x1111111111111111111111111111111111111111',
+    });
+
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.jinnClaimSubmissionMode).toBe('emit-only');
+    expect(config.ethereumRpcUrl).toBeUndefined();
+  });
+
+  it('accepts L1 cross-chain config when ethereumRpcUrl is set', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      jinnDistributorAddress: '0x1111111111111111111111111111111111111111',
+      ethereumRpcUrl: 'https://sepolia.example/rpc',
+      jinnL1Network: 'sepolia',
+      jinnMessengerMode: 'mock',
+    });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_ETHEREUM_RPC_URL'];
+
+    const config = loadConfig(configPath);
+    expect(config.jinnDistributorAddress).toBe('0x1111111111111111111111111111111111111111');
+    expect(config.ethereumRpcUrl).toBe('https://sepolia.example/rpc');
+    expect(config.jinnL1Network).toBe('sepolia');
+    expect(config.jinnMessengerMode).toBe('mock');
+    expect(config.jinnClaimLoopIntervalMs).toBe(60 * 60 * 1000);
+  });
+
+  it('JINN_ETHEREUM_RPC_URL env var satisfies the L1 refine', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      jinnDistributorAddress: '0x1111111111111111111111111111111111111111',
+    });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_ETHEREUM_RPC_URL'] = 'https://sepolia.env.example/rpc';
+
+    try {
+      const config = loadConfig(configPath);
+      expect(config.ethereumRpcUrl).toBe('https://sepolia.env.example/rpc');
+    } finally {
+      delete process.env['JINN_ETHEREUM_RPC_URL'];
+    }
+  });
+
+  it('loads optional L2 proof RPC from env for canonical canaries', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_L2_PROOF_RPC_URL'] = 'https://base-sepolia-proof.example/rpc';
+
+    const config = loadConfig(configPath);
+    expect(config.l2ProofRpcUrl).toBe('https://base-sepolia-proof.example/rpc');
+  });
+
+  it('rejects malformed jinnDistributorAddress', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      jinnDistributorAddress: 'not-an-address',
+      ethereumRpcUrl: 'https://sepolia.example/rpc',
+    });
+    expect(() => loadConfig(configPath)).toThrow();
   });
 
   it('loads testnet artifact override paths from config and env', async () => {

@@ -31,8 +31,6 @@
 > The body of this document is preserved unchanged as a historical record
 > of the Phase 1a deployment and the Phase 1b transition plan as
 > originally framed.
->
-> Update (2026-06-30): the JINN-token tokenomics described here is now dropped entirely by DR-2026-06-30 (tokenless, OLAS-native) — not re-roadmapped. See `spec/2026-06-30-tokenless-olas-native.md`.
 
 ## 1. Overview
 

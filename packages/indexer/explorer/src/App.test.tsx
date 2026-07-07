@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -11,12 +11,23 @@ const NETWORK_FIXTURE = {
   tasksRefunded: 0,
   attempts: 25,
   everAttemptedOperators: 3,
+  activeOperators: 1,
+  sustainedOperators: 0,
+  activeWindow: {
+    startTs: 1_700_000_000,
+    endTs: 1_700_000_000 + 48 * 3600,
+    blockSeconds: 6 * 3600,
+    blockCount: 8,
+    requiredTjinnPerBlock: '3000000000000000000',
+  },
   solverNetsRunning: 2,
   verdicts: 20,
   verdictsPass: 16,
   resolvedRate: 0.8,
+  jinnDistributedOperator: '0',
+  jinnDistributedDao: '0',
   mostRecentSettlementBlock: null,
-  composition: { byMode: [], byHarness: [], byModel: [], byPlugin: [] },
+  composition: { byMode: [], byHarness: [] },
   enrichmentCoverage: { enrichedAttempts: 20, totalAttempts: 25, share: 0.8 },
   lastIndexedBlock: '12000000',
   lastIndexedAt: new Date().toISOString(),
@@ -28,6 +39,15 @@ const OPERATORS_FIXTURE = {
   lowVolume: [],
   minVerdicts: 5,
   activeOperators: 0,
+  sustainedOperators: 0,
+  activeWindow: {
+    startTs: 1_700_000_000,
+    endTs: 1_700_000_000 + 48 * 3600,
+    blockSeconds: 6 * 3600,
+    blockCount: 8,
+    requiredTjinnPerBlock: '3000000000000000000',
+  },
+  meta: { jinnAttribution: 'pending' as const },
   lastIndexedBlock: '12000000',
   lastIndexedAt: new Date().toISOString(),
   behindHead: null,
@@ -89,15 +109,15 @@ describe('App', () => {
     render(<App />, { wrapper: Wrapper });
     // Logo wordmark
     expect(screen.getByText('jinn')).toBeInTheDocument();
-    // Corpus leads the nav (Network is the logo's job now)
-    expect(screen.getAllByText('Corpus').length).toBeGreaterThan(0);
+    // "Network" may appear in nav and view heading — both are fine
+    expect(screen.getAllByText('Network').length).toBeGreaterThan(0);
   });
 
-  it('renders the Dashboard at "/"', async () => {
+  it('renders NetworkView stub at "/"', () => {
     const { Wrapper } = makeWrapper('/');
     render(<App />, { wrapper: Wrapper });
-    // The dashboard's Activity strip lands once the network hook resolves.
-    await waitFor(() => expect(screen.getByText(/active operators/i)).toBeInTheDocument());
+    // Both the nav link and the view heading say "Network"
+    expect(screen.getAllByText('Network').length).toBeGreaterThan(0);
   });
 
   it('renders OperatorsView stub at "/operators"', () => {
@@ -120,14 +140,15 @@ describe('App', () => {
     expect(screen.getByText('404')).toBeInTheDocument();
   });
 
-  it('marks no nav item active on the Dashboard "/" (the logo is home)', () => {
+  it('marks the correct nav item active for "/"', () => {
     const { Wrapper } = makeWrapper('/');
     render(<App />, { wrapper: Wrapper });
-    // No nav item owns "/", so none is aria-current there.
-    const active = screen
-      .getAllByText(/Corpus|SolverNets|Operators/)
-      .filter((el) => el.getAttribute('aria-current') === 'page');
-    expect(active).toHaveLength(0);
+    // Find the nav link with aria-current (may be multiple "Network" elements)
+    const networkLinks = screen.getAllByText('Network');
+    const navLink = networkLinks.find(
+      (el) => el.getAttribute('aria-current') === 'page',
+    );
+    expect(navLink).toBeTruthy();
   });
 
   it('marks the correct nav item active for "/operators"', () => {

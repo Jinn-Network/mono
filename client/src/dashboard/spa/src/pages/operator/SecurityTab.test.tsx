@@ -5,7 +5,6 @@ import { SecurityTab } from './SecurityTab.js';
 vi.mock('../../api/client.js', () => ({
   api: {
     changeKeystorePassword: vi.fn(),
-    harnessAuthStatus: vi.fn().mockResolvedValue({ harnesses: [] }),
   },
 }));
 

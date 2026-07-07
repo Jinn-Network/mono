@@ -7,7 +7,7 @@
  * **fails loud — but only in a deployment context**.
  *
  * Load-bearing constraint: a plain local `jinn run` (no `JINN_STATE_DIR`,
- * running as the user) must NEVER be newly gated. The
+ * running as the user, no relayer configured) must NEVER be newly gated. The
  * fail-loud boot gate fires only when `isDeploymentContext()` is true; outside
  * that, every check is advisory (surfaced in `doctor`, never boot-fatal). The
  * `doctor` command runs all checks regardless of context.
@@ -16,6 +16,7 @@
  *   - `writable_volume`        — the one genuinely new primitive (write+fsync+unlink probe)
  *   - `state_on_volume`        — assert resolved state lives on the configured volume
  *   - `credentials_resolvable` — reuses `detectAuthContext`; presence-only, NEVER echoes secrets
+ *   - `relayer_reachable`      — cheap probe; skip-ok when no relayer endpoint is configured
  *   - `agent_cli_non_root`     — uid 0 is unfit (the agent CLI refuses to run as root)
  *
  * Every check is side-effect-light and NEVER throws — a failure becomes a
@@ -40,6 +41,7 @@ export interface DeploymentCheckResult {
     | 'writable_volume'
     | 'state_on_volume'
     | 'credentials_resolvable'
+    | 'relayer_reachable'
     | 'agent_cli_non_root';
   ok: boolean;
   detail: string;
@@ -52,6 +54,14 @@ export interface DeploymentReadinessInputs {
   stateDir: string | undefined;
   /** `config.earningDir` — the resolved earning/state directory. */
   earningDir: string;
+  /**
+   * Optional relayer endpoint. No config field plumbs this today (the
+   * claim-relayer is referenced only as a contract-level concept), so this is
+   * `undefined` in production and the relayer check degrades to skip-ok. The DI
+   * surface keeps it injectable so the reachability path stays testable and so
+   * a future relayer-URL config can wire straight in.
+   */
+  relayerUrl: string | undefined;
   /**
    * `config.runtimeMode` — a persisted runtime mode (`'docker-compose'` /
    * `'container'`) declared by the operator (via `jinn auth --mode` or the app
@@ -71,6 +81,7 @@ export interface DeploymentReadinessDeps {
   /** `process.getuid` (undefined on platforms without it, e.g. Windows). */
   getuid: (() => number) | undefined;
   detectAuthContext: typeof defaultDetectAuthContext;
+  fetch: typeof fetch;
 }
 
 export interface DeploymentReadinessReport {
@@ -263,6 +274,65 @@ export function checkCredentialsResolvable(input: {
 }
 
 // ---------------------------------------------------------------------------
+// relayer_reachable
+// ---------------------------------------------------------------------------
+
+/**
+ * If a relayer endpoint is configured, probe it (short-timeout HEAD/GET). If
+ * not configured, skip-ok. Never throws.
+ *
+ * Production passes `relayerUrl: undefined` today — no config field plumbs a
+ * relayer URL (the claim-relayer is a contract-level / off-process concept), so
+ * this degrades to skip-ok. The injectable surface keeps the reachable /
+ * unreachable paths testable.
+ */
+export async function checkRelayerReachable(
+  relayerUrl: string | undefined,
+  fetchImpl: typeof fetch,
+): Promise<DeploymentCheckResult> {
+  if (!relayerUrl) {
+    return {
+      name: 'relayer_reachable',
+      ok: true,
+      detail: 'no claim-relayer endpoint configured — skipped',
+    };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = (await fetchImpl(relayerUrl, {
+      method: 'HEAD',
+      signal: controller.signal,
+    })) as { ok?: boolean; status?: number };
+    const status = typeof res.status === 'number' ? res.status : undefined;
+    const reachable = res.ok === true || (status !== undefined && status >= 200 && status < 400);
+    if (reachable) {
+      return {
+        name: 'relayer_reachable',
+        ok: true,
+        detail: `claim-relayer responded${status !== undefined ? ` (${status})` : ''}`,
+      };
+    }
+    return {
+      name: 'relayer_reachable',
+      ok: false,
+      detail: `claim-relayer responded with a non-success status${status !== undefined ? ` (${status})` : ''}`,
+      remedy: 'Check the relayer service health and the configured endpoint.',
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      name: 'relayer_reachable',
+      ok: false,
+      detail: `claim-relayer unreachable: ${msg}`,
+      remedy: 'Verify the relayer service is running and the endpoint/network path is reachable.',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // agent_cli_non_root
 // ---------------------------------------------------------------------------
 
@@ -344,6 +414,7 @@ export async function runDeploymentReadinessChecks(
     await checkWritableVolume(probeDir),
     checkStateOnVolume({ deployment, stateDir: inputs.stateDir, earningDir: inputs.earningDir }),
     checkCredentialsResolvable({ context: authContext, env: deps.env }),
+    await checkRelayerReachable(inputs.relayerUrl, deps.fetch),
     checkAgentCliNonRoot(deps.getuid),
   ];
 

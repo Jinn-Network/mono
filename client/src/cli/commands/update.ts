@@ -30,10 +30,6 @@ function readClientVersion(): string {
   try {
     const raw = readFileSync(PACKAGE_JSON_PATH, 'utf-8');
     const pkg = JSON.parse(raw) as { version?: string };
-    // Fallback differs deliberately from `version.ts`'s `readClientVersion`
-    // ('0.0.0'): this value is interpolated into a human-readable success line,
-    // so 'unknown' reads more honestly than a fake semver. Not extracted to a
-    // shared util on purpose.
     return pkg.version ?? 'unknown';
   } catch {
     return 'unknown';
@@ -500,10 +496,6 @@ Examples:
       if (allOk) {
         const noColor = Boolean(ctx.env['NO_COLOR']);
         const stderrIsTty = Boolean(process.stderr.isTTY);
-        // NB: `readClientVersion()` reports the currently-running process's
-        // build, not the freshly-installed one — the new binary takes effect on
-        // the next launch, so this line reflects the version that just ran the
-        // update, not the version the operator just updated TO.
         console.error(
           formatUpdateSuccessLine(readClientVersion(), { stderrIsTty, noColor }),
         );

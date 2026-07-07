@@ -34,10 +34,6 @@ function resolveBuildCommit(env: NodeJS.ProcessEnv): string {
 function readClientVersion(): string {
   const raw = readFileSync(PACKAGE_JSON_PATH, 'utf-8');
   const pkg = JSON.parse(raw) as { version?: string };
-  // Fallback differs deliberately from `update.ts`'s `readClientVersion`
-  // ('unknown'): this command emits a structured semver payload, so the
-  // degenerate value must itself be valid semver — '0.0.0' is the correct
-  // sentinel. Not extracted to a shared util on purpose.
   return pkg.version ?? '0.0.0';
 }
 

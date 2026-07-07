@@ -17,7 +17,6 @@ import { viemSendTransactionWithRetry, waitForTransactionReceiptWithRetry } from
 import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import { isOperationalServiceStep } from '../earning/types.js';
-import { recordLoopTick } from './loop-heartbeat.js';
 
 export interface BalanceTopupLoopConfig {
   intervalMs: number;
@@ -173,7 +172,6 @@ export class BalanceTopupLoop {
         }, 'balance-topup');
       }
       this.config.jinnStore?.setConfigValue('last_balance_topup_tick_at', new Date().toISOString());
-      if (this.config.jinnStore) recordLoopTick(this.config.jinnStore, 'balance-topup'); // #1043 loop watchdog
       await new Promise(r => setTimeout(r, this.config.intervalMs));
     }
   }

@@ -1,0 +1,13 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-05-20T15:23:10.000Z",
+  "deployBlock": 41761151,
+  "txHash": "0x97524384c024a2bcfe11b3699bad53e8533bc25f43e64101ce1e0e4170491f9b",
+  "contracts": {
+    "TaskClaimEmitter": "0xF60055534E377F4020eEA80356C0643E02f4f307",
+    "TaskActivityCheckerV3": "0x0e1B5f264F4FAdcFAA950fb00c58d9A39C040f70",
+    "ServiceRegistry": "0x31D3202d8744B16A120117A053459DDFAE93c855"
+  }
+}

@@ -149,11 +149,6 @@ export const DEFAULT_TASK_POST_COUNTS = {
 export const DEFAULT_RUNNING_BOOTSTRAP = {
   schemaVersion: 1,
   mode: 'running',
-  // Onboarding gate (#1041): App.tsx holds the full-screen Onboarding takeover
-  // until bootstrap reports onboardingComplete:true. A running, already-onboarded
-  // daemon surfaces this from its persisted config (bootstrap-endpoint.ts), so the
-  // mock must carry it or the SPA never reaches the operator dashboard.
-  onboardingComplete: true,
   steps: ['wallet'],
   currentStep: 'complete',
   services: [

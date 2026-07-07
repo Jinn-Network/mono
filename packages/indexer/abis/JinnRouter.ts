@@ -4,14 +4,13 @@
  *
  * NOTE: the V3 JinnRouter (task-coordinator-router-v3) is the current
  * testnet contract. The mainnet deployment uses the same event signatures.
- * TaskFinalized does not exist as a standalone event. The current tokenless
- * router finalizes in TaskCoordinator.recordVerdict on the first delivered
- * verdict when TaskCreated omits requiredVerdicts. `TaskBudgetRefunded` *does*
- * exist and is now indexed -> `Task.refunded`. `VerdictDeliveryClaimed` carries
- * the per-verdict outcome (`verdictCode`: 0=None, 1=Pass, 2=Fail, 3=Invalid,
+ * TaskFinalized does not exist as a standalone event — task finalization is
+ * derived from SolutionDeliveryClaimed. `TaskBudgetRefunded` *does* exist and
+ * is now indexed → `Task.refunded`. `VerdictDeliveryClaimed` carries the
+ * per-verdict outcome (`verdictCode`: 0=None, 1=Pass, 2=Fail, 3=Invalid,
  * 4=Unresolved). The Task.finalized schema column starts as false and is
- * updated by the VerdictDeliveryClaimed handler. See README.md
- * §Schema-version policy for the limitation note.
+ * updated when a SolutionDeliveryClaimed event indicates all attempts resolved.
+ * See README.md §Schema-version policy for the limitation note.
  */
 export const JINN_ROUTER_ABI = [
   // ── Task creation ─────────────────────────────────────────────────────────
@@ -23,10 +22,8 @@ export const JINN_ROUTER_ABI = [
       { name: 'taskId', type: 'uint256', indexed: true },
       { name: 'manifestDigest', type: 'bytes32', indexed: true },
       { name: 'taskCidDigest', type: 'bytes32', indexed: false },
-      // Tokenless-OLAS pivot (DR-2026-06-30): trimmed TaskCreated emits maxClaims
-      // as uint32 and no longer emits requiredVerdicts (the recorder finalizes on
-      // the first verdict — loop completion — not on a required-verdict count).
-      { name: 'maxClaims', type: 'uint32', indexed: false },
+      { name: 'maxClaims', type: 'uint16', indexed: false },
+      { name: 'requiredVerdicts', type: 'uint16', indexed: false },
       { name: 'solutionBudget', type: 'uint256', indexed: false },
       { name: 'verdictBudget', type: 'uint256', indexed: false },
     ],
@@ -44,8 +41,7 @@ export const JINN_ROUTER_ABI = [
       { name: 'deliveryRate', type: 'uint256', indexed: false },
     ],
   },
-  // ── Solution delivery (marks delivery / starts evaluation; not final) ─────
-  // VerdictDeliveryClaimed finalizes after verdict delivery.
+  // ── Solution delivery (used to mark tasks finalized) ──────────────────────
   {
     name: 'SolutionDeliveryClaimed',
     type: 'event',
@@ -81,13 +77,6 @@ export const JINN_ROUTER_ABI = [
     ],
   },
   // ── Task creation function (for claimWindowStart/End via createTask args) ─
-  {
-    name: 'taskCoordinator',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-  },
   {
     name: 'createTask',
     type: 'function',

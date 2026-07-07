@@ -22,6 +22,18 @@ Four scenarios, all single-operator, all run on every push to `next` (canary cad
 
 **Wall-clock budget:** 30s
 
+## T1.3 — indexer-round-trip
+
+**Catches:** fufn eval-substrate / indexer schema drift.
+
+**What it does:** Spawns a local Ponder indexer + a daemon configured to use it (against an Anvil fork). Posts a task. Polls the Discovery API. Asserts the indexed row matches what was posted.
+
+**Implementation:** `client/test/release/tier-1/T1.3-indexer-round-trip.ts`
+
+**Wall-clock budget:** 60s
+
+**Status:** Currently a skip stub. Real implementation requires a Ponder spawn helper at `client/test/_support/indexer/ponder.ts` — tracked at [GH issue #341](https://github.com/Jinn-Network/mono/issues/341).
+
 ## T1.4 — SPA route smoke
 
 **Catches:** broken routes, missing mocks, JS errors, React error boundary firings.
@@ -37,4 +49,4 @@ Four scenarios, all single-operator, all run on every push to `next` (canary cad
 The "what does this scenario actually exercise" docs are in `testing-jinn-app` references (Plan B). release-prep references just point at them:
 
 - T1.4: [`testing-jinn-app/references/scenario-spa-route-smoke.md`](../../testing-jinn-app/references/scenario-spa-route-smoke.md)
-- (T1.1-T1.2 are simple enough to be fully described by their implementation files; no separate contract doc needed.)
+- (T1.1-T1.3 are simple enough to be fully described by their implementation files; no separate contract doc needed.)

@@ -93,7 +93,7 @@ The `/explorer/*` routes set `Cache-Control: public, max-age=30, stale-while-rev
 
 ### Monitoring (`/health/task-coverage`)
 
-`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It resolves the active JinnRouter's `taskCoordinator()` view, reads that TaskCoordinator contract's authoritative on-chain `nextTaskId()` view (the storage slot is on `TaskCoordinator`, not JinnRouter), compares it against the indexer's `max(task.id)` and `max(attempt.taskId)`, and returns 200 when both gaps are within the configured threshold, 503 otherwise.
+`GET /health/task-coverage` is an operator-facing health probe added in response to issue #567 (the indexer's `TaskCreated` handler silently stopping). It compares the TaskCoordinator contract's authoritative on-chain `nextTaskId()` view (the storage slot is on `TaskCoordinator`, not JinnRouter — JinnRouterV3 holds a reference to the coordinator but does not re-expose the view) against the indexer's `max(task.id)` and `max(attempt.taskId)` and returns 200 when both gaps are within the configured threshold, 503 otherwise.
 
 ```
 GET /health/task-coverage
@@ -126,38 +126,22 @@ Configuration:
 
 - `JINN_TASK_COVERAGE_GAP_THRESHOLD` — integer, default `5`. The maximum gap allowed before the route returns 503. Set to a higher value if your `PONDER_RPC_URL_84532` latency keeps the indexer naturally a few blocks behind realtime.
 
-#### #1304 tokenless deployment alignment note
-
-The original "GraphQL serves 0 tasks" symptom no longer reproduces on production: raw GraphQL returns operator Safe tasks for the active Base Sepolia router `0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247`. The active causes found during #1304 were deployment-alignment defects:
-
-- `/health/task-coverage` was reading a stale hard-coded coordinator instead of resolving `taskCoordinator()` from the active router, so the route returned `status: "unknown"` even when indexed tasks existed.
-- The tokenless router no longer emits `requiredVerdicts`; `TaskCoordinator.recordVerdict` finalizes on the first delivered verdict, but old indexer rows persisted the missing value as `0` and never finalized.
-
-Fixing existing bad rows requires a clean `DATABASE_SCHEMA` bump and re-sync so `TaskCreated` rows are re-folded with `requiredVerdicts = 1`. The verdict handler also normalizes existing non-positive rows during replay, but the deployment answer should be schema bump plus re-sync for legible state.
-
-Post-deploy smoke for this class of issue:
-
-1. Deploy the indexer and enrichment worker against the same bumped `DATABASE_SCHEMA`.
-2. Wait for `/ready` to return 200 before traffic cutover.
-3. Verify `/health/task-coverage` returns 200 with `status: "ok"` and `taskGap` near 0.
-4. Verify `/graphql` returns non-empty `task` rows for the active router/operator scope being tested.
-5. Verify the daemon discovers claimable attempts and the first delivered verdict finalizes a task on the trimmed tokenless stack.
-
 ### Envelope enrichment (`JINN_INDEXER_ENRICH_ENVELOPES`, `JINN_IPFS_GATEWAY_URL`)
 
 The harness/mode/plugin/model facets, the train/frozen leaderboard split, the checkpoint timeline, and freeze integrity come from an **IPFS-enrichment step**: for each indexed `envelope:<cid>` (execution evidence), the `MetadataSet` handler fetches the envelope body from an IPFS gateway and projects its `executor` block into the `attemptEnvelopeMeta` table (joined to attempts by `requestId`). It's resilient — a fetch/parse failure for one envelope is logged and skipped (Ponder reprocesses on the next sync), never crashes the indexer.
 
-**The verdict (evaluation) path was split off in-handler by #779.** `JINN_INDEXER_ENRICH_ENVELOPES` now has a dual meaning:
+- `JINN_INDEXER_ENRICH_ENVELOPES` — default `true`. Set to `false` (or `0`) to skip the per-envelope IPFS fetch and sync faster; the enriched facets above won't populate (the rest of the explorer still works).
+- `JINN_IPFS_GATEWAY_URL` — default `https://gateway.autonolas.tech`. The gateway used for envelope fetches; the base is normalized to end with `/ipfs/`.
 
-- The **execution** path (`envelope:<cid>` → `attemptEnvelopeMeta`), the `solverNetManifest` body, and the `harnessCheckpoint` manifest still enrich **in-handler, default ON** — `false`/`0` skips them.
-- The **evaluation** path (`evaluation:<cid>` → `verdictEnvelopeMeta`) now defaults to **anchor-only in-handler** (the `MetadataSet` handler writes the `envelope` anchor and returns — no verdict IPFS fetch). The IPFS-bound verdict enrichment is owned by the standalone **enrichment worker** (`packages/indexer-enrichment`), so a verdict-enrichment backlog can no longer starve `/graphql` (the 502 incident). Set `JINN_INDEXER_ENRICH_ENVELOPES=true` (or `1`) to restore in-handler verdict enrichment — the documented rollback lever.
+The historical sync is noticeably slower with enrichment on (one IPFS round-trip per execution envelope). If that's a problem, either run a faster (HyperSync-backed) RPC, or set `JINN_INDEXER_ENRICH_ENVELOPES=false` and accept that the enriched facets won't populate — note that Ponder won't backfill enrichment after the fact, so flipping it on later requires a re-sync (`DATABASE_SCHEMA` bump). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
 
-- `JINN_INDEXER_ENRICH_ENVELOPES` — default `true` for the execution/manifest/checkpoint paths; the verdict path is OFF unless this is explicitly `true`/`1`.
-- `JINN_IPFS_GATEWAY_URL` — default `https://gateway.autonolas.tech`. The gateway used for envelope fetches; the base is normalized to end with `/ipfs/`. **Shared with the enrichment worker.**
+### Sepolia L1 RPC (`PONDER_RPC_URL_11155111`)
 
-The historical sync is noticeably slower with execution enrichment on (one IPFS round-trip per execution envelope). If that's a problem, either run a faster (HyperSync-backed) RPC, or set `JINN_INDEXER_ENRICH_ENVELOPES=false` and accept that the enriched facets won't populate — note that Ponder won't backfill enrichment after the fact, so flipping it on later requires a re-sync (`DATABASE_SCHEMA` bump). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
+The indexer sources `JinnDistributor.Claimed` events from Sepolia L1 (chain 11155111) in addition to the Base Sepolia chain (84532). A public default RPC is baked into `ponder.config.ts`; **set a real RPC in production** — the public endpoint rate-limits and the Sepolia historical sync from the conservative start block is slow on a public endpoint. A HyperSync-backed RPC (e.g. from Envio) is strongly recommended, the same as for Base. Add it to `.env`:
 
-**Deploy sequencing with the enrichment worker (#779):** the verdict path is enriched by `packages/indexer-enrichment`, a separate Railway service on the **same** `DATABASE_URL` + `DATABASE_SCHEMA`. Because adding the worker's `retryCount`/`nextAttemptAt` columns to `verdict_envelope_meta` is an `onchainTable` change (Ponder does not online-migrate), a `DATABASE_SCHEMA` bump + re-sync is required when this version first deploys; repoint **both** the indexer and the worker to the new schema together. See `packages/indexer-enrichment/README.md` for the worker's env, the O2/O3/O4 caveats, and the backfill-drain note.
+```
+PONDER_RPC_URL_11155111=https://your-sepolia-hypersync-rpc
+```
 
 ## Zero-downtime rolling deploys (the views pattern)
 
@@ -169,18 +153,16 @@ Ponder's canonical approach for re-deploys without operator-visible downtime:
 4. Run `ponder db create-views --schema=jinn_indexer_v2 --views-schema=jinn_indexer` to swap the public-facing views over to `v2`'s tables.
 5. Decommission the `v1` instance and drop its schema.
 
-The Dockerfile CMD now runs `ponder start --views-schema=jinn_indexer`, so step 4 happens automatically: each deployment swaps the public-facing `jinn_indexer` views to its own data schema once `/ready` is 200. (Invariant: `DATABASE_SCHEMA` must stay a different, versioned name — `jinn_indexer_vN` — or the data schema and the views schema collide and the deploy fails; see `.env.example`.)
-
-**Scope — what the auto-swap does and does not deliver.** The auto-swap benefits **external SQL consumers** (psql, the recovery procedure below, future read-replicas / BI) and removes the manual `ponder db create-views` footgun (the partial-swap hazard in §The all-entities-atomic view swap). It does **not** itself deliver operator-facing zero-downtime for `/explorer` + `/graphql` — those routes read through Ponder's runtime `db` bound to the running process's own `DATABASE_SCHEMA`, not through the public `jinn_indexer` views. Operator-facing zero-downtime is delivered by `railway.toml`'s `/ready` healthcheck cutover (#998): the old container keeps serving until the new one is `/ready`.
+Or use `ponder start --views-schema=jinn_indexer` on the new deployment to automate the views swap on `/ready`.
 
 This is the recommended pattern when shipping schema changes that would otherwise require a re-sync. See Ponder's "Self-hosting" docs §"Production deployment" for the canonical recipe.
 
 ### The all-entities-atomic view swap
 
-`ponder db create-views` rewrites the views for **every entity in the schema in a single transaction** — there is no per-entity flag. The full set of 9 entities the indexer publishes is:
+`ponder db create-views` rewrites the views for **every entity in the schema in a single transaction** — there is no per-entity flag. The full set of 10 entities the indexer publishes is:
 
 ```
-task, attempt, verdict, solverNetManifest,
+task, attempt, verdict, rewardDistribution, solverNetManifest,
 envelope, pluginPublication, harnessCheckpoint, attemptEnvelopeMeta,
 verdictEnvelopeMeta
 ```

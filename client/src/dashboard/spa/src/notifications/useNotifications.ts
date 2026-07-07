@@ -43,10 +43,10 @@ const INTENT_KINDS: ['intent'] = ['intent'];
  * - `harness` readiness is now populated by the daemon on `/v1/status.harness`
  *   (#440) — a single boolean + name + reason rollup over the joined SolverNets'
  *   harnesses. Older daemons / partial responses default to ready.
- * - `password_rotation_due` reads `s.security.lastPasswordRotationAt` (#441) —
- *   the keystore-password file's ISO mtime, or null when env-sourced/missing.
+ * - `password_rotation_due` has no `/v1/status` field today; the default below
+ *   keeps it silent until the daemon surfaces the input.
  */
-export function mapStatusToDeriveInput(
+function mapStatusToDeriveInput(
   rawStatus: unknown,
   rawBootstrap: unknown,
   restartPending: boolean,
@@ -87,10 +87,10 @@ export function mapStatusToDeriveInput(
       eth: masterEth,
       runwayDays: masterRunwayDays,
     },
-    // Staking / OLAS collector-queue values are substrate infrastructure, not
-    // operator-facing notifications (the daemon no longer emits them on
-    // /v1/status as of #992). OLAS staking rewards accumulate automatically
-    // via the stOLAS curating-agent rail.
+    // Staking / OLAS collector-queue values are substrate, not operator tJINN
+    // earning, and are never surfaced as notifications (the daemon no longer
+    // emits them on /v1/status as of #992). tJINN claims are automatic via the
+    // daemon emit loop plus standing relayer.
     // Harness readiness rollup comes from `/v1/status.harness` (#440).
     // `ready !== false` preserves default-ready when the field is absent
     // (older daemons / partial responses); `name`/`reason` accept the
@@ -110,12 +110,9 @@ export function mapStatusToDeriveInput(
       safeBound: svc?.safeBoundToAgent !== false,
     })),
     joinedSolverNets,
-    // `security.lastPasswordRotationAt` is the ISO mtime of the keystore-password
-    // file (issue #441); null/absent ⇒ password_rotation_due stays silent.
-    passwordRotatedAt:
-      typeof s.security?.lastPasswordRotationAt === 'string'
-        ? s.security.lastPasswordRotationAt
-        : undefined,
+    // No /v1/status field for last password rotation today; follow-up Issue
+    // tracks adding it. Until then, password_rotation_due never fires.
+    passwordRotatedAt: undefined,
   };
 }
 
@@ -136,7 +133,7 @@ export function useNotifications(): OperatorNotification[] {
     queryFn: () => api.getBootstrap(),
   });
 
-  // Event-driven source for the `claim_failed` notification kind (per
+  // Event-driven source for the 12th notification kind (`claim_failed`, per
   // OPERATOR-APP-SPEC §2.10 + issue #442). Subscribes to `kind: 'intent'` only
   // so the hook does not re-render on every `log` event the daemon emits.
   // SSE backfill replays the last 50 events on connect, so a page reload that

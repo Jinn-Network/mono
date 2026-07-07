@@ -56,7 +56,7 @@ jobs:
       # is the actual PR HEAD the branch-protection / publish guard reasons about.
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -83,13 +83,9 @@ jobs:
         working-directory: client
         run: yarn install --immutable
 
-      - name: Smoke snapshot builder entrypoint
-        working-directory: client
-        run: yarn smoke:build-anvil-snapshot
-
-      # Build the indexer (Ponder codegen) so the hermetic snapshot indexer
-      # round-trip (test/hermetic/indexer-roundtrip.test.ts, run via
-      # `yarn test:hermetic`) can spawn a real indexer against the snapshot chain.
+      # Build the indexer (Ponder codegen) so the hermetic indexer round-trip
+      # (T1.3, the local-Ponder-vs-snapshot test that closes the #341 stub) can
+      # spawn a real indexer against the snapshot chain.
       - name: Install indexer deps
         working-directory: packages/indexer
         run: yarn install --immutable
@@ -110,7 +106,7 @@ jobs:
           # dumped state.json is missing or zero-length" (-s is false for both).
           if [ ! -d "$STATE_DIR" ] || [ ! -s "$STATE_DIR/state.json" ]; then
             echo "::error::Hermetic snapshot fixture missing/empty at $STATE_DIR/state.json"
-            echo "Run \`cd client && BASE_RPC_URL=... yarn tsx ../contracts/scripts/build-anvil-snapshot.ts\` and commit the fixture."
+            echo "Run \`tsx contracts/scripts/build-anvil-snapshot.ts\` (needs BASE_RPC_URL) and commit the fixture."
             echo "See docs/snapshots/base-v3-snapshot.md for the rollout order."
             exit 1
           fi
@@ -129,7 +125,7 @@ jobs:
       # via spawnAnvilFromState (adversarial claim/delivery on real bytecode) and
       # exercise the deterministic RPC fallback chain (#592) with a mock
       # transport. The positional path scopes vitest to just this home (the same
-      # filename-filter form `release:tier-1:T1.1` uses) so the gate's verdict
+      # filename-filter form `release:tier-1:T1.3` uses) so the gate's verdict
       # maps 1:1 to the hermetic surface.
       # The dedicated hermetic config runs the suite SEQUENTIALLY
       # (fileParallelism:false) with a long timeout — its heavy files each spawn
@@ -140,6 +136,15 @@ jobs:
         id: hermetic
         working-directory: client
         run: yarn test:hermetic
+
+      # The existing T1.3 indexer round-trip — local Ponder vs the snapshot chain
+      # (closes the #341 permanent-skip stub). It self-skips cleanly when its
+      # prerequisites (anvil / Ponder / RPC fork) are unavailable, classifying any
+      # infra failure as flake-infra, never a product red.
+      - name: Indexer round-trip (T1.3)
+        id: indexer
+        working-directory: client
+        run: yarn release:tier-1:T1.3
 
       # App-flow determinism (#1014, DR-2026-06-03): the deterministic
       # mocked-daemon Playwright journeys run in THIS gate per the redesign's
@@ -171,9 +176,8 @@ jobs:
           retention-days: 7
 
       # Write the verdict JSON. Reaching this step means every prior step
-      # succeeded — the hermetic suite (which includes the snapshot indexer
-      # round-trip) and the app-flow step both passed; a failure of either
-      # short-circuits the job before here. `if: success()` is explicit so the
+      # succeeded (the snapshot suite + T1.3 both passed; a failure of either
+      # short-circuits the job before here). `if: success()` is explicit so the
       # green verdict is only ever written on a genuinely green run.
       - name: Write verdict (success)
         if: success()
@@ -184,7 +188,8 @@ jobs:
             "headSha": "${HEAD_SHA}",
             "conclusion": "success",
             "scenarios": [
-              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
+              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery on snapshot bytecode + deterministic RPC fallback) green" },
+              { "id": "indexer-round-trip-T1.3", "verdict": "pass", "failClass": null, "notes": "local Ponder vs snapshot chain (closes #341 stub)" },
               { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" }
             ],
             "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."

@@ -3,7 +3,7 @@
   "chainId": 84532,
   "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
   "owner": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-  "deployedAt": "2026-06-29T14:52:46.003Z",
+  "deployedAt": "2026-05-02T12:27:26.420Z",
   "config": {
     "timingProfile": "fast-test",
     "mechMarketplaceSource": "deployment-phase1b-mech-baseSepolia-fast.json",
@@ -11,13 +11,13 @@
     "coordinatorInitialOwner": "0x15e78734481bD31F6e183dad05225505a45ACd07"
   },
   "contracts": {
-    "taskCoordinatorImpl": "0xC756D4A5b7a6a7C2F74Fa4Ce4fd84E7b82D223ca",
-    "taskCoordinator": "0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98",
-    "jinnRouterV3Impl": "0x2521e932B2508B2589cCc35F8cfB8B29f0e086D5",
-    "jinnRouterV3": "0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247",
+    "taskCoordinatorImpl": "0x830bFdBdA48D599e414c51888c8CDA6c84e67B18",
+    "taskCoordinator": "0x9ce736d3CB367cC5Db538B7962bdf416EbD7451B",
+    "jinnRouterV3Impl": "0x5f3E1e26Fd26b7A6BE4171976e555d62Bd3dcFC0",
+    "jinnRouterV3": "0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9",
     "mechMarketplace": "0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7",
     "activityChecker": "0x0e1B5f264F4FAdcFAA950fb00c58d9A39C040f70",
-    "activityCheckerImpl": "0x3f061273348264b2a1Ae584eCC614185748832a8"
+    "activityCheckerImpl": "0x9e573CFbbc52729528199005A9F3d274FE7052C4"
   },
   "upgrades": [
     {
@@ -32,34 +32,6 @@
         "taskCoordinatorImpl": "0x830bFdBdA48D599e414c51888c8CDA6c84e67B18",
         "jinnRouterV3Impl": "0x5f3E1e26Fd26b7A6BE4171976e555d62Bd3dcFC0",
         "activityCheckerImpl": "0x9e573CFbbc52729528199005A9F3d274FE7052C4"
-      }
-    },
-    {
-      "upgradedAt": "2026-05-06T13:41:14.651Z",
-      "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-      "previous": {
-        "taskCoordinatorImpl": "0x830bFdBdA48D599e414c51888c8CDA6c84e67B18",
-        "jinnRouterV3Impl": "0x5f3E1e26Fd26b7A6BE4171976e555d62Bd3dcFC0",
-        "activityCheckerImpl": "0x9e573CFbbc52729528199005A9F3d274FE7052C4"
-      },
-      "current": {
-        "taskCoordinatorImpl": "0x047C9d27acD5cd860398389f48b87d42BEaCd8fd",
-        "jinnRouterV3Impl": "0xDb713EB5F1827C5764e7B0E4c7d8951BeD2ba0ee",
-        "activityCheckerImpl": "0x84E0302460Ab11B2169a2D00336C049Ab650a4aC"
-      }
-    },
-    {
-      "upgradedAt": "2026-06-29T14:52:46.003Z",
-      "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-      "previous": {
-        "taskCoordinatorImpl": "0x047C9d27acD5cd860398389f48b87d42BEaCd8fd",
-        "jinnRouterV3Impl": "0xDb713EB5F1827C5764e7B0E4c7d8951BeD2ba0ee",
-        "activityCheckerImpl": "0x84E0302460Ab11B2169a2D00336C049Ab650a4aC"
-      },
-      "current": {
-        "taskCoordinatorImpl": "0x69f857b222D970460202e9C94c6205Be87582610",
-        "jinnRouterV3Impl": "0x7c1F768E92c7Fd84e789CB7748B70340B876E25d",
-        "activityCheckerImpl": "0x916027798716518a601824ea1A6f09105a152C36"
       }
     }
   ]

@@ -112,7 +112,8 @@ contract JinnRouterV3 {
         uint256 indexed taskId,
         bytes32 indexed manifestDigest,
         bytes32 taskCidDigest,
-        uint32 maxClaims,
+        uint16 maxClaims,
+        uint16 requiredVerdicts,
         uint256 solutionBudget,
         uint256 verdictBudget
     );
@@ -190,8 +191,9 @@ contract JinnRouterV3 {
             revert RouterZeroValue();
         }
 
+        uint16 requiredVerdicts = _requiredVerdicts(policy);
         uint256 solutionBudget = solutionMaxDeliveryRate * uint256(policy.maxClaims);
-        uint256 verdictBudget = verdictMaxDeliveryRate * uint256(policy.maxClaims);
+        uint256 verdictBudget = verdictMaxDeliveryRate * uint256(policy.maxClaims) * uint256(requiredVerdicts);
         uint256 requiredBudget = solutionBudget + verdictBudget;
         if (msg.value != requiredBudget) revert RouterInsufficientTaskBudget(0, msg.value, requiredBudget);
 
@@ -215,6 +217,7 @@ contract JinnRouterV3 {
             manifestDigest,
             taskCidDigest,
             policy.maxClaims,
+            requiredVerdicts,
             solutionBudget,
             verdictBudget
         );
@@ -238,7 +241,9 @@ contract JinnRouterV3 {
             revert RouterInsufficientTaskBudget(taskId, payment.solutionBudgetRemaining, deliveryRate);
         }
 
-        attemptIndex = taskCoordinator.claimTask(taskId, msg.sender);
+        uint64 claimExpiresAt;
+        (attemptIndex, claimExpiresAt) = taskCoordinator.claimTask(taskId, msg.sender);
+        claimExpiresAt;
 
         payment.solutionBudgetRemaining -= deliveryRate;
         requestId = IMechMarketplaceV3(mechMarketplace).request{value: deliveryRate}(
@@ -268,7 +273,9 @@ contract JinnRouterV3 {
         if (payment.creator == address(0)) revert RouterTaskNotFound(taskId);
         _validateMechOperator(evaluatorMech, msg.sender);
 
-        verdictIndex = taskCoordinator.claimEvaluation(taskId, attemptIndex, msg.sender);
+        uint64 claimExpiresAt;
+        (verdictIndex, claimExpiresAt) = taskCoordinator.claimEvaluation(taskId, attemptIndex, msg.sender);
+        claimExpiresAt;
 
         uint256 deliveryRate = IMechV3(evaluatorMech).maxDeliveryRate();
         if (deliveryRate == 0) revert RouterZeroValue();
@@ -308,20 +315,25 @@ contract JinnRouterV3 {
         if (payment.creator == address(0)) revert RouterTaskNotFound(taskId);
         if (msg.sender != payment.creator) revert RouterOwnerOnly(msg.sender, payment.creator);
 
+        TaskCoordinator.TaskRecord memory record = taskCoordinator.getTask(taskId);
         uint256 solutionAmount;
         uint256 verdictAmount;
 
-        // Tokenless-OLAS pivot: windows/deadlines are gone, so refund is at the creator's
-        // discretion. The budget for any in-flight claim is already decremented at claim time
-        // (claimTask / claimEvaluation), so `*BudgetRemaining` only ever holds budget for
-        // not-yet-claimed requests plus per-claim slack. Reclaiming it cancels FUTURE funding
-        // capacity but never touches already-claimed (pending) work. Each side refunds once.
-        if (!payment.solutionBudgetRefunded && payment.solutionBudgetRemaining > 0) {
+        if (
+            !payment.solutionBudgetRefunded &&
+            payment.solutionBudgetRemaining > 0 &&
+            block.timestamp > record.policy.claimWindowEnd
+        ) {
             solutionAmount = payment.solutionBudgetRemaining;
             payment.solutionBudgetRemaining = 0;
             payment.solutionBudgetRefunded = true;
         }
-        if (!payment.verdictBudgetRefunded && payment.verdictBudgetRemaining > 0) {
+
+        bool verdictRefundable = block.timestamp > record.policy.evaluationPolicy.evaluationDeadline;
+        if (!verdictRefundable && record.submittedCount > 0) {
+            verdictRefundable = taskCoordinator.allSubmittedAttemptsFinalized(taskId);
+        }
+        if (!payment.verdictBudgetRefunded && payment.verdictBudgetRemaining > 0 && verdictRefundable) {
             verdictAmount = payment.verdictBudgetRemaining;
             payment.verdictBudgetRemaining = 0;
             payment.verdictBudgetRefunded = true;
@@ -357,14 +369,14 @@ contract JinnRouterV3 {
             revert RouterWrongDeliveryOperator(requestId, attempt.operator, deliveryMech);
         }
 
-        // Tokenless-OLAS loop-completion gate: the solver's activity is NOT credited here at
-        // solution-delivery time. eligibleActivityWeight is credited on the first verdict
-        // (see claimVerdictDelivery), so OLAS staking liveness only counts solutions that
-        // completed the loop. The novelty-weighted credit is applied at that point from the
-        // stored solution digest.
+        uint256 solutionWeight = FULL_WEIGHT;
+        if (activityChecker != address(0)) {
+            solutionWeight = ITaskActivityCheckerV3(activityChecker).recordSolutionDelivery(msg.sender, solutionDigest);
+        }
+
         claimed[requestId] = true;
         solutionDeliveryClaimed[requestId] = true;
-        taskCoordinator.recordSubmission(requestId, msg.sender, solutionDigest, FULL_WEIGHT);
+        taskCoordinator.recordSubmission(requestId, msg.sender, solutionDigest, solutionWeight);
 
         emit SolutionDeliveryClaimed(msg.sender, requestId, taskId, attemptIndex);
     }
@@ -405,22 +417,8 @@ contract JinnRouterV3 {
 
         if (activityChecker != address(0)) {
             ITaskActivityCheckerV3(activityChecker).recordVerdictDelivery(msg.sender, verdictDigest);
-            if (attemptFinalized) {
-                // Tokenless-OLAS loop-completion gate: credit the solver's activity on the
-                // first verdict (any verdict code — Pass or Fail), not at solution-delivery.
-                // This is what makes OLAS staking liveness count completed loops only.
-                // (For the smoke, requiredVerdicts defaults to 1, so finalization == first
-                // verdict; crediting on the literal first verdict regardless of quorum is a
-                // later refinement.)
-                TaskCoordinator.AttemptRecord memory finalizedAttempt =
-                    taskCoordinator.getAttempt(taskId, attemptIndex);
-                ITaskActivityCheckerV3(activityChecker).recordSolutionDelivery(
-                    finalizedAttempt.operator,
-                    finalizedAttempt.solutionCidDigest
-                );
-                if (creditCreator) {
-                    ITaskActivityCheckerV3(activityChecker).recordTaskCreationFinalized(creator, taskId, creatorWeight);
-                }
+            if (attemptFinalized && creditCreator) {
+                ITaskActivityCheckerV3(activityChecker).recordTaskCreationFinalized(creator, taskId, creatorWeight);
             }
         }
 
@@ -437,5 +435,9 @@ contract JinnRouterV3 {
     function _requireDelivered(bytes32 requestId) internal view {
         IMechMarketplaceV3.RequestStatus status = IMechMarketplaceV3(mechMarketplace).getRequestStatus(requestId);
         if (status != IMechMarketplaceV3.RequestStatus.Delivered) revert RouterNotDelivered(requestId);
+    }
+
+    function _requiredVerdicts(TaskCoordinator.TaskPolicy calldata policy) internal pure returns (uint16) {
+        return policy.evaluationPolicy.requiredVerdicts == 0 ? 1 : policy.evaluationPolicy.requiredVerdicts;
     }
 }

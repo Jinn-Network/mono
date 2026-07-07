@@ -1,42 +1,48 @@
 export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'error' | 'log';
 
-// ── OLAS reward read state ────────────────────────────────────────────────────
+// ── tJINN status (#406) ───────────────────────────────────────────────────────
 //
-// Read state for the operator's OLAS (stOLAS) earned figures, consumed by the
-// Wallet card.
-export type StakingRewardReadState = 'pending' | 'ready' | 'error';
+// Mirror of the daemon-side `TjinnStatus` / `TjinnServiceStatus` /
+// `TjinnStatusState` from `client/src/api/status-build.ts`. Surfaced on the
+// `/v1/status` response as `tJinn` (PR #447, daemon half). Mirrored here —
+// rather than imported — to keep the SPA build off the daemon type graph,
+// matching the established pattern for `LauncherStatusResponse` etc.
 
-export interface RewardsServiceEntry {
+/** Read state for the Sepolia tJINN ERC-20 Safe balance. */
+export type TjinnStatusState = 'pending' | 'ready' | 'error';
+
+/** Per-service tJINN Safe balance entry. */
+export interface TjinnServiceStatus {
   index: number;
-  pending: string;
-  claimed: string;
-  asset: 'OLAS';
-  lastClaimAt: string | null;
-  lastClaimTxHash: string | null;
+  serviceId: number | null;
+  safeAddress: string | null;
+  balanceWei: string | null;
+  operatorClaimedWei: string | null;
+  state: TjinnStatusState;
+  error: string | null;
 }
 
-export interface RewardsResponse {
-  schemaVersion: 1;
-  generatedAt: string;
-  readState: 'ready' | 'error';
-  totalPending: string;
-  totalClaimed: string;
-  lastClaimAt: string | null;
-  lastClaimTickAt: string | null;
-  nextCheckpointAt: string | null;
-  error?: string;
-  services: RewardsServiceEntry[];
-}
-
-export interface ClaimRewardsResponse {
-  ok: boolean;
-  result?: {
-    submitted?: number;
-    skippedNoPending?: number;
-    claims?: Array<{ txHash?: string; amountWei?: string; serviceId?: number }>;
-  };
-  exitCode?: number | null;
-  error?: string;
+/**
+ * Real Sepolia tJINN ERC-20 Safe balance, summed across the operator's fleet
+ * Safes (deduplicated on shared Safe addresses). `safeBalanceWei` is null
+ * unless `state === 'ready'`; a `ready` state with a null balance is a
+ * confirmed-empty balance and should render as `0`.
+ */
+export interface TjinnStatus {
+  state: TjinnStatusState;
+  chainId: number;
+  tokenAddress: string;
+  safeBalanceWei: string | null;
+  operatorClaimedWei: string | null;
+  /**
+   * Sum of `JinnDistributor.Claimed.operatorMinted` across the operator's
+   * services over the last 24 hours, as a base-10 wei string. Null when the
+   * window read failed or has not been resolved yet.
+   */
+  operatorMintedLast24hWei: string | null;
+  safeCount: number;
+  services: TjinnServiceStatus[];
+  error: string | null;
 }
 
 // ── cost surface (#474) ─────────────────────────────────────────────────────
@@ -147,14 +153,6 @@ export interface BootstrapState {
     plugins?: string[];
     disabledDefaultPlugins?: string[];
   }>;
-  /**
-   * #983: true once the operator clicked "Enter dashboard" at the end of the
-   * guided onboarding takeover. App.tsx gates the bootstrap→dashboard hand-off
-   * on `mode==='running' && onboardingComplete` so the first SolverNet join no
-   * longer ejects the operator before the harness/model step. Sourced from the
-   * daemon's in-memory config (POST /v1/operator/onboarding-complete writes it).
-   */
-  onboardingComplete?: boolean;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
   // Issue #367: the embedded-agent feature flag is no longer carried in this
@@ -964,25 +962,6 @@ export interface HarnessReadinessEntry {
   ready: boolean;
   reason?: string;
   nextStep?: HarnessReadinessNextStep;
-}
-
-// ── Harness auth status (`/v1/harnesses/auth-status`) — #564 ─────────────────
-export type HarnessAuthSourceKind = 'file' | 'env' | 'session' | 'none';
-export type HarnessAuthState = 'loaded' | 'missing' | 'unknown';
-
-export interface HarnessAuthStatusEntry {
-  harnessName: string;
-  sourceKind: HarnessAuthSourceKind;
-  sourcePath?: string;
-  envKey?: string;
-  keySuffix: string | null;
-  lastModified: string | null;
-  state: HarnessAuthState;
-  docAnchor?: string;
-}
-
-export interface HarnessAuthStatusResponse {
-  harnesses: HarnessAuthStatusEntry[];
 }
 
 // ── Codex CLI doctor (`/api/codex/doctor`) ───────────────────────────────────

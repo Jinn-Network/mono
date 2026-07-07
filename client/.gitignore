@@ -21,7 +21,3 @@ playwright/.cache/
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
-
-# Operator-generated jinn-repo pool (built via scripts/build-jinn-repo-pool.ts;
-# regenerable run input at the default loadJinnRepoPool() path, not committed source)
-src/solver-types/jinn-repo-pool.json

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
+interface ITaskPolicyHook {
+    function canClaim(address operator, uint256 taskId, bytes32 manifestDigest) external view returns (bool);
+}
+
 error TCZeroAddress();
 error TCZeroValue();
 error TCAlreadyInitialized();
@@ -8,30 +12,40 @@ error TCNotInitialized();
 error TCOwnerOnly(address sender, address owner);
 error TCRouterOnly(address sender, address router);
 error TCTaskNotFound(uint256 taskId);
+error TCInvalidWindow();
 error TCInvalidPolicy();
 error TCTaskNotOpen(uint256 taskId);
+error TCClaimWindowClosed(uint256 taskId);
+error TCSubmissionDeadlinePassed(uint256 taskId);
+error TCEvaluationDeadlinePassed(uint256 taskId);
 error TCMaxClaimsReached(uint256 taskId);
+error TCOperatorClaimLimitReached(uint256 taskId, address operator);
+error TCPolicyHookRejected(uint256 taskId, address operator);
 error TCAttemptNotFound(uint256 taskId, uint32 attemptIndex);
 error TCAttemptNotSubmitted(uint256 taskId, uint32 attemptIndex);
+error TCAttemptNotClaimed(uint256 taskId, uint32 attemptIndex);
+error TCAttemptNotRegistered(uint256 taskId, uint32 attemptIndex);
 error TCAttemptAlreadyRegistered(uint256 taskId, uint32 attemptIndex);
 error TCAttemptAlreadySubmitted(uint256 taskId, uint32 attemptIndex);
-error TCAttemptNotRegistered(uint256 taskId, uint32 attemptIndex);
+error TCAttemptAlreadyFinalized(uint256 taskId, uint32 attemptIndex);
 error TCRequestAlreadyRegistered(bytes32 requestId);
 error TCRequestNotFound(bytes32 requestId);
 error TCNotAttemptOperator(uint256 taskId, uint32 attemptIndex, address operator);
+error TCClaimNotExpired(uint256 taskId, uint32 attemptIndex);
+error TCAttemptClaimExpired(uint256 taskId, uint32 attemptIndex);
 error TCSolverSelfEvaluation(uint256 taskId, uint32 attemptIndex, address evaluator);
+error TCEvaluatorClaimLimitReached(uint256 taskId, uint32 attemptIndex, address evaluator);
+error TCMaxVerdictsReached(uint256 taskId, uint32 attemptIndex);
 error TCVerdictNotFound(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 error TCVerdictAlreadyRegistered(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 error TCVerdictAlreadyDelivered(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 error TCVerdictNotRegistered(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 error TCNotVerdictEvaluator(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex, address evaluator);
 error TCInvalidVerdictCode(uint8 verdictCode);
+error TCVerdictClaimExpired(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 
 /// @title TaskCoordinator
 /// @notice Canonical Task lifecycle, claim, attempt, submission, and evaluation state for new Jinn Tasks.
-/// @dev Tokenless-OLAS pivot: the quality/quorum/finalization/window/lease apparatus is removed.
-/// A Task escrows a launcher-funded attempt count (`maxClaims`); the first delivered verdict of an
-/// attempt finalizes it and the creator is credited once. Self-evaluation is always rejected.
 contract TaskCoordinator {
     enum TaskStatus {
         None,
@@ -45,7 +59,14 @@ contract TaskCoordinator {
         Claimed,
         RequestRegistered,
         Submitted,
-        Finalized
+        Expired
+    }
+
+    enum AttemptFinalization {
+        None,
+        PendingEvaluation,
+        Passed,
+        Failed
     }
 
     enum VerdictStatus {
@@ -63,12 +84,23 @@ contract TaskCoordinator {
         Unresolved
     }
 
+    struct EvaluationPolicy {
+        uint16 requiredVerdicts;
+        uint16 passThreshold;
+        uint64 evaluationDeadline;
+        uint16 maxVerdictsPerEvaluator;
+        bool disallowSolverSelfEvaluation;
+    }
+
     struct TaskPolicy {
-        uint32 maxClaims;
-        // Default false → self-evaluation blocked (the independent-evaluation
-        // invariant). A testnet SolverNet may set this true so a single operator
-        // can close the loop solo for dogfooding; mainnet leaves it false.
-        bool allowSolverSelfEvaluation;
+        uint64 claimWindowStart;
+        uint64 claimWindowEnd;
+        uint64 submissionDeadline;
+        uint32 claimLeaseTtlSeconds;
+        uint16 maxClaims;
+        uint16 maxClaimsPerOperator;
+        address policyHook;
+        EvaluationPolicy evaluationPolicy;
     }
 
     struct TaskRecord {
@@ -80,7 +112,7 @@ contract TaskCoordinator {
         uint32 claimCount;
         uint32 submittedCount;
         uint32 finalizedAttemptCount;
-        bool creatorCredited;
+        bool taskCreationCredited;
     }
 
     struct AttemptRecord {
@@ -90,8 +122,14 @@ contract TaskCoordinator {
         bytes32 requestId;
         bytes32 solutionCidDigest;
         uint256 solutionWeight;
-        uint32 verdictCount;
+        uint64 claimedAt;
+        uint64 claimExpiresAt;
+        uint64 submittedAt;
         AttemptStatus status;
+        AttemptFinalization finalization;
+        uint16 verdictClaimCount;
+        uint16 validVerdictCount;
+        uint16 passVerdictCount;
     }
 
     struct VerdictRecord {
@@ -102,6 +140,9 @@ contract TaskCoordinator {
         bytes32 requestId;
         bytes32 verdictCidDigest;
         VerdictCode verdictCode;
+        uint64 claimedAt;
+        uint64 claimExpiresAt;
+        uint64 deliveredAt;
         VerdictStatus status;
     }
 
@@ -126,6 +167,8 @@ contract TaskCoordinator {
     mapping(uint256 => TaskRecord) private _tasks;
     mapping(uint256 => mapping(uint32 => AttemptRecord)) private _attempts;
     mapping(uint256 => mapping(uint32 => mapping(uint32 => VerdictRecord))) private _verdicts;
+    mapping(uint256 => mapping(address => uint16)) public claimsByTaskByOperator;
+    mapping(uint256 => mapping(uint32 => mapping(address => uint16))) public verdictClaimsByAttemptByEvaluator;
     mapping(bytes32 => RequestRef) private _requestRefs;
     mapping(bytes32 => VerdictRequestRef) private _verdictRequestRefs;
 
@@ -137,9 +180,19 @@ contract TaskCoordinator {
         address indexed creator,
         bytes32 indexed manifestDigest,
         bytes32 taskCidDigest,
-        uint32 maxClaims
+        uint16 maxClaims,
+        uint16 requiredVerdicts,
+        uint64 claimWindowStart,
+        uint64 claimWindowEnd,
+        uint64 submissionDeadline,
+        uint64 evaluationDeadline
     );
-    event TaskClaimed(uint256 indexed taskId, uint32 indexed attemptIndex, address indexed operator);
+    event TaskClaimed(
+        uint256 indexed taskId,
+        uint32 indexed attemptIndex,
+        address indexed operator,
+        uint64 claimExpiresAt
+    );
     event TaskAttemptRequestRegistered(
         uint256 indexed taskId,
         uint32 indexed attemptIndex,
@@ -157,7 +210,8 @@ contract TaskCoordinator {
         uint256 indexed taskId,
         uint32 indexed attemptIndex,
         uint32 indexed verdictIndex,
-        address evaluator
+        address evaluator,
+        uint64 claimExpiresAt
     );
     event VerdictRequestRegistered(
         uint256 indexed taskId,
@@ -173,6 +227,15 @@ contract TaskCoordinator {
         bytes32 verdictCidDigest,
         uint8 verdictCode
     );
+    event AttemptFinalized(
+        uint256 indexed taskId,
+        uint32 indexed attemptIndex,
+        bool passed,
+        uint16 validVerdictCount,
+        uint16 passVerdictCount
+    );
+    event TaskCreationCreditLocked(uint256 indexed taskId, address indexed creator, uint256 weight);
+    event TaskAttemptExpired(uint256 indexed taskId, uint32 indexed attemptIndex, address indexed operator);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert TCOwnerOnly(msg.sender, owner);
@@ -219,7 +282,9 @@ contract TaskCoordinator {
         if (!initialized) revert TCNotInitialized();
         if (creator == address(0)) revert TCZeroAddress();
         if (taskCidDigest == bytes32(0) || manifestDigest == bytes32(0)) revert TCZeroValue();
-        if (policy.maxClaims == 0) revert TCInvalidPolicy();
+
+        TaskPolicy memory normalizedPolicy = _normalizePolicy(policy);
+        _validatePolicy(normalizedPolicy);
 
         taskId = nextTaskId++;
         _tasks[taskId] = TaskRecord({
@@ -227,29 +292,58 @@ contract TaskCoordinator {
             taskCidDigest: taskCidDigest,
             manifestDigest: manifestDigest,
             status: TaskStatus.Open,
-            policy: policy,
+            policy: normalizedPolicy,
             claimCount: 0,
             submittedCount: 0,
             finalizedAttemptCount: 0,
-            creatorCredited: false
+            taskCreationCredited: false
         });
 
-        emit TaskCreated(taskId, creator, manifestDigest, taskCidDigest, policy.maxClaims);
+        emit TaskCreated(
+            taskId,
+            creator,
+            manifestDigest,
+            taskCidDigest,
+            normalizedPolicy.maxClaims,
+            normalizedPolicy.evaluationPolicy.requiredVerdicts,
+            normalizedPolicy.claimWindowStart,
+            normalizedPolicy.claimWindowEnd,
+            normalizedPolicy.submissionDeadline,
+            normalizedPolicy.evaluationPolicy.evaluationDeadline
+        );
     }
 
     function claimTask(uint256 taskId, address operator)
         external
         onlyRouter
-        returns (uint32 attemptIndex)
+        returns (uint32 attemptIndex, uint64 claimExpiresAt)
     {
         if (operator == address(0)) revert TCZeroAddress();
         TaskRecord storage record = _tasks[taskId];
         if (record.status == TaskStatus.None) revert TCTaskNotFound(taskId);
         if (record.status != TaskStatus.Open) revert TCTaskNotOpen(taskId);
-        if (record.claimCount >= record.policy.maxClaims) revert TCMaxClaimsReached(taskId);
+
+        TaskPolicy memory policy = record.policy;
+        uint256 nowTs = block.timestamp;
+        if (nowTs < policy.claimWindowStart || nowTs > policy.claimWindowEnd) revert TCClaimWindowClosed(taskId);
+        if (nowTs > policy.submissionDeadline) revert TCSubmissionDeadlinePassed(taskId);
+        if (record.claimCount >= policy.maxClaims) revert TCMaxClaimsReached(taskId);
+        if (claimsByTaskByOperator[taskId][operator] >= policy.maxClaimsPerOperator) {
+            revert TCOperatorClaimLimitReached(taskId, operator);
+        }
+        if (policy.policyHook != address(0)) {
+            if (!ITaskPolicyHook(policy.policyHook).canClaim(operator, taskId, record.manifestDigest)) {
+                revert TCPolicyHookRejected(taskId, operator);
+            }
+        }
 
         attemptIndex = record.claimCount;
+        uint256 expires = nowTs + policy.claimLeaseTtlSeconds;
+        if (expires > policy.submissionDeadline) expires = policy.submissionDeadline;
+        claimExpiresAt = uint64(expires);
+
         record.claimCount++;
+        claimsByTaskByOperator[taskId][operator]++;
         _attempts[taskId][attemptIndex] = AttemptRecord({
             taskId: taskId,
             attemptIndex: attemptIndex,
@@ -257,11 +351,17 @@ contract TaskCoordinator {
             requestId: bytes32(0),
             solutionCidDigest: bytes32(0),
             solutionWeight: 0,
-            verdictCount: 0,
-            status: AttemptStatus.Claimed
+            claimedAt: uint64(nowTs),
+            claimExpiresAt: claimExpiresAt,
+            submittedAt: 0,
+            status: AttemptStatus.Claimed,
+            finalization: AttemptFinalization.None,
+            verdictClaimCount: 0,
+            validVerdictCount: 0,
+            passVerdictCount: 0
         });
 
-        emit TaskClaimed(taskId, attemptIndex, operator);
+        emit TaskClaimed(taskId, attemptIndex, operator, claimExpiresAt);
     }
 
     function registerAttemptRequest(uint256 taskId, uint32 attemptIndex, bytes32 requestId) external onlyRouter {
@@ -297,9 +397,16 @@ contract TaskCoordinator {
         }
 
         TaskRecord storage record = _tasks[ref.taskId];
+        if (block.timestamp > record.policy.submissionDeadline) revert TCSubmissionDeadlinePassed(ref.taskId);
+        if (block.timestamp > attempt.claimExpiresAt) {
+            revert TCAttemptClaimExpired(ref.taskId, ref.attemptIndex);
+        }
+
         attempt.solutionCidDigest = solutionCidDigest;
         attempt.solutionWeight = solutionWeight;
+        attempt.submittedAt = uint64(block.timestamp);
         attempt.status = AttemptStatus.Submitted;
+        attempt.finalization = AttemptFinalization.PendingEvaluation;
         record.submittedCount++;
 
         emit TaskSubmitted(ref.taskId, ref.attemptIndex, operator, requestId, solutionCidDigest, solutionWeight);
@@ -308,7 +415,7 @@ contract TaskCoordinator {
     function claimEvaluation(uint256 taskId, uint32 attemptIndex, address evaluator)
         external
         onlyRouter
-        returns (uint32 verdictIndex)
+        returns (uint32 verdictIndex, uint64 claimExpiresAt)
     {
         if (evaluator == address(0)) revert TCZeroAddress();
         TaskRecord storage task = _tasks[taskId];
@@ -316,14 +423,27 @@ contract TaskCoordinator {
         AttemptRecord storage attempt = _attempts[taskId][attemptIndex];
         if (attempt.status == AttemptStatus.None) revert TCAttemptNotFound(taskId, attemptIndex);
         if (attempt.status != AttemptStatus.Submitted) revert TCAttemptNotSubmitted(taskId, attemptIndex);
-        // Self-evaluation is blocked by default (independent-evaluation invariant);
-        // a SolverNet opts in via policy.allowSolverSelfEvaluation (testnet dogfooding).
-        if (!task.policy.allowSolverSelfEvaluation && evaluator == attempt.operator) {
-            revert TCSolverSelfEvaluation(taskId, attemptIndex, evaluator);
+        if (attempt.finalization != AttemptFinalization.PendingEvaluation) {
+            revert TCAttemptAlreadyFinalized(taskId, attemptIndex);
         }
 
-        verdictIndex = attempt.verdictCount;
-        attempt.verdictCount++;
+        EvaluationPolicy memory evalPolicy = task.policy.evaluationPolicy;
+        if (block.timestamp > evalPolicy.evaluationDeadline) revert TCEvaluationDeadlinePassed(taskId);
+        if (evalPolicy.disallowSolverSelfEvaluation && evaluator == attempt.operator) {
+            revert TCSolverSelfEvaluation(taskId, attemptIndex, evaluator);
+        }
+        if (attempt.verdictClaimCount >= evalPolicy.requiredVerdicts) revert TCMaxVerdictsReached(taskId, attemptIndex);
+        if (verdictClaimsByAttemptByEvaluator[taskId][attemptIndex][evaluator] >= evalPolicy.maxVerdictsPerEvaluator) {
+            revert TCEvaluatorClaimLimitReached(taskId, attemptIndex, evaluator);
+        }
+
+        verdictIndex = attempt.verdictClaimCount;
+        uint256 expires = block.timestamp + task.policy.claimLeaseTtlSeconds;
+        if (expires > evalPolicy.evaluationDeadline) expires = evalPolicy.evaluationDeadline;
+        claimExpiresAt = uint64(expires);
+
+        attempt.verdictClaimCount++;
+        verdictClaimsByAttemptByEvaluator[taskId][attemptIndex][evaluator]++;
         _verdicts[taskId][attemptIndex][verdictIndex] = VerdictRecord({
             taskId: taskId,
             attemptIndex: attemptIndex,
@@ -332,10 +452,13 @@ contract TaskCoordinator {
             requestId: bytes32(0),
             verdictCidDigest: bytes32(0),
             verdictCode: VerdictCode.None,
+            claimedAt: uint64(block.timestamp),
+            claimExpiresAt: claimExpiresAt,
+            deliveredAt: 0,
             status: VerdictStatus.Claimed
         });
 
-        emit EvaluationClaimed(taskId, attemptIndex, verdictIndex, evaluator);
+        emit EvaluationClaimed(taskId, attemptIndex, verdictIndex, evaluator, claimExpiresAt);
     }
 
     function registerVerdictRequest(
@@ -399,10 +522,25 @@ contract TaskCoordinator {
             revert TCVerdictNotRegistered(ref.taskId, ref.attemptIndex, ref.verdictIndex);
         }
 
+        TaskRecord storage task = _tasks[ref.taskId];
+        if (block.timestamp > task.policy.evaluationPolicy.evaluationDeadline) {
+            revert TCEvaluationDeadlinePassed(ref.taskId);
+        }
+        if (block.timestamp > verdict.claimExpiresAt) {
+            revert TCVerdictClaimExpired(ref.taskId, ref.attemptIndex, ref.verdictIndex);
+        }
+
         VerdictCode verdictCode = VerdictCode(verdictCodeRaw);
         verdict.verdictCidDigest = verdictCidDigest;
         verdict.verdictCode = verdictCode;
+        verdict.deliveredAt = uint64(block.timestamp);
         verdict.status = VerdictStatus.Delivered;
+
+        AttemptRecord storage attempt = _attempts[ref.taskId][ref.attemptIndex];
+        attempt.validVerdictCount++;
+        if (verdictCode == VerdictCode.Pass) {
+            attempt.passVerdictCount++;
+        }
 
         emit VerdictDelivered(
             ref.taskId,
@@ -413,25 +551,39 @@ contract TaskCoordinator {
             verdictCodeRaw
         );
 
-        // Tokenless-OLAS pivot: the FIRST delivered verdict of an attempt finalizes it (any
-        // verdict code — there is no quality gate now). The attempt is reported as passed; the
-        // creator is credited exactly once per task with the finalized attempt's solution weight.
-        // Later verdicts on an already-finalized attempt deliver but do not re-finalize.
-        TaskRecord storage task = _tasks[ref.taskId];
-        AttemptRecord storage attempt = _attempts[ref.taskId][ref.attemptIndex];
-        if (attempt.status == AttemptStatus.Submitted) {
+        EvaluationPolicy memory evalPolicy = task.policy.evaluationPolicy;
+        if (attempt.validVerdictCount == evalPolicy.requiredVerdicts) {
             attemptFinalized = true;
-            attemptPassed = true;
-            attempt.status = AttemptStatus.Finalized;
+            attemptPassed = attempt.passVerdictCount >= evalPolicy.passThreshold;
+            attempt.finalization = attemptPassed ? AttemptFinalization.Passed : AttemptFinalization.Failed;
             task.finalizedAttemptCount++;
 
-            if (!task.creatorCredited) {
-                task.creatorCredited = true;
+            emit AttemptFinalized(
+                ref.taskId,
+                ref.attemptIndex,
+                attemptPassed,
+                attempt.validVerdictCount,
+                attempt.passVerdictCount
+            );
+
+            if (!task.taskCreationCredited) {
+                task.taskCreationCredited = true;
                 creditCreator = true;
                 creator = task.creator;
                 creatorWeight = attempt.solutionWeight;
+                emit TaskCreationCreditLocked(ref.taskId, creator, creatorWeight);
             }
         }
+    }
+
+    function expireAttempt(uint256 taskId, uint32 attemptIndex) external {
+        AttemptRecord storage attempt = _attempts[taskId][attemptIndex];
+        if (attempt.status == AttemptStatus.None) revert TCAttemptNotFound(taskId, attemptIndex);
+        if (attempt.status == AttemptStatus.Submitted) revert TCAttemptAlreadySubmitted(taskId, attemptIndex);
+        if (attempt.status == AttemptStatus.Expired) return;
+        if (block.timestamp <= attempt.claimExpiresAt) revert TCClaimNotExpired(taskId, attemptIndex);
+        attempt.status = AttemptStatus.Expired;
+        emit TaskAttemptExpired(taskId, attemptIndex, attempt.operator);
     }
 
     function getTask(uint256 taskId) external view returns (TaskRecord memory record) {
@@ -467,5 +619,62 @@ contract TaskCoordinator {
     function taskIdByRequestId(bytes32 requestId) external view returns (uint256 taskId) {
         RequestRef memory ref = _requestRefs[requestId];
         return ref.taskId;
+    }
+
+    function allSubmittedAttemptsFinalized(uint256 taskId) external view returns (bool) {
+        TaskRecord storage task = _tasks[taskId];
+        if (task.status == TaskStatus.None) revert TCTaskNotFound(taskId);
+        return task.submittedCount > 0 && task.finalizedAttemptCount == task.submittedCount;
+    }
+
+    function _normalizePolicy(TaskPolicy calldata policy) internal pure returns (TaskPolicy memory normalized) {
+        normalized = policy;
+        EvaluationPolicy memory evalPolicy = policy.evaluationPolicy;
+        bool evalPolicyZero = evalPolicy.requiredVerdicts == 0
+            && evalPolicy.passThreshold == 0
+            && evalPolicy.evaluationDeadline == 0
+            && evalPolicy.maxVerdictsPerEvaluator == 0
+            && !evalPolicy.disallowSolverSelfEvaluation;
+
+        if (normalized.evaluationPolicy.requiredVerdicts == 0) {
+            normalized.evaluationPolicy.requiredVerdicts = 1;
+        }
+        if (normalized.evaluationPolicy.passThreshold == 0) {
+            normalized.evaluationPolicy.passThreshold = 1;
+        }
+        if (normalized.evaluationPolicy.evaluationDeadline == 0) {
+            normalized.evaluationPolicy.evaluationDeadline = normalized.submissionDeadline;
+        }
+        if (normalized.evaluationPolicy.maxVerdictsPerEvaluator == 0) {
+            normalized.evaluationPolicy.maxVerdictsPerEvaluator = 1;
+        }
+        if (evalPolicyZero) {
+            normalized.evaluationPolicy.disallowSolverSelfEvaluation = true;
+        }
+    }
+
+    function _validatePolicy(TaskPolicy memory policy) internal pure {
+        if (policy.maxClaims == 0 || policy.maxClaimsPerOperator == 0 || policy.claimLeaseTtlSeconds == 0) {
+            revert TCInvalidPolicy();
+        }
+        if (policy.maxClaimsPerOperator > policy.maxClaims) revert TCInvalidPolicy();
+        if (
+            policy.claimWindowStart == 0 ||
+            policy.claimWindowEnd < policy.claimWindowStart ||
+            policy.submissionDeadline < policy.claimWindowEnd
+        ) {
+            revert TCInvalidWindow();
+        }
+
+        EvaluationPolicy memory evalPolicy = policy.evaluationPolicy;
+        if (
+            evalPolicy.requiredVerdicts == 0 ||
+            evalPolicy.passThreshold == 0 ||
+            evalPolicy.passThreshold > evalPolicy.requiredVerdicts ||
+            evalPolicy.maxVerdictsPerEvaluator == 0
+        ) {
+            revert TCInvalidPolicy();
+        }
+        if (evalPolicy.evaluationDeadline < policy.submissionDeadline) revert TCInvalidWindow();
     }
 }

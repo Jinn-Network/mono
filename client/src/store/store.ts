@@ -1726,22 +1726,6 @@ export class Store {
       });
   }
 
-  getClaimedRewardsLast24hWei(): string {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const rows = this.db.prepare(
-      `SELECT amount_wei FROM reward_claims WHERE ts >= ?`,
-    ).all(cutoff) as Array<{ amount_wei: string }>;
-    let total = 0n;
-    for (const row of rows) {
-      try {
-        total += BigInt(row.amount_wei);
-      } catch {
-        /* ignore malformed legacy rows */
-      }
-    }
-    return total.toString();
-  }
-
   getClaimedRewardsByService(): Record<number, { total: string; lastAt: string; lastTxHash: string }> {
     const rows = this.db.prepare(
       `SELECT id, service_index, amount_wei, ts, tx_hash FROM reward_claims ORDER BY id ASC`,

@@ -184,12 +184,6 @@ returns `waiting_for_external_action` with the URL and the exact command to
 rerun next. Agents with the `jinn-operator` skill installed know how to walk an
 operator through a SolverNet automatically.
 
-Each Harness reads its **own** auth store (the daemon only forwards an
-allowlisted set of env vars — it does not hold your provider keys). For the
-per-harness auth store, the canonical rotate command/file, and why `client/.env`
-must not be used to set provider keys at runtime, see
-[`docs/operator/rotating-harness-keys.md`](../docs/operator/rotating-harness-keys.md).
-
 **Safety net:** before spending gas on a claim, the daemon checks whether the
 responsible Harness is actually ready. If a portfolio.v0 request arrives and your
 api-wallet isn't approved, the daemon records the Task as FAILED locally

@@ -9,7 +9,7 @@
 //
 // See `spec/2026-05-05-solvernet-creation-and-launch.md` §7 and §8.
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { zodToJsonSchema as zodToJsonSchemaImpl } from 'zod-to-json-schema';
 
 /**

@@ -16,16 +16,10 @@ vi.mock('./api/connection-state.js', () => ({
 }));
 
 // Drive App into the running branch so the operating shell (and its rail)
-// mounts. #983: the running-mode → <Operating> gate requires onboarding to be
-// complete, so set the flag here (else App holds the onboarding takeover).
+// mounts.
 vi.mock('./api/client.js', () => ({
   api: {
-    getBootstrap: async () => ({
-      mode: 'running',
-      chain: 'base-sepolia',
-      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
-      onboardingComplete: true,
-    }),
+    getBootstrap: async () => ({ mode: 'running', chain: 'base-sepolia' }),
   },
 }));
 

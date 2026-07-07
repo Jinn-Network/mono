@@ -15,10 +15,21 @@ const MANIFEST_DIGEST = `0x${'44'.repeat(32)}` as Hex;
 const FIRST_TX = `0x${'aa'.repeat(32)}` as Hex;
 const SECOND_TX = `0x${'bb'.repeat(32)}` as Hex;
 
-// Tokenless-OLAS pivot: on-chain policy is `maxClaims` + `allowSolverSelfEvaluation`.
 const POLICY = {
+  claimWindowStart: 1n,
+  claimWindowEnd: 2n,
+  submissionDeadline: 3n,
+  claimLeaseTtlSeconds: 300,
   maxClaims: 1,
-  allowSolverSelfEvaluation: false,
+  maxClaimsPerOperator: 1,
+  policyHook: '0x0000000000000000000000000000000000000000' as Address,
+  evaluationPolicy: {
+    requiredVerdicts: 1,
+    passThreshold: 1,
+    evaluationDeadline: 4n,
+    maxVerdictsPerEvaluator: 1,
+    disallowSolverSelfEvaluation: true,
+  },
 };
 
 function taskCreatedLog(taskId: bigint, txHash: Hex, blockNumber: bigint) {
@@ -34,11 +45,12 @@ function taskCreatedLog(taskId: bigint, txHash: Hex, blockNumber: bigint) {
   const data = encodeAbiParameters(
     [
       { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'maxClaims', type: 'uint32' },
+      { name: 'maxClaims', type: 'uint16' },
+      { name: 'requiredVerdicts', type: 'uint16' },
       { name: 'solutionBudget', type: 'uint256' },
       { name: 'verdictBudget', type: 'uint256' },
     ],
-    [TASK_CID_DIGEST, POLICY.maxClaims, 10n, 10n],
+    [TASK_CID_DIGEST, POLICY.maxClaims, POLICY.evaluationPolicy.requiredVerdicts, 10n, 10n],
   );
   return {
     address: ROUTER_ADDRESS,

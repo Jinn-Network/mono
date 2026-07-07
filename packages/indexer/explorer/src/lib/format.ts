@@ -52,7 +52,7 @@ export function block(s: string | number | null | undefined): string {
 // ── jinn ─────────────────────────────────────────────────────────────────────
 
 /**
- * Format a raw Base Sepolia JINN/OLAS wei string as a decimal OLAS amount.
+ * Format a raw JINN wei string as a decimal JINN amount.
  *
  * Uses BigInt arithmetic for the integer part to avoid precision loss, then
  * derives the fractional display with modulo arithmetic.
@@ -60,21 +60,21 @@ export function block(s: string | number | null | undefined): string {
  * @param weiStr  decimal string e.g. "100500000000000000044"
  * @param decimals token decimals (default 18)
  * @param digits  display decimal places (default 2)
- * @returns e.g. `"100.50 OLAS"` or `"0 OLAS"` for zero/null/empty
+ * @returns e.g. `"100.50 JINN"` or `"0 JINN"` for zero/null/empty
  */
 export function jinn(
   weiStr: string | null | undefined,
   decimals = 18,
   digits = 2,
 ): string {
-  if (!weiStr || weiStr === '0') return '0 OLAS';
+  if (!weiStr || weiStr === '0') return '0 JINN';
   let raw: bigint;
   try {
     raw = BigInt(weiStr);
   } catch {
     return '—';
   }
-  if (raw === 0n) return '0 OLAS';
+  if (raw === 0n) return '0 JINN';
 
   const divisor = 10n ** BigInt(decimals);
   const wholePart = raw / divisor;
@@ -84,11 +84,7 @@ export function jinn(
   const fracStr = fracRaw.toString().padStart(decimals, '0').slice(0, digits);
 
   const wholeFormatted = intFmt.format(wholePart);
-  if (wholePart === 0n && /^0+$/.test(fracStr)) {
-    const floor = digits <= 0 ? '1' : `0.${'0'.repeat(digits - 1)}1`;
-    return `<${floor} OLAS`;
-  }
-  return `${wholeFormatted}.${fracStr} OLAS`;
+  return `${wholeFormatted}.${fracStr} JINN`;
 }
 
 // ── shortAddr ─────────────────────────────────────────────────────────────────
@@ -123,59 +119,6 @@ export function shortCid(
   if (!cid) return '—';
   if (cid.length <= head + tail + 1) return cid;
   return `${cid.slice(0, head)}…${cid.slice(-tail)}`;
-}
-
-// ── external-link mapping (spec §3.4) ──────────────────────────────────────────
-
-/** Base Sepolia basescan base — the explorer's pinned chain (spec §3.8). */
-const BASESCAN_SEPOLIA = 'https://sepolia.basescan.org';
-
-/** Autonolas IPFS gateway — the corpus content resolver. */
-const IPFS_GATEWAY = 'https://gateway.autonolas.tech/ipfs';
-
-/**
- * Build a basescan URL for a transaction hash on Base Sepolia, or null when
- * the hash is absent/degenerate ('0x' placeholder from an un-enriched anchor).
- */
-export function basescanTxUrl(txHash: string | null | undefined): string | null {
-  if (!txHash || !/^0x[0-9a-fA-F]{2,}$/.test(txHash) || txHash === '0x') return null;
-  return `${BASESCAN_SEPOLIA}/tx/${txHash}`;
-}
-
-/**
- * Build a basescan URL for an account address on Base Sepolia, or null when the
- * address is absent/degenerate. Links a contributor straight to the on-chain
- * record (Legibility — every claim independently verifiable on chain).
- */
-export function basescanAddressUrl(address: string | null | undefined): string | null {
-  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return null;
-  return `${BASESCAN_SEPOLIA}/address/${address}`;
-}
-
-/**
- * Build an IPFS gateway URL for a CID, or null when the CID is absent. The cid
- * is attacker-influenceable (it comes from an on-chain key), so it is
- * percent-encoded before interpolation into the gateway path — matching the
- * internal-link treatment (scheme + host are fixed, so this is low-risk).
- */
-export function ipfsUrl(cid: string | null | undefined): string | null {
-  if (!cid) return null;
-  return `${IPFS_GATEWAY}/${encodeURIComponent(cid)}`;
-}
-
-// ── relUnix ─────────────────────────────────────────────────────────────────
-
-/**
- * Human-readable relative time from a unix-seconds timestamp (number), or null.
- * Mirrors relTime but for the numeric block-timestamp the corpus carries.
- *
- * @returns e.g. `"just now"`, `"3m ago"`, `"2h ago"`, `"5d ago"`, or `"—"`
- */
-export function relUnix(unixSeconds: number | null | undefined): string {
-  if (unixSeconds === null || unixSeconds === undefined || !Number.isFinite(unixSeconds) || unixSeconds <= 0) {
-    return '—';
-  }
-  return relTime(new Date(unixSeconds * 1000).toISOString());
 }
 
 // ── relTime ───────────────────────────────────────────────────────────────────

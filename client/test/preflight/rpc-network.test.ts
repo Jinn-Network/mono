@@ -9,10 +9,6 @@ import {
   summarizeFallbackChain,
   type ProbeResult,
 } from '../../src/preflight/rpc-network.js';
-import {
-  DEFAULT_TESTNET_RPC_URLS,
-  DEFAULT_MAINNET_RPC_URLS,
-} from '../../src/config.js';
 
 const servers: Server[] = [];
 
@@ -236,43 +232,4 @@ describe('summarizeFallbackChain (AC7 boot-log format)', () => {
       '[rpc] L2 transport: fallback chain (3 providers) — primary=base-sepolia.publicnode.com',
     );
   });
-});
-
-/**
- * Issue #911 — manual live confidence pass for the default RPC provider lists.
- *
- * OFF the default `yarn test` gate by design: it makes real network calls to
- * each shipped default endpoint and asserts the returned chain-id. Run it
- * implement-time / when rotating an endpoint:
- *
- *   JINN_RPC_LIVE_PROBE=1 yarn vitest run test/preflight/rpc-network.test.ts
- *
- * A failure here means a shipped default 401/403'd, was unreachable, or
- * returned the wrong chain-id — substitute from the free pool and re-run.
- */
-describe.skipIf(!process.env['JINN_RPC_LIVE_PROBE'])('default RPC lists — live chain-id probe (#911)', () => {
-  const cases: ReadonlyArray<readonly [string, number, readonly string[]]> = [
-    ['Base Sepolia', 84532, DEFAULT_TESTNET_RPC_URLS],
-    ['Base mainnet', 8453, DEFAULT_MAINNET_RPC_URLS],
-  ];
-
-  async function liveChainId(url: string): Promise<number> {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-    });
-    if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
-    const json = (await res.json()) as { result?: string };
-    if (!json.result) throw new Error(`${url} → no result`);
-    return Number.parseInt(json.result, 16);
-  }
-
-  for (const [name, expectedChainId, list] of cases) {
-    for (const url of list) {
-      it(`${name} slot ${url} returns chain-id ${expectedChainId}`, async () => {
-        expect(await liveChainId(url)).toBe(expectedChainId);
-      }, 20_000);
-    }
-  }
 });

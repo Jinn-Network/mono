@@ -18,16 +18,15 @@ You are the coordinating agent for one batch integration. The human invokes you 
 
 ## Step 1 — Survey the ready PRs
 
-Fetch all open PRs:
+Fetch all open PRs against `next`:
 
 ```bash
 gh pr list \
   --repo Jinn-Network/mono \
+  --base next \
   --state open \
-  --json number,title,headRefName,baseRefName,labels,statusCheckRollup,files
+  --json number,title,headRefName,labels,statusCheckRollup,files
 ```
-
-The survey must see PRs whose base is another open PR's head branch (upper stack layers), not just PRs based on `next` — dropping `--base next` is what makes the candidate set complete (AC #2). `baseRefName` feeds `enumerateStacks` (`packages/eng-loop/src/dispatcher/stack-order.ts`), the candidate-set discovery + ordering function.
 
 For each PR, re-check `statusCheckRollup`. The `implement-issue` pipeline only opened each PR when every gate passed, but CI can go stale — always verify the current rollup, not the one recorded at PR-open time.
 
@@ -99,7 +98,7 @@ verbatim to the "approve any PR you would have approved yourself" pattern that
 preceded the PR #423 / PR #607 incident on 2026-05-25 — that authorization is
 exhausted before the gate runs, not after.
 
-After the CI / `Blocked on: Human` / code-owner drops, feed the surviving PRs' `{number, headRefName, baseRefName}` into `enumerateStacks(prs, 'next')`. Its `candidates` (ordered, tiered) are the **candidate set** for ordering; its `orphans` (base = deleted branch or a cycle) are reported separately (Step 5) and never dropped silently.
+The remaining PRs form the **candidate set** for ordering.
 
 ---
 
@@ -109,9 +108,7 @@ Ordering is a **reasoning task, not a sort**. Inspect the candidate set and appl
 
 ### Tier 1 — Known dependency stacks
 
-The base-ref graph from `enumerateStacks` is the **authoritative** stack enumeration: a PR is stacked iff its `baseRefName` is another open PR's `headRefName`, regardless of the issue's `Blocked on: Another issue #A` field. The `Blocked on` field becomes a corroborating signal only — on disagreement the base graph wins, because it reflects actual branch topology. When `gh-stack` is available it is the named canonical tool for reading declared stack order; the base-graph walker (`enumerateStacks`) is the documented fallback (and the source of truth for the topology either way).
-
-A PR whose `baseRefName` is another open PR's head branch is already branched on that PR's branch (the dispatcher stacked it at dispatch time). The root must merge before its dependents. Order each stack lower-layer-first (root depth 0 first), matching `OrderedPr.depth`.
+A PR whose linked issue carries `Blocked on: Another issue #A` is already branched on A's branch (the dispatcher stacked it at dispatch time). A must merge before its dependents. Order each stack bottom-up: root first, dependents after it in the sequence.
 
 If a stack has multiple levels (A blocks B which blocks C), order them A → B → C.
 
@@ -212,15 +209,6 @@ Confirm the merged commits appear at the HEAD of `origin/next`. If they do not, 
 
 `next` has now advanced. The remaining PRs need to be rebased onto the new `next` before they are ready to merge. Dispatch a **rebase subagent** for the *next* PR immediately (it can run while the coordinator records the just-completed merge). Apply the same verification discipline (3a) when the subagent reports back.
 
-**Re-target stacked upper layers after the parent merges.** When a parent PR `A` (head branch `b/A`) merges into `next`, its branch is deleted by the rebase-merge. Any open PR whose base *was* `A`'s head branch is now pointed at a deleted branch — it must be re-targeted to `next`, then rebased, before it can merge:
-
-```bash
-gh pr edit <N> --repo Jinn-Network/mono --base next
-# then dispatch the rebase subagent (3a) to rebase b/N onto origin/next
-```
-
-This closes the orphaned-upper-layer gap — the #534 / #593 failure described in the issue, where the upper layer of a stack was never discovered or re-targeted and silently fell out of the batch. Apply the same 3a verification discipline to the re-targeted PR.
-
 **Repeat** until the ordered list is exhausted.
 
 ---
@@ -297,13 +285,6 @@ Final `next` HEAD: `<sha>`
 | #50 | fix(api): correct artifact search pagination | Semantic conflict with #38 in `src/api/server.ts` — both modified `searchArtifacts`; resolution needs re-implementation | `Blocked on: Human` |
 | #61 | feat(client): add foo helper | Awaiting code-owner review — touched `/PRINCIPLES.md`, requires approval from `@oaksprout` or `@ritsukai` | unchanged (not routed to `Blocked on: Human`) |
 | #62 | fix(daemon): correct foo race | Awaiting maintainer review — no CODEOWNERS coverage on touched paths; needs an approving review from a reviewer with `authorAssociation ∈ {OWNER, MEMBER}` | unchanged (not routed to `Blocked on: Human`) |
-
-### Orphaned-base PRs
-
-PRs whose base ref is neither `next` nor any other open PR's head branch — the
-base branch was deleted, or the base graph contains a cycle. These were never
-in the candidate set and were **not** dropped silently. Surface each with its
-number, title, and current `baseRefName`, so the human can re-point or close it.
 
 ### Awaiting code-owner review
 

@@ -1,4 +1,4 @@
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { DecimalProbabilitySchema, IsoDateTimeSchema } from '../prediction-v1.js';
 
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);

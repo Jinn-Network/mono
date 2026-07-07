@@ -2,7 +2,7 @@
  * Typed fetch helpers + React Query hooks for the Jinn network explorer.
  *
  * All shapes mirror the exact JSON responses from `packages/indexer/src/api/explorer.ts`.
- * bigint fields serialised as decimal strings (mostRecentSettlementBlock, etc.).
+ * bigint fields serialised as decimal strings (jinnEarned, mostRecentSettlementBlock, etc.).
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -32,12 +32,44 @@ export interface LeaderboardRow {
   verdictsPass: number;
   /** null when verdictsTotal === 0 */
   resolvedRate: number | null;
-  /** Decimal wei string; labeled as OLAS in the UI. */
+  /** decimal string, e.g. "100500000000000000044" */
   jinnEarned: string;
-  /** Oldest-first 8 x 6h reward qualification flags. */
-  recentBlocks?: boolean[];
-  /** true when the newest completed OLAS reward bucket qualifies. */
+  /**
+   * Liveness (issue #926): true when the operator earned ≥ the per-block floor
+   * in the NEWEST completed block of `activeWindow` (the in-progress block is
+   * excluded). This is what the `Active?` column means — "earning now" — not
+   * the 48h-sustained gate. Derive sustained from `recentBlocks.every(Boolean)`.
+   */
   active: boolean;
+  /**
+   * Per-block qualification flags over `activeWindow` — length
+   * `activeWindow.blockCount` (8), oldest-first (`recentBlocks[0]` is the
+   * oldest completed bucket, `recentBlocks[7]` is the newest). `true` when the
+   * operator earned ≥ `activeWindow.requiredTjinnPerBlock` in that block.
+   *
+   * Server contract: present on every `ranked`/`lowVolume` entry returned by
+   * `/explorer/operators`. Optional on the wire type because the train/frozen
+   * leaderboards inside `/explorer/solvernet/:cid` reuse this shape and do
+   * not populate it.
+   */
+  recentBlocks?: boolean[];
+}
+
+/**
+ * Reference window for the "active operator" surface — the most recent
+ * `blockCount` × `blockSeconds`-second blocks, ending at the most-recent
+ * completed UTC boundary.
+ *
+ * `requiredTjinnPerBlock` is the wei floor an operator's per-block
+ * `operatorMinted` sum must clear to qualify a block. Serialised as a
+ * decimal string because bigints don't round-trip through JSON.
+ */
+export interface ActiveWindow {
+  startTs: number;
+  endTs: number;
+  blockSeconds: number;
+  blockCount: number;
+  requiredTjinnPerBlock: string;
 }
 
 export interface RankedLeaderboardRow extends LeaderboardRow {
@@ -59,6 +91,14 @@ export interface NetworkResponse extends FreshnessMeta {
    * disambiguate from the headline "active operators" surface.
    */
   everAttemptedOperators: number;
+  /**
+   * Liveness count — operators that qualified in the newest completed bucket of
+   * `activeWindow` (issue #926). "Earning now," not the 48h gate.
+   */
+  activeOperators: number;
+  /** Milestone-1 count — operators that qualified on EVERY bucket of `activeWindow`. */
+  sustainedOperators: number;
+  activeWindow: ActiveWindow;
   solverNetsRunning: number;
   verdicts: number;
   /** Envelope-truth-preferring pass count. */
@@ -82,6 +122,8 @@ export interface NetworkResponse extends FreshnessMeta {
     total: number;
     share: number;
   };
+  jinnDistributedOperator: string;
+  jinnDistributedDao: string;
   mostRecentSettlementBlock: string | null;
   composition: {
     byMode: CompositionEntry[];
@@ -220,33 +262,21 @@ export interface SolverNetResponse extends FreshnessMeta {
 
 // ── GET /explorer/operators ──────────────────────────────────────────────────
 
-export interface ActiveWindow {
-  startTs: number;
-  endTs: number;
-  blockSeconds: number;
-  blockCount: number;
-  requiredOlasPerBlock: string;
-}
-
 export interface OperatorsResponse extends FreshnessMeta {
   ranked: RankedLeaderboardRow[];
   lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
   minVerdicts: number;
-  /**
-   * Distinct operators that cleared the newest completed 6h OLAS reward bucket.
-   */
+  /** Liveness count — multisigs active in the newest completed bucket (issue #926). */
   activeOperators: number;
-  /** Distinct operators that cleared all 8 completed 6h OLAS reward buckets. */
+  /** Milestone-1 count — multisigs that qualified on EVERY bucket of `activeWindow`. */
   sustainedOperators: number;
-  /** Distinct operators with at least 25 OLAS lifetime. */
-  operatorsAtMilestone3: number;
   activeWindow: ActiveWindow;
-  meta?: {
-    jinnAttribution?: 'pending' | 'ok';
-  };
   appliedFilters?: {
     mode?: string;
     harness?: string;
+  };
+  meta: {
+    jinnAttribution: 'pending' | 'ok';
   };
 }
 
@@ -275,6 +305,10 @@ export interface OperatorResponse extends FreshnessMeta {
     verdictsTotal: number;
     verdictsPass: number;
     resolvedRate: number | null;
+    jinnEarned: string;
+  };
+  meta: {
+    jinnAttribution: 'pending' | 'ok';
   };
 }
 
@@ -319,115 +353,6 @@ export function useNetwork(params?: NetworkParams) {
           include: params?.includeUnenriched ? 'raw' : undefined,
         })}`,
       ),
-  });
-}
-
-// ── Distribution signal (#1314) ──────────────────────────────────────────────
-
-export interface DistributionSignalRow {
-  cluster: string;
-  envelopeCount: number;
-  contributorCount: number;
-  topTags: string[];
-}
-
-export interface DistributionSignalResponse {
-  rows: DistributionSignalRow[];
-  envelopeTotal: number;
-  contributorTotal: number;
-  seedsExcluded: number;
-  includeSeeds: boolean;
-}
-
-export function useDistributionSignal(includeSeeds: boolean) {
-  return useQuery({
-    queryKey: ['distribution-signal', includeSeeds],
-    queryFn: () =>
-      fetchJson<DistributionSignalResponse>(
-        `/distribution-signal${qs({ include: includeSeeds ? 'seeded' : undefined })}`,
-      ),
-  });
-}
-
-// ── Corpus (#1406) ────────────────────────────────────────────────────────────
-
-export interface CorpusItemRow {
-  cid: string;
-  chainId: number;
-  summary: string;
-  /** The primary distribution tag (v0 cluster key); '' when untagged. */
-  cluster: string;
-  /** verifiability tier: user-accepted | tests-passed | evaluator-verified | ''. */
-  tier: string;
-  contributor: string;
-  model: string;
-  stepCount: number;
-  /** Unix-seconds anchor timestamp, or null when un-enriched. */
-  createdAt: number | null;
-}
-
-export interface CorpusListResponse extends FreshnessMeta {
-  items: CorpusItemRow[];
-  total: number;
-  seedsExcluded: number;
-  includeSeeds: boolean;
-}
-
-export interface CorpusItemResponse extends FreshnessMeta {
-  cid: string;
-  chainId: number;
-  summary: string;
-  cluster: string;
-  tags: string[];
-  tier: string;
-  contributor: string;
-  harness: string;
-  model: string;
-  tools: string[];
-  stepCount: number;
-  provenance: string;
-  /** MetadataSet anchor tx hash; '' when un-enriched. */
-  anchorTx: string;
-  createdAt: number | null;
-}
-
-export interface CorpusParams {
-  includeSeeds?: boolean;
-  limit?: number;
-  offset?: number;
-  /** Server-side sort column; omit for the backend default (createdAt). */
-  sort?: string;
-  /** Server-side sort direction; omit for the backend default (desc). */
-  dir?: 'asc' | 'desc';
-}
-
-export function useCorpus(params?: CorpusParams) {
-  return useQuery({
-    queryKey: ['corpus', params],
-    queryFn: () =>
-      fetchJson<CorpusListResponse>(
-        `/explorer/corpus${qs({
-          include: params?.includeSeeds ? 'seeded' : undefined,
-          limit: params?.limit,
-          offset: params?.offset,
-          sort: params?.sort,
-          dir: params?.dir,
-        })}`,
-      ),
-  });
-}
-
-export function useCorpusItem(cid: string) {
-  return useQuery({
-    queryKey: ['corpus-item', cid],
-    queryFn: () =>
-      fetchJson<CorpusItemResponse>(
-        `/explorer/corpus/${encodeURIComponent(cid)}`,
-      ),
-    enabled: Boolean(cid),
-    // A 404 for an unknown CID is a terminal answer, not a transient error —
-    // don't retry it (the not-found view is the intended terminal state).
-    retry: false,
   });
 }
 

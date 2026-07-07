@@ -68,7 +68,6 @@ describe('launched-record generator dispatcher', () => {
     const factories: LaunchedRecordGeneratorFactories = {
       predictionV1: vi.fn(() => predictionGenerator),
       sweRebenchV2: vi.fn(() => sweGenerator),
-      jinnRepo: vi.fn(() => noopGenerator()),
     };
     const logger = {
       info: vi.fn(),
@@ -133,29 +132,5 @@ describe('launched-record generator dispatcher', () => {
     expect(logger.info).toHaveBeenCalledWith(
       '[main] launched-record generator wired: 5474_swe-rebench-v2-v1_edb172d3 (swe-rebench-v2.v1, status=paused)',
     );
-  });
-
-  it('dispatches a jinn-repo record through the jinnRepo factory', async () => {
-    const jinnRepoGenerator = noopGenerator();
-    const factories: LaunchedRecordGeneratorFactories = {
-      predictionV1: vi.fn(() => noopGenerator()),
-      sweRebenchV2: vi.fn(() => noopGenerator()),
-      jinnRepo: vi.fn(() => jinnRepoGenerator),
-    };
-    const jinnRepoRecord = record('5474_jinn-repo-v1_abc12345');
-
-    const result = await wireLaunchedRecordGenerators({
-      pendingGenerators: [pending(jinnRepoRecord)],
-      staticConfig: {},
-      factories,
-    });
-
-    expect(factories.jinnRepo).toHaveBeenCalledTimes(1);
-    expect(factories.jinnRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ recordRef: expect.objectContaining({ current: jinnRepoRecord }) }),
-    );
-    expect(result.generators).toEqual([
-      { solverType: 'jinn-repo.v1', generator: jinnRepoGenerator, getLauncherState: undefined },
-    ]);
   });
 });

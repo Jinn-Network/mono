@@ -17,6 +17,7 @@ import {
   parseAbi,
   parseEther,
   toBytes,
+  zeroAddress,
   type Abi,
   type Address,
   type Hex,
@@ -27,12 +28,6 @@ import {
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
-import {
-  KNOWN_INSTANCE_ID,
-  KNOWN_REPO,
-  KNOWN_COMMIT,
-  KNOWN_MANIFEST_CID,
-} from '../release/tier-2/fixtures/known-instance.js';
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const CONTRACTS_DIR = resolve(E2E_DIR, '..', '..', '..', 'contracts');
@@ -68,7 +63,6 @@ import {
 } from '../../src/harnesses/engine/registry.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
-import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -811,7 +805,7 @@ export interface RunningDaemon {
  *   - apiPort: 0 → OS assigns a free port at daemon-startup time (no TOCTOU race).
  *   - peers: empty (no peer discovery in the test).
  *   - subgraphUrl: omitted (no-subgraph mode is supported).
- *   - rewardClaim / balanceTopup: omitted (interval 0 → loops not started).
+ *   - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → loops not started).
  *   - packagingDeps / envelopeDeps / deliveryDeps: omitted → pack() falls back
  *     to NotImplementedError (Task 4+ will wire delivery deps as needed).
  *   - identityPublisher / reputationFeedback: omitted (no ERC-8004 in test).
@@ -853,31 +847,6 @@ export async function startDaemon(
    *   so the evaluator/verdict leg is deterministic and needs no network.
    */
   opts?: { polymarketGammaBaseUrl?: string; instanceLabel?: string },
-  /**
-   * Extra SolverType→harness-name dispatch entries merged into
-   * `solverTypeHarnesses` on top of the prediction.v1 mapping derived from
-   * `harnessSelector`. Used by the jinn-repo loop driver to force
-   * `jinn-repo.v1` restoration onto the claude-code learner. Honored only when
-   * the named harness `supports(ctx)` (see HarnessRegistry.findFor) — so an
-   * entry mapping jinn-repo.v1 → claude-code does NOT capture the evaluation
-   * leg (claude-code returns false for evaluation), which still first-matches
-   * the JinnRepoEvaluatorHarness. Defaults to `{}` → no behavioural change for
-   * the prediction consumer.
-   */
-  extraSolverTypeHarnesses?: Record<string, string>,
-  /**
-   * Optional SolverNetRegistry-like object passed straight through to the
-   * TaskEngine. The engine consults it to (a) gate claims on an enabled
-   * SolverNet for the task's solverType and (b) resolve the SolverNet's
-   * runtime plugins so the solver harness loads the SolverType's bundled
-   * runtime SKILL (e.g. jinn-repo-runtime → checkout-mono-at-base_commit).
-   *
-   * MUST stay undefined for the prediction consumer (daemon-harness-cycle.ts):
-   * when set, the engine REJECTS any task whose solverType has no enabled net,
-   * which would break the prediction flow that relies on the no-registry path.
-   * Defaults to undefined → no behavioural change.
-   */
-  solverNetRegistry?: SolverNetRegistry,
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const chainCfg = getChainConfig('base');
@@ -977,12 +946,10 @@ export async function startDaemon(
   //    The selected harness name is the canonical name from names.ts —
   //    see `selectorToHarnessName` above.
   const selectedHarnessName = selectorToHarnessName(harnessSelector);
-  const solverTypeHarnesses: Record<string, string> = {
-    ...(harnessSelector === 'prediction-v1-baseline'
+  const solverTypeHarnesses: Record<string, string> =
+    harnessSelector === 'prediction-v1-baseline'
       ? {}
-      : { 'prediction.v1': selectedHarnessName }),
-    ...(extraSolverTypeHarnesses ?? {}),
-  };
+      : { 'prediction.v1': selectedHarnessName };
 
   const implRegistry = new HarnessRegistry({
     default: DEFAULT_HARNESS,
@@ -1077,7 +1044,7 @@ export async function startDaemon(
   //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
   //    - taskSources: omitted (no creator-side tasks in Task 5+)
   //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
-  //    - rewardClaim / balanceTopup: omitted (interval 0 → no loops)
+  //    - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → no loops)
   //    - status: omitted (GET /v1/status not exercised here)
   //    - corpusFactory: omitted (no subgraph configured)
   //    - apiServer: the pre-started server from step 2 — Daemon adopts it
@@ -1093,8 +1060,8 @@ export async function startDaemon(
     // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
     creatorSafeAddress: operator.safeAddress,
-    // subgraphUrl / nodeEndpoint / signer: omitted
-    // rewardClaim / balanceTopup: omitted → those loops don't start
+    // subgraphUrl / nodeEndpoint / x402 / signer: omitted
+    // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
     restorationEngine: {
       paths: {
         // Default consumer (daemon-harness-cycle.ts) calls startDaemon with no
@@ -1108,11 +1075,6 @@ export async function startDaemon(
         implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
       },
       implRegistry,
-      // Optional registry: undefined for the prediction consumer (no change);
-      // the jinn-repo driver passes one so the engine resolves the
-      // jinn-repo-runtime bundled plugin into solverPluginRoots and the solver
-      // agent receives the checkout-mono SKILL.
-      ...(solverNetRegistry ? { solverNetRegistry } : {}),
       packagingDeps,
       envelopeDeps,
       deliveryDeps,
@@ -1148,161 +1110,7 @@ export async function startDaemon(
   return { daemon, store, stop };
 }
 
-/**
- * Start a producer/solver daemon whose `swe-rebench-v2.v1` solve leg is served
- * by the hermetic env-gated StubHarness (returns the canned known-good patch;
- * never calls an LLM). Sets JINN_HARNESS_STUB_INSTANCE + JINN_TEST_MODE +
- * JINN_HARNESS_STUB_FIXTURES_DIR before `startDaemon` (which builds harnesses
- * in-process via `buildHarnesses`, registering the stub by `solverType`
- * first-match) and restores the prior env once `startDaemon` returns so a
- * sibling evaluator daemon started afterwards does not pick the stub up. The
- * evaluation role is never handled by the stub (StubHarness.supports() returns
- * false for role === 'evaluation').
- */
-export async function startSweRebenchSolverDaemon(
-  fixture: DaemonHarnessFixture,
-  operator: BootstrappedOperator,
-  ipfsGatewayUrl: string,
-  v3Env: TaskV3Env,
-  ipfsRegistryUrl: string,
-  opts: { instanceLabel?: string; fixturesDir: string; instanceMatcher: string },
-): Promise<RunningDaemon> {
-  const prev = {
-    instance: process.env['JINN_HARNESS_STUB_INSTANCE'],
-    testMode: process.env['JINN_TEST_MODE'],
-    fixturesDir: process.env['JINN_HARNESS_STUB_FIXTURES_DIR'],
-  };
-  process.env['JINN_HARNESS_STUB_INSTANCE'] = opts.instanceMatcher;
-  process.env['JINN_TEST_MODE'] = '1';
-  process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] = opts.fixturesDir;
-
-  const restore = (): void => {
-    if (prev.instance === undefined) delete process.env['JINN_HARNESS_STUB_INSTANCE'];
-    else process.env['JINN_HARNESS_STUB_INSTANCE'] = prev.instance;
-    if (prev.testMode === undefined) delete process.env['JINN_TEST_MODE'];
-    else process.env['JINN_TEST_MODE'] = prev.testMode;
-    if (prev.fixturesDir === undefined) delete process.env['JINN_HARNESS_STUB_FIXTURES_DIR'];
-    else process.env['JINN_HARNESS_STUB_FIXTURES_DIR'] = prev.fixturesDir;
-  };
-
-  let daemon: RunningDaemon;
-  try {
-    daemon = await startDaemon(
-      fixture,
-      operator,
-      'prediction-v1-baseline',
-      ipfsGatewayUrl,
-      v3Env,
-      ipfsRegistryUrl,
-      { instanceLabel: opts.instanceLabel ?? 'op-a' },
-    );
-  } finally {
-    // The stub harness is captured inside buildHarnesses synchronously during
-    // startDaemon; once startDaemon returns it is safe to restore the env so a
-    // sibling evaluator daemon started afterwards does not pick the stub up.
-    restore();
-  }
-  return daemon;
-}
-
 // ── Task posting + claim detection ────────────────────────────────────────────
-
-/**
- * Sign an unsigned task document, register it with the mock IPFS server, and
- * post it on the locally-deployed V3 JinnRouter. Shared by `postPredictionV1Task`
- * and `postSweRebenchV2Task` — everything except the task-document body is
- * identical between solver types, so the per-solverType helpers build only the
- * `unsignedTaskDoc` + `manifestCid` and delegate the rest here.
- */
-async function postSignedTaskOnChain(
-  fixture: DaemonHarnessFixture,
-  creatorPrivKey: `0x${string}`,
-  unsignedTaskDoc: Record<string, unknown>,
-  manifestCid: string,
-  mockIpfs: MockIpfsServer,
-  v3Env: TaskV3Env,
-  opts: { disallowSolverSelfEvaluation?: boolean } = {},
-): Promise<PostedPredictionTask> {
-  const rpcUrl = fixture.anvil.rpcUrl;
-  const routerAddress = v3Env.routerAddress;
-  const marketplaceAddress = v3Env.mockMarketplaceAddress;
-  const creator = privateKeyToAccount(creatorPrivKey);
-
-  // Sign the task document with the creator's key (any secp256k1 key works;
-  // the daemon does not validate the creator signature at claim time).
-  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
-  const signedTaskDoc = {
-    ...unsignedTaskDoc,
-    signature: {
-      algo: 'secp256k1' as const,
-      signer: creator.address,
-      hash: signed.hash,
-      sig: signed.sig,
-    },
-  };
-
-  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)). The daemon
-  // derives the IPFS CID as `f01551220${digest.slice(2)}` from the on-chain
-  // event and fetches from the mock gateway at that path.
-  const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
-  mockIpfs.register(taskCidDigest, signedTaskDoc);
-
-  const manifestDigest = keccak256(toBytes(manifestCid)) as `0x${string}`;
-
-  // Use the mock mech's maxDeliveryRate so the V3 router's budget check passes.
-  const deliveryRate = await getMechDeliveryRate(
-    fixture.publicClient,
-    v3Env.mockMechAddress as Address,
-  );
-  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
-  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
-
-  // Tokenless-OLAS pivot: the on-chain TaskCoordinator.TaskPolicy is `maxClaims`
-  // plus `allowSolverSelfEvaluation` (windows / lease / quorum / EvaluationPolicy
-  // removed). The off-chain scheduling intent still rides on the signed task.v1
-  // `claimPolicy` field; only these two cross the wire into createTask.
-  //
-  // Default `allowSolverSelfEvaluation: true` — this is the single-operator
-  // dogfood path (daemon-harness-cycle.ts): one daemon posts, solves, delivers,
-  // then SELF-evaluates its own attempt to drive the verdict that credits the
-  // solver's activity counter. Without self-eval allowed the coordinator reverts
-  // `claimEvaluation` (evaluator == solver) and the verdict leg never closes, so
-  // the activity counter stays at 0. Multi-operator scenarios (T2.2) pass
-  // `disallowSolverSelfEvaluation: true` to restore the independent-evaluation
-  // invariant so the dedicated evaluator (op-b), not the solver (op-a), settles
-  // the verdict.
-  const onchainPolicy = {
-    maxClaims: 10,
-    allowSolverSelfEvaluation: !opts.disallowSolverSelfEvaluation,
-  };
-
-  // The trimmed JinnRouterV3.createTask requires msg.value == solutionBudget +
-  // verdictBudget where each side = rate * maxClaims (the per-verdict
-  // requiredVerdicts multiplier is gone). With maxClaims=10: value = rate * 20.
-  const MAX_CLAIMS = 10n;
-  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
-  const solutionBudget = rateArg * MAX_CLAIMS;
-  const verdictBudget = rateArg * MAX_CLAIMS;
-  const value = solutionBudget + verdictBudget;
-
-  const created = await writeContractTx({
-    publicClient: fixture.publicClient,
-    rpcUrl,
-    account: creator,
-    address: routerAddress,
-    abi: JINN_ROUTER_ABI,
-    functionName: 'createTask',
-    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
-    value,
-  });
-
-  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
-  const taskId = BigInt(String(taskCreated['taskId']));
-  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
-
-  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
-}
 
 /**
  * Build, sign, and register a prediction.v1 task with the mock IPFS server,
@@ -1330,21 +1138,24 @@ export async function postPredictionV1Task(
   /**
    * Optional on-chain policy overrides.
    *
-   * - `disallowSolverSelfEvaluation` — when true, the on-chain `TaskPolicy` is
-   *   built with `allowSolverSelfEvaluation: false`, so the TaskCoordinator
-   *   reverts `claimEvaluation` (`TCSolverSelfEvaluation`) if the evaluator
-   *   equals the solution attempt's operator. Multi-operator scenarios (T2.2)
-   *   set this so the solver (op-a) cannot win the evaluation-claim race against
-   *   the dedicated evaluator (op-b): with `requiredVerdicts: 1`, whichever
-   *   operator claims first settles the single verdict, and if op-a wins, op-b
-   *   can never settle — making `waitForVerdict(evaluator=op-b)` time out
-   *   non-deterministically. Defaults to `false` so the single-operator consumer
-   *   (`daemon-harness-cycle.ts`) posts with `allowSolverSelfEvaluation: true`
-   *   and can solve + self-evaluate + close the loop solo (the verdict leg is
-   *   what credits the solver's activity counter).
+   * - `disallowSolverSelfEvaluation` — when true, the TaskCoordinator reverts
+   *   `claimEvaluation` if the evaluator equals the solution attempt's operator
+   *   (TaskCoordinator.sol §432-433). Multi-operator scenarios (T2.2) set this
+   *   so the solver (op-a) cannot win the evaluation-claim race against the
+   *   dedicated evaluator (op-b): with `requiredVerdicts: 1`, whichever operator
+   *   claims first settles the single verdict, and if op-a wins, op-b can never
+   *   settle (TCMaxVerdictsReached) — making `waitForVerdict(evaluator=op-b)`
+   *   time out non-deterministically. Defaults to `false` to preserve the
+   *   single-operator consumer (`daemon-harness-cycle.ts`), which never waits
+   *   for a verdict and so is unaffected either way.
    */
   opts: { disallowSolverSelfEvaluation?: boolean } = {},
 ): Promise<PostedPredictionTask> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const routerAddress = v3Env.routerAddress;
+  const marketplaceAddress = v3Env.mockMarketplaceAddress;
+
+  const creator = privateKeyToAccount(creatorPrivKey);
   const now = Date.now();
   const nowSec = Math.floor(now / 1000);
 
@@ -1424,97 +1235,86 @@ export async function postPredictionV1Task(
     createdAt: now,
   };
 
-  return postSignedTaskOnChain(
-    fixture,
-    creatorPrivKey,
-    unsignedTaskDoc,
-    MANIFEST_CID,
-    mockIpfs,
-    v3Env,
-    opts,
-  );
-}
-
-/**
- * Build, sign, and register a `swe-rebench-v2.v1` task with the mock IPFS server,
- * then post it on the locally-deployed V3 JinnRouter. The returned shape matches
- * `postPredictionV1Task` so `waitForDaemonClaim` / `waitForDelivery` /
- * `waitForVerdict` consume it unchanged.
- *
- * The task's `spec` carries the SweRebenchV2TaskSchema fields for the
- * known-solvable instance `sympy__sympy-27510` (fixtures/known-instance.ts) —
- * the same field set T3.1 writes (T3.1-producer-evaluator-real.ts:648-663). The
- * producer daemon's StubHarness injects the canned patch for the solve leg.
- */
-export async function postSweRebenchV2Task(
-  fixture: DaemonHarnessFixture,
-  operator: BootstrappedOperator,
-  creatorPrivKey: `0x${string}`,
-  mockIpfs: MockIpfsServer,
-  v3Env: TaskV3Env,
-  opts: { disallowSolverSelfEvaluation?: boolean } = {},
-): Promise<PostedPredictionTask> {
-  const now = Date.now();
-  const nowSec = Math.floor(now / 1000);
-
-  // SWE-rebench v2 task document. spec fields mirror the schema T3.1 writes
-  // (T3.1-producer-evaluator-real.ts:648-663). manifestDigest uses the
-  // SWE-rebench v2 mainline manifest CID so the on-chain manifest cross-check
-  // is consistent.
-  const MANIFEST_CID = KNOWN_MANIFEST_CID;
-  const unsignedTaskDoc = {
-    schemaVersion: 'task.v1' as const,
-    id: 'daemon-harness-e2e-swe-rebench-v2-1',
-    solverType: 'swe-rebench-v2.v1',
-    solverNetManifestCid: MANIFEST_CID,
-    contractId: 'swe-rebench-v2',
-    contractVersion: 'v1',
-    role: 'restoration' as const,
-    description: `SWE-rebench v2 instance ${KNOWN_INSTANCE_ID}`,
-    window: {
-      startTs: now - 5_000,
-      endTs: now + 600_000,
+  // Sign the task document with the creator's key (any secp256k1 key works;
+  // the daemon does not validate the creator signature at claim time).
+  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
+  const signedTaskDoc = {
+    ...unsignedTaskDoc,
+    signature: {
+      algo: 'secp256k1' as const,
+      signer: creator.address,
+      hash: signed.hash,
+      sig: signed.sig,
     },
-    spec: {
-      schemaVersion: 'swe-rebench-v2.v1',
-      solverType: 'swe-rebench-v2.v1',
-      instance_id: KNOWN_INSTANCE_ID,
-      repo: KNOWN_REPO,
-      base_commit: KNOWN_COMMIT,
-      language: 'python',
-      problem_statement: `SWE-rebench v2 instance: ${KNOWN_INSTANCE_ID}`,
-      interface: '',
-      hf_dataset: 'nebius/SWE-rebench-leaderboard',
-      hf_split: '2025_01',
-      deadline_unix: nowSec + 60 * 60,
-      round_month: '2025-01',
-    },
-    eligibility: {},
-    claimPolicy: {
-      mode: 'parallel' as const,
-      maxClaims: 10,
-      maxClaimsPerOperator: 1,
-      claimLeaseTtlSeconds: 600,
-      claimWindowStartTs: nowSec - 5,
-      claimWindowEndTs: nowSec + 300,
-      submissionDeadlineTs: nowSec + 900,
-    },
-    creator: {
-      safeAddress: operator.safeAddress as `0x${string}`,
-      agentEoa: operator.agentAddress as `0x${string}`,
-    },
-    createdAt: now,
   };
 
-  return postSignedTaskOnChain(
-    fixture,
-    creatorPrivKey,
-    unsignedTaskDoc,
-    MANIFEST_CID,
-    mockIpfs,
-    v3Env,
-    opts,
+  // ── Step 2: Compute on-chain digest and register with mock IPFS ────────────
+  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)).
+  // The daemon derives the IPFS CID as `f01551220${digest.slice(2)}` from the
+  // on-chain event and fetches from the mock gateway at that path.
+  const taskJson = JSON.stringify(signedTaskDoc);
+  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  mockIpfs.register(taskCidDigest, signedTaskDoc);
+
+  // ── Step 3: Compute manifestDigest ────────────────────────────────────────
+  const manifestDigest = keccak256(toBytes(MANIFEST_CID)) as `0x${string}`;
+
+  // ── Step 4: Get delivery rate + timeout from the mock mech/marketplace ──────
+  // Use the mock mech's maxDeliveryRate so the V3 router's budget check passes.
+  const deliveryRate = await getMechDeliveryRate(
+    fixture.publicClient,
+    v3Env.mockMechAddress as Address,
   );
+  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
+  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
+
+  // ── Step 5: Build claim policy matching the task doc ──────────────────────
+  const latestBlock = await fixture.publicClient.getBlock();
+  const chainNowSec = Number(latestBlock.timestamp);
+  const onchainPolicy = {
+    claimWindowStart: BigInt(chainNowSec - 5),
+    claimWindowEnd: BigInt(chainNowSec + 300),
+    submissionDeadline: BigInt(chainNowSec + 900),
+    claimLeaseTtlSeconds: 600,
+    maxClaims: 10,
+    maxClaimsPerOperator: 1,
+    policyHook: zeroAddress,
+    evaluationPolicy: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      evaluationDeadline: BigInt(chainNowSec + 1_200),
+      maxVerdictsPerEvaluator: 1,
+      disallowSolverSelfEvaluation: opts.disallowSolverSelfEvaluation ?? false,
+    },
+  };
+
+  // ── Step 6: Post task on-chain via the locally-deployed V3 JinnRouter ───────
+  // The V3 router's createTask requires: msg.value == solutionBudget + verdictBudget
+  // where solutionBudget = rate * maxClaims and verdictBudget = rate * maxClaims * requiredVerdicts.
+  // With maxClaims=10 and requiredVerdicts=1: value = rate * 10 + rate * 10 * 1 = rate * 20.
+  const MAX_CLAIMS = 10n;
+  const REQUIRED_VERDICTS = 1n;
+  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
+  const solutionBudget = rateArg * MAX_CLAIMS;
+  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
+  const value = solutionBudget + verdictBudget;
+
+  const created = await writeContractTx({
+    publicClient: fixture.publicClient,
+    rpcUrl,
+    account: creator,
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createTask',
+    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
+    value,
+  });
+
+  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
+  const taskId = BigInt(String(taskCreated['taskId']));
+  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
+
+  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
 }
 
 // ── Deliver event ABI for MockTaskMechWithDelivery ───────────────────────────
@@ -1781,13 +1581,9 @@ export async function waitForDaemonClaim(
  * Read the operator's on-chain activity counter from the locally-deployed
  * TaskActivityCheckerV3. The counter (`eligibleActivityWeight`) increments
  * when the V3 router calls `recordSolutionDelivery(safeAddress, solutionDigest)`
- * — and per the tokenless-OLAS loop-completion gate that call fires on
- * `claimVerdictDelivery` (the first verdict finalizes the attempt), NOT at
- * `claimSolutionDelivery`. So crediting the solver's activity requires the
- * verdict leg to close: in the single-operator dogfood the operator must
- * self-evaluate its own attempt, which the on-chain policy permits only when
- * `allowSolverSelfEvaluation: true` (set by `postSignedTaskOnChain`'s default).
- * We compare before/after values to assert the loop actually closed.
+ * during `claimSolutionDelivery`. We compare before/after values around
+ * `waitForDelivery` to assert the daemon's settle tx actually registered
+ * with the activity checker.
  *
  * Note: this reads from our locally-deployed TaskActivityCheckerV3 (in the V3
  * stack deployed by `deployMinimalV3Stack`), NOT from the production OLAS

@@ -27,14 +27,7 @@ describe('runReviewPass', () => {
       if (cmd === 'git') return '';
       throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
     };
-    // PR #50 is authored by jinn-bot; allowlist it so the review-side author
-    // gate (DR-2026-06-15) permits dispatch — the implementer bot is a trusted
-    // author so the engine reviews its own PRs.
-    await runReviewPass(
-      { ...DEFAULT_CONFIG, reviewBotLogin: 'jinn-bot', authorAllowlist: ['jinn-bot'] },
-      runner,
-      spawn,
-    );
+    await runReviewPass({ ...DEFAULT_CONFIG, reviewBotLogin: 'jinn-bot' }, runner, spawn);
     expect(spawnCalls).toHaveLength(1);
     const prompt = spawnCalls[0].args[spawnCalls[0].args.indexOf('-p') + 1];
     expect(prompt).toContain('review-pr');

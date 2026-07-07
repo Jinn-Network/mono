@@ -60,11 +60,7 @@ export interface IssueSource {
  * Injectable command runner — takes a command and args, returns stdout.
  * Defaults to a real execFile-based runner; swap in a fake for tests.
  */
-export type CommandRunner = (
-  cmd: string,
-  args: string[],
-  opts?: { env?: Record<string, string> },
-) => Promise<string>;
+export type CommandRunner = (cmd: string, args: string[]) => Promise<string>;
 
 // ---------------------------------------------------------------------------
 // Internal shapes that mirror real `gh` JSON output (observed 2026-05-21).
@@ -87,14 +83,8 @@ interface GhIssue {
 // Default real CommandRunner
 // ---------------------------------------------------------------------------
 
-export const defaultRunner: CommandRunner = async (cmd, args, opts) => {
-  const { stdout } = await execFileAsync(cmd, args, {
-    maxBuffer: 10 * 1024 * 1024,
-    // Per-call env overlay (used to run `gh` as a specific identity via
-    // GH_TOKEN — the dual-identity boot check, DR-2026-06-15). Merged over the
-    // ambient env so PATH etc. survive.
-    ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
-  });
+export const defaultRunner: CommandRunner = async (cmd, args) => {
+  const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 10 * 1024 * 1024 });
   return stdout;
 };
 

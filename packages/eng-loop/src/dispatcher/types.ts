@@ -6,11 +6,7 @@ export type IssueShape =
 export type BlockedOn = 'Nothing' | 'Human' | 'Another issue';
 export type Effort = 'Low' | 'Medium' | 'High';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
-// 'Human' is a parked lane: the dispatcher promotes escalated (Blocked on:
-// Human) sessions into it so they leave the active "In Progress" column and
-// are visible at a glance as "needs a human". It is never a dispatchable state
-// (selectReady requires 'Todo') nor an in-flight state.
-export type ProjectStatus = 'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Done';
+export type ProjectStatus = 'Todo' | 'In Progress' | 'In Review' | 'Done';
 
 /** An issue as polled from the source, with its taxonomy fields. */
 export interface PolledIssue {
@@ -113,20 +109,6 @@ export interface DispatcherConfig {
    * `authorAllowlist`. Source: `JINN_REVIEW_BOT_LOGIN` (runner-read).
    */
   reviewBotLogin: string;
-  /**
-   * GH token (fine-grained PAT / installation token) that *implement* sessions
-   * authenticate as when authoring PRs. Injected per session via `GH_TOKEN`
-   * (DR-2026-06-15). Empty = sessions inherit the runner's ambient `gh` account
-   * (single-identity / legacy behaviour). Source: `JINN_IMPL_GH_TOKEN`.
-   */
-  implGhToken: string;
-  /**
-   * GH token that *review* sessions authenticate as when posting reviews. Must
-   * resolve to a different account than `implGhToken` (GitHub forbids approving
-   * your own PR) and to `reviewBotLogin` (else review-detection never matches).
-   * Both are checked fail-loud at boot. Source: `JINN_REVIEW_GH_TOKEN`.
-   */
-  reviewGhToken: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -142,8 +124,6 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
   reviewBotLogin: '',
-  implGhToken: '',
-  reviewGhToken: '',
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */

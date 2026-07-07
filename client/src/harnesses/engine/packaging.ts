@@ -23,7 +23,7 @@ import { join, relative, resolve, extname, isAbsolute } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { createWriteStream } from 'node:fs';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import type { Task } from '../../types/task.js';
 import type { OutputArtifact } from '../../types/portfolio.js';
 import type { Artifact } from '../../types/envelope.js';
@@ -39,11 +39,11 @@ import {
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
 //
 // OUTPUTS.json access descriptor shape (no `kind` field):
-//   { "endpoint": "https://…", "priceUsdc": "0" }       — free fetch
+//   { "endpoint": "https://…", "priceUsdc": "0" }       — free
+//   { "endpoint": "https://…", "priceUsdc": "0.001" }   — x402-gated
 //
-// `priceUsdc` is retained as an artifact-metadata field but acquisition is a
-// free fetch (no payment layer). Omit the access object entirely to inherit
-// the operator default.
+// Use explicit priceUsdc: "0" for free artifacts.
+// Omit the access object entirely to inherit the operator default price.
 
 const OutputEntrySchema = z.object({
   path: z.string(),

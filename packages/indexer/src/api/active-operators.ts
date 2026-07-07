@@ -1,63 +1,88 @@
 /**
- * Active-operator window + qualification over OLAS/JINN staking rewards.
+ * Active-operator window + qualification — the shared util the explorer's
+ * `/operators` and `/network` handlers use to compute the "active" surface.
  *
- * The Base Sepolia ERC20 is named JINN in contracts, but it represents OLAS in
- * this testnet setup. Public copy should say OLAS; this helper names the
- * threshold accordingly.
+ * Definition (per `docs/superpowers/specs/2026-05-30-active-operator-explorer-design.md`):
+ *   - The reference window is the last `BLOCK_COUNT` (= 8) completed UTC
+ *     `BLOCK_SECONDS`-second blocks (= 6h). The in-progress block is
+ *     deliberately excluded — a 0-claim partial bucket would mark every
+ *     operator inactive between checkpoints.
+ *   - An operator counts as "active" iff their per-block sum of
+ *     `rewardDistribution.operatorMinted` is `>= REQUIRED_TJINN_PER_BLOCK`
+ *     (= 3 tJINN, mirrored from `client/scripts/check-milestone-1.ts`'s
+ *     `3n * 10n ** 18n` literal — intentionally not imported; that script
+ *     is out of scope to retrofit).
+ *
+ * The function is pure: it takes the (multisig, operatorMinted,
+ * claimedAtTimestamp) tuples already loaded from `rewardDistribution` and
+ * `nowSec`, and returns the window + the set of qualifying multisigs.
+ * Multisig strings are compared verbatim — no case normalisation; the
+ * upstream `multisig ↔ attempt.operator` join uses the same `t.hex()`
+ * representation on both sides.
  */
 
 /** Width of each bucket in seconds (= 6 hours). */
 export const BLOCK_SECONDS = 6 * 3600;
 
-/** Number of completed buckets the window spans (= 8 -> 48 hours). */
+/** Number of completed buckets the window spans (= 8 → 48 hours). */
 export const BLOCK_COUNT = 8;
 
-/** Per-block OLAS earning floor in wei: any positive earned reward qualifies. */
-export const REQUIRED_OLAS_PER_BLOCK = 1n;
-
-/** Lifetime OLAS floor for the Milestone-3 count. */
-export const MILESTONE_3_OLAS_FLOOR = 25n * 10n ** 18n;
+/**
+ * Per-block tJINN earning floor. `3 × 10^18` wei matches the literal in
+ * `client/scripts/check-milestone-1.ts:46`; that script intentionally is
+ * not refactored to consume this constant (out of scope).
+ */
+export const REQUIRED_TJINN_PER_BLOCK = 3n * 10n ** 18n;
 
 export interface ActiveWindow {
-  /** UTC seconds, inclusive lower bound. */
+  /** UTC seconds — inclusive lower bound of the window. */
   startTs: number;
-  /** UTC seconds, exclusive upper bound at the latest completed 6h boundary. */
+  /** UTC seconds — exclusive upper bound; the most-recent completed 6h boundary. */
   endTs: number;
   blockSeconds: number;
   blockCount: number;
-  /** Floor in wei. */
-  requiredOlasPerBlock: bigint;
+  /** Floor in wei (`3 × 10^18`). */
+  requiredTjinnPerBlock: bigint;
 }
 
 export interface ActiveOperatorReward {
   multisig: string;
-  operatorRewarded: bigint;
+  operatorMinted: bigint;
   claimedAtTimestamp: bigint;
-}
-
-export type RewardActivitySource = 'checkpoint' | 'claim-fallback';
-
-export function selectRewardActivityRows(
-  checkpointRows: ActiveOperatorReward[],
-  claimRows: ActiveOperatorReward[],
-  checkpointRowsExist: boolean,
-): { source: RewardActivitySource; rows: ActiveOperatorReward[] } {
-  if (checkpointRowsExist) {
-    return { source: 'checkpoint', rows: checkpointRows };
-  }
-  return { source: 'claim-fallback', rows: claimRows };
 }
 
 export interface ActiveOperatorResult {
   window: ActiveWindow;
-  /** Operators whose newest completed bucket has any earned OLAS. */
+  /**
+   * Liveness (issue #926): multisigs that qualified in the NEWEST completed
+   * block (`blocks[BLOCK_COUNT - 1]`). This is what the explorer's `Active?`
+   * column means — "earning right now" — decoupled from whether the operator
+   * has sustained the full 48h window.
+   */
   active: Set<string>;
-  /** Operators whose every bucket in the 48h window has any earned OLAS. */
+  /**
+   * Milestone 1: multisigs that qualified in EVERY one of the `BLOCK_COUNT`
+   * buckets — the 48h-sustained gate. Every sustained operator is also active,
+   * but not vice versa.
+   */
   sustained: Set<string>;
-  /** Per-operator bucket qualification, oldest bucket first. */
+  /**
+   * Per-operator qualification breakdown over the window.
+   *
+   * `blocks` is the per-bucket qualifying flag, length `BLOCK_COUNT`,
+   * **oldest-first** — `blocks[0]` is the oldest completed bucket and
+   * `blocks[BLOCK_COUNT - 1]` is the newest. `blocksQualified` is the count
+   * of `true` entries in `blocks`.
+   */
   perOperator: Map<string, { blocks: boolean[]; blocksQualified: number }>;
 }
 
+/**
+ * Anchor `endTs` to the most-recent completed UTC `BLOCK_SECONDS` boundary
+ * via `floor(nowSec / BLOCK_SECONDS) × BLOCK_SECONDS`. When `nowSec` lands
+ * exactly on a boundary, that boundary belongs to the in-progress block
+ * (the just-completed window stays `[boundary − 8×6h, boundary)`).
+ */
 export function computeActiveWindow(nowSec: number): ActiveWindow {
   const endTs = Math.floor(nowSec / BLOCK_SECONDS) * BLOCK_SECONDS;
   const startTs = endTs - BLOCK_SECONDS * BLOCK_COUNT;
@@ -66,15 +91,24 @@ export function computeActiveWindow(nowSec: number): ActiveWindow {
     endTs,
     blockSeconds: BLOCK_SECONDS,
     blockCount: BLOCK_COUNT,
-    requiredOlasPerBlock: REQUIRED_OLAS_PER_BLOCK,
+    requiredTjinnPerBlock: REQUIRED_TJINN_PER_BLOCK,
   };
 }
 
+/**
+ * Pure: bucket rewards by `floor((claimedAtTimestamp − startTs) / BLOCK_SECONDS)`,
+ * drop any bucket outside `[0, BLOCK_COUNT)`, sum `operatorMinted` per
+ * `(multisig, bucket)`, count buckets whose sum is at least
+ * `REQUIRED_TJINN_PER_BLOCK`, mark a multisig "active" iff its NEWEST completed
+ * block qualifies (liveness), and "sustained" iff its qualifying bucket count
+ * equals `BLOCK_COUNT` (the 48h Milestone-1 gate).
+ */
 export function computeActiveOperators(
   rewards: ActiveOperatorReward[],
   nowSec: number,
 ): ActiveOperatorResult {
   const window = computeActiveWindow(nowSec);
+  // sums[operator][bucket] → bigint
   const sums = new Map<string, bigint[]>();
 
   for (const r of rewards) {
@@ -87,34 +121,25 @@ export function computeActiveOperators(
       perBucket = new Array<bigint>(BLOCK_COUNT).fill(0n);
       sums.set(r.multisig, perBucket);
     }
-    perBucket[bucket] = (perBucket[bucket] ?? 0n) + r.operatorRewarded;
+    perBucket[bucket] = (perBucket[bucket] ?? 0n) + r.operatorMinted;
   }
 
   const active = new Set<string>();
   const sustained = new Set<string>();
   const perOperator = new Map<string, { blocks: boolean[]; blocksQualified: number }>();
-
   for (const [op, perBucket] of sums) {
-    const blocks = perBucket.map((sum) => sum >= REQUIRED_OLAS_PER_BLOCK);
-    const blocksQualified = blocks.filter(Boolean).length;
-    perOperator.set(op, { blocks, blocksQualified });
+    // `perBucket` indexing already runs oldest-first because `bucket` is
+    // `floor((ts - startTs) / BLOCK_SECONDS)` — index 0 = startTs..startTs+6h
+    // = oldest completed block, index BLOCK_COUNT-1 = newest completed.
+    const blocks = perBucket.map((sum) => sum >= REQUIRED_TJINN_PER_BLOCK);
+    let qualified = 0;
+    for (const b of blocks) if (b) qualified += 1;
+    perOperator.set(op, { blocks, blocksQualified: qualified });
+    // Liveness: the newest completed block (index BLOCK_COUNT-1) clears the floor.
     if (blocks[BLOCK_COUNT - 1]) active.add(op);
-    if (blocksQualified === BLOCK_COUNT) sustained.add(op);
+    // Sustained (M1): every block clears the floor.
+    if (qualified === BLOCK_COUNT) sustained.add(op);
   }
 
   return { window, active, sustained, perOperator };
-}
-
-export function countOperatorsAtMilestone3(
-  rows: { multisig: string; operatorRewarded: bigint }[],
-): number {
-  const perOperator = new Map<string, bigint>();
-  for (const r of rows) {
-    perOperator.set(r.multisig, (perOperator.get(r.multisig) ?? 0n) + r.operatorRewarded);
-  }
-  let count = 0;
-  for (const total of perOperator.values()) {
-    if (total >= MILESTONE_3_OLAS_FLOOR) count += 1;
-  }
-  return count;
 }

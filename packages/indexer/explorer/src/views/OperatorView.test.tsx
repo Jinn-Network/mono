@@ -6,6 +6,7 @@
  *   - Totals KPI row renders (resolved rate in gold)
  *   - perSolverNet table renders with CID links
  *   - Empty perSolverNet → "No activity recorded for this address"
+ *   - meta.jinnAttribution: 'pending' → JINN shows "—"
  *   - Loading and error states render
  */
 
@@ -46,7 +47,9 @@ const OPERATOR_FIXTURE: OperatorResponse = {
     verdictsTotal: 100,
     verdictsPass: 90,
     resolvedRate: 0.9,
+    jinnEarned: '1500000000000000000',
   },
+  meta: { jinnAttribution: 'ok' },
   lastIndexedBlock: '12000000',
   lastIndexedAt: new Date().toISOString(),
   behindHead: null,
@@ -61,7 +64,13 @@ const EMPTY_OPERATOR_FIXTURE: OperatorResponse = {
     verdictsTotal: 0,
     verdictsPass: 0,
     resolvedRate: null,
+    jinnEarned: '0',
   },
+};
+
+const PENDING_JINN_FIXTURE: OperatorResponse = {
+  ...OPERATOR_FIXTURE,
+  meta: { jinnAttribution: 'pending' },
 };
 
 // ── Wrapper ───────────────────────────────────────────────────────────────────
@@ -142,6 +151,29 @@ describe('OperatorView', () => {
       expect(screen.getAllByText('120').length).toBeGreaterThanOrEqual(1);
       // Resolved rate = 90.0% — appears in KPI and in table column
       expect(screen.getAllByText('90.0%').length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('renders JINN earned when attribution is ok', async () => {
+    mockFetch(OPERATOR_FIXTURE);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+
+    await waitFor(() => {
+      // 1.5 JINN
+      expect(screen.getByText('1.50 JINN')).toBeInTheDocument();
+    });
+  });
+
+  it('shows JINN as "—" when jinnAttribution is pending', async () => {
+    mockFetch(PENDING_JINN_FIXTURE);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+
+    await waitFor(() => {
+      // The "—" with title attribute for JINN
+      const pendingEl = document.querySelector('[title*="jinn-mono-ebu7.9"]');
+      expect(pendingEl).toBeTruthy();
     });
   });
 

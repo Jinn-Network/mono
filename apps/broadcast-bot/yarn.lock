@@ -53,11 +53,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/broadcast-bot@workspace:."
   dependencies:
-    "@types/node": "npm:^26.1.0"
-    smol-toml: "npm:^1.7.0"
+    "@types/node": "npm:^22.0.0"
+    smol-toml: "npm:^1.3.0"
     twitter-api-v2: "npm:^1.18.0"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.54.2"
+    viem: "npm:^2.52.2"
     vitest: "npm:^4.1.8"
     zod: "npm:^3.23.0"
   bin:
@@ -307,12 +307,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^26.1.0":
-  version: 26.1.0
-  resolution: "@types/node@npm:26.1.0"
+"@types/node@npm:^22.0.0":
+  version: 22.19.19
+  resolution: "@types/node@npm:22.19.19"
   dependencies:
-    undici-types: "npm:~8.3.0"
-  checksum: 10c0/61c22ad1ef215e24138cb8b7368fb68bab9de4c123b3f23d411749b015ba1b7d22f878ad54add26a0b69068d7e07c04af665069d8571b6c6c3b9b2fb73b7bd91
+    undici-types: "npm:~6.21.0"
+  checksum: 10c0/402e0f088c94cabda3cd721546bd8e4e75e098e0b342f6e03b90ca1e19c28986f9650112c64fcfd09fc8cebc0f8b20291a513153e90489331cf666e1e5503e16
   languageName: node
   linkType: hard
 
@@ -894,10 +894,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"smol-toml@npm:^1.7.0":
-  version: 1.7.0
-  resolution: "smol-toml@npm:1.7.0"
-  checksum: 10c0/8eef246b9b96f278a181f6dd2a90c754304cb4cf92ccdfe1d2f714fb980fb3f539ba00283609e8fd2fbcf7c0d48a4ae76b36bc0de556ed286b2c865827a778e8
+"smol-toml@npm:^1.3.0":
+  version: 1.6.1
+  resolution: "smol-toml@npm:1.6.1"
+  checksum: 10c0/511a78722f99c7616fdb46af708de3d7e81434b5a3d58061166da73f28bfc6cae4f0cd04683f60515b9c490cd10152fce72287c960b337419c0299cc1f0f2a22
   languageName: node
   linkType: hard
 
@@ -1010,10 +1010,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"undici-types@npm:~8.3.0":
-  version: 8.3.0
-  resolution: "undici-types@npm:8.3.0"
-  checksum: 10c0/c8aa7e2fbebfce519654dafadc0ece59be888d2ccaf180fb4495da875e7b536d2456345c384069c7e6f3e9c9ab7435f074957da306f142343eee86ff8048855a
+"undici-types@npm:~6.21.0":
+  version: 6.21.0
+  resolution: "undici-types@npm:6.21.0"
+  checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
   languageName: node
   linkType: hard
 
@@ -1024,9 +1024,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.54.2":
-  version: 2.54.2
-  resolution: "viem@npm:2.54.2"
+"viem@npm:^2.52.2":
+  version: 2.52.2
+  resolution: "viem@npm:2.52.2"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1035,13 +1035,13 @@ __metadata:
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
     ox: "npm:0.14.29"
-    ws: "npm:8.21.0"
+    ws: "npm:8.20.1"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/9f798c9581d910409e613db16b0db9dc09d0fce2c94211e0516fa9e38da090dd064703afbc27e8ad7368e19bdb479701c2bebce87402d2267503bcde3bc95a32
+  checksum: 10c0/5a94c8170cce7f9dafd1b21da4e9dd6c7782600ada7b02db87cf721a2db5b81e8c13476a5e75fcbd4baf852dd9738254e015482076581cb7ce33059e04f57a02
   languageName: node
   linkType: hard
 
@@ -1193,9 +1193,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ws@npm:8.21.0":
-  version: 8.21.0
-  resolution: "ws@npm:8.21.0"
+"ws@npm:8.20.1":
+  version: 8.20.1
+  resolution: "ws@npm:8.20.1"
   peerDependencies:
     bufferutil: ^4.0.1
     utf-8-validate: ">=5.0.2"
@@ -1204,7 +1204,7 @@ __metadata:
       optional: true
     utf-8-validate:
       optional: true
-  checksum: 10c0/ef4a243476283fc49bc7550966c4af4aa0eef56273837211e700de3b664e08604a760cdddcb5ba43c049140e74ccfec5b0ee0bb439e08c2adf9138902fdde5f9
+  checksum: 10c0/ce162433218399cdedeb76fd33363d4d86a7d910058d4e3c679dce08cea65d6da6b39f11baa4d7808d024cf46ed88f6a05c17611621aaad8fc5e62edacc30c5d
   languageName: node
   linkType: hard
 

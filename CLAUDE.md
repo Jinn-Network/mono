@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a shipped a JINN token + DAO + distribution on Sepolia/Base Sepolia, but that token stack is **superseded by DR-2026-06-30 (tokenless, OLAS-native)** — Jinn no longer launches its own token or runs its own chain; OLAS (Base) is the permanent unit of both stake and reward, and operators earn OLAS for verified completed-loop work. See `spec/2026-06-30-tokenless-olas-native.md` and `log/decisions/2026-06-30-tokenless-olas-native-pivot.md` (DR-2026-06-30). Forward roadmap is the **Phase A umbrella** under the knowledge-market substrate framing — see `spec/2026-04-30-phase-a-umbrella.md`, `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md`, `log/decisions/2026-04-30-knowledge-market-vision-framing.md` (DR-2026-04-30), and GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM). The original Phase 1b roadmap (`spec/2026-04-06-phase-1a-design.md` §9, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) is subsumed: anti-farming decay and ve-JINN are shipped, evidence-schema work executes through Phase A.1, the residual challenge mechanism is re-homed to Phase B.2.
+Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Forward roadmap is the **Phase A umbrella** under the knowledge-market substrate framing — see `spec/2026-04-30-phase-a-umbrella.md`, `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md`, `log/decisions/2026-04-30-knowledge-market-vision-framing.md` (DR-2026-04-30), and GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM). The original Phase 1b roadmap (`spec/2026-04-06-phase-1a-design.md` §9, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) is subsumed: anti-farming decay and ve-JINN are shipped, evidence-schema work executes through Phase A.1, the residual challenge mechanism is re-homed to Phase B.2.
 
 Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
@@ -282,7 +282,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 
 | Config key       | Env override             | Default                           |
 |------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet (default fallback chain): `["https://mainnet.base.org", …4 more]` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", …3 more, "https://sepolia.base.org"]` (≥5 free providers per chain, #911) |
+| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet: `https://mainnet.base.org` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", "https://sepolia.base.org"]` |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
@@ -298,9 +298,6 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
-| watchdogAutoRestart | JINN_WATCHDOG_AUTO_RESTART | false — loop watchdog (#1043). Off: a stale loop is detected, loud-logged, and emits a `loop_watchdog_stale` event. On: a stale loop also triggers a non-zero `process.exit` so Railway's ON_FAILURE policy restarts the daemon through its existing idempotent boot path. |
-| faucetDailyTopupCap | JINN_FAUCET_DAILY_TOPUP_CAP | 10 — max faucet drips one "Top up from faucet" click issues in a batch, and the per-24h ceiling per wallet (#560) |
-| faucetTopupCooldownMs | JINN_FAUCET_TOPUP_COOLDOWN_MS | 86400000 (24h) — once the daily cap is reached, the top-up action stays disabled until this window elapses since the first call of that batch (#560) |
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 
 `JINN_PASSWORD` is env-only — never in config files.
@@ -313,20 +310,15 @@ an array of URLs**. Comma-separated env values (`BASE_SEPOLIA_RPC_URL=a,b`,
 `JINN_RPC_URL=a,b`, `JINN_ETHEREUM_RPC_URL=a,b`) are split on commas. The
 loader builds a viem `fallback({ rank: false })` transport under the hood:
 primary is tried first, secondary on network error or HTTP 429 / 5xx,
-capped at 6 providers (5 vetted free defaults + 1 operator-prepended paid
-primary). `rank: false` is deliberate — operator slot order is preserved
-(the issue's "Tenderly stays in slot 3" constraint). When every slot fails
-the daemon throws `AllRpcsFailedError`.
+chain capped at 4 providers. `rank: false` is deliberate — operator slot
+order is preserved (the issue's "Tenderly stays in slot 3" constraint).
+When every slot fails the daemon throws `AllRpcsFailedError`.
 
-Each supported chain ships a default of ≥5 distinct free RPC providers
-(issue #911): Base Sepolia (84532) and Ethereum Sepolia (11155111) on
-testnet, Base mainnet (8453) and Ethereum mainnet (1) on mainnet. The Base
-Sepolia default leads with `https://base-sepolia.publicnode.com` (no-auth,
-50k-block `getLogs` cap) and ends with `https://sepolia.base.org` (free
-public Coinbase endpoint, 2k-block cap, last-resort backup). Operators with
-paid keys (Alchemy / Tenderly) should **prepend** their URL to keep the free
-chain as automatic backup (the prepended primary plus the 5 defaults fit
-inside the 6-slot cap after dedup):
+Testnet default is a two-provider chain: `https://base-sepolia.publicnode.com`
+(no-auth, 50k-block `getLogs` cap) followed by `https://sepolia.base.org`
+(free public Coinbase endpoint, 2k-block cap, last-resort backup). Operators
+with paid keys (Alchemy / Tenderly) should **prepend** their URL to keep
+the public chain as automatic backup:
 
 ```json
 {
@@ -365,19 +357,19 @@ Discovery defaults differ by network: mainnet ships with no `discovery` block an
 
 ## Architecture
 
-Per DR-2026-06-30 (tokenless, OLAS-native), Jinn has no DAO token, no treasury emissions, and no bespoke distribution contracts. **OLAS (Base) is the economic layer** — it supplies stake, staking emissions, veOLAS nomination, and the stOLAS zero-capital onboarding rail. Jinn's own on-chain surface is deliberately tiny: **one activity checker + one thin recorder**, everything else OLAS-native and unmodified.
+Three layers, top to bottom:
 
-1. **Economic layer (OLAS, Base)** — OLAS is the unit of both stake and reward. OLAS staking emissions (directed by Jinn's veOLAS nominee) are the bootstrap subsidy; the launcher-escrowed per-task marketplace delivery fee is the demand economy. Zero-capital onboarding via the stOLAS `ExternalStakingDistributor` (bond lent; operator recorded as curating agent, keeps ≈85%).
-2. **Jinn-custom on-chain surface (Base)** — one **activity checker** (counts completed-loop activity toward OLAS staking liveness) + one thin **recorder** (`TaskCoordinator`/`JinnRouterV3`, trimmed: anchors each `(task, solution, verdict)` tuple, enforces self-eval prevention, sequences solver credit; gates no payout). Retains the launcher delivery-fee escrow.
-3. **Execution layer (Base)** — OLAS Mech Marketplace (request/delivery, first-delivery-wins), OLAS service/mech/Safe infra, ERC-8004 (knowledge discovery). Knowledge is recorded on-chain now, priced later.
+1. **DAO Layer (Ethereum Mainnet)** — JINN ERC-20 token, treasury with epoch emissions, ve-JINN gauge for directing emissions to distribution contracts (Phase 1+)
+2. **Distribution Contracts (per-chain)** — Four incentive channels (creation, restoration, outcome, evaluation rewards), distribute JINN to qualifying participants (Phase 1+)
+3. **Execution Layer (Base)** — OLAS Mech Marketplace (request/delivery), JinnRouter (loop enforcement + activity tracking), ERC-8004 (knowledge discovery), x402 (payment-gated knowledge access)
 
 ### How the daemon works
 
-See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is seven long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, peer-sync) plus one-shot in-flight recovery on startup. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
+See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is eight long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, jinn-claim L1↔L2, peer-sync) plus one-shot in-flight recovery on startup. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
 Generators are **launched-record-driven**, not config-flag-driven (per `spec/2026-05-05-solvernet-creation-and-launch.md` §11). On startup the daemon walks `~/.jinn-client/solvernets/launched/` for records this operator owns; for each record where `status === 'launched'` and `generatorEnabled === true`, it spawns the matching SolverType-specific generator. The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone — gating is "do I have a launched record where I'm the owner." Joining a SolverNet as an operator (writing a `joinedSolverNets[<manifestCid>]` config entry, see §12) never starts a generator; that's launcher-only.
 
-Operator participation is keyed by `manifestCid`, not by SolverNet name. The operator's local config has the shape `joinedSolverNets[<manifestCid>] = { name, manifestCid, roles, harness, plugins, model }` — one entry per launched SolverNet the operator has joined. Edits to this shape are restart-required; the daemon does not hot-reload SolverNet config. Claim eligibility filters on these entries: a daemon with no joined SolverNets does not claim *any* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type. Each `harness` reads its own auth store (the daemon only forwards an allowlisted env set); for the per-harness auth store + rotate command, and why `client/.env` is repo-dev-only, see [`docs/operator/rotating-harness-keys.md`](docs/operator/rotating-harness-keys.md).
+Operator participation is keyed by `manifestCid`, not by SolverNet name. The operator's local config has the shape `joinedSolverNets[<manifestCid>] = { name, manifestCid, roles, harness, plugins, model }` — one entry per launched SolverNet the operator has joined. Edits to this shape are restart-required; the daemon does not hot-reload SolverNet config. Claim eligibility filters on these entries: a daemon with no joined SolverNets does not claim *any* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type.
 
 ### Earning bootstrap
 
@@ -405,12 +397,12 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 ## Phased Rollout
 
 - **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
-- **Phase 1a** (complete; token stack superseded): Forked OLAS contracts and deployed a JINN token + Treasury + distribution on Sepolia/Base Sepolia with multisig governance. The JINN-token deliverable is dropped by DR-2026-06-30 (tokenless, OLAS-native); the OLAS staking / mech / Safe infra proven here carries forward.
+- **Phase 1a** (complete): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
 - **Phase A** (in progress): Knowledge-market substrate framing per DR-2026-04-30. A.1 operational loop (corpus library + gating leak fix + manifest hygiene + cache + MCP rewiring) shipped; A.2 plug-in surface and A.3 campaign infra shipped; A.4 campaign-launch / SolverNet creation + launch experience shipped on testnet (`spec/2026-05-05-solvernet-creation-and-launch.md` v0.2 — Launcher SPA, manifest-anchored registry, operator join flow, manifest-cid claim eligibility). See `spec/2026-04-30-phase-a-umbrella.md`. Subsumes the original Phase 1b roadmap; anti-farming decay + ve-JINN already shipped, residual challenge mechanism re-homed to Phase B.2.
 - **Phase B** (parallel after A.1): Trust infrastructure — B.1 verifiability tier activation, B.2 evaluator economics + signal-design (includes challenge mechanism)
 - **Phase C** (gated by community formation): Flagship marketplace API — the canonical app the team ships in-house
-- **Phase 2**: Mainnet — run the tokenless, OLAS-native model on Base mainnet, where real OLAS emissions, veOLAS nomination, and the stOLAS pool exist (per DR-2026-06-30). No fair-launch token and no bespoke multi-chain distribution.
-- **Phase 3**: Autonomous — the launcher-funded demand stream (marketplace delivery fees) sustains the network beyond the OLAS staking subsidy; knowledge-pricing turns the corpus into the get-better incentive.
+- **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts
+- **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
 
 ## Testing
 
@@ -459,7 +451,7 @@ All frontends in this repo follow the rules below. They exist so that any operat
 
 ### Every frontend ships with a spec
 
-Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md) or [`packages/indexer/explorer/EXPLORER-APP-SPEC.md`](packages/indexer/explorer/EXPLORER-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
+Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
 
 ### Spec must include a domain model
 
@@ -483,21 +475,6 @@ A component may have zero entries on any axis (e.g. a read-only component has no
   - The smallest possible surface — snowflakes stay narrow.
 
 Snowflake approvals are recorded in the PR thread; recurring patterns should graduate to a shared internal package rather than living as one-offs per app.
-
-### Show, don't narrate — no helper-text cruft
-
-**A frontend shows data; it does not narrate it.** Do not add caption, subtitle, legend, or footnote text whose only job is to describe, restate, or hedge what the UI already displays. A label plus its value is enough. This is a standing rule: remove such text on sight, and never add it.
-
-"Helper-text cruft" is any of:
-
-- **Restating the numbers as a sentence.** A card that already shows the stats does not also need "6 attempts contributed by 1 operator, in 2 clusters." Show the stats.
-- **Narrating where the data lives or what a link does.** "Both links leave the explorer." / "the full payloads live in the IPFS envelope below." / "every trace: summary · steps · IPFS ref · anchor." The link and the section already say this.
-- **Decorative status captions.** "launched · accepting tasks" under a running count; "newest first" is fine (it states the sort), but a mood caption is not.
-- **Instructions for self-evident controls.** A Prev/Next pager needs no "click to page."
-
-The test: if you deleted the sentence, would the user lose any *information they can't already see*? If no, delete it.
-
-**If a term genuinely needs explaining, use a tooltip, not permanent caption text.** An `InfoTooltip` (or equivalent) puts the explanation one click away for the person who needs it and out of the way for everyone else. Reserve prose for empty states (which must say what fills them) and error states (which must say what failed and how to retry) — there, plain words are the content, not cruft.
 
 ### Design system
 

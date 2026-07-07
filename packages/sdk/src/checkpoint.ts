@@ -10,7 +10,7 @@
  * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §7
  */
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 
 export const HarnessCheckpointManifestSchema = z.object({
   schemaVersion: z.literal('harness.checkpoint.v1'),

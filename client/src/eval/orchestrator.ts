@@ -19,6 +19,7 @@
  */
 
 import type { Harness, HarnessContext } from '../harnesses/types.js';
+import type { SweRebenchV2Evaluator } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import type { HarnessCheckpointManifest } from '@jinn-network/sdk/checkpoint';
 import type { LoadedHeldOutSlate } from '../solver-types/_swe-rebench-v2-held-out-slate.js';
 import type { ResolvedSlateTask } from './resolve-slate-tasks.js';
@@ -125,40 +126,10 @@ export type RunHarnessOnceForEval = (params: {
   solution?: { patch: string };
 }>;
 
-/**
- * The grade verdict the orchestrator consumes. It reads exactly two fields:
- * `passed_match` (→ per-task pass/fail) and `test_log` (→ recorded excerpt).
- * This is the swe-rebench-v2 verdict surface; the repo-native JinnRepoEvaluator
- * is projected onto it by the adapter in eval.ts. Anything unscorable is
- * signalled by THROWING (the orchestrator's catch records `unscorable`) — never
- * by a verdict flag — so both backends agree on the unscorable contract.
- */
-export interface EvalGradeVerdict {
-  passed_match: boolean;
-  test_log: string;
-}
-
-/**
- * Minimal structural evaluator the orchestrator depends on. `SweRebenchV2Evaluator`
- * satisfies it directly (its verdict is a superset of `EvalGradeVerdict`); the
- * jinn-repo path supplies an adapter in eval.ts that wraps `JinnRepoEvaluator`,
- * translating the call and projecting its `{ passed, unscorable, logExcerpt }`
- * result onto this verdict (throwing on unscorable). `task`/`solutionPayload`/`row`
- * are the swe-rebench-v2 grade call; the orchestrator passes them verbatim and
- * the backend adapter interprets them.
- */
-export interface SolutionEvaluator {
-  grade(args: {
-    task: { instance_id: string };
-    solutionPayload: { schemaVersion: string; patch: string };
-    row?: unknown;
-  }): Promise<EvalGradeVerdict>;
-}
-
 export interface EvalOrchestratorDeps {
   harness: Harness;
   fetchImplStateDirToLocal(implStateDirCid: string, targetDir: string): Promise<string>;
-  evaluator: SolutionEvaluator;
+  evaluator: SweRebenchV2Evaluator;
   runHarnessOnce: RunHarnessOnceForEval;
   store: {
     recordEvalResult(args: EvalResultRecord): void;
@@ -214,71 +185,17 @@ export interface EvalRunResult {
   evaluated: EvalProvenance;
 }
 
-/**
- * One slate instance normalised for the backend-agnostic run/grade loop. The
- * BACKEND (eval.ts) owns construction of both `harnessTask` (the LEAK-CONTROLLED
- * view the solver sees — for jinn-repo this is `solverView(item)`, never the
- * pool item) and `gradeTask`/`row` (what the evaluator needs — for jinn-repo the
- * full pool item incl. gold tests). The swe-rebench-v2 path derives these from
- * `tasksWithRows` via the default mapping below, unchanged.
- */
-export interface EvalSlateInstance {
-  instance_id: string;
-  /** Task handed to the solver harness — already leak-controlled by the backend. */
-  harnessTask: NonNullable<HarnessContext['task']>;
-  /** Backend-specific grade payload; passed verbatim as the evaluator's `task`. */
-  gradeTask: { instance_id: string };
-  /** Solution payload `schemaVersion` the evaluator expects. */
-  solutionSchemaVersion: string;
-  /** swe-rebench-v2 HF row reused at grade time; absent for repo-native. */
-  row?: unknown;
-}
-
-/**
- * Default swe-rebench-v2 instance mapping — preserves the exact harness `task`
- * envelope and grade call the orchestrator used before the backend seam existed.
- */
-function sweRebenchSlateInstance(rt: ResolvedSlateTask): EvalSlateInstance {
-  return {
-    instance_id: rt.task.instance_id,
-    // Carry the full SweRebenchV2Task in `spec` + the `solverType` dispatch key
-    // so the harness can restore the repo (clone/checkout from
-    // spec.repo/base_commit). id/description/role alone are insufficient.
-    harnessTask: {
-      id: rt.task.instance_id,
-      description: rt.task.problem_statement,
-      role: 'restoration',
-      solverType: 'swe-rebench-v2.v1',
-      spec: rt.task as unknown as Record<string, unknown>,
-      window: { startTs: 0, endTs: Date.now() + 3_600_000 },
-    },
-    gradeTask: rt.task,
-    solutionSchemaVersion: 'swe-rebench-v2-solution.v1',
-    row: rt.row,
-  };
-}
-
 export async function runEval(args: {
   checkpointManifest: HarnessCheckpointManifest;
   checkpointCid: string;
   slate: LoadedHeldOutSlate;
-  /**
-   * swe-rebench-v2 slate tasks (the historical input). When given, each is
-   * normalised via the default swe-rebench mapping. Mutually informative with
-   * `slateInstances`: a backend that builds its own leak-controlled instances
-   * (jinn-repo) passes `slateInstances` directly instead.
-   */
-  tasksWithRows?: ResolvedSlateTask[];
-  /** Pre-built, backend-normalised instances (jinn-repo path). Overrides `tasksWithRows`. */
-  slateInstances?: EvalSlateInstance[];
+  tasksWithRows: ResolvedSlateTask[];
   parentCheckpointCid: string;
   deps: EvalOrchestratorDeps;
   /** Working dir for the fetched impl-state-dir (defaults to a checkpoint-scoped tmp path). */
   implStateDir?: string;
 }): Promise<EvalRunResult> {
   const { deps, slate, checkpointCid, parentCheckpointCid } = args;
-  const slateInstances: EvalSlateInstance[] =
-    args.slateInstances ?? (args.tasksWithRows ?? []).map(sweRebenchSlateInstance);
 
   // Confounder guard (DR-2026-05-28 §2). The store keys aggregates by slate
   // VERSION; if EITHER checkpoint has results recorded under a different slate
@@ -314,8 +231,7 @@ export async function runEval(args: {
   // C1 guard proves equal.
   let evaluatedDigest = args.checkpointManifest.codeDigest;
 
-  for (const inst of slateInstances) {
-    const task = inst.gradeTask;
+  for (const { task, row } of args.tasksWithRows) {
     let passed: boolean | null;
     let unscorable = false;
     let logExcerpt = '';
@@ -324,21 +240,28 @@ export async function runEval(args: {
         harness: deps.harness,
         implStateDir: localImplStateDir,
         mode: 'frozen',
-        // The harness task is built by the BACKEND (eval.ts) and is already
-        // leak-controlled (jinn-repo hands the solver `solverView(item)` only —
-        // no gold tests / reference solution). swe-rebench-v2 carries the full
-        // task in `spec` so the harness can restore the repo.
-        task: inst.harnessTask,
+        // Carry the full SweRebenchV2Task in `spec` + the `solverType` dispatch
+        // key so the harness can restore the repo (clone/checkout from
+        // spec.repo/base_commit). The harness emits a swe-rebench-v2 patch from
+        // spec; id/description/role alone are insufficient for a real run.
+        task: {
+          id: task.instance_id,
+          description: task.problem_statement,
+          role: 'restoration',
+          solverType: 'swe-rebench-v2.v1',
+          spec: task as unknown as Record<string, unknown>,
+          window: { startTs: 0, endTs: Date.now() + 3_600_000 },
+        },
       });
 
       // AC#3: a freeze violation is loud and terminal — do NOT record this
       // instance (its implStateDir mutation taints the run). Thrown OUTSIDE the
       // unscorable catch below so it propagates and aborts the whole eval.
       if (run.violation) {
-        throw new FreezeFenceViolationError(inst.instance_id);
+        throw new FreezeFenceViolationError(task.instance_id);
       }
       if (!run.solution) {
-        throw new Error(`harness produced no solution for instance ${inst.instance_id}`);
+        throw new Error(`harness produced no solution for instance ${task.instance_id}`);
       }
 
       // C1: on the FIRST successful run, verify the real digest of the evaluated
@@ -360,8 +283,8 @@ export async function runEval(args: {
 
       const verdict = await deps.evaluator.grade({
         task,
-        solutionPayload: { schemaVersion: inst.solutionSchemaVersion, patch: run.solution.patch },
-        ...(inst.row !== undefined ? { row: inst.row } : {}),
+        solutionPayload: { schemaVersion: 'swe-rebench-v2-solution.v1', patch: run.solution.patch },
+        row,
       });
       passed = verdict.passed_match;
       logExcerpt = verdict.test_log.slice(0, 1000);
@@ -388,7 +311,7 @@ export async function runEval(args: {
       checkpoint_cid: checkpointCid,
       slate_hash: slate.hash,
       slate_version: slate.version,
-      instance_id: inst.instance_id,
+      instance_id: task.instance_id,
       passed,
       unscorable,
       code_digest: args.checkpointManifest.codeDigest,
@@ -396,7 +319,7 @@ export async function runEval(args: {
       test_log_excerpt: logExcerpt,
     });
 
-    perTask.push({ instance_id: inst.instance_id, passed, unscorable });
+    perTask.push({ instance_id: task.instance_id, passed, unscorable });
   }
 
   // AC#2: compare child vs parent at the SAME slate version. A parent with no

@@ -22,7 +22,6 @@ import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
-import { assertReviewIdentities } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
 import {
@@ -31,13 +30,11 @@ import {
   resetFieldCache,
 } from '../src/dispatcher/field-cache.js';
 import { makePauseSession } from '../src/dispatcher/pause-session.js';
-import { syncHumanLane } from '../src/dispatcher/human-lane.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
 import type { ProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
 import { gateOrRun, isSkipped } from '../src/dispatcher/rate-limit-guard.js';
-import { classifyRateLimitError } from '../src/dispatcher/rate-limit-error.js';
 import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
@@ -77,8 +74,6 @@ const REPO = 'Jinn-Network/mono';
  */
 const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
 const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
-const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
-const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
@@ -311,9 +306,6 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
   };
   const firstDelay = await runOnce();
   scheduleNext(firstDelay);
-}
-
-// ---------------------------------------------------------------------------
 // makeCollectCompletions — the concrete finished-session classifier (#489)
 //
 // `loop.ts` stays gh/git-free: it hands the previous + current in-flight sets
@@ -419,8 +411,6 @@ async function main(): Promise<void> {
     ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
     authorAllowlist,
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
-    implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
-    reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
   };
 
   if (cfg.authorAllowlist.length === 0) {
@@ -445,12 +435,6 @@ async function main(): Promise<void> {
   } else {
     console.log(`[eng:loop] review-pr enabled (bot=${cfg.reviewBotLogin}, label=${cfg.engineReviewLabel}, cap=${cfg.reviewCap})`);
   }
-
-  // Fail-loud dual-identity check (DR-2026-06-15 gate 5): refuse to start a
-  // misconfigured review loop — reviewer == author, a token whose account does
-  // not match reviewBotLogin, or missing tokens — rather than spinning silently
-  // or posting self-approvals that GitHub rejects. No-op when review is off.
-  await assertReviewIdentities(cfg, realRunner);
 
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
@@ -528,25 +512,6 @@ async function main(): Promise<void> {
         throw new Error(
           '[eng:loop] field cache is null at cycle entry — main() must populate it via fetchFieldIds before any cycle runs',
         );
-      }
-
-      // Keep the `Human` Status lane mirroring "blocked on a human": promote
-      // Todo/In-Progress + `Blocked on: Human` issues into it (the operator's
-      // single "needs my eyes" view), and demote unblocked items back to Todo so
-      // clearing the block re-readies them. Infra-side — covers wall-clock and
-      // in-session escalations uniformly; idempotent. Best-effort: failures are
-      // logged, not fatal (the leak fix already frees slots via the `Blocked on`
-      // marker, so a missed move only delays the visual sync, never wedges).
-      try {
-        const { promoted, demoted } = await syncHumanLane(snapshot, cycleFieldCache, realRunner);
-        if (promoted.length > 0) {
-          console.log(`[eng:loop] → Status: Human (blocked on human) → #${promoted.join(', #')}`);
-        }
-        if (demoted.length > 0) {
-          console.log(`[eng:loop] Status: Human → Todo (unblocked) → #${demoted.join(', #')}`);
-        }
-      } catch (err) {
-        console.error('[eng:loop] Human-lane sync error (cycle unaffected):', err);
       }
 
       // Build a per-cycle pause closure that resolves the project item id
@@ -645,16 +610,6 @@ async function main(): Promise<void> {
       }
       return intervalMs;
     } catch (err) {
-      // #539: a cycle that tripped the GitHub API rate limit (despite the #585
-      // proactive guard) backs off to just past the limit's reset instead of
-      // re-polling at normal cadence and re-throwing the same error each tick.
-      const rl = classifyRateLimitError(err);
-      if (rl.isRateLimit) {
-        console.warn(
-          `[eng:loop] rate-limited; resuming at ${rl.resetAt ?? new Date(Date.now() + rl.sleepMs).toISOString()}`,
-        );
-        return rl.sleepMs;
-      }
       console.error('[eng:loop] Cycle error:', err);
       return intervalMs;
     }
@@ -690,21 +645,6 @@ async function main(): Promise<void> {
 // so a relative invocation (e.g. `tsx ./scripts/run-eng-loop.ts`) matches the
 // absolute path returned by `fileURLToPath`.
 if (argv[1] != null && resolve(argv[1]) === fileURLToPath(import.meta.url)) {
-  // Capture async faults that escape the awaited chain — notably a rejection
-  // from a setTimeout-scheduled cycle, whose promise is voided and never caught
-  // by `main().catch` below. Without these handlers Node terminates with a bare
-  // "Node.js v<ver>" footer and no stack, leaving the respawn supervisor nothing
-  // to diagnose. Log the full reason, then exit non-zero so the supervisor
-  // restarts a clean process. Registered only on direct invocation so importing
-  // this module (regression test) does not install process-global handlers.
-  process.on('unhandledRejection', (reason) => {
-    console.error('[eng:loop] FATAL unhandledRejection — exiting for supervisor respawn:', reason);
-    process.exit(1);
-  });
-  process.on('uncaughtException', (err) => {
-    console.error('[eng:loop] FATAL uncaughtException — exiting for supervisor respawn:', err);
-    process.exit(1);
-  });
   main().catch((err) => {
     console.error('[eng:loop] Fatal error:', err);
     process.exit(1);

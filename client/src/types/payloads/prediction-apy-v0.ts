@@ -3,7 +3,7 @@
  * jinn.execution.v1 envelopes.
  */
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefixed hex string');
 const IntegerStringSchema = z.string().regex(/^-?\d+$/, 'must be an integer string');

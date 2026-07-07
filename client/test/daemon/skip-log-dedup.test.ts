@@ -98,15 +98,6 @@ describe('SkipLogDeduper work-skip cache', () => {
     expect(dedup.shouldRecheck('84', t1 + SKIP_RECHECK_TTL_MS)).toBe(true);
   });
 
-  it('recordSkip returns whether the skip reason should be logged', () => {
-    const dedup = new SkipLogDeduper();
-
-    expect(dedup.recordSkip('84', 'slot busy')).toBe(true);
-    expect(dedup.recordSkip('84', 'slot busy')).toBe(false);
-    expect(dedup.recordSkip('84', 'harness not ready')).toBe(true);
-    expect(dedup.recordSkip('85', 'harness not ready')).toBe(true);
-  });
-
   it('forget() clears the work-skip cache so the task re-checks immediately', () => {
     const dedup = new SkipLogDeduper();
     const t0 = 1_000_000;

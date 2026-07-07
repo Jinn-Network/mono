@@ -23,39 +23,25 @@ describe('Chrome', () => {
     expect(screen.getByText('explorer')).toBeInTheDocument();
   });
 
-  it('renders the nav items — Corpus first, no redundant Network', () => {
+  it('renders all three nav items', () => {
     renderChrome();
-    expect(screen.getByText('Corpus')).toBeInTheDocument();
+    expect(screen.getByText('Network')).toBeInTheDocument();
     expect(screen.getByText('SolverNets')).toBeInTheDocument();
     expect(screen.getByText('Operators')).toBeInTheDocument();
-    // Network is the logo's job now, not a duplicate nav item.
-    expect(screen.queryByText('Network')).toBeNull();
   });
 
-  it('leads the nav with Corpus', () => {
-    renderChrome();
-    const nav = screen.getByRole('navigation', { name: /primary/i });
-    const links = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
-    expect(links[0]).toBe('Corpus');
-  });
-
-  it('marks the Corpus link as active on "/corpus" and its deep paths', () => {
-    renderChrome('/corpus/bafkreicorpusitem');
-    const corpusLink = screen.getByText('Corpus');
-    expect(corpusLink).toHaveAttribute('aria-current', 'page');
-  });
-
-  it('marks no nav item active on the Dashboard "/" (the logo is home)', () => {
+  it('marks the Network link as active on "/"', () => {
     renderChrome('/');
-    expect(screen.getByText('Corpus')).not.toHaveAttribute('aria-current', 'page');
+    const networkLink = screen.getByText('Network');
+    expect(networkLink).toHaveAttribute('aria-current', 'page');
   });
 
   it('marks the Operators link as active on "/operators"', () => {
     renderChrome('/operators');
     const operatorsLink = screen.getByText('Operators');
     expect(operatorsLink).toHaveAttribute('aria-current', 'page');
-    // Corpus should NOT be active
-    expect(screen.getByText('Corpus')).not.toHaveAttribute('aria-current', 'page');
+    // Network should NOT be active
+    expect(screen.getByText('Network')).not.toHaveAttribute('aria-current', 'page');
   });
 
   it('renders the search box with placeholder', () => {

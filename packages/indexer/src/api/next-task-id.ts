@@ -8,39 +8,38 @@
  * NOTE: the `nextTaskId` storage slot lives on TaskCoordinator
  * (`contracts/src/tasks/TaskCoordinator.sol`), not JinnRouter. JinnRouterV3
  * holds a reference to the coordinator (`taskCoordinator` field) but does not
- * re-expose the view, so this probe reads the active router's coordinator
- * reference first, then calls the returned coordinator.
+ * re-expose the view, so this probe reads the coordinator address directly.
  *
- * The active router address and RPC parsing live in side-effect-free helpers
- * rather than `ponder.config.ts` because the config module registers Ponder
- * event handlers on load. When mainnet indexing lands this will need a
- * per-chain extension; the testnet-only scope matches what the indexer serves
- * today.
+ * Address is hard-coded rather than imported from `ponder.config.ts` because
+ * the config module registers Ponder event handlers on load — pulling it into
+ * a Vitest run would drag those side effects in. When mainnet indexing lands
+ * this will need a per-chain extension; the testnet-only scope matches what
+ * the indexer serves today.
  */
-import { createPublicClient } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { JINN_ROUTER_ABI } from '../../abis/JinnRouter.js';
 import { TASK_COORDINATOR_ABI } from '../../abis/TaskCoordinator.js';
-import { BASE_SEPOLIA_JINN_ROUTER_ADDRESS } from '../chain-config.js';
-import { buildIndexerFallback, parseBaseSepoliaRpcChain } from '../rpc-config.js';
 import { createCachedRpcCall, RPC_TIMEOUT_MS } from './rpc-cache.js';
 
-const baseSepoliaUrls = parseBaseSepoliaRpcChain();
+/**
+ * TaskCoordinator address on Base Sepolia — must stay in sync with the
+ * deployment record at
+ * `contracts/deployment-task-coordinator-router-v3-baseSepolia-fast.json`.
+ */
+const TASK_COORDINATOR_ADDRESS =
+  '0x9ce736d3CB367cC5Db538B7962bdf416EbD7451B' as const;
+
+const RPC_URL =
+  process.env['PONDER_RPC_URL_84532'] ?? 'https://sepolia.base.org';
 
 const client = createPublicClient({
   chain: baseSepolia,
-  transport: buildIndexerFallback(baseSepoliaUrls, { timeout: RPC_TIMEOUT_MS }),
+  transport: http(RPC_URL, { timeout: RPC_TIMEOUT_MS }),
 });
 
 const cached = createCachedRpcCall<bigint>(async () => {
-  const coordinatorAddress = (await client.readContract({
-    address: BASE_SEPOLIA_JINN_ROUTER_ADDRESS,
-    abi: JINN_ROUTER_ABI,
-    functionName: 'taskCoordinator',
-  })) as `0x${string}`;
-
   return (await client.readContract({
-    address: coordinatorAddress,
+    address: TASK_COORDINATOR_ADDRESS,
     abi: TASK_COORDINATOR_ABI,
     functionName: 'nextTaskId',
   })) as bigint;

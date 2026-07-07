@@ -31,6 +31,11 @@ export const DEFAULT_TESTNET_ARTIFACTS = {
   mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
   taskCoordinatorRouterV3: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-task-coordinator-router-v3-baseSepolia-fast.json'),
   stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
+  faucet: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-testnet-faucet-baseSepolia-fast.json'),
+  /** v0 MVI L1 stack (JINN, Timelock, Governor, Distributor, Messenger) on Sepolia. */
+  jinnMviL1: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-mvi-l1-sepolia.json'),
+  /** v0 MVI L2 emitter (TaskClaimEmitter) on Base Sepolia. */
+  jinnMviL2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-mvi-l2-baseSepolia.json'),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -140,6 +145,11 @@ export interface ChainConfig {
    */
   identityRegistry?: string;
   /**
+   * Testnet-only JINN faucet (testnet operator onboarding). Absent on mainnet.
+   * Resolved from the deployment-jinn-testnet-faucet-baseSepolia artifact.
+   */
+  jinnFaucet?: string;
+  /**
    * JinnRouter delivery claim ABI: V1 single arg (Base mainnet), V2 + evidenceHash
    * (Phase 1b), or Task-native V3 split Solution/Verdict delivery claims.
    * Override with JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2|v3.
@@ -177,6 +187,7 @@ interface ChainConfigOverrides {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
+  testnetFaucetDeploymentPath?: string;
 }
 
 interface DeploymentArtifact {
@@ -257,15 +268,15 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   serviceManager: '0x5BA58970c2Ae16Cf6218783018100aF2dCcFc915',
   gnosisSafeSameAddressMultisig: '0x10100e74b7F706222F8A7C0be9FC7Ae1717Ad8B2',
 
-  // OLAS token (used as the staking/bond token on Base Sepolia).
+  // Phase 1a uses bridged JINN as the staking/bond token on Base Sepolia.
   olasToken: '0x4F177E56bd79c169742a1BF8907dB0A5e54F5524',
 
-  // Mech marketplace is not used in the tokenless-OLAS staking loop.
+  // Mech marketplace is out of scope for the staking-only Phase 1a loop.
   mechMarketplace: '0x0000000000000000000000000000000000000000',
   mechFactory: '0x0000000000000000000000000000000000000000',
   mechRequestPrice: 99n,
 
-  // OLAS staking proxy (Base Sepolia) — stOLAS curating-agent contract.
+  // Phase 1a staking proxy (Base Sepolia)
   stakingContract: '0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0',
 
   // ERC-8004 IdentityRegistry (Base Sepolia, vanity 0x8004…)
@@ -276,7 +287,7 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   serviceHash: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
   serviceNft: 'bafybeiaakdeconw7j5z76fgghfdjmsr6tzejotxcwnvmp3nroaw3glgyve',
 
-  // Bond: match the OLAS staking contract minStakingDeposit.
+  // Bond: match the live Phase 1a staking minStakingDeposit.
   bondAmount: 10n * 10n ** 18n,
 
   // Conservative gas estimate
@@ -408,6 +419,19 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
       throw new Error(`stOLAS artifact ${path.resolve(stolasArtifactPath)} is missing contracts.distributor`);
     }
     resolved.distributorAddress = distributor;
+  }
+
+  // Testnet JINN faucet (optional — if the artifact is absent we just skip auto-drip).
+  const faucetArtifactPath =
+    overrides.testnetFaucetDeploymentPath
+    ?? process.env['JINN_TESTNET_FAUCET_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.faucet;
+  if (faucetArtifactPath && existsSync(path.resolve(faucetArtifactPath))) {
+    const faucetArtifact = loadArtifact(faucetArtifactPath);
+    const faucetAddress = faucetArtifact.contracts?.faucet;
+    if (faucetAddress) {
+      resolved.jinnFaucet = faucetAddress;
+    }
   }
 
   return resolved;
@@ -800,6 +824,233 @@ export const STOLAS_STAKING_SLOTS_ABI = [
     inputs: [],
     name: 'maxNumServices',
     outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+// ---------------------------------------------------------------------------
+// v0 MVI cross-chain claim flow (Phase B / jinn-mono-7x5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolved v0 MVI deployment surface.
+ *
+ * Two artifacts: an L1 stack (deployed by deploy-jinn-mvi-l1.ts) carrying
+ * JINN + Timelock + Governor + Distributor + Messenger; and an L2 emitter
+ * (separate deploy script) carrying just the TaskClaimEmitter address.
+ *
+ * The daemon's cross-chain claim loop reads `distributor` + `messenger` for
+ * the L1 submission step and `claimEmitter` for the L2 emit step.
+ */
+export interface JinnMviConfig {
+  jinn?: string;
+  /** L1 chain id from the L1 artifact (e.g. 11155111 for Sepolia). */
+  l1ChainId?: number;
+  timelock?: string;
+  governor?: string;
+  distributor?: string;
+  messenger?: string;
+  messengerMode?: 'canonical' | 'mock';
+  claimEmitter?: string;
+}
+
+interface JinnMviL1Artifact {
+  network?: string;
+  chainId?: number;
+  messenger?: { mode?: string; address?: string };
+  contracts?: {
+    JINN?: string;
+    TimelockController?: string;
+    JinnGovernor?: string;
+    JinnDistributor?: string;
+    Messenger?: string;
+  };
+}
+
+interface JinnMviL2Artifact {
+  network?: string;
+  chainId?: number;
+  contracts?: {
+    TaskClaimEmitter?: string;
+  };
+}
+
+/**
+ * Load and merge the v0 MVI L1/L2 deployment artifacts. Both are optional —
+ * the daemon falls back to direct address overrides from config / env when
+ * neither is present.
+ *
+ * Throws when an artifact path is supplied but the file is missing or
+ * malformed; this is the same fail-loud pattern as resolveBaseSepoliaConfig.
+ */
+export function loadJinnMviConfig(args: {
+  l1ArtifactPath?: string;
+  l2ArtifactPath?: string;
+  /** Direct overrides (config field or env var); take precedence over artifacts. */
+  distributorAddress?: string;
+  messengerAddress?: string;
+  claimEmitterAddress?: string;
+  messengerMode?: 'canonical' | 'mock';
+}): JinnMviConfig {
+  const out: JinnMviConfig = {};
+
+  if (args.l1ArtifactPath) {
+    const resolved = path.resolve(args.l1ArtifactPath);
+    if (!existsSync(resolved)) {
+      throw new Error(`Jinn MVI L1 artifact not found: ${resolved}`);
+    }
+    const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL1Artifact;
+    out.jinn = artifact.contracts?.JINN;
+    if (typeof artifact.chainId === 'number') out.l1ChainId = artifact.chainId;
+    out.timelock = artifact.contracts?.TimelockController;
+    out.governor = artifact.contracts?.JinnGovernor;
+    out.distributor = artifact.contracts?.JinnDistributor;
+    out.messenger = artifact.contracts?.Messenger ?? artifact.messenger?.address;
+    const rawMode = artifact.messenger?.mode;
+    if (rawMode === 'canonical' || rawMode === 'mock') {
+      out.messengerMode = rawMode;
+    }
+  }
+
+  if (args.l2ArtifactPath) {
+    const resolved = path.resolve(args.l2ArtifactPath);
+    if (!existsSync(resolved)) {
+      throw new Error(`Jinn MVI L2 artifact not found: ${resolved}`);
+    }
+    const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL2Artifact;
+    out.claimEmitter = artifact.contracts?.TaskClaimEmitter;
+  }
+
+  // Direct overrides take precedence.
+  if (args.distributorAddress) out.distributor = args.distributorAddress;
+  if (args.messengerAddress) out.messenger = args.messengerAddress;
+  if (args.claimEmitterAddress) out.claimEmitter = args.claimEmitterAddress;
+  if (args.messengerMode) out.messengerMode = args.messengerMode;
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// TaskClaimEmitter / IClaimMessenger / JinnDistributor ABI fragments
+// ---------------------------------------------------------------------------
+
+export const JINN_CLAIM_EMITTER_ABI = [
+  {
+    type: 'event',
+    name: 'ClaimTicket',
+    inputs: [
+      { name: 'claimId', type: 'uint256', indexed: true },
+      { name: 'serviceId', type: 'uint256', indexed: true },
+      { name: 'taskCreationWeight', type: 'uint256', indexed: false },
+      { name: 'solutionDeliveryWeight', type: 'uint256', indexed: false },
+      { name: 'verdictDeliveryWeight', type: 'uint256', indexed: false },
+      { name: 'multisig', type: 'address', indexed: true },
+      { name: 'claimer', type: 'address', indexed: false },
+    ],
+  },
+  {
+    inputs: [{ name: 'serviceId', type: 'uint256' }],
+    name: 'emitClaim',
+    outputs: [{ name: 'claimId', type: 'uint256' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+export const CLAIM_TICKET_TOPIC0 = keccak256(
+  stringToBytes('ClaimTicket(uint256,uint256,uint256,uint256,uint256,address,address)'),
+);
+
+export const JINN_DISTRIBUTOR_ABI = [
+  {
+    inputs: [{ name: 'proof', type: 'bytes' }],
+    name: 'claim',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '', type: 'uint256' }],
+    name: 'totalClaimedOperator',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '', type: 'uint256' }],
+    name: 'totalClaimedDao',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'messenger',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+export const CLAIM_MESSENGER_ABI = [
+  {
+    inputs: [{ name: 'proof', type: 'bytes' }],
+    name: 'verifyClaim',
+    outputs: [
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'taskCreationWeight', type: 'uint256' },
+      { name: 'solutionDeliveryWeight', type: 'uint256' },
+      { name: 'verdictDeliveryWeight', type: 'uint256' },
+      { name: 'multisig', type: 'address' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+/**
+ * Mock messenger ABI — admin setFixture path used by burn-in to plant
+ * fixtures on Sepolia. The verifyClaim path matches IClaimMessenger.
+ */
+export const MOCK_MESSENGER_ABI = [
+  {
+    inputs: [
+      { name: 'claimId', type: 'uint256' },
+      {
+        name: 'f',
+        type: 'tuple',
+        components: [
+          { name: 'serviceId', type: 'uint256' },
+          { name: 'taskCreationWeight', type: 'uint256' },
+          { name: 'solutionDeliveryWeight', type: 'uint256' },
+          { name: 'verdictDeliveryWeight', type: 'uint256' },
+          { name: 'multisig', type: 'address' },
+        ],
+      },
+    ],
+    name: 'setFixture',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'claimId', type: 'uint256' }],
+    name: 'fixtures',
+    outputs: [
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'taskCreationWeight', type: 'uint256' },
+      { name: 'solutionDeliveryWeight', type: 'uint256' },
+      { name: 'verdictDeliveryWeight', type: 'uint256' },
+      { name: 'multisig', type: 'address' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'owner',
+    outputs: [{ name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },

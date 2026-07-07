@@ -58,6 +58,7 @@ export interface SliceSeriesKPIs {
   verdicts: number;
   verdictsPass: number;
   resolvedRate: number | null;
+  jinnEarned: string; // decimal string
 }
 
 export interface SliceSeries {
@@ -77,6 +78,7 @@ export interface SliceResponseLeaderboardRow {
   verdictsTotal: number;
   verdictsPass: number;
   resolvedRate: number | null;
+  jinnEarned: string;
   dominantMode?: string;
   dominantHarness?: string;
 }
@@ -197,6 +199,7 @@ function computeSeriesKPIs(rows: SliceInputRow[]): SliceSeriesKPIs {
     verdicts,
     verdictsPass,
     resolvedRate: verdicts === 0 ? null : verdictsPass / verdicts,
+    jinnEarned: '0', // always '0' — per-series JINN attribution not implemented in Phase 2
   };
 }
 
@@ -266,6 +269,7 @@ function sumSeriesKPIs(series: SliceSeries[]): SliceSeriesKPIs {
     verdicts,
     verdictsPass,
     resolvedRate: verdicts === 0 ? null : verdictsPass / verdicts,
+    jinnEarned: '0', // always '0' — per-series JINN attribution not implemented in Phase 2
   };
 }
 

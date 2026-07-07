@@ -19,7 +19,6 @@ import {
 } from './learner/index.js';
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
-import { JinnRepoEvaluatorHarness } from './jinn-repo-evaluator/harness.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
 import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
@@ -221,16 +220,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
       ipfsRegistryUrl: env.ipfsRegistryUrl,
     }),
   );
-  out.push(
-    new JinnRepoEvaluatorHarness({
-      stub: isStub,
-      implStateDir: env.implStateDirRoot
-        ? `${env.implStateDirRoot}/jinn-repo-evaluator`
-        : undefined,
-    }),
-  );
 
-  // Env-gated stub harness for T2.4 release gate. Active only when
+  // Env-gated stub harness for T2.2 release gate. Active only when
   // JINN_HARNESS_STUB_INSTANCE is set; no-op otherwise.
   const stub = maybeCreateStubHarnessFromEnv();
   if (stub) {

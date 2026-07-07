@@ -63,24 +63,6 @@ describe('GhPrSource.poll', () => {
     expect(polled[0].needsReview).toBe(true);
   });
 
-  it('matches the bot review case-insensitively (A1) -> needsReview:false', async () => {
-    // Review author login differs only in CASE from the configured BOT
-    // ('Jinn-Bot' vs 'jinn-bot'). Case-folding must still detect the current
-    // review, else the PR would be re-reviewed forever.
-    const MIXED_CASE_VIEW = JSON.stringify({
-      reviews: [{ author: { login: 'Jinn-Bot' }, state: 'APPROVED', submittedAt: '2026-05-29T12:00:00Z' }],
-      commits: [{ committedDate: '2026-05-29T10:00:00Z' }],
-    });
-    const runner: CommandRunner = async (_cmd, args) => {
-      if (args[0] === 'pr' && args[1] === 'list')
-        return JSON.stringify([{ number: 13, title: 't', headRefName: 'x', headRefOid: 's', isDraft: false, author: { login: 'bob' } }]);
-      if (args[0] === 'pr' && args[1] === 'view') return MIXED_CASE_VIEW;
-      throw new Error('unexpected');
-    };
-    const polled = await new GhPrSource(runner, LABEL, BOT).poll();
-    expect(polled[0].needsReview).toBe(false);
-  });
-
   it('returns empty when reviewBotLogin is empty (fail-safe, no gh calls)', async () => {
     const calls: Array<{ cmd: string; args: string[] }> = [];
     const runner: CommandRunner = async (cmd, args) => { calls.push({ cmd, args }); return '[]'; };

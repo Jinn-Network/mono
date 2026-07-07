@@ -149,7 +149,7 @@ describe('testnet donation mode e2e smoke', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('packages scrubbed artifacts to IPFS sources and reacquires them through corpus without an origin fetch', async () => {
+  it('packages scrubbed artifacts to IPFS sources and reacquires them through corpus without x402', async () => {
     const requestId = '0x' + 'c'.repeat(64);
     const workingDir = join(tmp, 'work', requestId);
     mkdirSync(join(workingDir, 'sessions'), { recursive: true });
@@ -222,7 +222,7 @@ describe('testnet donation mode e2e smoke', () => {
     const served = producerStore.getServedArtifact(donatedArtifact!.sha256);
     expect(served?.content.equals(donatedBytes)).toBe(true);
 
-    const originAcquire = vi.fn();
+    const x402Acquire = vi.fn();
     const discovery: DiscoveryAPI = {
       findClaimableTasks: vi.fn().mockResolvedValue([]),
       listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
@@ -249,7 +249,7 @@ describe('testnet donation mode e2e smoke', () => {
           if (payload === undefined) throw new Error(`fake IPFS CID not found: ${cid}`);
           return payload;
         },
-        acquireFn: originAcquire,
+        acquireFn: x402Acquire,
       },
     );
 
@@ -259,7 +259,7 @@ describe('testnet donation mode e2e smoke', () => {
     expect(acquired?.source).toBe('ipfs');
     expect(acquired?.paidAmountUsdc).toBe('0');
     expect(acquired?.bytes.equals(donatedBytes)).toBe(true);
-    expect(originAcquire).not.toHaveBeenCalled();
+    expect(x402Acquire).not.toHaveBeenCalled();
     expect(readerStore.getNetworkArtifact(donatedArtifact!.sha256)?.content.equals(donatedBytes)).toBe(true);
   });
 });

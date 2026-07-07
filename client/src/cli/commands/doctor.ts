@@ -249,8 +249,8 @@ function checkDaemonRuntimeReady(): CheckResult {
 /**
  * On testnet, warn if the stOLAS distributor pool is drained. Operators can
  * neither fix this themselves nor bootstrap past it — the protocol team has
- * to refill the distributor. Emitted as a warning, not a hard failure,
- * because a refill may be in-flight.
+ * to refill (see contracts/scripts/README-jinn-testnet-faucet.md). Emitted
+ * as a warning, not a hard failure, because a refill may be in-flight.
  */
 async function checkDistributorReachable(config: JinnConfig): Promise<CheckResult | null> {
   if (config.network !== 'testnet') return null;
@@ -282,7 +282,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
       return {
         name: 'distributor_reachable',
         ok: false,
-        detail: `testnet staking pool is drained — distributor holds ${jinn.toFixed(2)} tJINN, need ≥${required.toFixed(2)} per service`,
+        detail: `testnet staking pool is drained — distributor holds ${jinn.toFixed(2)} JINN, need ≥${required.toFixed(2)} per service`,
         remedy:
           'Protocol-team action required (operators cannot fix this locally). ' +
           'Report the outage to the Jinn testnet channel; bootstrap will keep failing with `Overflow` until the pool is topped up.',
@@ -291,7 +291,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
     return {
       name: 'distributor_reachable',
       ok: true,
-      detail: `distributor holds ${jinn.toFixed(2)} tJINN (${Math.floor(jinn / required)} services of runway)`,
+      detail: `distributor holds ${jinn.toFixed(2)} JINN (${Math.floor(jinn / required)} services of runway)`,
     };
   } catch (err) {
     return {
@@ -362,6 +362,7 @@ configuration:
   - writable_volume             state directory is writable (write+fsync+unlink probe)
   - state_on_volume             state resolves under JINN_STATE_DIR in a deployment context
   - credentials_resolvable      agent-CLI credentials resolvable (presence-only; no secret echo)
+  - relayer_reachable           claim-relayer endpoint reachable (skipped when unconfigured)
   - agent_cli_non_root          daemon not running as root (uid 0)
   - portfolio_impl_state_dir    HL impl state directory present and readable
   - hl_api_wallet               HL API wallet generated and approved by operator
@@ -417,12 +418,14 @@ Examples:
         {
           stateDir: config.stateDir,
           earningDir: config.earningDir,
+          relayerUrl: undefined,
           runtimeMode: config.runtimeMode,
         },
         {
           env: ctx.env,
           getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
           detectAuthContext: deps.detectAuthContext,
+          fetch,
         },
       );
       checks.push(...deploymentReadinessChecksForDoctor(deploymentReport));

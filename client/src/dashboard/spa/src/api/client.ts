@@ -32,11 +32,8 @@ import type {
   DiscoverySolverNetOperatorCountResponse,
   DiscoveryTaskPostCountsResponse,
   HarnessReadinessEntry,
-  HarnessAuthStatusResponse,
   CodexDoctorResponse,
   DebugReportManifest,
-  RewardsResponse,
-  ClaimRewardsResponse,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -83,7 +80,6 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getStatus: () => jfetch<unknown>('/v1/status'),
-  getRewards: () => jfetch<RewardsResponse>('/v1/rewards'),
   getBootstrap: () => jfetch<BootstrapState>('/v1/bootstrap'),
   getRecentEvents: (kinds?: string[], limit = 100) => {
     const q = new URLSearchParams();
@@ -134,7 +130,7 @@ export const api = {
    *   Gas top-up an explicit, one-shot action with no re-firing loop
    *   (jinn-mono #336).
    */
-  triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean; signal?: AbortSignal }) =>
+  triggerDrip: (opts?: { singleDrip?: boolean }) =>
     jfetch<{
       ok: boolean;
       address?: string;
@@ -146,32 +142,10 @@ export const api = {
       deltaWei?: string;
       reason?: string;
       rateLimited?: boolean;
-      // Issue #560 — batched daily-cap top-up fields.
-      dailyCap?: number;
-      callsRemaining?: number;
-      cooldownExpiresAt?: number | null;
     }>(
-      opts?.singleDrip
-        ? '/v1/setup/drip?singleDrip=true'
-        : opts?.batch
-          ? '/v1/setup/drip?batch=true'
-          : '/v1/setup/drip',
-      { method: 'POST', signal: opts?.signal },
+      opts?.singleDrip ? '/v1/setup/drip?singleDrip=true' : '/v1/setup/drip',
+      { method: 'POST' },
     ),
-  /**
-   * Read the operator's batched faucet top-up quota for today (issue #560):
-   * how many drips remain and when the 24h cooldown expires. Soft-renders the
-   * full cap pre-bootstrap so the WalletCard always has something to show.
-   */
-  getDripQuota: () =>
-    jfetch<{
-      ok: boolean;
-      address?: string;
-      dailyCap?: number;
-      callsRemaining?: number;
-      cooldownExpiresAt?: number | null;
-      reason?: string;
-    }>('/v1/setup/drip/quota'),
   changeKeystorePassword: (current: string, next: string) =>
     jfetch<{ ok: boolean }>('/v1/setup/change-password', {
       method: 'POST',
@@ -198,10 +172,6 @@ export const api = {
    */
   stopDaemon: () =>
     jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/stop', {
-      method: 'POST',
-    }),
-  claimRewards: () =>
-    jfetch<ClaimRewardsResponse>('/api/admin/claim-rewards', {
       method: 'POST',
     }),
   getSolverNets: () => jfetch<SolverNetsCatalogResponse>('/v1/solvernets'),
@@ -288,14 +258,6 @@ export const api = {
     jfetch<HarnessReadinessEntry>(
       `/v1/harnesses/${encodeURIComponent(name)}/readiness`,
     ),
-
-  /**
-   * Per-harness auth-source status (#564) — auth source path, masked last-4
-   * key suffix, credential mtime, and a loaded/missing/unknown badge. The
-   * endpoint NEVER returns full key bytes.
-   */
-  harnessAuthStatus: () =>
-    jfetch<HarnessAuthStatusResponse>('/v1/harnesses/auth-status'),
 
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
   // Operator mode never calls these — Operator-mode UI shows zero launcher
@@ -495,11 +457,6 @@ export const api = {
           }
         >;
       }>('/v1/operator/joined'),
-    completeOnboarding: () =>
-      jfetch<{ ok: boolean; onboardingComplete: boolean }>(
-        '/v1/operator/onboarding-complete',
-        { method: 'POST' },
-      ),
   },
   captures: {
     listPending: () => jfetch<CapturesListResponse>('/api/captures/pending'),

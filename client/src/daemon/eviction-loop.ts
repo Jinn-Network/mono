@@ -88,19 +88,19 @@ export class EvictionLoop {
           const last = this.lastReStakeAttemptMs.get(id);
           const ts = this.now();
           if (last !== undefined && ts - last < this.reStakeThrottleMs) {
-            console.debug(
+            console.error(
               `[eviction-loop] Service ${displayIndex} (service_id ${svc.service_id}) still evicted; reStake throttled (last attempt ${ts - last}ms ago, window ${this.reStakeThrottleMs}ms)`,
             );
             continue;
           }
-          console.debug(
+          console.error(
             `[eviction-loop] Service ${displayIndex} (service_id ${svc.service_id}) is evicted; triggering auto-restake`,
           );
           this.lastReStakeAttemptMs.set(id, ts); // mark BEFORE awaiting so a revert is throttled like a success
           await this.config.recoverEvictedService(svc);
         }
       } catch (err) {
-        console.debug(
+        console.error(
           `[eviction-loop] Service ${displayIndex}: error checking staking state (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
@@ -116,7 +116,7 @@ export class EvictionLoop {
       try {
         await this.runOnce();
       } catch (err) {
-        console.debug(
+        console.error(
           '[eviction-loop] Tick failed (non-fatal):',
           err instanceof Error ? err.message : err,
         );

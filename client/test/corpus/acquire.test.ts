@@ -87,7 +87,7 @@ describe('acquireArtifactContent', () => {
     expect(store.getNetworkArtifact(realSha)).not.toBeNull();
   });
 
-  it('prefers donated IPFS source and caches verified bytes without origin fetch', async () => {
+  it('prefers donated IPFS source and caches verified bytes without x402 fetch', async () => {
     const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
     const acquireFn = vi.fn();
     const fetchFromIpfs = vi.fn(async () => ({
@@ -194,26 +194,6 @@ describe('acquireArtifactContent', () => {
     expect(store.getNetworkArtifact(declaredSha)).toBeNull();
   });
 
-  it('surfaces a free-fetch AcquireResult not_found as AcquireError', async () => {
-    const declaredSha = 'b'.repeat(64);
-    // Fake returns the discriminated AcquireResult shape (ok:false) rather
-    // than Buffer | null, exercising the free-fetch union branch.
-    const acquireFn = vi.fn(async () => ({ ok: false as const, reason: 'not_found' as const, message: 'HTTP 404' }));
-    await expect(
-      acquireArtifactContent({
-        sha256: declaredSha,
-        artifactType: 'design_document',
-        access,
-        store,
-        selfSafeAddress: '0x' + 'f'.repeat(40),
-        privateKey: TEST_KEY,
-        acquireFn,
-        ownerSafe: '0x' + 'a'.repeat(40),
-      }),
-    ).rejects.toThrow(/not_found/);
-    expect(store.getNetworkArtifact(declaredSha)).toBeNull();
-  });
-
   it('origin fetch with hash mismatch throws and does not cache', async () => {
     const acquireFn = vi.fn(async () => Buffer.from('wrong bytes'));
     const declaredSha = 'a'.repeat(64);
@@ -235,7 +215,7 @@ describe('acquireArtifactContent', () => {
   it('self-store re-verifies sha256 and refuses to mirror corrupt bytes', async () => {
     // Simulate cache-poisoning: served_artifacts row claims sha256=declaredSha
     // but actually contains wrong bytes. The self-store fast path must NOT
-    // copy them into network_artifacts where peers could fetch them.
+    // copy them into network_artifacts where peers could fetch via x402.
     const declaredSha = 'a'.repeat(64);
     const wrongBytes = Buffer.from('not what was promised');
     const selfSafe = '0x' + 'f'.repeat(40);

@@ -39,7 +39,7 @@ This spec defines the missing lifecycle, persistence, registry, manifest, and UI
 4. **The generator is launcher-owned.** Operators must never run the generator merely by joining the SolverNet.
 5. **A SolverNet owns its protocol contract.** The separate `solverType` concept is removed (§8). Contract identity is `{ id, version }`; instance identity is `manifestCid`.
 6. **Discovery is a global registry, not a curated list.** The on-chain ERC-8004 anchor (`IdentityRegistry.setMetadata`) plus subgraph indexing produces a permissionless, self-published registry of every launched SolverNet. Operators see all launched SolverNets; trust filters layer on top later.
-7. **Launchers commit to a price per delivered Solution and per delivered Verdict.** Price is a market-transaction commitment in the manifest. (Protocol-level rewards — OLAS staking emissions directed via Jinn's veOLAS nominee — are a separate flow and are not part of the manifest.)
+7. **Launchers commit to a price per delivered Solution and per delivered Verdict.** Price is a market-transaction commitment in the manifest. (Protocol-level rewards — JINN emissions via gauges — are a separate flow and are not part of the manifest.)
 8. **The manifest is the launched-instance authority.** It embeds the full contract shape (no "ref to a known protocol" mode); operators verify and participate against the signed manifest body without external resolution.
 
 ## 3. Vocabulary
@@ -670,7 +670,7 @@ This replaces the legacy `solverType`-keyed dispatch path. During the migration 
 - Public forking flow for existing SolverNets.
 - Permissionless arbitrary schema authoring without review tooling.
 - Full on-chain SolverNet registry contract (the IdentityRegistry-anchored MVP is sufficient).
-- veOLAS nominee management or protocol-level OLAS staking emissions.
+- ve-JINN gauges or protocol-level emissions.
 - Cap fields in the manifest budget block (`maxOpenBudgetWei`, `maxDailyBudgetWei`). Day-1 ships rates only; caps are a follow-up.
 - Operator-side verification that posted tasks' on-chain policy matches the launcher's manifest commitment. Day-1 trust is reputation-based; verification is a follow-up.
 - Followed-launcher list / blocklist / curated launcher index UI. Day-1 the registry is global; trust filters are deferred.

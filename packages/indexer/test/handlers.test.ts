@@ -28,7 +28,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta, rewardDistribution, stakingService, stakingRewardCheckpoint } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -36,15 +36,12 @@ import {
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
-  handleRewardsDistributed,
-  handleServiceStaked,
-  handleStakingCheckpoint,
+  handleClaimed,
   parseCheckpointManifestLite,
   parseSolverNetManifestLite,
   parseVerdictEnvelopeLite,
   type HandlerContext,
 } from '../src/handlers.js';
-import { resolveInstanceFields } from '../src/enrichment-parse.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
 import type { FetchLike } from '../src/ipfs.js';
 import {
@@ -57,6 +54,7 @@ import {
   envelopePayloadV2,
   verdictDeliveryClaimedEvent,
   taskBudgetRefundedEvent,
+  claimedEvent,
 } from './helpers/events.js';
 
 const CHAIN_ID = 84532;
@@ -73,12 +71,10 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [envelope, ['agentId', 'metadataKey', 'chainId']],
   [pluginPublication, ['id']],
   [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
+  [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
   [attemptEnvelopeMeta, ['requestId', 'chainId']],
   [verdictEnvelopeMeta, ['requestId', 'chainId']],
-  [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
-  [stakingService, ['chainId', 'stakingProxy', 'serviceId']],
-  [stakingRewardCheckpoint, ['chainId', 'stakingProxy', 'epoch', 'serviceId', 'checkpointAtBlock', 'logIndex']],
 ]);
 
 let db: InMemoryDb;
@@ -142,33 +138,6 @@ describe('TaskCreated → task', () => {
     });
     expect(db.count(task)).toBe(1);
     expect(db.get(task, { id: '7' })?.maxClaims).toBe(3);
-  });
-
-  it('issue #1304: defaults missing tokenless requiredVerdicts to 1', async () => {
-    await handleTaskCreated({
-      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: undefined }),
-      context,
-      task,
-    });
-
-    expect(db.get(task, { id: '7' })?.requiredVerdicts).toBe(1);
-  });
-
-  it('issue #1304: a tokenless task with missing requiredVerdicts finalizes on the first verdict', async () => {
-    await handleTaskCreated({
-      event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: undefined }),
-      context,
-      task,
-    });
-
-    await handleVerdictDeliveryClaimed({
-      event: verdictDeliveryClaimedEvent({ taskId: 7n, attemptIndex: 0, verdictIndex: 0 }, { block: 100n }),
-      context,
-      verdict,
-      task,
-    });
-
-    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
   });
 });
 
@@ -236,227 +205,11 @@ describe('TaskAttemptCreated → attempt', () => {
   });
 });
 
-describe('RewardsDistributed → rewardDistribution', () => {
-  it('records collectorAmount as the operator OLAS reward for the service multisig', async () => {
-    const event = {
-      args: {
-        serviceId: 42n,
-        multisig: '0xabababababababababababababababababababab' as `0x${string}`,
-        collectorAmount: 3n * 10n ** 18n,
-        protocolAmount: 1n,
-        curatingAgentAmount: 2n,
-      },
-      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
-      transaction: { hash: `0x${'77'.repeat(32)}` as `0x${string}` },
-      log: { logIndex: 5 },
-    };
-
-    await handleRewardsDistributed({ event, context, rewardDistribution });
-    await handleRewardsDistributed({ event, context, rewardDistribution });
-
-    expect(db.count(rewardDistribution)).toBe(1);
-    expect(db.get(rewardDistribution, {
-      chainId: CHAIN_ID,
-      serviceId: '42',
-      claimedAtBlock: 41_200_000n,
-      logIndex: 5,
-    })).toMatchObject({
-      serviceId: '42',
-      multisig: '0xabababababababababababababababababababab',
-      operatorRewarded: 3n * 10n ** 18n,
-      protocolRewarded: 1n,
-      curatingAgentRewarded: 2n,
-      claimedAtBlock: 41_200_000n,
-      claimedAtTimestamp: 1_700_000_000n,
-      claimedAtTx: `0x${'77'.repeat(32)}`,
-      chainId: CHAIN_ID,
-    });
-  });
-});
-
-describe('StolasStakingProxy staking activity → earned reward rows', () => {
-  const stakingProxy = '0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39' as `0x${string}`;
-  const multisig = '0xabababababababababababababababababababab' as `0x${string}`;
-
-  it('maps ServiceStaked service ids to the operator multisig', async () => {
-    const event = {
-      args: {
-        epoch: 77n,
-        serviceId: 42n,
-        owner: '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd' as `0x${string}`,
-        multisig,
-        nonces: [1n, 2n],
-      },
-      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
-      transaction: { hash: `0x${'88'.repeat(32)}` as `0x${string}` },
-      log: { address: stakingProxy, logIndex: 3 },
-    };
-
-    await handleServiceStaked({ event, context, stakingService });
-    await handleServiceStaked({ event, context, stakingService });
-
-    expect(db.count(stakingService)).toBe(1);
-    expect(db.get(stakingService, {
-      chainId: CHAIN_ID,
-      stakingProxy,
-      serviceId: '42',
-    })).toMatchObject({
-      serviceId: '42',
-      stakingProxy,
-      owner: '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd',
-      multisig,
-      stakedAtBlock: 41_200_000n,
-      stakedAtTimestamp: 1_700_000_000n,
-      stakedAtTx: `0x${'88'.repeat(32)}`,
-      chainId: CHAIN_ID,
-    });
-  });
-
-  it('stores Checkpoint earned OLAS allocations by mapped service multisig', async () => {
-    await handleServiceStaked({
-      event: {
-        args: {
-          epoch: 77n,
-          serviceId: 42n,
-          owner: '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd' as `0x${string}`,
-          multisig,
-          nonces: [],
-        },
-        block: { number: 41_199_900n, timestamp: 1_699_999_000n },
-        transaction: { hash: `0x${'88'.repeat(32)}` as `0x${string}` },
-        log: { address: stakingProxy, logIndex: 2 },
-      },
-      context,
-      stakingService,
-    });
-
-    const checkpointEvent = {
-      args: {
-        epoch: 78n,
-        availableRewards: 100n * 10n ** 18n,
-        serviceIds: [42n, 43n],
-        rewards: [3n * 10n ** 18n, 5n * 10n ** 18n],
-        epochLength: 86_400n,
-      },
-      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
-      transaction: { hash: `0x${'99'.repeat(32)}` as `0x${string}` },
-      log: { address: stakingProxy, logIndex: 6 },
-    };
-
-    await handleStakingCheckpoint({
-      event: checkpointEvent,
-      context,
-      stakingService,
-      stakingRewardCheckpoint,
-    });
-    await handleStakingCheckpoint({
-      event: checkpointEvent,
-      context,
-      stakingService,
-      stakingRewardCheckpoint,
-    });
-
-    expect(db.count(stakingRewardCheckpoint)).toBe(1);
-    expect(db.get(stakingRewardCheckpoint, {
-      chainId: CHAIN_ID,
-      stakingProxy,
-      epoch: '78',
-      serviceId: '42',
-      checkpointAtBlock: 41_200_000n,
-      logIndex: 6,
-    })).toMatchObject({
-      serviceId: '42',
-      stakingProxy,
-      multisig,
-      epoch: '78',
-      reward: 3n * 10n ** 18n,
-      epochLength: 86_400n,
-      checkpointAtBlock: 41_200_000n,
-      checkpointAtTimestamp: 1_700_000_000n,
-      checkpointAtTx: `0x${'99'.repeat(32)}`,
-      chainId: CHAIN_ID,
-    });
-  });
-
-  it('recovers checkpoint multisig from mapServiceInfo when ServiceStaked was missed', async () => {
-    const recoveredOwner = '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd' as `0x${string}`;
-    const fallbackContext: HandlerContext = {
-      ...context,
-      client: {
-        readContract: async (opts) => {
-          expect(opts).toMatchObject({
-            address: stakingProxy,
-            functionName: 'mapServiceInfo',
-            args: [42n],
-            blockNumber: 41_200_000n,
-          });
-          return [multisig, recoveredOwner, 1_700_000_000n, 0n];
-        },
-      },
-    };
-
-    const checkpointEvent = {
-      args: {
-        epoch: 78n,
-        availableRewards: 100n * 10n ** 18n,
-        serviceIds: [42n],
-        rewards: [3n * 10n ** 18n],
-        epochLength: 86_400n,
-      },
-      block: { number: 41_200_000n, timestamp: 1_700_000_000n },
-      transaction: { hash: `0x${'99'.repeat(32)}` as `0x${string}` },
-      log: { address: stakingProxy, logIndex: 6 },
-    };
-
-    await handleStakingCheckpoint({
-      event: checkpointEvent,
-      context: fallbackContext,
-      stakingService,
-      stakingRewardCheckpoint,
-    });
-
-    expect(db.get(stakingService, {
-      chainId: CHAIN_ID,
-      stakingProxy,
-      serviceId: '42',
-    })).toMatchObject({
-      serviceId: '42',
-      stakingProxy,
-      owner: recoveredOwner,
-      multisig,
-      stakedAtBlock: 41_200_000n,
-      stakedAtTimestamp: 1_700_000_000n,
-      stakedAtTx: `0x${'99'.repeat(32)}`,
-      chainId: CHAIN_ID,
-    });
-
-    expect(db.get(stakingRewardCheckpoint, {
-      chainId: CHAIN_ID,
-      stakingProxy,
-      epoch: '78',
-      serviceId: '42',
-      checkpointAtBlock: 41_200_000n,
-      logIndex: 6,
-    })).toMatchObject({
-      serviceId: '42',
-      stakingProxy,
-      multisig,
-      epoch: '78',
-      reward: 3n * 10n ** 18n,
-      epochLength: 86_400n,
-      checkpointAtBlock: 41_200_000n,
-      checkpointAtTimestamp: 1_700_000_000n,
-      checkpointAtTx: `0x${'99'.repeat(32)}`,
-      chainId: CHAIN_ID,
-    });
-  });
-});
-
-// ── Area 4: SolutionDeliveryClaimed no longer finalizes (issues #530/#1304) ───
+// ── Area 4: SolutionDeliveryClaimed no longer finalizes (issue #530) ──────────
 // SolutionDeliveryClaimed is a solution-slot delivery — the START of evaluation,
-// not finalization. The finalized flag is recomputed in
-// handleVerdictDeliveryClaimed from delivered verdicts; this handler must leave
-// finalized untouched.
+// not finalization. On-chain finalization is validVerdictCount >= requiredVerdicts
+// (TaskCoordinator.recordVerdict). The finalized flag is recomputed in
+// handleVerdictDeliveryClaimed; this handler must leave finalized untouched.
 
 describe('SolutionDeliveryClaimed', () => {
   it('does NOT mark the task finalized (it is the start of evaluation, not the end)', async () => {
@@ -467,8 +220,8 @@ describe('SolutionDeliveryClaimed', () => {
       context,
       task,
     });
-    // finalized must stay false — the task is still Open until a verdict is
-    // delivered and handleVerdictDeliveryClaimed recomputes finalization.
+    // Issue #530: finalized must stay false — the task is still Open until
+    // delivered verdicts reach requiredVerdicts.
     expect(db.get(task, { id: '7' })?.finalized).toBe(false);
   });
 
@@ -823,7 +576,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
     expect(db.get(task, { id: '7' })?.finalized).toBe(true);
   });
 
-  it('issue #1304: normalizes persisted requiredVerdicts == 0 rows to first-verdict finalization', async () => {
+  it('issue #530: never finalizes when requiredVerdicts == 0', async () => {
     await handleTaskCreated({
       event: taskCreatedEvent({ taskId: 7n, requiredVerdicts: 0 }),
       context,
@@ -835,7 +588,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
       verdict,
       task,
     });
-    expect(db.get(task, { id: '7' })?.finalized).toBe(true);
+    expect(db.get(task, { id: '7' })?.finalized).toBe(false);
   });
 
   it('issue #530: skips finalized recompute when the task row is absent (predates startBlock), still writes the verdict', async () => {
@@ -904,6 +657,60 @@ describe('TaskBudgetRefunded → task.refunded', () => {
   });
 });
 
+// ── Claimed → rewardDistribution ─────────────────────────────────────────────
+
+describe('Claimed → rewardDistribution', () => {
+  it('creates a rewardDistribution row with all expected fields', async () => {
+    await handleClaimed({
+      event: claimedEvent(
+        {
+          serviceId: 1n,
+          multisig: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+          operatorMinted: 1000n,
+          daoMinted: 200n,
+          totalEntitledOperator: 1000n,
+          totalEntitledDao: 200n,
+        },
+        { block: 8_000_001n, logIndex: 3, txHash: ('0x' + 'dd'.repeat(32)) as `0x${string}`, timestamp: 1_700_000_042n },
+      ),
+      context,
+      rewardDistribution,
+    });
+
+    const row = db.get(rewardDistribution, { chainId: CHAIN_ID, serviceId: '1', claimedAtBlock: 8_000_001n, logIndex: 3 });
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      serviceId: '1',
+      multisig: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+      operatorMinted: 1000n,
+      daoMinted: 200n,
+      totalEntitledOperator: 1000n,
+      totalEntitledDao: 200n,
+      claimedAtBlock: 8_000_001n,
+      claimedAtTimestamp: 1_700_000_042n,
+      logIndex: 3,
+      claimedAtTx: ('0x' + 'dd'.repeat(32)) as `0x${string}`,
+      chainId: CHAIN_ID,
+    });
+  });
+
+  it('is idempotent — a replayed Claimed event does not create a duplicate row', async () => {
+    const ev = claimedEvent(
+      {
+        serviceId: 1n,
+        multisig: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+        operatorMinted: 1000n,
+        daoMinted: 200n,
+        totalEntitledOperator: 1000n,
+        totalEntitledDao: 200n,
+      },
+      { block: 8_000_001n, logIndex: 3, txHash: ('0x' + 'dd'.repeat(32)) as `0x${string}` },
+    );
+    await handleClaimed({ event: ev, context, rewardDistribution });
+    await handleClaimed({ event: ev, context, rewardDistribution });
+    expect(db.count(rewardDistribution)).toBe(1);
+  });
+});
 
 describe('envelope most-recent-wins', () => {
   const key = `envelope:${ENVELOPE_CID}`;
@@ -1789,49 +1596,6 @@ describe('parseVerdictEnvelopeLite', () => {
   });
 });
 
-// ─── resolveInstanceFields (pure, shared module #779) ─────────────────────────
-// The swe-rebench-v2 task-body → instance_id + solverNetManifestCid resolver
-// the enrichment worker relies on. Extracted from the inlined handler block so
-// the worker and the legacy in-handler path cannot drift.
-
-describe('resolveInstanceFields', () => {
-  it('reads spec.instance_id and top-level solverNetManifestCid from a task.v1 body', () => {
-    const taskBody = {
-      schemaVersion: 'task.v1',
-      solverNetManifestCid: 'bafyManifestSweA',
-      spec: { instance_id: 'sympy__sympy-27510' },
-    };
-    expect(resolveInstanceFields(taskBody)).toEqual({
-      instanceId: 'sympy__sympy-27510',
-      solverNetManifestCid: 'bafyManifestSweA',
-    });
-  });
-
-  it('returns empty strings when the body lacks the fields', () => {
-    expect(resolveInstanceFields({ spec: {} })).toEqual({
-      instanceId: '',
-      solverNetManifestCid: '',
-    });
-  });
-
-  it('returns empty strings for a non-object body', () => {
-    expect(resolveInstanceFields(null)).toEqual({ instanceId: '', solverNetManifestCid: '' });
-    expect(resolveInstanceFields('nope')).toEqual({ instanceId: '', solverNetManifestCid: '' });
-    expect(resolveInstanceFields(undefined)).toEqual({ instanceId: '', solverNetManifestCid: '' });
-  });
-
-  it('ignores a non-string / empty instance_id', () => {
-    expect(resolveInstanceFields({ spec: { instance_id: '' }, solverNetManifestCid: 'cid' })).toEqual({
-      instanceId: '',
-      solverNetManifestCid: 'cid',
-    });
-    expect(resolveInstanceFields({ spec: { instance_id: 123 } })).toEqual({
-      instanceId: '',
-      solverNetManifestCid: '',
-    });
-  });
-});
-
 // ─── MetadataSet evaluation: enrichment → verdictEnvelopeMeta ─────────────────
 
 describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
@@ -1865,7 +1629,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -1906,7 +1669,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
         attemptEnvelopeMeta,
         verdictEnvelopeMeta,
         enrichEnvelopes: true,
-        enrichVerdicts: true,
         ipfsGateway: 'https://stub',
         fetchImpl: stubFetch,
       })
@@ -1935,51 +1697,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     expect(db.count(verdictEnvelopeMeta)).toBe(0);
   });
 
-  // ── AC1 (#779): anchor-only path does no IPFS I/O, writes the CID-keyed
-  // evaluation `envelope` skeleton, and returns fast. The `envelope` anchor IS
-  // the discovery skeleton the worker's left-anti-join keys on — an `evaluation`
-  // envelope with no `ok` verdict_envelope_meta row presents as un-enriched.
-  it('AC1: anchor-only path writes the evaluation envelope skeleton, does no IPFS I/O, and is fast', async () => {
-    let called = false;
-    const stubFetch: FetchLike = async () => {
-      called = true;
-      return { ok: true, status: 200, json: async () => SWE_REBENCH_FAIL_BODY };
-    };
-    const start = performance.now();
-    await handleMetadataSet({
-      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
-      context,
-      solverNetManifest,
-      envelope,
-      harnessCheckpoint,
-      attemptEnvelopeMeta,
-      verdictEnvelopeMeta,
-      enrichEnvelopes: false,
-      ipfsGateway: 'https://stub',
-      fetchImpl: stubFetch,
-    });
-    const elapsedMs = performance.now() - start;
-
-    // No IPFS fetch on the anchor-only path.
-    expect(called).toBe(false);
-
-    // The CID-keyed evaluation envelope anchor (the worker's discovery skeleton)
-    // IS written, even with enrichment off.
-    const anchor = db.rows(envelope).find((e) => e.metadataKey === evalKey);
-    expect(anchor).toBeDefined();
-    expect(anchor?.kind).toBe('evaluation');
-    expect(anchor?.manifestCid).toBe(EVAL_CID);
-
-    // It presents as un-enriched to the worker's left-anti-join: no
-    // verdict_envelope_meta row exists for it yet.
-    expect(db.count(verdictEnvelopeMeta)).toBe(0);
-
-    // Sub-10ms guard: the anchor-only path is a single in-memory upsert + early
-    // return. Loose enough not to flake, tight enough to catch a re-introduced
-    // synchronous IPFS fetch.
-    expect(elapsedMs).toBeLessThan(10);
-  });
-
   it('does NOT write a row when the body has no task.requestId', async () => {
     const stubFetch: FetchLike = async () => ({
       ok: true,
@@ -1995,7 +1712,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -2013,7 +1729,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -2041,7 +1756,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -2061,7 +1775,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -2114,7 +1827,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -2152,7 +1864,6 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       attemptEnvelopeMeta,
       verdictEnvelopeMeta,
       enrichEnvelopes: true,
-      enrichVerdicts: true,
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
@@ -2163,76 +1874,5 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     expect(row?.solverNetManifestCid).toBe('');
     expect(row?.actualPassed).toBe(false);  // verdict row still written
     expect(calls).toBeGreaterThanOrEqual(2); // verdict + task body attempt
-  });
-});
-
-// ─── AC5 (#779): verdict cutover reversibility via enrichVerdicts ──────────────
-// After the cutover, the evaluation (verdict) enrichment branch is gated by a
-// NEW enrichVerdicts param (default OFF), wired in index.ts from the SAME
-// JINN_INDEXER_ENRICH_ENVELOPES env but defaulting off. enrichEnvelopes still
-// governs the execution/manifest/checkpoint paths (out of #779 scope). This
-// proves the flag is a clean rollback lever AND that the new default is
-// anchor-only for verdicts.
-
-describe('AC5: verdict cutover reversibility (enrichVerdicts)', () => {
-  const EVAL_CID = 'bafyevaluation';
-  const REQUEST_ID = `0x${'aa'.repeat(32)}` as `0x${string}`;
-  const EVALUATOR = `0x${'bb'.repeat(20)}` as `0x${string}`;
-  const evalKey = `evaluation:${EVAL_CID}`;
-  const SWE_BODY = {
-    schemaVersion: 'jinn.execution.v1',
-    role: 'verdict',
-    solverType: 'swe-rebench-v2.v1',
-    task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1 },
-    verdictIndex: 0,
-    participant: { safeAddress: EVALUATOR, agentEoa: '0x' },
-    evidenceTier: 'committed',
-    payload: { passed_match: false, score: 0 },
-  };
-
-  it.each([
-    { enrichVerdicts: false as const, label: 'OFF (new default → worker owns enrichment)' },
-    { enrichVerdicts: true as const, label: 'ON (rollback → in-handler enrichment)' },
-  ])('enrichVerdicts=$enrichVerdicts $label', async ({ enrichVerdicts }) => {
-    let called = false;
-    const stubFetch: FetchLike = async () => {
-      called = true;
-      return { ok: true, status: 200, json: async () => SWE_BODY };
-    };
-    const start = performance.now();
-    await handleMetadataSet({
-      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
-      context,
-      solverNetManifest,
-      envelope,
-      harnessCheckpoint,
-      attemptEnvelopeMeta,
-      verdictEnvelopeMeta,
-      // Execution-path flag stays on (proving #779 scopes ONLY the verdict
-      // path) — the verdict gate is the separate enrichVerdicts.
-      enrichEnvelopes: true,
-      enrichVerdicts,
-      ipfsGateway: 'https://stub',
-      fetchImpl: stubFetch,
-    });
-    const elapsedMs = performance.now() - start;
-
-    // The evaluation envelope anchor is ALWAYS written (the skeleton).
-    const anchor = db.rows(envelope).find((e) => e.metadataKey === evalKey);
-    expect(anchor?.kind).toBe('evaluation');
-
-    if (enrichVerdicts) {
-      // Rollback path: in-handler enrichment runs, verdict row written.
-      expect(called).toBe(true);
-      const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
-      expect(row).toBeDefined();
-      expect(row?.enrichmentStatus).toBe('ok');
-      expect(row?.evaluatorVerdict).toBe('FAIL');
-    } else {
-      // New default: anchor-only, no IPFS fetch, no verdict row, fast.
-      expect(called).toBe(false);
-      expect(db.count(verdictEnvelopeMeta)).toBe(0);
-      expect(elapsedMs).toBeLessThan(10);
-    }
   });
 });

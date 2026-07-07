@@ -10,6 +10,7 @@ export const CANONICAL_KINDS = [
   'rpc_unreachable',
   'no_solvernets_joined',
   'safe_binding_pending',
+  'claim_available',
   'claim_failed',
 ] as const;
 

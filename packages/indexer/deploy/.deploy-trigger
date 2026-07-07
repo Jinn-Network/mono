@@ -1,8 +1,0 @@
-# Trigger file for Railway watchPatterns rebuild (#1151).
-#
-# Touching any file under packages/indexer/** or packages/sdk/** causes
-# Railway to build current next HEAD instead of SKIPPING the deploy.
-# This marker exists so future redeploys can be triggered by editing a
-# timestamp here, without touching live indexer source or the Dockerfile.
-#
-# Last trigger: 2026-06-12 — ship contractId enrichment to prod (#1151).

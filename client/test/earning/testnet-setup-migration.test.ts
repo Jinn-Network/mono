@@ -12,7 +12,6 @@ import {
 import { createDefaultFleetState, type FleetState } from '../../src/earning/types.js';
 
 const NEW_STAKING_PROXY = '0x24e34E5037956a5Feca1AAAfaA30297084C228B8';
-const CURRENT_STAKING_PROXY = '0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39';
 const DISTRIBUTOR = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
 
 function legacyState(): FleetState {
@@ -41,7 +40,6 @@ function legacyState(): FleetState {
 
 async function runMigration(overrides: {
   state?: FleetState;
-  currentStakingContract?: string;
   stakingState?: bigint;
   sendThrows?: Error;
   waitThrows?: Error;
@@ -68,7 +66,7 @@ async function runMigration(overrides: {
     state,
     chain: 'base-sepolia',
     stakingMode: 'standard',
-    currentStakingContract: overrides.currentStakingContract ?? NEW_STAKING_PROXY,
+    currentStakingContract: NEW_STAKING_PROXY,
     distributorAddress: DISTRIBUTOR,
     publicClient: publicClient as any,
     masterWallet: { account: { address: state.master_address } } as any,
@@ -203,28 +201,6 @@ describe('automatic testnet setup migration', () => {
     expect(sendTransaction).not.toHaveBeenCalled();
     const archive = await store.loadMigrationArchive();
     expect(archive.entries[0]!.retire_status).toBe('already_inactive');
-  });
-
-  it('migrates the previous fast staking proxy after another Base Sepolia rewire', async () => {
-    const state = {
-      ...legacyState(),
-      services: [
-        {
-          ...legacyState().services[0]!,
-          staking_address: NEW_STAKING_PROXY,
-        },
-      ],
-    };
-    const { earningDir, result, sendTransaction } = await runMigration({
-      state,
-      currentStakingContract: CURRENT_STAKING_PROXY,
-    });
-    dirs.push(earningDir);
-
-    expect(result.migratedCount).toBe(1);
-    expect(sendTransaction).toHaveBeenCalledTimes(1);
-    expect(result.state.services[0]!.staking_address).toBeNull();
-    expect(result.state.services[0]!.step).toBe('awaiting_stake');
   });
 
   it('is idempotent when an archive exists and the old row is seen again', async () => {

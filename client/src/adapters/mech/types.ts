@@ -222,16 +222,27 @@ export const JINN_ROUTER_ABI = [
       { name: 'taskCidDigest', type: 'bytes32' },
       { name: 'manifestDigest', type: 'bytes32' },
       {
-        // Tokenless-OLAS pivot: TaskCoordinator.TaskPolicy is `maxClaims` plus
-        // `allowSolverSelfEvaluation` (default false → self-evaluation blocked,
-        // the independent-evaluation invariant; a testnet SolverNet sets it true
-        // so one operator can close the loop solo). Off-chain scheduling intent
-        // (windows / lease / quorum) stays off-chain in the task.v1 `claimPolicy`.
         name: 'policy',
         type: 'tuple',
         components: [
-          { name: 'maxClaims', type: 'uint32' },
-          { name: 'allowSolverSelfEvaluation', type: 'bool' },
+          { name: 'claimWindowStart', type: 'uint64' },
+          { name: 'claimWindowEnd', type: 'uint64' },
+          { name: 'submissionDeadline', type: 'uint64' },
+          { name: 'claimLeaseTtlSeconds', type: 'uint32' },
+          { name: 'maxClaims', type: 'uint16' },
+          { name: 'maxClaimsPerOperator', type: 'uint16' },
+          { name: 'policyHook', type: 'address' },
+          {
+            name: 'evaluationPolicy',
+            type: 'tuple',
+            components: [
+              { name: 'requiredVerdicts', type: 'uint16' },
+              { name: 'passThreshold', type: 'uint16' },
+              { name: 'evaluationDeadline', type: 'uint64' },
+              { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
+              { name: 'disallowSolverSelfEvaluation', type: 'bool' },
+            ],
+          },
         ],
       },
       { name: 'solutionMaxDeliveryRate', type: 'uint256' },
@@ -261,7 +272,8 @@ export const JINN_ROUTER_ABI = [
       { name: 'taskId', type: 'uint256', indexed: true },
       { name: 'manifestDigest', type: 'bytes32', indexed: true },
       { name: 'taskCidDigest', type: 'bytes32', indexed: false },
-      { name: 'maxClaims', type: 'uint32', indexed: false },
+      { name: 'maxClaims', type: 'uint16', indexed: false },
+      { name: 'requiredVerdicts', type: 'uint16', indexed: false },
       { name: 'solutionBudget', type: 'uint256', indexed: false },
       { name: 'verdictBudget', type: 'uint256', indexed: false },
     ],

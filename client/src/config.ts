@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
@@ -50,6 +50,13 @@ export const JinnConfigSchema = z.object({
    */
   rpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
   archiveRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
+  /**
+   * Optional L2 proof/archive RPC endpoint(s) for canonical cross-chain canaries.
+   * The daemon can use its normal rpcUrl for writes while proof construction
+   * uses this endpoint for historical eth_getProof at OP dispute-game blocks.
+   * Accepts string or array form (see rpcUrl). Env: JINN_L2_PROOF_RPC_URL.
+   */
+  l2ProofRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
 
   /**
    * Single volume-aware durable-state root. When set (env JINN_STATE_DIR or
@@ -75,11 +82,11 @@ export const JinnConfigSchema = z.object({
 
   /**
    * How often the daemon attempts stOLAS ExternalStakingDistributor.claim for each staked
-   * fleet service (ms). Default 0 so operators claim OLAS manually from the app.
-   * Set JINN_REWARD_CLAIM_INTERVAL_MS=600000 for managed/headless auto-claim.
+   * fleet service (ms). Default 600000 (10 min) — well under typical checkpoint liveness windows
+   * on Base while limiting RPC/gas churn. Set to 0 to disable auto-claim.
    * Env: JINN_REWARD_CLAIM_INTERVAL_MS
    */
-  rewardClaimIntervalMs: z.number().int().min(0).default(0),
+  rewardClaimIntervalMs: z.number().int().min(0).default(600_000),
 
   /**
    * How often the daemon checks agent EOA and Safe balances and tops them up from the master
@@ -252,13 +259,112 @@ export const JinnConfigSchema = z.object({
   /** Optional Base Sepolia stOLAS deployment artifact path */
   testnetStolasDeploymentPath: z.string().optional(),
 
+
   /**
-   * Loop-watchdog auto-restart gate (#1043). Default OFF (the locked Option A
-   * decision): the watchdog always detects a stale loop and loud-logs + emits
-   * a `loop_watchdog_stale` event, but the non-zero process.exit recovery only
-   * fires when this is on. Env: JINN_WATCHDOG_AUTO_RESTART=1|true|yes.
+   * Optional deployment artifact for the v0 MVI L1 stack
+   * (deployment-jinn-mvi-l1-{network}{,-fast}.json). Provides addresses for
+   * JINN, Timelock, JinnGovernor, JinnDistributor, and Messenger.
+   * When set the daemon enables the cross-chain JINN claim loop.
    */
-  watchdogAutoRestart: z.boolean().default(false),
+  jinnMviL1DeploymentPath: z.string().optional(),
+
+  /**
+   * Optional deployment artifact for the v0 MVI L2 emitter
+   * (deployment-jinn-mvi-l2-{network}.json). Provides the
+   * TaskClaimEmitter address on the measurement chain (Base / Base Sepolia).
+   */
+  jinnMviL2DeploymentPath: z.string().optional(),
+
+  // ── Cross-chain claim loop (Phase B / jinn-mono-7x5) ─────────────────────
+
+  /**
+   * RPC endpoint(s) for the L1 governance chain (Ethereum / Sepolia) where
+   * the JinnDistributor lives. Accepts string or array form (see rpcUrl) and
+   * supports comma-separated env values. Testnet defaults to a public Sepolia
+   * RPC; mainnet requires an operator override when L1 submit mode is
+   * configured. Env: JINN_ETHEREUM_RPC_URL.
+   */
+  ethereumRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
+
+  /**
+   * Optional archive RPC endpoint(s) for the L1 governance chain. Used for
+   * historical block lookups when constructing canonical-mode proofs. Accepts
+   * string or array form. Env: JINN_ETHEREUM_ARCHIVE_RPC_URL.
+   */
+  ethereumArchiveRpcUrl: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
+
+  /**
+   * L1 network used by the cross-chain claim loop. 'sepolia' tracks Base
+   * Sepolia testnet; 'ethereum' tracks Base mainnet. Defaults to 'sepolia'
+   * during Phase 1b. Env: JINN_L1_NETWORK.
+   */
+  jinnL1Network: z.enum(['sepolia', 'ethereum']).default('sepolia'),
+
+  /**
+   * JinnDistributor address on the L1 governance chain. Required for
+   * jinnClaimSubmissionMode='submit'. When set for submit mode, ethereumRpcUrl
+   * MUST also be set. Resolved from jinnMviL1DeploymentPath when omitted;
+   * otherwise a manual override. Env: JINN_DISTRIBUTOR_ADDRESS.
+   */
+  jinnDistributorAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
+    .optional(),
+
+  /**
+   * TaskClaimEmitter address on the L2 measurement chain (Base / Base
+   * Sepolia). Resolved from jinnMviL2DeploymentPath when omitted.
+   * Env: JINN_CLAIM_EMITTER_ADDRESS.
+   */
+  jinnClaimEmitterAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
+    .optional(),
+
+  /**
+   * Messenger address on the L1 governance chain. Resolved from
+   * jinnMviL1DeploymentPath when omitted.
+   * Env: JINN_MESSENGER_ADDRESS.
+   */
+  jinnMessengerAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
+    .optional(),
+
+  /**
+   * Messenger mode driving proof construction. `mock` submits MockMessenger
+   * fixtures — required for automated Sepolia burn-in (`runOnce`). `canonical`
+   * builds OP-Stack storage proofs for verifier-only checks; scheduled daemon
+   * ticks **skip** canonical mode (multi-day finality) — use
+   * `tsx scripts/verify-canonical-canary.ts` after finality instead. Defaults
+   * to `canonical`.
+   * Env: JINN_MESSENGER_MODE.
+   */
+  jinnMessengerMode: z.enum(['canonical', 'mock']).default('canonical'),
+
+  /**
+   * Claim submission mode. `emit-only` only submits TaskClaimEmitter.emitClaim
+   * on L2 and records the resulting ticket. `submit` continues into the L1
+   * messenger/distributor path.
+   * Env: JINN_CLAIM_SUBMISSION_MODE.
+   */
+  jinnClaimSubmissionMode: z.enum(['emit-only', 'submit']).default('emit-only'),
+
+  /**
+   * Explicit operator gate for the cross-chain JINN claim loop. The schema
+   * default stays off for mainnet/unknown networks; loadConfig defaults this
+   * on for testnet now that the emitter and standing relayer are live.
+   * Env: JINN_CLAIM_LOOP_ENABLED=1|true|yes.
+   */
+  jinnClaimLoopEnabled: z.boolean().default(false),
+
+  /**
+   * How often the daemon ticks the cross-chain JINN claim loop (ms). Default
+   * 3 600 000 (1 hour) — well below mainnet challenge windows while
+   * minimising RPC/gas churn. Set to 0 to disable when the address is set.
+   * Env: JINN_CLAIM_LOOP_INTERVAL_MS.
+   */
+  jinnClaimLoopIntervalMs: z.number().int().min(0).default(60 * 60 * 1000),
 
   /** Staking mode: 'standard' uses stOLAS (no OLAS needed), 'self-bond' uses operator-provided OLAS. */
   stakingMode: z.enum(['standard', 'self-bond']).default('standard'),
@@ -299,26 +405,6 @@ export const JinnConfigSchema = z.object({
     .string()
     .regex(/^\d+$/, 'must be a non-negative integer string')
     .optional(),
-
-  /**
-   * Faucet top-up daily cap + cooldown (issue #560). Single source of truth
-   * for the running-mode Dashboard "Top up from faucet" batch action, shared
-   * by the daemon endpoint and surfaced to the SPA via GET /v1/setup/drip/quota.
-   *
-   * `faucetDailyTopupCap` — number of faucet drips a single operator click may
-   * issue in one batch (and the per-24h ceiling per wallet). Env:
-   * JINN_FAUCET_DAILY_TOPUP_CAP.
-   *
-   * `faucetTopupCooldownMs` — once the cap is reached, the top-up action is
-   * disabled until this window elapses since the first call of that batch.
-   * Env: JINN_FAUCET_TOPUP_COOLDOWN_MS.
-   */
-  faucetDailyTopupCap: z.number().int().positive().default(10),
-  faucetTopupCooldownMs: z
-    .number()
-    .int()
-    .min(0)
-    .default(24 * 60 * 60 * 1000),
 
   /**
    * Operator-controlled Harness inventory.
@@ -408,19 +494,6 @@ export const JinnConfigSchema = z.object({
       }),
     )
     .optional(),
-
-  /**
-   * Set true once the operator clicks "Enter dashboard" at the end of the
-   * #983 guided onboarding takeover. Distinct from `joinedSolverNets` being
-   * non-empty: a node can have a membership mid-onboarding (the first join
-   * populates the map) yet not have finished harness/model selection. The SPA
-   * gates the bootstrap→dashboard hand-off on this flag (see App.tsx), so the
-   * first join no longer ejects the operator before the harness step.
-   *
-   * Written by POST /v1/operator/onboarding-complete (persisted to disk AND
-   * mutated in-memory so GET /v1/bootstrap reflects it without a restart).
-   */
-  onboardingComplete: z.boolean().optional(),
 
   /**
    * Trusted ed25519 publishers for external harness impls. The daemon
@@ -513,25 +586,8 @@ export const JinnConfigSchema = z.object({
           port: z.number().int().positive().default(7342),
         })
         .default({ enabled: false, port: 7342 }),
-      /**
-       * Seller-side ML PII detection (Transformers.js NER, in-process) applied
-       * before captures (and task trajectories) are published. Off by default:
-       * the structural key policy + openredaction + secretlint/entropy stages
-       * always scrub (the non-ML guarantee); this adds person/org/location NER
-       * at the cost of a one-time model download. When enabled, a model-load
-       * failure fails closed at the publish altitude — the trajectory is not
-       * published — while the daemon's other loops keep running.
-       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=1|true|yes,
-       *      JINN_CAPTURES_PII_DETECTION_MODEL=<hf-model-id>
-       */
-      piiDetection: z
-        .object({
-          enabled: z.boolean().default(false),
-          model: z.string().optional(),
-        })
-        .default({ enabled: false }),
     })
-    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: false } }),
+    .default({ llmProxy: { enabled: false, port: 7342 } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
@@ -603,7 +659,19 @@ export const JinnConfigSchema = z.object({
       blockedCids: z.array(z.string()).default([]),
     })
     .default({ blockedCids: [] }),
-});
+}).refine(
+  (cfg) =>
+    cfg.jinnClaimSubmissionMode !== 'submit' ||
+    !cfg.jinnDistributorAddress ||
+    !!cfg.ethereumRpcUrl,
+  {
+    message:
+      'ethereumRpcUrl must be set when jinnDistributorAddress is configured in submit mode ' +
+      '(env JINN_ETHEREUM_RPC_URL or config field). The cross-chain claim loop ' +
+      'cannot reach the L1 governance chain without it.',
+    path: ['ethereumRpcUrl'],
+  },
+);
 
 const DEFAULT_ENGINE = {
   workingDirRoot: join(homedir(), '.jinn-client', 'engine', 'work'),
@@ -625,6 +693,9 @@ export type JinnConfig = Omit<
   z.infer<typeof JinnConfigSchema>,
   | 'rpcUrl'
   | 'archiveRpcUrl'
+  | 'l2ProofRpcUrl'
+  | 'ethereumRpcUrl'
+  | 'ethereumArchiveRpcUrl'
   | 'tasks'
   | 'engine'
 > & {
@@ -632,6 +703,12 @@ export type JinnConfig = Omit<
   rpcUrls: readonly string[];
   archiveRpcUrl?: string;
   archiveRpcUrls?: readonly string[];
+  l2ProofRpcUrl?: string;
+  l2ProofRpcUrls?: readonly string[];
+  ethereumRpcUrl?: string;
+  ethereumRpcUrls?: readonly string[];
+  ethereumArchiveRpcUrl?: string;
+  ethereumArchiveRpcUrls?: readonly string[];
   tasks: Task[];
   engine: { workingDirRoot: string; implStateDirRoot: string };
 };
@@ -650,42 +727,21 @@ export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
  */
 export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
 
+export const DEFAULT_TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
+
 /**
- * Default fallback chain for the L2 measurement chain (Base Sepolia, chain-id
- * 84532) on testnet. Originally a two-provider chain (AC2 of issue #592);
- * widened to ≥5 distinct free providers per issue #911 so a default-config
- * daemon tolerates a single-provider quota cliff (the Tenderly shared-quota
- * cliff of 2026-05-24) without an operator key.
- *   slot 0 — `https://base-sepolia.publicnode.com` (#835 no-auth primary,
- *     50k-block getLogs cap, no shared-quota cliff).
- *   slot 1 — `https://base-sepolia-rpc.publicnode.com`
- *   slot 2 — `https://base-sepolia.drpc.org`
- *   slot 3 — `https://base-sepolia.gateway.tenderly.co`
- *   slot 4 — `https://sepolia.base.org` (free public Coinbase endpoint,
- *     2k-block cap; last-resort backup, stays last).
+ * Default fallback chain for the L2 measurement chain (Base Sepolia) on
+ * testnet. Per AC2 of issue #592:
+ *   slot 0 — `https://base-sepolia.publicnode.com` (no-auth, 50k-block
+ *     getLogs cap, no shared-quota cliff).
+ *   slot 1 — `https://sepolia.base.org` (free public Coinbase endpoint,
+ *     2k-block cap; last-resort backup).
  * Operators are encouraged to prepend a paid primary key (Alchemy, Tenderly,
  * etc.) via `rpcUrl` config or `JINN_RPC_URL` / `BASE_SEPOLIA_RPC_URL` env.
- * All five endpoints live-verified to return chain-id 84532 (#911).
  */
 export const DEFAULT_TESTNET_RPC_URLS: readonly string[] = [
   'https://base-sepolia.publicnode.com',
-  'https://base-sepolia-rpc.publicnode.com',
-  'https://base-sepolia.drpc.org',
-  'https://base-sepolia.gateway.tenderly.co',
   'https://sepolia.base.org',
-];
-
-/**
- * Default fallback chain for the L2 measurement chain (Base mainnet, chain-id
- * 8453). ≥5 distinct free providers per issue #911.
- *   slot 0 — `https://mainnet.base.org` (free public Coinbase endpoint).
- */
-export const DEFAULT_MAINNET_RPC_URLS: readonly string[] = [
-  'https://mainnet.base.org',
-  'https://base.publicnode.com',
-  'https://base.drpc.org',
-  'https://1rpc.io/base',
-  'https://base.meowrpc.com',
 ];
 
 
@@ -849,6 +905,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   const merged: Record<string, unknown> = { ...fileValues };
 
   if (env['JINN_NETWORK'])           merged.network = env['JINN_NETWORK'];
+  if (env['JINN_L2_PROOF_RPC_URL'])  merged.l2ProofRpcUrl = env['JINN_L2_PROOF_RPC_URL'];
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
   if (env['JINN_DB_PATH'])           merged.dbPath = env['JINN_DB_PATH'];
   if (env['JINN_POLL_INTERVAL_MS'])  merged.pollIntervalMs = parseInt(env['JINN_POLL_INTERVAL_MS'], 10);
@@ -919,9 +976,24 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_L2_DEPLOYMENT']) merged.testnetL2DeploymentPath = env['JINN_TESTNET_L2_DEPLOYMENT'];
   if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
-  if (env['JINN_WATCHDOG_AUTO_RESTART'] !== undefined) {
-    const v = env['JINN_WATCHDOG_AUTO_RESTART'].trim().toLowerCase();
-    merged.watchdogAutoRestart = v === '1' || v === 'true' || v === 'yes';
+  if (env['JINN_MVI_L1_DEPLOYMENT']) merged.jinnMviL1DeploymentPath = env['JINN_MVI_L1_DEPLOYMENT'];
+  if (env['JINN_MVI_L2_DEPLOYMENT']) merged.jinnMviL2DeploymentPath = env['JINN_MVI_L2_DEPLOYMENT'];
+  if (env['JINN_ETHEREUM_RPC_URL']) merged.ethereumRpcUrl = env['JINN_ETHEREUM_RPC_URL'];
+  if (env['JINN_ETHEREUM_ARCHIVE_RPC_URL']) merged.ethereumArchiveRpcUrl = env['JINN_ETHEREUM_ARCHIVE_RPC_URL'];
+  if (env['JINN_L1_NETWORK']) merged.jinnL1Network = env['JINN_L1_NETWORK'];
+  if (env['JINN_DISTRIBUTOR_ADDRESS']) merged.jinnDistributorAddress = env['JINN_DISTRIBUTOR_ADDRESS'];
+  if (env['JINN_CLAIM_EMITTER_ADDRESS']) merged.jinnClaimEmitterAddress = env['JINN_CLAIM_EMITTER_ADDRESS'];
+  if (env['JINN_MESSENGER_ADDRESS']) merged.jinnMessengerAddress = env['JINN_MESSENGER_ADDRESS'];
+  if (env['JINN_MESSENGER_MODE']) merged.jinnMessengerMode = env['JINN_MESSENGER_MODE'];
+  if (env['JINN_CLAIM_SUBMISSION_MODE']) {
+    merged.jinnClaimSubmissionMode = env['JINN_CLAIM_SUBMISSION_MODE'];
+  }
+  if (env['JINN_CLAIM_LOOP_ENABLED'] !== undefined) {
+    const v = env['JINN_CLAIM_LOOP_ENABLED'].trim().toLowerCase();
+    merged.jinnClaimLoopEnabled = v === '1' || v === 'true' || v === 'yes';
+  }
+  if (env['JINN_CLAIM_LOOP_INTERVAL_MS'] !== undefined) {
+    merged.jinnClaimLoopIntervalMs = parseInt(env['JINN_CLAIM_LOOP_INTERVAL_MS'], 10);
   }
   if (env['JINN_STAKING_MODE'])           merged.stakingMode = env['JINN_STAKING_MODE'];
   if (env['JINN_TARGET_SERVICES'])    merged.targetServices = parseInt(env['JINN_TARGET_SERVICES'], 10);
@@ -945,12 +1017,6 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_MIN_SAFE_ETH_WEI']) {
     merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
-  }
-  if (env['JINN_FAUCET_DAILY_TOPUP_CAP'] !== undefined) {
-    merged.faucetDailyTopupCap = parseInt(env['JINN_FAUCET_DAILY_TOPUP_CAP'], 10);
-  }
-  if (env['JINN_FAUCET_TOPUP_COOLDOWN_MS'] !== undefined) {
-    merged.faucetTopupCooldownMs = parseInt(env['JINN_FAUCET_TOPUP_COOLDOWN_MS'], 10);
   }
   // Legacy `JINN_PREDICTION_V1_*` env vars are no longer recognised. Their
   // values now live in the launched-record's generator-config block per
@@ -994,9 +1060,7 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (
     env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined ||
-    env['JINN_CAPTURES_LLM_PROXY_PORT'] !== undefined ||
-    env['JINN_CAPTURES_PII_DETECTION_ENABLED'] !== undefined ||
-    env['JINN_CAPTURES_PII_DETECTION_MODEL'] !== undefined
+    env['JINN_CAPTURES_LLM_PROXY_PORT'] !== undefined
   ) {
     const prevCaptures = typeof merged['captures'] === 'object' && merged['captures'] !== null
       ? (merged['captures'] as Record<string, unknown>)
@@ -1004,14 +1068,8 @@ export function loadConfig(configPath?: string): JinnConfig {
     const prevProxy = typeof prevCaptures['llmProxy'] === 'object' && prevCaptures['llmProxy'] !== null
       ? (prevCaptures['llmProxy'] as Record<string, unknown>)
       : {};
-    const prevPii = typeof prevCaptures['piiDetection'] === 'object' && prevCaptures['piiDetection'] !== null
-      ? (prevCaptures['piiDetection'] as Record<string, unknown>)
-      : {};
     const enabled = env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined
       ? ['1', 'true', 'yes'].includes(env['JINN_CAPTURES_LLM_PROXY_ENABLED'].trim().toLowerCase())
-      : undefined;
-    const piiEnabled = env['JINN_CAPTURES_PII_DETECTION_ENABLED'] !== undefined
-      ? ['1', 'true', 'yes'].includes(env['JINN_CAPTURES_PII_DETECTION_ENABLED'].trim().toLowerCase())
       : undefined;
     merged['captures'] = {
       ...prevCaptures,
@@ -1020,13 +1078,6 @@ export function loadConfig(configPath?: string): JinnConfig {
         ...(enabled !== undefined ? { enabled } : {}),
         ...(env['JINN_CAPTURES_LLM_PROXY_PORT']
           ? { port: Number.parseInt(env['JINN_CAPTURES_LLM_PROXY_PORT'], 10) }
-          : {}),
-      },
-      piiDetection: {
-        ...prevPii,
-        ...(piiEnabled !== undefined ? { enabled: piiEnabled } : {}),
-        ...(env['JINN_CAPTURES_PII_DETECTION_MODEL']
-          ? { model: env['JINN_CAPTURES_PII_DETECTION_MODEL'] }
           : {}),
       },
     };
@@ -1095,6 +1146,14 @@ export function loadConfig(configPath?: string): JinnConfig {
         ? { fallbackToOnchain: existing.fallbackToOnchain }
         : {}),
     };
+  }
+
+  if (resolvedNetwork === 'testnet' && !merged.ethereumRpcUrl) {
+    merged.ethereumRpcUrl = DEFAULT_TESTNET_ETHEREUM_RPC_URL;
+  }
+
+  if (resolvedNetwork === 'testnet' && merged.jinnClaimLoopEnabled === undefined) {
+    merged.jinnClaimLoopEnabled = true;
   }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
@@ -1173,13 +1232,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   // shared-quota cliff of 2026-05-24 that took out every default-config
   // daemon at once). See #554 + the NetworkSection.tsx "shared RPC" panel for
   // the operator-facing pitch to bring their own key. The sibling Ethereum L1
-  // default (DEFAULT_TESTNET_ETHEREUM_RPC_URLS above) is publicnode-headed —
-  // this keeps the two L1/L2 defaults symmetric. Both chains ship ≥5 free
-  // providers per issue #911.
+  // default (DEFAULT_TESTNET_ETHEREUM_RPC_URL above) is already publicnode —
+  // this keeps the two L1/L2 defaults symmetric.
   const parsed = result.data;
   const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
     ? DEFAULT_TESTNET_RPC_URLS
-    : DEFAULT_MAINNET_RPC_URLS;
+    : ['https://mainnet.base.org'];
 
   const rpcUrlsResolved = parsed.rpcUrl !== undefined
     ? parseRpcUrls(parsed.rpcUrl)
@@ -1187,12 +1245,24 @@ export function loadConfig(configPath?: string): JinnConfig {
   const archiveRpcUrlsResolved = parsed.archiveRpcUrl !== undefined
     ? parseRpcUrls(parsed.archiveRpcUrl)
     : undefined;
+  const l2ProofRpcUrlsResolved = parsed.l2ProofRpcUrl !== undefined
+    ? parseRpcUrls(parsed.l2ProofRpcUrl)
+    : undefined;
+  const ethereumRpcUrlsResolved = parsed.ethereumRpcUrl !== undefined
+    ? parseRpcUrls(parsed.ethereumRpcUrl)
+    : undefined;
+  const ethereumArchiveRpcUrlsResolved = parsed.ethereumArchiveRpcUrl !== undefined
+    ? parseRpcUrls(parsed.ethereumArchiveRpcUrl)
+    : undefined;
 
   // Strip the union-typed (string | string[]) RPC fields from `parsed` — the
   // returned shape carries the resolved head URL plus a `*Urls` array instead.
   const {
     rpcUrl: _rpcUrl,
     archiveRpcUrl: _archiveRpcUrl,
+    l2ProofRpcUrl: _l2ProofRpcUrl,
+    ethereumRpcUrl: _ethereumRpcUrl,
+    ethereumArchiveRpcUrl: _ethereumArchiveRpcUrl,
     ...rest
   } = parsed;
 
@@ -1202,6 +1272,18 @@ export function loadConfig(configPath?: string): JinnConfig {
     rpcUrls: rpcUrlsResolved,
     ...(archiveRpcUrlsResolved
       ? { archiveRpcUrl: archiveRpcUrlsResolved[0]!, archiveRpcUrls: archiveRpcUrlsResolved }
+      : {}),
+    ...(l2ProofRpcUrlsResolved
+      ? { l2ProofRpcUrl: l2ProofRpcUrlsResolved[0]!, l2ProofRpcUrls: l2ProofRpcUrlsResolved }
+      : {}),
+    ...(ethereumRpcUrlsResolved
+      ? { ethereumRpcUrl: ethereumRpcUrlsResolved[0]!, ethereumRpcUrls: ethereumRpcUrlsResolved }
+      : {}),
+    ...(ethereumArchiveRpcUrlsResolved
+      ? {
+          ethereumArchiveRpcUrl: ethereumArchiveRpcUrlsResolved[0]!,
+          ethereumArchiveRpcUrls: ethereumArchiveRpcUrlsResolved,
+        }
       : {}),
     // parseTask assigns a UUID to any entry missing an id
     tasks: parsed.tasks.map(parseTask),
@@ -1280,7 +1362,19 @@ const TRACKED_ENV_VARS = [
   'JINN_TESTNET_L2_DEPLOYMENT',
   'JINN_TESTNET_TOKEN_DEPLOYMENT',
   'JINN_TESTNET_MECH_DEPLOYMENT',
-  'JINN_WATCHDOG_AUTO_RESTART',
+  'JINN_L2_PROOF_RPC_URL',
+  'JINN_MVI_L1_DEPLOYMENT',
+  'JINN_MVI_L2_DEPLOYMENT',
+  'JINN_ETHEREUM_RPC_URL',
+  'JINN_ETHEREUM_ARCHIVE_RPC_URL',
+  'JINN_L1_NETWORK',
+  'JINN_DISTRIBUTOR_ADDRESS',
+  'JINN_CLAIM_EMITTER_ADDRESS',
+  'JINN_MESSENGER_ADDRESS',
+  'JINN_MESSENGER_MODE',
+  'JINN_CLAIM_SUBMISSION_MODE',
+  'JINN_CLAIM_LOOP_ENABLED',
+  'JINN_CLAIM_LOOP_INTERVAL_MS',
   'JINN_STAKING_MODE',
   'JINN_TARGET_SERVICES',
   'JINN_DEBUG',
@@ -1288,8 +1382,6 @@ const TRACKED_ENV_VARS = [
   'JINN_MASTER_ETH_DAILY_WEI',
   'JINN_MIN_EOA_GAS_WEI',
   'JINN_MIN_SAFE_ETH_WEI',
-  'JINN_FAUCET_DAILY_TOPUP_CAP',
-  'JINN_FAUCET_TOPUP_COOLDOWN_MS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',

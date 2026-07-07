@@ -10,8 +10,6 @@ The jinn app is the operator dashboard SPA at `client/src/dashboard/spa/`, serve
 1. **Manual smoke** via `chrome-devtools` MCP against a live daemon — for spotting UX/layout paper cuts during development.
 2. **Automated E2E** via Playwright with route-mocked daemon API — for regression coverage in `client/test/dashboard/`.
 
-**Canonical domain model.** What these tests must cover is defined by [`client/OPERATOR-APP-SPEC.md`](../../../client/OPERATOR-APP-SPEC.md) — the operator app's canonical spec. It models the app as 14 components (§2.1 Daemon through §2.14 Generator panel), each described along four axes: **Static**, **Streams**, **Actions**, and **State messages**. The [Spec coverage map](#spec-coverage-map) below maps each component to the recipe or test that covers it.
-
 ## When to use
 
 - After SPA changes that touch routing, layout, bootstrap/status data flow, or shared shell components
@@ -139,29 +137,6 @@ In addition to the single-op concerns listed earlier:
 | Test producer/evaluator on Anvil-fork (T2.2) | [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) |
 | Eyeball the paired two-operator SPA flow (manual) | [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) |
 | Gate create→launch→join deterministically | `yarn e2e:app-flow` (`solvernet-flow` + `join` e2e, hermetic gate) |
-
-## Spec coverage map
-
-The recipes above are surface/route-keyed; this table pivots back to the spec's component model (§2.1–§2.14) so each component can be checked off against the SPA surface that renders it and the recipe or test that covers it. Unit-test paths are relative to `client/src/dashboard/spa/src/`; e2e paths are under `client/test/dashboard/`.
-
-| Spec component (§) | SPA surface(s) | Covered by |
-|---|---|---|
-| 2.1 Daemon | `pages/overview/NodeHealthCard.tsx` (Daemon + RPC rows); daemon event stream `pages/Events.tsx` + `components/EventStreamList.tsx` | Manual smoke → Overview · NodeHealthCard; `pages/overview/NodeHealthCard.test.tsx`, `pages/Events.test.tsx`. **NOTE:** Actions axis — Restart-respawn (#289) is manual-only per the `--no-ui` CAVEAT above; no gated e2e. |
-| 2.2 Identity | `pages/overview/IdentityCard.tsx` (Service / Agent / Master / Safe) | `pages/overview/IdentityCard.test.tsx`; manual smoke → Overview · WalletCard Identity section. |
-| 2.3 Funds | `pages/overview/WalletCard.tsx` (Gas / runway / faucet) | `pages/overview/WalletCard.test.tsx`, `pages/Overview.balances.test.tsx`; e2e `runway-display.e2e.test.ts` (#288), `funding-sequence.e2e.test.ts`. |
-| 2.4 Network Memberships | `pages/operator/MembershipsTab.tsx`; `pages/configuration/JoinedNetCard.tsx`; operator join `pages/operator-catalog/JoinFlow.tsx` | `pages/operator/MembershipsTab.test.tsx`, `pages/configuration/JoinedNetCard.test.tsx`; e2e `join.e2e.test.ts` (`yarn e2e:app-flow`). Manifest-cid attribution per "Things to watch for". |
-| 2.5 SolverNet Registry | `pages/operator-catalog/RegistryCatalog.tsx`; `pages/operator/RegistryTab.tsx` | `pages/operator-catalog/RegistryCatalog.test.tsx`, `pages/operator/RegistryTab.test.tsx`; manual smoke → Operator · Join (Registry catalog rendering watch-for). |
-| 2.6 Tasks (in-flight) | `pages/overview/ActivityCard.tsx` (Tasks sub-column); launched `pages/launcher-launched/TasksPanel.tsx` | `pages/overview/ActivityCard.test.tsx`, `pages/launcher-launched/TasksPanel.test.tsx`; manual smoke → Overview · ActivityCard Tasks table. |
-| 2.7 Rewards | `pages/overview/WalletCard.tsx` (Rewards section: tJINN earned / lifetime claimed); `pages/leaderboard/Leaderboard.tsx` | `pages/overview/WalletCard.test.tsx`, `pages/leaderboard/Leaderboard.test.tsx`. |
-| 2.8 Bootstrap | `regions/Onboarding.tsx` + `regions/onboarding/{SolverNetStep,HarnessSelectStep,…}.tsx` (takeover) | e2e `onboarding-flow.e2e.test.ts`, `funding-sequence.e2e.test.ts`; unit `regions/Onboarding.test.tsx`, `regions/onboarding/SolverNetStep.test.tsx`. Older setup-mode e2e `spa.e2e.test.ts`. |
-| 2.9 Harness Selection | onboarding rendering `regions/onboarding/HarnessSelectStep.tsx` (+ `TierDots.tsx` for three-tier availability) | `regions/onboarding/HarnessSelectStep.test.tsx`, `regions/onboarding/TierDots.test.tsx`; e2e `onboarding-flow.e2e.test.ts`, `HarnessSection.e2e.test.ts`. **NOTE:** the post-onboarding Settings home is the #983 split follow-up — no standalone Settings harness surface yet. |
-| 2.10 Notifications | `notifications/components/NotificationsList.tsx`, rendered in `shell/AppShell.tsx` | `notifications/components/NotificationsList.test.tsx`, `notifications/useNotifications.test.tsx`, `notifications/derive.test.ts`, `notifications/taxonomy.test.ts`; e2e `claim-failed-notification.e2e.test.ts` (#442). Restart-banner persistence in "Things to watch for". |
-| 2.11 Settings | `pages/operator/NetworkTab.tsx` (RPC + task-post panel), `pages/operator/SecurityTab.tsx`; deep-link `/configuration#network` / `#security` | `pages/operator/NetworkTab.test.tsx`, `pages/operator/SecurityTab.test.tsx`; e2e `spa-config.e2e.test.ts`, `task-post-counts.e2e.test.ts` (#918). **NOTE:** §2.9 Harness-Selection home not yet hosted here (#983 split). |
-| 2.12 Updates | no dedicated page; `update_available` kind in `notifications/taxonomy.ts` rendered via NotificationsList | Partial: `notifications/taxonomy.test.ts` covers the `update_available` kind. **NOTE:** Actions axis — current-version / check-now / apply-update — no first-class Updates surface shipped yet; deferred. |
-| 2.13 Optional components | Launcher `pages/Launcher.tsx`; Artifact Serving `pages/operator/OperatorDataMarket.tsx`; Peers — Configuration peer list | Launcher: e2e `solvernet-flow.e2e.test.ts`, `task-post-counts.e2e.test.ts`; `pages/Launcher.test.tsx`. Artifact: `pages/operator/OperatorDataMarket.test.tsx`. **NOTE:** mode-gated / partial — Peers has no dedicated e2e; opt-in surfaces render only when the mode is active. |
-| 2.14 Generator panel (#570) | `pages/launcher-launched/GeneratorPanel.tsx` | `pages/launcher-launched/GeneratorPanel.test.tsx`; e2e `solvernet-flow.e2e.test.ts` (generator hot-apply watch-for). |
-
-Cells with a coverage gap carry a **NOTE** naming the closing issue or marking the surface deferred / mode-gated.
 
 ## Common mistakes
 

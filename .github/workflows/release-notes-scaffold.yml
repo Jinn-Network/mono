@@ -36,7 +36,7 @@ jobs:
     name: Build release-notes draft
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # need full history to walk tags + commits since last stable client release
 
@@ -305,27 +305,13 @@ jobs:
             echo "\`promote-main.yml\` fast-forwards \`main\` to \`next\`, which auto-closes this PR"
             echo "as merged. A new release-review PR is opened by the next Monday scaffold run."
             echo ""
-            echo "### Pre-publish checklist"
-            echo ""
-            echo "- [ ] **Holistic diff** reviewed as a whole (the gate above)."
-            echo "- [ ] **Paired flow (Mode 2)** run (DR-2026-06-08) —"
-            echo "  \`.claude/skills/testing-jinn-app/references/scenario-multi-op-spa-flow.md\`."
-            echo "  Record the verdict here and append one line to"
-            echo "  \`log/decisions/release-readiness-runs.md\`:"
-            echo "  ✅ pass / ⚠️ infra-blocked, proceeding / ❌ product-red, holding — <notes>"
-            echo ""
             echo "### Soft gate"
             echo ""
-            echo "Both checklist items are a **soft convention** (DR-2026-05-20, DR-2026-06-08):"
-            echo "nothing mechanically blocks \`npm-publish.yml\` and the publish guard's two"
-            echo "SHA-bound check-runs (\`hermetic-gate\` + \`environment-suite\`) are untouched."
-            echo "The gate is the diff being looked at and the paired flow being run + recorded"
-            echo "before Captain clicks Publish. The paired flow is human-run on purpose — an"
-            echo "automated version can only flake against real testnet (why T2.3 was deleted)."
+            echo "This is a **soft convention** (DR-2026-05-20): nothing mechanically blocks"
+            echo "\`npm-publish.yml\`. The gate is the diff existing and being looked at."
             echo ""
             echo "Hotfixes do not open a release-review PR — their diff review is the hotfix"
-            echo "PR-to-\`main\` itself (see \`docs/runbooks/hotfix.md\`), and the paired-flow"
-            echo "gate does not apply to them (the next Monday cut re-verifies the app surface)."
+            echo "PR-to-\`main\` itself (see \`docs/runbooks/hotfix.md\`)."
             echo ""
             echo "_Opened automatically by \`release-notes-scaffold.yml\` — issue #307._"
           } > "$BODY_FILE"

@@ -71,10 +71,6 @@ interface ObservedLifecycleRequest {
 const RUNNING_BOOTSTRAP = {
   schemaVersion: 1,
   mode: 'running',
-  // #1041: the SPA gates the dashboard behind onboardingComplete (App.tsx). A
-  // running, onboarded daemon reports it; without it the app is stuck on the
-  // onboarding takeover and the operator shell never renders.
-  onboardingComplete: true,
   steps: ['wallet'],
   currentStep: 'complete',
   services: [

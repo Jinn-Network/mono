@@ -12,7 +12,6 @@ import {
   createPrivateKeyHttpSigner,
   type EthHttpSigner,
 } from '../auth/erc8128.js';
-import { recordLoopTick } from '../daemon/loop-heartbeat.js';
 
 export interface PeerSyncConfig {
   peers: string[];           // Peer HTTP endpoints, e.g., ['http://localhost:3001']
@@ -56,7 +55,6 @@ export class PeerSync {
       if (count > 0) {
         console.log(`[peers] Synced ${count} remote artifacts`);
       }
-      recordLoopTick(this.store, 'peer-sync'); // #1043 loop watchdog
       await new Promise(r => setTimeout(r, this.syncIntervalMs));
     }
   }

@@ -58,22 +58,6 @@ describe('parseRpcUrls', () => {
     expect(() => parseRpcUrls(', ,')).toThrow(/at least one RPC URL/i);
   });
 
-  it('caps the chain at 6 providers (5 vetted free defaults + 1 operator paid primary, #911)', () => {
-    expect(MAX_RPC_CHAIN_LENGTH).toBe(6);
-  });
-
-  it('keeps a 5-element distinct chain un-truncated (#911)', () => {
-    const five = [
-      'https://r0.example',
-      'https://r1.example',
-      'https://r2.example',
-      'https://r3.example',
-      'https://r4.example',
-    ];
-    expect(parseRpcUrls(five)).toHaveLength(5);
-    expect(parseRpcUrls(five)).toEqual(five);
-  });
-
   it(`caps the chain at ${MAX_RPC_CHAIN_LENGTH} providers`, () => {
     const many = Array.from({ length: MAX_RPC_CHAIN_LENGTH + 2 }, (_, i) => `https://r${i}.example`);
     const log = vi.fn();
@@ -93,11 +77,10 @@ describe('parseRpcUrls', () => {
 
   it('deduplicates before applying the cap so the effective chain matches operator intent', () => {
     const log = vi.fn();
-    // 'a' repeated 3× + 6 distinct hosts → dedup yields 7 distinct → cap to 6.
+    // 'a' repeated 3× + 4 distinct hosts → dedup yields 5 distinct → cap to 4.
     const result = parseRpcUrls(
       ['https://a.example', 'https://a.example', 'https://a.example',
-        'https://b.example', 'https://c.example', 'https://d.example',
-        'https://e.example', 'https://f.example', 'https://g.example'],
+        'https://b.example', 'https://c.example', 'https://d.example', 'https://e.example'],
       { log },
     );
     expect(result).toEqual([
@@ -105,8 +88,6 @@ describe('parseRpcUrls', () => {
       'https://b.example',
       'https://c.example',
       'https://d.example',
-      'https://e.example',
-      'https://f.example',
     ]);
   });
 

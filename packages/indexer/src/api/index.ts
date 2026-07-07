@@ -25,11 +25,9 @@
  *   GET /builders/:address/artifacts    — unified artifact list for a builder (ttz8)
  *   GET /builders/:address/scores       — per-artifact score history for a builder (ttz8, ebu7 dep)
  *
- * Route-registration order matters in Hono: the SPA static handler + `*`
- * fallback are registered LAST, after every API route — a route registered
- * after the catch-all is shadowed in production (where the SPA build always
- * exists) while staying green in CI (where it doesn't). See #1363 and
- * test/api.spa-route-order.test.ts.
+ * Route-registration order matters in Hono: `/graphql` and `/explorer` are
+ * registered before the static catch-all so exact-match routes are not
+ * shadowed.
  */
 import { db } from 'ponder:api';
 import schema, { pluginPublication } from 'ponder:schema';
@@ -42,12 +40,9 @@ import {
   getPluginScores,
   listBuilderArtifacts,
   listBuilderScores,
-  buildDistributionSignal,
-  searchCaptureMeta,
   type PluginPublicationRow,
   type AttemptEnvelopeMetaRow,
   type VerdictRow,
-  type CaptureEnvelopeMetaRow,
 } from './routes.js';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync } from 'node:fs';
@@ -64,6 +59,22 @@ app.route('/explorer', explorer);
 // under /health rather than /explorer so monitoring tooling can scope a
 // liveness check to the health namespace.
 app.route('/health', taskCoverage);
+
+// Serve the built explorer SPA from ./public if it exists; otherwise fall back
+// to the placeholder page so the indexer is never broken without a frontend build.
+const hasSpaBuild = existsSync('./public/index.html');
+
+if (hasSpaBuild) {
+  // First pass: try to serve the file directly from public/ (assets, sigils, etc.).
+  // serveStatic calls next() when no matching file exists, so the SPA fallback below
+  // handles all client-side routes.
+  app.use('*', serveStatic({ root: './public' }));
+  // SPA shell fallback: any non-API path that wasn't a real file returns index.html
+  // so client-side routing works.
+  app.get('*', serveStatic({ path: 'index.html', root: './public' }));
+} else {
+  app.get('/', (c) => c.html(PLACEHOLDER_HTML));
+}
 
 // ── Shared ebu7-schema probe ──────────────────────────────────────────────────
 // Routes 3 and 5 join against ebu7's `attemptEnvelopeMeta` + `verdict`
@@ -235,68 +246,5 @@ app.get('/builders/:address/scores', async (c) => {
     return c.json({ error: 'builder-scores unavailable', detail: String(err) }, 503);
   }
 });
-
-// ── GET /distribution-signal (#1314) ──────────────────────────────────────────
-//   v0 tag-rollup distribution signal over enriched capture envelopes.
-//   Seeds (provenance=imported) excluded by default; ?include=seeded folds
-//   them back in (the explorer's demonstrate-it-live toggle, spec §7).
-
-app.get('/distribution-signal', async (c) => {
-  const includeSeeds = c.req.query('include') === 'seeded';
-  try {
-    const s = schema as { captureEnvelopeMeta?: unknown };
-    if (!s.captureEnvelopeMeta) return c.json(buildDistributionSignal([], { includeSeeds }));
-    const metas = (await db
-      .select()
-      .from(s.captureEnvelopeMeta as never)) as unknown as CaptureEnvelopeMetaRow[];
-    return c.json(buildDistributionSignal(metas, { includeSeeds }));
-  } catch (err) {
-    return c.json({ error: 'distribution-signal unavailable', detail: String(err) }, 503);
-  }
-});
-
-// ── GET /capture-meta (#1344) ─────────────────────────────────────────────────
-//   Content-aware substring search over enriched capture metadata (tags +
-//   task summary) — the harness-layer consume path's fast path. Seeds are
-//   included: search is the consume surface.
-
-app.get('/capture-meta', async (c) => {
-  const q = c.req.query('q') ?? '';
-  const limitRaw = Number.parseInt(c.req.query('limit') ?? '50', 10);
-  const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 50, 1), 200);
-  try {
-    const s = schema as { captureEnvelopeMeta?: unknown };
-    if (!s.captureEnvelopeMeta) return c.json([]);
-    const metas = (await db
-      .select()
-      .from(s.captureEnvelopeMeta as never)) as unknown as CaptureEnvelopeMetaRow[];
-    return c.json(searchCaptureMeta(metas, q, { limit }));
-  } catch (err) {
-    return c.json({ error: 'capture-meta unavailable', detail: String(err) }, 503);
-  }
-});
-
-// ── Explorer SPA — MUST stay the last registration in this file (#1363) ──────
-// Serve the built explorer SPA from ./public if it exists; otherwise fall back
-// to the placeholder page so the indexer is never broken without a frontend build.
-//
-// Hono matches in registration order, so the `*` catch-all below swallows any
-// route registered after it. CI and the vitest suite run without an explorer
-// build (hasSpaBuild=false → no catch-all), while the production image always
-// ships one — a route added below this block passes every test and is dead in
-// production. test/api.spa-route-order.test.ts pins this.
-const hasSpaBuild = existsSync('./public/index.html');
-
-if (hasSpaBuild) {
-  // First pass: try to serve the file directly from public/ (assets, sigils, etc.).
-  // serveStatic calls next() when no matching file exists, so the SPA fallback below
-  // handles all client-side routes.
-  app.use('*', serveStatic({ root: './public' }));
-  // SPA shell fallback: any non-API path that wasn't a real file returns index.html
-  // so client-side routing works.
-  app.get('*', serveStatic({ path: 'index.html', root: './public' }));
-} else {
-  app.get('/', (c) => c.html(PLACEHOLDER_HTML));
-}
 
 export default app;

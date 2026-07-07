@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
-const TRACKED_ENVS = ['PONDER_RPC_URL_84532'];
+const TRACKED_ENVS = ['PONDER_RPC_URL_84532', 'PONDER_RPC_URL_11155111'];
 
 beforeEach(() => {
   for (const key of TRACKED_ENVS) {
@@ -35,16 +35,7 @@ afterEach(() => {
 });
 
 async function loadConfig(): Promise<{
-  chains: { baseSepolia: any };
-  contracts: {
-    JinnRouter: {
-      chain: {
-        baseSepolia: {
-          address: string;
-        };
-      };
-    };
-  };
+  chains: { baseSepolia: any; sepolia: any };
 }> {
   const mod = await import('../ponder.config.js');
   return mod.default;
@@ -84,32 +75,15 @@ describe('ponder.config baseSepolia fallback (AC4)', () => {
     const config = await loadConfig();
     expect(config.chains.baseSepolia.ethGetLogsBlockRange).toBe(2000);
   });
+});
 
-  it('declares only the baseSepolia chain (Sepolia L1 / JinnDistributor removed)', async () => {
+describe('ponder.config sepolia fallback (L1)', () => {
+  it('builds a fallback transport for L1 too', async () => {
+    process.env.PONDER_RPC_URL_11155111 = 'https://eth-a.example,https://eth-b.example';
     const config = await loadConfig();
-    expect(Object.keys(config.chains)).toEqual(['baseSepolia']);
-  });
-
-  it('indexes the active tokenless Base Sepolia router from #1304', async () => {
-    const config = await loadConfig();
-    expect(config.contracts.JinnRouter.chain.baseSepolia.address).toBe(
-      '0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247',
-    );
-  });
-
-  it('indexes the Base Sepolia OLAS/JINN ExternalStakingDistributor rewards contract', async () => {
-    const config = await loadConfig() as any;
-    expect(config.contracts.ExternalStakingDistributor.chain.baseSepolia).toMatchObject({
-      address: '0x20951FBDb4F9cB1f051ef416BCB11A9Cfe3CEf81',
-      startBlock: 41_000_000,
-    });
-  });
-
-  it('indexes the active Base Sepolia stOLAS staking proxy checkpoint events', async () => {
-    const config = await loadConfig() as any;
-    expect(config.contracts.StolasStakingProxy.chain.baseSepolia).toMatchObject({
-      address: '0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39',
-      startBlock: 41_000_000,
-    });
+    const transport = config.chains.sepolia.rpc;
+    const instantiated = transport({ chain: { id: 11155111 } as any });
+    expect(instantiated.config.type).toBe('fallback');
+    expect(instantiated.value.transports.length).toBe(2);
   });
 });

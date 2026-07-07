@@ -83,8 +83,4 @@ EXPOSE 42069
 # `ponder start` runs both the indexer and the HTTP server (GraphQL + built-in
 # /health and /ready endpoints). For HTTP-only replicas behind a proxy, use
 # `ponder serve` instead — see Ponder's "Horizontal scaling" docs.
-# `--views-schema=jinn_indexer` auto-swaps the public-facing `jinn_indexer`
-# views to this deployment's data schema on /ready (Ponder's zero-downtime
-# views pattern) — DATABASE_SCHEMA MUST stay a different, versioned name
-# (`jinn_indexer_vN`) or the two collide and the deploy fails. See deploy/README.md.
-CMD ["node", "node_modules/ponder/dist/esm/bin/ponder.js", "start", "--views-schema=jinn_indexer"]
+CMD ["node", "node_modules/ponder/dist/esm/bin/ponder.js", "start"]

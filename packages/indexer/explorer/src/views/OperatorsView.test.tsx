@@ -1,9 +1,8 @@
 /**
  * OperatorsView tests (post-#610 roster).
  *
- * The view is a flat roster: operator (short-address link) / active? /
- * activity blocks / attempts / OLAS earned. No rank, no top-level
- * resolved-rate column, no filter UI.
+ * The view is now a flat roster: operator (short-address link) / attempts /
+ * JINN earned. No rank, no top-level resolved-rate column, no filter UI.
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -25,9 +24,9 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       verdictsTotal: 8,
       verdictsPass: 7,
       resolvedRate: 7 / 8,
+      jinnEarned: '1000000000000000000',
       active: true,
       recentBlocks: [true, true, true, true, true, true, true, true],
-      jinnEarned: '1000000000000000000',
       dominantMode: 'train',
       dominantHarness: 'swe-bench',
     },
@@ -40,23 +39,23 @@ const OPERATORS_FIXTURE: OperatorsResponse = {
       verdictsTotal: 2,
       verdictsPass: 1,
       resolvedRate: 0.5,
+      jinnEarned: '500000000000000000',
       active: false,
       recentBlocks: [false, true, false, true, false, true, false, true],
-      jinnEarned: '500000000000000000',
     },
   ],
   minVerdicts: 5,
   activeOperators: 1,
-  sustainedOperators: 2,
-  operatorsAtMilestone3: 2,
+  sustainedOperators: 0,
   activeWindow: {
     startTs: 1_700_000_000,
-    endTs: 1_700_172_800,
-    blockSeconds: 21_600,
+    endTs: 1_700_000_000 + 48 * 3600,
+    blockSeconds: 6 * 3600,
     blockCount: 8,
-    requiredOlasPerBlock: '1',
+    requiredTjinnPerBlock: '3000000000000000000',
   },
   appliedFilters: {},
+  meta: { jinnAttribution: 'ok' },
   lastIndexedBlock: '12000000',
   lastIndexedAt: new Date().toISOString(),
   behindHead: null,
@@ -161,14 +160,16 @@ describe('OperatorsView', () => {
     expect(screen.getByText(/^attempts$/i)).toBeInTheDocument();
   });
 
-  it('renders the OLAS earned value for each operator', async () => {
+  it('renders the JINN earned value for each operator', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('1.00 OLAS')).toBeInTheDocument();
+      // 1e18 wei = 1.00 JINN, 5e17 wei = 0.50 JINN
+      expect(screen.getByText('1.00 JINN')).toBeInTheDocument();
     });
-    expect(screen.getByText('0.50 OLAS')).toBeInTheDocument();
+    expect(screen.getByText('0.50 JINN')).toBeInTheDocument();
+    expect(screen.getByText(/jinn earned/i)).toBeInTheDocument();
   });
 
   it('renders loading state initially', () => {
@@ -199,7 +200,7 @@ describe('OperatorsView', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
   });
 
-  it('renders Operator | Active? | Activity blocks | Attempts | OLAS earned column order', async () => {
+  it('renders Operator | Active? | Activity blocks | Attempts | JINN earned column order (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
@@ -215,67 +216,108 @@ describe('OperatorsView', () => {
         expect.stringMatching(/active\?/i),
         expect.stringMatching(/activity blocks/i),
         expect.stringMatching(/attempts/i),
-        expect.stringMatching(/olas earned/i),
+        expect.stringMatching(/jinn earned/i),
       ]),
     );
     const operatorIdx = headers.findIndex((h) => /operator/i.test(h));
     const activeIdx = headers.findIndex((h) => /active\?/i.test(h));
-    const activityBlocksIdx = headers.findIndex((h) => /activity blocks/i.test(h));
+    const recentIdx = headers.findIndex((h) => /activity blocks/i.test(h));
     const attemptsIdx = headers.findIndex((h) => /attempts/i.test(h));
-    const olasEarnedIdx = headers.findIndex((h) => /olas earned/i.test(h));
     expect(operatorIdx).toBeLessThan(activeIdx);
-    expect(activeIdx).toBeLessThan(activityBlocksIdx);
-    expect(activityBlocksIdx).toBeLessThan(attemptsIdx);
-    expect(attemptsIdx).toBeLessThan(olasEarnedIdx);
-    expect(headers.some((h) => /jinn earned/i.test(h))).toBe(false);
+    expect(activeIdx).toBeLessThan(recentIdx);
+    expect(recentIdx).toBeLessThan(attemptsIdx);
   });
 
-  it('does not render legacy token copy on the operators page or tooltips', async () => {
+  it('does NOT render the `last 8 × 6h, ≥3 tJINN each` subtitle on the Active operators KPI (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
-
-    for (const trigger of screen.getAllByRole('button', { name: /definition/i })) {
-      fireEvent.click(trigger);
-    }
-
-    expect(document.body.textContent).not.toMatch(/\bJINN\b/);
-    expect(document.body.textContent).not.toMatch(/tJINN/);
-    expect(document.body.textContent).not.toMatch(/collector-token/i);
+    expect(screen.queryByText(/last 8/i)).toBeNull();
+    expect(screen.queryByText(/≥3 tJINN each/)).toBeNull();
   });
 
-  it('defines activity as earning any OLAS in a completed bucket', async () => {
+  it('places the InfoTooltip `?` trigger in the KPI eyebrow next to the `Active operators` label (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText(/active operators/i)).toBeInTheDocument();
     });
-
-    for (const trigger of screen.getAllByRole('button', { name: /definition/i })) {
-      fireEvent.click(trigger);
-    }
-
-    expect(document.body.textContent).toMatch(/earned any OLAS/i);
-    expect(document.body.textContent).not.toMatch(/at least 3 OLAS/i);
+    // The trigger must be reachable next to the eyebrow label, not nested
+    // under the big numeric value (`.data` text). The DOM contract: the
+    // `Active operators definition` trigger and the label text share a
+    // common parent that does NOT contain the bare numeric value `1`.
+    const trigger = screen.getByRole('button', {
+      name: /active operators definition/i,
+    });
+    const labelNode = screen.getByText(/active operators/i);
+    // Trigger and label share an ancestor — the eyebrow row. The value
+    // `1` should not live inside that shared ancestor.
+    const sharedAncestor = labelNode.parentElement;
+    expect(sharedAncestor?.contains(trigger)).toBe(true);
+    // Value "1" lives in the sibling `.data` div, not in the eyebrow row.
+    expect(sharedAncestor?.textContent ?? '').not.toMatch(/^.*\b1\b.*$/s);
   });
 
-  it('renders 8 Y/N symbols separated by ` | ` per row in the Activity blocks column', async () => {
+  it('renders 8 Y/N symbols separated by ` | ` per row in the Activity blocks column (issue #905)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
     });
+    // Two rows, two body <tr> — read each row's Activity-blocks cell text content
+    // (whitespace-collapsed) and compare to the ` | `-joined expected glyphs.
     const rows = Array.from(document.querySelectorAll('tbody tr'));
-    const activityTexts = rows.map((row) => row.querySelectorAll('td')[2]?.textContent);
-    expect(activityTexts).toEqual([
-      'Y | Y | Y | Y | Y | Y | Y | Y',
-      'N | Y | N | Y | N | Y | N | Y',
-    ]);
+    expect(rows.length).toBe(2);
+    const cellTexts = rows.map((r) => {
+      const tds = r.querySelectorAll('td');
+      // Order: Operator | Active? | Activity blocks | Attempts | JINN earned
+      return (tds[2]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    });
+    expect(cellTexts[0]).toBe('Y | Y | Y | Y | Y | Y | Y | Y');
+    expect(cellTexts[1]).toBe('N | Y | N | Y | N | Y | N | Y');
+  });
+
+  it('gives each Activity blocks symbol a native `title` showing the block UTC window (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // Window: 1_700_000_000 → 1_700_000_000 + 48 * 3600, 8 buckets of 6h.
+    // Oldest block (index 0): 1_700_000_000 (2023-11-14 22:13:20 UTC) →
+    //   1_700_021_600 (2023-11-15 04:13:20 UTC).
+    // The title format mirrors the spec: `YYYY-MM-DD HH:MM → YYYY-MM-DD HH:MM UTC`.
+    const symbolCells = document.querySelectorAll('[data-testid^="activity-block-cell-"]');
+    expect(symbolCells.length).toBeGreaterThanOrEqual(8);
+    for (const cell of Array.from(symbolCells)) {
+      const t = cell.getAttribute('title') ?? '';
+      expect(t).toMatch(/→/);
+      expect(t).toMatch(/UTC/);
+    }
+  });
+
+  it('renders an InfoTooltip in the Activity blocks column header with the encoding note (issue #905)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    const trigger = screen.getByRole('button', {
+      name: /activity blocks definition/i,
+    });
+    fireEvent.click(trigger);
+    expect(
+      screen.getByText(
+        /Each cell is one of the last 8 completed UTC 6-hour blocks \(oldest left\)\. Y = operator earned ≥3 tJINN in that block; N = did not\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('renders Yes/No per row driven by row.active', async () => {
@@ -290,17 +332,58 @@ describe('OperatorsView', () => {
     expect(screen.getByText('No')).toBeInTheDocument();
   });
 
-  it('Active? is Yes when row.active is true', async () => {
+  it('opens the active-operator tooltip body when the trigger is clicked', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // At least one InfoTooltip trigger renders on the page (stat strip + column header).
+    const triggers = screen.getAllByRole('button', { name: /definition/i });
+    expect(triggers.length).toBeGreaterThan(0);
+    fireEvent.click(triggers[0]!);
+    // Liveness copy (issue #926): the `Active operators` tile + `Active?` column
+    // describe "most recent completed block," not the 48h-sustained gate.
+    expect(
+      screen.getAllByText(/Earned ≥3 tJINN in the most recent completed UTC 6-hour block/i)
+        .length,
+    ).toBeGreaterThan(0);
+    // The window dates render in the body — derived from activeWindow.startTs/endTs.
+    expect(screen.getAllByText(/UTC/).length).toBeGreaterThan(0);
+  });
+
+  it('renders a Sustained (48h) KPI from data.sustainedOperators (issue #926)', async () => {
+    mockFetchOperators();
+    const { Wrapper } = makeWrapper();
+    render(<OperatorsView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
+    });
+    // Separate from "Active operators" — the 48h Milestone-1 count.
+    expect(screen.getByText(/sustained \(48h\)/i)).toBeInTheDocument();
+    // sustainedOperators === 0 in the fixture.
+    const sustainedTrigger = screen.getByRole('button', {
+      name: /sustained operators definition/i,
+    });
+    expect(sustainedTrigger).toBeInTheDocument();
+  });
+
+  it('Active? is Yes when only the newest block qualifies (liveness, not all-8) (issue #926)', async () => {
+    // The real-world post-backlog case: active in the newest completed block
+    // only. The server sets active=true (liveness); the row must render Yes.
     const fixture: OperatorsResponse = {
       ...OPERATORS_FIXTURE,
       ranked: [
         {
           ...OPERATORS_FIXTURE.ranked[0]!,
           active: true,
+          recentBlocks: [false, false, false, false, false, false, false, true],
         },
       ],
       lowVolume: [],
       activeOperators: 1,
+      sustainedOperators: 0,
     };
     mockFetchOperators(fixture);
     const { Wrapper } = makeWrapper();
@@ -314,15 +397,19 @@ describe('OperatorsView', () => {
     expect(activeCell?.textContent).toBe('Yes');
   });
 
-  it('renders Sustained and Milestone-3 KPIs from the OLAS reward window', async () => {
+  it('sustained tooltip describes the 48h all-8 gate (issue #926)', async () => {
     mockFetchOperators();
     const { Wrapper } = makeWrapper();
     render(<OperatorsView />, { wrapper: Wrapper });
     await waitFor(() => {
       expect(screen.getByText('0xabc0…0001')).toBeInTheDocument();
     });
-    expect(screen.getByText(/sustained \(48h\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/milestone 3/i)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: /sustained operators definition/i }),
+    );
+    expect(
+      screen.getByText(/each of the last 8 completed UTC 6-hour blocks/i),
+    ).toBeInTheDocument();
   });
 
   it('does not pass mode/harness/minVerdicts to useOperators (no filter UI)', async () => {

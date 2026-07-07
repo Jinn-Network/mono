@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 
 export const FailClassSchema = z.enum(['real-bug', 'flake-infra', 'flake-timing', 'agent-crash']);
 export type FailClass = z.infer<typeof FailClassSchema>;

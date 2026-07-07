@@ -16,24 +16,6 @@ export interface HarnessUsage {
   outputTokens?: number;
 }
 
-/** Reject non-finite (NaN/Infinity) or negative numbers from harness-reported usage. */
-function isValidNonNeg(x: number): boolean {
-  return Number.isFinite(x) && x >= 0;
-}
-
-/**
- * Validate an optional Claude token-count field: accept finite non-negative
- * numbers, drop everything else to `undefined` (token counts are telemetry only).
- */
-function validTokenField(value: unknown, field: string): number | undefined {
-  if (typeof value !== 'number') return undefined;
-  if (!isValidNonNeg(value)) {
-    console.warn(`[spend] invalid ${field} from harness (value: ${value}) — field dropped`);
-    return undefined;
-  }
-  return value;
-}
-
 /** Parse Claude Code `--output-format stream-json` output for the terminal result. */
 export function parseClaudeCodeUsage(
   stdoutJsonl: string,
@@ -45,20 +27,11 @@ export function parseClaudeCodeUsage(
     let obj: Record<string, unknown>;
     try { obj = JSON.parse(trimmed); } catch { continue; }
     if (obj['type'] === 'result' && typeof obj['total_cost_usd'] === 'number') {
-      const cost = obj['total_cost_usd'] as number;
-      // total_cost_usd is gate-critical: a non-finite/negative value would poison
-      // the spend accumulator. Reject the whole line so we fall back to the heuristic.
-      if (!isValidNonNeg(cost)) {
-        console.warn(`[spend] invalid total_cost_usd from harness (value: ${cost}) — falling back to heuristic`);
-        continue;
-      }
       const usage = obj['usage'] as Record<string, unknown> | undefined;
-      // Token counts are optional telemetry (they do NOT drive Claude cost):
-      // drop just the offending field rather than rejecting the cost.
       result = {
-        costUsd: cost,
-        inputTokens: validTokenField(usage?.['input_tokens'], 'input_tokens'),
-        outputTokens: validTokenField(usage?.['output_tokens'], 'output_tokens'),
+        costUsd: obj['total_cost_usd'] as number,
+        inputTokens: typeof usage?.['input_tokens'] === 'number' ? usage['input_tokens'] as number : undefined,
+        outputTokens: typeof usage?.['output_tokens'] === 'number' ? usage['output_tokens'] as number : undefined,
       };
     }
   }
@@ -80,16 +53,6 @@ export function parseCodexUsage(
       const inT = usage['input_tokens'];
       const outT = usage['output_tokens'];
       if (typeof inT === 'number' && typeof outT === 'number') {
-        // Codex token counts ARE the cost basis (priced via priceTokens), so a
-        // non-finite/negative count must reject the whole line and fall back.
-        if (!isValidNonNeg(inT)) {
-          console.warn(`[spend] invalid input_tokens from harness (value: ${inT}) — falling back to heuristic`);
-          continue;
-        }
-        if (!isValidNonNeg(outT)) {
-          console.warn(`[spend] invalid output_tokens from harness (value: ${outT}) — falling back to heuristic`);
-          continue;
-        }
         result = { inputTokens: inT, outputTokens: outT };
       }
     }

@@ -588,19 +588,14 @@ describe('Fleet bootstrap', () => {
       .mockResolvedValue(undefined);
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await bootstrapper.bootstrap('test-password');
     expect(result.ok).toBe(true);
     expect(recoverSpy).not.toHaveBeenCalled();
     expect(sweepSpy).not.toHaveBeenCalled();
-    const logged = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(logged).toMatch(/deferring to the background EvictionLoop/);
-    // Eviction is non-load-bearing substrate — the deferral notice must not
-    // read as an error (#1060 / DR-2026-06-04).
-    const errs = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(errs).not.toMatch(/deferring to the background EvictionLoop/);
   }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   // (Removed) The startup-reStake-revert test (#789) no longer applies: resume

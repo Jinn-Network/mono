@@ -1,5 +1,0 @@
-{
-  "name": "jinn-repo-runtime",
-  "version": "0.1.0",
-  "description": "Runtime plugin for the jinn-repo.v1 SolverNet — provides domain reference for jinn-repo.v1 task shape, repo handling (checkout of Jinn-Network/mono at base_commit), and the solution payload schema."
-}

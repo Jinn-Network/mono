@@ -172,21 +172,6 @@ describe('deriveNotifications', () => {
   });
 });
 
-describe('freshly-onboarded node (#983 AC5)', () => {
-  it('emits no no_solvernets_joined / harness_not_ready / restart_required residue', () => {
-    // A node that finished onboarding has ≥1 joined SolverNet, a ready harness,
-    // and no pending restart. The 5-step guided flow gates entry to <Operating>
-    // on exactly these conditions, so the derivation must produce none of the
-    // three residue notifications for this state. baseState already models a
-    // genuinely-clean running node.
-    const out = deriveNotifications(baseState);
-    const kinds = out.map((n) => n.kind);
-    expect(kinds).not.toContain('no_solvernets_joined');
-    expect(kinds).not.toContain('harness_not_ready');
-    expect(kinds).not.toContain('restart_required');
-  });
-});
-
 describe('deriveNotifications — eviction (#773)', () => {
   it('does not emit service_evicted (removed from taxonomy)', () => {
     const out = deriveNotifications({

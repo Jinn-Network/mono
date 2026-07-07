@@ -55,8 +55,6 @@ const CFG: DispatcherConfig = {
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
   reviewBotLogin: '',
-  implGhToken: '',
-  reviewGhToken: '',
 };
 
 /**
@@ -80,7 +78,6 @@ const FIELD_LIST_JSON = JSON.stringify({
       options: [
         { id: 'opt_todo', name: 'Todo' },
         { id: 'opt_in_progress', name: 'In Progress' },
-        { id: 'opt_human', name: 'Human' },
         { id: 'opt_in_review', name: 'In Review' },
         { id: 'opt_done', name: 'Done' },
       ],
@@ -142,7 +139,6 @@ const FIELD_CACHE: FieldCache = {
     options: {
       Todo: 'opt_todo',
       'In Progress': 'opt_in_progress',
-      Human: 'opt_human',
       'In Review': 'opt_in_review',
       Done: 'opt_done',
     },
@@ -345,21 +341,6 @@ describe('dispatchIssue', () => {
 
     // (b) headless-override block — check for a distinctive phrase from headless-override.md
     expect(prompt).toContain('non-interactive');
-  });
-
-  it('authenticates the implement session as the implementer identity via GH_TOKEN (DR-2026-06-15)', async () => {
-    const { runner } = makeRunner();
-    const { spawn, calls } = makeSpawn();
-    await dispatchIssue(ISSUE, { ...CFG, implGhToken: 'impl-token-xyz' }, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
-    const env = calls[0].opts.env as Record<string, string> | undefined;
-    expect(env?.GH_TOKEN).toBe('impl-token-xyz');
-  });
-
-  it('inherits the ambient gh account when no implementer token is configured', async () => {
-    const { runner } = makeRunner();
-    const { spawn, calls } = makeSpawn();
-    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } }); // implGhToken: ''
-    expect(calls[0].opts.env).toBeUndefined();
   });
 
   it('spawns with a prompt containing the CLAUDE.md canon', async () => {
@@ -566,7 +547,6 @@ describe('dispatchIssue', () => {
           options: [
             { id: 'opt_todo_new', name: 'Todo' },
             { id: 'opt_in_progress_NEW', name: 'In Progress' },
-            { id: 'opt_human_new', name: 'Human' },
             { id: 'opt_in_review_new', name: 'In Review' },
             { id: 'opt_done_new', name: 'Done' },
           ],
@@ -637,7 +617,6 @@ describe('dispatchIssue', () => {
           options: [
             { id: 'opt_todo_new', name: 'Todo' },
             { id: 'opt_in_progress_NEW', name: 'In Progress' },
-            { id: 'opt_human_new', name: 'Human' },
             { id: 'opt_in_review_new', name: 'In Review' },
             { id: 'opt_done_new', name: 'Done' },
           ],

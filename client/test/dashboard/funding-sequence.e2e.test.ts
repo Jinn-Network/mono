@@ -82,10 +82,6 @@ const SETUP_BOOTSTRAP_STAGE2 = {
 const RUNNING_BOOTSTRAP = {
   schemaVersion: 1,
   mode: 'running',
-  // #1041: the SPA gates the dashboard behind onboardingComplete (App.tsx). This
-  // terminal running state must report it or the funding sequence never lands on
-  // the operator dashboard (activity-card) it asserts.
-  onboardingComplete: true,
   steps: ['wallet', 'fund', 'identity', 'service', 'mech'],
   currentStep: 'complete',
   services: [

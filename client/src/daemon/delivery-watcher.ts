@@ -5,14 +5,11 @@ import { isRecoverableTransactionError } from '../tx-retry.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import { validatePayload } from '../types/payloads/index.js';
 import { getSweRebenchV2StateStore } from '../solver-types/swe-rebench-v2.js';
-import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
 
 export class DeliveryWatcherLoop {
   private stopped = false;
   private stopResolve: (() => void) | null = null;
   private stopPromise: Promise<void>;
-  /** Lazily-built engine persistence, memoized on first use (issue #575). */
-  private taskRuns: TaskRunPersistence | null = null;
 
   constructor(
     private readonly adapter: ExecutionAdapter,
@@ -83,10 +80,7 @@ export class DeliveryWatcherLoop {
 
           // The adapter handles claim + evaluation creation internally.
           // We just drive the iteration and log for observability.
-          // On the engine-recovery self-delivery path the adapter rebuilds the
-          // task from an in-memory map lost across restart, so task.role is
-          // undefined. Fall back to the restart-surviving task_runs row (#575).
-          const role = delivery.task.role ?? this.resolveRoleFromStore(delivery.requestId) ?? 'unknown';
+          const role = delivery.task.role ?? 'unknown';
           console.error(`[delivery-watcher] Processed ${role} delivery: ${delivery.requestId.slice(0, 10)}...`);
           if (this.store) {
             emitEvent(this.store, {
@@ -109,22 +103,6 @@ export class DeliveryWatcherLoop {
         const delayMs = isRecoverableTransactionError(err) ? 12_000 : 5000;
         await Promise.race([new Promise(r => setTimeout(r, delayMs)), this.stopPromise]);
       }
-    }
-  }
-
-  /**
-   * Resolve a delivery's role from the engine's SQLite `task_runs` table when
-   * the in-memory task carries no role (engine-recovery self-delivery, #575).
-   * Returns null when no store is configured, no matching row exists, or a DB
-   * error occurs — the caller then degrades to 'unknown' rather than crashing.
-   */
-  private resolveRoleFromStore(requestId: string): 'restoration' | 'evaluation' | null {
-    if (!this.store) return null;
-    try {
-      this.taskRuns ??= new TaskRunPersistence(this.store.db);
-      return this.taskRuns.getByRequestId(requestId)?.taskRole ?? null;
-    } catch {
-      return null;
     }
   }
 

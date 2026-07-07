@@ -1,24 +1,28 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData } from 'viem';
 import {
   JINN_ROUTER_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
 } from '../../../src/adapters/mech/types.js';
-import {
-  ROUTER_TASK_CREATED_EVENT,
-  ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
-  ROUTER_DISCOVERY_EVENTS,
-  MECH_DELIVER_EVENT,
-  scanLatestDeliveryDataByRid,
-} from '../../../src/adapters/mech/contracts.js';
 
 describe('JinnRouter contract encoding', () => {
   const taskCidDigest = ('0x' + '11'.repeat(32)) as `0x${string}`;
   const manifestDigest = ('0x' + '22'.repeat(32)) as `0x${string}`;
-  // Tokenless-OLAS pivot: on-chain policy is `maxClaims` + `allowSolverSelfEvaluation`.
   const policy = {
+    claimWindowStart: 1n,
+    claimWindowEnd: 2n,
+    submissionDeadline: 3n,
+    claimLeaseTtlSeconds: 300,
     maxClaims: 25,
-    allowSolverSelfEvaluation: false,
+    maxClaimsPerOperator: 1,
+    policyHook: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+    evaluationPolicy: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      evaluationDeadline: 4n,
+      maxVerdictsPerEvaluator: 1,
+      disallowSolverSelfEvaluation: true,
+    },
   };
 
   it('encodes createTask calldata', () => {
@@ -123,11 +127,12 @@ describe('JinnRouter contract encoding', () => {
     const data = encodeAbiParameters(
       [
         { name: 'taskCidDigest', type: 'bytes32' },
-        { name: 'maxClaims', type: 'uint32' },
+        { name: 'maxClaims', type: 'uint16' },
+        { name: 'requiredVerdicts', type: 'uint16' },
         { name: 'solutionBudget', type: 'uint256' },
         { name: 'verdictBudget', type: 'uint256' },
       ],
-      [taskCidDigest, policy.maxClaims, 25_000_000n, 25_000_000n],
+      [taskCidDigest, policy.maxClaims, policy.evaluationPolicy.requiredVerdicts, 25_000_000n, 25_000_000n],
     );
 
     const decoded = decodeEventLog({
@@ -141,6 +146,7 @@ describe('JinnRouter contract encoding', () => {
     expect(decoded.args.taskId).toBe(1n);
     expect(decoded.args.taskCidDigest).toBe(taskCidDigest);
     expect(decoded.args.maxClaims).toBe(policy.maxClaims);
+    expect(decoded.args.requiredVerdicts).toBe(policy.evaluationPolicy.requiredVerdicts);
     expect(decoded.args.solutionBudget).toBe(25_000_000n);
     expect(decoded.args.verdictBudget).toBe(25_000_000n);
   });
@@ -180,45 +186,5 @@ describe('JinnRouter contract encoding', () => {
     expect(decoded.args.taskId).toBe(1n);
     expect(decoded.args.attemptIndex).toBe(0);
     expect(decoded.args.requestId).toBe(requestId);
-  });
-});
-
-// #116: the Task-native polling path filters getLogs by topic0 using these ABI
-// event items. Pin their names/shape so a future ABI rename can't silently empty
-// a filter (getAbiItem throws on an absent name — these consts surface that loud).
-describe('event-specific router log filters (#116)', () => {
-  it('exposes the two router discovery events with the right names', () => {
-    expect(ROUTER_TASK_CREATED_EVENT.type).toBe('event');
-    expect(ROUTER_TASK_CREATED_EVENT.name).toBe('TaskCreated');
-    expect(ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT.type).toBe('event');
-    expect(ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT.name).toBe('SolutionDeliveryClaimed');
-  });
-
-  it('ROUTER_DISCOVERY_EVENTS is exactly [TaskCreated, SolutionDeliveryClaimed]', () => {
-    expect(ROUTER_DISCOVERY_EVENTS).toHaveLength(2);
-    expect(ROUTER_DISCOVERY_EVENTS.map((e) => e.name)).toEqual([
-      'TaskCreated',
-      'SolutionDeliveryClaimed',
-    ]);
-  });
-
-  it('MECH_DELIVER_EVENT is the mech Deliver event', () => {
-    expect(MECH_DELIVER_EVENT.type).toBe('event');
-    expect(MECH_DELIVER_EVENT.name).toBe('Deliver');
-  });
-
-  it('scanLatestDeliveryDataByRid filters getLogs by the Deliver topic (not address-only)', async () => {
-    const getLogs = vi.fn().mockResolvedValue([]);
-    const mech = ('0x' + 'ab'.repeat(20)) as `0x${string}`;
-    await scanLatestDeliveryDataByRid(
-      { getLogs } as any,
-      mech,
-      0n,
-      0n,
-    );
-    expect(getLogs).toHaveBeenCalledTimes(1);
-    const arg = getLogs.mock.calls[0][0];
-    expect(arg.address).toBe(mech);
-    expect(arg.event).toBe(MECH_DELIVER_EVENT);
   });
 });

@@ -1,0 +1,34 @@
+{
+  "name": "@jinn-network/claim-relayer",
+  "version": "0.1.0",
+  "description": "Standing mock-messenger claim relayer for JINN Path A",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "jinn-claim-relayer": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "viem": "^2.52.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

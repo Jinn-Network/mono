@@ -129,22 +129,23 @@ Capture `$ISSUE_URL` and `$ISSUE_NUMBER` for Steps 3–5.
 
 ## Step 3 — Add the issue to the Project
 
-Use `--format json` and extract the item id with `jq` (verified working
-2026-07-02):
-
 ```bash
-ITEM_ID=$(gh project item-add 1 --owner Jinn-Network --url "$ISSUE_URL" --format json | jq -r '.id')
-echo "Item id: $ITEM_ID"
+ITEM_OUTPUT=$(gh project item-add 1 --owner Jinn-Network --url "$ISSUE_URL")
+echo "$ITEM_OUTPUT"
 ```
 
-> **Do not** parse plain-text output. With the currently installed gh CLI,
-> `gh project item-add` without `--format json` prints **nothing** to stdout
-> (no `Added item: PVTI_...` line), so grepping for `PVTI_...` yields an empty
-> `ITEM_ID`. The failure then surfaces one step later: every
-> `gh project item-edit` call fails with
-> `GraphQL: Could not resolve to a node with the global id of ''`.
-> If you see that error, the item id extraction is the culprit — use the
-> `--format json | jq -r '.id'` path above.
+This prints a line like:
+
+```
+Added item: PVTI_lADODh3-Ac4BXYaIz...
+```
+
+Extract the item id:
+
+```bash
+ITEM_ID=$(echo "$ITEM_OUTPUT" | grep -oE 'PVTI_[A-Za-z0-9_-]+')
+echo "Item id: $ITEM_ID"
+```
 
 ---
 

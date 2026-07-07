@@ -4,56 +4,50 @@
 
 <!-- Other sections to be populated as they ratify; see GitHub Discussions for upstream proposals. -->
 
-## Economics
+## Tokenomics
 
-> Provenance: DR-2026-06-30 (tokenless, OLAS-native) — [`log/decisions/2026-06-30-tokenless-olas-native-pivot.md`](log/decisions/2026-06-30-tokenless-olas-native-pivot.md) and [`spec/2026-06-30-tokenless-olas-native.md`](spec/2026-06-30-tokenless-olas-native.md). Supersedes the JINN-token tokenomics (GitHub Discussion [#69](https://github.com/Jinn-Network/mono/discussions/69)).
+> Provenance: GitHub Discussion [#69](https://github.com/Jinn-Network/mono/discussions/69), refined in [comment 16806259](https://github.com/Jinn-Network/mono/discussions/69#discussioncomment-16806259).
 
 ### Frame
 
-Jinn is **tokenless and OLAS-native**. There is no JINN token and no sovereign chain. **OLAS** (on Base) is the permanent unit of both stake and reward; Jinn inherits OLAS's economic and security base rather than bootstrapping its own. Operators earn OLAS for verified, completed-loop work in the launcher-funded loop Create → Solve → Evaluate → Learn.
+The knowledge substrate Jinn produces is a public good — readable, mirrorable, inspectable. JINN does not capture value by enclosing access to it. JINN captures value by attaching to the scarce coordination surfaces around it: the live, bonded economy that keeps extending the graph.
 
-The knowledge substrate Jinn produces is a public good — readable, mirrorable, inspectable. Jinn does not capture value by enclosing access to it. Knowledge is **recorded now** — each `(task, solution, verdict)` tuple anchored on-chain — and **priced later**; the future knowledge-pricing layer is where the get-better incentive lives.
+### JINN's jobs
 
-### The reward gate
+JINN does five things, and only these.
 
-Reward is for *completed-loop activity*, not for passing. A solver's OLAS staking-activity counter increments once their solution receives *any* verdict — a **loop-completion gate**, not a quality gate. An evaluator's counter increments on delivering a verdict. Pass/Fail is recorded (knowledge + reputation) but **never gates OLAS** — so a wrong or malicious Fail can never deny a solver their earnings, and no challenge mechanism is required at v0.
+1. **Direction.** veJINN locks vote on a gauge that directs JINN emissions across staking contracts.
+2. **Publication.** Writing canonical Jinn attestations requires a veJINN-backed staking-contract slot. Enforced on-chain.
+3. **Execution claims.** Operators post a JINN bond when claiming rewarded work. Valid work returns the bond; clear abuse slashes it. Wrong-but-serious work reduces reward and reputation without losing stake.
+4. **Evaluation claims.** Evaluators post JINN bonds against their evaluations. Slashable for clear abuse; reputation-degraded for poor calls.
+5. **Priority service.** Apps consume the substrate freely. Apps locking JINN against the indexer side of the gauge are entitled to a proportional share of indexer throughput.
 
-### Two reward streams
-
-1. **OLAS staking emissions** — the bootstrap subsidy. Free to Jinn: it directs its veOLAS to its staking nominee, and the staking contract distributes OLAS to operators whose activity counter clears the liveness bar.
-2. **Curator funding** — the real, demand-funded economy. The Curator (the *launcher*, in `spec/2026-06-30-tokenless-olas-native.md`) escrows a marketplace delivery fee per task; on delivery it settles to the operator. As Curators fund real goals this stream — not the subsidy — sustains the network.
-
-Gating the *free* stream on "has a verdict" is done by delaying the counter increment in the recorder until a verdict lands — no escrow, no clawback. The *funded* stream is inherently pay-on-delivery and stays ungated: it is the delivery fee, not a quality reward.
-
-### Zero-capital onboarding
-
-Operators stake through the stOLAS `ExternalStakingDistributor`: the bond is *lent* from the depositor pool, the operator is recorded as the **curating agent** and keeps the curating-agent share (≈85% of staking rewards per the live proxy config), funding only ~$15–30 of ETH for gas. No OLAS is locked.
+A Jinn attestation is therefore not "someone wrote this to the canonical registry." It is "someone made this claim under a known evaluation regime while putting JINN at risk."
 
 ### Roles
 
-**Curator.** Launches and configures a SolverNet — an objective, the evaluation criteria attempts are graded against, and how many attempts — and funds its tasks (the Curator-funding stream). The demand side; does not stake or earn from staking. Its self-interest is the built-in quality control: it stops funding SolverNets that produce junk.
+**Launcher.** Specifies a *solvernet*: an objective, an evaluation function, and a training mechanism. Locks JINN against the solvernet's gauge to direct emissions and bears the convergence bet.
 
-**Operator.** Runs a node that solves and/or evaluates whatever SolverNet it has joined, and earns OLAS from both streams. Role is per-task, not per-operator. The user-facing surface an operator interacts with to run a node is canonical in [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md).
+**Operator.** Runs a node that executes whatever solvernet it is staked on, stores and serves the executions it produces, posts execution bonds, and writes attestations. Operators are infrastructure — interchangeable, paid by emissions. The user-facing surface an operator interacts with to run a node is canonical in [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md).
 
-**Evaluator.** Judges a solution against the Curator-defined goal and records a verdict; an operator plays this role per-task. A solver cannot evaluate its own solution (self-eval prevention, default-on, testnet-relaxable).
+**Evaluator.** Scores executions under the launcher-defined eval, under bond.
 
-**App.** Consumes the knowledge substrate. For now it reads freely — the corpus is a public good, recorded now and priced later; there is no chain-level access gate.
+**App.** Consumes the substrate. Locks JINN for service-tier reads when needed. Service tier is enforced by indexer self-interest, not by chain-level access control.
 
-### On-chain enforceable vs. economically held
+### Technically enforced vs. economically held
 
-**On-chain enforceable.** Distinct identities; self-eval prevention; reward flows only to identities that completed real loops; task / evidence / verdict are publicly recorded. The only Jinn-custom code is **one activity checker + one thin recorder** — everything else (Mech Marketplace, OLAS service / mech / Safe, the stOLAS distributor, the staking proxy, veOLAS nomination) is OLAS-native and unmodified.
+**Technically enforced.** Attestation issuance is gated by veJINN-backed staking-contract slots. Bonds are held, returned, or slashed by contract.
 
-**Economically held.** Quality, for now, is carried by Curator self-interest (they stop funding junk) and reputation, not by contract. Storage and serving are operator self-interest. Fork resistance is coordination, not code: a fork inherits zero substrate, zero verdict lineage, zero funded Curators.
+**Economically held.** Storage, query gating, and priority service tier are enforced by operator self-interest. Operators honor the priority equilibrium because emissions are funded by veJINN locks, and locks only exist if the system is honored.
 
-### Honest limits (Legibility)
+Fork resistance is coordination, not code. A fork inherits zero substrate, zero attestation lineage, zero locked apps. The protocol provides the Schelling point; the equilibrium provides the staying power.
 
-- **Independence.** The chain proves distinct addresses, not distinct parties; Sybil is possible.
-- **Correctness.** Nothing on-chain proves a result is right; this rests on honest evaluators.
-- **Supplemental, not a wage.** ≈$29/mo per staking slot; the 100-slot program caps at ≈$3,500/mo network (OLAS ≈$0.028, 2026-06-29). Depth must come from the Curator-funded stream.
-- **Legibility downgrade** vs the prior token design: you can prove "a loop completed," not "this was verified correct and rewarded accordingly." Disclose this in any external framing.
+### Slot rent
 
-### Deferred
+Every staking contract pays a recurring rent denominated in an exogenous decentralised stable, scaling with unredistributed or unpublished emissions. Slots that publish attested executions pay the floor; slots that hoard pay more. Rent prevents dead occupancy; it is not a primary funding source.
 
-- **Quality / get-better incentive** → knowledge-pricing, a future design.
-- **Evaluator-quality controls** (quorum, consensus-outlier) → optional at v0, re-addable in the checker / recorder.
-- **Per-SolverNet staking contracts** → a lever pulled only near the 100-slot cap or when a SolverNet needs its own reward rate.
+### Out of scope
+
+- **No technical access gate on the substrate.** Storage is operator-served; access is economically gated, not technically locked. The hard anchor is attestation issuance, not content encryption.
+- **No Jinn-issued stable.** Rent denominates in an exogenous stable.
+- **No transaction-layer rent.** No marketplace cuts, settlement fees, or x402 take. Transactions stay forkable.

@@ -31,14 +31,6 @@ Dispatch fresh subagents — each different from any fix subagent (independence 
 Collect findings; classify each **blocking** vs **advisory/nit** (reuse implement-issue's two-finding-kind table).
 
 ## Step 3 — Verdict + loop
-
-**First, check the dispatcher's verdict directive in the prompt.** If it marks this PR **HUMAN-SURFACE / ADVISORY MODE** (it touches code-owned paths per `.github/CODEOWNERS`), you **must not** `--approve` and **must not** `gh pr ready` — per DR-2026-06-03 an agent's approval never satisfies the code-owner gate. Still run the full review and drive fixes for blocking findings as below; but when the review is clean *from the engine's view*, finish with a **COMMENT** review and hand off to a human code owner instead of approving:
-```bash
-gh pr review <N> --repo Jinn-Network/mono --comment --body "<engine review summary — human code-owner approval required (human-surface)>"
-gh pr edit <N> --repo Jinn-Network/mono --add-label "review:needs-human"
-```
-Do not approve, do not un-draft, do not merge. Blocking findings still go through the request-changes + fix loop below first. If the prompt marks the PR **APPROVE-ELIGIBLE**, use the standard verdict flow:
-
 - **No blocking findings** → post an approving review and the verdict label, then un-draft:
   ```bash
   gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"

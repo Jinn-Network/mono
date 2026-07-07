@@ -1,7 +1,5 @@
 # Launching Jinn as an independent blockchain — decision record and reasoning
 
-> **Status (2026-06-30): superseded by DR-2026-06-30 (tokenless, OLAS-native).** Jinn drops the native token and the sovereign chain; OLAS is the economic layer. For the current direction read `spec/2026-06-30-tokenless-olas-native.md` and `log/decisions/2026-06-30-tokenless-olas-native-pivot.md`.
-
 - **Version:** 0.4.3 (discussion draft — major revision)
 - **Date:** 2026-06-05
 - **Author:** drafted with Opus, for Oak + Ritsu review

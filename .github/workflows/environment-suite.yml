@@ -89,7 +89,7 @@ jobs:
       # against. (The default checkout ref is `next` for the schedule and the
       # branch the dispatch was launched from for workflow_dispatch.)
       - name: Checkout (for SHA resolution)
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -154,7 +154,7 @@ jobs:
       # the suite actually validates and binds its verdict to.
       - name: Checkout candidate SHA
         if: steps.resolve.outputs.skip != 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.resolve.outputs.candidate_sha }}
           fetch-depth: 0

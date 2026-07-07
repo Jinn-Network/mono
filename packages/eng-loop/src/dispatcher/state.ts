@@ -155,30 +155,9 @@ export async function deriveInFlight(
   runner: CommandRunner,
 ): Promise<{ inFlight: InFlightSession[]; drift: string[] }> {
   // 1. Build a set of issue numbers that are In Progress, from the snapshot.
-  //
-  //    Escalated sessions (`Blocked on: Human`) are PARKED, not in-flight. An
-  //    escalation keeps Status "In Progress" (there is no parked Status) and
-  //    retains its worktree so a human can resume it — but it must NOT consume a
-  //    concurrency slot, or accumulated escalations freeze the dispatcher (the
-  //    slot-leak: 5 escalations wedged a cap-5 loop, observed live 2026-06-13).
-  //    We therefore exclude any `Blocked on: Human` issue from the in-flight set
-  //    and track it separately so its retained worktree is not mistaken for
-  //    orphan drift. Keying on `blockedOn` (not Status) makes this robust to a
-  //    future dedicated "Human" Status lane: the escalation marker is the same.
   const inProgressIssues = new Map<number, true>();
-  const escalatedIssues = new Set<number>();
   for (const item of snapshot.items) {
-    if (item.contentType !== 'Issue') continue;
-    // Parked iff escalated by either marker: the `Blocked on: Human` field (set
-    // at escalation) or the `Human` Status lane (where the dispatcher promotes
-    // escalations). Checking both keeps parking correct even if one is cleared
-    // independently — e.g. a human re-opens "Blocked on" while triaging but
-    // leaves the issue in the Human lane.
-    if (item.blockedOn === 'Human' || item.status === 'Human') {
-      escalatedIssues.add(item.number);
-      continue;
-    }
-    if (item.status === 'In Progress') {
+    if (item.status === 'In Progress' && item.contentType === 'Issue') {
       inProgressIssues.set(item.number, true);
     }
   }
@@ -222,11 +201,9 @@ export async function deriveInFlight(
     }
   }
 
-  // For each task worktree, check if there is an In Progress issue.
-  // Escalated (parked) issues retain their worktree by design, so a worktree
-  // belonging to one is expected — not drift.
+  // For each task worktree, check if there is an In Progress issue
   for (const [issueNumber, wt] of taskWorktrees) {
-    if (!inProgressIssues.has(issueNumber) && !escalatedIssues.has(issueNumber)) {
+    if (!inProgressIssues.has(issueNumber)) {
       drift.push(
         `drift: worktree ${wt.worktreePath} exists for issue #${issueNumber} but that issue is not In Progress on the board`,
       );

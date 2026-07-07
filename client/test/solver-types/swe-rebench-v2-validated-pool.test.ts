@@ -10,8 +10,6 @@ import {
   MAX_TRANSIENT_PASSES,
   TRANSIENT_INFRA_REASONS,
   exportScorableVettedPoolArtifact,
-  excludeFromVettedPoolArtifact,
-  shouldRepublishVettedPool,
   hashVettedPoolArtifact,
   loadVettedPoolArtifactScorableEntries,
   sweRebenchV2VettedPoolArtifactMetadataKey,
@@ -302,66 +300,6 @@ describe('swe-rebench-v2 vetted pool artifact helpers', () => {
       .toBe(hashVettedPoolArtifact(artifact));
     expect(sweRebenchV2VettedPoolArtifactMetadataKey('bafy-manifest'))
       .toBe('solvernet-artifact:bafy-manifest:swe-rebench-v2-vetted-pool');
-  });
-});
-
-describe('excludeFromVettedPoolArtifact (#986 substrate-level held-out exclusion)', () => {
-  async function buildArtifact(ids: string[]) {
-    const dir = tmpDir();
-    const store = new ValidatedPoolStore({ stateDir: dir });
-    for (const id of ids) {
-      await store.record(
-        id,
-        { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-06-05T00:00:00Z', rowHash: 'sha256:' + 'f'.repeat(64) },
-        EVAL_SEMANTICS_VERSION,
-      );
-    }
-    const artifact = await exportScorableVettedPoolArtifact(store, EVAL_SEMANTICS_VERSION, { generatedAt: '2026-06-05T00:00:00.000Z' });
-    if (!artifact) throw new Error('expected artifact');
-    return artifact;
-  }
-
-  it('drops exactly the excluded ids and preserves the rest', async () => {
-    const artifact = await buildArtifact(['org__a', 'org__b', 'org__c']);
-    const filtered = excludeFromVettedPoolArtifact(artifact, new Set(['org__b']));
-    expect(filtered.entries.map((e) => e.instance_id)).toEqual(['org__a', 'org__c']);
-  });
-
-  it('is a no-op when the exclusion set is empty and never mutates its input', async () => {
-    const artifact = await buildArtifact(['org__a', 'org__b']);
-    const before = artifact.entries.map((e) => e.instance_id);
-    const filtered = excludeFromVettedPoolArtifact(artifact, new Set());
-    expect(filtered.entries.map((e) => e.instance_id)).toEqual(['org__a', 'org__b']);
-    expect(artifact.entries.map((e) => e.instance_id)).toEqual(before);
-  });
-
-  it('yields the same content+hash as an artifact built without the held-out entry', async () => {
-    const full = await buildArtifact(['org__a', 'org__b', 'org__c']);
-    const filtered = excludeFromVettedPoolArtifact(full, new Set(['org__b']));
-    const clean = await buildArtifact(['org__a', 'org__c']);
-    expect(loadVettedPoolArtifactScorableEntries(filtered).ids).toEqual(new Set(['org__a', 'org__c']));
-    expect(hashVettedPoolArtifact(filtered)).toBe(hashVettedPoolArtifact(clean));
-    expect(hashVettedPoolArtifact(filtered)).not.toBe(hashVettedPoolArtifact(full));
-  });
-});
-
-describe('shouldRepublishVettedPool (#986 held-out contamination trigger)', () => {
-  const heldOut = new Set(['b']);
-  it('republishes when there is no existing publication', () => {
-    expect(shouldRepublishVettedPool({ existingIds: null, heldOutIds: heldOut, validatedNewer: false })).toBe(true);
-  });
-  it('republishes when the validated pool is newer (preserves the prior timestamp-gated refresh)', () => {
-    expect(shouldRepublishVettedPool({ existingIds: new Set(['a', 'c']), heldOutIds: heldOut, validatedNewer: true })).toBe(true);
-  });
-  it('reuses an uncontaminated publication that is not newer (write-once / published-authoritative)', () => {
-    expect(shouldRepublishVettedPool({ existingIds: new Set(['a', 'c']), heldOutIds: heldOut, validatedNewer: false })).toBe(false);
-  });
-  it('republishes when the existing publication still lists a now-held-out instance (the rollout/slate-bump trigger)', () => {
-    expect(shouldRepublishVettedPool({ existingIds: new Set(['a', 'b', 'c']), heldOutIds: heldOut, validatedNewer: false })).toBe(true);
-  });
-  it('does NOT republish merely because the publication diverges from local scorable (no held-out overlap)', () => {
-    // existing lists an instance absent from local scorable, but none are held-out
-    expect(shouldRepublishVettedPool({ existingIds: new Set(['z']), heldOutIds: heldOut, validatedNewer: false })).toBe(false);
   });
 });
 

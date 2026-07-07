@@ -15,15 +15,13 @@ function defaultProps(): WalletCardProps {
     totalEth: '0.0088',
     runwayDays: 1,
     perRole: { master: '0.0088', agent: '—', safe: '—' },
-    olasPending: '0.0000',
-    olasClaimed: '0.0000',
-    olasClaimedLast24h: '0.0000',
-    olasState: 'ready',
-    olasError: null,
+    tjinnEarned: '0.0000',
+    tjinnEarnedLast24h: '0.0000',
+    tjinnState: 'ready',
+    tjinnError: null,
     lastClaimAt: null,
     lastPasswordRotationAt: null,
     onTopUp: vi.fn(),
-    onClaim: vi.fn(),
   };
 }
 
@@ -51,105 +49,98 @@ describe('WalletCard', () => {
     expect(gas.textContent).toMatch(/eth/i);
     expect(gas.textContent).toMatch(/1d runway/);
     expect(screen.getByTestId('wallet-topup').textContent).toMatch(/top up from faucet/i);
+    // Per-role drill-down is commented out — no `per role` button on the page.
     expect(screen.queryByRole('button', { name: /per role/i })).toBeNull();
   });
 
-  it('shows pending OLAS, claimed OLAS, and a manual Claim action without legacy reward copy', () => {
-    const { ui } = wrap(
-      <WalletCard
-        {...defaultProps()}
-        olasPending="1.2500"
-        olasClaimed="3.5000"
-        olasClaimedLast24h="0.2500"
-      />,
-    );
+  it('does not show collector reward rows or claim actions', () => {
+    const { ui } = wrap(<WalletCard {...defaultProps()} tjinnEarned="1.2500" />);
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/pending olas/i);
+    expect(rewards.textContent).toMatch(/lifetime/i);
     expect(rewards.textContent).toContain('1.2500');
-    expect(rewards.textContent).toMatch(/claimed last 24hrs/i);
-    expect(rewards.textContent).toMatch(/lifetime claimed/i);
+    expect(rewards.textContent).toMatch(/jinn earned last 24hrs/i);
+    expect(rewards.textContent).not.toMatch(/lifetime claimed/i);
     expect(rewards.textContent).not.toMatch(/collector pending/i);
     expect(rewards.textContent).not.toMatch(/collector claimed/i);
     expect(rewards.textContent).not.toMatch(/collector-token/i);
-    expect(screen.getByTestId('wallet-claim').textContent).toMatch(/claim olas/i);
-    expect(screen.getByRole('button', { name: /claim olas/i })).toBeTruthy();
+    expect(screen.queryByTestId('wallet-claim')).toBeNull();
+    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
   });
 
-  it('shows the pending OLAS stat in the Rewards section when the read is ready', () => {
+  it('shows the lifetime tJINN stat in the Rewards section when the read is ready', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasPending="1.5000"
-        olasState="ready"
+        tjinnEarned="1.5000"
+        tjinnState="ready"
       />,
     );
     render(ui);
     const rewards = screen.getByTestId('wallet-section-rewards');
-    expect(rewards.textContent).toMatch(/pending olas/i);
-    const olasValue = screen.getByTestId('olas-pending-value');
-    expect(olasValue.textContent).toBe('1.5000');
-    expect(rewards.textContent).toContain('OLAS');
-    expect(screen.queryByTestId('olas-pending-state')).toBeNull();
+    expect(rewards.textContent).toMatch(/lifetime/i);
+    const tjinnValue = screen.getByTestId('tjinn-earned-value');
+    expect(tjinnValue.textContent).toBe('1.5000');
+    // Ready state shows the unit and emits no state copy.
+    expect(rewards.textContent).toContain('tJINN');
+    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
   });
 
-  it('shows OLAS claimed in the last 24hrs below pending rewards', () => {
+  it('shows JINN earned in the last 24hrs above the lifetime balance', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasPending="1.5000"
-        olasClaimedLast24h="0.2500"
-        olasState="ready"
+        tjinnEarned="1.5000"
+        tjinnEarnedLast24h="0.2500"
+        tjinnState="ready"
       />,
     );
     render(ui);
-    const region = screen.getByTestId('olas-claimed-24h-region');
-    expect(region.textContent).toMatch(/claimed last 24hrs/i);
-    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('0.2500');
-    expect(region.textContent).toContain('OLAS');
+    const region = screen.getByTestId('tjinn-earned-24h-region');
+    expect(region.textContent).toMatch(/jinn earned last 24hrs/i);
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
+    expect(region.textContent).toContain('tJINN');
   });
 
-  it('shows pending copy while staking rewards are unresolved', () => {
+  it('shows pending copy and no value while the tJINN read is unresolved', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasPending="—"
-        olasClaimedLast24h={null}
-        olasState="pending"
+        tjinnEarned="—"
+        tjinnEarnedLast24h={null}
+        tjinnState="pending"
       />,
     );
     render(ui);
-    expect(screen.getByTestId('olas-pending-value').textContent).toBe('pending');
-    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('pending');
-    expect(screen.getByTestId('olas-pending-state').textContent).toMatch(
-      /no rewards yet/i,
+    expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending');
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('pending');
+    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
+      /waiting for sepolia balance/i,
     );
-    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('shows the error string when the OLAS read failed', () => {
+  it('shows the error string when the tJINN read failed', () => {
     const { ui } = wrap(
       <WalletCard
         {...defaultProps()}
-        olasPending="—"
-        olasClaimedLast24h={null}
-        olasState="error"
-        olasError="OLAS staking rewards temporarily unavailable."
+        tjinnEarned="—"
+        tjinnEarnedLast24h={null}
+        tjinnState="error"
+        tjinnError="Sepolia tJINN balance temporarily unavailable."
       />,
     );
     render(ui);
-    expect(screen.getByTestId('olas-pending-value').textContent).toBe('unavailable');
-    expect(screen.getByTestId('olas-pending-state').textContent).toMatch(
+    expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('unavailable');
+    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
       /temporarily unavailable/i,
     );
-    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('unavailable');
-    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('unavailable');
   });
 
-  it('wraps the pending OLAS row in a polite live region', () => {
+  it('wraps the tJINN-earned row in a polite live region', () => {
     const { ui } = wrap(<WalletCard {...defaultProps()} />);
     render(ui);
-    const region = screen.getByTestId('olas-pending-region');
+    const region = screen.getByTestId('tjinn-earned-region');
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.getAttribute('aria-atomic')).toBe('true');
   });
@@ -160,7 +151,8 @@ describe('WalletCard', () => {
     expect(screen.getByText(/last rotated/i)).toBeTruthy();
     fireEvent.click(screen.getByTestId('wallet-change-password'));
     expect(hook).toBeTruthy();
-    expect(window.location.pathname || '/').toBeTruthy();
+    // The button is a real button → click routes via wouter's memory location.
+    expect(window.location.pathname || '/').toBeTruthy(); // sanity; deep route assertion belongs in App.routing.test.tsx
   });
 
   it('invokes onTopUp when Top up is clicked', () => {
@@ -169,69 +161,6 @@ describe('WalletCard', () => {
     render(ui);
     fireEvent.click(screen.getByTestId('wallet-topup'));
     expect(onTopUp).toHaveBeenCalledOnce();
-  });
-
-  it('invokes onClaim when Claim OLAS is clicked', () => {
-    const onClaim = vi.fn();
-    const { ui } = wrap(<WalletCard {...defaultProps()} olasPending="0.0100" onClaim={onClaim} />);
-    render(ui);
-    fireEvent.click(screen.getByTestId('wallet-claim'));
-    expect(onClaim).toHaveBeenCalledOnce();
-  });
-
-  it('disables Claim OLAS when there is no pending OLAS or another action is running', () => {
-    const { ui: zeroPending } = wrap(<WalletCard {...defaultProps()} olasPending="0.0000" />);
-    const first = render(zeroPending);
-    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
-    first.unmount();
-
-    const { ui: activeAction } = wrap(
-      <WalletCard {...defaultProps()} olasPending="0.0100" actionsDisabled />,
-    );
-    render(activeAction);
-    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('surfaces remaining top-ups for today when quota is partially used (issue #560)', () => {
-    const { ui } = wrap(
-      <WalletCard
-        {...defaultProps()}
-        topupDailyCap={10}
-        topupCallsRemaining={4}
-        topupCooldownExpiresAt={null}
-      />,
-    );
-    render(ui);
-    const gas = screen.getByTestId('wallet-section-gas');
-    expect(gas.textContent).toMatch(/4 of 10 top-ups left today/i);
-    expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it('disables the button and shows cap-reached copy when no top-ups remain (issue #560)', () => {
-    const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
-    const { ui } = wrap(
-      <WalletCard
-        {...defaultProps()}
-        topupDailyCap={10}
-        topupCallsRemaining={0}
-        topupCooldownExpiresAt={expiresAt}
-      />,
-    );
-    render(ui);
-    expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(true);
-    const gas = screen.getByTestId('wallet-section-gas');
-    expect(gas.textContent).toMatch(/daily faucet cap reached/i);
-    expect(gas.textContent).toMatch(/resets in/i);
-    expect(gas.textContent).toMatch(/12 hours/i);
-  });
-
-  it('keeps the button enabled and shows no quota copy when quota props are undefined (back-compat)', () => {
-    const { ui } = wrap(<WalletCard {...defaultProps()} />);
-    render(ui);
-    expect((screen.getByTestId('wallet-topup') as HTMLButtonElement).disabled).toBe(false);
-    const gas = screen.getByTestId('wallet-section-gas');
-    expect(gas.textContent).not.toMatch(/top-ups left today/i);
-    expect(gas.textContent).not.toMatch(/daily faucet cap reached/i);
   });
 
 });

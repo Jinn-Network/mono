@@ -29,12 +29,8 @@ interface GhPrView {
 function hasCurrentReview(view: GhPrView, botLogin: string): boolean {
   if (view.commits.length === 0) return false;
   const latestCommitMs = Math.max(...view.commits.map((c) => Date.parse(c.committedDate)));
-  // Case-fold: GitHub logins are case-insensitive, and the dual-identity boot
-  // check (identity.ts) also compares case-insensitively — keep them consistent
-  // so a configured-login casing difference can't cause endless re-review.
-  const bot = botLogin.toLowerCase();
   return view.reviews.some(
-    (r) => (r.author?.login ?? '').toLowerCase() === bot && Date.parse(r.submittedAt) >= latestCommitMs,
+    (r) => (r.author?.login ?? '') === botLogin && Date.parse(r.submittedAt) >= latestCommitMs,
   );
 }
 

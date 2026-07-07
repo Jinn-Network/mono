@@ -18,10 +18,8 @@
  * `readFileSync` so the tests run without a real codex binary or a real
  * `~/.codex/auth.json`.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
-import { Store } from '../../src/store/store.js';
-import { startApiServer, type ApiServer } from '../../src/api/server.js';
 
 interface ExecFileExitOk {
   type: 'ok';
@@ -100,17 +98,9 @@ vi.mock('node:child_process', async () => {
   return { execFile: mockedExecFile };
 });
 
-// Mock only `readFileSync` (the codex auth-file probe); delegate everything
-// else to the real module so importing `startApiServer` into this file (for
-// the #679 UI-token-gate block) keeps the real `existsSync` its build-info
-// load path depends on.
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
-  return {
-    ...actual,
-    readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
-  };
-});
+vi.mock('node:fs', () => ({
+  readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
+}));
 
 const { addCodexDoctorRoutes, probeCodexDoctor } = await import(
   '../../src/api/codex-doctor-endpoint.js'
@@ -677,52 +667,5 @@ describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
     expect(warnSpy.mock.calls[0]![0]).toContain('#675');
 
     warnSpy.mockRestore();
-  });
-});
-
-// #679 — the route GET /api/codex/doctor must sit behind the UI token gate
-// (the JSDoc at server.ts:160 already claims it does). startApiServer mounts
-// `requireUiToken(config.ui.token)` for every sibling `/api/*` prefix; this
-// block proves /api/codex/* is now gated like the others. Unauthenticated GETs
-// leaked codex doctor stdout/stderr (which can echo ~/.codex paths) before the
-// fix.
-describe('GET /api/codex/doctor — UI token gate (#679)', () => {
-  const UI_TOKEN = 'ui-token-679';
-  let store: Store;
-  let server: ApiServer;
-
-  beforeEach(async () => {
-    // The codex install probe shells `codex --version`; pin it to a benign
-    // "installed/ok" outcome so the authed 200 path resolves fast and stays
-    // hermetic (no real binary, no real filesystem).
-    execFileMock.mockReturnValue({ type: 'ok', stdout: 'codex 1.2.3\n', stderr: '' });
-    store = new Store(':memory:');
-    server = await startApiServer({
-      port: 0,
-      store,
-      apiToken: 'api-token',
-      ui: { token: UI_TOKEN, handshakeKey: 'handshake-key' },
-      codexDoctor: {},
-    });
-  });
-
-  afterEach(async () => {
-    await server?.close();
-    store?.close();
-  });
-
-  it('rejects an unauthenticated GET with 401 (no cookie, no x-jinn-ui-token header)', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.port}/api/codex/doctor`);
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'unauthorized' });
-  });
-
-  it('allows a GET carrying a valid x-jinn-ui-token header with 200 and the doctor body', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.port}/api/codex/doctor`, {
-      headers: { 'x-jinn-ui-token': UI_TOKEN },
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as CodexDoctorBody;
-    expect(body.installed).toBe(true);
   });
 });

@@ -21,7 +21,7 @@
  * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.2
  */
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 
 export const SweRebenchV2SolutionPayloadSchema = z.object({
   schemaVersion: z.literal('swe-rebench-v2-solution.v1'),

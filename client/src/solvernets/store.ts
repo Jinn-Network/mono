@@ -18,7 +18,7 @@ import { existsSync } from 'fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import {
   SolverNetManifestV1Schema,
   type SolverNetManifestV1,

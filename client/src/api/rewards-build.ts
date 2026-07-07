@@ -12,45 +12,19 @@ export interface RewardsV1ServiceEntry {
   index: number;
   pending: string;
   claimed: string;
-  asset: 'OLAS';
-  lastClaimAt: string | null;
-  lastClaimTxHash: string | null;
+  asset: 'reward';
 }
 
 export interface RewardsV1Response {
   schemaVersion: 1;
   generatedAt: string;
-  readState: 'ready' | 'error';
-  totalPending: string;
-  totalClaimed: string;
   lastClaimAt: string | null;
-  lastClaimTickAt: string | null;
   nextCheckpointAt: string | null;
-  error?: string;
   services: RewardsV1ServiceEntry[];
 }
 
-function addWei(a: string, b: string): string {
-  try {
-    return (BigInt(a) + BigInt(b)).toString();
-  } catch {
-    return a;
-  }
-}
-
-function latestClaim(
-  claimedByService: Record<number, { total: string; lastAt: string; lastTxHash: string }>,
-): string | null {
-  let latest: string | null = null;
-  for (const row of Object.values(claimedByService)) {
-    if (!latest || row.lastAt > latest) latest = row.lastAt;
-  }
-  return latest;
-}
-
 export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
-  const readState = raw.pendingStakingRewardsError ? 'error' : 'ready';
-  const total = readState === 'ready' ? (raw.pendingStakingRewardsWei ?? '0') : '0';
+  const total = raw.pendingStakingRewardsWei ?? '0';
   const list = raw.fleet?.services ?? [];
   const pendingByService = raw.pendingByService ?? {};
   const claimedByService = raw.claimedByService ?? {};
@@ -67,13 +41,10 @@ export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
     }
   }
 
-  let totalClaimed = '0';
   const services = list.map((svc) => {
     const index = displayFleetServiceIndex(svc);
     const stakedLike = isStakedLikeServiceStep(svc.step);
-    const claim = claimedByService[index];
-    const claimed = claim?.total ?? '0';
-    totalClaimed = addWei(totalClaimed, claimed);
+    const claimed = claimedByService[index]?.total ?? '0';
     return {
       index,
       pending: stakedLike
@@ -85,24 +56,15 @@ export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
                 : '0'))
         : '0',
       claimed,
-      asset: 'OLAS' as const,
-      lastClaimAt: claim?.lastAt ?? null,
-      lastClaimTxHash: claim?.lastTxHash ?? null,
+      asset: 'reward' as const,
     };
   });
-
-  const lastClaimAt = latestClaim(claimedByService);
 
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    readState,
-    totalPending: total,
-    totalClaimed,
-    lastClaimAt,
-    lastClaimTickAt: raw.lastRewardClaimTickAt,
+    lastClaimAt: raw.lastRewardClaimTickAt,
     nextCheckpointAt: raw.nextCheckpointAt ?? null,
-    ...(raw.pendingStakingRewardsError ? { error: raw.pendingStakingRewardsError } : {}),
     services,
   };
 }

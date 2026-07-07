@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState, type JSX } from 'react';
 import { toast } from 'sonner';
 import { api } from '../api/client.js';
@@ -8,7 +8,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
-import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../api/types.js';
+import type { SolverNetsCatalogResponse, TjinnStatus } from '../api/types.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap
@@ -65,12 +65,10 @@ interface OverviewStatusV1 {
     }>;
   };
   /**
-   * stOLAS staking rewards surfaced on /v1/status.rewards.
+   * Real Sepolia tJINN ERC-20 Safe balance (#406, daemon half PR #447).
+   * Optional: older daemons predate this field.
    */
-  rewards?: {
-    claimedStakingRewardsWei?: string;
-    claimedStakingRewardsLast24hWei?: string | null;
-  };
+  tJinn?: TjinnStatus;
   /** Security metadata. Not yet surfaced by the daemon — field absent until added. */
   security?: {
     lastPasswordRotationAt?: string | null;
@@ -135,8 +133,6 @@ interface OverviewStatusV1 {
       capPerBlock: number;
       capPerWeek: number;
       paused: boolean;
-      /** True when the credential has spend this 7d window (issue #891). Optional for backward-compat. */
-      active?: boolean;
       blockResetsAt: string;
       weekResetsAt: string;
     }>;
@@ -188,6 +184,21 @@ function formatEth(wei?: string): string {
   }
 }
 
+/**
+ * Format a wei amount for a one-line top-up confirmation. Drips are tiny, so
+ * show enough precision to be meaningful (6 dp) without a trailing wall of
+ * zeros.
+ */
+function formatDripEth(wei?: string): string | null {
+  if (!wei || !/^\d+$/.test(wei)) return null;
+  try {
+    const eth = Number(BigInt(wei)) / 1e18;
+    return `${eth.toFixed(6)} ETH`;
+  } catch {
+    return null;
+  }
+}
+
 /** Shorten a tx hash for inline display (0x1234…abcd). */
 function truncTx(hash?: string): string | null {
   if (!hash || hash.length < 12) return hash ?? null;
@@ -196,23 +207,10 @@ function truncTx(hash?: string): string | null {
 
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-  // Issue #560 — batched faucet top-up quota for the WalletCard. Refetched
-  // after a batch top-up so the remaining-count + cooldown copy stays live.
-  const { data: dripQuota } = useQuery({
-    queryKey: ['dripQuota'],
-    queryFn: () => api.getDripQuota(),
-    refetchInterval: 30_000,
-  });
   const { data: status, isError: statusIsError } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
     refetchInterval: 5_000,
-  });
-  const { data: rewards, isError: rewardsIsError } = useQuery<RewardsResponse>({
-    queryKey: ['rewards'],
-    queryFn: () => api.getRewards(),
-    refetchInterval: 30_000,
   });
   const { data: bootstrap } = useQuery<BootstrapWithSolverNets>({
     queryKey: ['bootstrap'],
@@ -243,17 +241,21 @@ export function OverviewPage(): JSX.Element {
   // through `jinn status`.
   const primaryServiceId = services.find((s) => s.serviceId !== null)?.serviceId ?? null;
 
-  const olasState: StakingRewardReadState =
-    rewardsIsError || rewards?.readState === 'error' ? 'error' : rewards ? 'ready' : 'pending';
-  const olasPending = olasState === 'ready' ? formatEth(rewards?.totalPending ?? '0') : '—';
-  const olasClaimed = olasState === 'ready' ? formatEth(rewards?.totalClaimed ?? '0') : '—';
-  const olasClaimedLast24h =
-    status?.rewards?.claimedStakingRewardsLast24hWei != null
-      ? formatEth(status.rewards.claimedStakingRewardsLast24hWei)
-      : status
-        ? '0.0000'
-        : null;
-  const olasError = rewards?.error ?? (rewardsIsError ? 'OLAS rewards temporarily unavailable.' : null);
+  // tJINN earned — the real Sepolia ERC-20 Safe balance (#406). When the read
+  // has resolved (`state === 'ready'`) a null `safeBalanceWei` is a
+  // confirmed-empty balance, so format it as '0' rather than the bare '—'
+  // `formatEth` returns for missing input. `pending`/`error` keep '—'; the
+  // state copy handled by WalletCard's `tjinnDisplay` carries the meaning.
+  const tjinnState = status?.tJinn?.state ?? 'pending';
+  const tjinnEarned =
+    status?.tJinn?.state === 'ready'
+      ? formatEth(status.tJinn.safeBalanceWei ?? '0')
+      : formatEth(status?.tJinn?.safeBalanceWei ?? undefined);
+  const tjinnEarnedLast24h =
+    status?.tJinn?.operatorMintedLast24hWei != null
+      ? formatEth(status.tJinn.operatorMintedLast24hWei)
+      : null;
+  const tjinnError = status?.tJinn?.error ?? null;
 
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
@@ -351,8 +353,8 @@ export function OverviewPage(): JSX.Element {
   // backend ships it (currently hardcoded `rpcHealthy={true}` in App.tsx).
   const daemonStatus: DaemonStatus = statusIsError && status === undefined ? 'stopped' : 'running';
   const rpcStatus: RpcStatus = 'healthy';
-  // No daemon state-message line under "Running" — the prior state-message
-  // line was idle copy like "waiting for next task" that added nothing.
+  // No daemon state-message line under "Running" — the prior `liveNow.line`
+  // text was idle copy like "waiting for next task" that added nothing.
   // Attention-worthy state (harness mismatch, etc.) surfaces through the
   // notifications row (spec §2.10). Node Health stays a glance-level health card.
   const daemonStateMessage: string | undefined = undefined;
@@ -458,80 +460,38 @@ export function OverviewPage(): JSX.Element {
             agent: perRoleAgentEth,
             safe: perRoleSafeEth,
           }}
-          olasPending={olasPending}
-          olasClaimed={olasClaimed}
-          olasClaimedLast24h={olasClaimedLast24h}
-          olasState={olasState}
-          olasError={olasError}
-          lastClaimAt={rewards?.lastClaimAt ?? null}
+          tjinnEarned={tjinnEarned}
+          tjinnEarnedLast24h={tjinnEarnedLast24h}
+          tjinnState={tjinnState}
+          tjinnError={tjinnError}
           lastPasswordRotationAt={status?.security?.lastPasswordRotationAt ?? null}
-          topupDailyCap={dripQuota?.dailyCap}
-          topupCallsRemaining={dripQuota?.callsRemaining}
-          topupCooldownExpiresAt={dripQuota?.cooldownExpiresAt ?? null}
           onTopUp={() =>
             runAction(
               'Top up gas',
               async () => {
-                // Issue #560: one click → a BATCH of drips up to the daily cap.
-                // The daemon caps the batch and enters a 24h cooldown once the
-                // cap is reached, so the operator gets the full day's allowance
-                // in one action instead of clicking once per 0.0001 ETH drip.
-                const res = await api.triggerDrip({ batch: true });
-                // Refresh the quota so the remaining-count + cooldown copy
-                // reflect this batch immediately.
-                void queryClient.invalidateQueries({ queryKey: ['dripQuota'] });
+                // Issue #336: one explicit click → exactly one faucet drip.
+                // `singleDrip: true` makes the daemon fire the faucet once and
+                // return immediately — no server-side loop, so the gas number
+                // never "magically" keeps climbing while the Dashboard is open.
+                const res = await api.triggerDrip({ singleDrip: true });
                 if (!res.ok) {
-                  if (res.reason === 'topup_cooldown') {
-                    throw new Error('Daily faucet cap reached. Try again after the cooldown.');
-                  }
                   throw new Error(res.reason ?? 'Gas top-up failed.');
                 }
-                const count = res.txHashes?.length ?? 0;
-                if (count === 0) {
+                const txHash = res.txHash ?? res.txHashes?.at(-1);
+                if (!txHash) {
                   return { message: 'Gas top-up checked; the faucet sent no funds.' };
                 }
-                const txLabel = truncTx(res.txHashes!.at(-1)!);
+                const amount = formatDripEth(res.deltaWei);
+                const txLabel = truncTx(txHash);
                 return {
-                  message:
-                    count === 1
-                      ? `Gas topped up · tx ${txLabel}`
-                      : `Gas topped up: ${count} drips · last tx ${txLabel}`,
+                  message: amount
+                    ? `Gas topped up: +${amount} · tx ${txLabel}`
+                    : `Gas top-up sent · tx ${txLabel}`,
                 };
               },
               // Confirmation is transient — surface it, then fade after ~5s.
               { autoClearMs: 5_000 },
             )}
-          onClaim={() =>
-            runAction(
-              'Claim OLAS',
-              async () => {
-                const res = await api.claimRewards();
-                if (!res.ok) {
-                  throw new Error(res.error ?? 'Reward claim failed.');
-                }
-                await Promise.all([
-                  queryClient.invalidateQueries({ queryKey: ['rewards'] }),
-                  queryClient.invalidateQueries({ queryKey: ['status'] }),
-                  queryClient.invalidateQueries({ queryKey: ['activity-events'] }),
-                ]);
-                const submitted = res.result?.submitted ?? 0;
-                if (submitted === 0) {
-                  return { message: 'No pending OLAS to claim.' };
-                }
-                const lastTx = res.result?.claims
-                  ?.map((claim) => claim.txHash)
-                  .filter((hash): hash is string => Boolean(hash))
-                  .at(-1);
-                const txLabel = truncTx(lastTx);
-                return {
-                  message: txLabel
-                    ? `Claim submitted · tx ${txLabel}`
-                    : `Claim submitted: ${submitted} claim${submitted === 1 ? '' : 's'}`,
-                };
-              },
-              { autoClearMs: 5_000 },
-            )}
-          claimPending={activeAction === 'Claim OLAS'}
         />
       </aside>
     </div>

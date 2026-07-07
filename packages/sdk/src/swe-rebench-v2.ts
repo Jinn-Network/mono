@@ -6,7 +6,7 @@
  * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.3
  */
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 
 export const SweRebenchV2LanguageSchema = z.enum([
   'python', 'javascript', 'typescript', 'go',

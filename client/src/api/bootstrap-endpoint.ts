@@ -24,7 +24,6 @@ export interface BootstrapEndpointConfig {
     rpcUrl?: string;
     defaultRpcUrl?: string;
     joinedSolverNets?: Record<string, unknown>;
-    onboardingComplete?: boolean;
   };
 }
 
@@ -249,7 +248,6 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
       ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
       ...(cfg.joinedSolverNets !== undefined ? { joinedSolverNets: cfg.joinedSolverNets } : {}),
-      ...(cfg.onboardingComplete !== undefined ? { onboardingComplete: cfg.onboardingComplete } : {}),
       ...(fundingGateActive && fundingGate ? { funding: fundingResponse(fundingGate) } : {}),
       ...(error ? { error } : {}),
       ...(retireFailed ? {

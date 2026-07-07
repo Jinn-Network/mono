@@ -115,14 +115,6 @@ publish-guard-change skill + waiver plumbing — overkill.
 
 ### Mode 2 — Real paired flow: a manual runbook, NOT an automated test
 
-**Amended 2026-06-08 ([DR-2026-06-08](2026-06-08-paired-flow-soft-release-gate.md)).**
-Mode 2 stays a manual, non-automated runbook — but it is now *run* as a **soft,
-human-judgment gate on the Monday named cut**. The "NOT a gate" framing below is
-narrowed to "not an *automated* gate": a human running it by hand and classifying the
-outcome (pass / infra-blocked / product-red) is exactly the failure-mode-free way to
-gate that this DR's reasoning permits. Nothing mechanical blocks publish; see
-DR-2026-06-08 for the gate's mechanism.
-
 **Superseded 2026-06-04.** Mode 2 was first built as a `continue-on-error`
 `real-paired-smoke` CI job (local-spawn of two warm operators, evaluator join,
 neutral/no-check-run). It was validated end-to-end on real Base Sepolia

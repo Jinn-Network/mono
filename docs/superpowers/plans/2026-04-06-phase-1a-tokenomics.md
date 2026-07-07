@@ -26,8 +26,6 @@
 > The body of this plan is preserved unchanged as a historical record of
 > the Phase 1a tokenomics implementation and the Phase 1b additions made
 > through 2026-04-10.
->
-> Update (2026-06-30): the JINN-token tokenomics described here is now dropped entirely by DR-2026-06-30 (tokenless, OLAS-native) — not re-roadmapped. See `spec/2026-06-30-tokenless-olas-native.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

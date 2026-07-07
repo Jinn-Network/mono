@@ -23,7 +23,7 @@ import type { Hono } from 'hono';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { getChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
@@ -33,11 +33,6 @@ import {
   computeFaucetDripCap,
   requestTestnetFunding,
 } from '../earning/faucet.js';
-import {
-  computeTopupQuota,
-  readFaucetTopupState,
-  writeFaucetTopupRecord,
-} from '../earning/faucet-topup-store.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
@@ -49,7 +44,6 @@ import {
   type ExecFileAsync,
 } from '../setup/claude-code-install.js';
 import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
-import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -95,15 +89,6 @@ export interface SetupRoutesConfig {
   maxFaucetIters?: number;
   interDripPauseMs?: number;
   /**
-   * Issue #560 — batched daily-cap top-up. `faucetDailyTopupCap` is how many
-   * faucet drips one operator "Top up from faucet" click may issue in a batch
-   * (and the per-24h ceiling per wallet); `faucetTopupCooldownMs` is how long
-   * the action stays disabled after the cap is reached. Defaults applied in the
-   * handler (10 / 24h) so existing callers / tests need not set them.
-   */
-  faucetDailyTopupCap?: number;
-  faucetTopupCooldownMs?: number;
-  /**
    * Backoff before retrying a transient CDP faucet 429 (issue #984). Defaults
    * to RATE_LIMIT_BACKOFF_MS (15000 ms); tests pass 0 to skip the sleep.
    * Independent of `interDripPauseMs` — mirrors `bootstrap.ts`'s
@@ -124,22 +109,6 @@ export interface SetupRoutesConfig {
    * bootstrap() again. jinn-mono-hjex.6
    */
   retryBootstrap?: () => Promise<void>;
-  /**
-   * #1037: hot-apply a join to the running daemon. The route registers
-   * eagerly (Hono freezes its matcher), so the applier is passed via a holder
-   * populated by main.ts after the join-consuming subsystems are built. When
-   * `current` is undefined (pre-running) or the apply throws, the endpoint
-   * returns restartRequired:true so the operator restarts to pick up the
-   * on-disk write.
-   */
-  joinApplier?: { current?: (entry: JoinedSolverNetConfig) => Promise<void> };
-  /**
-   * #983: called after POST /v1/operator/onboarding-complete persists the flag
-   * to disk, so the daemon's in-memory config reflects it and GET /v1/bootstrap
-   * (which reads the in-memory config) returns onboardingComplete:true without
-   * a restart. Mirrors the join-applier's in-memory mutation (join-applier.ts).
-   */
-  markOnboardingComplete?: () => void;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -148,51 +117,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   const persistConfigValue = config.persistConfigValue ?? persistTopLevelConfigValue;
   const currentClaudePath = (): string => config.getClaudePath?.() ?? config.claudePath ?? 'claude';
   let installInFlight: Promise<InstallClaudeCodeResponse> | null = null;
-  // Issue #560 H1: per-address guard so two concurrent batch POSTs for the
-  // same wallet can't both read `callsRemaining` before either persists and
-  // run up to 2 × dailyCap drips. Mirrors the `installInFlight` dedupe idiom.
-  const batchDripInFlight = new Set<string>();
-
-  const resolveEarningDir = (): string =>
-    config.earningDir ??
-    process.env['JINN_EARNING_DIR'] ??
-    join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
-
-  // Issue #560 batched-topup defaults. Resolved once so the POST /drip batch
-  // branch and GET /drip/quota route can't drift. Production callers always
-  // pass these (JinnConfig schema defaults); the `??` covers tests that build
-  // addSetupRoutes directly.
-  const faucetDailyTopupCap = config.faucetDailyTopupCap ?? 10;
-  const faucetTopupCooldownMs = config.faucetTopupCooldownMs ?? 24 * 60 * 60 * 1000;
-
-  /**
-   * Shared master-address + chain resolution for the faucet drip + quota
-   * routes. Returns either the resolved address/earningDir/chain or a ready
-   * `{ error, status }` envelope for the caller to return verbatim.
-   */
-  const resolveFaucetTarget = ():
-    | { ok: true; address: string; earningDir: string; chain: string | undefined }
-    | { ok: false; body: Record<string, unknown>; status: 404 | 500 } => {
-    const earningDir = resolveEarningDir();
-    const statePath = join(earningDir, 'earning_state.json');
-    if (!existsSync(statePath)) {
-      return { ok: false, body: { ok: false, reason: 'fleet_state_missing' }, status: 404 };
-    }
-    let parsed: { master_address?: string; chain?: string };
-    try {
-      parsed = JSON.parse(readFileSync(statePath, 'utf-8')) as {
-        master_address?: string;
-        chain?: string;
-      };
-    } catch {
-      return { ok: false, body: { ok: false, reason: 'fleet_state_unreadable' }, status: 500 };
-    }
-    const address = parsed.master_address;
-    if (!address) {
-      return { ok: false, body: { ok: false, reason: 'master_address_missing' }, status: 404 };
-    }
-    return { ok: true, address, earningDir, chain: config.chain ?? parsed.chain };
-  };
 
   app.get('/v1/auth/claude', async (c) => {
     const cwd = process.cwd();
@@ -258,17 +182,31 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   // rejects.
   app.post('/v1/setup/drip', async (c) => {
     const singleDrip = c.req.query('singleDrip') === 'true';
-    // Issue #560: `?batch=true` issues drips up to the daily cap in one click.
-    // If both batch and singleDrip are present, singleDrip wins (decided).
-    const batch = c.req.query('batch') === 'true' && !singleDrip;
-    const resolved = resolveFaucetTarget();
-    if (!resolved.ok) {
-      return c.json(resolved.body, resolved.status);
+    const earningDir =
+      config.earningDir ??
+      process.env['JINN_EARNING_DIR'] ??
+      join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
+    const statePath = join(earningDir, 'earning_state.json');
+    if (!existsSync(statePath)) {
+      return c.json({ ok: false, reason: 'fleet_state_missing' }, 404);
     }
-    const { address, earningDir, chain } = resolved;
+    let parsed: { master_address?: string; chain?: string };
+    try {
+      parsed = JSON.parse(readFileSync(statePath, 'utf-8')) as {
+        master_address?: string;
+        chain?: string;
+      };
+    } catch {
+      return c.json({ ok: false, reason: 'fleet_state_unreadable' }, 500);
+    }
+    const address = parsed.master_address;
+    if (!address) {
+      return c.json({ ok: false, reason: 'master_address_missing' }, 404);
+    }
+    const chain = config.chain ?? parsed.chain;
     if (chain !== 'base-sepolia') {
       return c.json(
-        { ok: false, reason: 'drip_only_on_base_sepolia', chain },
+        { ok: false, reason: 'drip_only_on_base_sepolia', chain: chain ?? parsed.chain },
         409,
       );
     }
@@ -344,10 +282,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
               ok: false,
               address,
               txHashes,
-              // One funding attempt was made (requestFunding ran once above),
-              // even though it failed — report 1 to stay consistent with the
-              // success path's `attempts: txHashes.length`.
-              attempts: 1,
+              attempts: 0,
               balanceWei: balanceWei?.toString(),
               targetWei: targetWei?.toString(),
               reason: result.reason,
@@ -377,101 +312,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
           },
           txHashes.length > 0 ? 202 : 200,
         );
-      }
-
-      // Batched daily-cap top-up (issue #560). The running-mode Dashboard "Top
-      // up from faucet" button issues drips up to the per-wallet daily cap in
-      // ONE click, then disables itself until a cooldown elapses since the
-      // first call of that batch. State persists per master address so the cap
-      // survives a restart. Distinct from the bootstrap loop below (which
-      // chases the Stage-1 ETH target); this branch caps by COUNT, not balance.
-      if (batch) {
-        const lockKey = address.toLowerCase();
-        // H1: reject a concurrent batch for the same wallet rather than letting
-        // both read `callsRemaining` and double-spend the cap. The lock is
-        // released in the `finally` below.
-        if (batchDripInFlight.has(lockKey)) {
-          return c.json({ ok: false, address, reason: 'batch_in_progress' }, 409);
-        }
-        batchDripInFlight.add(lockKey);
-        try {
-          const dailyCap = faucetDailyTopupCap;
-          const cooldownMs = faucetTopupCooldownMs;
-          const nowMs = now();
-          const existing = readFaucetTopupState(earningDir).byAddress[address.toLowerCase()];
-          const quota = computeTopupQuota({ record: existing, dailyCap, cooldownMs, now: nowMs });
-
-          // Cap reached and the window is still active → cooldown; do not call
-          // the faucet.
-          if (quota.callsRemaining === 0) {
-            return c.json(
-              {
-                ok: false,
-                address,
-                reason: 'topup_cooldown',
-                dailyCap,
-                callsRemaining: 0,
-                cooldownExpiresAt: quota.cooldownExpiresAt,
-              },
-              200,
-            );
-          }
-
-          // Window elapsed (or no record) → fresh batch starting now. Otherwise
-          // continue the active batch from its recorded start.
-          const startingFresh = !quota.windowActive;
-          let callsToday = startingFresh ? 0 : existing?.callsToday ?? 0;
-          const batchStartedAt = startingFresh ? nowMs : existing?.batchStartedAt ?? nowMs;
-
-          let rateLimited = false;
-          for (let i = 0; i < quota.callsRemaining; i++) {
-            const result = await requestFunding(address, 'base-sepolia');
-            if (!result.ok) {
-              // A rate-limit stops the batch but is not an error (operator can
-              // retry after the CDP per-address window). Any other failure also
-              // stops the batch and surfaces its reason.
-              if (result.rateLimited) rateLimited = true;
-              if (txHashes.length === 0) {
-                return c.json(
-                  {
-                    ok: false,
-                    address,
-                    txHashes,
-                    attempts: 0,
-                    dailyCap,
-                    callsRemaining: dailyCap - callsToday,
-                    cooldownExpiresAt: batchStartedAt + cooldownMs,
-                    reason: result.reason,
-                    rateLimited: result.rateLimited,
-                  },
-                  200,
-                );
-              }
-              break;
-            }
-            if (result.txHash) txHashes.push(result.txHash);
-            callsToday += 1;
-            // Persist write-through after each success so a crash mid-batch does
-            // not re-grant the whole cap.
-            writeFaucetTopupRecord(earningDir, address, { callsToday, batchStartedAt });
-          }
-
-          return c.json(
-            {
-              ok: txHashes.length > 0,
-              address,
-              txHashes,
-              attempts: txHashes.length,
-              dailyCap,
-              callsRemaining: Math.max(0, dailyCap - callsToday),
-              cooldownExpiresAt: batchStartedAt + cooldownMs,
-              ...(rateLimited ? { rateLimited: true } : {}),
-            },
-            txHashes.length > 0 ? 202 : 200,
-          );
-        } finally {
-          batchDripInFlight.delete(lockKey);
-        }
       }
 
       const maxFaucetIters = computeFaucetDripCap({
@@ -575,38 +415,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         500,
       );
     }
-  });
-
-  // GET /v1/setup/drip/quota — issue #560. Reports the operator's remaining
-  // batched top-up quota for today and the cooldown expiry, so the WalletCard
-  // can render "{n} of {cap} top-ups left today" and disable the button when
-  // the cap is reached. Soft-renders the full cap when no fleet state exists
-  // yet (pre-bootstrap SPA) so the card still has something to show.
-  app.get('/v1/setup/drip/quota', async (c) => {
-    const dailyCap = faucetDailyTopupCap;
-    const cooldownMs = faucetTopupCooldownMs;
-    const now = config.now ?? Date.now;
-
-    const resolved = resolveFaucetTarget();
-    if (!resolved.ok) {
-      // Pre-bootstrap (no fleet state / no master address): soft-render the
-      // full cap so the SPA can render the card before the wallet exists.
-      return c.json({ ok: true, dailyCap, callsRemaining: dailyCap, cooldownExpiresAt: null });
-    }
-    const { address, earningDir, chain } = resolved;
-    if (chain !== 'base-sepolia') {
-      return c.json({ ok: false, reason: 'drip_only_on_base_sepolia', chain }, 409);
-    }
-
-    const record = readFaucetTopupState(earningDir).byAddress[address.toLowerCase()];
-    const quota = computeTopupQuota({ record, dailyCap, cooldownMs, now: now() });
-    return c.json({
-      ok: true,
-      address,
-      dailyCap,
-      callsRemaining: quota.callsRemaining,
-      cooldownExpiresAt: quota.cooldownExpiresAt,
-    });
   });
 
   // The legacy POST /v1/setup/solvernets/:name route persisted into the
@@ -752,8 +560,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const previous = joinedSolverNets[cid];
-    const previousName =
-      typeof previous?.['name'] === 'string' ? (previous['name'] as string) : undefined;
     const previousContractRecord = isRecord(previous?.['contract'])
       ? previous?.['contract']
       : undefined;
@@ -771,28 +577,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       manifestCid: cid,
       roles,
     };
-    // A partial upsert (e.g. #983's Enter-dashboard second join, which sends
-    // only roles+harness+model) must not drop a `name` a prior join wrote:
-    // the live join applier (daemon/join-applier.ts) keys the in-memory
-    // SolverNet registry by `name`, so dropping it here makes the applier's
-    // `unregister(entry.name ?? cid)` miss the prior registration and insert a
-    // phantom duplicate keyed by cid — `forSolverType` then resolves the stale
-    // first entry, silently running the wrong harness/model live. Mirror the
-    // `previousContract` fallback below.
-    const nextName = typeof body.name === 'string' ? body.name : previousName;
-    if (nextName !== undefined) entry['name'] = nextName;
+    if (typeof body.name === 'string') entry['name'] = body.name;
     if (contract ?? previousContract) entry['contract'] = contract ?? previousContract;
     // `harness` / `model` / `plugins` are solver-side. Persist whatever the
     // SPA sent; the daemon-side runtime ignores them when only the
     // `evaluator` role is selected (evaluator harness comes from
     // `manifest.contract.evaluationFunction.implementation`).
-    //
-    // Unlike `name` / `contract` above, these are intentionally taken from the
-    // request body WITHOUT a previous-value fallback: the #983 onboarding
-    // Enter-dashboard step always sends harness+model, so this is correct for
-    // that flow. Callers doing a PARTIAL re-join that omits these fields will
-    // drop the prior values — any caller wanting them preserved must include
-    // them in the body.
     if (typeof body.harness === 'string') entry['harness'] = canonicalHarnessName(body.harness);
     if (typeof body.model === 'string') entry['model'] = body.model;
     if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
@@ -811,49 +601,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }, 500);
     }
 
-    // #1037: hot-apply to the running daemon if the applier is wired and the
-    // daemon has reached running mode. The on-disk write above already
-    // succeeded, so any live-apply failure (holder empty pre-running, or the
-    // applier throwing) degrades gracefully to restartRequired:true.
-    let restartRequired = true;
-    const applier = config.joinApplier?.current;
-    if (applier) {
-      try {
-        await applier(entry as unknown as JoinedSolverNetConfig);
-        restartRequired = false;
-      } catch (err) {
-        console.error(
-          '[join] live apply failed; operator must restart to pick up the join:',
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-
     return c.json({
       ok: true,
-      restartRequired,
+      restartRequired: true,
       manifestCid: cid,
       config: entry,
     });
-  });
-
-  // POST /v1/operator/onboarding-complete — #983. The operator clicked
-  // "Enter dashboard" at the end of the guided onboarding takeover (gated SPA-
-  // side on ≥1 join AND a ready solver harness AND a selected model). Persists
-  // the flag to disk and mutates the in-memory config so GET /v1/bootstrap
-  // reflects it live; App.tsx then drops the takeover for <Operating>.
-  app.post('/v1/operator/onboarding-complete', (c) => {
-    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    try {
-      persistConfigValue('onboardingComplete', true, cfgPath);
-    } catch (err) {
-      return c.json({
-        error: 'config_write_failed',
-        detail: err instanceof Error ? err.message : String(err),
-      }, 500);
-    }
-    config.markOnboardingComplete?.();
-    return c.json({ ok: true, onboardingComplete: true });
   });
 
   // DELETE /v1/operator/join/:cid — operator leaves a joined SolverNet.

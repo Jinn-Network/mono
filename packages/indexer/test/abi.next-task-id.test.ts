@@ -10,11 +10,11 @@
  * coordinator's `nextTaskId` against the indexer's max indexed task id to
  * surface that condition before it becomes operator-visible.
  *
- * Regression guard: JinnRouter must expose `taskCoordinator()` but NOT
- * `nextTaskId()`. The `nextTaskId` view lives on TaskCoordinator; JinnRouterV3
- * holds a reference to the coordinator but does not re-expose that view. The
- * health probe must discover the active coordinator through the active router,
- * then call `nextTaskId()` on the coordinator (#1304).
+ * Regression guard: the second assertion locks in that `nextTaskId` is NOT
+ * on the JinnRouter ABI. The view lives on TaskCoordinator; JinnRouterV3
+ * holds a reference to the coordinator but does not re-expose this view.
+ * A previous revision pointed the probe at JinnRouter, which reverted at
+ * runtime and made the health probe return `status: 'unknown'` forever.
  */
 import { describe, it, expect } from 'vitest';
 import { getAbiItem } from 'viem';
@@ -31,16 +31,6 @@ describe('TaskCoordinator ABI — nextTaskId()', () => {
     expect(item?.inputs).toEqual([]);
     expect(item?.outputs).toHaveLength(1);
     expect(item?.outputs[0]?.type).toBe('uint256');
-  });
-
-  it('exposes JinnRouter.taskCoordinator() as a view returning address', () => {
-    const item = getAbiItem({ abi: JINN_ROUTER_ABI, name: 'taskCoordinator' });
-    expect(item).toBeDefined();
-    expect(item?.type).toBe('function');
-    expect(item?.stateMutability).toBe('view');
-    expect(item?.inputs).toEqual([]);
-    expect(item?.outputs).toHaveLength(1);
-    expect(item?.outputs[0]?.type).toBe('address');
   });
 
   it('is NOT present on the JinnRouter ABI (regression guard for #567)', () => {

@@ -2,7 +2,7 @@
   "network": "baseSepolia",
   "chainId": 84532,
   "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-  "deployedAt": "2026-06-30T16:18:56.618Z",
+  "deployedAt": "2026-04-09T13:21:20.747Z",
   "config": {
     "timingProfile": "fast-test",
     "fee": 0,
@@ -20,7 +20,7 @@
     "mechFactory": "0x206183F35B2450Ca15A906BB923E74d945F78d67",
     "jinnRouter": "0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675",
     "serviceRegistry": "0x31D3202d8744B16A120117A053459DDFAE93c855",
-    "activityChecker": "0x0e1B5f264F4FAdcFAA950fb00c58d9A39C040f70",
-    "stakingToken": "0x4DB0Fcb877CCd92B6AeEdAaD561DaccB0CCc7E39"
+    "activityChecker": "0xF4Ca4943Eb0b0927d754A6A95206364f017D45f6",
+    "stakingToken": "0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b"
   }
 }

@@ -7,12 +7,13 @@
  * merging.
  *
  * Mechanism: shells out to `forge inspect <Path>:<Contract> storage-layout`
- * (Foundry is required for this guard). One `it()` per pinned variable for
- * clear failures.
+ * (Foundry is already required for the invariant suite under
+ * test/jinn/invariants/). One `it()` per pinned variable for clear failures.
  *
  * To intentionally change a pinned slot:
  *   1. Confirm the downstream consumer named in the failure is updated
- *      (proxy storage layout docs, deployment metadata, etc.).
+ *      (constants in CanonicalOpStackMessenger.sol, proxy storage layout
+ *      docs, deployment metadata, etc.).
  *   2. Edit the expected slot in PINNED_SLOTS below in the same PR.
  *   3. Note the rationale in the commit message; the test diff is the audit
  *      trail.
@@ -24,6 +25,8 @@
  *   - Historical JinnRouterV2 activity counters (creationCount …
  *     evaluationDeliveryCount, slots 5–8) — only the contract itself and
  *     legacy ABI callers read these.
+ *   - JINN ERC20 inherited OZ slots — managed by OZ and not read off-chain
+ *     via storage proof.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -39,6 +42,20 @@ interface PinnedSlot {
 }
 
 const PINNED_SLOTS: PinnedSlot[] = [
+  {
+    contractPath: 'src/jinn/cross-chain/TaskClaimEmitter.sol:TaskClaimEmitter',
+    variable: 'nextClaimId',
+    expectedSlot: '0',
+    downstream:
+      'CanonicalOpStackMessenger.CLAIM_SNAPSHOT_HASHES_SLOT (slot 1) assumes TaskClaimEmitter.nextClaimId occupies slot 0 immediately preceding the claimSnapshotHashes mapping.',
+  },
+  {
+    contractPath: 'src/jinn/cross-chain/TaskClaimEmitter.sol:TaskClaimEmitter',
+    variable: 'claimSnapshotHashes',
+    expectedSlot: '1',
+    downstream:
+      'CanonicalOpStackMessenger.sol hardcodes CLAIM_SNAPSHOT_HASHES_SLOT = 1 and derives the proof slot as keccak256(abi.encode(claimId, 1)). A drift here silently breaks every canonical Task-native L2→L1 claim proof.',
+  },
   {
     contractPath: 'src/staking/JinnRouterV2.sol:JinnRouterV2',
     variable: 'creators',
@@ -151,28 +168,16 @@ const PINNED_SLOTS: PinnedSlot[] = [
   {
     contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
     variable: '_requestRefs',
-    // NOTE: the tokenless-OLAS trim removed the `claimsByTaskByOperator` (was slot 6) and
-    // `verdictClaimsByAttemptByEvaluator` (was slot 7) per-operator/per-evaluator cap mappings,
-    // shifting _requestRefs down from slot 8 to slot 6.
-    expectedSlot: '6',
+    expectedSlot: '8',
     downstream:
       'TaskCoordinator._requestRefs maps mech requestId → (taskId, attemptIndex). Drift orphans pre-upgrade pending requests.',
   },
   {
     contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
     variable: '_verdictRequestRefs',
-    // NOTE: shifted from slot 9 to slot 7 by the same tokenless-OLAS cap-mapping removal that
-    // moved _requestRefs (see above).
-    expectedSlot: '7',
+    expectedSlot: '9',
     downstream:
       'TaskCoordinator._verdictRequestRefs maps verdict request → (taskId, attemptIndex, verdictIndex). Drift orphans pre-upgrade evaluator requests.',
-  },
-  {
-    contractPath: 'src/staking/TaskActivityCheckerV3.sol:TaskActivityCheckerV3',
-    variable: 'eligibleActivityWeight',
-    expectedSlot: '16',
-    downstream:
-      'StakingBase reads TaskActivityCheckerV3.eligibleActivityWeight as the activity weight at checkpoint (via getMultisigNonces/isRatioPass). The tokenless-OLAS in-place checker upgrade reuses the live proxy storage, so this slot must not move — drift would zero out every staker\'s liveness signal across the upgrade.',
   },
 ];
 

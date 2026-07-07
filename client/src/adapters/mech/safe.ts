@@ -12,7 +12,6 @@ import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
   isNonceTooLowError,
-  isReplacementUnderpricedError,
   type TxSubmissionLedger,
   withNonceLedger,
   withRecoverableRetry,
@@ -152,69 +151,7 @@ async function executeSafeTransactionInner(
           ...feeResult.overrides,
         });
       } catch (writeErr) {
-        const nonceTooLow = isNonceTooLowError(writeErr);
-        const replacementUnderpriced = isReplacementUnderpricedError(writeErr);
-
-        // Issue #897: before re-signing at a fresh nonce, reconcile against the
-        // tx already submitted at the currently-pinned nonce. The original EOA
-        // tx may have mined mid-retry (nonce-too-low = it mined; replacement-
-        // underpriced = it is still pending but the bump was too small and it
-        // may mine before the next attempt). Re-signing a NEW Safe
-        // execTransaction at the advanced Safe nonce is NOT idempotent — it
-        // re-attempts the delivery and reverts as already-claimed. So if the
-        // original receipt is already a success, short-circuit and return it;
-        // otherwise refresh the pinned nonce so the next attempt bumps fees
-        // against the fresh value and detects a mid-retry mine on the following
-        // pass.
-        if (nonceTooLow || replacementUnderpriced) {
-          // The ledger lookup MUST use the ORIGINAL pinned nonce
-          // (nonceLedger.nonce) — read it here, before refreshNonce() below
-          // advances it. Moving refreshNonce() earlier would break
-          // reconciliation by looking up the wrong (advanced) nonce key.
-          const existing = await nonceLedger.ledger.getTxSubmission({
-            chainId: nonceLedger.chainId,
-            from: nonceLedger.from,
-            nonce: nonceLedger.nonce,
-          });
-          // The tx-submission ledger is SHARED across every logical Safe tx the
-          // daemon broadcasts from this one agent EOA (claim, deliver,
-          // setMetadata, reStake) and is keyed only on the EOA nonce. A
-          // stuck-then-mined UNRELATED tx at the same nonce would otherwise let
-          // us return a foreign tx's hash and false-mark THIS delivery as
-          // landed. Gate the reconcile on the ledger entry actually being this
-          // call's own transaction: recordSubmitted stores `to: safeAddress`
-          // and `data: params.data`, so require both to match before trusting
-          // existing.hash. On mismatch, fall through to refresh + re-sign
-          // exactly as if no success receipt were found. (`to`/safeAddress are
-          // addresses — compare case-insensitively; data is calldata hex —
-          // normalize both to be safe.)
-          const entryMatchesThisTx =
-            existing?.to?.toLowerCase() === params.safeAddress.toLowerCase() &&
-            existing?.data?.toLowerCase() === params.data.toLowerCase();
-          if (existing?.hash && entryMatchesThisTx) {
-            try {
-              const reconciled = await publicClient.getTransactionReceipt({ hash: existing.hash });
-              if (reconciled.status === 'success') {
-                console.error(
-                  `[safe/viem] execTransaction reconciled: original tx ${existing.hash} mined ` +
-                    `at pinned nonce ${nonceLedger.nonce} — delivery already landed`,
-                );
-                await nonceLedger.markResolved();
-                return existing.hash;
-              }
-            } catch (receiptErr) {
-              // TransactionReceiptNotFoundError: the original is not yet mined.
-              // Any other failure (transient RPC fault) is also tolerated —
-              // we fall through to refresh + re-sign rather than rethrow — but
-              // log it so a persistent fault is observable, not masked.
-              const reason = receiptErr instanceof Error ? receiptErr.message : String(receiptErr);
-              console.error(
-                `[safe/viem] execTransaction reconcile receipt lookup for ${existing.hash} ` +
-                  `failed (${reason}) — treating as not-yet-mined, refreshing nonce`,
-              );
-            }
-          }
-
+        if (isNonceTooLowError(writeErr)) {
           const refreshed = await nonceLedger.refreshNonce();
           console.error(`[safe/viem] execTransaction refreshed pinned nonce -> ${refreshed}`);
         }
@@ -232,18 +169,6 @@ async function executeSafeTransactionInner(
               inner.innerData,
               inner.decodedName,
               inner.decodedArgs,
-              null,
-            );
-          }
-          if (inner.innerSelector) {
-            // Deterministic inner revert with an undecoded selector — terminal.
-            // Surface it structurally so tx-retry does not retry the GS013.
-            throw new SafeInnerRevertError(
-              `Safe execTransaction inner revert (estimate, undecoded selector ${inner.innerSelector})`,
-              inner.innerSelector,
-              inner.innerData,
-              null,
-              null,
               null,
             );
           }
@@ -277,24 +202,6 @@ async function executeSafeTransactionInner(
             hash as Hex,
           );
         }
-        if (inner.innerSelector) {
-          // The inner call reverts deterministically with a selector we don't
-          // decode (e.g. a newer custom error like TACTaskAlreadyCredited).
-          // Surface it as a SafeInnerRevertError — even without a decoded name —
-          // so tx-retry classifies it non-recoverable instead of retrying the
-          // wrapping GS013 forever. Re-running the same inner call reverts
-          // identically.
-          throw new SafeInnerRevertError(
-            `Safe execTransaction inner revert (undecoded selector ${inner.innerSelector}, txHash=${hash})`,
-            inner.innerSelector,
-            inner.innerData,
-            null,
-            null,
-            hash as Hex,
-          );
-        }
-        // No inner revert on re-simulation: the on-chain failure was a
-        // signature/owner (GS026) nonce race — retryable, self-heals on re-sign.
         throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
       }
       await nonceLedger.markResolved();

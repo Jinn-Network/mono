@@ -3,7 +3,7 @@
  * runtime fields (attempt number, role, etc.).
  */
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { WindowSchema, type Window } from './window.js';
 import { SignedTaskV1Schema, TaskClaimPolicySchema, type SignedTaskV1, type TaskClaimPolicy } from './task-document.js';
 

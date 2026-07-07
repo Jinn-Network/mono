@@ -6,7 +6,7 @@
  * is the SolverType-specific payload.
  */
 
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { WindowSchema } from './window.js';
 
 const HexStringSchema = z
@@ -44,14 +44,6 @@ export const TaskClaimPolicySchema = z.object({
    * network where verdict slots may be squatted.
    */
   requiredVerdicts: z.number().int().positive().optional(),
-  /**
-   * On-chain `TaskPolicy.allowSolverSelfEvaluation`. Optional; the adapter
-   * defaults it to `false` → the coordinator rejects a verdict whose evaluator
-   * is the attempt's solver (the independent-evaluation invariant). A testnet
-   * SolverNet sets it `true` so a single operator can solve + self-evaluate +
-   * close the loop solo (dogfooding). Leave unset/false on mainnet.
-   */
-  allowSolverSelfEvaluation: z.boolean().optional(),
 }).passthrough();
 
 export type TaskClaimPolicy = z.infer<typeof TaskClaimPolicySchema>;

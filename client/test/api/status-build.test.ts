@@ -2,9 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleStatusV1,
   resolveMasterDailyEstimateWei,
+  TJINN_PUBLIC_READ_ERROR,
   type GatheredStatusRaw,
 } from '../../src/api/status-build.js';
 import type { FleetState } from '../../src/earning/types.js';
+
+// tJINN identity is resolved from the bundled JINN MVI L1 artifact and threaded
+// onto GatheredStatusRaw. These match deployment-jinn-mvi-l1-sepolia.json.
+const TJINN_TOKEN_ADDRESS = '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A';
+const TJINN_CHAIN_ID = 11155111;
+
+/** The two tJINN-identity fields every GatheredStatusRaw literal must carry. */
+const tjinnIdentityFields = {
+  tjinnTokenAddress: TJINN_TOKEN_ADDRESS,
+  tjinnChainId: TJINN_CHAIN_ID,
+} as const;
 
 function minimalFleet(overrides: Partial<FleetState> = {}): FleetState {
   return {
@@ -52,6 +64,7 @@ describe('resolveMasterDailyEstimateWei', () => {
 describe('assembleStatusV1', () => {
   it('marks sqlite_only mode and short-circuits next actions', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       hintsScope: 'sqlite_only',
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
@@ -70,10 +83,22 @@ describe('assembleStatusV1', () => {
     expect(j.nextActions).toHaveLength(1);
     expect(j.nextActions[0]).toMatch(/npm run status/);
     expect(j.earnings.hint).toMatch(/omitted/);
+    expect(j.tJinn).toEqual({
+      state: 'pending',
+      chainId: 11155111,
+      tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+      safeBalanceWei: null,
+      operatorClaimedWei: null,
+      operatorMintedLast24hWei: null,
+      safeCount: 0,
+      services: [],
+      error: null,
+    });
   });
 
   it('reports zero runway excess when balance is already below minimum', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -103,6 +128,7 @@ describe('assembleStatusV1', () => {
     //   = 2991886719184102 / 500000000000000
     //   = 5.98... → BigInt floor → '5'
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -125,6 +151,7 @@ describe('assembleStatusV1', () => {
 
   it('flags low master balance vs minimum', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -150,6 +177,7 @@ describe('assembleStatusV1', () => {
 
   it('includes RPC failure in next actions when full mode', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -169,6 +197,7 @@ describe('assembleStatusV1', () => {
 
   it('reports claimed staking rewards summed across services', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -182,17 +211,95 @@ describe('assembleStatusV1', () => {
         0: { total: '300', lastAt: '2026-01-01T00:00:00.000Z', lastTxHash: '0xabc' },
         1: { total: '500', lastAt: '2026-01-01T00:00:01.000Z', lastTxHash: '0xdef' },
       },
-      claimedStakingRewardsLast24hWei: '120',
       pollIntervalMs: 5000,
       masterDailyEstimateWei: '1',
     };
     const j = assembleStatusV1(raw);
     expect(j.rewards.claimedStakingRewardsWei).toBe('800');
-    expect(j.rewards.claimedStakingRewardsLast24hWei).toBe('120');
+  });
+
+  it('keeps real tJINN balance available on the status boundary', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '1500000000000000000',
+        operatorClaimedWei: '1500000000000000000',
+        operatorMintedLast24hWei: '250000000000000000',
+        safeCount: 1,
+        services: [{
+          index: 1,
+          serviceId: 42,
+          safeAddress: '0x3333333333333333333333333333333333333333',
+          balanceWei: '1500000000000000000',
+          operatorClaimedWei: '1500000000000000000',
+          state: 'ready',
+          error: null,
+        }],
+        error: null,
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.tJinn.safeBalanceWei).toBe('1500000000000000000');
+  });
+
+  it('redacts raw tJINN read errors at the public status boundary', () => {
+    const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      tJinn: {
+        state: 'error',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: null,
+        operatorClaimedWei: null,
+        operatorMintedLast24hWei: null,
+        safeCount: 1,
+        services: [{
+          index: 1,
+          serviceId: 42,
+          safeAddress: '0x3333333333333333333333333333333333333333',
+          balanceWei: null,
+          operatorClaimedWei: null,
+          state: 'error',
+          error: 'HTTP request failed for https://rpc.sepolia.example?apikey=secret',
+        }],
+        error: 'HTTP request failed for https://rpc.sepolia.example?apikey=secret',
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.tJinn.error).toBe(TJINN_PUBLIC_READ_ERROR);
+    expect(j.tJinn.services[0]?.error).toBe(TJINN_PUBLIC_READ_ERROR);
+    expect(JSON.stringify(j.tJinn)).not.toContain('apikey=secret');
+    expect(JSON.stringify(j.tJinn)).not.toContain('rpc.sepolia.example');
   });
 
   it('passes prediction.v1 status through when present', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -230,6 +337,7 @@ describe('assembleStatusV1', () => {
 
   it('exposes per-role ETH balances from serviceBalances + master', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -270,6 +378,7 @@ describe('assembleStatusV1', () => {
 
   it('returns null balances for roles whose address or row is missing', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -290,6 +399,7 @@ describe('assembleStatusV1', () => {
 
   it('propagates the master read error onto balances.eth.master', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -316,6 +426,7 @@ describe('assembleStatusV1', () => {
 
   it('passes generic task-run status through when present', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -360,6 +471,7 @@ describe('assembleStatusV1 → status.harness', () => {
   // of fleet/RPC state, so we keep the fixture small.
   function rawForHarness(harnessRollup?: GatheredStatusRaw['harnessRollup']): GatheredStatusRaw {
     return {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -400,6 +512,7 @@ describe('assembleStatusV1 → status.harness', () => {
 describe('assembleStatusV1 — autoRestake observability (#651)', () => {
   it('emits autoRestake.enabled=false + checkIntervalMs=0 by default', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
@@ -418,6 +531,7 @@ describe('assembleStatusV1 — autoRestake observability (#651)', () => {
 
   it('emits autoRestake.enabled=true + checkIntervalMs when raw flags it on', () => {
     const raw: GatheredStatusRaw = {
+      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},

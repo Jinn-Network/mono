@@ -139,14 +139,6 @@ try {
 
   runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
 
-  // jinn-layer bin (#1356): usage must print from the packed tarball's bin.
-  const layerUsage = runOrExit('npm', ['exec', '--', 'jinn-layer'], 'jinn-layer usage');
-  if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
-    console.error('smoke-test-pack: jinn-layer bin did not print usage');
-    console.error(layerUsage.stdout);
-    process.exit(1);
-  }
-
   const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
   assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
 

@@ -4,7 +4,6 @@ import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
-import { recordLoopTick } from './loop-heartbeat.js';
 import { TaskPostingService } from '../tasks/posting-service.js';
 import type { TaskSource } from '../tasks/sources.js';
 import { getSweRebenchV2StateStore } from '../solver-types/swe-rebench-v2.js';
@@ -24,10 +23,10 @@ export class CreatorLoop {
   private readonly postingService: TaskPostingService;
 
   private static readonly PERMANENT_FAILURE_BACKOFF_MS = 30 * 60 * 1000;
-  private static readonly UNKNOWN_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 
-  private static failureCacheKey(state: Task, safeAddress?: string, prefix = 'create_failed'): string {
-    return `${prefix}${safeAddress ? `:${safeAddress}` : ''}:${state.id}`;
+  private static failureCacheKey(state: Task, safeAddress?: string): string {
+    const prefix = safeAddress ? `create_failed:${safeAddress}` : 'create_failed';
+    return `${prefix}:${state.id}`;
   }
 
   constructor(
@@ -54,20 +53,17 @@ export class CreatorLoop {
       }
     }
 
-    const isWithinBackoff = (key: string, windowMs: number): boolean => {
-      const failedAt = this.store.getConfigValue(key);
-      if (!failedAt) return false;
-      const ts = Number(failedAt);
-      return Number.isFinite(ts) && now - ts < windowMs;
-    };
-
     const postedTaskIds: string[] = [];
     for (const candidate of candidates) {
       const state = candidate.task;
-      const permanentKey = CreatorLoop.failureCacheKey(state, this.safeAddress);
-      const unknownKey = CreatorLoop.failureCacheKey(state, this.safeAddress, 'create_failed_unknown');
-      if (isWithinBackoff(permanentKey, CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS)) continue;
-      if (isWithinBackoff(unknownKey, CreatorLoop.UNKNOWN_FAILURE_BACKOFF_MS)) continue;
+      const failureKey = CreatorLoop.failureCacheKey(state, this.safeAddress);
+      const failedAt = this.store.getConfigValue(failureKey);
+      if (failedAt) {
+        const ts = Number(failedAt);
+        if (Number.isFinite(ts) && now - ts < CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS) {
+          continue;
+        }
+      }
 
       try {
         const postResult = await this.postingService.postCandidate(candidate, {
@@ -101,24 +97,17 @@ export class CreatorLoop {
       } catch (err) {
         if (err instanceof TransientError) continue;
         if (err instanceof PermanentError) {
-          this.store.setConfigValue(permanentKey, String(now));
+          this.store.setConfigValue(failureKey, String(now));
           console.error(
             `[creator] Permanent create failure for ${state.id}; backing off for ` +
             `${Math.round(CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS / 60000)} min: ${err.message}`,
           );
           continue;
         }
-        if (isRecoverableTransactionError(err)) {
-          console.warn(
-            `[creator] Recoverable create error for ${state.id}; will retry next tick: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-          );
-          continue;
-        }
-        this.store.setConfigValue(unknownKey, String(now));
+        this.store.setConfigValue(failureKey, String(now));
         console.error(
           `[creator] Create failure for ${state.id}; backing off for ` +
-          `${Math.round(CreatorLoop.UNKNOWN_FAILURE_BACKOFF_MS / 60000)} min`,
+          `${Math.round(CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS / 60000)} min`,
           err,
         );
       }
@@ -140,7 +129,6 @@ export class CreatorLoop {
         }, 'creator');
         delayMs = isRecoverableTransactionError(err) ? 12_000 : 8000;
       }
-      recordLoopTick(this.store, 'creator'); // #1043 loop watchdog
       await Promise.race([
         new Promise(r => setTimeout(r, delayMs)),
         this.stopPromise,
