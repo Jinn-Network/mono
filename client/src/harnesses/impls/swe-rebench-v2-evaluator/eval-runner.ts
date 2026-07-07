@@ -217,6 +217,14 @@ const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /Cannot connect to the Docker daemon/i, reason: 'docker_unavailable' },
   { rx: /input\/output error/i, reason: 'docker_storage_io_error' },
   { rx: /No such image|manifest unknown|pull access denied/i, reason: 'image_pull_failed' },
+  // #1422 follow-up — a hung/killed credential helper (`docker-credential-*`)
+  // makes `docker run` abort before the container starts. eval.py still writes
+  // a zero-passed "mismatch" report, so without this the harness delivered a
+  // FALSE `passed_match: false` verdict (2026-07-07 evaluator outage).
+  { rx: /error getting credentials/i, reason: 'docker_credentials_error' },
+  // Any docker-CLI-level abort ("docker: <error>" / daemon error response) means
+  // the container never ran the tests — never a real solver result.
+  { rx: /^docker: (?:error|Error response from daemon)/im, reason: 'docker_run_failed' },
   { rx: /error: corrupt patch at line|patch fragment without header/i, reason: 'patch_corrupt' },
   { rx: /patch does not apply|error: patch failed:/i, reason: 'patch_does_not_apply' },
   { rx: /Applied patch to .+ with conflicts|^U \S/m, reason: 'patch_merge_conflict' },

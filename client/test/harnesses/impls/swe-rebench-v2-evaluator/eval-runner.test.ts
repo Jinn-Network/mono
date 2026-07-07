@@ -573,6 +573,29 @@ describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
     expect(matchInfraSignature('Fatal Python error: Illegal instruction\nCurrent thread 0x000000010...')).toBe('image_arch_mismatch');
   });
 
+  // #1422 follow-up — real fingerprint from the 2026-07-07 evaluator outage:
+  // a hung/killed `docker-credential-*` helper makes `docker run` abort before
+  // the container ever starts, so eval.py records a zero-passed "mismatch"
+  // report with NO test having run. Without this signature the harness graded
+  // it as a genuine `passed_match: false` verdict and delivered a FALSE
+  // negative on-chain (test_log CID bafkreifxsn2vx…, verdict 0x3a6bde7a…).
+  const DOCKER_CREDENTIALS_KILLED = [
+    "Unable to find image 'swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-315:latest' locally",
+    'docker: error getting credentials - err: signal: killed, out: ``',
+    '',
+    "Run 'docker run --help' for more information",
+  ].join('\n');
+
+  it('classifies a killed docker credential helper as an infra abort, not a real verdict (#1422)', () => {
+    expect(matchInfraSignature(DOCKER_CREDENTIALS_KILLED)).toBe('docker_credentials_error');
+  });
+
+  it('classifies a generic docker-run daemon error as an infra abort', () => {
+    expect(
+      matchInfraSignature('docker: Error response from daemon: pull access denied for foo, repository does not exist'),
+    ).not.toBeNull();
+  });
+
   it('still leaves a normal pytest FAIL session alone (returns null)', () => {
     const normalFail = [
       '=================== test session starts ===================',
