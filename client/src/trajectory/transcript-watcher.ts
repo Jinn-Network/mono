@@ -96,7 +96,23 @@ export interface TranscriptWatcherConfig {
   /** Standard session directories (Codex, Claude Code, …). */
   directories?: WatchedDirectory[];
   onEvent: (envelope: DispatchEnvelope) => void;
+  /**
+   * #1422: skip `directories`-mode session files whose mtime is older than
+   * this many ms — dormant sessions are done growing and don't need a live
+   * OS-level watch handle. On an operator machine with a large accumulated
+   * history under `~/.claude/projects` / `~/.codex/sessions`, watching every
+   * historical file unbounded creates tens of thousands of native FSWatcher
+   * handles, starving the daemon's event loop (confirmed live: 15k+ handles,
+   * multiple daemon loops wedged for 70+ minutes; closing the handles
+   * in-process immediately unwedged them). Explicit `sources` are always
+   * watched regardless — they're operator-supplied, not bulk-enumerated.
+   * Default 7 days. `jinn capture import` remains the one-shot path for
+   * ingesting older history.
+   */
+  maxDirectoryFileAgeMs?: number;
 }
+
+const DEFAULT_MAX_DIRECTORY_FILE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface TranscriptWatcher {
   shutdown(): Promise<void>;
@@ -148,6 +164,25 @@ function isJsonlSessionFile(filePath: string): boolean {
   return filePath.endsWith('.jsonl');
 }
 
+/**
+ * #1422: whether a `directories`-mode file is recent enough to warrant an
+ * active watch (pre-registration + chokidar's native handle). `stats` is
+ * `undefined` on chokidar's path-only pre-check (before it has stat'd the
+ * candidate) — always allow through at that stage; it re-checks with stats
+ * once available. Directories are always kept so recursion can still
+ * discover freshly-active sessions underneath an old-looking parent.
+ */
+export function shouldWatchDirectoryFile(
+  filePath: string,
+  stats: { isDirectory(): boolean; mtimeMs: number } | undefined,
+  maxAgeMs: number,
+): boolean {
+  if (!stats) return true;
+  if (stats.isDirectory()) return true;
+  if (!isJsonlSessionFile(filePath)) return false;
+  return Date.now() - stats.mtimeMs <= maxAgeMs;
+}
+
 export async function startTranscriptWatcher(
   cfg: TranscriptWatcherConfig,
 ): Promise<TranscriptWatcher> {
@@ -159,6 +194,8 @@ export async function startTranscriptWatcher(
 
   const states = new Map<string, SourceState>();
   const directoryParsers = new Map<WatchedTool, TranscriptParser>();
+  const maxDirectoryFileAgeMs =
+    cfg.maxDirectoryFileAgeMs ?? DEFAULT_MAX_DIRECTORY_FILE_AGE_MS;
 
   const registerSource = async (
     source: WatchedSource,
@@ -184,6 +221,8 @@ export async function startTranscriptWatcher(
     directoryParsers.set(dir.tool, parser);
     const files = await listSessionJsonlFiles(dir.directory, dir.recursive === true);
     for (const filePath of files) {
+      const stats = await fs.stat(filePath).catch(() => undefined);
+      if (!shouldWatchDirectoryFile(filePath, stats, maxDirectoryFileAgeMs)) continue;
       await registerSource(
         {
           tool: dir.tool,
@@ -202,10 +241,21 @@ export async function startTranscriptWatcher(
     ...directories.map((d) => d.directory),
   ];
 
+  // #1422: explicit `sources` are operator-supplied and always watched
+  // regardless of extension/age; only `directories`-mode bulk enumeration is
+  // bounded (see maxDirectoryFileAgeMs above — this is the other half of the
+  // same fix, applied where it actually matters: chokidar's own native watch
+  // handles, not just this module's pre-registration).
+  const explicitSourcePaths = new Set(sources.map((s) => resolvePath(s.path)));
+
   const watcher: FSWatcher = chokidar.watch(watchPaths, {
     persistent: true,
     awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
     ignoreInitial: true,
+    ignored: (candidatePath, stats) => {
+      if (explicitSourcePaths.has(resolvePath(candidatePath))) return false;
+      return !shouldWatchDirectoryFile(candidatePath, stats, maxDirectoryFileAgeMs);
+    },
   });
 
   const resolveDirectoryForPath = (filepath: string): WatchedDirectory | undefined => {

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   startTranscriptWatcher,
+  shouldWatchDirectoryFile,
   type TranscriptWatcher,
 } from '../../src/trajectory/transcript-watcher.js';
 import type { TranscriptEvent } from '../../src/trajectory/transcript-parsers/types.js';
@@ -215,6 +216,77 @@ describe('TranscriptWatcher', () => {
 
     // The dead watcher must not have dispatched the post-shutdown append(s).
     expect(collected.length).toBe(before);
+  });
+
+  // Regression for #1422: an operator machine with a large accumulated
+  // ~/.claude/projects / ~/.codex/sessions history creates one native
+  // FSWatcher handle per historical filesystem entry with no age bound —
+  // 15,329 handles observed live (matching the machine's total file+dir count
+  // under those two roots almost exactly), starving the daemon's event loop
+  // for 70+ minutes across multiple unrelated loops (confirmed live: closing
+  // the handles in-process immediately unwedged them). `shouldWatchDirectoryFile`
+  // is the predicate both the pre-registration loop and chokidar's `ignored`
+  // option share to keep dormant files out of the watch set.
+  //
+  // Tested as a pure unit here rather than end-to-end: once a chokidar-ignored
+  // file is written to, its mtime legitimately becomes recent and chokidar
+  // correctly picks it back up (that's desired — a truly reactivated session
+  // should be noticed) — so an e2e "append to an old file, expect silence"
+  // assertion is untestable by construction, not a property of the fix.
+  describe('shouldWatchDirectoryFile', () => {
+    const maxAgeMs = 1000;
+
+    it('always allows directories through, regardless of age', () => {
+      const old = { isDirectory: () => true, mtimeMs: Date.now() - 10 * maxAgeMs };
+      expect(shouldWatchDirectoryFile('/some/dir', old, maxAgeMs)).toBe(true);
+    });
+
+    it('allows the pre-stat pass through (stats undefined)', () => {
+      expect(shouldWatchDirectoryFile('/some/file.jsonl', undefined, maxAgeMs)).toBe(true);
+    });
+
+    it('rejects non-.jsonl files outright', () => {
+      const fresh = { isDirectory: () => false, mtimeMs: Date.now() };
+      expect(shouldWatchDirectoryFile('/some/notes.txt', fresh, maxAgeMs)).toBe(false);
+    });
+
+    it('allows a .jsonl file within the age window', () => {
+      const fresh = { isDirectory: () => false, mtimeMs: Date.now() - maxAgeMs / 2 };
+      expect(shouldWatchDirectoryFile('/some/session.jsonl', fresh, maxAgeMs)).toBe(true);
+    });
+
+    it('rejects a .jsonl file older than the age window', () => {
+      const old = { isDirectory: () => false, mtimeMs: Date.now() - maxAgeMs * 10 };
+      expect(shouldWatchDirectoryFile('/some/session.jsonl', old, maxAgeMs)).toBe(false);
+    });
+  });
+
+  it('registers directory-mode sessions within maxDirectoryFileAgeMs and dispatches their appends', async () => {
+    const sessionsDir = path.join(tmpDir, 'aged-sessions');
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    const freshSession = path.join(sessionsDir, 'fresh.jsonl');
+    await fs.writeFile(freshSession, '');
+
+    watcher = await startTranscriptWatcher({
+      directories: [
+        {
+          tool: 'codex',
+          directory: sessionsDir,
+          sessionIdFromPath: (p) => path.basename(p, '.jsonl'),
+        },
+      ],
+      maxDirectoryFileAgeMs: 24 * 60 * 60 * 1000,
+      onEvent: (envelope) => collected.push(envelope),
+    });
+
+    await fs.appendFile(
+      freshSession,
+      JSON.stringify({ role: 'user', ts: '2026-05-07T00:00:00.000Z', content: 'fresh' }) + '\n',
+    );
+    await waitFor(() => collected.some((c) => c.sessionId === 'fresh'), 20000);
+
+    expect(collected.some((c) => c.sessionId === 'fresh')).toBe(true);
   });
 });
 
