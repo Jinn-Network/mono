@@ -1,7 +1,7 @@
 """
 Doctor command for hermes CLI.
 
-Diagnoses issues with Hermes Agent setup.
+Diagnoses issues with jinn-agent setup.
 """
 
 import os
@@ -12,6 +12,8 @@ from pathlib import Path
 
 from hermes_cli.config import get_project_root, get_hermes_home, get_env_path
 from hermes_cli.env_loader import load_hermes_dotenv
+from hermes_cli.skin_engine import get_active_skin
+from hermes_cli.status import titled_box
 from hermes_constants import display_hermes_home
 from hermes_constants import agent_browser_runnable
 
@@ -552,10 +554,24 @@ def run_doctor(args):
     manual_issues = []  # issues that can't be auto-fixed
     fixed_count = 0
 
+    # `doctor` is reached without going through cli.py's module-level skin
+    # init — pick up config.yaml's skin choice on demand (idempotent,
+    # degrades to the upstream literal on any error). Mirrors setup.py's
+    # _setup_cli_names.
+    try:
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print()
-    print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│                 🩺 Hermes Doctor                        │", Colors.CYAN))
-    print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
+    for _line in titled_box(f"{_brand} Doctor"):
+        print(color(_line, Colors.CYAN))
 
     _section("Security Advisories")
     try:
@@ -723,11 +739,11 @@ def run_doctor(args):
                 except OSError:
                     pass
                 check_ok(f"Created empty {_DHH}/.env")
-                check_info("Run 'hermes setup' to configure API keys")
+                check_info("Run 'jinn-agent setup' to configure API keys")
                 fixed_count += 1
             else:
-                check_info("Run 'hermes setup' to create one")
-                issues.append("Run 'hermes setup' to create .env")
+                check_info("Run 'jinn-agent setup' to create one")
+                issues.append("Run 'jinn-agent setup' to create .env")
     
     # Check ~/.hermes/config.yaml (primary) or project cli-config.yaml (fallback)
     config_path = HERMES_HOME / 'config.yaml'
@@ -946,9 +962,9 @@ def run_doctor(args):
                         fixed_count += 1
                     except Exception as mig_err:
                         check_warn(f"Auto-migration failed: {mig_err}")
-                        issues.append("Run 'hermes setup' to migrate config")
+                        issues.append("Run 'jinn-agent setup' to migrate config")
                 else:
-                    issues.append("Run 'hermes doctor --fix' or 'hermes setup' to migrate config")
+                    issues.append("Run 'jinn-agent doctor --fix' or 'jinn-agent setup' to migrate config")
             else:
                 check_ok(f"Config version up to date (v{current_ver})")
         except Exception:
@@ -1102,10 +1118,13 @@ def run_doctor(args):
         )
 
         nous_status = get_nous_auth_status()
+        # Default skin's `credit` key is unset, so this falls back to "Nous" —
+        # reconstructing the original literal "Nous Portal auth" byte-for-byte.
+        _portal_brand = get_active_skin().get_branding("credit", "Nous")
         if nous_status.get("logged_in"):
-            check_ok("Nous Portal auth", "(logged in)")
+            check_ok(f"{_portal_brand} Portal auth", "(logged in)")
         else:
-            check_warn("Nous Portal auth", "(not logged in)")
+            check_warn(f"{_portal_brand} Portal auth", "(not logged in)")
 
         codex_status = get_codex_auth_status()
         if codex_status.get("logged_in"):
@@ -1183,13 +1202,14 @@ def run_doctor(args):
         else:
             check_info(f"{_DHH}/SOUL.md exists but is empty — edit it to customize personality")
     else:
-        check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Hermes a custom personality)")
+        _agent_brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+        check_warn(f"{_DHH}/SOUL.md not found", f"(create it to give {_agent_brand} a custom personality)")
         if should_fix:
             soul_path.parent.mkdir(parents=True, exist_ok=True)
             soul_path.write_text(
-                "# Hermes Agent Persona\n\n"
-                "<!-- Edit this file to customize how Hermes communicates. -->\n\n"
-                "You are Hermes, a helpful AI assistant.\n",
+                f"# {_agent_brand} Persona\n\n"
+                f"<!-- Edit this file to customize how {_agent_brand} communicates. -->\n\n"
+                f"You are {_agent_brand}, a helpful AI assistant.\n",
                 encoding="utf-8",
             )
             check_ok(f"Created {_DHH}/SOUL.md with basic template")
@@ -2192,7 +2212,7 @@ def run_doctor(args):
         # still show warnings above, but should not pollute the final summary.
         api_disabled = _missing_api_key_toolsets_for_summary(unavailable)
         if api_disabled:
-            issues.append("Run 'hermes setup' to configure missing API keys for full tool access")
+            issues.append("Run 'jinn-agent setup' to configure missing API keys for full tool access")
     except Exception as e:
         check_warn("Could not check tool availability", f"({e})")
     
@@ -2214,7 +2234,7 @@ def run_doctor(args):
         if q_count > 0:
             check_warn(f"{q_count} skill(s) in quarantine", "(pending review)")
     else:
-        check_warn("Skills Hub directory not initialized", "(run: hermes skills list)")
+        check_warn("Skills Hub directory not initialized", "(run: jinn-agent skills list)")
 
     from hermes_cli.config import get_env_value
 
@@ -2404,7 +2424,7 @@ def run_doctor(args):
             print(f"  {i}. {issue}")
         print()
         if not should_fix:
-            print(color("  Tip: run 'hermes doctor --fix' to auto-fix what's possible.", Colors.DIM))
+            print(color("  Tip: run 'jinn-agent doctor --fix' to auto-fix what's possible.", Colors.DIM))
     else:
         print(color("─" * 60, Colors.GREEN))
         print(color("  All checks passed! 🎉", Colors.GREEN, Colors.BOLD))

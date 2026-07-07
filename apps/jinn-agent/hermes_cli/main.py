@@ -228,9 +228,21 @@ def _read_openai_version_fast() -> str | None:
 
 def _print_fast_version_info() -> None:
     from hermes_cli import __release_date__, __version__
+    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
 
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    print(f"Hermes Agent v{__version__} ({__release_date__})")
+    # This fast path runs before the CLI's normal skin-init (cli.py module
+    # load), so pick up config.yaml's skin choice on demand — idempotent,
+    # degrades to the upstream literal on any error (Termux constrained envs).
+    try:
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+    print(f"{_brand} v{__version__} ({__release_date__})")
     print(f"Project: {project_root}")
     print(f"Python: {sys.version.split()[0]}")
 
@@ -4344,6 +4356,20 @@ def cmd_import(args):
 
 def _print_version_info(*, check_updates: bool = True) -> None:
     from hermes_cli.banner import format_banner_version_label
+
+    # format_banner_version_label() reads the active skin's brand, but
+    # ``--version`` never goes through cli.py's module-level skin init —
+    # pick up config.yaml's skin choice on demand (idempotent, degrades to
+    # the upstream literal on any error). Mirrors setup.py's _setup_cli_names.
+    try:
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
 
     print(format_banner_version_label())
     print(f"Project: {PROJECT_ROOT}")

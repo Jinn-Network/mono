@@ -1,7 +1,7 @@
 """
 Status command for hermes CLI.
 
-Shows the status of all Hermes Agent components.
+Shows the status of all jinn-agent components.
 """
 
 import os
@@ -21,6 +21,7 @@ from hermes_cli.nous_account import (
 )
 from hermes_cli.nous_subscription import get_nous_subscription_features
 from hermes_cli.runtime_provider import resolve_requested_provider
+from hermes_cli.skin_engine import get_active_skin
 from hermes_constants import OPENROUTER_MODELS_URL
 from tools.tool_backend_helpers import managed_nous_tools_enabled
 
@@ -114,13 +115,25 @@ from hermes_constants import is_termux as _is_termux
 
 
 def show_status(args):
-    """Show status of all Hermes Agent components."""
+    """Show status of all jinn-agent components."""
     deep = getattr(args, 'deep', False)
 
+    # `status` is reached without going through cli.py's module-level skin
+    # init — pick up config.yaml's skin choice on demand (idempotent,
+    # degrades to the upstream literal on any error). Mirrors setup.py's
+    # _setup_cli_names.
+    try:
+        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print()
-    print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│                 ⚕ Hermes Agent Status                  │", Colors.CYAN))
-    print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
+    for _line in titled_box(f"{_brand} Status"):
+        print(color(_line, Colors.CYAN))
 
     # =========================================================================
     # Environment
@@ -241,14 +254,17 @@ def show_status(args):
         or (nous_account_info and nous_account_info.inference_credential_present)
     )
     nous_error = nous_status.get("error")
+    # Default skin's `credit` key is unset, so this falls back to "Nous" —
+    # reconstructing the original literal "Nous Portal" byte-for-byte.
+    _portal_brand = get_active_skin().get_branding("credit", "Nous")
     if nous_logged_in:
         nous_label = "logged in"
     elif nous_inference_present:
-        nous_label = "not logged in (Nous inference key configured)"
+        nous_label = f"not logged in ({_portal_brand} inference key configured)"
     else:
-        nous_label = "not logged in (run: hermes portal)"
+        nous_label = "not logged in (run: jinn-agent portal)"
     print(
-        f"  {'Nous Portal':<12}  {check_mark(nous_logged_in)} "
+        f"  {f'{_portal_brand} Portal':<12}  {check_mark(nous_logged_in)} "
         f"{nous_label}"
     )
     portal_url = nous_status.get("portal_base_url") or "(unknown)"
@@ -275,7 +291,7 @@ def show_status(args):
     codex_logged_in = bool(codex_status.get("logged_in"))
     print(
         f"  {'OpenAI Codex':<12}  {check_mark(codex_logged_in)} "
-        f"{'logged in' if codex_logged_in else 'not logged in (run: hermes model)'}"
+        f"{'logged in' if codex_logged_in else 'not logged in (run: jinn-agent model)'}"
     )
     codex_auth_file = codex_status.get("auth_store")
     if codex_auth_file:
@@ -304,7 +320,7 @@ def show_status(args):
     minimax_logged_in = bool(minimax_status.get("logged_in"))
     print(
         f"  {'MiniMax OAuth':<12}  {check_mark(minimax_logged_in)} "
-        f"{'logged in' if minimax_logged_in else 'not logged in (run: hermes auth add minimax-oauth)'}"
+        f"{'logged in' if minimax_logged_in else 'not logged in (run: jinn-agent auth add minimax-oauth)'}"
     )
     minimax_region = minimax_status.get("region")
     if minimax_logged_in and minimax_region:
@@ -326,7 +342,7 @@ def show_status(args):
     xai_oauth_logged_in = bool(xai_oauth_status.get("logged_in"))
     print(
         f"  {'xAI OAuth':<12}  {check_mark(xai_oauth_logged_in)} "
-        f"{'logged in' if xai_oauth_logged_in else 'not logged in (run: hermes auth add xai-oauth)'}"
+        f"{'logged in' if xai_oauth_logged_in else 'not logged in (run: jinn-agent auth add xai-oauth)'}"
     )
     xai_auth_file = xai_oauth_status.get("auth_store")
     if xai_auth_file:
@@ -342,14 +358,14 @@ def show_status(args):
     if managed_nous_tools_enabled():
         features = get_nous_subscription_features(config)
         print()
-        print(color("◆ Nous Tool Gateway", Colors.CYAN, Colors.BOLD))
+        print(color(f"◆ {_portal_brand} Tool Gateway", Colors.CYAN, Colors.BOLD))
         if not features.nous_auth_present:
-            print("  Nous Portal   ✗ not logged in")
+            print(f"  {_portal_brand} Portal   ✗ not logged in")
         else:
-            print("  Nous Portal   ✓ managed tools available")
+            print(f"  {_portal_brand} Portal   ✓ managed tools available")
         for feature in features.items():
             if feature.managed_by_nous:
-                state = "active via Nous subscription"
+                state = f"active via {_portal_brand} subscription"
             elif feature.active:
                 current = feature.current_provider or "configured provider"
                 state = f"active via {current}"
@@ -364,7 +380,7 @@ def show_status(args):
         # Nous OAuth without entitlement, or an opaque inference key without
         # Portal account information, cannot enable the Tool Gateway.
         print()
-        print(color("◆ Nous Tool Gateway", Colors.CYAN, Colors.BOLD))
+        print(color(f"◆ {_portal_brand} Tool Gateway", Colors.CYAN, Colors.BOLD))
         message = format_nous_portal_entitlement_message(
             nous_account_info,
             capability="managed web, image, TTS, STT, browser, and Modal tools",
@@ -393,7 +409,7 @@ def show_status(args):
             if key_val:
                 break
         configured = bool(key_val)
-        label = "configured" if configured else "not configured (run: hermes model)"
+        label = "configured" if configured else "not configured (run: jinn-agent model)"
         print(f"  {pname:<16} {check_mark(configured)} {label}")
 
     # LM Studio reachability — only probe when it's the active provider so
@@ -510,7 +526,7 @@ def show_status(args):
         if snapshot.has_process_service_mismatch:
             print("  Service:      installed but not managing the current running gateway")
         elif _is_termux() and not snapshot.gateway_pids:
-            print("  Start with:   hermes gateway")
+            print("  Start with:   jinn-agent gateway")
             print("  Note:         Android may stop background jobs when Termux is suspended")
         elif snapshot.service_installed and not snapshot.service_running:
             print("  Service:      installed but stopped")
@@ -604,6 +620,6 @@ def show_status(args):
 
     print()
     print(color("─" * 60, Colors.DIM))
-    print(color("  Run 'hermes doctor' for detailed diagnostics", Colors.DIM))
-    print(color("  Run 'hermes setup' to configure", Colors.DIM))
+    print(color("  Run 'jinn-agent doctor' for detailed diagnostics", Colors.DIM))
+    print(color("  Run 'jinn-agent setup' to configure", Colors.DIM))
     print()
