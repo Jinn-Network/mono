@@ -24,6 +24,17 @@ from hermes_cli.runtime_provider import resolve_requested_provider
 from hermes_constants import OPENROUTER_MODELS_URL
 from tools.tool_backend_helpers import managed_nous_tools_enabled
 
+def titled_box(title: str, width: int = 57) -> list[str]:
+    """Three box lines with the title centred — brand-width agnostic."""
+    inner = title[: width]
+    pad = width - len(inner)
+    left = pad // 2
+    return [
+        "┌" + "─" * width + "┐",
+        "│" + " " * left + inner + " " * (pad - left) + "│",
+        "└" + "─" * width + "┘",
+    ]
+
 def check_mark(ok: bool) -> str:
     if ok:
         return color("✓", Colors.GREEN)

@@ -1,6 +1,22 @@
 from types import SimpleNamespace
 
-from hermes_cli.status import show_status
+from hermes_cli.status import show_status, titled_box
+
+
+def test_titled_box_lines_equal_length_across_brand_widths():
+    for title in ("Hermes Agent Status", "jinn-agent Status"):
+        lines = titled_box(title)
+        assert len(lines) == 3
+        lengths = {len(line) for line in lines}
+        assert len(lengths) == 1, f"unequal line lengths for {title!r}: {lines}"
+
+
+def test_titled_box_centres_title():
+    lines = titled_box("jinn-agent Status", width=57)
+    top, middle, bottom = lines
+    assert top == "┌" + "─" * 57 + "┐"
+    assert bottom == "└" + "─" * 57 + "┘"
+    assert "jinn-agent Status" in middle
 
 
 def test_show_status_all_does_not_print_tavily_key_value(monkeypatch, capsys, tmp_path):
