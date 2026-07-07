@@ -40,7 +40,7 @@ jobs:
     # Only mirror Releases that look like a Monday named Build Notes cut (skip drafts and -canary tags).
     if: github.event.release.draft == false && !contains(github.event.release.tag_name, 'canary') && !contains(github.event.release.tag_name, '-draft')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}

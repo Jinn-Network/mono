@@ -6,6 +6,8 @@ image; everything they share lives here.
 
 > Local operators do not need any of this — `npm install -g @jinn-network/client@latest && jinn run` (see the root `CLAUDE.md`). This directory is only for headless, hosted (Railway) deployments.
 
+> To mirror the reference frontend (the operator dashboard SPA) specifically, see [../DEPLOY.md](../DEPLOY.md).
+
 ## The base image
 
 `ghcr.io/jinn-network/client` is the container-native base, built from

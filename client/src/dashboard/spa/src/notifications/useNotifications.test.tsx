@@ -127,7 +127,7 @@ describe('useNotifications', () => {
   });
 
   // ── claim_failed (issue #442) ──────────────────────────────────────────
-  // The event-driven 12th notification kind from OPERATOR-APP-SPEC §2.10.
+  // The event-driven `claim_failed` notification kind from OPERATOR-APP-SPEC §2.10.
   // Sourced from the `/v1/events` SSE stream rather than the snapshot
   // deriver because failure is not a steady-state value any `/v1/status`
   // snapshot will keep reporting.

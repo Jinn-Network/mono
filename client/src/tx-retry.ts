@@ -126,23 +126,34 @@ export function isRecoverableTransactionError(error: unknown): boolean {
     ]);
     if (decodedName != null && PERMANENT.has(decodedName)) return false;
     if (decodedName === 'RouterNotDelivered') return true;
-    // Unknown decoded inner — fall through to generic GS013 handling
+    // Reaching here the inner reason has no known name. If re-simulation still
+    // captured a raw selector, the inner call reverts deterministically (an
+    // undecoded custom error such as TACTaskAlreadyCredited, 0x33f626d3) — it
+    // will revert identically on every retry, so classify it terminal instead
+    // of retrying the wrapping GS013 forever. Only when there is no selector
+    // (re-simulation found no inner revert = a signature/nonce race) do we fall
+    // through to the string checks, which keep GS026 retryable.
+    const innerSelector = (error as { innerSelector?: string | null }).innerSelector ?? null;
+    if (innerSelector != null) return false;
   }
 
-  // Gnosis Safe 1.3.0 wraps every inner execTransaction revert as GS013 when
-  // safeTxGas == 0 && gasPrice == 0. When the inner reason is decodable,
-  // SafeInnerRevertError above handles it. The remaining GS013/GS026 path
-  // covers stale-nonce signature races, which the `executeSafeTransaction`
-  // retry self-heals by re-reading nonce and re-signing.
-  if (msg.includes('GS013')) return true;
+  // Gnosis Safe 1.3.0 error codes. GS026 = the signature/owner set was rejected
+  // — typically a stale-nonce race that `executeSafeTransaction` self-heals by
+  // re-reading the nonce and re-signing, so it stays retryable. GS013 =
+  // require(success || safeTxGas != 0 || gasPrice != 0): the Safe's INNER call
+  // reverted, which is deterministic and never clears on retry. Decodable inner
+  // reverts are already classified above via SafeInnerRevertError; a bare GS013
+  // reaching here (e.g. an estimate-path revert whose custom-error selector we
+  // don't decode) must fail fast rather than wedge the loop. Check GS026 first
+  // so the receipt-path "GS026/GS013 possible stale nonce" message (emitted only
+  // when re-simulation found no inner revert) stays retryable.
   if (msg.includes('GS026')) return true;
+  if (msg.includes('GS013')) return false;
 
   if (
-    lower.includes('replacement transaction underpriced') ||
-    lower.includes('replacement fee too low') ||
+    isReplacementUnderpricedError(error) ||
     lower.includes('fee cap less than block base fee') ||
-    lower.includes('max fee per gas less than block base fee') ||
-    lower.includes('transaction underpriced')
+    lower.includes('max fee per gas less than block base fee')
   ) {
     return true;
   }
@@ -217,6 +228,26 @@ export function isRecoverableTransactionError(error: unknown): boolean {
  */
 export function isNonceTooLowError(error: unknown): boolean {
   return flattenErrorMessage(error).toLowerCase().includes('nonce too low');
+}
+
+/**
+ * True when the RPC rejected an `eth_sendRawTransaction` because a tx already
+ * occupies the target nonce and the resubmission's fee bump was insufficient to
+ * replace it ("replacement underpriced"). Distinct from `nonce too low`: the
+ * original tx is still PENDING at this nonce, not yet mined.
+ *
+ * Issue #897: the Safe execTransaction retry uses this to refresh the pinned
+ * nonce before the next fee bump and to trigger a reconcile against the
+ * pending original tx (it may mine mid-retry). The substrings mirror the
+ * replacement branch of `isRecoverableTransactionError`.
+ */
+export function isReplacementUnderpricedError(error: unknown): boolean {
+  const lower = flattenErrorMessage(error).toLowerCase();
+  return (
+    lower.includes('replacement transaction underpriced') ||
+    lower.includes('replacement fee too low') ||
+    lower.includes('transaction underpriced')
+  );
 }
 
 export function sleep(ms: number): Promise<void> {

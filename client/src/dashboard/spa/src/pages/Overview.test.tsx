@@ -18,19 +18,27 @@ import type { JSX } from 'react';
 
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
+const getRewardsMock = vi.fn();
+const claimRewardsMock = vi.fn();
 const triggerDripMock = vi.fn();
+const getDripQuotaMock = vi.fn();
 const restartDaemonMock = vi.fn();
 const stopDaemonMock = vi.fn();
 const retryAgentBindingMock = vi.fn();
+const getSolverNetsMock = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
-    triggerDrip: (opts?: { singleDrip?: boolean }) => triggerDripMock(opts),
+    getRewards: () => getRewardsMock(),
+    claimRewards: () => claimRewardsMock(),
+    triggerDrip: (opts?: { singleDrip?: boolean; batch?: boolean }) => triggerDripMock(opts),
+    getDripQuota: () => getDripQuotaMock(),
     restartDaemon: (opts?: { forceRespawn?: boolean }) => restartDaemonMock(opts),
     stopDaemon: () => stopDaemonMock(),
     retryAgentBinding: (opts: { serviceIndex: number }) => retryAgentBindingMock(opts),
+    getSolverNets: () => getSolverNetsMock(),
   },
 }));
 
@@ -40,11 +48,40 @@ const { OverviewPage } = await import('./Overview.js');
 beforeEach(() => {
   getStatusMock.mockReset();
   getBootstrapMock.mockReset();
+  getRewardsMock.mockReset();
+  claimRewardsMock.mockReset();
   triggerDripMock.mockReset();
+  getDripQuotaMock.mockReset();
   restartDaemonMock.mockReset();
   stopDaemonMock.mockReset();
   retryAgentBindingMock.mockReset();
+  getSolverNetsMock.mockReset();
+  getRewardsMock.mockResolvedValue({
+    schemaVersion: 1,
+    generatedAt: '2026-04-14T12:00:00.000Z',
+    readState: 'ready',
+    totalPending: '0',
+    totalClaimed: '0',
+    lastClaimAt: null,
+    lastClaimTickAt: null,
+    nextCheckpointAt: null,
+    services: [],
+  });
+  claimRewardsMock.mockResolvedValue({
+    ok: true,
+    result: {
+      submitted: 1,
+      claims: [{ txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234' }],
+    },
+  });
   triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
+  getDripQuotaMock.mockResolvedValue({
+    ok: true,
+    dailyCap: 10,
+    callsRemaining: 10,
+    cooldownExpiresAt: null,
+  });
+  getSolverNetsMock.mockResolvedValue({ nets: [] });
   restartDaemonMock.mockResolvedValue({ ok: true });
   stopDaemonMock.mockResolvedValue({ ok: true });
 });
@@ -253,107 +290,173 @@ describe('OverviewPage Wallet wiring', () => {
     predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
   };
 
-  it('wires the Top up button on the Wallet card to api.triggerDrip with singleDrip', async () => {
+  it('wires the Top up button on the Wallet card to api.triggerDrip with batch (issue #560)', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});
     triggerDripMock.mockResolvedValue({
       ok: true,
-      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
-      deltaWei: '5000000000000000',
+      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+      dailyCap: 10,
+      callsRemaining: 9,
     });
     render(withProviders(<OverviewPage />));
 
     fireEvent.click(await screen.findByTestId('wallet-topup'));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
-    expect(triggerDripMock).toHaveBeenCalledWith({ singleDrip: true });
+    expect(triggerDripMock).toHaveBeenCalledWith({ batch: true });
   });
 
-  it('wires the tJINN-earned value from status.tJinn.safeBalanceWei', async () => {
-    getStatusMock.mockResolvedValue({
-      ...baseStatus,
-      tJinn: {
-        state: 'ready',
-        chainId: 11155111,
-        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
-        safeBalanceWei: '1500000000000000000',
-        operatorClaimedWei: '2750000000000000000',
-        operatorMintedLast24hWei: '250000000000000000',
-        safeCount: 1,
-        services: [],
-        error: null,
-      },
-    });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    // The tJINN-earned value derives from status.tJinn.safeBalanceWei
-    // (1.5 tJINN); the OLAS staking collector queue never reaches the SPA (#992).
-    await waitFor(() =>
-      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('1.5000'),
-    );
-    expect(screen.getByTestId('tjinn-earned-24h-value').textContent).toBe('0.2500');
-    expect(screen.getByText(/jinn earned last 24hrs/i)).toBeTruthy();
-    const tjinnValue = screen.getByTestId('tjinn-earned-value');
-    expect(tjinnValue.textContent).not.toBe('999.0000');
-    expect(screen.queryByText('999.0000')).toBeNull();
-    expect(screen.queryByText(/collector/i)).toBeNull();
-    expect(screen.queryByTestId('wallet-claim')).toBeNull();
-    expect(screen.queryByRole('button', { name: /claim/i })).toBeNull();
-  });
-
-  it('renders a confirmed-empty tJINN balance (ready + null) as 0', async () => {
-    getStatusMock.mockResolvedValue({
-      ...baseStatus,
-      tJinn: {
-        state: 'ready',
-        chainId: 11155111,
-        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
-        safeBalanceWei: null,
-        operatorClaimedWei: '0',
-        safeCount: 1,
-        services: [],
-        error: null,
-      },
-    });
-    getBootstrapMock.mockResolvedValue({});
-    render(withProviders(<OverviewPage />));
-
-    await waitFor(() =>
-      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('0.0000'),
-    );
-    // A confirmed-empty balance is distinguishable from loading — no state copy.
-    expect(screen.queryByTestId('tjinn-earned-state')).toBeNull();
-  });
-
-  it('shows pending tJINN copy when status.tJinn is absent (older daemon)', async () => {
+  it('passes the drip quota into the Wallet card (issue #560)', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});
+    getDripQuotaMock.mockResolvedValue({
+      ok: true,
+      dailyCap: 10,
+      callsRemaining: 4,
+      cooldownExpiresAt: null,
+    });
     render(withProviders(<OverviewPage />));
 
-    await waitFor(() =>
-      expect(screen.getByTestId('tjinn-earned-value').textContent).toBe('pending'),
-    );
-    expect(screen.getByTestId('tjinn-earned-state').textContent).toMatch(
-      /waiting for sepolia balance/i,
-    );
+    const quota = await screen.findByTestId('wallet-topup-quota');
+    expect(quota.textContent).toMatch(/4 of 10 top-ups left today/i);
   });
 
-  it('surfaces a one-line gas top-up confirmation with the tx hash + amount', async () => {
+  it('surfaces a cap-reached message when the daemon returns topup_cooldown (issue #560)', async () => {
     getStatusMock.mockResolvedValue(baseStatus);
     getBootstrapMock.mockResolvedValue({});
     triggerDripMock.mockResolvedValue({
-      ok: true,
-      txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
-      txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
-      deltaWei: '5000000000000000', // 0.005 ETH
+      ok: false,
+      reason: 'topup_cooldown',
+      dailyCap: 10,
+      callsRemaining: 0,
+      cooldownExpiresAt: Date.now() + 60_000,
     });
     render(withProviders(<OverviewPage />));
 
     fireEvent.click(await screen.findByTestId('wallet-topup'));
-    // Toast surface: amount + truncated tx hash both rendered in the
-    // sonner portal, queried by text rather than testid (sonner doesn't
-    // surface testids on individual toasts).
-    expect(await screen.findByText(/0\.005000 ETH/)).toBeTruthy();
+    expect(await screen.findByText(/daily faucet cap reached/i)).toBeTruthy();
+  });
+
+  it('wires pending and lifetime OLAS from /v1/rewards', async () => {
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      rewards: {
+        claimedStakingRewardsWei: '999000000000000000000',
+        claimedStakingRewardsLast24hWei: '250000000000000000',
+      },
+    });
+    getRewardsMock.mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '2026-04-14T12:00:00.000Z',
+      readState: 'ready',
+      totalPending: '1500000000000000000',
+      totalClaimed: '3500000000000000000',
+      lastClaimAt: '2026-04-14T10:45:00.000Z',
+      lastClaimTickAt: null,
+      nextCheckpointAt: null,
+      services: [],
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('olas-pending-value').textContent).toBe('1.5000'),
+    );
+    expect(screen.getByTestId('olas-claimed-value').textContent).toBe('3.5000');
+    expect(screen.getByTestId('olas-claimed-24h-value').textContent).toBe('0.2500');
+    expect(screen.getByText(/claimed last 24hrs/i)).toBeTruthy();
+    const olasValue = screen.getByTestId('olas-pending-value');
+    expect(olasValue.textContent).not.toBe('999.0000');
+    expect(screen.queryByText('999.0000')).toBeNull();
+    expect(screen.queryByText(/collector/i)).toBeNull();
+    expect(screen.getByRole('button', { name: /claim olas/i })).toBeTruthy();
+  });
+
+  it('renders zero pending OLAS when rewards are absent', async () => {
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      rewards: {
+        claimedStakingRewardsWei: '0',
+        claimedStakingRewardsLast24hWei: '0',
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('olas-pending-value').textContent).toBe('0.0000'),
+    );
+    expect(screen.queryByTestId('olas-pending-state')).toBeNull();
+    expect((screen.getByTestId('wallet-claim') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('shows pending OLAS copy when the rewards query has not loaded yet', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getRewardsMock.mockImplementation(() => new Promise(() => {}));
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('olas-pending-value').textContent).toBe('pending'),
+    );
+    expect(screen.getByTestId('olas-pending-state').textContent).toMatch(
+      /no rewards yet/i,
+    );
+  });
+
+  it('wires Claim OLAS to api.claimRewards and refreshes rewards/status/activity queries', async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+    getStatusMock.mockResolvedValue({
+      ...baseStatus,
+      rewards: {
+        claimedStakingRewardsWei: '0',
+        claimedStakingRewardsLast24hWei: '0',
+      },
+    });
+    getRewardsMock.mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '2026-04-14T12:00:00.000Z',
+      readState: 'ready',
+      totalPending: '10000000000000000',
+      totalClaimed: '0',
+      lastClaimAt: null,
+      lastClaimTickAt: null,
+      nextCheckpointAt: null,
+      services: [],
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    const claimButton = await screen.findByTestId('wallet-claim') as HTMLButtonElement;
+    await waitFor(() => expect(claimButton.disabled).toBe(false));
+    fireEvent.click(claimButton);
+    await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activity-events'] }),
+    );
+    await waitFor(() => expect(getRewardsMock.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(getStatusMock.mock.calls.length).toBeGreaterThan(1));
+    invalidateSpy.mockRestore();
+  });
+
+  it('surfaces a one-line gas top-up confirmation reporting the drip count + last tx (issue #560)', async () => {
+    getStatusMock.mockResolvedValue(baseStatus);
+    getBootstrapMock.mockResolvedValue({});
+    triggerDripMock.mockResolvedValue({
+      ok: true,
+      txHashes: [
+        '0x1110000000000000000000000000000000000000000000000000000000001111',
+        '0xabc0000000000000000000000000000000000000000000000000000000001234',
+      ],
+      dailyCap: 10,
+      callsRemaining: 8,
+    });
+    render(withProviders(<OverviewPage />));
+
+    fireEvent.click(await screen.findByTestId('wallet-topup'));
+    // Toast surface: drip count + truncated last tx hash, queried by text
+    // rather than testid (sonner doesn't surface testids on individual toasts).
+    expect(await screen.findByText(/2 drips/)).toBeTruthy();
     expect(screen.getByText(/0xabc0…1234/)).toBeTruthy();
   });
 
@@ -376,10 +479,17 @@ describe('OverviewPage Wallet wiring', () => {
     try {
       getStatusMock.mockResolvedValue(baseStatus);
       getBootstrapMock.mockResolvedValue({});
+      getDripQuotaMock.mockResolvedValue({
+        ok: true,
+        dailyCap: 10,
+        callsRemaining: 10,
+        cooldownExpiresAt: null,
+      });
       triggerDripMock.mockResolvedValue({
         ok: true,
-        txHash: '0xabc0000000000000000000000000000000000000000000000000000000001234',
-        deltaWei: '5000000000000000',
+        txHashes: ['0xabc0000000000000000000000000000000000000000000000000000000001234'],
+        dailyCap: 10,
+        callsRemaining: 9,
       });
       render(withProviders(<OverviewPage />));
 
@@ -416,4 +526,3 @@ describe('OverviewPage Node Health wiring', () => {
     expect(restartDaemonMock).toHaveBeenCalledWith({ forceRespawn: true });
   });
 });
-

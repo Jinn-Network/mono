@@ -14,7 +14,7 @@
 // - `evaluationFunction.implementation` is BINDING (canonical evaluator harness reference)
 // - `signature: { alg: 'eip-191'; signer: 0x...; value: 0x... }`
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { JsonSchema } from '../json-schema.js';
 
 // JSON Schema is opaque to this validator — manifests carry user-authored

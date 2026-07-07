@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { OutputArtifact, RationaleEntry, Solution } from './types.js';
 import { PredictionV1TaskSchema, type PredictionV1Task } from './prediction-v1.js';
 import {
@@ -12,6 +12,11 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from './payloads/swe-rebench-v2.js';
+import { JinnRepoTaskSchema } from './jinn-repo.js';
+import {
+  JinnRepoSolutionPayloadSchema,
+  JinnRepoVerdictPayloadSchema,
+} from './payloads/jinn-repo.js';
 import {
   SessionDerivedSolutionSchema,
   SessionDerivedTaskSchema,
@@ -24,6 +29,7 @@ export type PayloadKind = 'task' | 'solution' | 'verdict';
 export type SupportedSolverType =
   | 'prediction.v1'
   | 'swe-rebench-v2.v1'
+  | 'jinn-repo.v1'
   | 'session-derived.v1';
 
 export interface CredentialRequirement {
@@ -205,6 +211,53 @@ export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   },
 };
 
+export const JINN_REPO_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
+  id: 'jinn-repo',
+  version: 'v1',
+  name: 'Jinn repo',
+  schemas: {
+    task: {
+      zod: JinnRepoTaskSchema,
+      json: zodToJsonSchema(JinnRepoTaskSchema),
+    },
+    solution: {
+      zod: JinnRepoSolutionPayloadSchema,
+      json: zodToJsonSchema(JinnRepoSolutionPayloadSchema),
+    },
+    verdict: {
+      zod: JinnRepoVerdictPayloadSchema,
+      json: zodToJsonSchema(JinnRepoVerdictPayloadSchema),
+    },
+  },
+  claimPolicyDefaults: {
+    mode: 'parallel',
+    maxClaims: 5,
+    maxClaimsPerOperator: 5,
+    claimLeaseTtlSeconds: 60 * 60, // 1 hour per Task — coding tasks need more time than predictions
+  },
+  credentialRequirements: {
+    creator: [],
+    // Solver needs only public git/GitHub read; represented as no declared credential.
+    solver: [],
+    // Repo-native runner (no Docker) — unlike swe-rebench-v2, no Docker credential.
+    evaluator: [],
+  },
+  evaluationFunction: {
+    id: 'jinn-repo.repo-native-test.v1',
+    deterministic: true,
+    inputs: ['Jinn repo Task', 'Jinn repo Solution', 'gold tests from corpus'],
+    output: 'Jinn repo Verdict',
+    implementation: 'client/src/harnesses/impls/jinn-repo-evaluator',
+  },
+  aggregationFunction: {
+    id: 'jinn-repo.multi-winrate.v1',
+    deterministic: true,
+    inputs: ['SCORED jinn-repo.v1 Verdicts'],
+    output: 'structured network-result',
+    windowDays: 30,
+  },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SESSION_DERIVED_V1_SOLVER_NET_CONTRACT — Phase 0 / Task 0.4 scaffold.
 //
@@ -278,6 +331,7 @@ export const SESSION_DERIVED_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
   'prediction.v1': PREDICTION_V1_SOLVER_NET_CONTRACT,
   'swe-rebench-v2.v1': SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT,
+  'jinn-repo.v1': JINN_REPO_V1_SOLVER_NET_CONTRACT,
   'session-derived.v1': SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
 };
 

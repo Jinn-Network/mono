@@ -70,7 +70,9 @@ ETH actually lives across three roles — the **agent address** (gas float for t
   - eth amount (rolled-up; drill-down per role: master / agent / Safe)
   - runway
     - **Actions**
-      - request funds from faucet
+      - request funds from faucet — issues a *batch* of faucet drips up to the daily cap in one click (issue #560). Action states: `idle → batching → complete | cooldown_blocked`. A concurrent batch for the same wallet is rejected (`batch_in_progress`, HTTP 409); the in-flight click owns the cap until it settles.
+  - faucet top-ups remaining today (`callsRemaining: number`) — how many batched faucet top-ups the wallet may still issue before the daily cap (issue #560)
+  - faucet cap reset (`cooldownExpiresAt: number | null`) — epoch-ms when the daily cap resets, or null when the cap has not been hit
   - last password cycle
     - **Actions**
       - change password
@@ -85,6 +87,7 @@ ETH actually lives across three roles — the **agent address** (gas float for t
   - runway low
   - password rotation due
   - faucet rate-limited
+  - daily cap reached · resets in &lt;T&gt; — informational; the daily faucet top-up cap is spent and the "request funds from faucet" action is disabled until the cooldown elapses (issue #560)
 
 ### 2.4 Network Memberships
 
@@ -165,26 +168,17 @@ Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
-JINN and OLAS the operator has earned or is owed.
+The OLAS the operator has earned. Rewards build up automatically as the node completes tasks and delivers verdicts, and the daemon collects them for the operator — there is no manual claim step and nothing the operator needs to do here.
 
-- **Static**
-  - claimable
-    - **Actions**
-      - claim
-  - claimed
-- **Streams**
-  - epoch history
-    - txn
-    - datetime
-    - txn url
-  - claim history
-    - txn
-    - datetime
-    - txn url
+- **State**
+  - lifetime OLAS earned (`claimedStakingRewardsWei`)
+  - OLAS earned in last 24 h (`claimedStakingRewardsLast24hWei`)
 - **State messages**
-  - claim available
-  - claim failed
-  - cross-chain claim pending
+  - none
+- **Collections**
+  - none
+- **Actions**
+  - none (rewards are collected automatically)
 
 ### 2.8 Bootstrap
 
@@ -260,9 +254,15 @@ The pickable set is tier 1 ∩ tier 2; selecting a pickable harness then drives 
   - authenticated (tier 3)
   - ready (tier 3 — installed ∧ authenticated ∧ passing its check)
   - role — solver (operator-selected) or evaluator (manifest-bound)
+- **State (per harness, auth source — read-only) (#564)**
+  - auth source — the credential location: a file path (e.g. `~/.hermes/.env`), an env var, a CLI session, or "no auth required"
+  - key suffix — last 4 chars of the credential, masked to `—` when absent or shorter than 8 chars; the full key is never shown
+  - last modified — mtime of the credential file (`—` for session/env sources)
+  - auth state — `loaded` (credential present & non-empty), `missing` (file/key absent), or `unknown` (CLI-session auth, e.g. claude-code, or probe error)
+  - Rendered in §2.11 Settings → Security as a read-only table; each row deep-links to `docs/runbooks/rotating-harness-keys.md`. Data source: `GET /v1/harnesses/auth-status` (suffix + metadata only).
 - **Actions (per harness)**
   - select — choose this harness for the solver role of the SolverNet in context (writes to the §2.4 environment)
-  - install / authenticate — the per-harness setup action that drives the harness to ready; generalises the existing precheck pattern (install command / auth step, then re-check). Optional per harness: pure-compute harnesses are ready with no action.
+  - install / authenticate — the per-harness setup action that drives the harness to ready; generalises the existing precheck pattern (install command / auth step, then re-check). Optional per harness: pure-compute harnesses are ready with no action. For the auth store and rotate command/file behind each harness's auth step (and why `client/.env` is not it), see [`docs/operator/rotating-harness-keys.md`](../docs/operator/rotating-harness-keys.md).
   - re-check
 - **State messages**
   - harness not installed
@@ -301,7 +301,6 @@ Components raise state messages locally. The Notifications component is the unio
 - `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.
 - `no_solvernets_joined` — fires **only** for a running node that has left all its SolverNets *after* onboarding. It is **never** shown to a freshly-onboarded node: onboarding's completion criterion (§2.8) guarantees ≥1 joined SolverNet, so a node that has just finished onboarding always has a membership. The onboarding-local "join a SolverNet to finish" prompt (§2.8 state messages) is the takeover-phase counterpart and is a distinct, non-taxonomy message.
 - `safe_binding_pending`
-- `claim_available`
 - `claim_failed`
 
 ### 2.11 Settings
@@ -309,6 +308,8 @@ Components raise state messages locally. The Notifications component is the unio
 Operator-tunable configuration.
 
 **Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a membership's harness/model (§2.4 "change environment") or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once. **Scope:** this Settings home ships in the #983 follow-up (alongside removing the legacy overview readiness card), not in #983 itself — #983 delivers only the onboarding rendering.
+
+**Harness auth status (#564).** Settings → Security also hosts a read-only **Harness auth status** table — per-harness auth source, masked key suffix, credential mtime, and a `loaded`/`missing`/`unknown` state — sourced from `GET /v1/harnesses/auth-status` (suffix + metadata only, never full keys). See §2.9's "State (per harness, auth source)" sub-group and `docs/runbooks/rotating-harness-keys.md`.
 
 - **State** (read-only)
   - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.
@@ -355,6 +356,11 @@ Daemon version and update lifecycle.
 These appear only when the operator opts into a corresponding mode. Each follows the same four-axis shape; each is fully specified in its own follow-up when activated.
 
 - **Launcher** — when the operator has launched at least one SolverNet. Drafts, launched records, lifecycle transitions. The owned-SolverNets list (Collection: one row per launched record) exposes a per-row **recent posts (1h / 6h / 24h)** state — the windowed count of on-chain `TaskCreated` events filtered to that row's manifest CID (digest join via `manifestDigestForCid`), sourced through `DiscoveryAPI.getTaskPostCounts` (#918). Scope is per-SolverNet; the same **block-window approximation** as the §2.11 Network task-post panel applies (Base ~2s blocktime; counts approximate). All rows are served by **one batched query** keyed by every owned row's CID (never one query per row), polled every 30s. Zero / unavailable handling matches §2.11: a row with no counts or a 24h count of zero renders "No recent posts" (never blank), and a query error renders a terse "posts unavailable".
+  - **Spend & runway** (per launched-SolverNet detail view; `SpendPanel.tsx`).
+    - **State** — Safe address, Safe balance, solution price, verdict price, **per-Task cost** (`solutionPriceWei + verdictPriceWei + claim-tx gas`), and **projected runway** (Safe balance ÷ per-Task cost, in Tasks at current prices). The claim-tx gas term is a fixed honest-conservative estimate (~175,000 gas × ~0.0115 gwei ≈ 2,000 gwei/claim, #573); there is no live gas feed in the SPA. Excluding it previously over-stated runway by ~100× (133,333 vs ~1,000 Tasks).
+    - **State messages** — `runway low` — **warning** severity (rendered with the `--wane` warning token, matching §2.3 Funds' own operator-wallet `runway low` precedent). Raised when projected runway is under 100 Tasks. Maps to **no local action**: top-up lives on §2.3 Funds' operator-wallet faucet, not this panel — the operator tops up their wallet from the Overview faucet and the daemon's balance-topup loop forwards ETH to the Safe automatically. Distinct from §2.3 Funds' own `runway low` (which is about the operator's gas wallet, not the launcher Safe's Task budget).
+    - **Collections** — none.
+    - **Actions** — none; read-only projection.
 - **Artifact Serving** — when the operator serves paid artifacts. Inventory, pricing, access events.
 - **Peers** — when the operator connects to a peer network. Peer list, sync status.
 

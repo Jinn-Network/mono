@@ -8,23 +8,24 @@
 
 import { createHash } from 'node:crypto';
 import type { Store } from '../store/store.js';
-import { acquireArtifactWithPayment, type AcquireWithPaymentResult } from '../x402/acquire.js';
+import { fetchArtifactContent, type AcquireResult } from './fetch-artifact.js';
 import type { ArtifactContent, RouteResolver } from './types.js';
 import { AcquireError, HashMismatchError } from './types.js';
 import { fetchFromIpfs as defaultFetchFromIpfs } from '../adapters/mech/ipfs.js';
 import type { ArtifactSource } from '../types/envelope.js';
 
 /**
- * Origin acquire function. Historically returned `Buffer | null`; the new
- * discriminated union lets callers distinguish not_found vs payment_failed
- * vs network_error. We accept either shape so test fakes that still return
- * `Buffer | null` keep working.
+ * Origin acquire function. Historically returned `Buffer | null`; the
+ * discriminated union lets callers distinguish not_found vs network_error.
+ * We accept either shape so test fakes that still return `Buffer | null`
+ * keep working. `privateKey` is accepted for signature compatibility with
+ * older fakes but is unused — acquisition is a free fetch now.
  */
 type AcquireFn = (
   endpoint: string,
   sha256: string,
-  privateKey: string,
-) => Promise<Buffer | null | AcquireWithPaymentResult>;
+  privateKey?: string,
+) => Promise<Buffer | null | AcquireResult>;
 type FetchFromIpfsFn = (gatewayUrl: string, cid: string) => Promise<unknown>;
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1';
@@ -80,7 +81,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     sources = [],
     ipfsGatewayUrl,
     ownerSafe,
-    acquireFn = acquireArtifactWithPayment,
+    acquireFn = (endpoint, sha256) => fetchArtifactContent(endpoint, sha256),
     fetchFromIpfs = defaultFetchFromIpfs,
   } = args;
 
@@ -135,8 +136,8 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     } catch (err) {
       if (err instanceof HashMismatchError) throw err;
       // Donated IPFS is an opportunistic fast path. Gateway failures and
-      // malformed donation payloads should not block the paid acquisition
-      // chain; only verified byte hash mismatches remain fatal.
+      // malformed donation payloads should not block the acquisition chain;
+      // only verified byte hash mismatches remain fatal.
     }
   }
 
@@ -147,8 +148,8 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
       // Re-verify before mirroring. If served_artifacts has been corrupted
       // (disk error, manual edit, future migration bug, etc.) we must NOT
       // propagate the bad bytes into network_artifacts where peers can
-      // fetch them via x402. Throwing closes the cache-poisoning gap; the
-      // self-store path is now hash-equivalent to origin / route-resolver.
+      // fetch them. Throwing closes the cache-poisoning gap; the self-store
+      // path is now hash-equivalent to origin / route-resolver.
       const actualSha = sha256Hex(own.content);
       if (actualSha !== sha256) {
         throw new HashMismatchError(sha256, actualSha, 'self-store', selfSafeAddress);
@@ -215,9 +216,9 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
   let bytes: Buffer | null;
   try {
     const raw = await acquireFn(access.endpoint, sha256, privateKey);
-    // Accept both the legacy `Buffer | null` shape and the new discriminated
-    // union from acquireArtifactWithPayment. Buffer.isBuffer guards before
-    // we duck-type into the union.
+    // Accept both the legacy `Buffer | null` shape and the discriminated
+    // union from fetchArtifactContent. Buffer.isBuffer guards before we
+    // duck-type into the union.
     if (raw === null || Buffer.isBuffer(raw)) {
       bytes = raw;
     } else if (raw.ok === true) {
@@ -236,7 +237,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     throw new AcquireError(sha256, 'origin fetch failed', err);
   }
   if (!bytes) {
-    throw new AcquireError(sha256, 'origin returned null (404 / payment failed)');
+    throw new AcquireError(sha256, 'origin returned null (404 / not found)');
   }
   const actualSha = sha256Hex(bytes);
   if (actualSha !== sha256) {

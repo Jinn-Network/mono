@@ -31,7 +31,7 @@ export async function checkSubstrateTopup(opName: string, opts: TopupOptions = {
     needs.push({ resource: 'ETH', have: ethBalance, want: TARGET_ETH_WEI });
   }
 
-  // USDC on Safe (for x402 payments — only if op participates in donation scenarios)
+  // USDC on Safe (legacy substrate balance check; not consumed by artifact acquisition, which is now a free fetch)
   try {
     const usdcBalance = await client.readContract({
       address: USDC_BASE_SEPOLIA,

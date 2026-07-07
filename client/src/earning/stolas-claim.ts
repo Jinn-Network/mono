@@ -20,7 +20,7 @@ import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
 import type { ServiceState, ServiceStep, StakingMode } from './types.js';
 import { STOLAS_DISTRIBUTOR_ABI } from './contracts.js';
-import { JINN_STAKING_ABI } from './jinn-rewards.js';
+import { JINN_STAKING_ABI } from './stolas-staking.js';
 import { executeSafeTxDirect } from './safe-adapter.js';
 import {
   isRecoverableTransactionError,
@@ -171,7 +171,7 @@ export async function tickStolasDistributorClaims(
       const receipt = await waitForReceipt(publicClient, txHash as Hex);
       if (receipt.status !== 'success') {
         result.failedPermanent += 1;
-        console.error(
+        console.debug(
           `[reward-claim] claim tx failed for service ${serviceId} (hash=${txHash})`,
         );
         continue;
@@ -185,8 +185,8 @@ export async function tickStolasDistributorClaims(
       });
       console.log(
         `[reward-claim] Submitted distributor.claim for service ${serviceId} ` +
-        `(~${pending.toString()} wei pre-split — actual operator share is the ` +
-        `collector slot only; protocol/curating shares route per stOLAS proxy config)`,
+        `(~${pending.toString()} wei pre-split — operator share is the curating-agent ` +
+        `slot per stOLAS proxy config; collector/protocol route separately)`,
       );
     } catch (err) {
       if (isRecoverableTransactionError(err)) {
@@ -194,7 +194,7 @@ export async function tickStolasDistributorClaims(
       } else {
         result.failedPermanent += 1;
       }
-      console.error(
+      console.debug(
         `[reward-claim] Skipped service ${serviceId}:`,
         err instanceof Error ? err.message : err,
       );
@@ -304,7 +304,7 @@ export async function tickSelfBondStakingClaims(
 
     if (!safeAddress || !agentPrivateKey || !rpcUrl) {
       result.skippedMissingConfig += 1;
-      console.error(
+      console.debug(
         `[reward-claim] Self-bond: service ${serviceId} skipped — missing safeAddress, agentPrivateKey, or rpcUrl on claim target.`,
       );
       continue;
@@ -346,7 +346,7 @@ export async function tickSelfBondStakingClaims(
       const receipt = await waitForReceipt(publicClient, txHash as Hex);
       if (receipt.status !== 'success') {
         result.failedPermanent += 1;
-        console.error(
+        console.debug(
           `[reward-claim] Self-bond claim tx failed for service ${serviceId} (hash=${txHash})`,
         );
         continue;
@@ -368,7 +368,7 @@ export async function tickSelfBondStakingClaims(
       } else {
         result.failedPermanent += 1;
       }
-      console.error(
+      console.debug(
         `[reward-claim] Self-bond: skipped service ${serviceId}:`,
         err instanceof Error ? err.message : err,
       );

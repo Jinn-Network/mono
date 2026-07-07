@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import {
   REQUIRES_LIVE_DAEMON_READINESS,
   SkippableError,

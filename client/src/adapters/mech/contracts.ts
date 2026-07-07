@@ -1,6 +1,7 @@
 import {
   encodeFunctionData,
   decodeEventLog,
+  getAbiItem,
   type Address,
   type Hex,
   type PublicClient,
@@ -43,6 +44,11 @@ const TASK_COORDINATOR_ABI = [
     inputs: [{ name: 'taskId', type: 'uint256' }],
     outputs: [
       {
+        // Tokenless-OLAS pivot: TaskCoordinator.TaskRecord trimmed — policy is
+        // `maxClaims` + `allowSolverSelfEvaluation`; the window/lease/quorum/
+        // EvaluationPolicy fields are gone and the final flag is `creatorCredited`
+        // (was `taskCreationCredited`). `creator` then `taskCidDigest` MUST stay
+        // components 0/1 — getTaskCidDigest decodes positionally.
         name: 'record',
         type: 'tuple',
         components: [
@@ -54,30 +60,14 @@ const TASK_COORDINATOR_ABI = [
             name: 'policy',
             type: 'tuple',
             components: [
-              { name: 'claimWindowStart', type: 'uint64' },
-              { name: 'claimWindowEnd', type: 'uint64' },
-              { name: 'submissionDeadline', type: 'uint64' },
-              { name: 'claimLeaseTtlSeconds', type: 'uint32' },
-              { name: 'maxClaims', type: 'uint16' },
-              { name: 'maxClaimsPerOperator', type: 'uint16' },
-              { name: 'policyHook', type: 'address' },
-              {
-                name: 'evaluationPolicy',
-                type: 'tuple',
-                components: [
-                  { name: 'requiredVerdicts', type: 'uint16' },
-                  { name: 'passThreshold', type: 'uint16' },
-                  { name: 'evaluationDeadline', type: 'uint64' },
-                  { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
-                  { name: 'disallowSolverSelfEvaluation', type: 'bool' },
-                ],
-              },
+              { name: 'maxClaims', type: 'uint32' },
+              { name: 'allowSolverSelfEvaluation', type: 'bool' },
             ],
           },
           { name: 'claimCount', type: 'uint32' },
           { name: 'submittedCount', type: 'uint32' },
           { name: 'finalizedAttemptCount', type: 'uint32' },
-          { name: 'taskCreationCredited', type: 'bool' },
+          { name: 'creatorCredited', type: 'bool' },
         ],
       },
     ],
@@ -239,9 +229,13 @@ export async function submitTask(
       responseTimeout,
     ],
   });
+  // Tokenless-OLAS pivot: the trimmed JinnRouterV3.createTask escrows
+  // `solutionBudget + verdictBudget` where each side = rate * maxClaims (the
+  // per-verdict `requiredVerdicts` multiplier is gone). msg.value must match
+  // exactly or createTask reverts with RouterInsufficientTaskBudget.
   const taskBudget =
     solutionMaxDeliveryRateWei * BigInt(policy.maxClaims) +
-    verdictMaxDeliveryRateWei * BigInt(policy.maxClaims) * BigInt(policy.evaluationPolicy.requiredVerdicts || 1);
+    verdictMaxDeliveryRateWei * BigInt(policy.maxClaims);
 
   let lastError: unknown;
   for (let attempt = 0; attempt < TASK_CREATED_SUBMIT_ATTEMPTS; attempt++) {
@@ -347,21 +341,20 @@ async function findTaskCreatedNearReceipt(
   return taskCreatedFromLogs(logs, creator, taskCidDigest, manifestDigest);
 }
 
+/**
+ * On-chain `TaskCoordinator.TaskPolicy` as it crosses the wire to
+ * `JinnRouterV3.createTask`. Tokenless-OLAS pivot: the launcher-funded attempt
+ * count plus the self-evaluation gate. Off-chain scheduling intent (windows,
+ * lease, quorum) lives in the task.v1 `claimPolicy` field, not here.
+ *
+ * `allowSolverSelfEvaluation` defaults false → the coordinator rejects a verdict
+ * whose evaluator is the attempt's solver (the independent-evaluation invariant).
+ * A testnet SolverNet sets it true so a single operator can solve + self-evaluate
+ * + close the loop solo (dogfooding); mainnet leaves it false.
+ */
 export interface RouterTaskPolicy {
-  claimWindowStart: bigint;
-  claimWindowEnd: bigint;
-  submissionDeadline: bigint;
-  claimLeaseTtlSeconds: number;
   maxClaims: number;
-  maxClaimsPerOperator: number;
-  policyHook: Address;
-  evaluationPolicy: {
-    requiredVerdicts: number;
-    passThreshold: number;
-    evaluationDeadline: bigint;
-    maxVerdictsPerEvaluator: number;
-    disallowSolverSelfEvaluation: boolean;
-  };
+  allowSolverSelfEvaluation: boolean;
 }
 
 export async function claimTask(
@@ -793,6 +786,28 @@ export interface TaskRecord {
   blockNumber?: number;
 }
 
+// ── Event-specific log filters (#116) ───────────────────────────────────────
+// The Task-native polling path fetches only the router/mech events it actually
+// decodes, instead of scanning the address and decode-discarding the rest. These
+// ABI event items are passed as viem `getLogs({ event })` / `getLogs({ events })`
+// so the provider filters by topic0 server-side. `getAbiItem` throws if a name is
+// absent, so a future ABI rename fails loud rather than silently emptying a filter.
+export const ROUTER_TASK_CREATED_EVENT = getAbiItem({ abi: JINN_ROUTER_ABI, name: 'TaskCreated' });
+export const ROUTER_TASK_ATTEMPT_CREATED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'TaskAttemptCreated',
+});
+export const ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'SolutionDeliveryClaimed',
+});
+export const MECH_DELIVER_EVENT = getAbiItem({ abi: MECH_ABI, name: 'Deliver' });
+/** The two router events the Task-native poll loop needs per pass. */
+export const ROUTER_DISCOVERY_EVENTS = [
+  ROUTER_TASK_CREATED_EVENT,
+  ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
+] as const;
+
 export async function scanTasks(
   publicClient: PublicClient,
   routerAddress: Address,
@@ -807,6 +822,7 @@ export async function scanTasks(
     const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
     const logs = await publicClient.getLogs({
       address: routerAddress,
+      event: ROUTER_TASK_CREATED_EVENT,
       fromBlock: start,
       toBlock: end,
     });
@@ -1055,6 +1071,7 @@ export async function scanLatestDeliveryDataByRid(
     const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
     const logs = await publicClient.getLogs({
       address: mechContractAddress,
+      event: MECH_DELIVER_EVENT,
       fromBlock: start,
       toBlock: end,
     });

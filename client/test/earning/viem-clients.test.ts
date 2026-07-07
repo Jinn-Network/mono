@@ -11,8 +11,6 @@ import { privateKeyToAccount } from 'viem/accounts';
 import {
   createJinnPublicClient,
   createJinnWalletClient,
-  createJinnL1PublicClient,
-  createJinnL1WalletClient,
 } from '../../src/earning/viem-clients.js';
 
 const TEST_PRIVATE_KEY = `0x${'11'.repeat(32)}` as const;
@@ -40,33 +38,6 @@ describe('createJinnWalletClient', () => {
     const client = createJinnWalletClient(
       ['https://a.example', 'https://b.example'],
       'base-sepolia',
-      account,
-    );
-    expect(client.transport.type).toBe('fallback');
-  });
-});
-
-describe('createJinnL1PublicClient', () => {
-  it('builds a fallback transport for an array of URLs', () => {
-    const client = createJinnL1PublicClient(
-      ['https://a.example', 'https://b.example'],
-      'sepolia',
-    );
-    expect(client.transport.type).toBe('fallback');
-  });
-
-  it('still works for a single-string URL (back-compat)', () => {
-    const client = createJinnL1PublicClient('https://a.example', 'sepolia');
-    expect(client.transport.type).toBe('fallback');
-  });
-});
-
-describe('createJinnL1WalletClient', () => {
-  it('builds a fallback transport for an array of URLs', () => {
-    const account = privateKeyToAccount(TEST_PRIVATE_KEY);
-    const client = createJinnL1WalletClient(
-      ['https://a.example', 'https://b.example'],
-      'sepolia',
       account,
     );
     expect(client.transport.type).toBe('fallback');

@@ -9,6 +9,14 @@
  *   on-chain. Assert the verdict and that on-chain activity counters increment
  *   for both operators.
  *
+ * Sibling scenario: T2.4 (T2.4-producer-evaluator-swe-rebench.ts) covers the
+ * swe-rebench-v2.v1 loop with a hermetic stub solve + the real Docker evaluator
+ * (skip-clean when Docker/admission/HF are absent). This T2.2 scenario is the
+ * PREDICTION (prediction.v1) hermetic loop — the only end-to-end loop that is
+ * fully hermetic through the verdict (deterministic PredictionV1Evaluator + mock
+ * Gamma, no Docker/HF) — and is KEPT as the always-on lighter Tier-2 scenario
+ * per issue #898.
+ *
  * Why this is NOT an HTTP-endpoint scenario (resolves GH issue #350)
  * -----------------------------------------------------------------
  * The first cut of T2.2 assumed an HTTP task-control plane — `POST /v1/tasks`,

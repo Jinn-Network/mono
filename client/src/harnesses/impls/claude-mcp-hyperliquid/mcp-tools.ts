@@ -18,7 +18,7 @@
  * Claude cannot bypass them through reasoning.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { encode as msgpackEncode } from '@msgpack/msgpack';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';

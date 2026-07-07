@@ -2,10 +2,8 @@
  * OperatorsView — roster of operators participating across SolverNets.
  *
  * Per spec §5.4 and #610, this view no longer ranks operators across
- * SolverNets (a cross-net leaderboard mixes regimes and is not a coherent
- * score). It renders a flat roster: operator (short-address link) /
- * attempts / JINN earned. SolverNet detail views host the train+frozen
- * boards where ranking is meaningful (single regime, single task pool).
+ * SolverNets by quality. It renders a flat reward roster: operator
+ * (short-address link) / active? / activity blocks / attempts / OLAS earned.
  */
 
 import { Link } from 'wouter';
@@ -16,26 +14,14 @@ import { InfoTooltip } from '../components/InfoTooltip';
 import {
   ActiveOperatorTooltipBody,
   SustainedOperatorTooltipBody,
+  Milestone3TooltipBody,
   formatBlockWindow,
 } from '../components/ActiveOperatorTooltip';
 import { shortAddr, int, jinn } from '../lib/format';
 
-// Canonical encoding note for the ACTIVITY BLOCKS column header tooltip.
-// Mirrored verbatim from the acceptance criteria so the header tooltip stays in
-// sync if the criteria are tightened.
 const ACTIVITY_BLOCKS_ENCODING_NOTE =
-  'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned ≥3 tJINN in that block; N = did not.';
+  'Each cell is one of the last 8 completed UTC 6-hour blocks (oldest left). Y = operator earned any OLAS in that block; N = did not.';
 
-// ── Activity-blocks cell ──────────────────────────────────────────────────────
-
-/**
- * Per-row "Activity blocks" rendering — 8 Y/N glyphs joined by ` | `, each glyph
- * carrying a native `title` describing the block's UTC window.
- *
- * `recentBlocks` may be absent when the server omits it (older response, or
- * a code path that does not populate it); fall back to all-false so the row
- * still renders 8 cells.
- */
 function ActivityBlocksCell({
   recentBlocks,
   window,
@@ -242,6 +228,17 @@ export function OperatorsView() {
             }
             value={int(data.sustainedOperators)}
           />
+          <Kpi
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                Milestone 3 (&gt;=25 OLAS)
+                <InfoTooltip label="Milestone 3 definition">
+                  <Milestone3TooltipBody />
+                </InfoTooltip>
+              </span>
+            }
+            value={int(data.operatorsAtMilestone3)}
+          />
         </KpiRow>
       )}
 
@@ -276,7 +273,7 @@ export function OperatorsView() {
                   </span>
                 </th>
                 <th style={th}>Attempts</th>
-                <th style={th}>JINN earned</th>
+                <th style={th}>OLAS earned</th>
               </tr>
             </thead>
             <tbody>

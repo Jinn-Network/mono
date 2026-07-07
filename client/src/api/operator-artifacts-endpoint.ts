@@ -1,6 +1,6 @@
 import type { Context, Hono } from 'hono';
 import { existsSync, readFileSync } from 'node:fs';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import {
   DEFAULT_CONFIG_PATH,
   persistTopLevelConfigValue,

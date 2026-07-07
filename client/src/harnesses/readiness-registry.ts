@@ -85,6 +85,29 @@ export class HarnessReadinessRegistry {
     return this.opts.joinedHarnessesByCid;
   }
 
+  /**
+   * The by-name harness instance map seeded at construction. Exposed so the
+   * `/v1/harnesses/auth-status` endpoint (#564) can call each harness's
+   * `getAuthSource()` without re-deriving the harness set.
+   */
+  getHarnesses(): Record<string, Harness> {
+    return this.opts.harnessesByName;
+  }
+
+  /**
+   * Hot-apply a single joined SolverNet entry (#1037). Mutates the live
+   * `joinedHarnessesByCid` map and re-runs the refresh so the snapshot's
+   * `manifestCids` and `isReadyForClaim(cid)` reflect the new entry without a
+   * daemon restart. The harness's own `ready` is whatever the next refresh
+   * computes — when the harness is already installed (e.g. Codex) it is ready
+   * immediately; when not installed the readiness gate correctly reports
+   * not-ready.
+   */
+  async setJoined(manifestCid: string, spec: JoinedHarnessSpec): Promise<void> {
+    this.opts.joinedHarnessesByCid[manifestCid] = spec;
+    await this.refreshNow();
+  }
+
   isReadyForClaim(manifestCid: string): ReadyStatus {
     const joined = this.opts.joinedHarnessesByCid[manifestCid];
     if (!joined) {
@@ -115,12 +138,13 @@ export class HarnessReadinessRegistry {
   }
 
   private async _doRefresh(): Promise<void> {
-    // Group joined entries by harnessName so we only call isReady() once per
-    // harness. Seed the map with EVERY registered harness — not just joined
-    // ones — so the snapshot covers harnesses the operator could pick but
-    // has not joined yet. The SPA join form (#332) consults this snapshot to
-    // disable not-ready harness options before any join exists, so an
-    // unjoined harness must still appear (with an empty `manifestCids`).
+    // Build a harnessName -> manifestCids map keyed by EVERY registered harness
+    // (not just joined ones), then fold the joined entries in, so we only call
+    // isReady() once per harness. Seeding every registered harness means the
+    // snapshot covers harnesses the operator could pick but has not joined yet.
+    // The SPA join form (#332) consults this snapshot to disable not-ready
+    // harness options before any join exists, so an unjoined harness must still
+    // appear (with an empty `manifestCids`).
     const harnessToCids = new Map<string, string[]>();
     for (const name of Object.keys(this.opts.harnessesByName)) {
       harnessToCids.set(name, []);

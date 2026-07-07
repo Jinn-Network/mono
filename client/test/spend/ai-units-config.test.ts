@@ -97,6 +97,17 @@ describe('buildAiUnitsConfig', () => {
     expect(out?.manifestProjectedAiUnits['bafycid2']).toBeGreaterThan(100);
   });
 
+  it('claude-code under bare CLI session auth resolves to anthropic:subscription end-to-end (#891)', () => {
+    // Regression lock for AC1/AC2: bare CLI session auth means no env var at
+    // all, just `~/.claude/` on disk. #901 wired on-disk OAuth detection into
+    // resolveCredentialId; this asserts it survives through buildAiUnitsConfig
+    // so /v1/status enrols the credential and projects a non-zero USD cost.
+    mkdirSync(join(home, '.claude'));
+    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+    expect(out?.manifestCredentials['bafycid2']).toBe('anthropic:subscription');
+    expect(out?.manifestProjectedUsdMicros['bafycid2']).toBeGreaterThan(0);
+  });
+
   describe('buildAiUnitsConfig — USD fields (issue #1004)', () => {
     it('carries peg-derived USD caps and per-manifest USD projections alongside the unit fields', () => {
       // bafycid2 (claude-code) only resolves to a credential when ~/.claude/

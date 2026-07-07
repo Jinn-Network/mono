@@ -26,13 +26,12 @@ export interface LeaderboardRow {
   verdictsPass: number;
   /** Pass / total, or null if verdictsTotal === 0. */
   resolvedRate: number | null;
-  /** JINN tokens earned (raw bigint from chain). */
+  /** Lifetime OLAS/JINN staking rewards attributed to this operator. */
   jinnEarned: bigint;
   /**
-   * True when the operator qualified on every bucket of the rolling
-   * active-operator window (see `src/api/active-operators.ts`). Defaulted
-   * to `false` by the row builder; the `/operators` handler overlays the
-   * real value.
+   * True when the newest completed OLAS reward bucket qualifies. Defaulted to
+   * `false` by row builders; the `/operators` handler overlays the reward
+   * window value.
    */
   active: boolean;
 }
@@ -71,7 +70,10 @@ export function resolvedRateFromCounts(pass: number, total: number): number | nu
 /**
  * Derives finalization status and outcome for a single task attempt.
  *
- * `finalized` is true iff `requiredVerdicts > 0 && verdicts.length >= requiredVerdicts`.
+ * `finalized` is true iff `verdicts.length >= normalized requiredVerdicts`.
+ * The current tokenless router omits `requiredVerdicts` and finalizes on the
+ * first delivered verdict; rows that persisted the omission as 0 are normalized
+ * to 1 here to match handler finalization (#1304).
  * When finalized, `passed` is true iff a strict majority of verdicts are Pass
  * (`pass * 2 > verdicts.length`).
  *
@@ -84,7 +86,8 @@ export function attemptFinalization(
   verdicts: { verdictCode: number }[],
   requiredVerdicts: number,
 ): { finalized: boolean; passed: boolean } {
-  if (requiredVerdicts <= 0 || verdicts.length < requiredVerdicts) {
+  const normalizedRequiredVerdicts = requiredVerdicts <= 0 ? 1 : requiredVerdicts;
+  if (verdicts.length < normalizedRequiredVerdicts) {
     return { finalized: false, passed: false };
   }
   const pass = verdicts.filter((v) => v.verdictCode === 1).length;
@@ -182,40 +185,28 @@ export function rollingResolvedRate(passes: boolean[], k: number): number[] {
 // ── rankLeaderboard ───────────────────────────────────────────────────────────
 
 /**
- * Comparator used by the `/operators` leaderboard (issue #905).
+ * Comparator used by the `/operators` roster after the OLAS reward overlay.
  *
  * Sort key:
- *   1. `jinnEarned` desc (bigint comparison — no Number coercion, no precision loss)
- *   2. `active` desc (active first; the rolling-window active flag set by `/operators`)
- *   3. `operator` asc (lexicographic)
- *
- * Only meaningful for callers that overlay the real `active` flag onto rows —
- * `buildLeaderboardRows` defaults `active` to `false`, so without overlay this
- * collapses to `(jinnEarned, false, operator)` which is not what train/frozen
- * boards want. Use {@link compareByResolvedRateAttempts} there.
+ *   1. `jinnEarned` desc (the public UI labels this as OLAS)
+ *   2. `active` desc
+ *   3. `operator` asc
  */
 export function compareByJinnEarnedActive(a: LeaderboardRow, b: LeaderboardRow): number {
-  // jinnEarned desc — bigint comparison so 10^30-scale values stay accurate.
-  if (a.jinnEarned !== b.jinnEarned) {
-    return a.jinnEarned < b.jinnEarned ? 1 : -1;
-  }
-  // active desc — active operators sort above inactive at the same earnings.
+  if (a.jinnEarned !== b.jinnEarned) return a.jinnEarned < b.jinnEarned ? 1 : -1;
   if (a.active !== b.active) return a.active ? -1 : 1;
-  // operator asc
   return a.operator < b.operator ? -1 : a.operator > b.operator ? 1 : 0;
 }
 
 /**
- * Default comparator used by per-SolverNet train/frozen leaderboards.
+ * Default comparator used by the per-SolverNet train/frozen leaderboards.
  *
  * Sort key:
  *   1. `resolvedRate` desc (null rates sort last)
  *   2. `attempts` desc
  *   3. `operator` asc (lexicographic)
  *
- * This is the meaningful ordering for per-SolverNet evaluation surfaces, where
- * `active` (a protocol-wide rolling-window flag) and `jinnEarned` (a portfolio-
- * level signal) are not the relevant ranking signals.
+ * This is the meaningful quality-first ordering inside a single SolverNet.
  */
 export function compareByResolvedRateAttempts(a: LeaderboardRow, b: LeaderboardRow): number {
   // resolvedRate desc, nulls last.
@@ -237,8 +228,8 @@ export function compareByResolvedRateAttempts(a: LeaderboardRow, b: LeaderboardR
  *
  * Rows whose `verdictsTotal >= minVerdicts` go into `ranked`; the rest go into
  * `lowVolume`. Both groups are sorted by `comparator` — defaults to
- * {@link compareByResolvedRateAttempts} (the per-SolverNet ordering). The
- * `/operators` handler passes {@link compareByJinnEarnedActive} explicitly.
+ * {@link compareByResolvedRateAttempts}, the quality-first ordering used by
+ * both the per-SolverNet boards and `/operators`.
  *
  * The `ranked` group has sequential 1-based `rank` fields appended.
  * The `lowVolume` group keeps the same sort order but no `rank` field.

@@ -5,13 +5,14 @@
  * and assert that writes update the location.
  */
 import { renderHook, act } from '@testing-library/react';
-import { Router } from 'wouter';
+import { Router, useSearchParams } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import {
   useNumParam,
   useFilterParams,
   useStringArrayParam,
   useGroupParam,
+  usePatchParams,
 } from './url-state';
 import type { ReactNode } from 'react';
 
@@ -128,5 +129,44 @@ describe('useNumParam — window=30 round-trip', () => {
       wrapper: makeWrapper('/explore/cid'),
     });
     expect(result.current[0]).toBe(50);
+  });
+});
+
+describe('usePatchParams — atomic multi-key write', () => {
+  it('sets multiple keys and deletes null keys in a single write', () => {
+    const { result } = renderHook(
+      () => {
+        const [sp] = useSearchParams();
+        const patch = usePatchParams();
+        return { sp, patch };
+      },
+      { wrapper: makeWrapper('/corpus?page=2') },
+    );
+    act(() => {
+      // The coupled sort-change: set sort + dir, drop the page, all at once.
+      result.current.patch({ sort: 'stepCount', dir: 'desc', page: null });
+    });
+    expect(result.current.sp.get('sort')).toBe('stepCount');
+    expect(result.current.sp.get('dir')).toBe('desc');
+    // page must be gone — the whole point of the reset.
+    expect(result.current.sp.get('page')).toBeNull();
+  });
+
+  it('does not clobber earlier keys the way two separate setters would', () => {
+    // Regression guard: routing sort + dir through ONE patch keeps both. Two
+    // independent per-key setters in one handler would lose the first write.
+    const { result } = renderHook(
+      () => {
+        const [sp] = useSearchParams();
+        const patch = usePatchParams();
+        return { sp, patch };
+      },
+      { wrapper: makeWrapper('/corpus') },
+    );
+    act(() => {
+      result.current.patch({ sort: 'cluster', dir: 'asc' });
+    });
+    expect(result.current.sp.get('sort')).toBe('cluster');
+    expect(result.current.sp.get('dir')).toBe('asc');
   });
 });

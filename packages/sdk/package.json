@@ -32,6 +32,10 @@
       "import": "./dist/solvernets/swe-rebench-v2.js",
       "types": "./dist/solvernets/swe-rebench-v2.d.ts"
     },
+    "./solvernets/jinn-repo": {
+      "import": "./dist/solvernets/jinn-repo.js",
+      "types": "./dist/solvernets/jinn-repo.d.ts"
+    },
     "./solvernets/swe-rebench-v2-held-out-slate": {
       "import": "./dist/solvernets/swe-rebench-v2-held-out-slate.js",
       "types": "./dist/solvernets/swe-rebench-v2-held-out-slate.d.ts"
@@ -57,11 +61,11 @@
     "release:sdk": "node scripts/release-sdk.mjs"
   },
   "dependencies": {
-    "zod": "^3.22.0",
+    "zod": "^4.4.3",
     "zod-to-json-schema": "^3.23.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.1.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"
   }

@@ -8,15 +8,16 @@ All commands assume `Jinn-Network/mono` as the repo and `next` as the integratio
 
 ## Step 1 — Detect the ready PRs
 
-### Fetch all open PRs against `next`
+### Fetch all open PRs
 
 ```bash
 gh pr list \
   --repo Jinn-Network/mono \
-  --base next \
   --state open \
-  --json number,title,headRefName,statusCheckRollup,files
+  --json number,title,headRefName,baseRefName,statusCheckRollup,files
 ```
+
+`baseRefName` is required so candidate-set discovery (`enumerateStacks`) can classify each PR as root / stacked / orphan. Dropping `--base next` is what lets the survey see upper stack layers (PRs based on another open PR's head branch).
 
 ### Reading `statusCheckRollup`
 
@@ -484,6 +485,13 @@ and skip the PR (see `SKILL.md` §Step 4 for the full escalation protocol).
 Stacked PRs are linked chains: branch `B` is based on branch `A`, which is based
 on `next`. When `next` advances (because `A` merged), each subsequent layer must
 be rebased onto its parent in order, bottom-up.
+
+The stack topology comes from `enumerateStacks` in
+`packages/eng-loop/src/dispatcher/stack-order.ts` (base-ref graph:
+`baseRefName === another open PR's headRefName` ⇒ stacked). After the parent
+merges, the upper layer is pointed at the now-deleted parent branch — it must be
+re-targeted to `next` (`gh pr edit <N> --repo Jinn-Network/mono --base next`)
+*before* the rebase shown below, else the rebase has no valid base.
 
 **For a two-level stack (A → B):**
 

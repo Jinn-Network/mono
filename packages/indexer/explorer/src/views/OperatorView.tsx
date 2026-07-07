@@ -6,8 +6,7 @@
  *
  * Sections:
  *   - Header: full address + copy affordance + dominant mode/harness/type chips
- *   - KpiRow: totals (attempts, settled, verdicts pass/total, resolved rate GOLD,
- *             JINN earned — or "—" if jinnAttribution: 'pending')
+ *   - KpiRow: totals (attempts, settled, verdicts pass/total, resolved rate GOLD)
  *   - Card: per-SolverNet table with mode-breakdown text
  *   - StatusBar
  *
@@ -22,7 +21,7 @@ import { Card } from '../components/Card';
 import { Kpi, KpiRow } from '../components/Kpi';
 import { StatusChip } from '../components/StatusChip';
 import { DataTable, cellStyle, cellNumStyle } from '../components/DataTable';
-import { pct, int, jinn, shortAddr, shortCid } from '../lib/format';
+import { pct, int, shortAddr, shortCid } from '../lib/format';
 
 // ── Copy-address affordance ───────────────────────────────────────────────────
 
@@ -329,21 +328,6 @@ export function OperatorView() {
               label="Resolved rate"
               value={pct(data.totals.resolvedRate)}
               accent
-            />
-            <Kpi
-              label="JINN earned"
-              value={
-                data.meta.jinnAttribution === 'pending' ? (
-                  <span
-                    title="operator JINN attribution pending — see jinn-mono-ebu7.9"
-                    style={{ color: 'var(--fg-dim)' }}
-                  >
-                    —
-                  </span>
-                ) : (
-                  jinn(data.totals.jinnEarned)
-                )
-              }
             />
           </KpiRow>
 

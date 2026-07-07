@@ -3,6 +3,7 @@ import {
   createMemoryTxSubmissionLedger,
   flattenErrorMessage,
   isRecoverableTransactionError,
+  isReplacementUnderpricedError,
   recoverStuckNonceIfNeeded,
   viemSendTransactionWithRetry,
   withEoaBroadcastLock,
@@ -37,11 +38,44 @@ describe('tx-retry', () => {
       expect(isRecoverableTransactionError(new Error('GS026 invalid owner'))).toBe(true);
     });
 
-    it('returns true for GS013 (Safe 1.3.0 wraps GS026/nonce-race as GS013)', () => {
+    it('returns false for a bare GS013 — the Safe inner call reverted (deterministic)', () => {
+      // GS013 = require(success || safeTxGas != 0 || gasPrice != 0): the Safe's
+      // INNER call reverted, which is deterministic — it reverts identically on
+      // every retry. (A stale-nonce / signature race surfaces as GS026, not
+      // GS013.) Retrying it forever wedges the loop; observed on testnet wrapping
+      // TACTaskAlreadyCredited (selector 0x33f626d3). It must be terminal.
       const safeWrappedError = new Error(
         'The contract function "execTransaction" reverted with the following reason:\nGS013',
       );
-      expect(isRecoverableTransactionError(safeWrappedError)).toBe(true);
+      expect(isRecoverableTransactionError(safeWrappedError)).toBe(false);
+    });
+
+    it('returns false for a SafeInnerRevertError carrying an undecoded custom-error selector', () => {
+      // Receipt path: the Safe execution reverted on-chain and re-simulating the
+      // inner call reverts with a selector we don't decode (e.g. the on-chain
+      // dedup guard TACTaskAlreadyCredited, 0x33f626d3, not in KNOWN_INNER_ERRORS).
+      // A deterministic inner revert never clears on retry — terminal — even
+      // though the wrapping message still mentions GS013.
+      const error = new SafeInnerRevertError(
+        'Safe execTransaction inner revert (undecoded selector 0x33f626d3, txHash=0xabc)\nGS013',
+        '0x33f626d3',
+        '0x33f626d3',
+        null,
+        null,
+        `0x${'ab'.repeat(32)}` as `0x${string}`,
+      );
+      expect(isRecoverableTransactionError(error)).toBe(false);
+    });
+
+    it('keeps the receipt-path "possible stale nonce" message retryable when no inner revert was found', () => {
+      // safe.ts emits this generic message ONLY when re-simulating the inner call
+      // SUCCEEDS — i.e. the on-chain revert was a GS026 signature/nonce race,
+      // which re-reading the nonce and re-signing self-heals. It must stay
+      // retryable (GS026 is checked before GS013 in the classifier).
+      const error = new Error(
+        'Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=0xdead)',
+      );
+      expect(isRecoverableTransactionError(error)).toBe(true);
     });
 
     it('returns true for replacement underpriced', () => {
@@ -682,6 +716,19 @@ describe('tx-retry', () => {
       await expect(
         withEoaBroadcastLock(key, async () => 'ok'),
       ).resolves.toBe('ok');
+    });
+  });
+
+  describe('isReplacementUnderpricedError', () => {
+    it('matches replacement-underpriced RPC messages', () => {
+      expect(isReplacementUnderpricedError(new Error('replacement transaction underpriced'))).toBe(true);
+      expect(isReplacementUnderpricedError(new Error('replacement fee too low'))).toBe(true);
+      expect(isReplacementUnderpricedError(new Error('transaction underpriced'))).toBe(true);
+    });
+
+    it('does not match nonce-too-low or unrelated errors', () => {
+      expect(isReplacementUnderpricedError(new Error('nonce too low'))).toBe(false);
+      expect(isReplacementUnderpricedError(new Error('insufficient funds'))).toBe(false);
     });
   });
 });

@@ -5,8 +5,9 @@
  * `nextTaskId` storage slot (the counter that increments with each `createTask`
  * call). JinnRouterV3 holds a reference to the coordinator
  * (`TaskCoordinator public taskCoordinator;`) but does NOT re-expose
- * `nextTaskId()` — so the /health/task-coverage monitoring probe must read
- * directly from the coordinator. See issue #567.
+ * `nextTaskId()` — so the /health/task-coverage monitoring probe first reads
+ * the active router's `taskCoordinator()` view, then reads this ABI directly on
+ * the returned coordinator address. See issues #567 and #1304.
  *
  * Kept self-contained (no import from JinnRouter.ts) so the two ABI slices
  * stay independently editable.

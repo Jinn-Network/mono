@@ -270,8 +270,15 @@ export function JoinFlow({
   // The daemon keys the readiness endpoint by `Harness.name`, the same
   // canonical name `form.harness` carries.
   const evaluatorHarnessName = evaluatorHarnessNameForManifest(manifest);
+  // Whether the solver picker (and its cost-protection surface) is shown.
+  // Drives both the solver readiness probes below and the paid-key gate later.
+  const showSolverFields = form.roles.includes('solver');
   const readinessProbeNames = [
-    ...solverCompatibleHarnesses.map((h) => h.name),
+    // Solver-harness probes only when the solver picker is shown (#374): an
+    // evaluator-only join hides the picker, so probing those — and the 5s
+    // refetch that drives it — has nothing to act on. The evaluator-harness
+    // probe below stays independent so the evaluator gate works on its own.
+    ...(showSolverFields ? solverCompatibleHarnesses.map((h) => h.name) : []),
     ...(form.roles.includes('evaluator') && evaluatorHarnessName
       ? [evaluatorHarnessName]
       : []),
@@ -285,7 +292,6 @@ export function JoinFlow({
   // Cost-protection hooks must run before any conditional return (Rules of
   // Hooks). Pass undefined harness when solver fields are hidden — the hook
   // treats that as no paid-key surface.
-  const showSolverFields = form.roles.includes('solver');
   const usesPaidApiKey = useHarnessUsesPaidApiKey(
     showSolverFields ? form.harness : undefined,
   );
@@ -315,9 +321,9 @@ export function JoinFlow({
           : {}),
       }),
     onSuccess: (result) => {
-      // Invalidate so the catalog's joined-indicator badge and the Operator
-      // page's joined list / LiveNow banner pick the new entry up on the
-      // next tick instead of waiting up to 30s for the next refetch.
+      // Invalidate so the catalog's joined-indicator badge and the Overview
+      // page's joined list pick the new entry up on the next tick instead of
+      // waiting up to 30s for the next refetch.
       void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
       void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
       // Render an explicit success state on this page rather than a silent

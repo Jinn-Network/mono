@@ -6,8 +6,8 @@ import { cn } from '../lib/utils.js';
 /**
  * Three-region shell for the running-mode operator dashboard. Header + tabs
  * span both columns; the main outlet flows in the left column; the agent
- * rail is sticky on the right. Onboarding still owns the screen before
- * bootstrap completes.
+ * rail is sticky on the right when present (gated via `showRail = rail != null`).
+ * Onboarding still owns the screen before bootstrap completes.
  */
 export interface AppShellProps {
   header: ReactNode;

@@ -64,6 +64,56 @@ describe('AiUnitsPauseAlert', () => {
     expect(alert.textContent).toContain('AI-unit');
   });
 
+  it('does not render an idle credential as active (#891)', () => {
+    // active:false, paused:false — configured but not being worked against.
+    const { container } = render(
+      <AiUnitsPauseAlert
+        aiUnits={{
+          credentials: [
+            {
+              credentialId: 'anthropic:subscription',
+              unitsThisBlock: 0,
+              unitsThisWeek: 0,
+              capPerBlock: 100,
+              capPerWeek: 2800,
+              paused: false,
+              active: false,
+              blockResetsAt: '2026-05-28T18:00:00.000Z',
+              weekResetsAt: '2026-06-04T13:00:00.000Z',
+            },
+          ],
+        }}
+      />,
+    );
+    // Idle + unpaused → no banner at all, so it is never shown as active.
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId('ai-units-credential-state-anthropic:subscription')).toBeNull();
+  });
+
+  it('labels a paused, active credential as Active (#891)', () => {
+    render(
+      <AiUnitsPauseAlert
+        aiUnits={{
+          credentials: [
+            {
+              credentialId: 'anthropic:subscription',
+              unitsThisBlock: 100,
+              unitsThisWeek: 200,
+              capPerBlock: 100,
+              capPerWeek: 2800,
+              paused: true,
+              active: true,
+              blockResetsAt: '2026-05-28T18:00:00.000Z',
+              weekResetsAt: '2026-06-04T13:00:00.000Z',
+            },
+          ],
+        }}
+      />,
+    );
+    const state = screen.getByTestId('ai-units-credential-state-anthropic:subscription');
+    expect(state.textContent).toMatch(/Active/i);
+  });
+
   it('names the binding window (block or week)', () => {
     render(
       <AiUnitsPauseAlert

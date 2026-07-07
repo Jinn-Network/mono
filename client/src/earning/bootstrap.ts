@@ -1395,8 +1395,8 @@ export class FleetBootstrapper {
       }
       if (onChainState === 2) {
         // Do NOT eagerly reStake at startup. Re-staking is orthogonal to the
-        // protocol loop and to JINN earning (JinnDistributor mints on
-        // delivered-work counts, not OLAS stake state), and an inline reStake
+        // protocol loop and to earning (OLAS staking rewards accrue from
+        // delivered-work activity counts, not from re-stake liveness), and an inline reStake
         // here broadcasts from the agent EOA during boot — contending with
         // other agent-EOA work that runs in the same window (e.g. a launch's
         // IdentityRegistry.setMetadata, which then reverts and strands the
@@ -1408,7 +1408,7 @@ export class FleetBootstrapper {
         // cadence when enabled; when staking is intentionally dropped
         // (evictionCheckIntervalMs=0) the service simply stays evicted, which
         // does not affect earning (#789).
-        console.error(
+        console.log(
           `[jinn-earning] Service ${svc.service_id} (fleet index ${index}) is evicted on-chain; ` +
           `NOT reStaking inline at startup — deferring to the background EvictionLoop ` +
           `(staking is orthogonal to earning; #773/#789/#917). Daemon launch continues.`,
@@ -2625,9 +2625,11 @@ export interface RecoverEvictedServiceOptions {
  * Inspect a mined reStake receipt and log the correct outcome (#916).
  *
  * Pure + I/O-free so it can be unit-tested without a chain client. On a
- * `success` receipt it logs `reStake confirmed`. On a `reverted` receipt it
- * logs `reStake reverted` at error level (with the decoded reason if the
- * caller could obtain one) and throws so the recovery attempt re-queues.
+ * `success` receipt it logs `reStake confirmed` at log level. On a `reverted`
+ * receipt it logs `reStake reverted` at debug level (a benign substrate event —
+ * the NotEnoughTimeStaked window / stale-RPC race; staking is non-load-bearing,
+ * DR-2026-06-04 / #1060) with the decoded reason if the caller could obtain one,
+ * and still throws so the recovery attempt re-queues (#916 control flow intact).
  */
 export function handleReStakeReceipt(args: {
   receipt: { status: 'success' | 'reverted' };
@@ -2637,13 +2639,13 @@ export function handleReStakeReceipt(args: {
 }): void {
   const { receipt, serviceDisplayIndex, reStakeHash, revertReason } = args;
   if (receipt.status === 'success') {
-    console.error(
+    console.log(
       `[eviction-recovery] Service ${serviceDisplayIndex}: reStake confirmed (tx: ${reStakeHash})`,
     );
     return;
   }
   const msg = `[eviction-recovery] Service ${serviceDisplayIndex}: reStake reverted (tx: ${reStakeHash}, reason: ${revertReason ?? 'unavailable'})`;
-  console.error(msg);
+  console.debug(msg);
   throw new Error(msg);
 }
 
@@ -2680,7 +2682,7 @@ export async function recoverEvictedService(
     args: [addr(stakingAddress), BigInt(serviceId)],
   }) as Hex;
 
-  console.error(
+  console.debug(
     `[eviction-recovery] Service ${serviceDisplayIndex}: calling distributor.reStake() for evicted service ${serviceId}`,
   );
   let reStakeHash: Hex;

@@ -8,7 +8,6 @@
  * Assertions:
  *   - Ranked rows render in resolvedRate-desc order by default
  *   - The lowVolume section has a separate header row
- *   - JINN column shows "—" when meta.jinnAttribution === 'pending'
  *   - Mode/Harness columns appear only when data has dominantMode/dominantHarness
  *   - Empty ranked + empty lowVolume → empty state text
  */
@@ -31,7 +30,7 @@ const RANKED: LeaderboardRankedRow[] = [
     verdictsTotal: 280,
     verdictsPass: 266,
     resolvedRate: 0.95,
-    jinnEarned: '2000000000000000000',
+    jinnEarned: '0',
     active: false,
   },
   {
@@ -42,7 +41,7 @@ const RANKED: LeaderboardRankedRow[] = [
     verdictsTotal: 90,
     verdictsPass: 72,
     resolvedRate: 0.80,
-    jinnEarned: '500000000000000000',
+    jinnEarned: '0',
     active: false,
   },
   {
@@ -53,7 +52,7 @@ const RANKED: LeaderboardRankedRow[] = [
     verdictsTotal: 45,
     verdictsPass: 22,
     resolvedRate: 0.49,
-    jinnEarned: '100000000000000000',
+    jinnEarned: '0',
     active: false,
   },
 ];
@@ -124,25 +123,6 @@ describe('Leaderboard', () => {
     expect(screen.getByText(/New \/ Low-volume/i)).toBeInTheDocument();
     // The low-volume operator should appear
     expect(screen.getByText('0xdddd…dddd')).toBeInTheDocument();
-  });
-
-  it('shows JINN as "—" when meta.jinnAttribution is pending', () => {
-    const { Wrapper } = wrap();
-    render(
-      <Leaderboard
-        ranked={RANKED}
-        lowVolume={[]}
-        meta={{ jinnAttribution: 'pending' }}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    // All JINN cells should be "—"; the pct cells have percent signs
-    // Find td cells that have "—" as text — resolvedRate null would also produce "—"
-    // but here resolvedRate is non-null. So all "—" should be JINN cells.
-    const dashCells = screen.getAllByText('—');
-    // 3 ranked rows → 3 JINN "—" cells
-    expect(dashCells.length).toBeGreaterThanOrEqual(3);
   });
 
   it('hides Mode and Harness columns when data has no dominantMode', () => {

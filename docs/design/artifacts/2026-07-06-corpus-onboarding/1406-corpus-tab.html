@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jinn — 1406 · Corpus tab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<style>
+  /* ---- design-system tokens (explorer's colors_and_type.css + foundations.css) ---- */
+  :root{
+    --blue-950:#070d18; --blue-900:#0c1628; --blue-800:#142340; --blue-700:#1f3a66;
+    --blue-400:#7aa7dc; --blue-300:#a8c8ea; --blue-50:#f2f7fc;
+    --gold-600:#a88438; --gold-500:#c9a048; --gold-400:#dcb866; --gold-300:#ead08e;
+    --slate-400:#7d8ba3; --slate-300:#a4b0c2;
+    --vow-green:#6a9b8f; --wane:#b8802f; --break-red:#a85a5a; --seer-violet:#7a6db0;
+    --bg:var(--blue-900); --bg-elevated:var(--blue-800); --bg-sunken:var(--blue-950);
+    --fg:var(--blue-50); --fg-muted:var(--slate-300); --fg-dim:var(--slate-400);
+    --border:var(--blue-700); --border-strong:var(--blue-400); --border-accent:var(--gold-500);
+    --accent:var(--blue-400); --accent-hover:var(--blue-300); --gold:var(--gold-400);
+    --font-display:'Instrument Serif','Times New Roman',serif;
+    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --text-xs:11px; --text-sm:12px; --text-base:14px; --text-2xl:24px; --text-4xl:48px;
+    --radius-1:4px; --radius-2:6px; --radius-3:10px; --radius-pill:999px;
+    --dur-fast:80ms; --dur-base:140ms; --dur-slow:240ms; --ease-linear:linear;
+    --z-sticky:10;
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-mono);-webkit-font-smoothing:antialiased;}
+
+  /* doc scaffolding (not part of the app) */
+  .page{max-width:1240px;margin:0 auto;padding:56px 32px 120px;}
+  .doc-head{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:36px;display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;}
+  .doc-title{font-family:var(--font-display);font-size:42px;line-height:1.02;margin:0;font-weight:400;}
+  .doc-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:0 0 12px;}
+  .doc-sub{font-size:12.5px;line-height:1.6;color:var(--fg-muted);max-width:66ch;margin:10px 0 0;letter-spacing:-.01em;}
+  .doc-sub code{color:var(--accent);}
+  .doc-meta{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);text-align:right;line-height:1.9;white-space:nowrap;}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin:56px 0 6px;}
+  .sec-num{font-size:11px;letter-spacing:.14em;color:var(--accent);}
+  .sec-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg);margin:0;font-weight:500;}
+  .sec-note{font-size:12px;color:var(--fg-muted);line-height:1.6;max-width:80ch;margin:8px 0 20px;letter-spacing:-.01em;}
+  .sec-note code{color:var(--accent);}
+  .caption{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);margin:22px 0 10px;display:flex;gap:10px;align-items:center;}
+  .caption .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);}
+
+  .frame{border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:4px 4px 0 0 #04080f;background:var(--bg);}
+  .frame-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-sunken);border-bottom:1px solid var(--border);}
+  .frame-bar .lights{display:flex;gap:6px;}
+  .frame-bar .lights i{width:10px;height:10px;border-radius:50%;background:var(--border);display:block;}
+  .frame-url{margin-left:8px;font-size:11px;color:var(--fg-dim);letter-spacing:.02em;}
+
+  .notes{margin-top:80px;border-top:1px solid var(--border);padding-top:40px;}
+  .notes h2{font-family:var(--font-display);font-weight:400;font-size:30px;margin:0 0 6px;}
+  .notes h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--border);}
+  .notes h3:first-of-type{border-top:none;padding-top:0;}
+  .notes p,.notes li{font-size:13px;line-height:1.7;color:var(--fg-muted);letter-spacing:-.01em;max-width:82ch;}
+  .notes ul{padding-left:18px;margin:8px 0;}
+  .notes li{margin:5px 0;}
+  .notes code{font-size:12px;color:var(--accent);background:var(--bg-sunken);border:1px solid var(--border);border-radius:4px;padding:1px 6px;}
+  .notes strong{color:var(--fg);font-weight:600;}
+  table.map{border-collapse:collapse;width:100%;margin:10px 0;font-size:12.5px;}
+  table.map th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);font-weight:500;padding:8px 16px 8px 0;border-bottom:1px solid var(--border);}
+  table.map td{padding:9px 16px 9px 0;border-bottom:1px solid var(--border);color:var(--fg-muted);vertical-align:top;line-height:1.5;}
+  table.map td code{white-space:nowrap;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <div>
+      <p class="doc-kicker">Surface 2 · Web · Network explorer</p>
+      <h1 class="doc-title">Corpus tab</h1>
+      <p class="doc-sub">A new top-level tab in the <strong style="color:var(--fg);font-weight:600">network explorer</strong>: browse the contributed task-trace corpus, open one item, and reach its IPFS content and on-chain anchor. Composed entirely from the explorer's existing primitives (<code>Chrome</code>, <code>DataTable</code>, <code>StatusChip</code>, <code>Card</code>, <code>StatusBar</code>). Every item has a stable deep-linkable URL — <code>/corpus/:cid</code> — the seam the CLI's "view your contribution" step (#1405) lands on.</p>
+    </div>
+    <div class="doc-meta">issue&nbsp;1406<br>network&nbsp;explorer<br>/corpus &middot; /corpus/:cid</div>
+  </header>
+
+  <div class="sec-head"><span class="sec-num">2.1</span><h2 class="sec-title">Index — /corpus</h2></div>
+  <p class="sec-note">The roster idiom (<code>SolverNets</code> / <code>Operators</code> pattern): italic-serif page title, caps-mono count line, sortable <code>DataTable</code>, newest first, paged. The count line carries the surface's single gold emphasis — the corpus total. Each contribution links to its detail.</p>
+
+  <div class="frame">
+    <div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">explorer.jinn.network/corpus</span></div>
+    <div id="view-index"></div>
+  </div>
+
+  <div class="sec-head"><span class="sec-num">2.2</span><h2 class="sec-title">Detail — /corpus/:cid</h2></div>
+  <p class="sec-note">One envelope, at a stable URL. Summary as the serif headline, tier chip above it, a meta row (cluster · harness · model · contributor · provenance · scrub line), the tool sequence with expandable per-step payloads (step 3 shown open — click any row), and a Provenance card with the two outbound links: IPFS content and the Base Sepolia ERC-8004 anchor on basescan. This exact item — <code>bafkreid6qv…shxv4</code> — is the one the 1405 CLI flow publishes and deep-links to.</p>
+
+  <div class="frame">
+    <div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">explorer.jinn.network/corpus/bafkreid6qv…shxv4</span></div>
+    <div id="view-detail"></div>
+  </div>
+
+  <div class="sec-head"><span class="sec-num">2.3</span><h2 class="sec-title">Other states — empty · not found</h2></div>
+  <p class="sec-note">Empty keeps the explorer's flat voice — one statement about how the corpus grows. An unknown CID is a soft state with a way back, not a hard 404 — consistent with the Operator surface's unknown-address behaviour.</p>
+
+  <p class="caption"><span class="dot"></span>empty — no contributions yet</p>
+  <div class="frame"><div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">explorer.jinn.network/corpus · empty</span></div><div id="view-empty"></div></div>
+
+  <p class="caption"><span class="dot"></span>not found — unknown cid</p>
+  <div class="frame"><div class="frame-bar"><span class="lights"><i></i><i></i><i></i></span><span class="frame-url">explorer.jinn.network/corpus/bafkre…unknown</span></div><div id="view-notfound"></div></div>
+
+  <section class="notes">
+    <h2>Design notes — 1406 Corpus tab</h2>
+
+    <h3>Placement — fourth primary nav item</h3>
+    <p>The spec (§4) left open whether Corpus becomes a fourth tab or stays a Network-view sub-route. Designed here as a <strong>top-level tab</strong> — <code>Network · SolverNets · Operators · Corpus</code>. Rationale: the corpus is the network's product (the loop's Knowledge output), peer to its actors (Operators) and its programs (SolverNets); and the CLI deep-links operators straight into it, so it needs a first-class home, not a nested view. The #1407 summary card co-exists on the Network view and links here.</p>
+
+    <h3>Routes &amp; URL state</h3>
+    <ul>
+      <li><code>/corpus</code> — index. Sort key/direction, page, and the seed filter live in the query string per §3.3 (<code>?sort=createdAt&amp;dir=desc&amp;page=1&amp;include=raw</code>), so every slice is shareable.</li>
+      <li><code>/corpus/:cid</code> — detail, keyed by the envelope's content CID. Stable and deep-linkable: the CLI's <code>jinn-agent ledger</code> and the first-run "view your contribution" step (#1405) print exactly this URL. Unknown CID → the soft not-found state.</li>
+    </ul>
+
+    <h3>Component mapping — explorer primitive per element</h3>
+    <table class="map">
+      <thead><tr><th>Element</th><th>Explorer primitive</th></tr></thead>
+      <tbody>
+        <tr><td>Shell + nav (Corpus active)</td><td><code>Chrome</code> — one nav item added, nothing else changes</td></tr>
+        <tr><td>Page header (title + count line)</td><td>the <code>SolverNetsListView</code> header idiom, verbatim</td></tr>
+        <tr><td>Index table</td><td><code>DataTable</code> — sortable head, hairline rows, hover shift; row target <code>/corpus/:cid</code></td></tr>
+        <tr><td>Tier</td><td><code>StatusChip</code> — three corpus tiers added to its kind map (below)</td></tr>
+        <tr><td>Cluster / tags</td><td>bordered caps-mono chips — the filter-chip idiom</td></tr>
+        <tr><td>Detail meta row</td><td>the <code>KpiRow</code> hairline-divided row idiom</td></tr>
+        <tr><td>Tool sequence</td><td><code>Card</code> + list rows (disclosure per row); payload block is a sunken bordered panel</td></tr>
+        <tr><td>Outbound links</td><td>plain accent links with <code>→</code> — the explorer's provenance idiom</td></tr>
+        <tr><td>Freshness footer</td><td><code>StatusBar</code> — unchanged</td></tr>
+      </tbody>
+    </table>
+    <p>No new primitives. The only additions are data: three tier kinds on <code>StatusChip</code>'s map and a route pair.</p>
+
+    <h3>Seed provenance — a per-item fact, not a filter</h3>
+    <p>The seed toggle is retired from both this tab and the Network card (#1407). The index and every count show contributed traces only (the backend's envelope-only default, spec §3.2). Where an envelope <em>was</em> imported, that's a fact about the one item, so it renders on the detail's meta row: <code>Provenance · contributed</code> for network-produced traces, <code>imported seed</code> (in <code>--wane</code>) for seeded ones — whose index rows also stay out of the default listing. An audit view of seeds, if ever needed, belongs behind <code>?include=raw</code>, not in the primary UI.</p>
+
+    <h3>Tier chips — colour without breaking one-gold</h3>
+    <ul>
+      <li><code>user-accepted</code> — sky (<code>--accent</code>). The operator marked it done; no automated check.</li>
+      <li><code>tests-passed</code> — green (<code>--vow-green</code>). The task's own suite passed.</li>
+      <li><code>evaluator-verified</code> — muted gold (<code>--gold-600</code>) — the same muted lamplight <code>StatusChip</code> already uses for <code>frozen</code>, so a column of chips never competes with the surface's single <code>--gold-400</code> hero (the corpus total on the index; none on the detail unless the tier itself is the emphasis).</li>
+    </ul>
+    <p>Same ordering and colour logic as the CLI ledger (#1312) — the two surfaces state tiers identically.</p>
+
+    <h3>Tool steps — summarised sequence, payload on demand</h3>
+    <p>The spec's open question (§4: raw vs summarised) is resolved as <strong>both, layered</strong>: each row is a one-line summary (tool · outcome), and expanding shows the scrubbed args/result pair from the envelope. A failed intermediate step renders in <code>--wane</code> — attempts are part of the record, per Learning Maximised; the corpus shows search, not curated success. The full raw payload is one click further, via the IPFS content link.</p>
+
+    <h3>Pagination &amp; sorting</h3>
+    <p>Newest-first by default (<code>createdAt desc</code>); sortable on Cluster, Tier, Age, consistent with the roster tables' header-click behaviour. Paged 10 per page with Prev/Next — the corpus grows unboundedly, so unlike the rosters it cannot render whole. Page state in the URL.</p>
+
+    <h3>The seam with #1405</h3>
+    <p>The detail frame renders the same envelope the CLI first-run flow publishes (<code>fix flaky retry in http client</code>, tier <code>tests-passed</code>, contributor <code>0x91be…44a2</code>) — the trace previewed in the 1312 consent flow, published in 1405 step 2, landing here. One item, three surfaces, identical fields.</p>
+
+    <h3>Open questions</h3>
+    <ul>
+      <li><strong>Contributor link target.</strong> Shown linking to <code>/operator/:addr</code>. Correct only if contributors are always operators; if apps can contribute, this needs a contributor concept. Flagged.</li>
+      <li><strong>Cluster chip as filter.</strong> Clicking a cluster chip could filter the index (<code>?cluster=…</code>). Deferred — needs the filter-chip strip; the primitive exists.</li>
+      <li><strong>Steps column.</strong> The index shows a step count; it's derivable, not in the spec item shape. Drop if the endpoint doesn't carry it.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="corpus-shared.jsx"></script>
+<script type="text/babel" src="corpus-tab.jsx"></script>
+</body>
+</html>

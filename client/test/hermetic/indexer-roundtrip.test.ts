@@ -2,13 +2,13 @@
  * Hermetic gate — real indexer round-trip on the snapshot (closes #341 / spec §6
  * Home 1 "Indexer round-trip | [new] local Ponder vs snapshot").
  *
- * The T1.3 schema-agreement check (test/release/tier-1) proves the daemon's
- * GraphQL queries match the indexer schema, but it does NOT prove a real
- * on-chain → indexed round-trip. This does: it posts a REAL task on the
- * snapshot's V3 router, spawns a local Ponder pointed at the snapshot (via the
- * env-gated "snapshot mode" in packages/indexer/ponder.config.ts), and polls
- * Ponder's GraphQL until the task is indexed — catching the fufn / 2026-05-23
- * indexer-schema-drift regression class end to end.
+ * This is the sole indexer round-trip coverage: it proves BOTH that the
+ * daemon's GraphQL queries match the indexer schema (it throws on GraphQL
+ * schema errors) AND a real on-chain → indexed round-trip. It posts a REAL task
+ * on the snapshot's V3 router, spawns a local Ponder pointed at the snapshot
+ * (via the env-gated "snapshot mode" in packages/indexer/ponder.config.ts), and
+ * polls Ponder's GraphQL until the task is indexed — catching the fufn /
+ * 2026-05-23 indexer-schema-drift regression class end to end.
  *
  * Deterministic: the chain is the committed snapshot (spawnAnvilFromState, no
  * live RPC); Ponder indexes only the snapshot's JinnRouter. SKIP-CLEAN when the
@@ -27,7 +27,6 @@ import {
   http,
   keccak256,
   toBytes,
-  zeroAddress,
   type Abi,
   type Address,
   type Hex,
@@ -133,20 +132,8 @@ describeMaybe('hermetic indexer round-trip (spec §6 Home 1 / #341)', () => {
       // ── Post a real task on the snapshot's V3 router ───────────────────────
       const block = await publicClient.getBlock();
       const nowSec = Number(block.timestamp);
-      const policy = {
-        claimWindowStart: BigInt(nowSec - 5),
-        claimWindowEnd: BigInt(nowSec + 600),
-        submissionDeadline: BigInt(nowSec + 1200),
-        claimLeaseTtlSeconds: 600,
-        maxClaims: 10,
-        maxClaimsPerOperator: 1,
-        policyHook: zeroAddress,
-        evaluationPolicy: {
-          requiredVerdicts: 1, passThreshold: 1,
-          evaluationDeadline: BigInt(nowSec + 1500),
-          maxVerdictsPerEvaluator: 1, disallowSolverSelfEvaluation: false,
-        },
-      };
+      // Tokenless-OLAS pivot: TaskPolicy is { maxClaims, allowSolverSelfEvaluation } (bool, default false → self-eval blocked).
+      const policy = { maxClaims: 10, allowSolverSelfEvaluation: false };
       const salt = `indexer:${nowSec}:${startBlock}`;
       const taskCidDigest = keccak256(toBytes(`task:${salt}`)) as Hex;
       const manifestDigest = keccak256(toBytes(`manifest:${salt}`)) as Hex;

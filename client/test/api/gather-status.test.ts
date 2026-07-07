@@ -17,335 +17,6 @@ describe('gatherStatusForApi', () => {
     vi.resetModules();
   });
 
-  it('reads real tJINN balances on Sepolia separately from pending staking rewards', async () => {
-    const safeA = '0x3333333333333333333333333333333333333333';
-    const safeB = '0x4444444444444444444444444444444444444444';
-    const stakingProxy = '0x5555555555555555555555555555555555555555';
-    const distributor = '0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6';
-    const balanceReads: Array<{ token: string; safe: string; chainId: number }> = [];
-    const claimedReads: Array<{ distributor: string; serviceId: bigint; chainId: number }> = [];
-    const balanceOf = (token: string, safe: string): bigint => {
-      balanceReads.push({ token, safe, chainId: 11155111 });
-      return safe.toLowerCase() === safeA.toLowerCase()
-        ? 1500000000000000000n
-        : 2000000000000000000n;
-    };
-    const totalClaimedOperator = (address: string, serviceId: bigint): bigint => {
-      claimedReads.push({ distributor: address, serviceId, chainId: 11155111 });
-      switch (serviceId) {
-        case 41n:
-          return 10000000000000000000n;
-        case 42n:
-          return 20000000000000000000n;
-        case 43n:
-          return 30000000000000000000n;
-        default:
-          return 0n;
-      }
-    };
-    // `Claimed` events captured by `getLogs` for the 24h-minted sum. The
-    // operator's three services each have one event in the window; service 41
-    // also has a second event so the per-service sum is exercised.
-    const claimedEvents: ReadonlyArray<{
-      serviceId: bigint;
-      operatorMinted: bigint;
-    }> = [
-      { serviceId: 41n, operatorMinted: 250000000000000000n },
-      { serviceId: 41n, operatorMinted: 250000000000000000n },
-      { serviceId: 42n, operatorMinted: 500000000000000000n },
-      { serviceId: 43n, operatorMinted: 1000000000000000000n },
-    ];
-    const logReads: Array<{
-      address: string;
-      fromBlock: bigint;
-      toBlock: bigint;
-      serviceIds: bigint[];
-    }> = [];
-    vi.doMock('viem', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('viem')>();
-      return {
-        ...actual,
-        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
-          getBlockNumber: async () => 123n,
-          getChainId: async () => chain.id,
-          getBalance: async () => 0n,
-          // tJINN balances are read in one multicall3 round-trip (E2).
-          multicall: async (req: {
-            contracts: ReadonlyArray<{
-              address: string;
-              functionName: string;
-              args?: readonly [`0x${string}`] | readonly [bigint];
-            }>;
-          }) =>
-            req.contracts.map((c) => {
-              if (chain.id === 11155111 && c.functionName === 'balanceOf') {
-                return {
-                  status: 'success' as const,
-                  result: balanceOf(c.address, (c.args?.[0] as string | undefined) ?? '0x'),
-                };
-              }
-              if (chain.id === 11155111 && c.functionName === 'totalClaimedOperator') {
-                return {
-                  status: 'success' as const,
-                  result: totalClaimedOperator(c.address, (c.args?.[0] as bigint | undefined) ?? 0n),
-                };
-              }
-              return { status: 'success' as const, result: 0n };
-            }),
-          readContract: async (_req: {
-            address: string;
-            functionName: string;
-            args?: readonly [`0x${string}`] | readonly [bigint];
-          }) => {
-            return 0n;
-          },
-          getLogs: async (req: {
-            address: `0x${string}`;
-            fromBlock: bigint;
-            toBlock: bigint;
-            args?: { serviceId?: bigint[] };
-          }) => {
-            const allowed = new Set(
-              (req.args?.serviceId ?? []).map((id) => id.toString()),
-            );
-            logReads.push({
-              address: req.address,
-              fromBlock: req.fromBlock,
-              toBlock: req.toBlock,
-              serviceIds: req.args?.serviceId ?? [],
-            });
-            return claimedEvents
-              .filter((e) => allowed.has(e.serviceId.toString()))
-              .map((e) => ({
-                args: { serviceId: e.serviceId, operatorMinted: e.operatorMinted },
-              }));
-          },
-        }),
-        http: () => ({}),
-      };
-    });
-    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
-
-    await withTempStore(async (store) => {
-      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
-      const fleetStore = new FleetStateStore(earningDir);
-      const state = await fleetStore.load('base-sepolia');
-      await fleetStore.save({
-        ...state,
-        master_address: '0x1111111111111111111111111111111111111111',
-        services: [
-          {
-            index: 1,
-            agent_address: '0x2222222222222222222222222222222222222222',
-            safe_address: safeA,
-            service_id: 41,
-            mech_address: null,
-            staking_address: stakingProxy,
-            step: 'complete',
-            error: null,
-          },
-          {
-            index: 2,
-            agent_address: '0x6666666666666666666666666666666666666666',
-            safe_address: safeA,
-            service_id: 42,
-            mech_address: null,
-            staking_address: stakingProxy,
-            step: 'complete',
-            error: null,
-          },
-          {
-            index: 3,
-            agent_address: '0x7777777777777777777777777777777777777777',
-            safe_address: safeB,
-            service_id: 43,
-            mech_address: null,
-            staking_address: stakingProxy,
-            step: 'complete',
-            error: null,
-          },
-        ],
-      });
-
-      const apiStatus = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        // The Sepolia tJINN RPC endpoint is read from config.ethereumRpcUrl.
-        config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
-        network: 'testnet',
-        tjinnDistributorAddress: distributor,
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-
-      expect(apiStatus.tJinn).toMatchObject({
-        state: 'ready',
-        chainId: 11155111,
-        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
-        safeBalanceWei: '3500000000000000000',
-        operatorClaimedWei: '60000000000000000000',
-        // 0.25 + 0.25 + 0.5 + 1.0 = 2.0 tJINN minted across services in 24h
-        operatorMintedLast24hWei: '2000000000000000000',
-        safeCount: 2,
-        error: null,
-      });
-      expect(apiStatus.tJinn.services.map((svc) => svc.balanceWei)).toEqual([
-        '1500000000000000000',
-        '1500000000000000000',
-        '2000000000000000000',
-      ]);
-      expect(apiStatus.tJinn.services.map((svc) => svc.operatorClaimedWei)).toEqual([
-        '10000000000000000000',
-        '20000000000000000000',
-        '30000000000000000000',
-      ]);
-    });
-
-    expect(balanceReads).toEqual([
-      { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeA, chainId: 11155111 },
-      { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeB, chainId: 11155111 },
-    ]);
-    expect(claimedReads).toEqual([
-      { distributor, serviceId: 41n, chainId: 11155111 },
-      { distributor, serviceId: 42n, chainId: 11155111 },
-      { distributor, serviceId: 43n, chainId: 11155111 },
-    ]);
-  });
-
-  it('marks tJINN balance pending when the Sepolia RPC URL is unavailable', async () => {
-    mockStatusRpc();
-    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
-
-    await withTempStore(async (store) => {
-      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
-      const fleetStore = new FleetStateStore(earningDir);
-      const state = await fleetStore.load('base-sepolia');
-      await fleetStore.save({
-        ...state,
-        master_address: '0x1111111111111111111111111111111111111111',
-        services: [
-          {
-            index: 1,
-            agent_address: '0x2222222222222222222222222222222222222222',
-            safe_address: '0x3333333333333333333333333333333333333333',
-            service_id: null,
-            mech_address: null,
-            staking_address: null,
-            step: 'awaiting_stake',
-            error: null,
-          },
-        ],
-      });
-
-      const apiStatus = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-
-      expect(apiStatus.tJinn).toMatchObject({
-        state: 'pending',
-        safeBalanceWei: null,
-        safeCount: 1,
-        error: null,
-      });
-    });
-  });
-
-  it('keeps successful tJINN balances when one Safe read fails and redacts public errors', async () => {
-    const safeA = '0x3333333333333333333333333333333333333333';
-    const safeB = '0x4444444444444444444444444444444444444444';
-    vi.doMock('viem', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('viem')>();
-      return {
-        ...actual,
-        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
-          getBlockNumber: async () => 123n,
-          getChainId: async () => chain.id,
-          getBalance: async () => 0n,
-          // tJINN balances read via multicall3 with allowFailure: true — a
-          // per-Safe failure surfaces as a `{ status: 'failure' }` entry.
-          multicall: async (req: {
-            contracts: ReadonlyArray<{
-              functionName: string;
-              args?: readonly [`0x${string}`];
-            }>;
-          }) =>
-            req.contracts.map((c) => {
-              if (chain.id === 11155111 && c.functionName === 'balanceOf') {
-                const safe = c.args?.[0] ?? '0x';
-                if (safe.toLowerCase() === safeB.toLowerCase()) {
-                  return {
-                    status: 'failure' as const,
-                    error: new Error(
-                      'HTTP request failed for http://sepolia.example?apikey=secret',
-                    ),
-                  };
-                }
-                return { status: 'success' as const, result: 10n };
-              }
-              return { status: 'success' as const, result: 0n };
-            }),
-          readContract: async () => 0n,
-        }),
-        http: () => ({}),
-      };
-    });
-    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
-
-    await withTempStore(async (store) => {
-      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
-      const fleetStore = new FleetStateStore(earningDir);
-      const state = await fleetStore.load('base-sepolia');
-      await fleetStore.save({
-        ...state,
-        master_address: '0x1111111111111111111111111111111111111111',
-        services: [
-          {
-            index: 1,
-            agent_address: '0x2222222222222222222222222222222222222222',
-            safe_address: safeA,
-            service_id: null,
-            mech_address: null,
-            staking_address: null,
-            step: 'awaiting_stake',
-            error: null,
-          },
-          {
-            index: 2,
-            agent_address: '0x5555555555555555555555555555555555555555',
-            safe_address: safeB,
-            service_id: null,
-            mech_address: null,
-            staking_address: null,
-            step: 'awaiting_stake',
-            error: null,
-          },
-        ],
-      });
-
-      const apiStatus = await gatherStatusForApi(store, {
-        earningDir,
-        rpcUrl: 'http://base-sepolia.example',
-        // The Sepolia tJINN RPC endpoint is read from config.ethereumRpcUrl.
-        config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-      });
-
-      expect(apiStatus.tJinn.state).toBe('error');
-      expect(apiStatus.tJinn.safeBalanceWei).toBe('10');
-      expect(apiStatus.tJinn.error).toBe('Some Safe tJINN balances are temporarily unavailable.');
-      expect(apiStatus.tJinn.services.map((svc) => svc.state)).toEqual(['ready', 'error']);
-      expect(apiStatus.tJinn.services.map((svc) => svc.balanceWei)).toEqual(['10', null]);
-      expect(JSON.stringify(apiStatus.tJinn)).not.toContain('apikey=secret');
-      expect(JSON.stringify(apiStatus.tJinn)).not.toContain('sepolia.example');
-    });
-  });
-
   function mockStatusRpc(): void {
     vi.doMock('viem', async (importOriginal) => {
       const actual = await importOriginal<typeof import('viem')>();
@@ -968,6 +639,74 @@ describe('gatherStatusForApi', () => {
       expect(status.implStateCadence!.repos).toEqual([]);
     });
   });
+
+  it('always emits security.lastPasswordRotationAt (null when no rotation config)', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, undefined);
+      expect(status.security).toEqual({ lastPasswordRotationAt: null });
+    });
+  });
+
+  it('security.lastPasswordRotationAt is the keystore-password file mtime (file source)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const { writeFileSync, utimesSync } = await import('node:fs');
+    await withTempStore(async (store) => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-pw-'));
+      const pwPath = join(dir, 'keystore-password');
+      writeFileSync(pwPath, 'deadbeef\n', { mode: 0o600 });
+      // Pin mtime to a known instant (2024-01-02T03:04:05Z).
+      const when = new Date('2024-01-02T03:04:05.000Z');
+      utimesSync(pwPath, when, when);
+
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-earn-')),
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: { source: 'file', filePath: pwPath },
+      });
+
+      expect(status.security.lastPasswordRotationAt).toBe('2024-01-02T03:04:05.000Z');
+    });
+  });
+
+  it('security.lastPasswordRotationAt is null when the password is env-sourced', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-earn-')),
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: { source: 'env' },
+      });
+      expect(status.security.lastPasswordRotationAt).toBeNull();
+    });
+  });
+
+  it('security.lastPasswordRotationAt is null when the keystore-password file is missing', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-earn-')),
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: {
+          source: 'file',
+          filePath: join(tmpdir(), 'definitely-absent-jinn-keystore-password'),
+        },
+      });
+      expect(status.security.lastPasswordRotationAt).toBeNull();
+    });
+  });
 });
 
 describe('gatherStatusForApi — no staking reads on the hot path (#992)', () => {
@@ -1159,12 +898,10 @@ describe('gather-status autoRestake gating (#651)', () => {
     });
   });
 
-  // Finding A (review): the autoRestake gate must mirror `main.ts`'s
-  // `evictionCheck` predicate, which keys off `CHAIN_CONFIG.distributorAddress`
-  // (the stOLAS L2 distributor) — NOT `tjinnDistributorAddress` (the JINN MVI
-  // L1 distributor). The two contracts happen to bundle together in our
-  // current testnet deployment but they are semantically distinct.
-  it('gates autoRestake on stOLAS distributor presence, not tJINN distributor presence', async () => {
+  // The autoRestake gate must mirror `main.ts`'s `evictionCheck` predicate,
+  // which keys off `CHAIN_CONFIG.distributorAddress` (the stOLAS L2
+  // distributor).
+  it('gates autoRestake on stOLAS distributor presence', async () => {
     mockGatherViem();
     const { gatherStatusForApi } = await import(
       '../../src/api/gather-status.js'
@@ -1173,26 +910,23 @@ describe('gather-status autoRestake gating (#651)', () => {
     await withTempStore(async (store) => {
       const earningDir = await setupFleet();
 
-      // tJINN distributor set, stOLAS distributor missing → must NOT enable.
-      // Mirrors `main.ts:2520-2523`: when `CHAIN_CONFIG.distributorAddress`
-      // is absent the EvictionLoop is not constructed, so the SPA must NOT
-      // open the suppression window.
-      const tjinnOnly = await gatherStatusForApi(store, {
+      // No distributor set → must NOT enable. Mirrors `main.ts:2520-2523`:
+      // when `CHAIN_CONFIG.distributorAddress` is absent the EvictionLoop is
+      // not constructed, so the SPA must NOT open the suppression window.
+      const noDistributor = await gatherStatusForApi(store, {
         earningDir,
         rpcUrl: 'http://base-sepolia.example',
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        tjinnDistributorAddress: '0xdead000000000000000000000000000000000000',
         config: {
           evictionCheckIntervalMs: 60_000,
           stakingMode: 'standard',
         } as unknown as JinnConfig,
       });
-      expect(tjinnOnly.autoRestake.enabled).toBe(false);
+      expect(noDistributor.autoRestake.enabled).toBe(false);
 
-      // stOLAS distributor set, tJINN distributor missing → must enable.
-      // The tJINN distributor has no bearing on the EvictionLoop gate.
+      // stOLAS distributor set → must enable.
       const stOlasOnly = await gatherStatusForApi(store, {
         earningDir,
         rpcUrl: 'http://base-sepolia.example',

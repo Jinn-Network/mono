@@ -1,5 +1,5 @@
 /**
- * Fixture: a known-solvable SWE-rebench v2 instance for T2.2.
+ * Fixture: a known-solvable SWE-rebench v2 instance, shared by T2.4 and T3.1.
  *
  * Selection criteria:
  *   - Currently admitted to the SWE-rebench v2 pool (verdict-time recheck won't reject it).

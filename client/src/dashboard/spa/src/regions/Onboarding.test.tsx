@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Onboarding, statusFor } from './Onboarding.js';
 import type { BootstrapState } from '../api/types.js';
@@ -10,6 +10,11 @@ import type { JSX } from 'react';
 // `bootstrapOverride` lets individual tests tweak the returned bootstrap state
 // without re-mocking the module.
 let bootstrapOverride: Partial<BootstrapState> = {};
+const SWE_CID = 'bafkreichswerebenchv2example';
+const listRegistry = vi.fn();
+const operatorJoin = vi.fn();
+const completeOnboarding = vi.fn();
+const harnessReadiness = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
@@ -22,6 +27,16 @@ vi.mock('../api/client.js', () => ({
       chain: 'base-sepolia',
       ...bootstrapOverride,
     }),
+    // A hanging drip keeps AwaitingFundingCard in the `requesting` state so the
+    // balance-vs-target readout (which only renders while requesting) is
+    // assertable. Issue #979.
+    triggerDrip: () => new Promise<never>(() => {}),
+    solvernets: { listRegistry: () => listRegistry() },
+    operator: {
+      join: (...a: unknown[]) => operatorJoin(...a),
+      completeOnboarding: () => completeOnboarding(),
+    },
+    harnessReadiness: (n: string) => harnessReadiness(n),
   },
 }));
 
@@ -32,8 +47,46 @@ vi.mock('./Agent.js', () => ({
 }));
 
 afterEach(() => {
+  cleanup();
   bootstrapOverride = {};
   delete (window as { __JINN_FEATURES__?: unknown }).__JINN_FEATURES__;
+});
+
+beforeEach(() => {
+  listRegistry.mockReset();
+  listRegistry.mockResolvedValue({
+    summaries: [
+      {
+        manifestCid: SWE_CID,
+        solverNetId: 'sn-swe-1',
+        name: 'SWE-rebench v2',
+        network: 'base-sepolia',
+        launcherAgentId: '42',
+        launcherSafeAddress: '0xabc0000000000000000000000000000000000001',
+        status: 'launched',
+        statusUpdatedAt: '2026-06-01T00:00:00.000Z',
+        contractId: 'swe-rebench-v2',
+        contractVersion: 'v1',
+        solutionPriceWei: '0',
+        verdictPriceWei: '0',
+        openRoles: ['solver', 'evaluator'],
+        anchorBlock: 1,
+      },
+    ],
+    lastRefreshedAt: '2026-06-01T00:00:00.000Z',
+    lastError: null,
+  });
+  operatorJoin.mockReset();
+  operatorJoin.mockResolvedValue({
+    ok: true,
+    restartRequired: false,
+    manifestCid: SWE_CID,
+    config: { manifestCid: SWE_CID, roles: ['solver'], name: 'SWE-rebench v2' },
+  });
+  completeOnboarding.mockReset();
+  completeOnboarding.mockResolvedValue({ ok: true, onboardingComplete: true });
+  harnessReadiness.mockReset();
+  harnessReadiness.mockResolvedValue({ harnessName: 'codex', manifestCids: [], ready: true });
 });
 
 function withQueryClient(node: JSX.Element): JSX.Element {
@@ -41,8 +94,8 @@ function withQueryClient(node: JSX.Element): JSX.Element {
   return <QueryClientProvider client={qc}>{node}</QueryClientProvider>;
 }
 
-describe('Onboarding (3-phase post-vh74.2)', () => {
-  it('renders exactly three phases', async () => {
+describe('Onboarding (5-step rail)', () => {
+  it('renders all five steps, with 4 & 5 queued during bootstrap', async () => {
     render(withQueryClient(<Onboarding />));
 
     // Wait for bootstrap data to load (queries are async)
@@ -51,7 +104,22 @@ describe('Onboarding (3-phase post-vh74.2)', () => {
     expect(screen.getByText(/Provisioning your wallet/i)).toBeTruthy();
     expect(screen.getByText(/Fund your wallet/i)).toBeTruthy();
     expect(screen.getByText(/Joining Jinn/i)).toBeTruthy();
+    expect(screen.getByText(/Pick your first SolverNet/i)).toBeTruthy();
+    expect(screen.getByText(/Set up harness \+ model/i)).toBeTruthy();
     expect(screen.queryByText(/Sign in to Claude/i)).toBeNull();
+
+    // Header reads "of 5".
+    expect(screen.getByText(/Phase \d+ of 5/i)).toBeTruthy();
+
+    // Steps 4 & 5 are queued: labels present but no live registry / readiness
+    // fetch (their cards must NOT mount before the bootstrap flips terminal).
+    expect(screen.getByTestId('onboarding-phase-4').getAttribute('data-status')).toBe('queued');
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('queued');
+    expect(screen.queryByTestId('onboarding-solvernet-card')).toBeNull();
+    expect(screen.queryByTestId('onboarding-solvernet-loading')).toBeNull();
+    expect(screen.queryByTestId('onboarding-harness-card')).toBeNull();
+    expect(listRegistry).not.toHaveBeenCalled();
+    expect(harnessReadiness).not.toHaveBeenCalled();
   });
 
   it('does not render a Sign in to Claude phase', async () => {
@@ -180,5 +248,162 @@ describe('statusFor phase machine', () => {
     expect(statusFor(2, 2, false)).toBe('active');
     expect(statusFor(2, 2, undefined)).toBe('active');
     expect(statusFor(2, 2, true)).toBe('active');
+  });
+});
+
+// Issue #979: the funding card must receive the live balance from the
+// bootstrap poll so its progress bar reflects real funds climbing, not a
+// fabricated time curve.
+describe('Onboarding — funding card live balance (issue #979)', () => {
+  it('passes funding.eth_balance into AwaitingFundingCard', async () => {
+    bootstrapOverride = {
+      mode: 'setup',
+      currentStep: 'awaiting_funding',
+      steps: ['wallet', 'safe_predicted', 'awaiting_funding'],
+      master_address: '0x2222222222222222222222222222222222222222',
+      funding: {
+        eth_balance: '5000000000000000',
+        eth_required: '5000000000000000',
+        targetWei: '10000000000000000',
+        targetMet: false,
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await screen.findByText(/Fund your wallet/i);
+    fireEvent.click(screen.getByRole('button', { name: /fund from faucet/i }));
+    // Balance-vs-target readout proves the live balance reached the card.
+    expect(await screen.findByText(/balance .* \/ target/i)).toBeTruthy();
+  });
+});
+
+// ── #983: 5-step guided onboarding (SolverNet + harness + model) ──
+// After the bootstrap state machine reaches terminal, Onboarding renders the
+// two action steps. "Enter dashboard" stays disabled until ≥1 SolverNet is
+// joined AND the chosen harness is ready AND a model is selected.
+describe('Onboarding action steps (#983)', () => {
+  const terminal: Partial<BootstrapState> = {
+    mode: 'running',
+    currentStep: 'complete',
+    steps: ['complete'],
+    joinedSolverNets: {},
+  };
+
+  it('renders the SolverNet step once bootstrap reaches terminal', async () => {
+    bootstrapOverride = { ...terminal };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-solvernet-card')).toBeTruthy(),
+    );
+    // Step 4 becomes active (mounts SolverNetStep); step 5 stays queued until join.
+    expect(screen.getByTestId('onboarding-phase-4').getAttribute('data-status')).toBe('active');
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('queued');
+    expect(screen.queryByTestId('onboarding-harness-card')).toBeNull();
+  });
+
+  it('does not show Enter dashboard until a SolverNet is joined (step 5 queued)', async () => {
+    bootstrapOverride = { ...terminal };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() => screen.getByTestId('onboarding-solvernet-join'));
+    // Step 5 is queued (label-only) before any join — its content, including
+    // the Enter-dashboard button, is not mounted yet.
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('queued');
+    expect(screen.queryByTestId('onboarding-enter-dashboard')).toBeNull();
+  });
+
+  it('reveals the harness step after joining and shows Codex / gpt-5.4-mini default', async () => {
+    // Already joined: the bootstrap view carries the membership so the harness
+    // step renders without driving the join mutation through a re-poll.
+    bootstrapOverride = {
+      ...terminal,
+      joinedSolverNets: {
+        [SWE_CID]: { manifestCid: SWE_CID, roles: ['solver'] },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-harness-card')).toBeTruthy(),
+    );
+    // With a join present, step 5 is active and mounts the harness card.
+    expect(screen.getByTestId('onboarding-phase-5').getAttribute('data-status')).toBe('active');
+    const select = screen.getByTestId('onboarding-model-select') as HTMLSelectElement;
+    expect(select.value).toBe('gpt-5.4-mini');
+  });
+
+  it('enables Enter dashboard once joined + harness ready + model selected', async () => {
+    bootstrapOverride = {
+      ...terminal,
+      joinedSolverNets: {
+        [SWE_CID]: { manifestCid: SWE_CID, roles: ['solver'] },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() => screen.getByTestId('onboarding-harness-card'));
+    await waitFor(() => {
+      const enter = screen.getByTestId('onboarding-enter-dashboard') as HTMLButtonElement;
+      expect(enter.disabled).toBe(false);
+    });
+  });
+
+  it('keeps Enter dashboard disabled while the harness is not ready', async () => {
+    harnessReadiness.mockReset();
+    harnessReadiness.mockResolvedValue({
+      harnessName: 'codex',
+      manifestCids: [],
+      ready: false,
+      reason: 'CLI not installed',
+      nextStep: { description: 'Install codex', cli: 'brew install codex' },
+    });
+    bootstrapOverride = {
+      ...terminal,
+      joinedSolverNets: {
+        [SWE_CID]: { manifestCid: SWE_CID, roles: ['solver'] },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() => screen.getByTestId('onboarding-harness-not-ready'));
+    const enter = screen.getByTestId('onboarding-enter-dashboard') as HTMLButtonElement;
+    expect(enter.disabled).toBe(true);
+  });
+
+  it('persists harness+model via a second join when entering the dashboard', async () => {
+    bootstrapOverride = {
+      ...terminal,
+      joinedSolverNets: {
+        [SWE_CID]: { manifestCid: SWE_CID, roles: ['solver'] },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() => {
+      const enter = screen.getByTestId('onboarding-enter-dashboard') as HTMLButtonElement;
+      expect(enter.disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByTestId('onboarding-enter-dashboard'));
+    await waitFor(() => expect(operatorJoin).toHaveBeenCalled());
+    const lastCall = operatorJoin.mock.calls.at(-1)!;
+    expect(lastCall[0]).toBe(SWE_CID); // upsert targets the real manifest cid
+    expect(lastCall[1]).toMatchObject({ roles: ['solver'], harness: 'codex', model: 'gpt-5.4-mini' });
+    // #983: clicking Enter dashboard writes the completion flag so App.tsx
+    // drops the takeover.
+    await waitFor(() => expect(completeOnboarding).toHaveBeenCalledTimes(1));
+  });
+
+  it('surfaces an error when the Enter-dashboard mutation rejects', async () => {
+    operatorJoin.mockReset();
+    operatorJoin.mockRejectedValue(new Error('join_failed'));
+    bootstrapOverride = {
+      ...terminal,
+      joinedSolverNets: {
+        [SWE_CID]: { manifestCid: SWE_CID, roles: ['solver'] },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() => {
+      const enter = screen.getByTestId('onboarding-enter-dashboard') as HTMLButtonElement;
+      expect(enter.disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByTestId('onboarding-enter-dashboard'));
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-enter-error')).toBeTruthy(),
+    );
   });
 });

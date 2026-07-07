@@ -699,6 +699,16 @@ export interface HttpDiscoveryAPIOptions {
    */
   readyProbeTtlMs?: number;
   /**
+   * Backoff schedule (ms) for transparent retries on transient indexer
+   * failures (502/503 responses and network-level fetch errors). The number of
+   * retries equals `retryDelaysMs.length`: a `[200, 500]` schedule retries
+   * twice (sleep 200ms before the first retry, 500ms before the second) for a
+   * worst-case added latency of 700ms (< 800ms, #782 AC#1). Defaults to
+   * RETRY_DELAYS_MS. Tests pass `[0, 0]` to retry instantly. An empty array
+   * disables retry entirely. Exposed mostly for tests.
+   */
+  retryDelaysMs?: readonly number[];
+  /**
    * Per-request timeout (ms) applied to every indexer fetch — the `/ready`
    * probe and all GraphQL POSTs. Defaults to FETCH_TIMEOUT_MS. Bounds the fetch
    * so an indexer whose socket goes half-open (e.g. mid-redeploy) cannot wedge
@@ -728,7 +738,52 @@ const READY_PROBE_TTL_MS = 20_000;
  */
 const FETCH_TIMEOUT_MS = 15_000;
 
+/**
+ * Default backoff schedule for transparent retries on transient indexer
+ * failures. `[200, 500]` retries twice — worst-case added latency 700ms, under
+ * the 800ms cap (#782 AC#1). Indexer flake (502/503) is bursty: a single
+ * transient 502 otherwise silences a daemon poll for a full poll interval, so
+ * a short transparent retry recovers without surfacing an outage.
+ *
+ * Retry is safe here because every retried POST is a read-only GraphQL *query*
+ * (no mutations in this client), so re-issuing it is idempotent.
+ */
+const RETRY_DELAYS_MS = [200, 500] as const;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Wrap a fetch with transparent retry on transient indexer failures: 502/503
+ * responses and network-level fetch errors (TCP/TLS/DNS). Retries follow the
+ * `retryDelaysMs` schedule (one retry per entry). On exhaustion the last 502/503
+ * Response is returned unchanged — so `postGql`'s `!response.ok` raiser
+ * preserves the original status — or the last thrown error is re-thrown
+ * unchanged — so the network-path raiser preserves the original cause. Any
+ * non-502/503 response and any non-network outcome is returned/propagated on the
+ * first attempt (NOT retried); GraphQL-level `errors[]` are not visible here
+ * (they arrive in a 200 body) so they are likewise never retried.
+ */
+function fetchWithRetry(baseFetch: typeof fetch, retryDelaysMs: readonly number[]): typeof fetch {
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  return async (input, init) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await baseFetch(input, init);
+        if ((res.status === 502 || res.status === 503) && attempt < retryDelaysMs.length) {
+          await sleep(retryDelaysMs[attempt]);
+          continue;
+        }
+        return res;
+      } catch (err) {
+        if (attempt < retryDelaysMs.length) {
+          await sleep(retryDelaysMs[attempt]);
+          continue;
+        }
+        throw err;
+      }
+    }
+  };
+}
 
 function parseOptionalNumber(value: string | number | null | undefined): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
@@ -800,6 +855,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   const readyUrl = `${opts.url.replace(/\/graphql\/?$/, '').replace(/\/$/, '')}/ready`;
   const readyTtlMs = opts.readyProbeTtlMs ?? READY_PROBE_TTL_MS;
   const fetchTimeoutMs = opts.fetchTimeoutMs ?? FETCH_TIMEOUT_MS;
+  const retryDelaysMs = opts.retryDelaysMs ?? RETRY_DELAYS_MS;
   const baseFetch = opts.fetchImpl ?? globalThis.fetch;
 
   if (!baseFetch) {
@@ -814,8 +870,17 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // on-chain (#1038). A timeout turns the hang into the same
   // DiscoveryUnavailableError those loops already catch and retry. A caller
   // that supplies its own signal keeps it.
-  const fetchImpl: typeof fetch = (input, init) =>
+  //
+  // The AbortSignal-timeout wrap is INSIDE the retry loop (each retry attempt
+  // gets a fresh per-request timeout), and transient 502/503 responses and
+  // network-level fetch errors are transparently retried on the retryDelaysMs
+  // schedule before the failure is allowed to settle. This means a single
+  // bursty indexer flake no longer silences a whole daemon poll (#782); the
+  // bad-state `/ready` cache is also only written once the retrying fetch
+  // settles, so a transient probe blip cannot poison the cache (#782 AC#4).
+  const timeoutFetch: typeof fetch = (input, init) =>
     baseFetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(fetchTimeoutMs) });
+  const fetchImpl: typeof fetch = fetchWithRetry(timeoutFetch, retryDelaysMs);
 
   // ── /ready probe (memoized with a short TTL) ──────────────────────────────
   // Ponder serves GraphQL with 200 + stale/empty data while still catching up;

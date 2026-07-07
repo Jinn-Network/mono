@@ -620,19 +620,18 @@ describe('JoinFlow — per-harness readiness gate', () => {
     await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
     fireEvent.click(screen.getByLabelText('Evaluator'));
 
-    // Solver harnesses may still be probed (none selected here, but the catalog
-    // lists them); the evaluator name 'prediction-v1-evaluator' must NOT be.
-    // Anchor the negative assertion to a positive event: wait until at least
-    // one solver harness probe has fired, then assert the evaluator name was
-    // never among the probed names. Without the anchor, .toBe(false) would
-    // pass trivially on the first poll before any probes had a chance to run.
-    await waitFor(() => expect(apiMock.harnessReadiness).toHaveBeenCalled());
-    expect(apiMock.harnessReadiness.mock.calls.flat()).not.toContain(
-      'prediction-v1-evaluator',
+    // Evaluator-only join: the solver picker is hidden, so solver harnesses are
+    // no longer probed (#374), and the manifest evaluator implementation does
+    // not match a known evaluator harness, so the evaluator name is not probed
+    // either — nothing should be probed at all. Wait for the not-ready banner
+    // to settle absent, then assert no readiness probe fired and the gate stays
+    // open.
+    await waitFor(() =>
+      expect(screen.queryByTestId('join-evaluator-not-ready')).toBeNull(),
     );
+    expect(apiMock.harnessReadiness).not.toHaveBeenCalled();
     const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
-    expect(screen.queryByTestId('join-evaluator-not-ready')).toBeNull();
   });
 
   it('gates Save & Join when both roles are selected and the evaluator harness reports not-ready', async () => {

@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { DeliveryWatcherLoop } from '../../src/daemon/delivery-watcher.js';
 import type { ExecutionAdapter } from '../../src/adapters/adapter.js';
 import type { DeliveredResult, Task } from '../../src/types/index.js';
+import { Store } from '../../src/store/store.js';
+import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,6 +68,17 @@ function makeDelivery(resultData: string, requestId = 'req-001'): DeliveredResul
     result: { data: resultData },
     deliveryMechAddress: '0xmech',
   };
+}
+
+/**
+ * A delivery whose `task` carries NO `role` — mirrors the engine-recovery
+ * self-delivery path where the adapter yields a task rebuilt from a map lost
+ * across restart, so `task.role` is undefined (issue #575).
+ */
+function makeRolelessDelivery(resultData: string, requestId = 'req-001'): DeliveredResult {
+  const d = makeDelivery(resultData, requestId);
+  delete d.task.role;
+  return d;
 }
 
 /**
@@ -248,5 +261,103 @@ describe('DeliveryWatcherLoop envelope parsing', () => {
     expect(threw).toBe(false);
     expect(errors.some(e => e.includes('envelope ok'))).toBe(true);
     expect(errors.some(e => e.includes('envelope parse/validate failed'))).toBe(true);
+  });
+});
+
+describe('DeliveryWatcherLoop self-delivery role resolution (issue #575)', () => {
+  /**
+   * Run the watcher against a single delivery with a real Store, returning the
+   * collected console.error lines. The role on the delivery's `task` is left as
+   * the caller supplied (use makeRolelessDelivery for the recovery path).
+   */
+  async function runWithStore(
+    delivery: DeliveredResult,
+    store: Store,
+  ): Promise<string[]> {
+    const errors: string[] = [];
+    const origErr = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(a => String(a)).join(' '));
+    };
+
+    let loop!: DeliveryWatcherLoop;
+    const adapter = makeStubAdapter([delivery], () => loop.stop());
+    loop = new DeliveryWatcherLoop(adapter, store);
+
+    try {
+      await loop.run();
+    } finally {
+      console.error = origErr;
+    }
+    return errors;
+  }
+
+  function seedTaskRun(
+    store: Store,
+    requestId: string,
+    taskRole: 'restoration' | 'evaluation',
+  ): void {
+    const p = new TaskRunPersistence(store.db);
+    p.insertDiscovered({
+      requestId,
+      taskCid: 'bafy-seed',
+      onchainCreationTx: '0xseed',
+      onchainCreationBlock: 1,
+      solverType: 'portfolio.v0',
+      taskRole,
+      windowStartTs: Date.now(),
+      windowEndTs: Date.now() + 86_400_000,
+      task: { id: requestId, description: 'test', role: taskRole },
+    });
+  }
+
+  it('Test A: resolves a recovered restoration self-delivery role from task_runs', async () => {
+    const store = new Store(':memory:');
+    try {
+      seedTaskRun(store, 'req-575-a', 'restoration');
+      const errors = await runWithStore(
+        makeRolelessDelivery('legacy plain text result', 'req-575-a'),
+        store,
+      );
+      expect(errors.some(e => e.includes('Processed restoration delivery'))).toBe(true);
+      expect(errors.some(e => e.includes('Processed unknown delivery'))).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('Test B: resolves a recovered evaluation self-delivery role from task_runs', async () => {
+    const store = new Store(':memory:');
+    try {
+      seedTaskRun(store, 'req-575-b', 'evaluation');
+      const errors = await runWithStore(
+        makeRolelessDelivery('legacy plain text result', 'req-575-b'),
+        store,
+      );
+      expect(errors.some(e => e.includes('Processed evaluation delivery'))).toBe(true);
+      expect(errors.some(e => e.includes('Processed unknown delivery'))).toBe(false);
+
+      // The resolved role must also classify the emitted event as evaluation.
+      const kinds = store.db
+        .prepare('SELECT kind FROM activity_events WHERE request_id = ?')
+        .all('req-575-b') as Array<{ kind: string }>;
+      expect(kinds.some(k => k.kind === 'evaluation_submitted')).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('Test C: still logs "unknown" when no task_runs row exists', async () => {
+    const store = new Store(':memory:');
+    try {
+      // No seedTaskRun — the requestId is genuinely unknown.
+      const errors = await runWithStore(
+        makeRolelessDelivery('legacy plain text result', 'req-575-c'),
+        store,
+      );
+      expect(errors.some(e => e.includes('Processed unknown delivery'))).toBe(true);
+    } finally {
+      store.close();
+    }
   });
 });

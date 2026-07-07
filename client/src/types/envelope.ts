@@ -9,7 +9,7 @@
  * the registry in `./payloads/`.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { WindowSchema } from './window.js';
 import { SessionProvenanceSchema } from './session-provenance.js';
 

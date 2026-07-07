@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
@@ -45,6 +45,8 @@ import {
   decodeTaskCreatedLogs,
   decodeSolutionDeliveryClaimedLogs,
   decodeDeliverLogs,
+  ROUTER_DISCOVERY_EVENTS,
+  MECH_DELIVER_EVENT,
   findLatestDeliveryDataHexForRequest,
   getMarketplaceRequestDeliveryMech,
   getTaskCidDigest,
@@ -63,6 +65,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
+import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -381,11 +384,16 @@ export class MechAdapter implements ExecutionAdapter {
       const end = start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > toBlock
         ? toBlock
         : start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      // #116: filter server-side to the two router events the poll loop decodes
+      // (TaskCreated + SolutionDeliveryClaimed) via an OR-of-topic0, instead of an
+      // address-only scan that decode-discards the rest. Chunking is unchanged —
+      // a topic filter shrinks the result set, not the permitted block range.
       logs.push(...await this.publicClient.getLogs({
         address: this.config.routerAddress,
+        events: ROUTER_DISCOVERY_EVENTS,
         fromBlock: start,
         toBlock: end,
-      }));
+      }) as Log[]);
     }
     return logs;
   }
@@ -690,55 +698,25 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private contractPolicyForTask(state: Task): RouterTaskPolicy {
-    const nowSeconds = Math.floor(Date.now() / 1000);
+    // Tokenless-OLAS pivot: the on-chain TaskCoordinator.TaskPolicy is the
+    // launcher-funded attempt count (`maxClaims`) plus the self-evaluation gate
+    // (`allowSolverSelfEvaluation`). Windows, lease, and quorum do NOT cross the
+    // wire — that off-chain scheduling intent stays in the task.v1 `claimPolicy`
+    // field (still carried on the signed task document and read by the local
+    // scheduler).
+    //
+    // `allowSolverSelfEvaluation` comes from the off-chain `claimPolicy` when it
+    // sets the flag explicitly; that explicit value always wins. When it is
+    // absent (the common case — the auto-generators do not set it) the default
+    // is network-keyed: TRUE on testnet (Base Sepolia, 84532) so a single
+    // operator can solve + self-evaluate + close the loop solo for dogfooding,
+    // and FALSE on mainnet to preserve the independent-evaluation invariant (the
+    // coordinator rejects a verdict whose evaluator is the attempt's solver).
     const claimPolicy = state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
-    const normalizeTs = (value: number | undefined, fallback: number): bigint => {
-      const raw = value ?? fallback;
-      return BigInt(raw > 10_000_000_000 ? Math.floor(raw / 1000) : raw);
-    };
-    const claimWindowStart = normalizeTs(
-      claimPolicy.claimWindowStartTs ?? state.window?.startTs,
-      nowSeconds,
-    );
-    const claimWindowEnd = normalizeTs(
-      claimPolicy.claimWindowEndTs ?? state.window?.endTs,
-      nowSeconds + 30 * 60,
-    );
-    const submissionDeadline = normalizeTs(
-      claimPolicy.submissionDeadlineTs,
-      Number(claimWindowEnd) + claimPolicy.claimLeaseTtlSeconds,
-    );
-
+    const isTestnet = this.config.chainId === 84532;
     return {
-      claimWindowStart,
-      claimWindowEnd,
-      submissionDeadline,
-      claimLeaseTtlSeconds: claimPolicy.claimLeaseTtlSeconds,
       maxClaims: claimPolicy.maxClaims,
-      maxClaimsPerOperator: claimPolicy.maxClaimsPerOperator,
-      policyHook: (claimPolicy.policyHook ?? zeroAddress) as Address,
-      evaluationPolicy: {
-        // `requiredVerdicts` defaults to 1 but is overridable via the task's
-        // claim policy. A value > 1 opens additional verdict claim slots per
-        // attempt; combined with the per-evaluator cap below (1), it
-        // guarantees an honest evaluator can still claim and deliver a slot
-        // even when other evaluators have squatted some — the structural fix
-        // for a shared/adversarial testnet where a non-delivering claimer
-        // would otherwise permanently lock a single-slot attempt.
-        requiredVerdicts: claimPolicy.requiredVerdicts ?? 1,
-        passThreshold: 1,
-        evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
-        maxVerdictsPerEvaluator: 1,
-        // Allow the same operator to evaluate its own Solution on Base Sepolia
-        // (84532) so a single dogfood daemon can close the full
-        // post→claim→solve→grade→settle loop without standing up a second
-        // operator. Mainnet (8453) keeps the protocol-level protection.
-        // TODO: revert to unconditional `true` before mainnet launch, OR move
-        // this to a per-SolverNet manifest field so individual launchers can
-        // opt in to single-operator dogfood while the protocol default stays
-        // strict.
-        disallowSolverSelfEvaluation: this.config.chainId !== 84532,
-      },
+      allowSolverSelfEvaluation: claimPolicy.allowSolverSelfEvaluation ?? isTestnet,
     };
   }
 
@@ -817,6 +795,20 @@ export class MechAdapter implements ExecutionAdapter {
     return announcement;
   }
 
+  /**
+   * #1412: a task's execution window (task.window.endTs) is only known after
+   * IPFS hydration, not from any on-chain/discovery candidate shape. The
+   * engine kills the harness subprocess the instant this window is in the
+   * past (engine.ts: setTimeout(abort, max(0, endTs - now)) fires at 0ms), so
+   * claiming an already-expired task always fails with no chance of a real
+   * solve. Both discovery paths (DiscoveryAPI and the on-chain TaskCreated
+   * backlog scan) must skip these before spending a claim tx on a doomed run.
+   */
+  private hasExpiredExecutionWindow(announcement: TaskAnnouncement): boolean {
+    const windowEndTs = announcement.task.window?.endTs;
+    return windowEndTs !== undefined && windowEndTs <= Date.now();
+  }
+
   private async *discoverSubgraphRestorationTasks(): AsyncIterable<TaskAnnouncement> {
     const discovery = this.config.taskDiscovery;
     const discoveryApi: DiscoveryAPI | undefined = discovery?.discoveryApi;
@@ -892,12 +884,16 @@ export class MechAdapter implements ExecutionAdapter {
         // cycle we let the engine apply its gate to each one, preserving the
         // round-robin fairness across joined SolverNets. See task 212 live
         // verification in the fix's commit body.
-        yield await this.restorationAnnouncementFromDigest({
+        const announcement = await this.restorationAnnouncementFromDigest({
           taskId: candidate.taskId,
           taskCidDigest: candidate.taskCidDigest,
           transactionHash: candidate.createdAtTx,
           blockNumber: candidate.createdAtBlock,
         });
+
+        if (this.hasExpiredExecutionWindow(announcement)) continue;
+
+        yield announcement;
       } catch (err) {
         console.error(
           `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
@@ -1093,10 +1089,6 @@ export class MechAdapter implements ExecutionAdapter {
           for (const solution of submittedSolutions) {
             this.rememberPendingEvaluationSolution(solution);
           }
-          this.requestBlockCursor = currentBlock;
-          if (this.store) {
-            this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
-          }
 
           const joinedManifestDigests = this.joinedManifestDigestSet();
           const createdTasks = decodeTaskCreatedLogs(logs);
@@ -1119,6 +1111,7 @@ export class MechAdapter implements ExecutionAdapter {
                 transactionHash,
                 blockNumber,
               });
+              if (this.hasExpiredExecutionWindow(announcement)) continue;
               yield announcement;
             } catch (err) {
               console.error(`[mech] Failed to parse task ${taskId}:`, err);
@@ -1126,6 +1119,10 @@ export class MechAdapter implements ExecutionAdapter {
           }
           for await (const announcement of this.retryPendingEvaluationSolutions()) {
             yield announcement;
+          }
+          this.requestBlockCursor = currentBlock;
+          if (this.store) {
+            this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
           }
         }
       } catch (err) {
@@ -1138,6 +1135,9 @@ export class MechAdapter implements ExecutionAdapter {
         }));
       }
 
+      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
+      // nothing was yielded) so an idle-but-polling loop never looks stale.
+      if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
@@ -1422,8 +1422,11 @@ export class MechAdapter implements ExecutionAdapter {
       const chunkEnd = chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > currentBlock
         ? currentBlock
         : chunkStart + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      // #116: pin the mech `Deliver` topic server-side rather than fetching the
+      // whole address and decode-discarding. Range/chunking unchanged.
       const logs = await this.publicClient.getLogs({
         address: this.config.mechContractAddress,
+        event: MECH_DELIVER_EVENT,
         fromBlock: chunkStart,
         toBlock: chunkEnd,
       });
@@ -1545,6 +1548,9 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
+      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
+      // nothing was yielded) so an idle-but-polling loop never looks stale.
+      if (this.store) recordLoopTick(this.store, 'delivery-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }

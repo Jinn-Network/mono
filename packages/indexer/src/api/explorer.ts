@@ -24,7 +24,7 @@ import schema from 'ponder:schema';
 import { Hono } from 'hono';
 // Drizzle query helpers — re-exported by Ponder so we don't take a direct
 // dep on drizzle-orm (avoids the prod-install resolution miss we hit before).
-import { and, count, countDistinct, sum, eq, inArray, max, sql } from 'ponder';
+import { and, count, countDistinct, eq, inArray, max, sql, sum } from 'ponder';
 import {
   resolvedRateFromCounts,
   bucketResolvedRate,
@@ -44,59 +44,109 @@ import {
   type SliceResponseLeaderboardRow,
 } from './slice.js';
 import {
-  computeActiveOperators,
-  computeActiveWindow,
-  type ActiveWindow as ActiveWindowDomain,
-} from './active-operators.js';
+  buildCorpusList,
+  buildCorpusItem,
+  type CaptureEnvelopeMetaRow,
+} from './routes.js';
 import {
   loadHeldOutSlate,
   type LoadedHeldOutSlate,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2-held-out-slate';
+import {
+  computeActiveOperators,
+  computeActiveWindow,
+  countOperatorsAtMilestone3,
+  selectRewardActivityRows,
+  type ActiveWindow as ActiveWindowDomain,
+  type RewardActivitySource,
+} from './active-operators.js';
 
-/**
- * Wire-shape projection of {@link ActiveWindowDomain} — `requiredTjinnPerBlock`
- * is serialised as a decimal string because bigints don't round-trip through
- * JSON.
- */
 function serialiseActiveWindow(w: ActiveWindowDomain): {
   startTs: number;
   endTs: number;
   blockSeconds: number;
   blockCount: number;
-  requiredTjinnPerBlock: string;
+  requiredOlasPerBlock: string;
 } {
   return {
     startTs: w.startTs,
     endTs: w.endTs,
     blockSeconds: w.blockSeconds,
     blockCount: w.blockCount,
-    requiredTjinnPerBlock: w.requiredTjinnPerBlock.toString(),
+    requiredOlasPerBlock: w.requiredOlasPerBlock.toString(),
   };
 }
 
-/**
- * Loads the (multisig, operatorMinted, claimedAtTimestamp) tuples that fall
- * inside the rolling active-operator window and runs the per-bucket
- * qualification check. The window is intentionally NOT chain-scoped:
- * `rewardDistribution` is sourced from JinnDistributor on Sepolia L1 and
- * settles rewards earned on every L2 execution chain.
- */
+async function hasCheckpointRewardRows(): Promise<boolean> {
+  const rows = await db
+    .select({ total: count() })
+    .from(schema.stakingRewardCheckpoint)
+    .where(eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID));
+  return Number(rows[0]?.total ?? 0) > 0;
+}
+
 async function loadActiveOperators(nowSec: number) {
   const window = computeActiveWindow(nowSec);
+  const checkpointRowsExist = await hasCheckpointRewardRows();
+  if (checkpointRowsExist) {
+    const rewardRows = await db
+      .select({
+        multisig: schema.stakingRewardCheckpoint.multisig,
+        operatorRewarded: schema.stakingRewardCheckpoint.reward,
+        claimedAtTimestamp: schema.stakingRewardCheckpoint.checkpointAtTimestamp,
+      })
+      .from(schema.stakingRewardCheckpoint)
+      .where(
+        and(
+          eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID),
+          sql`${schema.stakingRewardCheckpoint.checkpointAtTimestamp} >= ${BigInt(window.startTs)}`,
+          sql`${schema.stakingRewardCheckpoint.checkpointAtTimestamp} < ${BigInt(window.endTs)}`,
+        ),
+      );
+    const selected = selectRewardActivityRows(rewardRows, [], true);
+    return { result: computeActiveOperators(selected.rows, nowSec), source: selected.source };
+  }
+
   const rewardRows = await db
     .select({
       multisig: schema.rewardDistribution.multisig,
-      operatorMinted: schema.rewardDistribution.operatorMinted,
+      operatorRewarded: schema.rewardDistribution.operatorRewarded,
       claimedAtTimestamp: schema.rewardDistribution.claimedAtTimestamp,
     })
     .from(schema.rewardDistribution)
     .where(
       and(
+        eq(schema.rewardDistribution.chainId, EXPLORER_CHAIN_ID),
         sql`${schema.rewardDistribution.claimedAtTimestamp} >= ${BigInt(window.startTs)}`,
         sql`${schema.rewardDistribution.claimedAtTimestamp} < ${BigInt(window.endTs)}`,
       ),
     );
-  return computeActiveOperators(rewardRows, nowSec);
+  const selected = selectRewardActivityRows([], rewardRows, false);
+  return { result: computeActiveOperators(selected.rows, nowSec), source: selected.source };
+}
+
+async function loadLifetimeRewards(
+  source: RewardActivitySource,
+): Promise<Array<{ multisig: `0x${string}`; operatorRewarded: bigint | string | number | null }>> {
+  if (source === 'checkpoint') {
+    return db
+      .select({
+        multisig: schema.stakingRewardCheckpoint.multisig,
+        operatorRewarded: sum(schema.stakingRewardCheckpoint.reward),
+      })
+      .from(schema.stakingRewardCheckpoint)
+      .where(eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID))
+      .groupBy(schema.stakingRewardCheckpoint.multisig);
+  }
+
+  return db
+    .select({
+      multisig: schema.rewardDistribution.multisig,
+      operatorRewarded: sum(schema.rewardDistribution.operatorRewarded),
+    })
+    .from(schema.rewardDistribution)
+    .where(eq(schema.rewardDistribution.chainId, EXPLORER_CHAIN_ID))
+    .groupBy(schema.rewardDistribution.multisig);
 }
 
 // ── Chain scope ───────────────────────────────────────────────────────────────
@@ -230,10 +280,6 @@ async function getIndexedHead(): Promise<{ lastIndexedBlock: bigint; validator: 
       .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID))
       .then((r) => ['verdict', r[0]?.v ?? null] as const),
     db
-      .select({ v: max(schema.rewardDistribution.claimedAtBlock) })
-      .from(schema.rewardDistribution)
-      .then((r) => ['reward', r[0]?.v ?? null] as const),
-    db
       .select({ v: max(schema.solverNetManifest.anchorBlock) })
       .from(schema.solverNetManifest)
       .where(eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID))
@@ -258,6 +304,16 @@ async function getIndexedHead(): Promise<{ lastIndexedBlock: bigint; validator: 
       .from(schema.verdictEnvelopeMeta)
       .where(eq(schema.verdictEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))
       .then((r) => ['verdictMeta', r[0]?.v ?? null] as const),
+    db
+      .select({ v: max(schema.rewardDistribution.claimedAtBlock) })
+      .from(schema.rewardDistribution)
+      .where(eq(schema.rewardDistribution.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => ['reward', r[0]?.v ?? null] as const),
+    db
+      .select({ v: max(schema.stakingRewardCheckpoint.checkpointAtBlock) })
+      .from(schema.stakingRewardCheckpoint)
+      .where(eq(schema.stakingRewardCheckpoint.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => ['stakingRewardCheckpoint', r[0]?.v ?? null] as const),
   ]);
   const candidates = entries.map(([, v]) => v).filter((v): v is bigint => v !== null);
   const lastIndexedBlock = candidates.length === 0
@@ -453,9 +509,7 @@ app.use('/network', explorerFreshness());
 app.get('/network', async (c) => {
   const includeUnenriched = c.req.query('include') === 'raw';
 
-  const activeResultPromise = loadActiveOperators(Math.floor(Date.now() / 1000));
-
-  const [taskStats, attemptStats, verdictRows, rewardStats, snStats, enrichmentRows, totalAttemptCount, activeResult] =
+  const [taskStats, attemptStats, verdictRows, snStats, enrichmentRows, totalAttemptCount] =
     await Promise.all([
       // Task counts — scoped to EXPLORER_CHAIN_ID
       db
@@ -516,16 +570,6 @@ app.get('/network', async (c) => {
           ),
         ),
 
-      // Reward distributions — intentionally unfiltered by chainId:
-      // JinnDistributor lives on Sepolia L1 (11155111) and JINN distributed
-      // is reported network-wide across all execution chains.
-      db
-        .select({
-          jinnOperator: sum(schema.rewardDistribution.operatorMinted),
-          jinnDao: sum(schema.rewardDistribution.daoMinted),
-        })
-        .from(schema.rewardDistribution),
-
       // SolverNets running — scoped to EXPLORER_CHAIN_ID
       db
         .select({ running: count() })
@@ -557,17 +601,11 @@ app.get('/network', async (c) => {
         .select({ total: count() })
         .from(schema.attempt)
         .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID)),
-
-      // Active-operator window — rolling 8 × 6h qualification surface.
-      // NOT chain-scoped: rewardDistribution settles on Sepolia L1 but reports
-      // network-wide rewards (loadActiveOperators preserves this).
-      activeResultPromise,
     ]);
 
   const tRow = taskStats[0];
   const aRow = attemptStats[0];
   const vRow = verdictRows[0];
-  const rRow = rewardStats[0];
   const snRow = snStats[0];
 
   const verdictsTotal = Number(vRow?.total ?? 0);
@@ -638,16 +676,10 @@ app.get('/network', async (c) => {
     tasksSettled: Number(tRow?.settled ?? 0),
     tasksRefunded: Number(tRow?.refunded ?? 0),
     attempts: Number(aRow?.total ?? 0),
-    // Renamed from `distinctOperators` (2026-05-30) to disambiguate from
-    // the headline "active operators" surface. Old key is gone — SPA
-    // consumers must read the new name.
+    // Distinct operator multisigs that have ever submitted an attempt on
+    // EXPLORER_CHAIN_ID. This network-wide headline remains an ever-attempted
+    // count; /operators owns the OLAS reward-window active/sustained surface.
     everAttemptedOperators: Number(aRow?.distinctOperators ?? 0),
-    // `activeOperators` is now liveness (qualified in the newest completed
-    // block); `sustainedOperators` is the 48h Milestone-1 gate (all 8 blocks).
-    // See issue #926 / active-operators.ts.
-    activeOperators: activeResult.active.size,
-    sustainedOperators: activeResult.sustained.size,
-    activeWindow: serialiseActiveWindow(activeResult.window),
     solverNetsRunning: Number(snRow?.running ?? 0),
     verdicts: verdictsTotal,
     verdictsPass,
@@ -659,8 +691,6 @@ app.get('/network', async (c) => {
     verdictConsistency,
     // How many verdicts have an evaluation-envelope enrichment row.
     enrichmentCoverageVerdicts,
-    jinnDistributedOperator: rRow?.jinnOperator ?? '0',
-    jinnDistributedDao: rRow?.jinnDao ?? '0',
     mostRecentSettlementBlock:
       tRow?.mostRecentSettlementBlock !== null &&
       tRow?.mostRecentSettlementBlock !== undefined
@@ -747,8 +777,7 @@ app.use('/solvernet/:cid', explorerFreshness());
  * New fields (ebu7.6):
  *   `trainBoard`        — operator leaderboard restricted to mode='train' attempts in this net.
  *   `frozenBoard`       — operator leaderboard restricted to mode='frozen' attempts in this net.
- *                         Operators can appear in both boards. jinnEarned is 0n in both boards
- *                         because reward attribution is fleet-wide and cannot be split by mode.
+ *                         Operators can appear in both boards.
  *   `checkpointTimeline` — all harnessCheckpoint rows (on-chain anchors only) sorted by
  *                           publishedAtBlock asc. Per-checkpoint frozen-eval score is absent
  *                           (pending checkpoint-manifest enrichment — harnessCheckpoint.codeDigest
@@ -1138,12 +1167,12 @@ app.get('/solvernet/:cid', async (c) => {
     learningCurveBuckets,
     learningCurveRolling,
     trainBoard: {
-      ranked: trainBoard.ranked.map((r) => ({ ...r, jinnEarned: r.jinnEarned.toString() })),
-      lowVolume: trainBoard.lowVolume.map((r) => ({ ...r, jinnEarned: r.jinnEarned.toString() })),
+      ranked: trainBoard.ranked,
+      lowVolume: trainBoard.lowVolume,
     },
     frozenBoard: {
-      ranked: frozenBoard.ranked.map((r) => ({ ...r, jinnEarned: r.jinnEarned.toString() })),
-      lowVolume: frozenBoard.lowVolume.map((r) => ({ ...r, jinnEarned: r.jinnEarned.toString() })),
+      ranked: frozenBoard.ranked,
+      lowVolume: frozenBoard.lowVolume,
     },
     checkpointTimeline,
     // #820 AC#1 — the named slate version frozenResolvedRate is scored against.
@@ -1168,31 +1197,32 @@ app.use('/operators', explorerFreshness());
  *   "ranked": [...],
  *   "lowVolume": [...],
  *   "minVerdicts": 5,
+ *   "activeOperators": 3,          // operators whose newest OLAS reward bucket qualifies
+ *   "sustainedOperators": 1,       // operators qualified in all 8 completed 6h buckets
+ *   "operatorsAtMilestone3": 2,    // operators with >=25 OLAS lifetime
  *   "appliedFilters": {},          // present when ?mode or ?harness is set
- *   "meta": { "jinnAttribution": "pending" },
  *   "lastIndexedBlock": "...",
  *   "lastIndexedAt": "...",
  *   "behindHead": null
  * }
  * ```
  *
- * `meta.jinnAttribution`:
- *   - `"pending"` — every operator has jinnEarned = 0n (rewardDistribution.multisig
- *     ↔ attempt.operator mapping not yet resolved — see spec §6.4).
- *   - `"ok"` — at least one operator has non-zero jinnEarned; attribution is live.
+ * OLAS is represented by the token named JINN on Base Sepolia. Active and
+ * sustained operators are computed from stOLAS Checkpoint earned-reward
+ * allocations. ExternalStakingDistributor.RewardsDistributed claim rows are
+ * kept only as a temporary fallback while no checkpoint rows have been indexed.
  *
- * New fields per row (ebu7.6):
+ * Per row (ebu7.6):
  *   `dominantMode`    — modal executor mode among this operator's enriched attempts
  *                       ('train'|'frozen'|'unknown'). 'unknown' when no enriched attempts.
  *   `dominantHarness` — modal implName among this operator's enriched attempts.
  *                       '(unknown)' when no enriched attempts.
  *
- * New query params (ebu7.6):
+ * Query params (ebu7.6):
  *   `?mode=train|frozen`  — restrict leaderboard to attempts with this mode.
  *                           Attempts without an AttemptEnvelopeMeta row are excluded.
- *                           When active, jinnEarned is 0 (reward attribution is fleet-wide).
  *   `?harness=<implName>` — restrict to attempts whose AttemptEnvelopeMeta.implName matches.
- *                           Stacks with ?mode. When active, jinnEarned is 0.
+ *                           Stacks with ?mode.
  */
 app.get('/operators', async (c) => {
   const minVerdicts = parseIntParam(
@@ -1232,29 +1262,36 @@ app.get('/operators', async (c) => {
   const operatorAddrs = rawRows.map((r) => r.operator);
   const dominantMap = await getDominantModeAndHarness(operatorAddrs);
 
-  // Active-operator overlay (issue #905) — load BEFORE rankLeaderboard so the
-  // comparator can use `active` as a tie-break on the (jinnEarned, active,
-  // operator) sort. `recentBlocks` is the per-bucket pass/fail flag the
-  // `/operators` view's ACTIVITY BLOCKS column renders. The rolling window is a
-  // protocol-wide signal (multisig ↔ attempt.operator via the same raw
-  // `t.hex()` representation `jinnEarned` uses; no case normalisation).
-  const activeResult = await loadActiveOperators(Math.floor(Date.now() / 1000));
+  const activeBundle = await loadActiveOperators(Math.floor(Date.now() / 1000));
+  const activeResult = activeBundle.result;
+
+  const lifetimeRewardRows = await loadLifetimeRewards(activeBundle.source);
+
+  const lifetimeRewards = new Map<`0x${string}`, bigint>();
+  for (const r of lifetimeRewardRows) {
+    lifetimeRewards.set(r.multisig, BigInt(r.operatorRewarded ?? 0));
+  }
+
+  const operatorsAtMilestone3 = countOperatorsAtMilestone3(
+    lifetimeRewardRows.map((r) => ({
+      multisig: r.multisig,
+      operatorRewarded: BigInt(r.operatorRewarded ?? 0),
+    })),
+  );
+
   const isActive = (op: string) => activeResult.active.has(op);
   const recentBlocksFor = (op: string): boolean[] =>
     activeResult.perOperator.get(op)?.blocks ??
     new Array(activeResult.window.blockCount).fill(false);
 
-  // Attach `active` + `recentBlocks` BEFORE ranking so the comparator's
-  // (jinnEarned, active, operator) tie-break sees the real values.
   const rows: (LeaderboardRow & { recentBlocks: boolean[] })[] = rawRows.map((r) => ({
     ...r,
     active: isActive(r.operator),
     recentBlocks: recentBlocksFor(r.operator),
+    jinnEarned: lifetimeRewards.get(r.operator) ?? 0n,
   }));
 
   const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts, compareByJinnEarnedActive);
-
-  const allJinnEarnedZero = rows.every((r) => r.jinnEarned === 0n);
 
   // Applied filters — only included when at least one filter is active.
   const appliedFilters: Record<string, string> = {};
@@ -1266,11 +1303,9 @@ app.get('/operators', async (c) => {
   const chainHead = c.get('chainHead');
   const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
-  // `active` and `recentBlocks` are attached by the pre-rank map above;
-  // serializeRow only stringifies `jinnEarned` and adds dominant-mode/harness.
-  const serializeRow = (
-    r: LeaderboardRow & { rank?: number; recentBlocks: boolean[] },
-  ) => ({
+  const allJinnEarnedZero = rows.every((r) => r.jinnEarned === 0n);
+
+  const serializeRow = (r: LeaderboardRow & { rank?: number; recentBlocks: boolean[] }) => ({
     ...r,
     jinnEarned: r.jinnEarned.toString(),
     dominantMode: dominantMap.get(r.operator)?.mode ?? 'unknown',
@@ -1281,14 +1316,15 @@ app.get('/operators', async (c) => {
     ranked: ranked.map(serializeRow),
     lowVolume: lowVolume.map(serializeRow),
     minVerdicts,
-    // Liveness count (newest completed block) vs the 48h Milestone-1 gate
-    // (all 8 blocks). Per-row `active` is liveness; `recentBlocks` carries the
-    // per-block history the SPA renders as the X/8 progress. See issue #926.
     activeOperators: activeResult.active.size,
     sustainedOperators: activeResult.sustained.size,
+    operatorsAtMilestone3,
     activeWindow: serialiseActiveWindow(activeResult.window),
     ...(hasFilter ? { appliedFilters } : {}),
-    meta: { jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok' },
+    meta: {
+      jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok',
+      rewardActivitySource: activeBundle.source,
+    },
     ...freshnessFields,
   });
 });
@@ -1326,20 +1362,16 @@ app.use('/operator/:addr', explorerFreshness());
  *     "settledContribution": 0,
  *     "verdictsTotal": 0,
  *     "verdictsPass": 0,
- *     "resolvedRate": null,
- *     "jinnEarned": "0"
+ *     "resolvedRate": null
  *   },
- *   "meta": { "jinnAttribution": "pending" },
  *   "lastIndexedBlock": "...",
  *   "lastIndexedAt": "...",
  *   "behindHead": null
  * }
  * ```
  *
- * `meta.jinnAttribution`:
- *   - `"pending"` — jinnEarned is "0", meaning the rewardDistribution.multisig
- *     ↔ attempt.operator join found no matching rows for this operator.
- *   - `"ok"` — jinnEarned > "0"; attribution is live.
+ * Post-pivot there is no per-operator `jinnEarned` / `jinnAttribution` (the
+ * JINN token economy was removed); `totals` carries on-chain activity only.
  *
  * New fields (ebu7.6):
  *   `dominantMode`       — modal executor mode among this operator's enriched attempts.
@@ -1382,9 +1414,7 @@ app.get('/operator/:addr', async (c) => {
         verdictsTotal: 0,
         verdictsPass: 0,
         resolvedRate: null,
-        jinnEarned: '0',
       },
-      meta: { jinnAttribution: 'pending' },
       ...freshnessFields,
     });
   }
@@ -1531,16 +1561,6 @@ app.get('/operator/:addr', async (c) => {
   // Dominant dims across all enriched attempts for this operator
   const dominantDims = computeDominantDims(envelopeRows);
 
-  // JINN earned — intentionally unfiltered by chainId:
-  // rewardDistribution is on Sepolia L1 (11155111) and JINN distributed
-  // is reported network-wide across all execution chains.
-  const rewards = await db
-    .select({ minted: sum(schema.rewardDistribution.operatorMinted) })
-    .from(schema.rewardDistribution)
-    .where(eq(schema.rewardDistribution.multisig, addr));
-  const jinnEarned = rewards[0]?.minted ?? '0';
-  const jinnEarnedStr = jinnEarned ?? '0';
-
   return c.json({
     operator: addr,
     dominantMode: dominantDims.mode,
@@ -1553,9 +1573,7 @@ app.get('/operator/:addr', async (c) => {
       verdictsTotal: totalVerdictsTotal,
       verdictsPass: totalVerdictsPass,
       resolvedRate: totalResolvedRate,
-      jinnEarned: jinnEarnedStr,
     },
-    meta: { jinnAttribution: jinnEarnedStr === '0' ? 'pending' : 'ok' },
     ...freshnessFields,
   });
 });
@@ -1722,8 +1740,6 @@ app.get('/slice', async (c) => {
  * Differences the adapter resolves:
  *   - `operator`: widens `` `0x${string}` `` to plain `string` (slice response is
  *     consumer-facing and doesn't pin the hex-prefixed template-literal type).
- *   - `jinnEarned`: converts the raw `bigint` from chain to a decimal string so
- *     the JSON response remains serialisable.
  *   - `settledContribution`: dropped (not part of the slice response shape).
  *   - `dominantMode` / `dominantHarness`: passed through when present (optional
  *     on both sides; `buildLeaderboardRows` does not currently emit these).
@@ -1737,7 +1753,6 @@ function toSliceLeaderboardRow(
     verdictsTotal: r.verdictsTotal,
     verdictsPass: r.verdictsPass,
     resolvedRate: r.resolvedRate,
-    jinnEarned: r.jinnEarned.toString(),
     dominantMode: r.dominantMode,
     dominantHarness: r.dominantHarness,
   };
@@ -2103,8 +2118,7 @@ interface BuildLeaderboardOptions {
  *
  * ebu7.6: accepts optional `manifestDigest` (SolverNet filter) and `mode`
  * (train/frozen board split). When `mode` is set, only attempts that have a
- * matching `AttemptEnvelopeMeta.mode` row count. jinnEarned is set to 0n for
- * the mode-filtered boards (reward attribution is fleet-wide, not per-mode).
+ * matching `AttemptEnvelopeMeta.mode` row count.
  */
 async function buildLeaderboardRows(
   opts: BuildLeaderboardOptions = {},
@@ -2195,24 +2209,6 @@ async function buildLeaderboardRows(
     { includeUnenriched },
   );
 
-  // Reward distributions — intentionally unfiltered by chainId.
-  // For mode-filtered boards, jinnEarned is 0n because reward attribution is
-  // fleet-wide and cannot be split by mode; callers should note this.
-  const rewardByOperator = new Map<string, bigint>();
-  if (mode === undefined) {
-    const rewardRows = await db
-      .select({
-        multisig: schema.rewardDistribution.multisig,
-        operatorMinted: schema.rewardDistribution.operatorMinted,
-      })
-      .from(schema.rewardDistribution);
-
-    for (const r of rewardRows) {
-      const prev = rewardByOperator.get(r.multisig) ?? 0n;
-      rewardByOperator.set(r.multisig, prev + r.operatorMinted);
-    }
-  }
-
   // Build per-operator rows
   const rows: LeaderboardRow[] = [];
   for (const op of operators) {
@@ -2238,9 +2234,9 @@ async function buildLeaderboardRows(
       verdictsTotal,
       verdictsPass,
       resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
-      jinnEarned: rewardByOperator.get(op) ?? 0n,
+      jinnEarned: 0n,
       // Default to inactive; the /operators handler overlays the real value
-      // from `computeActiveOperators(...)` against the rolling 8 × 6h window.
+      // from the OLAS reward window.
       active: false,
     });
   }
@@ -2335,7 +2331,6 @@ function modalString(arr: string[]): string | null {
  * value, optionally stacked with a `mode` filter.
  *
  * Used by `GET /explorer/operators?harness=<implName>`.
- * jinnEarned is 0n (reward attribution is fleet-wide, not per-harness).
  * Scoped to EXPLORER_CHAIN_ID.
  */
 async function buildLeaderboardRowsWithHarnessFilter(
@@ -2408,10 +2403,9 @@ async function buildLeaderboardRowsWithHarnessFilter(
       verdictsTotal,
       verdictsPass,
       resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
-      jinnEarned: 0n, // fleet-wide; cannot be split by harness
-      // Mode/harness-filtered boards never expose `active` truthfully — the
-      // window applies to the unfiltered roster. Surfacing the canonical
-      // surface on a filtered view would be misleading; default to false.
+      jinnEarned: 0n,
+      // Mode/harness-filtered boards default `active` to false; the /operators
+      // handler overlays the real value from the OLAS reward window.
       active: false,
     });
   }
@@ -2437,5 +2431,82 @@ function computeDominantDims(
     solverType: modalString(rows.map((r) => r.solverType)) ?? '(unknown)',
   };
 }
+
+// ── GET /explorer/corpus + /explorer/corpus/:cid (#1406) ─────────────────────
+//
+// The browsable corpus: an index of published capture envelopes and a
+// per-item detail read. Reads captureEnvelopeMeta (the same enriched table the
+// #1314 distribution signal rolls into clusters). Seeds excluded by default;
+// ?include=seeded folds them in, mirroring /distribution-signal. Scoped to
+// EXPLORER_CHAIN_ID like every other explorer route. captureEnvelopeMeta is
+// optional (backward compat with schemas predating #1314).
+
+/** Load all capture-envelope-meta rows for the explorer chain; [] when the table is absent. */
+async function loadCaptureMetas(): Promise<CaptureEnvelopeMetaRow[]> {
+  const s = schema as { captureEnvelopeMeta?: unknown };
+  if (!s.captureEnvelopeMeta) return [];
+  const rows = (await db
+    .select()
+    .from(schema.captureEnvelopeMeta)
+    .where(eq(schema.captureEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))) as unknown as CaptureEnvelopeMetaRow[];
+  return rows;
+}
+
+app.use('/corpus', explorerFreshness());
+app.use('/corpus/:cid', explorerFreshness());
+
+/**
+ * GET /explorer/corpus
+ *
+ * Sorted, paginated index of corpus items (published capture envelopes).
+ * Sort is server-side over the full corpus (?sort=createdAt|cluster|tier|
+ * stepCount, ?dir=asc|desc; default createdAt desc). Pagination via ?limit
+ * (default 25, max 200) and ?offset. Seeds excluded by default;
+ * ?include=seeded folds seeded/imported envelopes back in.
+ */
+app.get('/corpus', async (c) => {
+  const includeSeeds = c.req.query('include') === 'seeded';
+  const limitRaw = Number.parseInt(c.req.query('limit') ?? '', 10);
+  const offsetRaw = Number.parseInt(c.req.query('offset') ?? '', 10);
+  const sort = c.req.query('sort');
+  const dir = c.req.query('dir') === 'asc' ? 'asc' : 'desc';
+  const metas = await loadCaptureMetas();
+  const result = buildCorpusList(metas, {
+    includeSeeds,
+    limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+    offset: Number.isFinite(offsetRaw) ? offsetRaw : undefined,
+    sort,
+    dir,
+  });
+
+  const meta = c.get('indexedHead');
+  const chainHead = c.get('chainHead');
+  return c.json({
+    ...result,
+    ...freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined),
+  });
+});
+
+/**
+ * GET /explorer/corpus/:cid
+ *
+ * One corpus item's detail — the deep-link target the CLI links to. Returns
+ * 404 when the CID is not in the indexed corpus. Seeds are resolvable by
+ * direct CID (the detail is a link target, not a signal reader).
+ */
+app.get('/corpus/:cid', async (c) => {
+  const cid = c.req.param('cid');
+  const metas = await loadCaptureMetas();
+  const item = buildCorpusItem(metas, cid);
+
+  const meta = c.get('indexedHead');
+  const chainHead = c.get('chainHead');
+  const fresh = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
+
+  if (!item) {
+    return c.json({ error: 'unknown corpus item', ...fresh }, 404);
+  }
+  return c.json({ ...item, ...fresh });
+});
 
 export default app;

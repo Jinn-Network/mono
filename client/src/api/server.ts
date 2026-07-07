@@ -1,14 +1,13 @@
 /**
  * HTTP API server for jinn-client artifact discovery.
  *
- * Uses Hono for routing (enables x402 payment middleware).
+ * Uses Hono for routing.
  *
  * Routes:
  *   GET  /v1/status  (daemon health, fleet hints, RPC — best-effort)
  *   GET  /artifacts/search?tags=a,b&outcome=SUCCESS&limit=50
  *   GET  /artifacts/:id/content
  *   POST /artifacts  { id, taskId, requestId, title, content, tags, outcome }
- *   GET  /x402/artifacts/:id/content  (payment-gated, if x402 configured)
  */
 
 import { Hono } from 'hono';
@@ -21,7 +20,6 @@ import type { Server as HttpServer } from 'node:http';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Store } from '../store/store.js';
-import { addX402Routes, type X402Config } from '../x402/handler.js';
 import {
   verifyRequestWithErc8128,
   InMemoryNonceStore,
@@ -44,6 +42,7 @@ import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
+import { addHarnessAuthStatusRoutes } from './harness-auth-status-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addCodexDoctorRoutes, type CodexDoctorConfig } from './codex-doctor-endpoint.js';
@@ -57,6 +56,7 @@ import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
 import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
+import { addRewardsRoutes } from './rewards-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -73,31 +73,23 @@ export interface ApiServerConfig {
    * `POST /v1/artifacts/acquire`). Generated at daemon startup (or read
    * from `DAEMON_API_TOKEN`) and threaded into the MCP subprocess via
    * the same env var. Read-only routes (`GET /v1/status`, search,
-   * x402 cross-operator content) stay public.
+   * artifact content) stay public.
    */
   apiToken: string;
   requireAuth?: boolean;
   onArtifactPublished?: (artifact: { id: string; title: string; tags: string[]; outcome: string }) => void;
-  x402?: X402Config;
   /** When set, GET /v1/status includes fleet file + RPC reads. */
   status?: StatusGatherConfig;
   /**
    * Daemon-side Corpus instance. When set, exposes
    * `POST /v1/artifacts/acquire` so the MCP subprocess (and other in-host
-   * consumers) can fetch artifacts without ever seeing the agent EOA private
-   * key.
-   *
-   * SECURITY: this route signs x402 payments with the agent EOA. It has no
-   * UI authentication; callers need the daemon bearer token. An attacker who
-   * can reach this port and token can post fabricated
-   * `access.endpoint` URLs and drain the operator's USDC balance via the
-   * payment dance.
+   * consumers) can fetch artifacts. Bearer-token gated like `POST /artifacts`.
    *
    * Asymmetry with `search_records` / `inspect_record`: record discovery is
    * keyless (subgraph/on-chain reads + IPFS gateway) and stays client-side in
-   * the MCP server. Artifact acquisition is the only path that needs the
-   * signing key for x402 payments, so it's the only one that moves to the
-   * daemon. See spec/2026-04-30-phase-a-umbrella.md §4.
+   * the MCP server; artifact acquisition is a free fetch routed through the
+   * daemon so the byte cache lives in one place.
+   * See spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpus?: Corpus | (() => Corpus | undefined);
   /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
@@ -392,15 +384,15 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // ── Bearer-token gate for cost-mutating routes ─────────────────────────────
   //
   // `POST /artifacts` and `POST /v1/artifacts/acquire` both have side effects
-  // that cost the operator (artifact insert; signing x402 payments with the
-  // agent EOA). Without auth, an attacker reachable on the daemon API port
-  // could fabricate `access.endpoint` URLs and drain USDC. The bearer token
-  // is generated at daemon startup (or read from `DAEMON_API_TOKEN`) and
-  // forwarded to the MCP subprocess via the same env var. Read-only routes
-  // (`GET /v1/status`, `GET /artifacts/search`, `GET /artifacts/:id/content`)
-  // and the x402 cross-operator content routes stay public — they are
-  // intentionally network-reachable / payment-gated. The ERC-8128 middleware
-  // (gated by `requireAuth=true`, never set in prod) layers on top of this.
+  // (artifact insert; outbound fetch of an arbitrary `access.endpoint` plus a
+  // cache write). Without auth, an attacker reachable on the daemon API port
+  // could fabricate `access.endpoint` URLs and drive the daemon's fetcher. The
+  // bearer token is generated at daemon startup (or read from
+  // `DAEMON_API_TOKEN`) and forwarded to the MCP subprocess via the same env
+  // var. Read-only routes (`GET /v1/status`, `GET /artifacts/search`,
+  // `GET /artifacts/:id/content`) stay public — they are intentionally
+  // network-reachable. The ERC-8128 middleware (gated by `requireAuth=true`,
+  // never set in prod) layers on top of this.
   const expectedAuth = `Bearer ${config.apiToken}`;
   const expectedBuf = Buffer.from(expectedAuth);
   const requireBearer = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
@@ -486,6 +478,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/activity-events', requireUiToken(config.ui.token));
     app.use('/v1/activity-events/*', requireUiToken(config.ui.token));
     app.use('/v1/bootstrap', requireUiToken(config.ui.token));
+    app.use('/v1/rewards', requireUiToken(config.ui.token));
     app.use('/v1/solvernets', requireUiToken(config.ui.token));
     app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
     app.use('/v1/auth/*', requireUiToken(config.ui.token));
@@ -499,6 +492,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
     app.use('/api/hermes/*', requireUiToken(config.ui.token));
+    app.use('/api/codex/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
     app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
     app.use('/v1/debug-report', requireUiToken(config.ui.token));
@@ -518,6 +512,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.bootstrap) {
     addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.ui) {
+    addRewardsRoutes(app, {
+      store,
+      getStatus: () => liveStatus,
+    });
   }
 
   if (config.discovery) {
@@ -592,8 +593,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       addHarnessReadinessRoutes(app, {
         getRegistry: () => reg.holder.current ?? null,
       });
+      addHarnessAuthStatusRoutes(app, {
+        getRegistry: () => reg.holder.current ?? null,
+      });
     } else {
       addHarnessReadinessRoutes(app, { registry: reg });
+      addHarnessAuthStatusRoutes(app, { registry: reg });
     }
   }
 
@@ -621,12 +626,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // callers cannot fingerprint per-SolverNet generator state without it.
   if (config.ui && config.launcher) {
     addLauncherRoutes(app, config.launcher);
-  }
-
-  // x402 payment-gated routes (if configured)
-  if (config.x402) {
-    addX402Routes(app, store, config.x402);
-    console.log(`[api] x402 artifact serving enabled`);
   }
 
   // Bearer-token gate for POST /artifacts. Registered as `app.use` so it
@@ -721,17 +720,14 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // ── POST /v1/artifacts/acquire ─────────────────────────────────────────────
   //
   // Daemon-side acquire endpoint (jinn-mono-vy37.1.6). The MCP subprocess
-  // proxies its `acquire_artifact` tool through this route so the agent EOA
-  // private key required for x402 payments never leaves daemon process
-  // memory. Localhost-only — see api server bind host below; this route MUST
-  // NOT be exposed across the network without an auth layer because the
-  // daemon will sign x402 payments on the caller's behalf.
+  // proxies its `acquire_artifact` tool through this route so the byte cache
+  // (network_artifacts) lives in one place — the daemon — and the resolution
+  // chain (cache → self-store → route-resolver → free origin fetch) runs once.
+  // Bearer-token gated; localhost-only — see api server bind host below.
   //
   // Asymmetry with `search_records` / `inspect_record`: record lookup stays
   // client-side because subgraph/on-chain queries and IPFS manifest fetches are
-  // keyless.
-  // Only the buyer side of x402 needs the signing key, so only the buyer path
-  // moves here.
+  // keyless; artifact-byte acquisition routes here so the cache is shared.
   // See spec/2026-04-30-phase-a-umbrella.md §4.
   if (config.corpus) {
     const resolveCorpus = (): Corpus | undefined =>
@@ -864,7 +860,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       path.startsWith('/artifacts') ||
       path.startsWith('/auth') ||
       path.startsWith('/api') ||
-      path.startsWith('/x402') ||
       path.startsWith('/assets')
     ) {
       return c.notFound();

@@ -43,8 +43,8 @@ describe('StatusBar', () => {
     expect(screen.queryByText('enriched')).not.toBeInTheDocument();
   });
 
-  it('renders "ago" text as part of the time string', () => {
-    render(
+  it('renders "ago" text once as part of the time string', () => {
+    const { container } = render(
       <StatusBar
         lastIndexedBlock="5000"
         lastIndexedAt={new Date(Date.now() - 90_000).toISOString()}
@@ -52,6 +52,7 @@ describe('StatusBar', () => {
     );
     // relTime renders e.g. "2m ago" — find by regex
     expect(screen.getByText(/ago$/)).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/ago ago/i);
   });
 
   it('shows "blocks behind head" when behindHead > 0', () => {

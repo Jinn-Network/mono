@@ -4,6 +4,7 @@ import { Router, Switch, Route } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { SolverNetView } from './SolverNetView';
 import { useSlice, useSolverNet } from '../lib/api';
+import { MILESTONE2_MANIFEST_CID } from '../lib/milestone2';
 
 // ── Fixtures (dual-hook: SliceResponse + SolverNetResponse) ──────────────────
 
@@ -23,7 +24,6 @@ const SLICE_DATA = {
     verdicts: 800,
     verdictsPass: 760,
     resolvedRate: 0.95,
-    jinnEarned: '0',
   },
   series: [
     {
@@ -38,7 +38,6 @@ const SLICE_DATA = {
         verdicts: 800,
         verdictsPass: 760,
         resolvedRate: 0.95,
-        jinnEarned: '0',
       },
     },
   ],
@@ -50,7 +49,6 @@ const SLICE_DATA = {
         verdictsTotal: 180,
         verdictsPass: 171,
         resolvedRate: 0.95,
-        jinnEarned: '1000000000000000000',
       },
     ],
     frozen: [
@@ -60,7 +58,6 @@ const SLICE_DATA = {
         verdictsTotal: 8,
         verdictsPass: 7,
         resolvedRate: 0.875,
-        jinnEarned: '0',
       },
     ],
   },
@@ -492,7 +489,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
         verdicts: 400,
         verdictsPass: 254,
         resolvedRate: 0.635, // aggregate — the headline MUST be 63.5%
-        jinnEarned: '0',
       },
       series: [
         {
@@ -504,7 +500,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
             verdicts: 150,
             verdictsPass: 105,
             resolvedRate: 0.7, // distractor — NOT the headline
-            jinnEarned: '0',
           },
         },
         {
@@ -516,7 +511,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
             verdicts: 130,
             verdictsPass: 52,
             resolvedRate: 0.4,
-            jinnEarned: '0',
           },
         },
         {
@@ -528,7 +522,6 @@ describe('SolverNetView — KPI hero uses aggregate kpis.resolvedRate (bug 6.2)'
             verdicts: 120,
             verdictsPass: 89,
             resolvedRate: 0.74,
-            jinnEarned: '0',
           },
         },
       ],
@@ -883,5 +876,47 @@ describe('SolverNetView — + filter surfaces values on cold landing (#687 bug 2
     expect(
       within(dialog).queryByText(/No values to filter by/i),
     ).toBeNull();
+  });
+});
+
+// ── Milestone 2 gate card (#647) ──────────────────────────────────────────────
+
+describe('SolverNetView — Milestone 2 gate card', () => {
+  // A passing M2 slice: 140 verdicts, trailing-30 = 0.70 now vs 0.50 at t-99.
+  function m2PassingSlice() {
+    const rolling = new Array(140).fill(0.42);
+    rolling[40] = 0.5; // t-99 baseline (index n-100)
+    rolling[139] = 0.7; // current (index n-1)
+    return {
+      isLoading: false,
+      isError: false,
+      error: null,
+      data: {
+        ...SLICE_DATA,
+        kpis: { ...SLICE_DATA.kpis, verdicts: 140 },
+        series: [{ ...SLICE_DATA.series[0], rolling, kpis: { ...SLICE_DATA.series[0].kpis, verdicts: 140 } }],
+      },
+    };
+  }
+
+  it('renders the gate card with PASS on the Milestone 2 SolverNet', async () => {
+    vi.mocked(useSlice).mockReturnValue(m2PassingSlice() as any);
+    const { WrappedView } = makeWrapper(
+      `/solvernet/${encodeURIComponent(MILESTONE2_MANIFEST_CID)}`,
+    );
+    render(<WrappedView />);
+    expect(
+      await screen.findByText(/Milestone 2 — solvers improving/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('PASS')).toBeInTheDocument();
+    expect(screen.getAllByText(/\+20\.0pp/).length).toBeGreaterThan(0);
+  });
+
+  it('does not render the gate card on a non-Milestone-2 SolverNet', async () => {
+    vi.mocked(useSlice).mockReturnValue(m2PassingSlice() as any);
+    const { WrappedView } = makeWrapper();
+    render(<WrappedView />);
+    await screen.findByTestId('kpi-hero-resolved-rate');
+    expect(screen.queryByText(/Milestone 2 — solvers improving/i)).toBeNull();
   });
 });

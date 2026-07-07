@@ -244,6 +244,61 @@ async function maybeMaterializeSweRebenchPatchPayload(
   return payload;
 }
 
+async function maybeMaterializeJinnRepoPatchPayload(
+  workingDir: string,
+  task?: Task,
+): Promise<Record<string, unknown> | null> {
+  if (task?.solverType !== 'jinn-repo.v1' || task.role === 'evaluation') {
+    return null;
+  }
+  const repoDir = join(workingDir, 'repo');
+  if (!existsSync(join(repoDir, '.git'))) {
+    return null;
+  }
+
+  let rawPatch = '';
+  try {
+    // Async + bounded timeout, matching the swe-rebench materializer above.
+    const { stdout } = await execFileAsync('git', ['-C', repoDir, 'diff', '--binary'], {
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: GIT_DIFF_TIMEOUT_MS,
+    });
+    rawPatch = stdout;
+  } catch (err) {
+    console.warn(
+      `[claude-code-learner] harvestOutput: unable to derive jinn-repo patch from git diff: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+  if (!rawPatch.trim()) {
+    return null;
+  }
+  // Strip the solver's own test-file edits: the gold tests are held out from the
+  // solverView, so a solver can only satisfy them by editing source. Stripping
+  // test hunks on the producer side prevents a solver from passing the held-out
+  // gold tests by editing them. Mirrors the swe-rebench materializer.
+  const patch = stripTestPathHunks(rawPatch);
+  if (!patch.trim()) {
+    console.warn(
+      '[claude-code-learner] harvestOutput: jinn-repo git diff contained only test-file changes; no source patch to submit.',
+    );
+    return null;
+  }
+
+  const payload = {
+    schemaVersion: 'jinn-repo-solution.v1',
+    patch,
+  };
+  const executeDir = join(workingDir, '.execute');
+  mkdirSync(executeDir, { recursive: true });
+  writeFileSync(
+    join(executeDir, 'solution-payload.json'),
+    JSON.stringify(payload, null, 2),
+  );
+  return payload;
+}
+
 function payloadRole(task?: Task): Role {
   return task?.role === 'evaluation' ? 'verdict' : 'solution';
 }
@@ -499,6 +554,7 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
   // .execute/solution-payload.json path is preserved everywhere else.
   const rawTypedPayload =
     (await maybeMaterializeSweRebenchPatchPayload(workingDir, task)) ??
+    (await maybeMaterializeJinnRepoPatchPayload(workingDir, task)) ??
     readTypedPayloadJson(typedPayloadPath);
   const typedPayload = rawTypedPayload
     ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)

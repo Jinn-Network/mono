@@ -45,3 +45,7 @@ examples/external-restorer-impls/*/dist/
 examples/external-restorer-impls/*/.yarn/cache/
 examples/external-restorer-impls/*/.yarn/install-state.gz
 .superpowers/
+
+# yarn PnP local install artefacts (per-machine; never committed)
+packages/*/.pnp.cjs
+packages/*/.pnp.loader.mjs

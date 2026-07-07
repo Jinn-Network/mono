@@ -17,7 +17,8 @@
  * — this is a refactor, not a behaviour change. See `src/index.ts` for the
  * Ponder docs links and the schema rationale.
  */
-import { decodeAbiParameters, keccak256, toBytes, type Hex } from 'viem';
+import { decodeAbiParameters, isAddress, keccak256, toBytes, type Hex } from 'viem';
+import { STOLAS_STAKING_PROXY_ABI } from '../abis/StolasStakingProxy.js';
 import {
   parseEnvelopeKey,
   parsePluginKey,
@@ -26,6 +27,19 @@ import {
   tierFromRaw,
 } from './types.js';
 import { fetchIpfsJson, type FetchLike } from './ipfs.js';
+import {
+  safeStr,
+  parseVerdictEnvelopeLite,
+  resolveInstanceFields,
+  type VerdictEnvelopeLite,
+} from './enrichment-parse.js';
+
+// Re-exported for the test suite (test/handlers.test.ts imports
+// parseVerdictEnvelopeLite from '../src/handlers.js') and any downstream
+// consumer that still reaches for these via the handlers module. The single
+// definition lives in ./enrichment-parse.ts (#779).
+export { parseVerdictEnvelopeLite };
+export type { VerdictEnvelopeLite };
 
 // ── Minimal structural types for the handler context ──────────────────────────
 // Deliberately narrow — only the fields the handlers actually touch. The real
@@ -65,6 +79,9 @@ export interface HandlerDb {
 export interface HandlerContext {
   db: HandlerDb;
   chain: { id: number };
+  client?: {
+    readContract: (opts: Record<string, unknown>) => Promise<unknown>;
+  };
 }
 
 export interface BlockShape {
@@ -76,6 +93,7 @@ export interface TransactionShape {
   transactionIndex?: number;
 }
 export interface LogShape {
+  address?: `0x${string}`;
   logIndex?: number;
 }
 
@@ -86,7 +104,9 @@ export interface TaskCreatedEvent {
     manifestDigest: `0x${string}`;
     taskCidDigest: `0x${string}`;
     maxClaims: bigint | number;
-    requiredVerdicts: bigint | number;
+    // Tokenless TaskCreated events omit this; handler defaults to 1 for
+    // first-verdict finalization.
+    requiredVerdicts?: bigint | number;
   };
   block: BlockShape;
   transaction: TransactionShape;
@@ -145,6 +165,45 @@ export interface TaskBudgetRefundedEvent {
   log: LogShape;
 }
 
+export interface RewardsDistributedEvent {
+  args: {
+    serviceId: bigint;
+    multisig: `0x${string}`;
+    collectorAmount: bigint;
+    protocolAmount: bigint;
+    curatingAgentAmount: bigint;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
+export interface ServiceStakedEvent {
+  args: {
+    epoch: bigint;
+    serviceId: bigint;
+    owner: `0x${string}`;
+    multisig: `0x${string}`;
+    nonces: readonly bigint[];
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
+export interface StakingCheckpointEvent {
+  args: {
+    epoch: bigint;
+    availableRewards: bigint;
+    serviceIds: readonly bigint[];
+    rewards: readonly bigint[];
+    epochLength: bigint;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
 export interface MetadataSetEvent {
   args: {
     agentId: bigint;
@@ -154,6 +213,16 @@ export interface MetadataSetEvent {
   block: BlockShape;
   transaction: TransactionShape;
   log: LogShape;
+}
+
+const TOKENLESS_FIRST_VERDICT_REQUIRED_VERDICTS = 1;
+
+function requiredVerdictsFromTaskCreated(value: bigint | number | undefined): number {
+  return value === undefined ? TOKENLESS_FIRST_VERDICT_REQUIRED_VERDICTS : Number(value);
+}
+
+function requiredVerdictsForFinalization(value: number): number {
+  return value <= 0 ? TOKENLESS_FIRST_VERDICT_REQUIRED_VERDICTS : value;
 }
 
 // ── ABI tuple for payload decoding ────────────────────────────────────────────
@@ -274,20 +343,6 @@ export function decodeRevocationPayload(value: Hex): DecodedRevocationPayload | 
   }
 }
 
-export interface ClaimedEvent {
-  args: {
-    serviceId: bigint;
-    multisig: `0x${string}`;
-    operatorMinted: bigint;
-    daoMinted: bigint;
-    totalEntitledOperator: bigint;
-    totalEntitledDao: bigint;
-  };
-  block: BlockShape;
-  transaction: TransactionShape;
-  log: LogShape;
-}
-
 // ── JinnRouter: TaskCreated ───────────────────────────────────────────────────
 
 export async function handleTaskCreated({
@@ -307,7 +362,7 @@ export async function handleTaskCreated({
       taskCidDigest: event.args.taskCidDigest,
       creator: event.args.creator,
       maxClaims: Number(event.args.maxClaims),
-      requiredVerdicts: Number(event.args.requiredVerdicts ?? 0),
+      requiredVerdicts: requiredVerdictsFromTaskCreated(event.args.requiredVerdicts),
       createdAtBlock: event.block.number,
       createdAtTx: event.transaction.hash,
       // claimWindowStart and claimWindowEnd are not emitted in TaskCreated on
@@ -352,14 +407,19 @@ export async function handleTaskAttemptCreated({
 // Idempotent: a replayed event with the same (taskId, attemptIndex, verdictIndex,
 // chainId) does not clobber the original (onConflictDoNothing).
 //
-// Finalization (issue #530): on JinnRouter V3, on-chain finalization is
-// `attempt.validVerdictCount == requiredVerdicts` (TaskCoordinator.recordVerdict).
+// Finalization (issue #530 / #1304): on the current tokenless JinnRouter V3,
+// TaskCoordinator.recordVerdict finalizes on the first delivered verdict when
+// TaskCreated omits requiredVerdicts. Older rows persisted that omission as 0,
+// so non-positive requiredVerdicts are normalized to 1 for finalization. When a
+// legacy event explicitly carries requiredVerdicts > 1, it still requires that
+// many delivered verdicts.
+//
 // VerdictDeliveryClaimed fires once per *delivered* verdict, so the count of
 // delivered `verdict` rows for this attempt scope equals validVerdictCount.
-// After inserting the verdict row, recompute: finalized iff
-// requiredVerdicts > 0 && deliveredCount >= requiredVerdicts. Mirrors
-// metrics.ts:attemptFinalization. Monotonic — never flips finalized back to
-// false (db.update only ever sets it to true here).
+// After inserting the verdict row, recompute: finalized iff deliveredCount >=
+// normalized requiredVerdicts. Mirrors metrics.ts:attemptFinalization.
+// Monotonic — never flips finalized back to false (db.update only ever sets it
+// to true here).
 //
 // Existence guard (mirrors handleSolutionDeliveryClaimed): the matching
 // TaskCreated may predate `startBlock`, leaving no `task` row. db.update on a
@@ -394,15 +454,14 @@ export async function handleVerdictDeliveryClaimed({
     })
     .onConflictDoNothing();
 
-  // Recompute finalized from the task's requiredVerdicts vs delivered verdicts.
+  // Recompute finalized from normalized requiredVerdicts vs delivered verdicts.
   const existing = (await context.db.find(task, { id: taskId })) as
     | { requiredVerdicts: number; finalized: boolean }
     | null;
   if (!existing) return; // TaskCreated predates startBlock — skip; verdict row already written.
   if (existing.finalized) return; // Monotonic — already final, nothing to do.
 
-  const requiredVerdicts = existing.requiredVerdicts;
-  if (requiredVerdicts <= 0) return; // requiredVerdicts == 0 → never finalizes.
+  const requiredVerdicts = requiredVerdictsForFinalization(existing.requiredVerdicts);
 
   const deliveredCount = await context.db.countVerdicts(verdict, {
     taskId,
@@ -416,8 +475,8 @@ export async function handleVerdictDeliveryClaimed({
 
 // ── JinnRouter: SolutionDeliveryClaimed ──────────────────────────────────────
 // A solution-slot delivery — the START of the evaluation phase, NOT finalization
-// (issue #530). On-chain finalization is `validVerdictCount >= requiredVerdicts`
-// and is handled in handleVerdictDeliveryClaimed. This handler deliberately does
+// (issue #530 / #1304). On-chain finalization happens on verdict delivery and
+// is handled in handleVerdictDeliveryClaimed. This handler deliberately does
 // NOT touch task.finalized.
 //
 // At v0.1 there is nothing for this handler to persist beyond what TaskAttempt /
@@ -439,9 +498,10 @@ export async function handleSolutionDeliveryClaimed({
   const id = event.args.taskId.toString();
   const existing = await context.db.find(task, { id });
   if (!existing) return;
-  // Intentionally a no-op on task.finalized — see issue #530. SolutionDeliveryClaimed
-  // is the start of evaluation; finalization is recomputed in
-  // handleVerdictDeliveryClaimed from delivered-verdict count vs requiredVerdicts.
+  // Intentionally a no-op on task.finalized — see issues #530 and #1304.
+  // SolutionDeliveryClaimed is the start of evaluation; finalization is
+  // recomputed in handleVerdictDeliveryClaimed from delivered-verdict count vs
+  // normalized requiredVerdicts.
 }
 
 // ── JinnRouter: TaskBudgetRefunded → task.refunded = true ────────────────────
@@ -461,6 +521,189 @@ export async function handleTaskBudgetRefunded({
   const existing = await context.db.find(task, { id });
   if (!existing) return;
   await context.db.update(task, { id }).set({ refunded: true });
+}
+
+// ── ExternalStakingDistributor: RewardsDistributed → rewardDistribution ─────
+
+export async function handleRewardsDistributed({
+  event,
+  context,
+  rewardDistribution,
+}: {
+  event: RewardsDistributedEvent;
+  context: HandlerContext;
+  rewardDistribution: unknown;
+}): Promise<void> {
+  await context.db
+    .insert(rewardDistribution)
+    .values({
+      serviceId: event.args.serviceId.toString(),
+      multisig: event.args.multisig,
+      operatorRewarded: event.args.collectorAmount,
+      protocolRewarded: event.args.protocolAmount,
+      curatingAgentRewarded: event.args.curatingAgentAmount,
+      claimedAtBlock: event.block.number,
+      claimedAtTimestamp: event.block.timestamp,
+      logIndex: event.log.logIndex ?? 0,
+      claimedAtTx: event.transaction.hash,
+      chainId: context.chain.id,
+    })
+    .onConflictDoNothing();
+}
+
+// ── StolasStakingProxy: ServiceStaked → stakingService ───────────────────────
+
+export async function handleServiceStaked({
+  event,
+  context,
+  stakingService,
+}: {
+  event: ServiceStakedEvent;
+  context: HandlerContext;
+  stakingService: unknown;
+}): Promise<void> {
+  const stakingProxy = event.log.address;
+  if (!stakingProxy) return;
+
+  await context.db
+    .insert(stakingService)
+    .values({
+      serviceId: event.args.serviceId.toString(),
+      stakingProxy,
+      owner: event.args.owner,
+      multisig: event.args.multisig,
+      stakedAtBlock: event.block.number,
+      stakedAtTimestamp: event.block.timestamp,
+      stakedAtTx: event.transaction.hash,
+      chainId: context.chain.id,
+    })
+    .onConflictDoUpdate({
+      owner: event.args.owner,
+      multisig: event.args.multisig,
+      stakedAtBlock: event.block.number,
+      stakedAtTimestamp: event.block.timestamp,
+      stakedAtTx: event.transaction.hash,
+    });
+}
+
+// ── StolasStakingProxy: Checkpoint → stakingRewardCheckpoint ─────────────────
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
+
+function parseServiceInfoAddress(value: unknown): `0x${string}` | null {
+  if (typeof value !== 'string' || !isAddress(value) || value.toLowerCase() === ZERO_ADDRESS) {
+    return null;
+  }
+  return value as `0x${string}`;
+}
+
+async function resolveCheckpointService({
+  context,
+  stakingService,
+  stakingProxy,
+  serviceId,
+  event,
+}: {
+  context: HandlerContext;
+  stakingService: unknown;
+  stakingProxy: `0x${string}`;
+  serviceId: string;
+  event: StakingCheckpointEvent;
+}): Promise<{ multisig: `0x${string}` } | null> {
+  const chainId = context.chain.id;
+  const existing = (await context.db.find(stakingService, {
+    chainId,
+    stakingProxy,
+    serviceId,
+  })) as { multisig?: `0x${string}` } | null;
+  if (existing?.multisig) return { multisig: existing.multisig };
+
+  if (!context.client?.readContract) return null;
+
+  try {
+    const serviceInfo = await context.client.readContract({
+      address: stakingProxy,
+      abi: STOLAS_STAKING_PROXY_ABI,
+      functionName: 'mapServiceInfo',
+      args: [BigInt(serviceId)],
+      blockNumber: event.block.number,
+    });
+
+    const tuple = serviceInfo as readonly unknown[];
+    const object = serviceInfo as { multisig?: unknown; owner?: unknown };
+    const multisig = parseServiceInfoAddress(Array.isArray(tuple) ? tuple[0] : object.multisig);
+    if (!multisig) return null;
+
+    const owner = parseServiceInfoAddress(Array.isArray(tuple) ? tuple[1] : object.owner) ?? ZERO_ADDRESS;
+    await context.db
+      .insert(stakingService)
+      .values({
+        serviceId,
+        stakingProxy,
+        owner,
+        multisig,
+        stakedAtBlock: event.block.number,
+        stakedAtTimestamp: event.block.timestamp,
+        stakedAtTx: event.transaction.hash,
+        chainId,
+      })
+      .onConflictDoNothing();
+
+    return { multisig };
+  } catch {
+    return null;
+  }
+}
+
+export async function handleStakingCheckpoint({
+  event,
+  context,
+  stakingService,
+  stakingRewardCheckpoint,
+}: {
+  event: StakingCheckpointEvent;
+  context: HandlerContext;
+  stakingService: unknown;
+  stakingRewardCheckpoint: unknown;
+}): Promise<void> {
+  const stakingProxy = event.log.address;
+  if (!stakingProxy) return;
+
+  const chainId = context.chain.id;
+  const logIndex = event.log.logIndex ?? 0;
+  const count = Math.min(event.args.serviceIds.length, event.args.rewards.length);
+
+  for (let i = 0; i < count; i++) {
+    const serviceId = event.args.serviceIds[i]?.toString();
+    const reward = event.args.rewards[i];
+    if (!serviceId || reward === undefined) continue;
+
+    const service = await resolveCheckpointService({
+      context,
+      stakingService,
+      stakingProxy,
+      serviceId,
+      event,
+    });
+    if (!service?.multisig) continue;
+
+    await context.db
+      .insert(stakingRewardCheckpoint)
+      .values({
+        serviceId,
+        stakingProxy,
+        multisig: service.multisig,
+        epoch: event.args.epoch.toString(),
+        reward,
+        epochLength: event.args.epochLength,
+        checkpointAtBlock: event.block.number,
+        checkpointAtTimestamp: event.block.timestamp,
+        logIndex,
+        checkpointAtTx: event.transaction.hash,
+        chainId,
+      })
+      .onConflictDoNothing();
+  }
 }
 
 // ── CheckpointManifest lite parser ───────────────────────────────────────────
@@ -606,10 +849,6 @@ export interface EnvelopeLite {
   sourcePublished: boolean;
 }
 
-function safeStr(v: unknown): string {
-  return typeof v === 'string' ? v : '';
-}
-
 export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
   if (body === null || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
@@ -691,141 +930,138 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
   };
 }
 
-// ── Verdict envelope lite parser ──────────────────────────────────────────────
-// For evaluation envelopes (role='verdict' or kind='evaluation'). Reads the
-// ACTUAL evaluator outcome — the on-chain VerdictDeliveryClaimed.verdictCode
-// defaults to Pass(1) for failed evaluations (daemon bug), so the off-chain
-// envelope is the source of truth.
-//
-// SWE-rebench v2: payload.{passed_match,score}. Other solverTypes: payload.verdict.
-// Returns null if body isn't a recognisable jinn.execution.v1 verdict envelope.
+// `parseVerdictEnvelopeLite`, `VerdictEnvelopeLite`, and the swe-rebench-v2
+// `resolveInstanceFields` resolver moved to ./enrichment-parse.ts (#779) so the
+// standalone enrichment worker shares one definition with this handler and they
+// cannot drift. They are imported + re-exported at the top of this file.
 
-export interface VerdictEnvelopeLite {
-  requestId: string;
-  verdictIndex: number;
-  attemptIndex: number;
-  taskId: string;
-  /** IPFS CID of the task body (envelope.task.cid). Used by the swe-rebench-v2
-   *  enrichment branch to fetch spec.instance_id (#669). Empty when absent. */
-  taskCid: string;
-  evaluator: string;
-  solverType: string;
-  evidenceTier: string;
-  actualPassed: boolean;
-  actualScore: string;
-  passedCount: number;
-  totalCount: number;
-  evaluatorVerdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN';
+// ── Capture-envelope signal parsers (#1314) ──────────────────────────────────
+// Dep-free defensive parsers for the two-hop capture enrichment: the wrapper
+// envelope (capture:<cid>) carries a `jinn.trace-envelope.v0` artifact whose
+// IPFS body (donation encoding, base64 `data`) is the trace envelope holding
+// the fields the distribution signal reads.
+
+export interface CaptureWrapperLite {
+  /** participant.safeAddress — the contributor identity. */
+  contributor: string;
+  /** IPFS cid of the jinn.trace-envelope.v0 artifact. */
+  traceArtifactCid: string;
 }
 
-function safeInt(v: unknown, def = 0): number {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
-  if (typeof v === 'string') {
-    const n = Number.parseInt(v, 10);
-    if (Number.isFinite(n)) return n;
-  }
-  if (typeof v === 'bigint') return Number(v);
-  return def;
-}
-
-function normalizeVerdict(raw: unknown): 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN' {
-  if (typeof raw !== 'string') return 'UNKNOWN';
-  const v = raw.trim().toUpperCase();
-  if (v === 'PASS' || v === 'SCORED' || v === 'OK') return 'PASS';
-  if (v === 'FAIL' || v === 'REJECTED' || v === 'FAILED') return 'FAIL';
-  if (v === 'INVALID') return 'INVALID';
-  if (v === 'INDETERMINATE' || v === 'UNRESOLVED' || v === 'UNKNOWN') return 'INDETERMINATE';
-  return 'UNKNOWN';
-}
-
-export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | null {
+export function parseCaptureWrapperLite(body: unknown): CaptureWrapperLite | null {
   if (body === null || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
 
-  // role must be 'verdict' for an evaluation envelope (execution envelopes are role='restoration').
-  // We're permissive: also accept envelopes that lack role but have task.requestId + a parseable payload.
-  // task.requestId is the join key — required.
-  const task = b['task'];
-  if (task === null || typeof task !== 'object') return null;
-  const taskObj = task as Record<string, unknown>;
-  const requestId = safeStr(taskObj['requestId']);
-  if (!requestId) return null;
-
-  const attemptIndex = safeInt(taskObj['attemptIndex'], 0);
-  const taskId = safeStr(taskObj['taskId']) || String(taskObj['taskId'] ?? '');
-  // Capture the task body CID so the swe-rebench-v2 enrichment branch can
-  // resolve spec.instance_id via a follow-up IPFS fetch (#669). Optional;
-  // empty when the envelope omits it.
-  const taskCid = safeStr(taskObj['cid']);
-  // verdictIndex may be at the top level or under task. It is diagnostic only
-  // for older envelopes that omit it; requestId is the stable verdict join key.
-  const verdictIndex = safeInt(b['verdictIndex'] ?? taskObj['verdictIndex'], 0);
-
-  const solverType = safeStr(b['solverType']);
-  const evidenceTier = safeStr(b['evidenceTier']);
-
-  // participant.safeAddress → evaluator
-  let evaluator = '0x';
   const participant = b['participant'];
-  if (participant !== null && typeof participant === 'object') {
-    const p = participant as Record<string, unknown>;
-    const s = safeStr(p['safeAddress']);
-    if (s) evaluator = s;
+  const participantObj: Record<string, unknown> =
+    participant !== null && typeof participant === 'object'
+      ? (participant as Record<string, unknown>)
+      : {};
+  const contributor = safeStr(participantObj['safeAddress']);
+
+  if (!Array.isArray(b['artifacts'])) return null;
+  for (const artifact of b['artifacts'] as unknown[]) {
+    if (artifact === null || typeof artifact !== 'object') continue;
+    const a = artifact as Record<string, unknown>;
+    if (a['artifactType'] !== 'jinn.trace-envelope.v0') continue;
+    if (!Array.isArray(a['sources'])) continue;
+    for (const source of a['sources'] as unknown[]) {
+      if (source === null || typeof source !== 'object') continue;
+      const cid = safeStr((source as Record<string, unknown>)['cid']);
+      if (cid) return { contributor, traceArtifactCid: cid };
+    }
+  }
+  return null;
+}
+
+export interface TraceEnvelopeSignalLite {
+  taskSummary: string;
+  /** JSON.stringify(task.distributionTags) — '[]' when absent. */
+  tagsJson: string;
+  provenance: 'contributed' | 'imported';
+  verifiabilityTier: string;
+  /** environment.harness as "<name> <version>", '' when absent. Corpus detail (#1406). */
+  harness: string;
+  /** environment.model, '' when absent. Corpus detail (#1406). */
+  model: string;
+  /** JSON.stringify(environment.tools) — '[]' when absent. Corpus detail (#1406). */
+  toolsJson: string;
+  /** steps.length — 0 when absent. Corpus index + detail (#1406). */
+  stepCount: number;
+}
+
+export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignalLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+
+  // The artifact body is the donation encoding: { data: base64(trace JSON) }.
+  // Tolerate a raw trace-envelope body too (direct gateway reads).
+  let trace: Record<string, unknown> = b;
+  const data = b['data'];
+  if (typeof data === 'string' && data) {
+    try {
+      trace = JSON.parse(Buffer.from(data, 'base64').toString('utf-8')) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  if (trace === null || typeof trace !== 'object') return null;
+
+  const task = trace['task'];
+  const taskObj: Record<string, unknown> =
+    task !== null && typeof task === 'object' ? (task as Record<string, unknown>) : {};
+  const taskSummary = safeStr(taskObj['summary']);
+
+  let tagsJson = '[]';
+  if (Array.isArray(taskObj['distributionTags'])) {
+    try {
+      tagsJson = JSON.stringify(
+        (taskObj['distributionTags'] as unknown[]).filter((t) => typeof t === 'string'),
+      );
+    } catch {
+      tagsJson = '[]';
+    }
   }
 
-  // Payload — read the verdict.
-  const payload = b['payload'];
-  const payloadObj: Record<string, unknown> =
-    payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+  const provenance = trace['provenance'] === 'imported' ? 'imported' : 'contributed';
 
-  let actualPassed = false;
-  let actualScore = '';
-  let passedCount = 0;
-  let totalCount = 0;
-  let evaluatorVerdict: VerdictEnvelopeLite['evaluatorVerdict'] = 'UNKNOWN';
+  const outcome = trace['outcome'];
+  const outcomeObj: Record<string, unknown> =
+    outcome !== null && typeof outcome === 'object' ? (outcome as Record<string, unknown>) : {};
+  const verifiabilityTier = safeStr(outcomeObj['verifiabilityTier']);
 
-  // SWE-rebench v2 (solverType prefix): payload.passed_match + payload.score.
-  if (solverType.startsWith('swe-rebench-v2')) {
-    const passedRaw =
-      payloadObj['passed_match'] ?? payloadObj['passedMatch'] ?? payloadObj['passed'];
-    if (typeof passedRaw === 'boolean') {
-      actualPassed = passedRaw;
-    } else if (typeof passedRaw === 'string') {
-      actualPassed = passedRaw.toLowerCase() === 'true' || passedRaw === '1';
+  // ── Detail-view fields (#1406): environment fingerprint + step count. ──
+  const environment = trace['environment'];
+  const envObj: Record<string, unknown> =
+    environment !== null && typeof environment === 'object'
+      ? (environment as Record<string, unknown>)
+      : {};
+
+  const harnessRaw = envObj['harness'];
+  const harnessObj: Record<string, unknown> =
+    harnessRaw !== null && typeof harnessRaw === 'object'
+      ? (harnessRaw as Record<string, unknown>)
+      : {};
+  const harnessName = safeStr(harnessObj['name']);
+  const harnessVersion = safeStr(harnessObj['version']);
+  const harness = harnessName && harnessVersion ? `${harnessName} ${harnessVersion}` : harnessName;
+
+  const model = safeStr(envObj['model']);
+
+  let toolsJson = '[]';
+  if (Array.isArray(envObj['tools'])) {
+    try {
+      toolsJson = JSON.stringify(
+        (envObj['tools'] as unknown[]).filter((t) => typeof t === 'string'),
+      );
+    } catch {
+      toolsJson = '[]';
     }
-    const scoreRaw = payloadObj['score'];
-    if (typeof scoreRaw === 'number' && Number.isFinite(scoreRaw)) {
-      actualScore = scoreRaw.toString();
-    } else if (typeof scoreRaw === 'string') {
-      actualScore = scoreRaw;
-    }
-    const pc = payloadObj['passedCount'] ?? payloadObj['passed_count'];
-    const tc = payloadObj['totalCount'] ?? payloadObj['total_count'];
-    passedCount = Math.max(0, safeInt(pc, 0));
-    totalCount = Math.max(0, safeInt(tc, 0));
-    evaluatorVerdict = actualPassed ? 'PASS' : 'FAIL';
-  } else {
-    // Generic: payload.verdict (uppercase normalize).
-    const norm = normalizeVerdict(payloadObj['verdict']);
-    evaluatorVerdict = norm;
-    actualPassed = norm === 'PASS';
   }
 
-  return {
-    requestId,
-    verdictIndex,
-    attemptIndex,
-    taskId,
-    taskCid,
-    evaluator,
-    solverType,
-    evidenceTier,
-    actualPassed,
-    actualScore,
-    passedCount,
-    totalCount,
-    evaluatorVerdict,
-  };
+  const stepCount = Array.isArray(trace['steps']) ? (trace['steps'] as unknown[]).length : 0;
+
+  return { taskSummary, tagsJson, provenance, verifiabilityTier, harness, model, toolsJson, stepCount };
 }
 
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
@@ -845,7 +1081,10 @@ export async function handleMetadataSet({
   harnessCheckpoint,
   attemptEnvelopeMeta,
   verdictEnvelopeMeta,
+  captureEnvelopeMeta,
   enrichEnvelopes = false,
+  enrichVerdicts = false,
+  enrichCaptures = false,
   ipfsGateway = '',
   fetchImpl,
 }: {
@@ -857,7 +1096,29 @@ export async function handleMetadataSet({
   harnessCheckpoint?: unknown;
   attemptEnvelopeMeta?: unknown;
   verdictEnvelopeMeta?: unknown;
+  captureEnvelopeMeta?: unknown;
+  /**
+   * Governs in-handler IPFS enrichment of the execution-envelope
+   * (attemptEnvelopeMeta), solverNetManifest, and harnessCheckpoint paths.
+   * Unchanged by #779.
+   */
   enrichEnvelopes?: boolean;
+  /**
+   * Governs in-handler IPFS enrichment of the EVALUATION (verdict) path →
+   * verdictEnvelopeMeta. Split out from enrichEnvelopes by #779 so the verdict
+   * path can default OFF (the enrichment worker owns it) while leaving the
+   * execution path's behaviour unchanged. `true` restores in-handler verdict
+   * enrichment (the AC5 rollback lever); default `false` writes verdict anchors
+   * only. index.ts wires this from the SAME JINN_INDEXER_ENRICH_ENVELOPES env
+   * but defaulting off.
+   */
+  enrichVerdicts?: boolean;
+  /**
+   * Governs in-handler IPFS enrichment of the CAPTURE path →
+   * captureEnvelopeMeta (#1314, the distribution signal's data). Two IPFS
+   * fetches per capture anchor (wrapper envelope, then its trace artifact).
+   */
+  enrichCaptures?: boolean;
   ipfsGateway?: string;
   fetchImpl?: FetchLike;
 }): Promise<void> {
@@ -1212,7 +1473,7 @@ export async function handleMetadataSet({
     // appear as Pass on-chain. The envelope is the source of truth.
     // verdictEnvelopeMeta is optional for backward compat with callers/tests
     // that don't pass it.
-    if (envelopeKey.kind === 'evaluation' && enrichEnvelopes && verdictEnvelopeMeta) {
+    if (envelopeKey.kind === 'evaluation' && enrichVerdicts && verdictEnvelopeMeta) {
       try {
         const body = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
           timeoutMs: 5000,
@@ -1243,17 +1504,9 @@ export async function handleMetadataSet({
                 timeoutMs: 5000,
                 fetchImpl,
               });
-              if (taskBody && typeof taskBody === 'object') {
-                const spec = (taskBody as Record<string, unknown>)['spec'];
-                if (spec && typeof spec === 'object') {
-                  const raw = (spec as Record<string, unknown>)['instance_id'];
-                  if (typeof raw === 'string' && raw.length > 0) instanceId = raw;
-                }
-                const cidRaw = (taskBody as Record<string, unknown>)['solverNetManifestCid'];
-                if (typeof cidRaw === 'string' && cidRaw.length > 0) {
-                  bodySolverNetManifestCid = cidRaw;
-                }
-              }
+              const resolved = resolveInstanceFields(taskBody);
+              instanceId = resolved.instanceId;
+              bodySolverNetManifestCid = resolved.solverNetManifestCid;
             } catch (err) {
               console.warn(
                 `[indexer] task body fetch failed for verdict ${meta.requestId.slice(0, 10)}... cid=${meta.taskCid}: ${String(err)}`,
@@ -1331,6 +1584,95 @@ export async function handleMetadataSet({
       } catch (err) {
         console.warn(`[indexer] verdict envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
         // no row — we have no requestId without the body; Ponder reprocesses on next sync.
+      }
+    }
+
+    // ── Capture envelope enrichment → captureEnvelopeMeta (#1314) ──────────
+    // Only for capture envelopes (kind === 'capture'). Two-hop: the wrapper
+    // envelope body names the jinn.trace-envelope.v0 artifact; the artifact
+    // body carries the distribution tags / provenance / summary the signal
+    // reads. captureEnvelopeMeta is optional for backward compat.
+    if (envelopeKey.kind === 'capture' && enrichCaptures && captureEnvelopeMeta) {
+      try {
+        const wrapperBody = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
+          timeoutMs: 5000,
+          fetchImpl,
+        });
+        const wrapper = parseCaptureWrapperLite(wrapperBody);
+        if (wrapper) {
+          const artifactBody = await fetchIpfsJson(ipfsGateway, wrapper.traceArtifactCid, {
+            timeoutMs: 5000,
+            fetchImpl,
+          });
+          const signalMeta = parseTraceEnvelopeSignalLite(artifactBody);
+          if (signalMeta) {
+            // Anchor identity (#1406): the MetadataSet tx hash is the on-chain
+            // anchor link; the block timestamp is the corpus item's createdAt.
+            const anchorTx = event.transaction.hash;
+            const createdAtTimestamp = event.block.timestamp;
+            await context.db
+              .insert(captureEnvelopeMeta)
+              .values({
+                manifestCid: envelopeKey.cid,
+                chainId,
+                agentId,
+                contributor: wrapper.contributor,
+                taskSummary: signalMeta.taskSummary,
+                tagsJson: signalMeta.tagsJson,
+                provenance: signalMeta.provenance,
+                verifiabilityTier: signalMeta.verifiabilityTier,
+                harness: signalMeta.harness,
+                model: signalMeta.model,
+                toolsJson: signalMeta.toolsJson,
+                stepCount: signalMeta.stepCount,
+                anchorTx,
+                createdAtTimestamp,
+                enrichmentStatus: 'ok',
+                enrichedAtBlock: blockNumber,
+              })
+              .onConflictDoUpdate((row) => {
+                // Most-recent-wins, mirroring the other meta tables.
+                if (blockNumber >= row.enrichedAtBlock) {
+                  return {
+                    agentId,
+                    contributor: wrapper.contributor,
+                    taskSummary: signalMeta.taskSummary,
+                    tagsJson: signalMeta.tagsJson,
+                    provenance: signalMeta.provenance,
+                    verifiabilityTier: signalMeta.verifiabilityTier,
+                    harness: signalMeta.harness,
+                    model: signalMeta.model,
+                    toolsJson: signalMeta.toolsJson,
+                    stepCount: signalMeta.stepCount,
+                    anchorTx,
+                    createdAtTimestamp,
+                    enrichmentStatus: 'ok',
+                    enrichedAtBlock: blockNumber,
+                  };
+                }
+                // No-op: return existing row fields so Drizzle generates valid SQL.
+                return {
+                  agentId: row.agentId,
+                  contributor: row.contributor,
+                  taskSummary: row.taskSummary,
+                  tagsJson: row.tagsJson,
+                  provenance: row.provenance,
+                  verifiabilityTier: row.verifiabilityTier,
+                  harness: row.harness,
+                  model: row.model,
+                  toolsJson: row.toolsJson,
+                  stepCount: row.stepCount,
+                  anchorTx: row.anchorTx,
+                  createdAtTimestamp: row.createdAtTimestamp,
+                  enrichmentStatus: row.enrichmentStatus,
+                  enrichedAtBlock: row.enrichedAtBlock,
+                };
+              });
+          }
+        }
+      } catch (err) {
+        console.warn(`[indexer] capture envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
+        // no row — Ponder reprocesses on the next sync giving a natural retry.
       }
     }
 
@@ -1451,33 +1793,4 @@ export async function handleMetadataSet({
   }
 
   // Any other key (e.g. future metadata types) — no-op.
-}
-
-// ── JinnDistributor: Claimed → rewardDistribution ────────────────────────────
-export async function handleClaimed({
-  event,
-  context,
-  rewardDistribution,
-}: {
-  event: ClaimedEvent;
-  context: HandlerContext;
-  rewardDistribution: unknown;
-}): Promise<void> {
-  const logIndex = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
-  await context.db
-    .insert(rewardDistribution)
-    .values({
-      serviceId: event.args.serviceId.toString(),
-      multisig: event.args.multisig,
-      operatorMinted: event.args.operatorMinted,
-      daoMinted: event.args.daoMinted,
-      totalEntitledOperator: event.args.totalEntitledOperator,
-      totalEntitledDao: event.args.totalEntitledDao,
-      claimedAtBlock: event.block.number,
-      claimedAtTimestamp: event.block.timestamp,
-      logIndex,
-      claimedAtTx: event.transaction.hash,
-      chainId: context.chain.id,
-    })
-    .onConflictDoNothing();
 }

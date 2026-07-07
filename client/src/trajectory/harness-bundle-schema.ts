@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 /**
  * harness-bundle.v1 — the operator's resolved harness configuration at

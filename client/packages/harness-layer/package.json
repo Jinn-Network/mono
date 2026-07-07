@@ -1,0 +1,16 @@
+{
+  "name": "@jinn-network/harness-layer",
+  "version": "0.1.0",
+  "description": "Embeddable harness-layer surface: corpus consume path (search/get), capture path (scrub + preview), plus the jinn-layer CLI.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "client/packages/harness-layer"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

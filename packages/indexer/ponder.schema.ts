@@ -1,12 +1,11 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Ten entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X + attd:
+ * Nine entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X + attd:
  *
  *   Task                  — from JinnRouter.TaskCreated; finalized recomputed from VerdictDeliveryClaimed
  *   Attempt               — from JinnRouter.TaskAttemptCreated
  *   Verdict               — from JinnRouter.VerdictDeliveryClaimed
- *   RewardDistribution    — from JinnDistributor.Claimed on Sepolia L1
  *   SolverNetManifest     — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
  *   Envelope              — from IdentityRegistry.MetadataSet (envelope key patterns)
  *   PluginPublication     — from IdentityRegistry.MetadataSet (key prefix plugin:) per attd /
@@ -18,6 +17,12 @@
  *                           keyed by (requestId, chainId). The on-chain verdictCode
  *                           defaults to Pass(1) for failed evaluations (daemon bug); this table
  *                           holds the evaluator's real judgment from the off-chain envelope.
+ *   RewardDistribution    — from Base Sepolia ExternalStakingDistributor.RewardsDistributed;
+ *                           claimed OLAS/JINN staking rewards by service multisig.
+ *   StakingService        — from active stOLAS staking proxy ServiceStaked;
+ *                           serviceId -> multisig mapping.
+ *   StakingRewardCheckpoint — from active stOLAS staking proxy Checkpoint;
+ *                             earned/checkpointed OLAS by service multisig.
  *
  * Schema-version policy: any breaking change to an existing entity (rename,
  * remove, or type-change of a column) bumps the schema version and triggers a
@@ -26,14 +31,14 @@
  *
  * NOTE on Task.finalized / Task.refunded:
  *   JinnRouter does not emit standalone TaskFinalized or TaskRefunded events at
- *   v0.1. `finalized` is recomputed in handleVerdictDeliveryClaimed: it is set to
- *   true once the count of delivered `verdict` rows for an attempt reaches the
- *   task's `requiredVerdicts` — the indexer's proxy for TaskCoordinator's
- *   on-chain `validVerdictCount == requiredVerdicts` finalization rule (issue
- *   #530). It is NOT set on SolutionDeliveryClaimed (that is the start of
+ *   v0.1. `finalized` is recomputed in handleVerdictDeliveryClaimed: for the
+ *   current tokenless router, missing/non-positive `requiredVerdicts` means the
+ *   task finalizes on the first delivered verdict. Explicit positive
+ *   `requiredVerdicts` still require that many delivered verdicts (issue #530 /
+ *   #1304). It is NOT set on SolutionDeliveryClaimed (that is the start of
  *   evaluation, not the end). `refunded` is set from TaskBudgetRefunded. The
- *   daemon's canClaimTask simulation compensates at claim time. See
- *   README.md §Known limitations.
+ *   daemon's canClaimTask simulation compensates at claim time. See README.md
+ *   §Known limitations.
  *
  * NOTE on claimWindowStart / claimWindowEnd:
  *   These fields are not emitted in the TaskCreated event on JinnRouter V3. They
@@ -51,8 +56,8 @@ import { onchainTable, index, relations, primaryKey } from 'ponder';
 
 /**
  * One JinnRouter task. Created on TaskCreated; `finalized` recomputed on
- * VerdictDeliveryClaimed when delivered verdicts reach requiredVerdicts
- * (issue #530).
+ * VerdictDeliveryClaimed when delivered verdicts reach normalized
+ * requiredVerdicts (issue #530 / #1304).
  *
  * Supports findClaimableTasks: filter by manifestDigest, finalized, refunded;
  * join with Attempt for attempt/operatorAttempt counts.
@@ -73,7 +78,11 @@ export const task = onchainTable(
     // If the ABI widens, change this column to t.bigint() and re-sync.
     /** maxClaims from TaskCreated event. */
     maxClaims: t.integer().notNull(),
-    /** requiredVerdicts from the TaskCreated event — verdicts needed before an attempt finalizes. */
+    /**
+     * requiredVerdicts from the TaskCreated event. The tokenless router omits
+     * this field, so the handler stores 1 for new rows; old 0 rows are
+     * normalized to 1 during finalization.
+     */
     requiredVerdicts: t.integer().notNull().default(0),
     /** Block number of the TaskCreated event. */
     createdAtBlock: t.bigint().notNull(),
@@ -90,11 +99,11 @@ export const task = onchainTable(
      */
     claimWindowEnd: t.bigint(),
     /**
-     * True once delivered verdicts for any attempt reach the task's
-     * requiredVerdicts — the indexer's proxy for TaskCoordinator's on-chain
-     * `validVerdictCount == requiredVerdicts` finalization (issue #530).
-     * Recomputed in handleVerdictDeliveryClaimed; NOT set on
-     * SolutionDeliveryClaimed. Monotonic.
+     * True once delivered verdicts for any attempt reach the task's normalized
+     * requiredVerdicts. For the tokenless router, missing/non-positive
+     * requiredVerdicts finalize on the first verdict (#1304). Recomputed in
+     * handleVerdictDeliveryClaimed; NOT set on SolutionDeliveryClaimed.
+     * Monotonic.
      */
     finalized: t.boolean().notNull().default(false),
     /**
@@ -194,36 +203,26 @@ export const verdict = onchainTable(
 // ── RewardDistribution ───────────────────────────────────────────────────────
 
 /**
- * One JINN distribution claim. From JinnDistributor.Claimed on Sepolia L1.
- * Claimed carries cumulative entitlement (totalEntitled*) and this-claim's
- * minted delta (operatorMinted / daoMinted). One row per claim event; the
- * per-channel split (wCreation/wRestorationDelivery/wEvaluationDelivery) is NOT
- * in the event — the explorer reconstructs it from per-operator JinnRouter
- * activity counts (TaskCreated by creator, SolutionDeliveryClaimed by operator,
- * VerdictDeliveryClaimed by evaluator).
+ * One OLAS/JINN staking reward distribution. From
+ * ExternalStakingDistributor.RewardsDistributed on Base Sepolia. In this
+ * testnet setup, the token named JINN represents OLAS.
  *
- * Primary key: (chainId, serviceId, claimedAtBlock, logIndex) — a service can
- * claim repeatedly; block+logIndex disambiguate.
+ * `operatorRewarded` stores the event's collectorAmount, which is the
+ * operator-facing reward reserve in the current stOLAS configuration.
  */
 export const rewardDistribution = onchainTable(
   'reward_distribution',
   (t) => ({
     serviceId: t.text().notNull(),
-    /** The operator multisig (Safe) that claimed — joins to attempt.operator. */
+    /** The service Safe / operator multisig that earned the reward. */
     multisig: t.hex().notNull(),
-    /** JINN minted to the operator on this claim (wei). */
-    operatorMinted: t.bigint().notNull(),
-    /** JINN minted to the DAO on this claim (wei). */
-    daoMinted: t.bigint().notNull(),
-    /** Cumulative operator entitlement after this claim (wei). */
-    totalEntitledOperator: t.bigint().notNull(),
-    /** Cumulative DAO entitlement after this claim (wei). */
-    totalEntitledDao: t.bigint().notNull(),
+    /** OLAS amount attributed to the operator-facing collector slot (wei). */
+    operatorRewarded: t.bigint().notNull(),
+    /** OLAS amount routed to protocol (wei). */
+    protocolRewarded: t.bigint().notNull(),
+    /** OLAS amount routed to curating agent (wei). */
+    curatingAgentRewarded: t.bigint().notNull(),
     claimedAtBlock: t.bigint().notNull(),
-    /**
-     * Block timestamp (UTC seconds) for `claimedAtBlock`. Used by the explorer's
-     * active-operator surface to bucket rewards into the rolling 8 × 6h window.
-     */
     claimedAtTimestamp: t.bigint().notNull(),
     logIndex: t.integer().notNull(),
     claimedAtTx: t.hex().notNull(),
@@ -231,9 +230,77 @@ export const rewardDistribution = onchainTable(
   }),
   (table) => ({
     pk: primaryKey({ columns: [table.chainId, table.serviceId, table.claimedAtBlock, table.logIndex] }),
-    serviceIdx: index().on(table.serviceId),
     multisigIdx: index().on(table.multisig),
     blockIdx: index().on(table.claimedAtBlock),
+    timestampIdx: index().on(table.claimedAtTimestamp),
+  }),
+);
+
+// ── StakingService ───────────────────────────────────────────────────────────
+
+/**
+ * Latest serviceId -> multisig mapping from the active stOLAS staking proxy.
+ * Checkpoint events only carry serviceIds, so this table lets the indexer
+ * attribute earned rewards to the public operator multisig without requiring a
+ * claim transaction.
+ */
+export const stakingService = onchainTable(
+  'staking_service',
+  (t) => ({
+    serviceId: t.text().notNull(),
+    stakingProxy: t.hex().notNull(),
+    owner: t.hex().notNull(),
+    multisig: t.hex().notNull(),
+    stakedAtBlock: t.bigint().notNull(),
+    stakedAtTimestamp: t.bigint().notNull(),
+    stakedAtTx: t.hex().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.chainId, table.stakingProxy, table.serviceId] }),
+    multisigIdx: index().on(table.multisig),
+    serviceIdx: index().on(table.serviceId),
+    blockIdx: index().on(table.stakedAtBlock),
+  }),
+);
+
+// ── StakingRewardCheckpoint ──────────────────────────────────────────────────
+
+/**
+ * Earned OLAS allocation from the active stOLAS Checkpoint event. This is the
+ * activity signal for `/operators`: earning during the bucket matters, while
+ * claiming/cashing out is operator-controlled and should not affect liveness.
+ */
+export const stakingRewardCheckpoint = onchainTable(
+  'staking_reward_checkpoint',
+  (t) => ({
+    serviceId: t.text().notNull(),
+    stakingProxy: t.hex().notNull(),
+    multisig: t.hex().notNull(),
+    epoch: t.text().notNull(),
+    reward: t.bigint().notNull(),
+    epochLength: t.bigint().notNull(),
+    checkpointAtBlock: t.bigint().notNull(),
+    checkpointAtTimestamp: t.bigint().notNull(),
+    logIndex: t.integer().notNull(),
+    checkpointAtTx: t.hex().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({
+      columns: [
+        table.chainId,
+        table.stakingProxy,
+        table.epoch,
+        table.serviceId,
+        table.checkpointAtBlock,
+        table.logIndex,
+      ],
+    }),
+    multisigIdx: index().on(table.multisig),
+    serviceIdx: index().on(table.serviceId),
+    timestampIdx: index().on(table.checkpointAtTimestamp),
+    blockIdx: index().on(table.checkpointAtBlock),
   }),
 );
 
@@ -694,8 +761,26 @@ export const verdictEnvelopeMeta = onchainTable(
      * 'UNKNOWN' when the envelope body lacks a recognizable verdict field.
      */
     evaluatorVerdict: t.text().notNull().default('UNKNOWN'),
-    /** 'pending' | 'ok' | 'failed'. */
+    /**
+     * 'pending' | 'retry' | 'ok' | 'failed'.
+     * Current #779 worker writes only 'ok' rows here. Pre-requestId
+     * verdict-body failures are tracked in the worker-owned enrichment_attempt
+     * table because this table's primary key is inside the body. The other
+     * statuses remain for compatibility with any pre-existing/future row-keyed
+     * retry path and are still honoured by worker discovery.
+     */
     enrichmentStatus: t.text().notNull().default('pending'),
+    /**
+     * Row-keyed retry counter retained for compatibility/future use. The #779
+     * worker's verdict-body retry counter lives in enrichment_attempt.
+     */
+    retryCount: t.integer().notNull().default(0),
+    /**
+     * Epoch-ms for row-keyed retry eligibility, nullable. The #779 worker uses
+     * enrichment_attempt.next_attempt_at for verdict-body retry/backoff, but
+     * still honours this field for any pre-existing pending/retry rows.
+     */
+    nextAttemptAt: t.bigint(),
     /** Block number of the MetadataSet event that triggered enrichment. */
     enrichedAtBlock: t.bigint().notNull(),
     /** Chain ID. */
@@ -708,6 +793,9 @@ export const verdictEnvelopeMeta = onchainTable(
     actualPassedIdx: index().on(table.actualPassed),
     evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
     taskIdIdx: index().on(table.taskId),
+    // Supports worker discovery for any pre-existing row-keyed pending/retry
+    // verdict rows.
+    dueIdx: index().on(table.enrichmentStatus, table.nextAttemptAt),
     instanceIdIdx: index().on(table.manifestCid, table.actualPassed, table.instanceId),
     // Filter shape used by getInstanceSuccessCounts (#669 Finding 2): scope
     // success counts to a single SolverNet so multi-SolverNet operators don't
@@ -717,6 +805,67 @@ export const verdictEnvelopeMeta = onchainTable(
       table.actualPassed,
       table.instanceId,
     ),
+  }),
+);
+
+// ── CaptureEnvelopeMeta ──────────────────────────────────────────────────────
+/**
+ * Envelope-sourced metadata for a published capture (harness trace), populated
+ * by the IPFS enrichment pass (issue #1314): for each indexed `capture:<cid>`
+ * MetadataSet event, fetch the wrapper envelope body, then the
+ * `jinn.trace-envelope.v0` artifact it carries, and project the fields the
+ * distribution signal reads: distribution tags, provenance, contributor.
+ *
+ * Seeds (`provenance: 'imported'`) are stored but EXCLUDED from the signal's
+ * default counts — the API filters on this column (spec §7).
+ *
+ * Resilient: on IPFS fetch/parse failure no row is written; Ponder reprocesses
+ * on the next sync giving a natural retry.
+ *
+ * Primary key: (manifestCid, chainId) — the wrapper envelope CID is the
+ * corpus ref, one meta row per published capture.
+ */
+export const captureEnvelopeMeta = onchainTable(
+  'capture_envelope_meta',
+  (t) => ({
+    /** The wrapper envelope CID (the corpus ref) — part of the metadataKey after `capture:`. */
+    manifestCid: t.text().notNull(),
+    /** Chain ID. */
+    chainId: t.integer().notNull(),
+    /** agentId of the publisher (decimal string). */
+    agentId: t.text().notNull(),
+    /** Contributor identity: participant.safeAddress from the wrapper envelope. */
+    contributor: t.text().notNull().default(''),
+    /** Scrubbed one-line task summary from the trace envelope. */
+    taskSummary: t.text().notNull().default(''),
+    /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
+    tagsJson: t.text().notNull().default('[]'),
+    /** 'contributed' | 'imported' — the signal's seed-exclusion filter column. */
+    provenance: t.text().notNull().default('contributed'),
+    /** outcome.verifiabilityTier from the trace envelope. */
+    verifiabilityTier: t.text().notNull().default(''),
+    /** environment.harness — "<name> <version>", empty when absent. Corpus detail (#1406). */
+    harness: t.text().notNull().default(''),
+    /** environment.model, empty when absent. Corpus detail (#1406). */
+    model: t.text().notNull().default(''),
+    /** JSON.stringify(environment.tools) — tool names only. Corpus detail (#1406). */
+    toolsJson: t.text().notNull().default('[]'),
+    /** steps.length — the trace's step count. Corpus index + detail (#1406). */
+    stepCount: t.integer().notNull().default(0),
+    /** Transaction hash of the MetadataSet anchor event — the on-chain anchor link (#1406). */
+    anchorTx: t.hex().notNull().default('0x'),
+    /** Unix-seconds block timestamp of the anchor event — the corpus item's createdAt (#1406). */
+    createdAtTimestamp: t.bigint().notNull().default(0n),
+    /** 'ok' | 'failed'. */
+    enrichmentStatus: t.text().notNull().default('ok'),
+    /** Block number of the MetadataSet event that triggered enrichment. */
+    enrichedAtBlock: t.bigint().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.manifestCid, table.chainId] }),
+    provenanceIdx: index().on(table.provenance),
+    contributorIdx: index().on(table.contributor),
+    createdAtIdx: index().on(table.createdAtTimestamp),
   }),
 );
 

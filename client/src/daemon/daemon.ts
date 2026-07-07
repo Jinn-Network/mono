@@ -8,14 +8,14 @@ import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
-import type { X402Config } from '../x402/handler.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
-import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
+import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import {
@@ -112,7 +112,6 @@ export interface DaemonConfig {
   signer?: EthHttpSigner;
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint?: string;
-  x402?: X402Config;
 
   /**
    * Periodic stOLAS distributor reward claims (master EOA pays gas).
@@ -141,13 +140,6 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   checkpoint?: CheckpointLoopConfig;
-
-  /**
-   * Cross-chain JINN claim loop (jinn-mono-7x5). Emits ClaimTicket on L2,
-   * waits for finality (canonical) or plants a fixture (mock), and submits
-   * the L1 distributor claim. Omitted or interval 0 → loop not started.
-   */
-  jinnClaim?: JinnClaimLoopConfig;
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
@@ -230,6 +222,21 @@ export interface DaemonConfig {
    * Omitted only when no joined SolverNet resolves to a billed credential.
    */
   aiUnits?: AiUnitsDaemonConfig;
+
+  /**
+   * Loop watchdog (#1043). When supplied, the daemon seeds a heartbeat for
+   * every started loop and runs a supervisor that detects any loop whose last
+   * tick has gone stale. `autoRestart` is the flag-gated recovery (default OFF
+   * per the locked Option A decision): off → detect + loud-log + structured
+   * event only; on → non-zero process.exit so Railway's ON_FAILURE policy
+   * restarts the daemon through its existing idempotent boot path. Omitted in
+   * unit tests, so the watchdog is inert there.
+   */
+  watchdog?: {
+    autoRestart: boolean;
+    stalenessFactor?: number;
+    checkIntervalMs?: number;
+  };
 }
 
 export class Daemon {
@@ -251,7 +258,7 @@ export class Daemon {
   private balanceTopupLoop?: BalanceTopupLoop;
   private evictionLoop?: EvictionLoop;
   private checkpointLoop?: CheckpointLoop;
-  private jinnClaimLoop?: JinnClaimLoop;
+  private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
 
   constructor(private readonly config: DaemonConfig) {
@@ -305,12 +312,6 @@ export class Daemon {
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
       this.checkpointLoop = new CheckpointLoop(config.checkpoint);
     }
-    if (config.jinnClaim && config.jinnClaim.intervalMs > 0) {
-      this.jinnClaimLoop = new JinnClaimLoop({
-        ...config.jinnClaim,
-        jinnStore: this.store,
-      });
-    }
   }
 
   async start(): Promise<void> {
@@ -342,7 +343,6 @@ export class Daemon {
         port: this.apiPort,
         store: this.store,
         apiToken: this.apiToken,
-        x402: this.config.x402,
         status: this.config.status,
         bindHost: this.config.apiBindHost,
         corpus,
@@ -471,14 +471,50 @@ export class Daemon {
         }),
       );
     }
-    if (this.jinnClaimLoop) {
+    // #1043 loop watchdog. Inert unless config.watchdog is supplied.
+    //
+    // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
+    // process.exit (see watchdog-loop.ts WATCHDOG_EXIT_CODE). It does NOT add a
+    // mid-flight re-execution path to any loop. A wedged daemon recovers by
+    // exiting → Railway ON_FAILURE restart (deploy/railway-*-operator/
+    // railway.toml, maxRetries=10) → the existing idempotent boot path:
+    // engine.recoverInFlight() above (daemon.ts) re-drives in-flight tasks and
+    // src/preflight/pidfile-liveness.ts clears a stale lock. Both are already
+    // idempotent, so a restart cannot double-claim / double-deliver / double-pay.
+    if (this.config.watchdog) {
+      const interval = this.config.pollIntervalMs ?? 5000;
+      const FOR_AWAIT_FLOOR_MS = 5 * 60_000; // the #1038 wedge lasted 4.5h
+      const registrations: WatchdogLoopRegistration[] = [
+        { name: 'creator', intervalMs: 5000 },
+        { name: 'engine-tick', intervalMs: interval },
+        { name: 'engine-watcher', intervalMs: interval, floorMs: FOR_AWAIT_FLOOR_MS },
+        { name: 'delivery-watcher', intervalMs: interval, floorMs: FOR_AWAIT_FLOOR_MS },
+      ];
+      if (this.rewardClaimLoop) registrations.push({ name: 'reward-claim', intervalMs: this.config.rewardClaim!.intervalMs });
+      if (this.balanceTopupLoop) registrations.push({ name: 'balance-topup', intervalMs: this.config.balanceTopup!.intervalMs });
+      if (peers.length > 0) registrations.push({ name: 'peer-sync', intervalMs: 60_000 });
+
+      // Seed every started loop so the watchdog never trips on first boot
+      // before any loop has had a chance to tick.
+      for (const reg of registrations) {
+        recordLoopTick(this.store, reg.name);
+      }
+
+      this.watchdogLoop = new WatchdogLoop({
+        store: this.store,
+        loops: registrations,
+        stalenessFactor: this.config.watchdog.stalenessFactor,
+        checkIntervalMs: this.config.watchdog.checkIntervalMs,
+        autoRestart: this.config.watchdog.autoRestart,
+        isActive: () => this.cachedShutdownState === 'running',
+      });
       this.loopPromises.push(
-        this.jinnClaimLoop.run().catch(err => {
-          console.error('[daemon] jinn-claim crashed:', err);
+        this.watchdogLoop.run().catch(err => {
+          console.error('[daemon] watchdog crashed:', err);
           emitStructured({
             kind: 'error',
-            message: 'jinn-claim loop crashed',
-            errorCode: 'jinn_claim_crashed',
+            message: 'watchdog loop crashed',
+            errorCode: 'watchdog_crashed',
             details: { error: err instanceof Error ? err.message : String(err) },
           });
         }),
@@ -507,8 +543,8 @@ export class Daemon {
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();
     this.checkpointLoop?.stop();
-    this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
+    this.watchdogLoop?.stop();
 
     // Stop the adapter to unblock any pending async iterators
     await this.adapter.stop();
@@ -580,10 +616,9 @@ export class Daemon {
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
       const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
-        this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason);
         // Log once per (taskId, reason) — the engine-watcher re-observes every
         // pending task each pass, so an unguarded log here floods the console.
-        if (this.skipLogDeduper.shouldLog(taskAnnouncement.taskId, accept.reason)) {
+        if (this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason)) {
           console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         }
         continue;

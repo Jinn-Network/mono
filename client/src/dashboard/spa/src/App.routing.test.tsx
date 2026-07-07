@@ -380,9 +380,51 @@ describe('App routes', () => {
     vi.mocked(api.getBootstrap).mockResolvedValue({
       mode: 'running',
       chain: 'base-sepolia',
-    } as BootstrapState);
+      // #983: the running-mode → <Operating> gate now requires onboarding to be
+      // complete (else App holds the onboarding takeover). Set the flag so this
+      // routing test reaches the operator Switch.
+      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+      onboardingComplete: true,
+    } as unknown as BootstrapState);
     render(withProviders(<App />, '/operator/network'));
     await waitFor(() => expect(screen.getByTestId('network-tab')).toBeTruthy());
     expect(screen.queryByTestId('memberships-tab')).toBeNull();
+  });
+
+  // ── #983: onboarding completion overlay ──
+  // The daemon flips mode→running purely on the earning state machine; a node
+  // that finished bootstrap but has not completed onboarding is live-but-idle.
+  // A mid-onboarding node may already carry a membership (the first join
+  // populates joinedSolverNets) yet not have finished the harness/model step,
+  // so App holds the takeover on an explicit onboardingComplete flag rather
+  // than on joinedSolverNets being non-empty.
+
+  it('holds Onboarding when running but onboarding is not complete (#983)', async () => {
+    vi.mocked(api.getBootstrap).mockResolvedValue({
+      mode: 'running',
+      chain: 'base-sepolia',
+      currentStep: 'complete',
+      services: [],
+      steps: [],
+      schemaVersion: 1,
+      // A mid-onboarding node may already have a membership (first join populates
+      // it) yet not have finished — onboardingComplete is still false/absent.
+      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+    } as unknown as BootstrapState);
+    render(withProviders(<App />, '/overview'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-progress')).toBeTruthy());
+    expect(screen.queryByTestId('network-tab')).toBeNull();
+  });
+
+  it('routes to <Operating> when running and onboarding is complete (#983)', async () => {
+    vi.mocked(api.getBootstrap).mockResolvedValue({
+      mode: 'running',
+      chain: 'base-sepolia',
+      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+      onboardingComplete: true,
+    } as unknown as BootstrapState);
+    render(withProviders(<App />, '/operator/network'));
+    await waitFor(() => expect(screen.getByTestId('network-tab')).toBeTruthy());
+    expect(screen.queryByTestId('onboarding-progress')).toBeNull();
   });
 });

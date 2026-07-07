@@ -37,12 +37,14 @@ import {
 } from 'viem';
 
 /**
- * Hard cap on the number of providers in a single fallback chain. Four covers
- * the "operator paid primary + public publicnode + public sepolia.base.org +
- * Tenderly slot-3" shape from the issue; beyond that the boot probe takes too
- * long and slot 5+ is almost always copy-paste noise.
+ * Hard cap on the number of providers in a single fallback chain. Six covers
+ * the "5 vetted free defaults + 1 operator-prepended paid primary" shape: a
+ * chain that ships 5 distinct free providers per supported chain (#911) and
+ * still leaves one slot for an operator's paid primary to survive
+ * dedup-then-cap. Beyond that the boot probe takes too long and slot 7+ is
+ * almost always copy-paste noise.
  */
-export const MAX_RPC_CHAIN_LENGTH = 4;
+export const MAX_RPC_CHAIN_LENGTH = 6;
 
 export interface ParseRpcUrlsOptions {
   /** Logger used to emit the "capped" warning. Defaults to `console.error`. */
@@ -73,7 +75,7 @@ export function parseRpcUrls(
 
   // Dedup before applying the cap so repeated URLs (easy to introduce when an
   // operator prepends a paid primary that already exists in the fallback list)
-  // don't burn slots of the 4-slot chain. `Set` preserves first-seen insertion
+  // don't burn slots of the chain. `Set` preserves first-seen insertion
   // order, which matches the "primary stays in slot 0" constraint.
   const deduped = [...new Set(cleaned)];
 

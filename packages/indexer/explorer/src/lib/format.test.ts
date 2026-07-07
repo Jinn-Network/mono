@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pct, int, block, jinn, shortAddr, shortCid, relTime } from './format';
+import { pct, int, block, jinn, shortAddr, shortCid, relTime, ipfsUrl } from './format';
 
 // ── pct ──────────────────────────────────────────────────────────────────────
 
@@ -69,29 +69,28 @@ describe('block', () => {
 
 describe('jinn', () => {
   it('formats a large wei value correctly without precision loss', () => {
-    // 100.50 JINN = 100500000000000000000 wei
-    expect(jinn('100500000000000000000')).toBe('100.50 JINN');
+    expect(jinn('100500000000000000000')).toBe('100.50 OLAS');
   });
   it('formats a value with trailing zeros in fraction', () => {
-    // 1.00 JINN = 1000000000000000000 wei
-    expect(jinn('1000000000000000000')).toBe('1.00 JINN');
+    expect(jinn('1000000000000000000')).toBe('1.00 OLAS');
   });
-  it('returns 0 JINN for "0"', () => {
-    expect(jinn('0')).toBe('0 JINN');
+  it('returns 0 OLAS for "0"', () => {
+    expect(jinn('0')).toBe('0 OLAS');
   });
-  it('returns 0 JINN for null', () => {
-    expect(jinn(null)).toBe('0 JINN');
+  it('returns 0 OLAS for null', () => {
+    expect(jinn(null)).toBe('0 OLAS');
   });
-  it('returns 0 JINN for empty string', () => {
-    expect(jinn('')).toBe('0 JINN');
+  it('returns 0 OLAS for empty string', () => {
+    expect(jinn('')).toBe('0 OLAS');
   });
   it('handles a number in the thousands', () => {
-    // 5000 JINN
-    expect(jinn('5000000000000000000000')).toBe('5,000.00 JINN');
+    expect(jinn('5000000000000000000000')).toBe('5,000.00 OLAS');
   });
   it('respects custom digits', () => {
-    // 1.5 JINN
-    expect(jinn('1500000000000000000', 18, 1)).toBe('1.5 JINN');
+    expect(jinn('1500000000000000000', 18, 1)).toBe('1.5 OLAS');
+  });
+  it('does not round nonzero sub-cent OLAS down to displayed zero', () => {
+    expect(jinn('1775660000000000')).toBe('<0.01 OLAS');
   });
   it('returns dash for non-numeric string', () => {
     expect(jinn('not-a-number')).toBe('—');
@@ -175,5 +174,30 @@ describe('relTime', () => {
   });
   it('returns dash for invalid date string', () => {
     expect(relTime('not-a-date')).toBe('—');
+  });
+});
+
+// ── ipfsUrl ────────────────────────────────────────────────────────────────────
+
+describe('ipfsUrl', () => {
+  it('builds a gateway URL for a normal CID', () => {
+    expect(ipfsUrl('bafkreiabc123')).toBe(
+      'https://gateway.autonolas.tech/ipfs/bafkreiabc123',
+    );
+  });
+  it('returns null for null/undefined/empty', () => {
+    expect(ipfsUrl(null)).toBeNull();
+    expect(ipfsUrl(undefined)).toBeNull();
+    expect(ipfsUrl('')).toBeNull();
+  });
+  it('percent-encodes an attacker-influenceable cid so it cannot break out of the path', () => {
+    // A cid carrying path/query metacharacters must not alter the gateway path.
+    expect(ipfsUrl('../../evil?x=1')).toBe(
+      `https://gateway.autonolas.tech/ipfs/${encodeURIComponent('../../evil?x=1')}`,
+    );
+    // No raw slash, dot-segment, or query separator survives into the URL.
+    const url = ipfsUrl('a/b#frag')!;
+    expect(url).toBe('https://gateway.autonolas.tech/ipfs/a%2Fb%23frag');
+    expect(url.startsWith('https://gateway.autonolas.tech/ipfs/')).toBe(true);
   });
 });

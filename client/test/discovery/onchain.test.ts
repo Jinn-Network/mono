@@ -52,8 +52,7 @@ const TASK_CREATED_ABI = [
       { name: 'taskId', type: 'uint256', indexed: true },
       { name: 'manifestDigest', type: 'bytes32', indexed: true },
       { name: 'taskCidDigest', type: 'bytes32', indexed: false },
-      { name: 'maxClaims', type: 'uint16', indexed: false },
-      { name: 'requiredVerdicts', type: 'uint16', indexed: false },
+      { name: 'maxClaims', type: 'uint32', indexed: false },
       { name: 'solutionBudget', type: 'uint256', indexed: false },
       { name: 'verdictBudget', type: 'uint256', indexed: false },
     ],
@@ -108,12 +107,11 @@ function buildTaskCreatedLog(
   const data = encodeAbiParameters(
     [
       { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'maxClaims', type: 'uint16' },
-      { name: 'requiredVerdicts', type: 'uint16' },
+      { name: 'maxClaims', type: 'uint32' },
       { name: 'solutionBudget', type: 'uint256' },
       { name: 'verdictBudget', type: 'uint256' },
     ],
-    [taskCidDigest, maxClaims, 1, 1000n, 500n],
+    [taskCidDigest, maxClaims, 1000n, 500n],
   );
   return {
     address: ROUTER,
@@ -608,6 +606,7 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
       safeAddress: SAFE_ADDRESS,
       mechAddress: MECH_ADDRESS,
       taskDiscoveryFromBlock: 0,
+      chunkBlocks: 100_000,
       publicClient: mockClient as never,
     });
 
@@ -623,6 +622,14 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
     expect(result[0].createdAtBlock).toBe(5_000);
     expect(result[0].createdAtTx).toBe(txHash);
     expect(result[0].maxClaims).toBe(5);
+    expect(mockClient.getLogs).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      address: ROUTER,
+      event: expect.objectContaining({ name: 'TaskCreated' }),
+    }));
+    expect(mockClient.getLogs).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      address: ROUTER,
+      event: expect.objectContaining({ name: 'TaskAttemptCreated' }),
+    }));
   });
 
   it('filters out a candidate when canClaimTask returns ok=false', async () => {

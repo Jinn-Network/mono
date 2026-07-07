@@ -21,6 +21,7 @@ import {
   type CaptureRateLimitDefaults,
 } from './rate-limit.js';
 import { CapturePublishRateLimitError, CapturePublishUnavailableError } from '../api/captures.js';
+import type { ScrubPipeline } from '../trajectory/scrub/pipeline.js';
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as const;
@@ -38,6 +39,14 @@ export interface LiveCapturePublisherOptions {
   identityPublisher?: IdentityPublisher;
   harnessMode?: 'train' | 'frozen';
   rateLimits?: Partial<CaptureRateLimitDefaults>;
+  /**
+   * Seller-side scrub pipeline applied to capture spans before publish. Wired
+   * from main.ts so captures and task trajectories share one pipeline (and the
+   * same optional ML PII detector). Absent → the publish path defaults to the
+   * non-ML safety floor (buildScrubPipeline()), so captures are never published
+   * raw by omission.
+   */
+  scrubPipeline?: ScrubPipeline;
 }
 
 export interface LiveCapturePublisher {
@@ -76,6 +85,7 @@ export function createLiveCapturePublisher(options: LiveCapturePublisherOptions)
         defaultArtifactEndpoint: options.operatorEndpoint,
         defaultPriceUsdc: options.defaultPriceUsdc,
         executor: { mode: options.harnessMode ?? 'train' },
+        ...(options.scrubPipeline ? { scrubPipeline: options.scrubPipeline } : {}),
         publishArtifact: async ({ artifactType, payload }) => {
           const content = Buffer.from(canonicalJson(payload), 'utf8');
           const sha256 = sha256Hex(content);

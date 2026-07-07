@@ -18,6 +18,7 @@ import { Store } from '../../../src/store/store.js';
 import {
   TaskEngine,
   joinedSolverNetsViewFromConfig,
+  createMutableJoinedSolverNetsView,
   type JoinedSolverNetsView,
 } from '../../../src/harnesses/engine/engine.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
@@ -374,6 +375,50 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
 
       expect(accept).toEqual({ ok: true });
+    });
+  });
+
+  describe('#1037 — always-constructed mutable empty view (zero-join daemon)', () => {
+    // main.ts now ALWAYS wires the engine view (a mutable empty one at zero
+    // joins) instead of leaving it undefined. This flips a zero-join daemon
+    // from the legacy solverType fallback to an active (empty) joined gate.
+    // Safe because the daemon's discovery cid set is also empty (it discovers
+    // nothing), and no-cid/no-digest tasks still fall through to legacy gates.
+    it('rejects a cid-bearing task under an empty mutable view', async () => {
+      const view = createMutableJoinedSolverNetsView({});
+      const engine = makeEngine({ joinedSolverNets: view });
+      const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      if (!accept.ok) {
+        expect(accept.reason).toMatch(/has not joined that SolverNet/);
+      }
+    });
+
+    it('passes a task with neither cid nor digest under an empty mutable view', async () => {
+      const view = createMutableJoinedSolverNetsView({});
+      const engine = makeEngine({ joinedSolverNets: view });
+      const task: Task = { id: 'health-check', description: 'health check' };
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept).toEqual({ ok: true });
+    });
+
+    it('accepts a cid-bearing task after the join is set() live', async () => {
+      const view = createMutableJoinedSolverNetsView({});
+      const engine = makeEngine({ joinedSolverNets: view });
+      const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
+
+      const before = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      expect(before.ok).toBe(false);
+
+      view.set(LAUNCHER_A_CID, { roles: ['solver'] });
+
+      const after = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      expect(after).toEqual({ ok: true });
     });
   });
 

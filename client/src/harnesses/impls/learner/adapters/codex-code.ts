@@ -24,6 +24,13 @@ export interface CodexCodeHarnessAdapterConfig {
   clientRoot?: string;
   _spawnFn?: typeof spawn;
   _runSessionStartHook?: boolean;
+  /**
+   * Override the process-group kill for testing (#895, mirrors #883). Called
+   * as `(childPid, signal)` and expected to signal the child's whole process
+   * group (`process.kill(-childPid, signal)`) so leaked grandchildren are
+   * reaped. Injected by tests so they never fire a real signal.
+   */
+  _killProcessGroup?: (childPid: number, signal: NodeJS.Signals) => void;
 }
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
@@ -145,6 +152,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
   private readonly clientRoot: string;
   private readonly spawnFn: typeof spawn;
   private readonly runSessionStartHook: boolean;
+  private readonly killProcessGroup: (childPid: number, signal: NodeJS.Signals) => void;
 
   constructor(config: CodexCodeHarnessAdapterConfig = {}) {
     this.codexPath = config.codexPath ?? defaultCodexPath();
@@ -156,6 +164,8 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     this.clientRoot = config.clientRoot ?? defaultClientRoot();
     this.spawnFn = config._spawnFn ?? spawn;
     this.runSessionStartHook = config._runSessionStartHook ?? true;
+    this.killProcessGroup =
+      config._killProcessGroup ?? ((childPid, signal) => { process.kill(-childPid, signal); });
   }
 
   /**
@@ -246,6 +256,13 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
       cwd: inputs.workingDir,
+      // #895 (mirrors #883): run codex as its own process-group leader so we
+      // can reap the WHOLE group (codex + any tool subprocesses it leaks, e.g.
+      // an unbounded `while …; do sleep; done` shell). Killing just the codex
+      // pid would orphan those grandchildren. detached:true only changes
+      // process-group leadership; the ['pipe','pipe','pipe'] stdin contract
+      // (#675) is unaffected.
+      detached: process.platform !== 'win32',
     };
 
     return new Promise<void>((resolvePromise, reject) => {
@@ -271,23 +288,30 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
         child.stdin.end(prompt);
       }
 
+      // #895 (mirrors #883): reap the child AND its process group, so a tool
+      // subprocess the model leaked (e.g. an unbounded `while …; do sleep; done`
+      // shell) dies too. Killing only the codex pid would orphan such a
+      // grandchild — and because that live grandchild keeps codex's event loop
+      // alive, codex itself would never exit (the observed hang). SIGKILL
+      // backstops SIGTERM.
+      const reap = (signal: NodeJS.Signals): void => {
+        if (typeof child.pid === 'number') {
+          try { this.killProcessGroup(child.pid, signal); } catch { /* group already gone */ }
+        }
+        try { if (!child.killed) child.kill(signal); } catch { /* already dead */ }
+      };
+
       if (inputs.abort.aborted) {
-        if (!child.killed) child.kill('SIGTERM');
+        reap('SIGTERM');
       }
 
       const onAbort = () => {
-        if (!child.killed) child.kill('SIGTERM');
+        reap('SIGTERM');
       };
       inputs.abort.addEventListener('abort', onAbort);
 
       let stderr = '';
-      child.stdout?.on('data', (d: Buffer) => {
-        stdoutLog.write(d);
-      });
-      child.stderr?.on('data', (d: Buffer) => {
-        stderrLog.write(d);
-        stderr += d.toString();
-      });
+      let stdoutBuf = '';
 
       let settled = false;
       const settleAfterLogs = (
@@ -299,6 +323,62 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
         inputs.abort.removeEventListener('abort', onAbort);
         closeLogs().then(complete, onLogError);
       };
+
+      // #895 (mirrors #883): complete on codex's terminal turn marker, not
+      // solely on process exit. `codex exec --json` streams
+      // {"type":"turn.completed",...} when the turn ends (success) or
+      // {"type":"turn.failed","error":{...}} (failure); it may then fail to
+      // exit (a leaked tool subprocess holds the event loop open). Settling on
+      // the marker — and reaping the group — means the task never strands in
+      // RUNNING waiting for an exit that never comes. The `child.on('exit')`
+      // handler below still covers crashes that emit no marker; the `settled`
+      // guard makes whichever fires first win.
+      const onTerminal = (type: 'turn.completed' | 'turn.failed', obj: Record<string, unknown>): void => {
+        if (settled) return;
+        reap('SIGTERM');
+        const killTimer = setTimeout(() => reap('SIGKILL'), 2000);
+        if (typeof killTimer.unref === 'function') killTimer.unref();
+        settleAfterLogs(() => {
+          if (type === 'turn.completed') {
+            resolvePromise();
+          } else {
+            const errObj = obj['error'] as Record<string, unknown> | undefined;
+            const errMessage = errObj?.['message'];
+            const msg =
+              typeof errMessage === 'string'
+                ? errMessage
+                : JSON.stringify(errObj ?? {});
+            reject(new Error(`codex-code adapter: turn.failed: ${msg.slice(0, 500)}`));
+          }
+        });
+      };
+
+      child.stdout?.on('data', (d: Buffer) => {
+        stdoutLog.write(d);
+        if (settled) return;
+        stdoutBuf += d.toString();
+        let nl: number;
+        while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
+          const line = stdoutBuf.slice(0, nl).trim();
+          stdoutBuf = stdoutBuf.slice(nl + 1);
+          if (!line.includes('"type":"turn.completed"') && !line.includes('"type":"turn.failed"')) continue;
+          try {
+            const obj = JSON.parse(line) as { type?: unknown };
+            if (obj && obj.type === 'turn.completed') {
+              onTerminal('turn.completed', obj as Record<string, unknown>);
+              return;
+            }
+            if (obj && obj.type === 'turn.failed') {
+              onTerminal('turn.failed', obj as Record<string, unknown>);
+              return;
+            }
+          } catch { /* partial or non-JSON line; keep scanning */ }
+        }
+      });
+      child.stderr?.on('data', (d: Buffer) => {
+        stderrLog.write(d);
+        stderr += d.toString();
+      });
 
       child.on('exit', (code, signal) => {
         settleAfterLogs(() => {

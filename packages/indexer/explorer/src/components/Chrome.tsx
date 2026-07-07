@@ -70,8 +70,10 @@ export function Logo() {
 
 // ── TopNav ────────────────────────────────────────────────────────────────────
 
+// The logo links to '/' (the Dashboard), so no redundant Network/Dashboard nav
+// item — Corpus leads.
 const NAV_ITEMS = [
-  { to: '/', label: 'Network' },
+  { to: '/corpus', label: 'Corpus' },
   { to: '/solvernets', label: 'SolverNets' },
   { to: '/operators', label: 'Operators' },
 ] as const;

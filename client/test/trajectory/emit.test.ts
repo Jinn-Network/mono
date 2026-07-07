@@ -3,6 +3,9 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { keccak256, toBytes } from 'viem';
 import { TrajectoryCollector } from '../../src/trajectory/collector.js';
 import { emitTrajectory } from '../../src/trajectory/emit.js';
+import { ScrubPipeline } from '../../src/trajectory/scrub/pipeline.js';
+import type { ScrubStage } from '../../src/trajectory/scrub/types.js';
+import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { JinnTrajectoryV1Schema } from '../../src/trajectory/schema.js';
 
@@ -117,5 +120,47 @@ describe('emitTrajectory', () => {
     expect(result.signed.spans[0]!.attributes.message).toContain('<REDACTED>');
     expect(result.signed.redactionManifest.totalRedactions).toBeGreaterThan(0);
     expect(() => JinnTrajectoryV1Schema.parse(result.signed)).not.toThrow();
+  });
+
+  // B1 (task-trajectory path): a scrub-stage throw — e.g. the fail-closed ML PII
+  // stage when the model failed to load — must abort emit BEFORE the trajectory
+  // is uploaded to IPFS. scrubSpansForEmit runs ahead of uploadToIpfs, so the
+  // throw propagates and nothing is pinned (fail closed; the engine then leaves
+  // envelope.trajectory = null). This proves no raw trajectory leaks to IPFS.
+  it('fails closed: a throwing scrub stage aborts emit before any IPFS upload', async () => {
+    vi.mocked(uploadToIpfs).mockClear();
+    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-fc' });
+    c.addSpan({
+      name: 'tool',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: { 'jinn.span.kind': 'tool', 'tool.output': 'raw content that must not be pinned' },
+      events: [],
+      status: { code: 'OK' },
+    });
+
+    const throwingStage: ScrubStage = {
+      name: 'ml-pii',
+      version: '0.1.0',
+      scrub() {
+        return Promise.reject(new Error('failing closed — this trajectory is NOT published'));
+      },
+    };
+
+    const pk = generatePrivateKey();
+    const account = privateKeyToAccount(pk);
+    await expect(
+      emitTrajectory({
+        collector: c,
+        runId: 'run-fc',
+        signerPrivateKey: pk,
+        signerAddress: account.address,
+        ipfsRegistryUrl: 'http://stub',
+        scrubPipeline: new ScrubPipeline([throwingStage]),
+      }),
+    ).rejects.toThrow(/failing closed|NOT published/i);
+    // The load-bearing assertion: nothing was uploaded to IPFS.
+    expect(vi.mocked(uploadToIpfs)).not.toHaveBeenCalled();
   });
 });

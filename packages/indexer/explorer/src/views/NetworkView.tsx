@@ -2,11 +2,10 @@
  * NetworkView — protocol-wide stats.
  *
  * Layout:
- *   1. Activity strip — distinct operators / SolverNets running / last settlement block.
- *   2. Economy row — JINN distributed (operator/DAO split) + "how it flows" copy.
- *   3. Network composition — HBars by mode / harness / model / plugin under an
+ *   1. Activity strip — distinct operators / SolverNets running.
+ *   2. Network composition — HBars by mode / harness / model / plugin under an
  *      ALL-CAPS-MONO `NETWORK COMPOSITION` eyebrow.
- *   4. Enrichment coverage line + status bar.
+ *   3. Enrichment coverage line + status bar.
  *
  * Per spec §5.1 and #610, the cross-SolverNet "solve rate" hero (added in PR
  * #251) was removed: a single aggregate rate across SolverNets mixes regimes
@@ -26,9 +25,8 @@ import type { NetworkResponse } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { HBars } from '../components/HBars';
-import { InfoTooltip } from '../components/InfoTooltip';
-import { ActiveOperatorTooltipBody } from '../components/ActiveOperatorTooltip';
-import { pct, int, block, jinn } from '../lib/format';
+import { CorpusCard } from '../components/CorpusCard';
+import { pct, int } from '../lib/format';
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
@@ -69,26 +67,11 @@ function ActivityStrip({ data }: { data: NetworkResponse }) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(2, 1fr)',
         }}
       >
-        <ActivityCell
-          k="Active operators"
-          v={int(data.activeOperators)}
-          first
-          info={<ActiveOperatorTooltipBody window={data.activeWindow} />}
-        />
-        <ActivityCell
-          k="SolverNets running"
-          v={int(data.solverNetsRunning)}
-          sub="launched · accepting tasks"
-        />
-        <ActivityCell
-          k="Last settlement"
-          v={block(data.mostRecentSettlementBlock)}
-          sub={data.mostRecentSettlementBlock ? 'block' : 'no settled tasks yet'}
-          smaller
-        />
+        <ActivityCell k="Active operators" v={int(data.everAttemptedOperators)} first />
+        <ActivityCell k="SolverNets running" v={int(data.solverNetsRunning)} />
       </div>
     </Card>
   );
@@ -100,14 +83,12 @@ function ActivityCell({
   sub,
   first,
   smaller,
-  info,
 }: {
   k: string;
   v: ReactNode;
   sub?: string;
   first?: boolean;
   smaller?: boolean;
-  info?: ReactNode;
 }) {
   return (
     <div
@@ -132,7 +113,6 @@ function ActivityCell({
         }}
       >
         {k}
-        {info && <InfoTooltip label={`${k} definition`}>{info}</InfoTooltip>}
       </div>
       <div
         className="data"
@@ -163,170 +143,6 @@ function ActivityCell({
   );
 }
 
-// ── Economy row ───────────────────────────────────────────────────────────────
-
-function EconomyRow({ data }: { data: NetworkResponse }) {
-  let opWei = 0n;
-  let daoWei = 0n;
-  try {
-    opWei = BigInt(data.jinnDistributedOperator || '0');
-  } catch {
-    /* leave at 0 */
-  }
-  try {
-    daoWei = BigInt(data.jinnDistributedDao || '0');
-  } catch {
-    /* leave at 0 */
-  }
-  const total = opWei + daoWei;
-  const opPctNum =
-    total === 0n ? 0 : Number((opWei * 10000n) / total) / 100;
-  const daoPctNum =
-    total === 0n ? 0 : Number((daoWei * 10000n) / total) / 100;
-
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-        gap: 20,
-      }}
-    >
-      <Card title="Economy">
-        <div
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            fontWeight: 500,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-muted)',
-            marginBottom: 10,
-          }}
-        >
-          JINN distributed
-        </div>
-        <div
-          className="data"
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--text-4xl)',
-            lineHeight: 1,
-            color: 'var(--accent-gold)',
-            letterSpacing: '-0.01em',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {jinn(total.toString())}
-        </div>
-
-        <div style={{ marginTop: 20 }}>
-          <div
-            style={{
-              height: 6,
-              background: 'var(--bg-sunken)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-pill)',
-              overflow: 'hidden',
-              display: 'flex',
-            }}
-          >
-            <div
-              aria-label="Operators share"
-              style={{
-                background: 'var(--accent-gold)',
-                width: `${opPctNum}%`,
-                height: '100%',
-              }}
-            />
-            <div
-              aria-label="DAO share"
-              style={{
-                background: 'var(--seer-violet)',
-                width: `${daoPctNum}%`,
-                height: '100%',
-                opacity: 0.75,
-              }}
-            />
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              marginTop: 10,
-              fontFamily: 'var(--font-mono)',
-              fontSize: 11,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            <span>
-              <LegendSwatch color="var(--accent-gold)" />
-              {jinn(opWei.toString())} to operators
-            </span>
-            <span>
-              <LegendSwatch color="var(--seer-violet)" opacity={0.75} />
-              {jinn(daoWei.toString())} to DAO
-            </span>
-          </div>
-        </div>
-      </Card>
-
-      <Card>
-        <div
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            fontWeight: 500,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg)',
-            marginBottom: 12,
-          }}
-        >
-          How JINN flows
-        </div>
-        <p
-          style={{
-            margin: 0,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
-            color: 'var(--fg-muted)',
-            lineHeight: 1.6,
-          }}
-        >
-          Every settled task distributes from the launcher's bond. Operators
-          earn for passing solutions; the DAO collects a protocol cut to fund
-          the next epoch.
-        </p>
-      </Card>
-    </div>
-  );
-}
-
-function LegendSwatch({
-  color,
-  opacity = 1,
-}: {
-  color: string;
-  opacity?: number;
-}) {
-  return (
-    <span
-      aria-hidden
-      style={{
-        display: 'inline-block',
-        width: 8,
-        height: 8,
-        marginRight: 8,
-        verticalAlign: 'middle',
-        borderRadius: 2,
-        background: color,
-        opacity,
-      }}
-    />
-  );
-}
-
 // ── NetworkView ───────────────────────────────────────────────────────────────
 
 export function NetworkView() {
@@ -341,8 +157,8 @@ export function NetworkView() {
         gap: 28,
       }}
     >
-      {/* No page header — the chrome's Network tab is the wayfinder. The
-          per-SolverNet detail view is where coherent per-regime rates live. */}
+      {/* No page header — the logo is the wayfinder home. The per-SolverNet
+          detail view is where coherent per-regime rates live. */}
 
       {/* Loading state */}
       {isLoading && <NetworkSkeleton />}
@@ -388,7 +204,11 @@ export function NetworkView() {
       {data && (
         <>
           <ActivityStrip data={data} />
-          <EconomyRow data={data} />
+
+          {/* Corpus summary (#1407, spec §2.4) — below Activity, above
+              composition. Renamed + restructured from the "Distribution
+              signal" card (#1314); links into the Corpus tab (#1406). */}
+          <CorpusCard />
 
           <Card title="Network composition">
             <div

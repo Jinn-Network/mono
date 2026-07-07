@@ -22,9 +22,7 @@ const PRODUCTION_DEPS: RewardsDeps = {
 
 function formatRewardAmount(wei: string): string {
   try {
-    // stOLAS / JINN / OLAS all use 18 decimals. This command reports the
-    // staking collector queue, not spendable operator tJINN.
-    return `${formatUnits(BigInt(wei), 18)} collector-token`;
+    return `${formatUnits(BigInt(wei), 18)} OLAS`;
   } catch {
     return `${wei} wei`;
   }
@@ -38,16 +36,22 @@ function humanRewards(payload: RewardsV1Response): string {
     const anyPending = payload.services.some((s) => s.pending !== '0');
     lines.push(
       anyPending
-        ? 'Pending staking collector claims:'
-        : 'Pending staking collector claims: none yet.',
+        ? 'Pending OLAS rewards:'
+        : 'Pending OLAS rewards: none yet.',
     );
     for (const s of payload.services) {
       lines.push(`  Service #${s.index}: ${formatRewardAmount(s.pending)} pending · ${formatRewardAmount(s.claimed)} claimed`);
     }
-    lines.push('Operator tJINN/JINN earnings are reported from the Sepolia tJINN Safe balance, not this collector queue.');
+    if (payload.readState === 'error') {
+      lines.push(`Reward read unavailable: ${payload.error ?? 'unknown error'}`);
+    }
+    lines.push('Operator OLAS rewards accrue through staking and can be claimed when pending.');
   }
   lines.push(
-    `Last claim tick: ${payload.lastClaimAt ?? 'never (daemon not yet run the claim loop)'}`,
+    `Last successful claim: ${payload.lastClaimAt ?? 'never'}`,
+  );
+  lines.push(
+    `Last claim tick: ${payload.lastClaimTickAt ?? 'never (daemon not yet run the claim loop)'}`,
   );
   lines.push(
     `Next checkpoint: ${payload.nextCheckpointAt ?? 'not reported by the staking contract'}`,
@@ -61,9 +65,9 @@ export function createRewardsCommand(deps: RewardsDeps = PRODUCTION_DEPS): Comma
     summary: 'Staking collector queue per service; next checkpoint time',
     helpText: `Usage: jinn rewards [--human]
 
-Returns the current staking collector claim queue per service. This is
-the OLAS-style distributor maintenance path; operator tJINN/JINN earnings
-are the Sepolia tJINN Safe balance shown in status / the app.
+Returns the current OLAS staking collector claim queue per service. This is
+the OLAS staking distributor maintenance path; operator OLAS staking rewards
+accumulate via the stOLAS curating-agent rail and are shown in status / the app.
 
 Examples:
   jinn rewards
@@ -109,12 +113,11 @@ Examples:
             raw.pendingStakingRewardsWei = pr.sum;
             raw.pendingByService = pr.pendingByService;
             if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
+          } else {
+            raw.pendingStakingRewardsError = pr.error;
           }
-          // pr.error path: leave the staking fields unset — assembleRewardsV1
-          // degrades to pending=0 / nextCheckpointAt=null (same as the catch).
-        } catch {
-          // Config unreadable or RPC error — assembleRewardsV1 degrades to
-          // pending=0 / nextCheckpointAt=null, which the human renderer handles.
+        } catch (err) {
+          raw.pendingStakingRewardsError = err instanceof Error ? err.message : String(err);
         }
       }
       const payload = deps.assembleRewardsV1(raw);

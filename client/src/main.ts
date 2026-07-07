@@ -54,7 +54,7 @@ import { applyPidfileLivenessGate } from './preflight/pidfile-liveness.js';
 import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
+import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import {
@@ -71,11 +71,7 @@ import { Daemon } from './daemon/daemon.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
-import {
-  buildJinnClaimLoopConfig,
-  shouldWireJinnClaimL1Signer,
-} from './daemon/jinn-claim-loop-wiring.js';
-import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
+import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
 import {
@@ -83,7 +79,8 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
-import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
+import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
+import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
@@ -107,6 +104,8 @@ import { CredentialScrubProcessor } from './trajectory/processors/credential-scr
 import { TranscriptContentScrubProcessor } from './trajectory/processors/transcript-content-scrub.js';
 import { IdentityScrubProcessor } from './trajectory/processors/identity-scrub.js';
 import { PathScrubProcessor } from './trajectory/processors/path-scrub.js';
+import { buildScrubPipeline } from './trajectory/scrub/build.js';
+import { maybeBuildPiiDetector } from './trajectory/scrub/pii-build.js';
 import { SqliteExporterProcessor } from './trajectory/processors/sqlite-exporter.js';
 import { ClaudeCodeJsonlParser } from './trajectory/transcript-parsers/claude-code-jsonl.js';
 import { CodexSessionParser } from './trajectory/transcript-parsers/codex-session.js';
@@ -217,6 +216,11 @@ let activeClaudePath = config.claudePath ?? 'claude';
 const selectClaudePath = (claudePath: string): void => {
   activeClaudePath = claudePath;
   config.claudePath = claudePath;
+  // Harmless no-op when the embedded agent is disabled
+  // (`embeddedAgentEnabled` is false at this point): the agent surface
+  // that consumes this path isn't mounted, so the update has nothing to
+  // propagate to. Called unconditionally to keep the path in sync
+  // whenever the agent IS enabled.
   updateAgentClaudePath(claudePath);
 };
 
@@ -230,35 +234,8 @@ const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
   minEoaGasWei: config.minEoaGasWei,
   minSafeEthWei: config.minSafeEthWei,
 });
-const MESSENGER_MODE_EXPLICIT =
-  process.env['JINN_MESSENGER_MODE'] !== undefined ||
-  configFileHasTopLevelKey(CONFIG_PATH, 'jinnMessengerMode');
-const JINN_MVI_CONFIG = loadJinnMviConfig({
-  l1ArtifactPath:
-    config.jinnMviL1DeploymentPath ??
-    (config.network === 'testnet' ? DEFAULT_TESTNET_ARTIFACTS.jinnMviL1 : undefined),
-  l2ArtifactPath:
-    config.jinnMviL2DeploymentPath ??
-    (config.network === 'testnet' ? DEFAULT_TESTNET_ARTIFACTS.jinnMviL2 : undefined),
-  distributorAddress: config.jinnDistributorAddress,
-  messengerAddress: config.jinnMessengerAddress,
-  claimEmitterAddress: config.jinnClaimEmitterAddress,
-  messengerMode: MESSENGER_MODE_EXPLICIT ? config.jinnMessengerMode : undefined,
-});
-const JINN_CLAIM_MESSENGER_MODE = JINN_MVI_CONFIG.messengerMode ?? config.jinnMessengerMode;
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
-
-function configFileHasTopLevelKey(configPath: string | undefined, key: string): boolean {
-  const filePath = configPath ?? join(process.env['HOME'] ?? '', '.jinn-client', 'config.json');
-  if (!filePath || !existsSync(filePath)) return false;
-  try {
-    const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
-    return !!raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
-  } catch {
-    return false;
-  }
-}
 
 class EnsurePendingCaptureProcessor implements SpanProcessor {
   constructor(private readonly captures: CapturesStore) {}
@@ -873,10 +850,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // fail-loud on chain-id mismatch against the head provider.
   await probeFallbackChain(config.rpcUrls, config.network, 'L2');
   console.error(summarizeFallbackChain('L2', config.rpcUrls));
-  if (config.jinnClaimLoopEnabled && config.ethereumRpcUrls) {
-    await probeFallbackChain(config.ethereumRpcUrls, config.network, 'L1');
-    console.error(summarizeFallbackChain('L1', config.ethereumRpcUrls));
-  }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
   if (!portPreflight.ok) {
@@ -1066,6 +1039,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
+  // #1037: same eager-register / late-populate pattern for the join applier.
+  // The join endpoint registers eagerly inside startApiServer; the applier is
+  // built only after the latest join-consuming subsystem (the engine view,
+  // wired in the Daemon ctor). The endpoint tolerates an empty holder in the
+  // gap between server-start and populate by falling back to
+  // restartRequired:true.
+  const joinApplierHolder: {
+    current: import('./daemon/join-applier.js').JoinApplier | undefined;
+  } = { current: undefined };
+
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
   // timeout), main() waits on this promise instead of returning, so the setup
@@ -1175,6 +1158,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
           joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
+          onboardingComplete: config.onboardingComplete,
         }),
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
@@ -1290,6 +1274,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // targetServices DOES need to flow through so the faucet drips enough
         // ETH to cover ALL services for the operator's chosen targetServices.
         targetServices: config.targetServices,
+        // Issue #560: batched daily-cap top-up knobs — single source of truth
+        // in JinnConfig, surfaced to the SPA via GET /v1/setup/drip/quota.
+        faucetDailyTopupCap: config.faucetDailyTopupCap,
+        faucetTopupCooldownMs: config.faucetTopupCooldownMs,
         claudePath: activeClaudePath,
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -1321,16 +1309,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             resolve();
           });
         },
+        // #1037: hot-apply a join to the running daemon. Populated after the
+        // join-consuming subsystems are built (see joinApplierHolder). Empty
+        // until then → the endpoint returns restartRequired:true.
+        joinApplier: joinApplierHolder,
+        // #983: mutate the in-memory config so GET /v1/bootstrap reflects the
+        // completion flag live (the endpoint persists to disk; this keeps the
+        // configReader's in-memory read consistent — same pattern as the
+        // join-applier's config write). Cast: JinnConfig has the optional field.
+        markOnboardingComplete: () => {
+          (config as { onboardingComplete?: boolean }).onboardingComplete = true;
+        },
       },
       status: {
         earningDir: config.earningDir,
         rpcUrl: config.rpcUrl,
-        // tJINN identity comes from the bundled JINN MVI L1 artifact
-        // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
-        // is read from `config.ethereumRpcUrl` via the threaded `config`.
-        tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
-        tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
-        tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
         network: config.network,
         pollIntervalMs: config.pollIntervalMs,
         masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -1342,6 +1335,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         engine: config.engine,
         config,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        passwordRotation: {
+          source: passwordResolution.source,
+          filePath: passwordResolution.filePath,
+        },
       },
       // Launcher mode (Tasks 6 + 7). Deps are resolved lazily because the
       // generator and Safe address are constructed after bootstrap, after
@@ -1794,6 +1791,29 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // the /build page rendered "Discovery unavailable" permanently.
   discoveryApiHolder.current = sharedDiscoveryApi;
 
+  // #1037: the live task-discovery descriptor. Always present with a mutable
+  // `solverNetManifestCids` array (`taskDiscoveryManifestCids` is a fresh
+  // `.map` result, safe to push onto). The join applier holds this same object
+  // reference and pushes a newly-joined cid onto it live.
+  const taskDiscovery = {
+    discoveryApi: sharedDiscoveryApi,
+    solverNetManifestCids: taskDiscoveryManifestCids,
+    // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
+    // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow through.
+    // Hardcoding here shadowed the adapter's default and re-introduced the
+    // ghost-task floor every release; removing the shadow makes `adapter.ts`
+    // the single source of truth. See gh #300. An operator MAY opt in to a
+    // recent floor via `taskDiscoveryOnchainFromBlock` to bound the canonical
+    // getLogs scan (which otherwise parses a large history on the main thread
+    // and can stall the loop) and lean on the indexer DiscoveryAPI.
+    ...(config.taskDiscoveryOnchainFromBlock !== undefined
+      ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
+      : {}),
+    ...(config.taskDiscoveryAllowedTaskIds?.length
+      ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
+      : {}),
+  };
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1807,27 +1827,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
-    taskDiscovery: taskDiscoveryManifestCids.length > 0
-      ? {
-          discoveryApi: sharedDiscoveryApi,
-          solverNetManifestCids: taskDiscoveryManifestCids,
-          // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
-          // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow
-          // through. Hardcoding here shadowed the adapter's default and
-          // re-introduced the ghost-task floor every release; removing the
-          // shadow makes `adapter.ts` the single source of truth. See gh
-          // #300. An operator MAY opt in to a recent floor via
-          // `taskDiscoveryOnchainFromBlock` to bound the canonical getLogs
-          // scan (which otherwise parses a large history on the main thread
-          // and can stall the loop) and lean on the indexer DiscoveryAPI.
-          ...(config.taskDiscoveryOnchainFromBlock !== undefined
-            ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
-            : {}),
-          ...(config.taskDiscoveryAllowedTaskIds?.length
-            ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
-            : {}),
-        }
-      : undefined,
+    taskDiscovery,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1837,70 +1837,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const agentChain = config.network === 'testnet'
     ? viemChains.baseSepolia
     : viemChains.base;
-  const l1Chain = config.jinnL1Network === 'sepolia' ? viemChains.sepolia : viemChains.mainnet;
-  const agentChainContracts = agentChain.contracts as {
-    portal?: Record<number, { address: `0x${string}` }>;
-    disputeGameFactory?: Record<number, { address: `0x${string}` }>;
-  } | undefined;
-  const optimismPortalAddress =
-    agentChainContracts?.portal?.[l1Chain.id]?.address;
-  const disputeGameFactoryAddress =
-    agentChainContracts?.disputeGameFactory?.[l1Chain.id]?.address;
-  const l2ProofClient = config.l2ProofRpcUrls
-    ? createJinnPublicClient(config.l2ProofRpcUrls, NETWORK_CHAIN)
-    : undefined;
   const agentClients = createClients(config.rpcUrls, agentPrivateKey, agentChain);
-
-  // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
-  // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
-  // Same key as L2; only the chain differs.
-  const shouldWireJinnClaimL1 = shouldWireJinnClaimL1Signer({
-    enabled: config.jinnClaimLoopEnabled,
-    intervalMs: config.jinnClaimLoopIntervalMs,
-    submissionMode: config.jinnClaimSubmissionMode,
-    distributorAddress: JINN_MVI_CONFIG.distributor,
-    ethereumRpcUrl: config.ethereumRpcUrl,
-  });
-  const l1ClientsForJinnClaim =
-    shouldWireJinnClaimL1 && config.ethereumRpcUrls
-      ? {
-          public: createJinnL1PublicClient(config.ethereumRpcUrls, config.jinnL1Network),
-          wallet: createJinnL1WalletClient(
-            config.ethereumRpcUrls,
-            config.jinnL1Network,
-            privateKeyToAccount(agentPrivateKey),
-          ),
-        }
-      : undefined;
-  const jinnClaimLoopConfig = buildJinnClaimLoopConfig({
-    enabled: config.jinnClaimLoopEnabled,
-    intervalMs: config.jinnClaimLoopIntervalMs,
-    submissionMode: config.jinnClaimSubmissionMode,
-    messengerMode: JINN_CLAIM_MESSENGER_MODE,
-    mvi: JINN_MVI_CONFIG,
-    l2Client: agentClients.publicClient,
-    l2ProofClient,
-    l2Wallet: agentClients.walletClient,
-    l1Clients: l1ClientsForJinnClaim,
-    store: earningStore,
-    chain: NETWORK_CHAIN,
-    optimismPortalAddress,
-    disputeGameFactoryAddress,
-  });
-  if (jinnClaimLoopConfig) {
-    console.log(
-      `[main] JinnClaimLoop: enabled (submission=${config.jinnClaimSubmissionMode}, ` +
-      `mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
-      `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${JINN_MVI_CONFIG.distributor}, ` +
-      `emitter=${JINN_MVI_CONFIG.claimEmitter})`,
-    );
-  } else if (!config.jinnClaimLoopEnabled) {
-    console.log('[main] JinnClaimLoop: disabled (jinnClaimLoopEnabled=false)');
-  } else {
-    console.log(
-      `[main] JinnClaimLoop: disabled (missing claim-loop artifacts, interval disabled, or L1 submit wiring)`,
-    );
-  }
 
   // ── Harness registry ─────────────────────────────────────────────────────────
 
@@ -2039,6 +1976,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   harnessReadinessRegistryHolder.current = harnessReadinessRegistry;
   console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
 
+  // #1037: always construct the engine eligibility view (mutable) so a
+  // hot-applied join can inject its cid live. Previously this was wired only
+  // when config.joinedSolverNets was truthy; a zero-join daemon then ran the
+  // legacy solverType gate. With an always-present empty view, a zero-join
+  // daemon rejects cid-bearing tasks (its discovery cid set is empty so it
+  // discovers none) and still passes legacy no-cid tasks. See plan §behaviour-change.
+  const joinedSolverNetsView = createMutableJoinedSolverNetsView(config.joinedSolverNets);
+
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
   // Packaging deps: artifacts are always written to served_artifacts
@@ -2137,6 +2082,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  // ── Seller-side scrub pipeline (publish-time) ─────────────────────────────
+  // One pipeline shared by the task engine and the live capture publisher so
+  // every published trajectory passes through the same maintained scrub stack
+  // (structural key policy → openredaction → secretlint/entropy → optional ML
+  // PII). The OTLP receiver above runs best-effort ingest-time scrubbers; this
+  // is the authoritative final gate before a trajectory becomes public/sellable.
+  const sellerPiiDetector = await maybeBuildPiiDetector(config.captures.piiDetection);
+  const sellerScrubPipeline = buildScrubPipeline(
+    sellerPiiDetector ? { piiDetector: sellerPiiDetector } : {},
+  );
+
   const liveCapturePublisher = createLiveCapturePublisher({
     store: sharedStore,
     captures: capturesStore,
@@ -2149,6 +2105,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     clientGitSha: buildInfo.clientGitSha,
     identityPublisher,
     harnessMode: config.harness.mode,
+    scrubPipeline: sellerScrubPipeline,
   });
   capturePublishRef.current = liveCapturePublisher.publishCapture;
 
@@ -2514,12 +2471,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
-      // tJINN identity comes from the bundled JINN MVI L1 artifact
-      // (`JINN_MVI_CONFIG`) — one source of truth. The Sepolia RPC endpoint
-      // is read from `config.ethereumRpcUrl` via the threaded `config`.
-      tjinnTokenAddress: JINN_MVI_CONFIG.jinn,
-      tjinnChainId: JINN_MVI_CONFIG.l1ChainId,
-      tjinnDistributorAddress: JINN_MVI_CONFIG.distributor,
       // stOLAS L2 distributor — mirrors `CHAIN_CONFIG.distributorAddress`
       // used to gate the EvictionLoop (issue #651). Threaded through so the
       // SPA's autoRestake predicate keys off the same on-chain artifact as
@@ -2536,6 +2487,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       engine: config.engine,
       config,
       configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+      passwordRotation: {
+        source: passwordResolution.source,
+        filePath: passwordResolution.filePath,
+      },
       spendCaps: spendCap?.caps,
       aiUnits,
     },
@@ -2550,7 +2505,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    jinnClaim: jinnClaimLoopConfig,
     restorationEngine: {
       paths: {
         workingDirRoot: config.engine.workingDirRoot,
@@ -2567,9 +2521,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // doesn't match a joined entry (plus a role gate). Absent when the
       // operator hasn't joined any nets yet — the engine then falls back to
       // the legacy solverType-keyed gate.
-      ...(config.joinedSolverNets
-        ? { joinedSolverNets: joinedSolverNetsViewFromConfig(config.joinedSolverNets) }
-        : {}),
+      // #1037: always wire the (mutable) view so a hot-applied join is live.
+      joinedSolverNets: joinedSolverNetsView,
       // Spec §14: task validation resolves manifest → contract → schemas.
       // Threaded only when the SolverNet registry client was constructed
       // (testnet branch above). The engine treats absence as "schema
@@ -2581,6 +2534,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       reputationFeedback,
       operatorConfig,
       harnessMode: config.harness.mode,
+      // Share the one maintained scrub pipeline (incl. optional ML PII) so task
+      // trajectories and captures are scrubbed by the same stack before publish.
+      scrubPipeline: sellerScrubPipeline,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
@@ -2653,7 +2609,28 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             },
           }
         : undefined,
+    // #1043 loop watchdog. Always constructed in production so a stale loop is
+    // detected + surfaced; the process-exit recovery is flag-gated (default
+    // OFF) by config.watchdogAutoRestart.
+    watchdog: { autoRestart: config.watchdogAutoRestart },
   });
+
+  // #1037: populate the join applier now that all four join-consuming
+  // subsystems exist — the live task-discovery descriptor (`taskDiscovery`),
+  // the mutable engine view (`joinedSolverNetsView`), the readiness registry,
+  // and the SolverNet registry. The join endpoint registered eagerly at
+  // server-start; before this point it returns restartRequired:true.
+  joinApplierHolder.current = createJoinApplier({
+    taskDiscovery,
+    view: joinedSolverNetsView,
+    readiness: harnessReadinessRegistry,
+    registry: solverNetRegistry,
+    config,
+  });
+
+  if (config.watchdogAutoRestart) {
+    console.log('[watchdog] auto-restart ENABLED (stale loop → non-zero exit)');
+  }
 
   // Write pidfile so `jinn stop` can find us. First, refuse the run if another
   // daemon already owns this earning directory — see issue #649. The gate
@@ -2671,14 +2648,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     {
       stateDir: config.stateDir,
       earningDir: config.earningDir,
-      relayerUrl: undefined,
       runtimeMode: config.runtimeMode,
     },
     {
       env: process.env,
       getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
       detectAuthContext,
-      fetch,
     },
   );
 

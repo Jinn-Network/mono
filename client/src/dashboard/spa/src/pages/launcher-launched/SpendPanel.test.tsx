@@ -159,24 +159,87 @@ describe('SpendPanel', () => {
     expect(screen.getByTestId('launcher-launched-spend-safe-address').textContent).toMatch(/0xE64b…B5CF/);
   });
 
-  it('projects runway as Safe balance / per-Task cost', async () => {
+  it('projects runway from a claim-gas-inclusive per-Task cost', async () => {
     const fetchLauncherStatus = vi.fn().mockResolvedValue(
-      buildStatusResponse('Polymarket', '1500'),
+      // balance = 4 × per-Task cost (3_512_500_000_000 wei).
+      buildStatusResponse('Polymarket', '14050000000000'),
     );
     wrap(
       <SpendPanel
         record={buildRecord()}
-        manifest={buildManifest({ solutionPriceWei: '100', verdictPriceWei: '50' })}
+        manifest={buildManifest({
+          solutionPriceWei: '1000000000000', // 1000 gwei
+          verdictPriceWei: '500000000000', // 500 gwei
+        })}
         fetchLauncherStatus={fetchLauncherStatus}
       />,
     );
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-runway').textContent,
-      ).toContain('10 Tasks'),
+      ).toContain('4 Tasks'),
     );
-    // Per-Task cost = 100 + 50 = 150 wei.
-    expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).toContain('150 wei');
+    // Per-Task cost = 1000 gwei + 500 gwei + 2012.5 gwei claim gas = 3512.5 gwei.
+    expect(
+      screen.getByTestId('launcher-launched-spend-per-task').textContent,
+    ).toContain('3512.5 gwei');
+  });
+
+  it('surfaces a low-runway state message below 100 Tasks', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      // 99 × per-Task cost (3_512_500_000_000) = 347_737_500_000_000.
+      buildStatusResponse('Polymarket', '347737500000000'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({
+          solutionPriceWei: '1000000000000',
+          verdictPriceWei: '500000000000',
+        })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-low-runway'),
+      ).toBeTruthy(),
+    );
+    expect(
+      screen.getByTestId('launcher-launched-spend-low-runway').textContent,
+    ).toMatch(/runway low/i);
+    // AC3: the message must point the operator at the Overview faucet and the
+    // daemon's auto-forward behaviour (#573).
+    expect(
+      screen.getByTestId('launcher-launched-spend-low-runway').textContent,
+    ).toMatch(
+      /top up your wallet from the overview faucet — the daemon forwards eth to the safe automatically\./i,
+    );
+  });
+
+  it('hides the low-runway message at or above 100 Tasks', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      // 100 × per-Task cost = 351_250_000_000_000.
+      buildStatusResponse('Polymarket', '351250000000000'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({
+          solutionPriceWei: '1000000000000',
+          verdictPriceWei: '500000000000',
+        })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-runway').textContent,
+      ).toContain('100 Tasks'),
+    );
+    expect(
+      screen.queryByTestId('launcher-launched-spend-low-runway'),
+    ).toBeNull();
   });
 
   it('matches launcher status by manifest solver type when names differ', async () => {
@@ -233,8 +296,9 @@ describe('SpendPanel', () => {
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-per-task').textContent,
-      ).toBe('15 gwei'),
+      ).toBe('2027.5 gwei'),
     );
+    // Per-Task = 10 gwei + 5 gwei + 2012.5 gwei claim gas = 2027.5 gwei.
     expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('10 gwei');
     expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('5 gwei');
     expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).not.toContain('e-');
@@ -254,8 +318,9 @@ describe('SpendPanel', () => {
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-per-task').textContent,
-      ).toBe('15 gwei'),
+      ).toBe('2027.5 gwei'),
     );
+    // Per-Task = 10 gwei + 5 gwei + 2012.5 gwei claim gas = 2027.5 gwei.
     expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('10 gwei');
     expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('5 gwei');
   });
