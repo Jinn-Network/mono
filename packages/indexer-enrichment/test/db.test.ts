@@ -62,6 +62,7 @@ describe('schema parity', () => {
       'request_id',
       'instance_id',
       'solver_net_manifest_cid',
+      'solution_request_id',
       'actual_passed',
       'actual_score',
       'evaluator_verdict',
@@ -204,6 +205,7 @@ describe('upsertVerdict', () => {
     totalCount: 0,
     instanceId: 'sympy__sympy-27510',
     solverNetManifestCid: 'bafyManifest',
+    solutionRequestId: `0x${'99'.repeat(32)}`,
     evaluatorVerdict: 'PASS' as const,
   };
 

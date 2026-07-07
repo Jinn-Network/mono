@@ -46,6 +46,7 @@ export interface UpsertVerdictArgs {
   totalCount: number;
   instanceId: string;
   solverNetManifestCid: string;
+  solutionRequestId: string;
   evaluatorVerdict: string;
   enrichedAtBlock: bigint;
   chainId: number;
@@ -238,11 +239,11 @@ export class EnrichmentStore {
   async upsertVerdict(args: UpsertVerdictArgs): Promise<void> {
     await this.db.execute(sql`
       INSERT INTO ${this.q('verdict_envelope_meta')}
-        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
+        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","solution_request_id","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
       VALUES (
         ${args.requestId}, ${args.verdictIndex}, ${args.attemptIndex}, ${args.taskId}, ${args.evaluator},
         ${args.manifestCid}, ${args.solverType}, ${args.evidenceTier}, ${args.actualPassed}, ${args.actualScore},
-        ${args.passedCount}, ${args.totalCount}, ${args.instanceId}, ${args.solverNetManifestCid}, ${args.evaluatorVerdict},
+        ${args.passedCount}, ${args.totalCount}, ${args.instanceId}, ${args.solverNetManifestCid}, ${args.solutionRequestId}, ${args.evaluatorVerdict},
         'ok', 0, NULL, ${args.enrichedAtBlock}, ${args.chainId}
       )
       ON CONFLICT ("request_id","chain_id") DO UPDATE SET
@@ -259,6 +260,7 @@ export class EnrichmentStore {
         "total_count" = EXCLUDED."total_count",
         "instance_id" = EXCLUDED."instance_id",
         "solver_net_manifest_cid" = EXCLUDED."solver_net_manifest_cid",
+        "solution_request_id" = EXCLUDED."solution_request_id",
         "evaluator_verdict" = EXCLUDED."evaluator_verdict",
         "enrichment_status" = 'ok',
         "retry_count" = 0,

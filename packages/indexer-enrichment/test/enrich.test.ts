@@ -7,6 +7,7 @@ import { createPgliteHarness, type PgliteHarness } from './helpers/pglite-db.js'
 
 const CHAIN_ID = 84532;
 const REQUEST_ID = `0x${'aa'.repeat(32)}`;
+const SOLVE_REQUEST_ID = `0x${'99'.repeat(32)}`;
 const EVAL_CID = 'bafyevalaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const TASK_CID = 'bafytaskaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
@@ -63,6 +64,7 @@ const SWE_VERDICT_BODY = {
 const SWE_TASK_BODY = {
   schemaVersion: 'task.v1',
   solverNetManifestCid: 'bafyManifestSweA',
+  restorationRequestId: SOLVE_REQUEST_ID,
   spec: { instance_id: 'sympy__sympy-27510' },
 };
 
@@ -83,6 +85,7 @@ describe('enrichBatch', () => {
       request_id: REQUEST_ID,
       instance_id: 'sympy__sympy-27510',
       solver_net_manifest_cid: 'bafyManifestSweA',
+      solution_request_id: SOLVE_REQUEST_ID,
       actual_passed: true,
       actual_score: '1',
       evaluator_verdict: 'PASS',
@@ -167,11 +170,59 @@ describe('enrichBatch', () => {
     expect(row?.enrichment_status).toBe('ok');
     expect(row?.instance_id).toBe('');
     expect(row?.solver_net_manifest_cid).toBe('');
+    expect(row?.solution_request_id).toBe('');
     // The verdict fields still land (we had the verdict body).
     expect(row?.evaluator_verdict).toBe('PASS');
     // instanceId='' → the launcher's `instanceId_not:""` filter shape excludes
     // this partial row from success counts, exactly as today.
     expect(row?.instance_id).toBe('');
+  });
+});
+
+// ── #1436: solutionRequestId threads through the standalone worker ────────────
+
+describe('#1436 solutionRequestId', () => {
+  it('persists restorationRequestId from the task body as solutionRequestId (#1433)', async () => {
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
+    const fetchImpl: FetchLike = async (url) => {
+      if (String(url).includes(TASK_CID)) {
+        return { ok: true, status: 200, json: async () => SWE_TASK_BODY };
+      }
+      return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
+    };
+    await enrichBatch(store, depsWith(fetchImpl));
+    const row = await readVerdict(REQUEST_ID);
+    expect(row?.solution_request_id).toBe(SOLVE_REQUEST_ID);
+  });
+
+  it('writes solutionRequestId="" when the task body is unfetchable (degraded path)', async () => {
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
+    const fetchImpl: FetchLike = async (url) => {
+      if (String(url).includes(TASK_CID)) throw new Error('task body offline');
+      return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
+    };
+    await enrichBatch(store, depsWith(fetchImpl));
+    const row = await readVerdict(REQUEST_ID);
+    expect(row?.solution_request_id).toBe('');
+  });
+
+  it('writes solutionRequestId="" when the task body lacks restorationRequestId', async () => {
+    await seedEvalAnchor(EVAL_CID, 41_500_000n);
+    const taskBodyNoSolveId = {
+      schemaVersion: 'task.v1',
+      solverNetManifestCid: 'bafyManifestSweA',
+      spec: { instance_id: 'sympy__sympy-27510' },
+    };
+    const fetchImpl: FetchLike = async (url) => {
+      if (String(url).includes(TASK_CID)) {
+        return { ok: true, status: 200, json: async () => taskBodyNoSolveId };
+      }
+      return { ok: true, status: 200, json: async () => SWE_VERDICT_BODY };
+    };
+    await enrichBatch(store, depsWith(fetchImpl));
+    const row = await readVerdict(REQUEST_ID);
+    expect(row?.solution_request_id).toBe('');
+    expect(row?.instance_id).toBe('sympy__sympy-27510');
   });
 });
 
@@ -218,6 +269,7 @@ describe('idempotency (AC6)', () => {
       totalCount: 0,
       instanceId: 'sympy__sympy-27510',
       solverNetManifestCid: 'bafyManifestSweA',
+      solutionRequestId: SOLVE_REQUEST_ID,
       evaluatorVerdict: 'PASS' as const,
       enrichedAtBlock: 41_500_000n,
       chainId: CHAIN_ID,

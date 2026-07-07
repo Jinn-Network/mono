@@ -97,6 +97,7 @@ export async function enrichBatch(
 
     let instanceId = '';
     let solverNetManifestCid = '';
+    let solutionRequestId = '';
     if (meta.solverType.startsWith('swe-rebench-v2') && meta.taskCid) {
       try {
         const taskBody = await fetchIpfsJson(deps.ipfsGateway, meta.taskCid, {
@@ -106,17 +107,19 @@ export async function enrichBatch(
         const resolved = resolveInstanceFields(taskBody);
         instanceId = resolved.instanceId;
         solverNetManifestCid = resolved.solverNetManifestCid;
+        solutionRequestId = resolved.solutionRequestId;
       } catch (err) {
         // Graceful degrade, matching handlers.ts EXACTLY: we have the requestId
         // (verdict parsed) but the task body is unfetchable. The handler catches,
-        // warns, and falls through — leaving instanceId='' and
-        // solverNetManifestCid='' — then writes the verdict row with
-        // enrichmentStatus='ok'. The launcher's instanceId_not:"" filter excludes
-        // the partial row from success counts (#669). Do NOT mark for retry.
+        // warns, and falls through — leaving instanceId='',
+        // solverNetManifestCid='', and solutionRequestId='' — then writes the
+        // verdict row with enrichmentStatus='ok'. The launcher's instanceId_not:""
+        // filter excludes the partial row from success counts (#669). Do NOT mark
+        // for retry.
         console.warn(
           `[indexer-enrichment] task body fetch failed for verdict ${meta.requestId.slice(0, 10)}... cid=${meta.taskCid}: ${String(err)} (writing ok with instanceId='')`,
         );
-        // instanceId / solverNetManifestCid stay '' — fall through to upsert.
+        // instanceId / solverNetManifestCid / solutionRequestId stay '' — fall through to upsert.
       }
     }
 
@@ -135,6 +138,7 @@ export async function enrichBatch(
       totalCount: meta.totalCount,
       instanceId,
       solverNetManifestCid,
+      solutionRequestId,
       evaluatorVerdict: meta.evaluatorVerdict,
       enrichedAtBlock: anchor.publishedAtBlock,
       chainId: anchor.chainId,
