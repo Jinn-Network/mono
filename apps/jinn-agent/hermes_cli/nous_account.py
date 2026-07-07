@@ -188,6 +188,29 @@ def format_nous_portal_entitlement_message(
     """
     billing_url = nous_portal_billing_url(account_info)
 
+    # This module is reachable from paths that never go through cli.py's
+    # module-level skin init (e.g. `status`, `doctor`) — pick up config.yaml's
+    # skin choice on demand (idempotent, degrades to the upstream literal on
+    # any error). Mirrors status.py's _setup_cli_names-style guard.
+    try:
+        from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+        _skin = get_active_skin()
+    except Exception:
+        from hermes_cli.skin_engine import get_active_skin as _get_active_skin
+
+        _skin = _get_active_skin()
+    _brand = _skin.get_branding("agent_name", "Hermes Agent")
+    # `portal_label` is the FULL phrase ("Nous Portal" upstream, "Provider
+    # Portal" under the jinn skin) — the portal is Nous Research's own
+    # third-party service, not our brand, so this is a neutral label rather
+    # than a reuse of the `credit` ("Jinn Network") key.
+    _portal = _skin.get_branding("portal_label", "Nous Portal")
+
     if account_info is not None:
         if coverage_category is not None:
             if account_info.tool_gateway_entitled_for(coverage_category):
@@ -197,7 +220,7 @@ def format_nous_portal_entitlement_message(
                 # specific capability isn't covered. Surface a neutral billing
                 # nudge without exposing pool-vs-paid internals to the user.
                 return (
-                    f"{capability} isn't included with your current Nous Portal "
+                    f"{capability} isn't included with your current {_portal} "
                     f"access. Add credits or a subscription to enable it at {billing_url}."
                 )
         elif account_info.tool_gateway_entitled:
@@ -205,33 +228,33 @@ def format_nous_portal_entitlement_message(
 
     if account_info is None:
         return (
-            f"Hermes could not verify your Nous Portal entitlement, so {capability} "
-            f"is unavailable. Run `hermes model` to refresh your login, or check "
+            f"{_brand} could not verify your {_portal} entitlement, so {capability} "
+            f"is unavailable. Run `jinn-agent model` to refresh your login, or check "
             f"billing at {billing_url}."
         )
 
     if not account_info.logged_in:
         if account_info.inference_credential_present:
             return (
-                f"Nous inference credentials are configured, but Hermes cannot verify "
-                f"your Nous Portal paid access for {capability}. Log in with "
-                f"`hermes model` to enable Portal-managed features. Billing and "
+                f"Nous inference credentials are configured, but {_brand} cannot verify "
+                f"your {_portal} paid access for {capability}. Log in with "
+                f"`jinn-agent model` to enable Portal-managed features. Billing and "
                 f"credits are managed at {billing_url}."
             )
         return (
-            f"Log in to Nous Portal to use {capability}: run `hermes model`. "
+            f"Log in to {_portal} to use {capability}: run `jinn-agent model`. "
             f"Billing and credits are managed at {billing_url}."
         )
 
     if account_info.paid_service_access is None:
         detail = (
-            f"Hermes could not verify your Nous Portal paid access, so {capability} "
+            f"{_brand} could not verify your {_portal} paid access, so {capability} "
             f"is unavailable."
         )
         if account_info.error:
             detail += f" Account lookup failed: {account_info.error}."
         if include_refresh_hint:
-            detail += " Run `hermes model` to refresh your session."
+            detail += " Run `jinn-agent model` to refresh your session."
         detail += f" Check billing at {billing_url}."
         return detail
 
@@ -239,19 +262,19 @@ def format_nous_portal_entitlement_message(
     reason = access.reason if access else None
     if reason == "account_missing":
         return (
-            f"Hermes could not find a Nous Portal account or organisation for this "
-            f"login, so {capability} is unavailable. Run `hermes model` to "
+            f"{_brand} could not find a {_portal} account or organisation for this "
+            f"login, so {capability} is unavailable. Run `jinn-agent model` to "
             f"authenticate again; if the problem persists, contact Nous support."
         )
 
     if reason == "no_usable_credits" or account_info.paid_service_access is False:
-        message = _no_paid_access_message(account_info, capability, billing_url)
+        message = _no_paid_access_message(account_info, capability, billing_url, portal_label=_portal)
         if include_refresh_hint and not account_info.fresh:
-            message += " If you recently bought credits, run `hermes model` to refresh Hermes."
+            message += f" If you recently bought credits, run `jinn-agent model` to refresh {_brand}."
         return message
 
     return (
-        f"Your Nous Portal account does not currently have paid service access, "
+        f"Your {_portal} account does not currently have paid service access, "
         f"so {capability} is unavailable. Add credits or update billing at {billing_url}."
     )
 
@@ -260,6 +283,8 @@ def _no_paid_access_message(
     account_info: NousPortalAccountInfo,
     capability: str,
     billing_url: str,
+    *,
+    portal_label: str = "Nous Portal",
 ) -> str:
     access = account_info.paid_service_access_info
     has_active_subscription = access.has_active_subscription if access else None
@@ -271,27 +296,27 @@ def _no_paid_access_message(
     if has_active_subscription and active_subscription_is_paid:
         credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
         return (
-            f"Your Nous Portal credits are exhausted{credit_detail}, so {capability} "
+            f"Your {portal_label} credits are exhausted{credit_detail}, so {capability} "
             f"is unavailable. Top up or renew credits at {billing_url}."
         )
 
     if has_active_subscription and active_subscription_is_paid is False:
         return (
-            f"Your current Nous Portal plan does not include paid service access, "
+            f"Your current {portal_label} plan does not include paid service access, "
             f"so {capability} is unavailable. Upgrade or add credits at {billing_url}."
         )
 
     if has_active_subscription is False:
         credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
         return (
-            f"Your Nous Portal account has no active subscription or usable credits"
+            f"Your {portal_label} account has no active subscription or usable credits"
             f"{credit_detail}, so {capability} is unavailable. Subscribe or add credits "
             f"at {billing_url}."
         )
 
     credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
     return (
-        f"Your Nous Portal account has no usable paid credits{credit_detail}, so "
+        f"Your {portal_label} account has no usable paid credits{credit_detail}, so "
         f"{capability} is unavailable. Add credits or update billing at {billing_url}."
     )
 

@@ -2672,9 +2672,12 @@ class CLICommandsMixin:
         when cancelled.
         """
         from hermes_cli.config import is_managed, format_managed_message
+        from hermes_cli.skin_engine import get_active_skin
+
+        _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
 
         if is_managed():
-            print(f"  ✗ {format_managed_message('update Hermes Agent')}")
+            print(f"  ✗ {format_managed_message(f'update {_brand}')}")
             return False
 
         # Use the prompt_toolkit-native modal so the confirmation panel
@@ -2682,12 +2685,12 @@ class CLICommandsMixin:
         # with the prompt_toolkit event loop (same pattern as
         # _confirm_destructive_slash).
         choices = [
-            ("once", "Update Now", "exit the current session and update Hermes Agent"),
+            ("once", "Update Now", f"exit the current session and update {_brand}"),
             ("cancel", "Cancel", "keep the current session"),
         ]
         raw = self._prompt_text_input_modal(
-            title="⚕  Update Hermes Agent",
-            detail="This will exit the current session and run `hermes update`.",
+            title=f"⚕  Update {_brand}",
+            detail="This will exit the current session and run `jinn-agent update`.",
             choices=choices,
         )
         if raw is None:

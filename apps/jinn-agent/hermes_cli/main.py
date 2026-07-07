@@ -2452,6 +2452,20 @@ def cmd_whatsapp(args):
     from hermes_cli.config import get_env_value, save_env_value
     from hermes_constants import find_node_executable, with_hermes_node_path
 
+    # `whatsapp` never goes through cli.py's module-level skin init — pick up
+    # config.yaml's skin choice on demand (idempotent, degrades to the
+    # upstream literal on any error). Mirrors setup.py's _setup_cli_names.
+    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    try:
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config as _load_config
+
+            init_skin_from_config(_load_config())
+    except Exception:
+        pass
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+    _response_label = get_active_skin().get_branding("response_label", "⚕ Hermes").strip()
+
     print()
     print("⚕ WhatsApp Setup")
     print("=" * 50)
@@ -2664,14 +2678,14 @@ def cmd_whatsapp(args):
             print("    2. Send a message to the bot's WhatsApp number")
             print("    3. The agent will reply automatically")
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Hermes Agent'")
+            print(f"  Tip: Agent responses are prefixed with '{_response_label}'")
         else:
             print("  Next steps:")
             print("    1. Start the gateway:  hermes gateway")
             print("    2. Open WhatsApp → Message Yourself")
             print("    3. Type a message — the agent will reply")
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Hermes Agent'")
+            print(f"  Tip: Agent responses are prefixed with '{_response_label}'")
             print("  so you can tell them apart from your own messages.")
         print()
         print("  Or install as a service: hermes gateway install")
@@ -2712,7 +2726,20 @@ def cmd_postinstall(args):
 
     stamp_install_method("pip")
 
-    print("⚕ Hermes post-install bootstrap")
+    # `postinstall` never goes through cli.py's module-level skin init — pick
+    # up config.yaml's skin choice on demand (idempotent, degrades to the
+    # upstream literal on any error). Mirrors setup.py's _setup_cli_names.
+    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    try:
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+
+    print(f"⚕ {_brand} post-install bootstrap")
     print()
 
     for dep in ("node", "browser", "ripgrep", "ffmpeg"):
@@ -9239,7 +9266,20 @@ def _cmd_update_impl(args, gateway_mode: bool):
             logger.debug("Could not read updates.non_interactive_local_changes: %s", exc)
             discard_local_changes = False
 
-    print("⚕ Updating Hermes Agent...")
+    # `update` never goes through cli.py's module-level skin init — pick up
+    # config.yaml's skin choice on demand (idempotent, degrades to the
+    # upstream literal on any error). Mirrors setup.py's _setup_cli_names.
+    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    try:
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config as _load_config_for_skin
+
+            init_skin_from_config(_load_config_for_skin())
+    except Exception:
+        pass
+    _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
+
+    print(f"⚕ Updating {_brand}...")
     print()
 
     # On Windows, abort early if another hermes.exe is holding the venv shim
