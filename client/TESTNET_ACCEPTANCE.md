@@ -42,7 +42,7 @@ yarn vitest run \
   test/harnesses/impls/learner/swe-rebench-v2-roundtrip.test.ts \
   test/harnesses/impls/swe-rebench-v2-evaluator/harness.test.ts
 yarn build
-yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>
+yarn release:olas-rails-smoke
 ```
 
 Do not remove tests or lower assertions to pass this gate. If a test exposes a
@@ -50,12 +50,9 @@ real mismatch in the public flow, fix the implementation or explicitly hold the
 release.
 
 `yarn e2e:donation` (and the corpus integration suite, `vitest run test/corpus`)
-remain fast mocked/smoke checks. They do not replace `yarn release:donation-consumption`, which is the
-release-blocking proof that another isolated operator can discover and consume
-donated SWE execution data through the canonical on-chain/IPFS discovery path
-and real MCP acquisition path, cache it as a network artifact, reuse that cache
-from the learner-facing MCP path, and
-continue through the real SWE solve/evaluate loop.
+remain fast mocked/smoke checks. They do not replace `yarn release:olas-rails-smoke --execute`, which is the
+release-blocking proof that the tokenless OLAS rails smoke harness can complete a
+prediction.v1 loop on Base Sepolia and claim staking rewards.
 
 ## Required Browser Gates
 
@@ -109,30 +106,21 @@ The release is not ready until the live or canary-dry-run proof shows:
    The subgraph may accelerate discovery, but on-chain ERC-8004 metadata plus
    IPFS must be sufficient for release proof.
 
-Run the live donation proof with:
+Run the live OLAS rails proof with:
 
 ```bash
-yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>
+yarn release:olas-rails-smoke --execute
 ```
 
 Release mode requires fresh evidence created after the command starts.
-`--reuse-existing` is diagnostics-only and is not valid PR/canary evidence.
-The producer daemon's operator artifact inventory is UI-token protected; pass
-the startup handshake key with `--producer-handshake-key` or provide
-`JINN_DONATION_PRODUCER_UI_TOKEN` for an existing UI session.
-The default isolated consumer home inherits the producer's joined SWE-rebench v2
-SolverNet configuration but uses its own HOME, earning state, database, API
-port, Safe, and agent identity. If you pass `--consumer-config`, that config
-must already be joined as SWE-rebench v2 solver and evaluator with the
-SWE-rebench v2 runtime enabled.
+See [docs/runbooks/sepolia-olas-rails-smoke.md](../docs/runbooks/sepolia-olas-rails-smoke.md)
+for config, funding, and evidence expectations.
 
-When running the broader `yarn release:client --prepare` gate on `main`, export
-`JINN_DONATION_PRODUCER_HANDSHAKE_KEY` or
-`JINN_DONATION_PRODUCER_UI_TOKEN` first so the nested
-`release:donation-consumption` step can read the protected producer inventory.
+When running the broader `yarn release:client --prepare` gate on `main`, the nested
+`release:olas-rails-smoke` step runs in dry-run mode (no live chain interaction).
 
-Record task IDs, task CIDs, envelope CIDs, trajectory source CIDs, settlement
-transaction hashes, and the redacted donated/acquired artifact evidence.
+Record task IDs, settlement transaction hashes, and the evidence directory under
+`.local/olas-rails-smoke/`.
 
 ## Donation And Scrubbing Gate
 

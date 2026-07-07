@@ -1,6 +1,6 @@
 # Tier 1 scenarios
 
-Four scenarios, all single-operator, all run on every push to `next` (canary cadence) plus inside `release-prep` for any candidate version. None of them use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
+Three scenarios, all single-operator, all run on every push to `next` (canary cadence) plus inside `release-prep` for any candidate version. None of them use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
 
 ## T1.1 — bootstrap-fresh-anvil
 

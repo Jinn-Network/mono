@@ -43,10 +43,10 @@ jobs:
     name: Publish package
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
-    # Stable publish reruns the CI-safe release gates. The live donation-consumption
-    # and app-first testnet gates require a producer daemon, UI auth/handshake, and
-    # local operator evidence; those stay in `yarn release:client --prepare` before
-    # Captain publishes the GitHub Release.
+    # Stable publish reruns the CI-safe release gates. The live olas-rails-smoke
+    # execute mode and app-first testnet gates require local operator config and
+    # funding; those stay in `yarn release:client --prepare` before Captain
+    # publishes the GitHub Release.
     timeout-minutes: 90
     environment: npm-publish
     env:

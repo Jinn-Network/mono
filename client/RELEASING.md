@@ -13,7 +13,7 @@ The release flow has six layers:
 
 1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 2. the fork-based local operator gate (`yarn release:operator-gate`) — **now runs automatically in `npm-publish.yml` on stable publishes** (jinn-mono-2cl.7); previously manual
-3. the cross-operator donated SWE execution-data gate (`yarn release:donation-consumption`) — **runs during `yarn release:client --prepare` and must be attached as release evidence before publishing** (jinn-mono-2cl.7); it is not rerun inside GitHub Actions because it requires a live producer daemon and local operator credentials
+3. the tokenless OLAS rails smoke gate (`yarn release:olas-rails-smoke`) — **runs during `yarn release:client --prepare` in dry-run mode** and must be attached as release evidence before publishing; use `yarn release:olas-rails-smoke --execute` for live Base Sepolia proof (see [docs/runbooks/sepolia-olas-rails-smoke.md](../docs/runbooks/sepolia-olas-rails-smoke.md))
 4. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
 5. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
 6. the GitHub Release workflows for npm `latest` and GHCR
@@ -40,7 +40,7 @@ Do this once because the package did not exist on npm initially.
    yarn build
    yarn pack:smoke
    yarn release:operator-gate
-   yarn release:donation-consumption
+   yarn release:olas-rails-smoke
    cd ../contracts
    yarn test
    forge install foundry-rs/forge-std --no-git
@@ -94,7 +94,7 @@ npx @jinn-network/client@canary --help
    ```
    This runs the local client gates, the fork-based operator gate, contract
    gates, Docker testnet acceptance setup with bootstrap, the Docker diagnostic
-   gate, the donation-consumption gate, and writes a report under
+   gate, the OLAS rails smoke gate, and writes a report under
    `client/release-runs/<version>-<timestamp>/`. The app-first SWE-rebench v2
    and donated-data proof in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md)
    must be attached to the release evidence before publishing.
@@ -114,7 +114,7 @@ the `vX.Y.Z` tag points at:
 release-tag=vX.Y.Z
 release-commit=<git sha>
 release-client-prepare=passed
-donation-consumption=passed
+olas-rails-smoke=passed
 app-first-testnet-acceptance=passed
 -->
 ```
