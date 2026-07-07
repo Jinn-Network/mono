@@ -1,10 +1,10 @@
-import os, re, subprocess, sys
+import os, re, subprocess
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]          # apps/jinn-agent/
 _BIN = _REPO / "bin" / "jinn-agent"
 # Technical tokens that are NOT branding and are allowed on screen:
-_TECHNICAL = re.compile(r"HERMES_[A-Z0-9_]+|\.hermes\b|hermes_[a-z0-9_]+")
+_TECHNICAL = re.compile(r"HERMES_[A-Z0-9_]+|\.hermes\b|hermes_[a-z0-9_]+|nous_[a-z0-9_]+")
 _BRAND_WORDS = ("hermes", "nous")
 
 def strip_technical(text: str) -> str:
