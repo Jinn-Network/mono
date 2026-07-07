@@ -5,8 +5,13 @@ import { z } from 'zod/v3';
  *
  * A skill (SKILL.md + optional companion files + machine-readable
  * provenance) carried as one entry in the `jinn.execution.v1` wrapper
- * envelope's `artifacts[]`, published ALONGSIDE the layer-1 trace envelope
- * (never instead of it). Access/pricing come from the enclosing Artifact
+ * envelope's `artifacts[]`. Carrier invariant by provenance kind:
+ * **imported** (seeds) publish ALONGSIDE the seeded layer-1 trace envelope
+ * (never instead of it); **distilled** skills have no trace of their own —
+ * their evidence is the referenced layer-1 envelopes in `sourceEnvelopeCids` —
+ * so they publish as a skill-only wrapper (`publishSkill()`,
+ * client/packages/harness-layer/src/publish-skill.ts, DR-2026-07-06).
+ * Access/pricing come from the enclosing Artifact
  * entry (client/src/types/envelope.ts ArtifactSchema: sha256,
  * access.endpoint, access.priceUsdc, metadata.tags).
  *
@@ -55,7 +60,11 @@ export const SkillCompanionFileSchema = z.object({
 
 export const SkillProvenanceSchema = z.object({
   kind: z.enum(['imported', 'distilled']),
-  /** Envelope CIDs the skill was distilled from ([] for seed imports). */
+  /**
+   * Envelope CIDs the skill was distilled from ([] for seed imports).
+   * The "distilled from N traces" count is this array's length — never
+   * stored separately (anti-drift).
+   */
   sourceEnvelopeCids: z.array(z.string().min(1)),
   operator: z.object({ safeAddress: HexAddressSchema }),
   solverType: z.string().min(1).optional(),
@@ -67,6 +76,19 @@ export const SkillProvenanceSchema = z.object({
       licence: z.string().nullable(),
     })
     .optional(),
+  // --- distilled-skill fields (DR-2026-07-06, additive; producer is
+  // publishSkill() in client/packages/harness-layer/src/publish-skill.ts) ---
+  /** Success→strategic-pattern vs failure→lesson (spec §7, D10). */
+  skillKind: z.enum(['strategic-pattern', 'failure-lesson']).optional(),
+  /** SHA-256 of the exact distill prompt that produced the skill (auditability, D4). */
+  distillPromptSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  /** Task-distribution the skill targets (e.g. 'coding'). */
+  distribution: z.string().min(1).optional(),
+  /** Verifiability tier of the source evidence (e.g. 'evaluator-verified'). */
+  verifiabilityTier: z.string().min(1).optional(),
 });
 
 /** Decoded size of a base64 string without decoding it. */

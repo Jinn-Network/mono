@@ -42,7 +42,13 @@ export function parseEnvelopeKey(key: string): { kind: string; cid: string } | n
   const colon = key.indexOf(':');
   if (colon <= 0 || colon === key.length - 1) return null;
   const kind = key.slice(0, colon);
-  if (kind !== 'envelope' && kind !== 'evaluation' && kind !== 'capture') return null;
+  // `skill:` is the layer-2 distilled-skill / seed consumable (jinn.skill.v1,
+  // spec/2026-07-06-distillation-v1.md §5). It is indexed as an Envelope row so
+  // corpus.query() / search() can surface it; it triggers no enrichment (the
+  // capture/envelope/evaluation enrichment gates are kind-specific).
+  if (kind !== 'envelope' && kind !== 'evaluation' && kind !== 'capture' && kind !== 'skill') {
+    return null;
+  }
   return { kind, cid: key.slice(colon + 1) };
 }
 

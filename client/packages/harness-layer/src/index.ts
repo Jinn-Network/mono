@@ -69,6 +69,23 @@ export {
 } from '../../../src/types/skill-artifact.js';
 
 export {
+  buildSkillMarkdown,
+  parseSkillMarkdown,
+  assertConformantName,
+  SkillPackageMetaSchema,
+  type SkillPackage,
+  type SkillPackageMeta,
+} from './skill-package.js';
+
+export {
+  publishSkill,
+  toSkillArtifactV1,
+  SKILL_SOLVER_TYPE,
+  type SkillPublishDeps,
+  type PublishSkillResult,
+} from './publish-skill.js';
+
+export {
   createLivePublishDeps,
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,

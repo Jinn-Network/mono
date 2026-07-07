@@ -1071,6 +1071,7 @@ export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignal
 //   envelope:<cid>            → upsert Envelope
 //   evaluation:<cid>          → upsert Envelope
 //   capture:<cid>             → upsert Envelope
+//   skill:<cid>               → upsert Envelope (jinn.skill.v1 layer-2 consumable; no enrichment)
 
 export async function handleMetadataSet({
   event,

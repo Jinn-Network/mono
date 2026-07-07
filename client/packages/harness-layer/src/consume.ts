@@ -24,6 +24,7 @@ import { createDiscoveryAPI } from '../../../src/discovery/factory.js';
 import type { DiscoveryAPI } from '../../../src/discovery/types.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
 import type { AcquireResult } from '../../../src/corpus/fetch-artifact.js';
+import { SKILL_ARTIFACT_TYPE } from '../../../src/types/skill-artifact.js';
 
 /**
  * Default public IPFS gateway. Mirrors the `ipfsGatewayUrl` zod default in
@@ -76,6 +77,14 @@ export interface CorpusSearchHit {
   solverType: string;
   role: string;
   artifactTypes: string[];
+  /**
+   * `'skill'` when the record carries a `jinn.skill.v1` artifact, else
+   * `'trace'`. Note: legacy pre-#1394 seeded-trace records (skill.md as a step
+   * attribute, no first-class artifact) classify as `'trace'` here even though
+   * `extractSkill()` still recognises them via its fallback shape — acceptable
+   * because the layer-2 re-import supersedes them with first-class records.
+   */
+  kind: 'skill' | 'trace';
   // Provenance.
   evidenceTier: EnvelopeRef['evidenceTier'];
   generatedAt: number;
@@ -125,7 +134,7 @@ export interface HarnessLayer {
      * artifactType / ref / task cid contains `query` (case-insensitive).
      * Empty query returns everything fetched (up to `limit`).
      */
-    search(query: string, opts?: { limit?: number }): Promise<CorpusSearchHit[]>;
+    search(query: string, opts?: { limit?: number; kind?: 'skill' | 'trace' }): Promise<CorpusSearchHit[]>;
     /** Fetch a record by ref (manifest CID from a search hit), including artifact bytes. */
     get(ref: string): Promise<CorpusRecord>;
   };
@@ -153,6 +162,7 @@ function toSearchHit(ref: EnvelopeRef, envelope: SignedEnvelope): CorpusSearchHi
     solverType: envelope.solverType,
     role: envelope.role,
     artifactTypes: envelope.artifacts.map((a) => a.artifactType),
+    kind: envelope.artifacts.some((a) => a.artifactType === SKILL_ARTIFACT_TYPE) ? 'skill' : 'trace',
     evidenceTier: ref.evidenceTier,
     generatedAt: envelope.generatedAt,
     publishedAt: ref.publishedAt,
@@ -239,7 +249,10 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
     }
   }
 
-  async function search(query: string, opts: { limit?: number } = {}): Promise<CorpusSearchHit[]> {
+  async function search(
+    query: string,
+    opts: { limit?: number; kind?: 'skill' | 'trace' } = {},
+  ): Promise<CorpusSearchHit[]> {
     const limit = opts.limit ?? DEFAULT_SEARCH_LIMIT;
     const hits: CorpusSearchHit[] = [];
     const seen = new Set<string>();
@@ -277,7 +290,10 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
       if (matchesQuery(hit, query)) hits.push(hit);
       if (hits.length >= limit) break;
     }
-    return hits;
+    // Client-side kind filter (spec §5: the indexer has no artifactType column,
+    // so this is a best-effort filter over the fetched page — a kind-filtered
+    // search may return fewer than `limit` if other kinds consumed the budget).
+    return opts.kind ? hits.filter((h) => h.kind === opts.kind) : hits;
   }
 
   async function get(ref: string): Promise<CorpusRecord> {

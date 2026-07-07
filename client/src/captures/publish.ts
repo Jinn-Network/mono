@@ -202,6 +202,10 @@ interface BuildUnsignedCaptureEnvelopeArgs {
   artifacts: Artifact[];
   harnessBundleSha: string;
   executorOverrides?: Partial<UnsignedEnvelope['executor']>;
+  /** Discriminator override (default 'capture'). Layer-2 skills pass 'distilled-skill'. */
+  solverType?: string;
+  /** Role override (default 'capture'). `role` is a closed enum; skills stay 'capture'. */
+  role?: UnsignedEnvelope['role'];
 }
 
 export function buildUnsignedCaptureEnvelope(args: BuildUnsignedCaptureEnvelopeArgs): UnsignedEnvelope {
@@ -239,8 +243,8 @@ export function buildUnsignedCaptureEnvelope(args: BuildUnsignedCaptureEnvelopeA
 
   return UnsignedEnvelopeSchema.parse({
     schemaVersion: 'jinn.execution.v1',
-    solverType: 'capture',
-    role: 'capture',
+    solverType: args.solverType ?? 'capture',
+    role: args.role ?? 'capture',
     generatedAt: windowEnd,
     sessionProvenance,
     participant,
