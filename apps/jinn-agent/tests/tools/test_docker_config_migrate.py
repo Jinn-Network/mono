@@ -126,7 +126,7 @@ def test_docker_config_migrate_does_not_rewrite_invalid_yaml(tmp_path: Path) -> 
 
     assert proc.returncode == 0, proc.stderr
     assert "Migrating config schema" not in proc.stdout
-    assert "hermes config:" in proc.stderr
+    assert "jinn-agent config:" in proc.stderr
     assert config_path.read_text(encoding="utf-8") == original
     assert not list(tmp_path.glob("*.bak-*"))
 

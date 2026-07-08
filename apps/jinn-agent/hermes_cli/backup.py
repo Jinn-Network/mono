@@ -461,7 +461,7 @@ def run_backup(args) -> None:
         if len(errors) > 10:
             print(f"  ... and {len(errors) - 10} more")
 
-    print(f"\nRestore with: hermes import {out_path.name}")
+    print(f"\nRestore with: jinn-agent import {out_path.name}")
 
 
 # ---------------------------------------------------------------------------
@@ -722,13 +722,13 @@ def run_import(args) -> None:
                 # hermes_cli.profiles might not be available (fresh install)
                 if any(profiles_dir.iterdir()):
                     print(f"\n  Profiles detected but aliases could not be created.")
-                    print(f"  Run: hermes profile list  (after installing hermes)")
+                    print(f"  Run: jinn-agent profile list  (after installing jinn-agent)")
 
         # Guidance
         print()
         if not (hermes_root / "hermes-agent").is_dir():
             print("Note: The hermes-agent codebase was not included in the backup.")
-            print("  If this is a fresh install, run: hermes update")
+            print("  If this is a fresh install, run: jinn-agent update")
 
         if restored_profiles:
             gw_profiles = [n for n, _ in restored_profiles]
