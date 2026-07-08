@@ -128,3 +128,72 @@ def run_cli(*args: str, home: str) -> str:
     env.pop("JINN_AGENT_HOME", None)
     p = subprocess.run([str(_BIN), *args], env=env, capture_output=True, text=True, timeout=120)
     return p.stdout + p.stderr
+
+
+# ── Runtime command-hint scanner (follow-up sweep of `hermes <subcmd>`) ──
+# A plain `hermes` on the user's PATH resolves to a stock upstream install,
+# so any RUNTIME output hinting `hermes <subcommand>` directs the user at
+# the wrong binary. Hints are hard-replaced to `jinn-agent <subcommand>` in
+# the source literal — never routed through the skin accessor — so they are
+# greppable and true at rest. Out of scope for this scanner (excluded):
+#   - comments (not in the AST) and docstrings — developer-facing
+#   - argparse help=/description=/epilog=/usage= kwargs — the --help surface
+#     is gated behaviourally by test_help.py instead
+#   - per-file allowlisted exact literals: process-cmdline / unit-file
+#     matchers and log-grep markers, which match how a process was actually
+#     spawned rather than what the user should type
+import ast
+
+COMMAND_HINT = re.compile(r"(?<![\w/.-])hermes ([a-z][a-z0-9-]*)")
+_HELP_KWARGS = frozenset({"help", "description", "epilog", "usage"})
+
+# Exact string literals that legitimately contain `hermes <word>`. Matched
+# against the whole literal so a matcher entry can never mask a regression
+# elsewhere in the file.
+ALLOWED_HINT_LITERALS = {
+    # _dashboard_pids() cmdline matchers + the update-log banner marker
+    "hermes_cli/main.py": frozenset({
+        "hermes dashboard",
+        "hermes serve",
+        "\n=== hermes update started ",
+    }),
+    # _LEGACY_UNIT_EXECSTART_MARKERS: identify pre-rename systemd units
+    "hermes_cli/gateway.py": frozenset({
+        " hermes gateway ",
+        "/hermes gateway ",
+    }),
+}
+
+
+def scan_runtime_hint_violations(rel_path: str) -> list:
+    """Scan *rel_path* (repo-relative) for `hermes <subcmd>` hints in
+    runtime string literals. Returns ``[(lineno, literal), ...]``.
+    """
+    source = (_REPO / rel_path).read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=rel_path)
+    skip = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) and isinstance(
+                    body[0].value, ast.Constant) and isinstance(
+                    body[0].value.value, str):
+                skip.add(id(body[0].value))
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg in _HELP_KWARGS:
+                    for sub in ast.walk(kw.value):
+                        if isinstance(sub, ast.Constant) and isinstance(
+                                sub.value, str):
+                            skip.add(id(sub))
+    allowed = ALLOWED_HINT_LITERALS.get(rel_path, frozenset())
+    violations = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        if id(node) in skip or node.value in allowed:
+            continue
+        if COMMAND_HINT.search(node.value):
+            violations.append((node.lineno, node.value))
+    return violations

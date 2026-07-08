@@ -582,7 +582,7 @@ def test_install_startup_fallback_does_not_auto_spawn_when_gateway_stopped(monke
     assert ("next_steps", None) in calls
     out = capsys.readouterr().out
     assert "gateway not started now" in out
-    assert "hermes --profile alice gateway start" in out
+    assert "jinn-agent --profile alice gateway start" in out
 
 
 def test_install_access_denied_declined_elevation_uses_startup_fallback(monkeypatch, tmp_path, capsys):
