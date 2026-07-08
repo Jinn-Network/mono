@@ -22,11 +22,12 @@
  */
 import { spawn } from 'node:child_process';
 import { mkdtemp, cp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildSolveArgs, parseSessionTokens, extractSessionId, type Arm } from '../src/pilot/solve.js';
-import { solveCostUsd, DEEPSEEK_V4_FLASH_RATES } from '../src/pilot/cost.js';
+import { solveCostUsd, DEEPSEEK_V4_FLASH_RATES, GPT_5_4_MINI_RATES, type RateTable } from '../src/pilot/cost.js';
 import { tallyPilot, type SolveOutcome, type PilotReport } from '../src/pilot/tally.js';
 import { parsePilotInstanceRow, type PilotInstance } from '../src/pilot/instance.js';
 import { HttpHfFetcher } from '../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
@@ -51,6 +52,11 @@ export interface PilotConfig {
   maxInstances: number;
   upstreamRepoDir: string;
   jinnAgentBin: string;
+  /** Inference endpoint pinned per-invocation (does not touch config.yaml).
+   *  Unset → jinn-agent uses its config default. For the Codex-subscription
+   *  run: provider='openai-codex', model='gpt-5.4-mini'. */
+  provider?: string;
+  model?: string;
   /** Hard cap per grade (ms). Default 10 min: amd64 SWE-rebench images can wedge
    *  indefinitely under Apple-Silicon emulation, and the eval runner's own default
    *  is 2h — far too long for a pilot. A timed-out grade becomes ungradeable and
@@ -88,10 +94,20 @@ function parseArgs(argv: string[]): PilotConfig {
       case '--max-instances': cfg.maxInstances = Number(argv[++i]); break;
       case '--upstream-repo-dir': cfg.upstreamRepoDir = String(argv[++i]); break;
       case '--jinn-agent-bin': cfg.jinnAgentBin = String(argv[++i]); break;
+      case '--provider': cfg.provider = String(argv[++i]); break;
+      case '--model': cfg.model = String(argv[++i]); break;
       case '--grade-timeout-ms': cfg.gradeTimeoutMs = Number(argv[++i]); break;
       case '--instances': {
         // JSON array of {instance_id, hf_dataset, hf_split}
         cfg.instances = JSON.parse(String(argv[++i])) as PilotInstanceRef[];
+        break;
+      }
+      case '--instances-file': {
+        // Same JSON array, read from a file (avoids fragile shell-quoting for
+        // large slates). Fail-loud if unreadable or not an array.
+        const parsed = JSON.parse(readFileSync(String(argv[++i]), 'utf8')) as unknown;
+        if (!Array.isArray(parsed)) throw new Error('--instances-file must contain a JSON array');
+        cfg.instances = parsed as PilotInstanceRef[];
         break;
       }
       default: break;
@@ -171,7 +187,7 @@ async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, rep
   await cp(baseDir, armDir, { recursive: true });
 
   const prompt = buildPrompt(instance);
-  const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns });
+  const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns, provider: cfg.provider, model: cfg.model });
   console.log(`[pilot] solving ${instance.instance_id} arm=${arm.name} repeat=${repeat}...`);
   const { stderr, exitCode } = await run(cfg.jinnAgentBin, args, { cwd: armDir });
 
@@ -186,8 +202,9 @@ async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, rep
     const exportRes = await run(cfg.jinnAgentBin, ['sessions', 'export', '--session-id', sessionId, '-']);
     const firstLine = exportRes.stdout.split('\n').find((l) => l.trim().length > 0) ?? '';
     const tokens = parseSessionTokens(firstLine);
-    costUsd = solveCostUsd(tokens, DEEPSEEK_V4_FLASH_RATES);
-    console.log(`[pilot]   tokens: in=${tokens.inputTokens} out=${tokens.outputTokens} cost=$${costUsd.toFixed(4)}`);
+    const rates: RateTable = cfg.provider === 'openai-codex' ? GPT_5_4_MINI_RATES : DEEPSEEK_V4_FLASH_RATES;
+    costUsd = solveCostUsd(tokens, rates);
+    console.log(`[pilot]   tokens: in=${tokens.inputTokens} out=${tokens.outputTokens} reason=${tokens.reasoningTokens} cost=$${costUsd.toFixed(4)}`);
   } catch (err) {
     console.warn(`[pilot]   could not capture tokens for ${instance.instance_id}/${arm.name}/${repeat}: ${(err as Error).message}`);
   }
