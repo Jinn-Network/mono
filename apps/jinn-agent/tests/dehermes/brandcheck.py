@@ -89,6 +89,13 @@ _TECHNICAL = re.compile(
     r"|nous or xai \(default: nous\)"
     r"|docs/hermes-\s*kanban-v1-spec\.pdf"
     r"|anpicasso/hermes-\s*plugin-\s*chrome-profiles"
+    # `hermes-cli` as the OAuth client id (login/model --help "(default:
+    # hermes-cli)") — DEFAULT_NOUS_CLIENT_ID in hermes_cli/auth.py, a
+    # protocol literal registered with the Nous portal that users pass
+    # verbatim via --client-id; renaming it would break auth. Anchored to
+    # the client-id help context so it can't widen into a general
+    # hermes-cli exemption (the toolset key of that name is gone).
+    r"|client id to use[^()]*\(default: hermes-cli\)"
 )
 # "nous" as a bare substring also matches inside ordinary English words that
 # have nothing to do with the brand — e.g. "synchronous" (a real, legitimate

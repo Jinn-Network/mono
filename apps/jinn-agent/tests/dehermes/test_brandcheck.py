@@ -48,6 +48,21 @@ def test_still_flags_hermes_agent_brand_string():
     with pytest.raises(AssertionError):
         assert_no_upstream_brand("hermes-agent is great")
 
+def test_allows_oauth_client_id_default_in_help():
+    # `hermes-cli` as the OAuth client id (DEFAULT_NOUS_CLIENT_ID) is a
+    # protocol literal users pass verbatim via --client-id — same category
+    # as the bare `nous` provider-id enum, not the (renamed) toolset key.
+    assert_no_upstream_brand("OAuth client id to use (default: hermes-cli)")
+    assert_no_upstream_brand(
+        "OAuth client id to use for provider portal login (default: hermes-cli)"
+    )
+
+def test_still_flags_hermes_cli_outside_client_id_context():
+    # The client-id anchor must not resurrect the removed toolset-key
+    # exemption: a bare hermes-cli elsewhere is a brand leak.
+    with pytest.raises(AssertionError):
+        assert_no_upstream_brand("Available toolsets: hermes-cli")
+
 def test_allows_pip_install_hermes_agent_package_name():
     # bare `hermes-agent` in a pip-install invocation is the real PyPI
     # package name (pyproject.toml `name = "hermes-agent"`) — e.g. the
