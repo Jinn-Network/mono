@@ -1418,7 +1418,13 @@ def _get_platform_tools(
     include_default_mcp_servers: bool = True,
 ) -> Set[str]:
     """Resolve which individual toolset names are enabled for a platform."""
-    from toolsets import resolve_toolset, TOOLSETS, canonical_toolset_name, platform_bundle_toolset
+    from toolsets import (
+        resolve_toolset,
+        TOOLSETS,
+        canonical_toolset_name,
+        is_platform_bundle_name,
+        platform_bundle_toolset,
+    )
 
     platform_toolsets = config.get("platform_toolsets") or {}
     toolset_names = platform_toolsets.get(platform)
@@ -1567,7 +1573,7 @@ def _get_platform_tools(
     for ts_key in enabled_toolsets:
         claimed.update(resolve_toolset(ts_key))
     skip = configurable_keys | plugin_ts_keys | platform_default_keys
-    skip |= {k for k in TOOLSETS if k.startswith("jinn-")}
+    skip |= {k for k in TOOLSETS if is_platform_bundle_name(k)}
     skip |= set(_DEFAULT_OFF_TOOLSETS) - {platform}
     for ts_key, ts_def in TOOLSETS.items():
         if ts_key in skip:
