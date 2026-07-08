@@ -25,6 +25,7 @@ import type { DiscoveryAPI } from '../../../src/discovery/types.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
 import type { AcquireResult } from '../../../src/corpus/fetch-artifact.js';
 import { SKILL_ARTIFACT_TYPE } from '../../../src/types/skill-artifact.js';
+import { extractSkill } from './skill.js';
 
 /**
  * Default public IPFS gateway. Mirrors the `ipfsGatewayUrl` zod default in
@@ -133,8 +134,13 @@ export interface HarnessLayer {
      * Query the corpus and return records whose solverType / role /
      * artifactType / ref / task cid contains `query` (case-insensitive).
      * Empty query returns everything fetched (up to `limit`).
+     *
+     * By default the result is collapsed to lineage heads: a skill record
+     * superseded (or deprecated) by a same-operator record in the fetched page
+     * is dropped (#1462). Pass `includeSuperseded: true` to disable the
+     * collapse and see every record.
      */
-    search(query: string, opts?: { limit?: number; kind?: 'skill' | 'trace' }): Promise<CorpusSearchHit[]>;
+    search(query: string, opts?: { limit?: number; kind?: 'skill' | 'trace'; includeSuperseded?: boolean }): Promise<CorpusSearchHit[]>;
     /** Fetch a record by ref (manifest CID from a search hit), including artifact bytes. */
     get(ref: string): Promise<CorpusRecord>;
   };
@@ -249,9 +255,73 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
     }
   }
 
+  /**
+   * Collapse a page of hits to lineage heads (#1462). For every `kind:'skill'`
+   * hit, fetch its body and read `provenance.supersedes` / `provenance.deprecates`:
+   *   - a `deprecates: true` record hides itself, and
+   *   - a `supersedes` pointer hides its target when — and only when — the
+   *     target's operator matches this record's operator.
+   *
+   * Operator identity is the on-chain-derived `operator.agentId` the DiscoveryAPI
+   * supplies on each hit (IdentityRegistry event → indexer `row.agentId`), NOT the
+   * envelope `participant.safeAddress`. participant.safeAddress is free-form IPFS
+   * manifest content the publisher writes at will; keying the same-operator check
+   * off it would let a forged address grief default discovery. agentId is not
+   * forgeable in this way — a record is only indexed under its publisher's real
+   * agentId — so a supersede fires only against the same on-chain operator. The
+   * match is fail-safe: an absent agentId never matches, so an unattributed record
+   * collapses nothing. Residual (narrower): the supersede intent itself is not yet
+   * signature-verified end-to-end; tracked in spec/2026-07-06-distillation-v1.md §16.
+   *
+   * O(page) window (DECISION #3, no indexer change): a supersede is honored
+   * only when BOTH successor and target land in the same fetched page (spec
+   * §5/§16). Head-resolution is fail-safe: an unfetchable body hides nothing
+   * (mirrors the warn+continue on the manifest-scan path above).
+   */
+  async function resolveHeads(hits: CorpusSearchHit[]): Promise<CorpusSearchHit[]> {
+    const lineage = new Map<string, { op: string; supersedes?: string; deprecates?: boolean }>();
+    for (const h of hits) {
+      if (h.kind !== 'skill') continue;
+      try {
+        const record = await get(h.ref);
+        const prov = extractSkill(record)?.skill.provenance;
+        lineage.set(h.ref, {
+          // Operator identity from the on-chain-derived `operator.agentId` the
+          // DiscoveryAPI supplies on the hit (IdentityRegistry event → indexer
+          // `row.agentId`, carried through `corpus.fetchManifest` untouched) —
+          // NOT the envelope `participant.safeAddress`, which is free-form IPFS
+          // manifest content the publisher writes at will (a forged value there
+          // could grief default discovery). A record can only be indexed under
+          // its publisher's real `agentId`, so a supersede pointer only fires
+          // against the SAME on-chain operator.
+          op: h.operator.agentId,
+          supersedes: prov?.supersedes,
+          deprecates: prov?.deprecates,
+        });
+      } catch (err) {
+        console.warn(`[harness-layer] head-resolution skipping ${h.ref}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const excluded = new Set<string>();
+    for (const [selfRef, info] of lineage) {
+      if (info.deprecates === true) excluded.add(selfRef);
+      if (info.supersedes) {
+        const target = lineage.get(info.supersedes);
+        // Same-operator only, fail-safe when identity is unknown: require both
+        // agentIds non-empty and equal. An empty agentId (a backend that does
+        // not attribute the hit) never matches, so an unattributable record
+        // hides nothing rather than griefing.
+        if (target && info.op && target.op && target.op === info.op) {
+          excluded.add(info.supersedes);
+        }
+      }
+    }
+    return hits.filter((h) => !(h.kind === 'skill' && excluded.has(h.ref)));
+  }
+
   async function search(
     query: string,
-    opts: { limit?: number; kind?: 'skill' | 'trace' } = {},
+    opts: { limit?: number; kind?: 'skill' | 'trace'; includeSuperseded?: boolean } = {},
   ): Promise<CorpusSearchHit[]> {
     const limit = opts.limit ?? DEFAULT_SEARCH_LIMIT;
     const hits: CorpusSearchHit[] = [];
@@ -290,10 +360,13 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
       if (matchesQuery(hit, query)) hits.push(hit);
       if (hits.length >= limit) break;
     }
+    // Collapse to lineage heads (#1462) unless the caller opts out. Runs before
+    // the kind filter so a superseded skill is dropped regardless of the filter.
+    const heads = opts.includeSuperseded ? hits : await resolveHeads(hits);
     // Client-side kind filter (spec §5: the indexer has no artifactType column,
     // so this is a best-effort filter over the fetched page — a kind-filtered
     // search may return fewer than `limit` if other kinds consumed the budget).
-    return opts.kind ? hits.filter((h) => h.kind === opts.kind) : hits;
+    return opts.kind ? heads.filter((h) => h.kind === opts.kind) : heads;
   }
 
   async function get(ref: string): Promise<CorpusRecord> {

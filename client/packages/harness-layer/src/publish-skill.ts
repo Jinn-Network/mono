@@ -79,10 +79,25 @@ export interface PublishSkillResult {
   anchorTx: `0x${string}` | null;
 }
 
+/**
+ * Supersede lineage a publish may stamp on a skill record (issue #1462).
+ * Lifecycle is *content* — not an injected collaborator — so it rides an
+ * optional param, preserving the deps/content seam and keeping every existing
+ * 2-arg call site working. Honored at read time only when the successor's
+ * operator matches the superseded record's operator (client/.../consume.ts).
+ */
+export interface SkillLifecycle {
+  /** Envelope/manifest CID of the prior record this one replaces. */
+  supersedes?: string;
+  /** Pure retirement marker: retires `supersedes` with no replacement. */
+  deprecates?: boolean;
+}
+
 /** Map the distiller-side SkillPackage onto the canonical SkillArtifactV1. */
 export function toSkillArtifactV1(
   pkg: SkillPackage,
   operatorSafeAddress: `0x${string}`,
+  lifecycle?: SkillLifecycle,
 ): SkillArtifactV1 {
   return SkillArtifactV1Schema.parse({
     schemaVersion: SKILL_ARTIFACT_TYPE,
@@ -109,6 +124,9 @@ export function toSkillArtifactV1(
       ...(pkg.jinn.distillModel !== undefined ? { distillModel: pkg.jinn.distillModel } : {}),
       ...(pkg.jinn.evidenceTokens !== undefined ? { evidenceTokens: pkg.jinn.evidenceTokens } : {}),
       ...(pkg.jinn.skillTokens !== undefined ? { skillTokens: pkg.jinn.skillTokens } : {}),
+      // Supersede lineage (#1462).
+      ...(lifecycle?.supersedes !== undefined ? { supersedes: lifecycle.supersedes } : {}),
+      ...(lifecycle?.deprecates !== undefined ? { deprecates: lifecycle.deprecates } : {}),
     },
   });
 }
@@ -116,9 +134,10 @@ export function toSkillArtifactV1(
 export async function publishSkill(
   pkg: SkillPackage,
   deps: SkillPublishDeps,
+  lifecycle?: SkillLifecycle,
 ): Promise<PublishSkillResult> {
   const now = deps.now?.() ?? new Date();
-  const skillArtifact = toSkillArtifactV1(pkg, deps.participant.safeAddress);
+  const skillArtifact = toSkillArtifactV1(pkg, deps.participant.safeAddress, lifecycle);
 
   const blob = await deps.publishArtifact({
     artifactType: SKILL_ARTIFACT_TYPE,

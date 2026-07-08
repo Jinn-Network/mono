@@ -103,4 +103,34 @@ describe('SkillArtifactV1Schema', () => {
     input.files[0]!.contentBase64 = big;
     expect(() => SkillArtifactV1Schema.parse(input)).toThrow(/1 MiB|cap/i);
   });
+
+  // --- supersede lineage (issue #1462, additive) ---
+
+  it('back-compat: an existing no-lineage fixture parses with supersedes/deprecates undefined', () => {
+    const parsed = SkillArtifactV1Schema.parse(valid());
+    expect(parsed.provenance.supersedes).toBeUndefined();
+    expect(parsed.provenance.deprecates).toBeUndefined();
+  });
+
+  it('accepts and round-trips a supersedes CID', () => {
+    const input = valid();
+    input.provenance.supersedes = 'bafyPrev';
+    const parsed = SkillArtifactV1Schema.parse(input);
+    expect(parsed.provenance.supersedes).toBe('bafyPrev');
+  });
+
+  it('accepts deprecates alongside supersedes (a retirement record)', () => {
+    const input = valid();
+    input.provenance.supersedes = 'bafyPrev';
+    input.provenance.deprecates = true;
+    const parsed = SkillArtifactV1Schema.parse(input);
+    expect(parsed.provenance.supersedes).toBe('bafyPrev');
+    expect(parsed.provenance.deprecates).toBe(true);
+  });
+
+  it('rejects an empty supersedes CID (.min(1))', () => {
+    const input = valid();
+    input.provenance.supersedes = '';
+    expect(() => SkillArtifactV1Schema.parse(input)).toThrow();
+  });
 });

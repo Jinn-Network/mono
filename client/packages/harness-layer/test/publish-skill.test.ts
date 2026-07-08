@@ -97,6 +97,24 @@ describe('toSkillArtifactV1 (SkillPackage → canonical #1394 artifact)', () => 
     expect(art.skill.skillMd).not.toContain('jinn:');
     expect(art.skill.skillMd).toContain('# Example');
   });
+
+  // --- supersede lineage (issue #1462) ---
+
+  it('omits supersedes/deprecates when no lifecycle is passed', () => {
+    const art = toSkillArtifactV1(pkg, `0x${'1'.repeat(40)}`);
+    expect(art.provenance.supersedes).toBeUndefined();
+    expect(art.provenance.deprecates).toBeUndefined();
+  });
+
+  it('carries supersedes + deprecates when a lifecycle is passed', () => {
+    const art = toSkillArtifactV1(pkg, `0x${'1'.repeat(40)}`, {
+      supersedes: 'bafyPrev',
+      deprecates: true,
+    });
+    expect(() => SkillArtifactV1Schema.parse(art)).not.toThrow();
+    expect(art.provenance.supersedes).toBe('bafyPrev');
+    expect(art.provenance.deprecates).toBe(true);
+  });
 });
 
 describe('publishSkill', () => {
@@ -135,5 +153,15 @@ describe('publishSkill', () => {
     const deps = fakeDeps();
     deps.signer = { address: `0x${'2'.repeat(40)}` as `0x${string}` }; // no key
     await expect(publishSkill(pkg, deps)).rejects.toThrow(/privateKey or a signEnvelope/);
+  });
+
+  it('threads a lifecycle onto the uploaded skill-artifact provenance (#1462)', async () => {
+    const deps = fakeDeps();
+    await publishSkill(pkg, deps, { supersedes: 'bafyPrev' });
+
+    const skillUpload = deps.artifactUploads.find((c) => c.artifactType === SKILL_ARTIFACT_TYPE);
+    const payload = skillUpload!.payload as SkillArtifactV1;
+    expect(payload.provenance.supersedes).toBe('bafyPrev');
+    expect(payload.provenance.deprecates).toBeUndefined();
   });
 });

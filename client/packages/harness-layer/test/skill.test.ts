@@ -279,4 +279,24 @@ describe('extractSkill()', () => {
     const record = toRecord(envelopes[0]!, published, result.envelopeRef);
     expect(extractSkill(record)).toBeNull();
   });
+
+  it('surfaces supersede lineage on the extracted provenance (#1462)', async () => {
+    const input = skillArtifact({
+      provenance: {
+        kind: 'distilled',
+        sourceEnvelopeCids: ['bafySrc1'],
+        operator: { safeAddress: TEST_SAFE },
+        solverType: 'skill-distiller.v0',
+        supersedes: 'bafyPrev',
+        deprecates: true,
+      },
+    });
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(await capture(capturedTask()), deps, { skill: input });
+    if (result.vetoed) throw new Error('unexpected veto');
+    const record = toRecord(envelopes[0]!, published, result.envelopeRef);
+    const extracted = extractSkill(record);
+    expect(extracted!.skill.provenance.supersedes).toBe('bafyPrev');
+    expect(extracted!.skill.provenance.deprecates).toBe(true);
+  });
 });

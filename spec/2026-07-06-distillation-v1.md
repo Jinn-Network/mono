@@ -815,6 +815,15 @@ Issue (mostly `feat`, one `fix` for #1409) with a TDD plan under `docs/superpowe
   the `ContributionActivityChecker` contract is deferred to a later amendment (§8).
 - **`skills` CLI custom-source support** — gates the forward-path resolver only (§9); verify against
   the CLI source before building.
+- **Supersede-lineage operator trust (#1462)** — head-resolution's same-operator check keys off the
+  on-chain-derived `operator.agentId` the DiscoveryAPI supplies on each hit (IdentityRegistry event →
+  indexer `row.agentId`, carried through `corpus.fetchManifest` untouched), NOT the forgeable envelope
+  `participant.safeAddress`. A record can only be indexed under its publisher's real `agentId`, so a
+  forged `participant.safeAddress` cannot retire a victim's skill (the successor is attributed to the
+  attacker's own operator, so the same-operator check does not fire). Residual (narrower): the check is
+  fail-safe when `agentId` is absent (a backend that does not attribute the hit collapses nothing rather
+  than mis-collapsing), and the supersede intent is not yet signature-verified end-to-end — but
+  same-operator is now enforced on a non-forgeable identity, closing the grief vector.
 - **skill envelope discriminator** — `role: 'capture'` (closed enum) + `solverType: 'distilled-skill'`
   + `artifactType: 'jinn.skill.v1'` (§5). RESOLVED: `skill:<cid>` is registered in the indexer's
   `parseEnvelopeKey` so skills are indexed and discoverable with no enrichment (live-checked). A full

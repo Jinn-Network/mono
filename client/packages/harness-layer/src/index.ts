@@ -83,6 +83,7 @@ export {
   SKILL_SOLVER_TYPE,
   type SkillPublishDeps,
   type PublishSkillResult,
+  type SkillLifecycle,
 } from './publish-skill.js';
 
 export {

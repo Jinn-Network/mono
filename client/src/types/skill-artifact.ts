@@ -108,6 +108,21 @@ export const SkillProvenanceSchema = z.object({
    */
   evidenceTokens: z.number().int().nonnegative().optional(),
   skillTokens: z.number().int().nonnegative().optional(),
+  // --- supersede lineage (issue #1462, additive) ---
+  /**
+   * Envelope/manifest CID of a prior skill record this one replaces — the same
+   * identity space as `sourceEnvelopeCids` and a search-hit `ref`. Honored at
+   * read time ONLY when this record's operator matches the superseded record's
+   * operator (cross-operator supersedes are ignored); see the read-path head
+   * resolver in client/packages/harness-layer/src/consume.ts.
+   */
+  supersedes: z.string().min(1).optional(),
+  /**
+   * Pure retirement marker: retires this record's `supersedes` target with no
+   * replacement and hides this record itself from discovery. A deprecation
+   * record carries no successor skill content.
+   */
+  deprecates: z.boolean().optional(),
 });
 
 /** Decoded size of a base64 string without decoding it. */
