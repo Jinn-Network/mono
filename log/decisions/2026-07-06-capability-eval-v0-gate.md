@@ -91,7 +91,8 @@ interaction), and scoped what a v0 result licenses against §8. Spec v0.2 folds 
    both-solve set. Power/N via the Connor (1987) McNemar formula + a pilot bootstrap sim —
    **explicitly not N=10/R=1** (DR-2026-06-02-b proved that cannot detect < +60pp).
 
-7. **Pinned model = `deepseek/deepseek-v4-flash` on OpenRouter** for the primary run — ~$0.09/$0.18
+7. **[Amended 2026-07-08 → `gpt-5.4-mini` via the OpenAI Codex subscription; see Amendment below.]**
+   **Pinned model = `deepseek/deepseek-v4-flash` on OpenRouter** for the primary run — ~$0.09/$0.18
    per M (~11–28× cheaper than Haiku) and a capable agentic coder, so cheaper *and* more
    representative of a cost-conscious fork user. **OpenRouter (metered) is required**: the cost gate
    needs provider-actual tokens, which a flat-rate subscription cannot supply. The pilot confirms
@@ -144,3 +145,34 @@ freeze corpus → draw slate disjoint from it → publish → distillation exclu
 **Ratified** 2026-07-07 (operator sign-off). The rig and pilot harness are in progress on
 `claude/gallant-dijkstra-768dc8`. Distillation MUST consume the published `cap-v0` slate boundary
 via `excludeHeldOutSlate` once the slate artifact lands (tracking: filed at ratification).
+
+## Amendment — 2026-07-08 (substrate re-pin, operator-directed)
+
+**Decision 7 pinned model changed: `deepseek/deepseek-v4-flash` → `gpt-5.4-mini` via the OpenAI
+Codex subscription.** Driven by pilot evidence, operator-directed (Ritsu). Spec updated to v0.3
+(decision E, §9, §11).
+
+- **Why.** The flash pilot surfaced a **confound**, not a corpus result: flash's weak agentic
+  tool-use spirals into empty-patch / >700k-token runs when handed extra context, so arm B's
+  headline "seeds hurt by −9.1pp" was largely flash flailing. Re-running the identical small-repo
+  slate on the reasoning-tier `gpt-5.4-mini` **eliminated the spirals** (0 empty patches across 16
+  solves), lifted arm A's solve rate (54.5% → 66.7%), and moved the seeds effect to **Δ = 0.0pp,
+  non-inferior** — a clean substrate on which a future distilled-arm signal is attributable to the
+  skills rather than model noise.
+- **Metering correction.** Decision 7 claimed a flat-rate subscription cannot supply
+  provider-actual tokens. **This is false for the Codex OAuth path**: `jinn-agent sessions export`
+  returns `input`/`output`/`reasoning`/`cache_read` token counts on the sub (`output_tokens`
+  already includes `reasoning_tokens` — do not double-count). The cost gate needs only counts,
+  priced at the published $0.75/$4.50-per-M rate; the PASS/FAIL *direction* is rate-independent.
+- **Honest tradeoff.** gpt-5.4-mini is ~3–4× flash's *representative* cost/solve, so **less
+  "cost-representative of a fork user"** than flash — accepted because inference is free to the
+  operator via the sub and the signal-quality win is decisive. The powered ~5,200-solve
+  screen+measurement will exceed sub caps → run throttle-bound on the sub or on the metered OpenAI
+  API (~$490); §4.2's same-model-for-screening constraint forbids a cheap-flash-screen split.
+- **Unchanged.** Everything else in this DR stands: the IUT gate, seeds-only v0 scope, contested
+  band, contamination control, reuse posture, and the §12 shared boundary. The methodology is
+  model-agnostic; only the pinned id moved. `deepseek-v4-flash`/`-pro` remain valid metered
+  fallbacks.
+- **Auth/run.** `jinn-agent auth add openai-codex --type oauth`; per-invocation
+  `--provider openai-codex -m gpt-5.4-mini` (only `gpt-5.4-mini` is accepted on a ChatGPT-account
+  Codex backend — `gpt-5.5-*`/`codex-mini`/`gpt-5.1-codex-mini` all 400).

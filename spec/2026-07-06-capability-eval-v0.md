@@ -1,8 +1,9 @@
 # Capability-Eval v0 — measuring the corpus-connected harness against stock
 
-- **Version:** 0.2 (design draft — hardened by a 6-lens adversarial review pass, 2026-07-06;
-  23 findings folded in, core design unchanged)
-- **Date:** 2026-07-06
+- **Version:** 0.3 (design draft — v0.2 hardened by a 6-lens adversarial review, 2026-07-06,
+  23 findings folded in; **v0.3 re-pins the model to `gpt-5.4-mini`** after the flash pilot
+  exposed an empty-patch confound — decision E + §9 + §11, 2026-07-08. Core design unchanged.)
+- **Date:** 2026-07-06 (updated 2026-07-08)
 - **Author:** Ritsu (design session)
 - **Shape:** `design` — output is this methodology spec. Building the rig is a follow-on
   `feat`, gated on sign-off of this spec. A small pilot run to estimate effect size for the
@@ -49,7 +50,7 @@ and the joint gate. §7 records the reuse-vs-rebuild decision line-by-line.
 | **B** | **Corpus ON = seeds pre-installed only.** Arm B is a static, distribution-matched skill loadout installed once via `/jinn skills install` before the per-task meter starts. **No live `corpus_search`/`corpus_fetch` mid-task.** This isolates the "skills in context" value, simplifies contamination control (no dynamic retrieval to audit), and extends cleanly to v1 (swap seeds → distilled skills in the loadout). Live-retrieval value is explicitly **out of scope for v0** — see §2.3 for what a v0 result does and does not license against §8. |
 | **C** | **Gate = non-inferior quality AND strictly-lower cost**, combined as an intersection-union test (§2). |
 | **D** | **Held-out slate = new, power-sized, contested-band construction** (§4). The existing v1 (N=10) and v2 (N=9) slates are reused as *format and tooling precedent only* — they are the very N≈10 artifacts DR-2026-06-02-b diagnosed as underpowered, not the measurement slate. |
-| **E** | **Pinned model = `deepseek/deepseek-v4-flash`** on OpenRouter for the primary run — ~$0.09/$0.18 per M tokens (~11–28× cheaper than Haiku) and a capable agentic coder, so it is both cheaper and more representative of what a cost-conscious fork user runs. **It runs on OpenRouter (metered), which is required** — the cost gate needs provider-actual tokens (§5.2), which a flat-rate subscription cannot supply. Two guards: the pilot confirms the contested band is non-empty and tool-use holds (v4-flash is a 13B-activated efficiency tier); if it is too weak, `deepseek/deepseek-v4-pro` ($0.435/$0.87, still ~10× under Haiku) is the fallback. External-validity threats named in §11; optional stronger-model replication as mitigation. |
+| **E** | **Pinned model = `gpt-5.4-mini` via the OpenAI Codex subscription** (amended 2026-07-08; was `deepseek/deepseek-v4-flash`). The flash pilot exposed a **confound**: flash's weak agentic tool-use spirals into empty-patch / >700k-token runs when handed extra context, so arm B's apparent "seeds hurt by −9.1pp" was largely flash flailing, not a corpus effect. Re-running the same slate on the reasoning-tier `gpt-5.4-mini` **eliminated the spirals** (0 empty patches / 16 solves), lifted arm A's solve rate (54.5%→66.7%), and moved the seeds effect to **Δ=0.0pp, non-inferior** — a clean substrate where any distilled-arm signal is attributable to the skills, not to model noise. Runs on jinn-agent (the Hermes fork, corpus tools intact) via `hermes auth add openai-codex --type oauth`, per-invocation `--provider openai-codex -m gpt-5.4-mini`. **The cost gate still holds on a subscription:** the Codex OAuth backend exports provider-actual token counts (`input`/`output`/`reasoning`/`cache_read`; `output_tokens` already includes `reasoning_tokens` — do not double-count), priced at the published $0.75/$4.50-per-M rate (§5.2) — this **corrects v0.2's claim** that a flat-rate sub cannot supply provider-actual tokens. Tradeoff recorded honestly: gpt-5.4-mini is ~3–4× flash's *representative* cost/solve, so **less "cost-representative of a fork user"** than flash — but inference is free to the operator via the sub, and the signal-quality win (no empty-patch confound) is decisive for a clean measurement. The methodology is **model-agnostic**; only the pinned id changes. `deepseek-v4-flash`/`-pro` on OpenRouter (metered) remain valid fallbacks. |
 | **F** | This is a **human-run measurement, not a CI gate** (§9). |
 
 ---
@@ -723,16 +724,23 @@ signed measurement, reproducible by re-running the pinned rig against the pinned
   (e.g. N = 200 at ~15% yield ≈ 1,333 candidates × R ≈ **4,000 screening solves+grades**). The
   screen, not the measurement, dominates host-hours — this is where the cheaper-leading-indicator
   option (§13) pays off.
-- **Cost (solve side, `deepseek-v4-flash`, decision E):** the spike measured real solves at ~186k in /
-  6k out (arm A, ~$0.023) and ~303k in / 6k out (arm B, ~$0.034) — the ~186k input is the
-  system-prompt+tools baseline every solve carries, and the seed loadout added ~117k input (it
-  changed *behavior*, not just added text). So per solve is **~$0.025–0.034**, and the combined solve
-  side (≈1,200 measurement + ≈4,000 screening solves) is **~$150 total** — still cheap; Docker/disk/
-  wall-clock remain the binding constraint. (Corollary: the "lower cost" bar is genuinely demanding —
-  a loadout that adds ~117k input must save more than it costs to carry, §2.1.)
-  (OpenRouter's credit check requires the key to *afford* the worst-case `max_tokens` up front but
-  bills **actual** tokens; keep `max_tokens` generous so no legitimate solve is truncated — a
-  truncated solve is a spurious fail — and size the key's limit to cover the reservation.)
+- **Cost (solve side, `gpt-5.4-mini`, decision E):** the small-repo pilot (16 solves, 8 repos)
+  measured **~$0.026–0.185/solve, avg ~$0.094** (representative, priced at the published
+  $0.75/$4.50-per-M rate) — reasoning tokens are a large share of output (e.g. 8.9k reasoning of
+  15.3k out). At ~$0.094/solve the combined solve side (≈1,200 measurement + ≈4,000 screening ≈
+  **5,200 solves**) is **~$490+ representative** — ~3–4× the earlier flash estimate, still small
+  next to the Docker/disk/wall-clock constraint (big repos push per-solve higher). **Inference is
+  free to the operator via the Codex sub** — *no throttle observed across the 16-solve pilot* — but
+  the ~5,200-solve powered screen+measurement *will* hit subscription caps, so it runs either
+  throttle-bound over many days on the sub or on the **metered OpenAI API** (~$490). Note the §4.2
+  constraint that **screening must use the same model as the arms** — so no cheap-flash-screen /
+  mini-measure split; both run on the pinned model. (Corollary unchanged: the "lower cost" bar is
+  demanding — a loadout must save more than the context tokens it carries cost to carry, §2.1; on
+  gpt-5.4-mini the generic-seed tax was a small ~+$0.003/solve median and quality-neutral.)
+- **Fallback metering (`deepseek`/OpenRouter):** OpenRouter's credit check requires the key to
+  *afford* the worst-case `max_tokens` up front but bills **actual** tokens; keep `max_tokens`
+  generous so no legitimate solve is truncated (a truncated solve is a spurious fail) and size the
+  key's limit to cover the reservation.
 - **Grade side (Docker):** each grade minutes-to-tens-of-minutes wall-clock, up to a **2-hour**
   hard timeout per instance (`DEFAULT_EVAL_TIMEOUT_MS`); images are linux/amd64 (slow/crash-prone
   under Apple-Silicon emulation — run on amd64 hosts). Serialised grades ≈ many hundreds of
@@ -803,7 +811,7 @@ requirements:
 | **Model-pretraining contamination** | **Main effect** cancels in the paired difference (§4.1). The residual **skill×memorization interaction** (an arm-B-only cue-unlock) does NOT cancel; bounded by the distribution-matched (not task-matched) loadout and flagged by the pilot's memorization-exposure probe (§4.1, §6.4) |
 | **Both-solve conditioning = selection on a post-treatment outcome (collider)** | Bounded: paired cost compares same-task B-vs-A (no set-composition win); the quality NI leg caps the driving regression channel; the both-solve composition delta + the §5.2 all-tasks cost secondary are published as a sanity check (§2.1) |
 | **δ mis-calibration / base-rate sensitivity** | δ = 5pp absolute pre-registered with a stated basis (§2.1); PASS additionally blocked if relative regression > 15% of stock base rate, so a large relative drop at a low band base rate cannot pass on the absolute margin |
-| **Pinned-model ceiling → thin/empty contested band or weak tool-use** (decision E; `deepseek-v4-flash` is a 13B-activated efficiency tier) | Named. Pilot measures band width + yield (§4.2, §6.4); if too weak (empty band or flaky agentic tool-use), fall back to `deepseek-v4-pro`; mitigation also includes widening the candidate pool and an optional stronger-model replication (pre-registered, own α) — the methodology is model-agnostic, only the pinned id changes |
+| **Pinned-model ceiling → thin/empty contested band, weak tool-use, or empty-patch spirals** (decision E) | **Largely resolved by the v0.3 re-pin.** flash's spirals (empty-patch / >700k-token runs when handed extra context) confounded the seeds arm — its "seeds hurt −9.1pp" was mostly flailing; `gpt-5.4-mini` eliminated them (0 empty patches / 16 solves) and holds a healthy contested band (arm A 66.7%). Residual, now *inverted*: gpt-5.4-mini is a **stronger** model than a floor fork user, so the band/effect may not transfer *down* — mitigated by the model-agnostic methodology (a cheaper-model replication is pre-registerable, own α) and the honestly-recorded cost-representativeness tradeoff (decision E, §9) |
 | **Contested-band ≠ full distribution / selection-on-baseline** | The claim is *explicitly scoped* to the contested region (§2.3); screening runs are not gate data, so RTM biases only the non-gating marginal rate, not the fresh paired difference (§4.2) |
 | **Ungradeable runs biasing quality** | Never scored as FAIL; re-run K=2 then symmetric drop-the-pair; drop count published (§5.1, §10.1) |
 | **Per-task skill cherry-picking / loadout-composition tuned to the task family** | Loadout is the whole imported seed set or a published fixed rule, frozen *before* slate ids are drawn (§3.1); per-task hand-picking forbidden |
