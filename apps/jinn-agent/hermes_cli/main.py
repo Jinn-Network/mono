@@ -8564,21 +8564,30 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
         print(f"  Run '{recommended_update_command()}' to install.")
 
 
+# FHS-layout command link probed by _ensure_fhs_path_guard. Module-level so
+# tests can point it at a temp path.
+_FHS_COMMAND_LINK = Path("/usr/local/bin/jinn-agent")
+
+
 def _ensure_fhs_path_guard() -> None:
     """Ensure /usr/local/bin is on PATH for RHEL-family root non-login shells.
 
     Mirrors the post-symlink probe added to ``scripts/install.sh`` so that
     existing FHS-layout root installs on RHEL/CentOS/Rocky/Alma 8+ get
-    repaired on ``hermes update`` without requiring a reinstall.  The
+    repaired on update without requiring a reinstall.  The
     installer's assumption that ``/usr/local/bin`` is on PATH for every
     standard shell breaks on those distros in non-login interactive shells
     (su, sudo -s, tmux panes, some web terminals): /etc/bashrc doesn't
     add /usr/local/bin and /root/.bash_profile doesn't either.  Symptom:
-    ``hermes`` prints ``command not found`` even though the symlink lives
-    at /usr/local/bin/hermes.
+    ``jinn-agent`` prints ``command not found`` even though the link lives
+    at /usr/local/bin/jinn-agent.
+
+    Both the link check and the probe use the ``jinn-agent`` name: a plain
+    ``hermes`` on PATH resolves to a stock upstream install, so probing it
+    would skip the repair while this fork's command stays unreachable.
 
     Silent no-op on: non-Linux, non-root, non-FHS installs, and any system
-    where ``bash -i -c 'command -v hermes'`` already resolves.  Idempotent.
+    where ``bash -i -c 'command -v jinn-agent'`` already resolves.  Idempotent.
     """
     if sys.platform != "linux":
         return
@@ -8588,8 +8597,8 @@ def _ensure_fhs_path_guard() -> None:
     except AttributeError:
         return
     # Only act when this is actually an FHS-layout install (command link at
-    # /usr/local/bin/hermes, code at /usr/local/lib/hermes-agent).
-    fhs_link = Path("/usr/local/bin/hermes")
+    # /usr/local/bin/jinn-agent).
+    fhs_link = _FHS_COMMAND_LINK
     if not fhs_link.is_symlink() and not fhs_link.exists():
         return
 
@@ -8607,7 +8616,7 @@ def _ensure_fhs_path_guard() -> None:
                 "bash",
                 "-i",
                 "-c",
-                "command -v hermes",
+                "command -v jinn-agent",
             ],
             capture_output=True,
             text=True,
@@ -10872,7 +10881,7 @@ def cmd_profile(args):
                 print(f"Skills:         {p.skill_count} installed")
                 if p.alias_path:
                     alias_display = p.alias_name or p.name
-                    print(f"Alias:          {alias_display} → hermes -p {p.name}")
+                    print(f"Alias:          {alias_display} → jinn-agent -p {p.name}")
                 break
         print()
         return
@@ -11192,7 +11201,7 @@ def cmd_profile(args):
         if alias_name:
             is_windows = sys.platform == "win32"
             wrapper = _get_wrapper_dir() / (f"{alias_name}.bat" if is_windows else alias_name)
-            print(f"Alias:   {alias_name} → hermes -p {name}  ({wrapper})")
+            print(f"Alias:   {alias_name} → jinn-agent -p {name}  ({wrapper})")
         print()
 
     elif action == "alias":

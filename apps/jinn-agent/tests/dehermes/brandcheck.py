@@ -177,15 +177,6 @@ ALLOWED_HINT_LITERALS = {
         ' s1000000 T "$log_dir"\nexec s6-setuidgid hermes s6-log 1 n10 s1000000'
         ' T "$log_dir"\n',
     }),
-    # _resolve_hermes_bin() genuinely probes shutil.which("hermes") today,
-    # so this log line is truthful to current behaviour. The resolver
-    # itself is a functional wrong-binary defect (same class as
-    # profiles.py's wrapper scripts and main.py's `command -v hermes`
-    # update probe) tracked for a separate fix — rewrite this string
-    # together with that fix.
-    "gateway/run.py": frozenset({
-        "Could not locate hermes binary for detached /restart",
-    }),
     # Legacy managed-section marker: prior fork builds wrote this exact
     # comment line into ~/.codex/config.toml; strip_managed_section must
     # keep matching it or re-runs duplicate the managed section. New

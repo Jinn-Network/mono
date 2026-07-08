@@ -164,10 +164,29 @@ class TestHandleUpdateCommand:
         """_resolve_hermes_bin returns argv parts from shutil.which when available."""
         from gateway.run import _resolve_hermes_bin
 
-        with patch("shutil.which", return_value="/custom/path/hermes"):
+        with patch("shutil.which", return_value="/custom/path/jinn-agent") as mock_which:
             result = _resolve_hermes_bin()
 
-        assert result == ["/custom/path/hermes"]
+        assert result == ["/custom/path/jinn-agent"]
+        mock_which.assert_called_once_with("jinn-agent")
+
+    @pytest.mark.asyncio
+    async def test_resolve_hermes_bin_never_uses_stock_hermes(self):
+        """Regression (wrong-binary): a plain `hermes` on PATH is a stock
+        upstream install and must never be picked up — even when present,
+        the resolver goes straight to the module fallback."""
+        import sys
+        from gateway.run import _resolve_hermes_bin
+
+        def fake_which(name):
+            return "/usr/local/bin/hermes" if name == "hermes" else None
+
+        fake_spec = MagicMock()
+        with patch("shutil.which", side_effect=fake_which), \
+             patch("importlib.util.find_spec", return_value=fake_spec):
+            result = _resolve_hermes_bin()
+
+        assert result == [sys.executable, "-m", "hermes_cli.main"]
 
     @pytest.mark.asyncio
     async def test_resolve_hermes_bin_fallback(self):

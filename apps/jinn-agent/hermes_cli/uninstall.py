@@ -97,25 +97,47 @@ def remove_path_from_shell_configs():
     return removed_from
 
 
-def remove_wrapper_script():
-    """Remove the hermes wrapper script if it exists."""
-    wrapper_paths = [
+def _wrapper_script_candidates() -> list:
+    """Paths where the agent's command wrapper/symlink may live.
+
+    A jinn-agent install's own command is the ``jinn-agent`` symlink that
+    ``setup.sh`` links into ``~/.local/bin``; the upstream installer's names
+    are the ``hermes`` wrapper scripts.
+    """
+    return [
+        Path.home() / ".local" / "bin" / "jinn-agent",
+        Path("/usr/local/bin/jinn-agent"),
         Path.home() / ".local" / "bin" / "hermes",
         Path("/usr/local/bin/hermes"),
     ]
-    
+
+
+def remove_wrapper_script():
+    """Remove the agent's command wrapper/symlink if it exists."""
     removed = []
-    for wrapper in wrapper_paths:
-        if wrapper.exists():
-            try:
-                # Check if it's our wrapper (contains hermes_cli reference)
-                content = wrapper.read_text()
-                if 'hermes_cli' in content or 'hermes-agent' in content:
+    for wrapper in _wrapper_script_candidates():
+        # exists() follows symlinks and is False for a dangling one, so also
+        # check is_symlink() — a link whose checkout is already gone must
+        # still be cleaned up.
+        if not (wrapper.is_symlink() or wrapper.exists()):
+            continue
+        try:
+            if wrapper.is_symlink():
+                # setup.sh installs the command as a symlink to the
+                # checkout's bin/jinn-agent; match on the link target
+                # (read_text on a dangling link would raise).
+                if Path(os.readlink(wrapper)).name == "jinn-agent":
                     wrapper.unlink()
                     removed.append(wrapper)
-            except Exception as e:
-                log_warn(f"Could not remove {wrapper}: {e}")
-    
+                continue
+            # Check if it's our wrapper (contains hermes_cli reference)
+            content = wrapper.read_text()
+            if 'hermes_cli' in content or 'hermes-agent' in content:
+                wrapper.unlink()
+                removed.append(wrapper)
+        except Exception as e:
+            log_warn(f"Could not remove {wrapper}: {e}")
+
     return removed
 
 
@@ -771,7 +793,7 @@ def _perform_uninstall(
             log_info("No Hermes-set User env vars to remove")
     
     # 3. Remove wrapper script
-    log_info("Removing the `hermes` wrapper script...")
+    log_info("Removing the `jinn-agent` command wrapper...")
     removed_wrappers = remove_wrapper_script()
     if removed_wrappers:
         for wrapper in removed_wrappers:

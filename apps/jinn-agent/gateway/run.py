@@ -2360,20 +2360,23 @@ def _get_channel_override(
 
 
 def _resolve_hermes_bin() -> Optional[list[str]]:
-    """Resolve the Hermes update command as argv parts.
+    """Resolve the agent CLI command for detached /restart as argv parts.
 
     Tries in order:
-    1. ``shutil.which("hermes")`` — standard PATH lookup
-    2. ``sys.executable -m hermes_cli.main`` — fallback when Hermes is running
-       from a venv/module invocation and the ``hermes`` shim is not on PATH
+    1. ``shutil.which("jinn-agent")`` — the fork's installed command. A plain
+       ``hermes`` on PATH resolves to a stock upstream install, so it is
+       deliberately never consulted.
+    2. ``sys.executable -m hermes_cli.main`` — fallback when the agent is
+       running from a venv/module invocation and the ``jinn-agent`` link is
+       not on PATH
 
     Returns argv parts ready for quoting/joining, or ``None`` if neither works.
     """
     import shutil
 
-    hermes_bin = shutil.which("hermes")
-    if hermes_bin:
-        return [hermes_bin]
+    agent_bin = shutil.which("jinn-agent")
+    if agent_bin:
+        return [agent_bin]
 
     try:
         import importlib.util
@@ -5904,7 +5907,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         hermes_cmd = _resolve_hermes_bin()
         if not hermes_cmd:
-            logger.error("Could not locate hermes binary for detached /restart")
+            logger.error("Could not locate the jinn-agent CLI for detached /restart")
             return
         if self._detached_restart_helper_started:
             return
