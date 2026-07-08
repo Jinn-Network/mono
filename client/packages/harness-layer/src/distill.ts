@@ -208,8 +208,15 @@ const SKILL_KIND_BY_TIER: Record<DistillCluster['tier'], SkillKind> = {
 interface FinalizeSpec {
   /** Drives the structural gate (incl. the lesson imperative-counterfactual guard). */
   tier: DistillCluster['tier'];
-  /** Provenance back-links → `metadata.jinn.provenance`; its length is `distilledFrom`. */
+  /** Provenance back-links → `metadata.jinn.provenance` (the full audited evidence set). */
   evidenceRefs: string[];
+  /**
+   * Corroboration count → `metadata.jinn.distilledFrom` = number of DISTINCT
+   * instances, NOT `evidenceRefs.length` (§6: multiple attempts at one instance
+   * are ONE unit of corroboration, not N — else retry-heavy instances manufacture
+   * false corroboration, #1478). Stage-1 clusters are single-instance → 1.
+   */
+  distinctInstances: number;
   /** The distiller input, for the honest `evidenceTokens` estimate. */
   input: unknown;
   /** The published `metadata.jinn.skillKind`. */
@@ -272,7 +279,7 @@ async function finalizeSkill(
       schema: 'jinn.skill.v1',
       distribution: deps.distribution,
       verifiabilityTier: 'evaluator-verified',
-      distilledFrom: spec.evidenceRefs.length,
+      distilledFrom: spec.distinctInstances,
       provenance: spec.evidenceRefs,
       distillPromptSha256: spec.promptSha,
       distilledAt: deps.now.toISOString(),
@@ -317,6 +324,7 @@ export async function distillClusters(
         {
           tier: cluster.tier,
           evidenceRefs: cluster.evidenceRefs,
+          distinctInstances: new Set(cluster.instanceIds).size,
           input: cluster.input,
           skillKind,
           promptSha: JINN_SKILL_DISTILL_PROMPT_V1_SHA256,
@@ -393,8 +401,9 @@ export async function metaDistill(
       }
 
       // Union the supporting evidence refs (dedup, preserve first-seen order) →
-      // provenance; its length is distilledFrom (> 1). The finalize `input` is
-      // the supported source bodies, so evidenceTokens is the honest union size.
+      // provenance (the full audited evidence set). distilledFrom is the
+      // distinct-instance count (§6, #1478), NOT the union size. The finalize
+      // `input` is the supported source bodies, so evidenceTokens is honest.
       const seen = new Set<string>();
       const unionRefs: string[] = [];
       for (const s of supportedSources) for (const ref of s.evidenceRefs) {
@@ -419,6 +428,7 @@ export async function metaDistill(
         {
           tier: cluster.gateTier,
           evidenceRefs: unionRefs,
+          distinctInstances: distinctInstances.size,
           input: finalizeInput,
           skillKind: 'cross-instance',
           promptSha: JINN_SKILL_META_DISTILL_PROMPT_V1_SHA256,

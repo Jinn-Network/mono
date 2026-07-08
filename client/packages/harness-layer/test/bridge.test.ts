@@ -123,6 +123,24 @@ describe('bridgeAttempts', () => {
     ]);
   });
 
+  it('a failed fetch does NOT consume a group slot — a later candidate backfills (#1478)', async () => {
+    // groupCap=2, but the FIRST candidate's evidence fetch fails: the cap must
+    // count successful bridges only, so the 2nd and 3rd still fill the group.
+    let call = 0;
+    const deps = coreDeps({
+      groupCap: 2,
+      fetchEvidence: async (r) => {
+        if (++call === 1) throw new Error('3-hop join miss');
+        return { taskSummary: `summary ${r.instanceId}`, patch: `patch ${r.instanceId}` };
+      },
+    });
+    const passRefs = ['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0') }));
+    const res = await bridgeAttempts(passRefs, deps);
+    expect(res.bridged).toHaveLength(2);       // the group still reached groupCap
+    expect(res.errors).toHaveLength(1);        // the miss is recorded, not silent
+    expect(res.deduped).toHaveLength(0);       // no valid candidate wrongly dropped as over-cap
+  });
+
   it('caps each polarity independently (a group is per (instance, polarity)) (#1478)', async () => {
     const deps = coreDeps({ groupCap: 2 });
     const refs = [

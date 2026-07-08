@@ -116,10 +116,28 @@ describe('distillClusters (three modes, output scrub, contamination scan, struct
     const pkg = d.published[0]!;
     expect(pkg.jinn.skillKind).toBe('strategic-pattern');
     expect(pkg.jinn.distillPromptSha256).toBe(JINN_SKILL_DISTILL_PROMPT_V1_SHA256);
+    // provenance anchors ALL source traces (audit); distilledFrom counts DISTINCT
+    // instances (§6 corroboration) — this cluster is one instance with two traces.
     expect(pkg.jinn.provenance).toEqual(['bafyEv1', 'bafyEv2']);
-    expect(pkg.jinn.distilledFrom).toBe(2);
+    expect(pkg.jinn.distilledFrom).toBe(1);
     // round-trips as a conformant skill package
     expect(() => parseSkillMarkdown(buildSkillMarkdown(pkg))).not.toThrow();
+  });
+
+  it('a retained group inflates provenance but NOT distilledFrom — one instance is one corroboration unit (§6, #1478)', async () => {
+    const d = deps(cleanOut);
+    // one instance, a group of 4 retained attempts (2 pass + 2 fail folded contrastive).
+    const groupCluster = cluster({
+      tier: 'contrastive',
+      clusterId: 'contrastive:flask__flask-1',
+      instanceIds: ['flask__flask-1'],
+      evidenceRefs: ['bafyP1', 'bafyP2', 'bafyF1', 'bafyF2'],
+    });
+    const res = await distillClusters([groupCluster], d);
+    expect(res.published).toHaveLength(1);
+    const pkg = d.published[0]!;
+    expect(pkg.jinn.provenance).toHaveLength(4);   // audit anchors every source trace
+    expect(pkg.jinn.distilledFrom).toBe(1);        // corroboration is ONE distinct instance
   });
 
   it('carries the built SkillPackage on each published entry (stage-2 join surface)', async () => {

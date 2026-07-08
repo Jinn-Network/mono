@@ -161,6 +161,17 @@ describe('runDistillationPipeline (Tier-0 dry-run)', () => {
     expect(res.bridge.deduped).toHaveLength(2);   // the 2 over the cap
   });
 
+  it('flags verdictsTruncated when the fetch returns exactly the limit (silent-partial-group guard, #1478)', async () => {
+    // the default fixture list returns exactly 3 rows.
+    const { d } = deps({ limit: 3 });
+    const res = await runDistillationPipeline(d);
+    expect(res.verdictsTruncated).toBe(true);
+
+    const { d: d2 } = deps({ limit: 100 });
+    const res2 = await runDistillationPipeline(d2);
+    expect(res2.verdictsTruncated).toBe(false);
+  });
+
   it('AC5: leaves metaDistilled undefined and stage-1 unchanged when meta is disabled', async () => {
     const { d } = deps();
     const res = await runDistillationPipeline(d);

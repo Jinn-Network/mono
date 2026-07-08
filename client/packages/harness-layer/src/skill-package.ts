@@ -52,12 +52,16 @@ export const SkillPackageMetaSchema = z
     evidenceTokens: z.number().int().nonnegative().optional(),
     skillTokens: z.number().int().nonnegative().optional(),
   })
-  // The exported frontmatter must not drift internally: the "distilled from N
-  // traces" claim travels to the skills ecosystem, so N must equal the
-  // provenance list it sits next to (the stored form derives it and cannot
-  // drift; this pins the EXPORT surface too).
-  .refine((m) => m.distilledFrom === m.provenance.length, {
-    message: 'distilledFrom must equal provenance.length',
+  // Corroboration vs audit: `distilledFrom` is the DISTINCT-INSTANCE
+  // corroboration count (§6 — retries at one problem are one unit, not N),
+  // while `provenance` anchors EVERY audited source trace. Under group
+  // retention (#1478) one instance can contribute many traces, so
+  // `distilledFrom <= provenance.length` (a skill cannot corroborate across
+  // more distinct instances than it has traces), and is ≥1 whenever any trace
+  // is anchored. This keeps the ecosystem-facing "distilled from N" claim
+  // honest as a breadth signal instead of inflating with retry count.
+  .refine((m) => m.distilledFrom <= m.provenance.length && (m.provenance.length === 0 || m.distilledFrom >= 1), {
+    message: 'distilledFrom must be between 1 and provenance.length (distinct-instance corroboration ≤ audited traces)',
   });
 export type SkillPackageMeta = z.infer<typeof SkillPackageMetaSchema>;
 

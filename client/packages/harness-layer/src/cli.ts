@@ -142,6 +142,13 @@ export interface RunJinnLayerCliOptions {
 }
 
 const DEFAULT_CLI_SEARCH_LIMIT = 20;
+/**
+ * `distill run` fetches the whole verdict corpus so per-instance attempt groups
+ * are complete (#1478) — the 20-row search default would silently truncate
+ * groups. Only an EXPLICIT `--limit` overrides this; the verdict source pages up
+ * to 20k rows, so this covers the current corpus with headroom.
+ */
+const DEFAULT_DISTILL_LIMIT = 2000;
 
 /**
  * Byte ceiling on any single IPFS object fetched by the distill pipeline
@@ -477,8 +484,12 @@ export async function runJinnLayerCli(
   if (isDistill) {
     const dd = opts.distillDeps ?? {};
 
+    // Only honor an EXPLICIT --limit; otherwise fetch the corpus broadly so
+    // attempt groups stay complete (#1478) rather than inheriting the 20-row
+    // search default (which silently truncates groups mid-instance).
+    const userSetLimit = rest.some((a) => a === '--limit' || a.startsWith('--limit='));
     const n = Number.parseInt(parsed.values.limit as string, 10);
-    const limit = Number.isFinite(n) && n > 0 ? n : undefined;
+    const limit = userSetLimit && Number.isFinite(n) && n > 0 ? n : DEFAULT_DISTILL_LIMIT;
 
     const outDir = (parsed.values.out as string | undefined) ?? mkdtempSync(join(tmpdir(), 'jinn-distill-'));
     mkdirSync(outDir, { recursive: true });
@@ -563,6 +574,9 @@ export async function runJinnLayerCli(
         `bridge: ${result.bridge.bridged.length} bridged, ${result.bridge.excludedHeldOut.length} held-out, ${result.bridge.deduped.length} deduped, ${result.bridge.errors.length} error(s)`,
         `clusters: ${result.clusterCount}`,
       ];
+      if (result.verdictsTruncated) {
+        lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
+      }
       for (const p of result.distilled.published) lines.push(`  PUBLISHED ${p.skillKind} ${p.envelopeRef} (${p.clusterId})`);
       for (const r of result.distilled.rejected) lines.push(`  rejected  ${r.clusterId} — ${r.reason}`);
       for (const e of result.distilled.errors) lines.push(`  ERROR     ${e.clusterId} — ${e.error}`);

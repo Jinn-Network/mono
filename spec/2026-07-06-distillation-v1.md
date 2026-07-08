@@ -339,9 +339,12 @@ an indexed `artifactType` column (a real indexer change — *not* "no indexer ch
 **Ranking (future intent, not a v1 surface).** No read path sorts by `verifiabilityTier` or
 `distilledFrom` (`searchCaptureMeta` returns scan order; `search()` returns first-N unordered;
 `queryEnvelopes` orders by `publishedAtBlock`; `distilledFrom` has no ledger column). At the N=1
-default every eligible skill also carries identical `(evaluator-verified, distilledFrom:N)`
-metadata, so there is nothing to rank on yet. The metadata is present in the package for **future**
-ranking; a discovery-time ranking surface is **not built in v1**.
+default every eligible stage-1 skill carries identical `(evaluator-verified, distilledFrom:1)`
+metadata — `distilledFrom` counts DISTINCT INSTANCES (§6, #1478), so a single-instance skill is 1
+however many retained attempts fed it, and there is nothing to rank on yet. A future ranking surface
+MUST key corroboration on `distilledFrom` (distinct instances), never on `provenance.length` (the
+audited trace count, which a retry-heavy instance inflates). The metadata is present in the package
+for **future** ranking; a discovery-time ranking surface is **not built in v1**.
 
 ## 6. Promotion gate (the corpus quality gate)
 
@@ -374,6 +377,11 @@ instance-skewed (one instance, `sympy-27510`, is ~46 of ~390 verified verdicts, 
 - **Distinct-instance clustering.** A cluster is keyed by *distinct* `instance_id`; multiple verdict
   rows for the same `instance_id` are **one** unit of corroboration, not N. This stops a skewed
   instance manufacturing false corroboration and stops the same problem being distilled repeatedly.
+  The published metadata encodes this split (#1478): **`distilledFrom` is the distinct-instance
+  corroboration count** (1 for a single-instance stage-1 skill, regardless of how many retained
+  attempts fed it), while **`provenance` anchors every retained attempt trace** for audit — so
+  `distilledFrom <= provenance.length`, and retry-heavy instances cannot inflate the corroboration
+  signal even though the whole attempt group reaches the distiller (§7, group-relative distillation).
 - The **raw-evidence arm** (§11, D9) is the backstop: a non-generalizing N=1 skill loses to serving
   the raw trace, so the gate catches it rather than the corroboration count.
 

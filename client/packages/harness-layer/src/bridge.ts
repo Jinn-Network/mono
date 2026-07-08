@@ -235,16 +235,18 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
       continue;
     }
     const key = `${ref.instanceId}:${ref.polarity}`;
-    const n = kept.get(key) ?? 0;
-    if (n >= groupCap) {
+    if ((kept.get(key) ?? 0) >= groupCap) {
       result.deduped.push({ instanceId: ref.instanceId, polarity: ref.polarity });
       continue;
     }
-    kept.set(key, n + 1);
     try {
       const ev = await deps.fetchEvidence(ref);
       const task = toBridgeCapturedTask(ref, ev, now);
       const pub = await deps.publishEvidence(task, ref);
+      // Count only SUCCESSFUL bridges toward the cap — the evidence fetch is a
+      // fragile multi-hop join (bridge-fetch-evidence.ts); a miss must not spend
+      // a group slot, so a later candidate for the same key can still backfill.
+      kept.set(key, (kept.get(key) ?? 0) + 1);
       result.bridged.push({
         instanceId: ref.instanceId,
         polarity: ref.polarity,

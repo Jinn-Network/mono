@@ -66,6 +66,13 @@ export interface PipelineResult {
   bridge: BridgeResult;
   clusterCount: number;
   distilled: DistillResult;
+  /**
+   * True when the verdict fetch returned exactly `limit` rows — a truncation
+   * signal. Under group retention (#1478) a truncated fetch means attempt groups
+   * may be PARTIAL (the source pages by enrichment order, not by instance), so
+   * `groupSize`/`nPass`/`nFail` understate the real group. The CLI surfaces this.
+   */
+  verdictsTruncated: boolean;
   /** Stage-2 result — present only when `meta` was enabled. */
   metaDistilled?: MetaDistillResult;
 }
@@ -94,6 +101,7 @@ export async function runDistillationPipeline(deps: PipelineDeps): Promise<Pipel
 
   // 1. Bridge — ledger → layer-1 evidence (exclusion + dedup live in bridgeAttempts).
   const refs = await deps.verdictSource.list({ ...(deps.limit !== undefined ? { limit: deps.limit } : {}) });
+  const verdictsTruncated = deps.limit !== undefined && refs.length >= deps.limit;
   const bridge = await bridgeAttempts(refs, {
     slateInstanceIds: slateIds,
     fetchEvidence: deps.fetchEvidence,
@@ -139,5 +147,5 @@ export async function runDistillationPipeline(deps: PipelineDeps): Promise<Pipel
     });
   }
 
-  return { bridge, clusterCount: clusters.length, distilled, ...(metaDistilled ? { metaDistilled } : {}) };
+  return { bridge, clusterCount: clusters.length, distilled, verdictsTruncated, ...(metaDistilled ? { metaDistilled } : {}) };
 }
