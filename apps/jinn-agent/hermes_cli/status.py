@@ -119,16 +119,11 @@ def show_status(args):
     deep = getattr(args, 'deep', False)
 
     # `status` is reached without going through cli.py's module-level skin
-    # init — pick up config.yaml's skin choice on demand (idempotent,
-    # degrades to the upstream literal on any error). Mirrors setup.py's
+    # init — pick up config.yaml's skin choice on demand. Mirrors setup.py's
     # _setup_cli_names.
-    try:
-        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+    from hermes_cli.skin_engine import ensure_skin_initialised
 
-        if get_active_skin_name() == "default":
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
 
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print()

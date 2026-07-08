@@ -228,19 +228,12 @@ def _read_openai_version_fast() -> str | None:
 
 def _print_fast_version_info() -> None:
     from hermes_cli import __release_date__, __version__
-    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
 
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     # This fast path runs before the CLI's normal skin-init (cli.py module
-    # load), so pick up config.yaml's skin choice on demand — idempotent,
-    # degrades to the upstream literal on any error (Termux constrained envs).
-    try:
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    # load), so pick up config.yaml's skin choice on demand (Termux constrained envs).
+    ensure_skin_initialised()
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     print(f"{_brand} v{__version__} ({__release_date__})")
     print(f"Project: {project_root}")
@@ -2453,16 +2446,10 @@ def cmd_whatsapp(args):
     from hermes_constants import find_node_executable, with_hermes_node_path
 
     # `whatsapp` never goes through cli.py's module-level skin init — pick up
-    # config.yaml's skin choice on demand (idempotent, degrades to the
-    # upstream literal on any error). Mirrors setup.py's _setup_cli_names.
-    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
-    try:
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config as _load_config
+    # config.yaml's skin choice on demand. Mirrors setup.py's _setup_cli_names.
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
 
-            init_skin_from_config(_load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     _response_label = get_active_skin().get_branding("response_label", "⚕ Hermes").strip()
 
@@ -2727,16 +2714,10 @@ def cmd_postinstall(args):
     stamp_install_method("pip")
 
     # `postinstall` never goes through cli.py's module-level skin init — pick
-    # up config.yaml's skin choice on demand (idempotent, degrades to the
-    # upstream literal on any error). Mirrors setup.py's _setup_cli_names.
-    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
-    try:
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
+    # up config.yaml's skin choice on demand. Mirrors setup.py's _setup_cli_names.
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
 
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
 
     print(f"⚕ {_brand} post-install bootstrap")
@@ -4386,17 +4367,11 @@ def _print_version_info(*, check_updates: bool = True) -> None:
 
     # format_banner_version_label() reads the active skin's brand, but
     # ``--version`` never goes through cli.py's module-level skin init —
-    # pick up config.yaml's skin choice on demand (idempotent, degrades to
-    # the upstream literal on any error). Mirrors setup.py's _setup_cli_names.
-    try:
-        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+    # pick up config.yaml's skin choice on demand. Mirrors setup.py's
+    # _setup_cli_names.
+    from hermes_cli.skin_engine import ensure_skin_initialised
 
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
 
     print(format_banner_version_label())
     print(f"Project: {PROJECT_ROOT}")
@@ -9267,16 +9242,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
             discard_local_changes = False
 
     # `update` never goes through cli.py's module-level skin init — pick up
-    # config.yaml's skin choice on demand (idempotent, degrades to the
-    # upstream literal on any error). Mirrors setup.py's _setup_cli_names.
-    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
-    try:
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config as _load_config_for_skin
+    # config.yaml's skin choice on demand. Mirrors setup.py's _setup_cli_names.
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
 
-            init_skin_from_config(_load_config_for_skin())
-    except Exception:
-        pass
+    ensure_skin_initialised()
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
 
     print(f"⚕ Updating {_brand}...")

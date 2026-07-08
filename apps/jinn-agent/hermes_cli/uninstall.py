@@ -601,17 +601,10 @@ def run_uninstall(args):
         return
 
     # Reached without going through cli.py's module-level skin init — pick up
-    # config.yaml's skin choice on demand (idempotent, degrades to the
-    # upstream literal on any error). Mirrors status.py::show_status.
-    try:
-        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+    # config.yaml's skin choice on demand. Mirrors status.py::show_status.
+    from hermes_cli.skin_engine import ensure_skin_initialised
 
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
 
     from hermes_cli.skin_engine import get_active_skin
 
@@ -897,15 +890,9 @@ def _perform_uninstall(
         print("  source ~/.bashrc  # or ~/.zshrc")
     print()
 
-    try:
-        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+    from hermes_cli.skin_engine import ensure_skin_initialised
 
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
 
     from hermes_cli.skin_engine import get_active_skin
 

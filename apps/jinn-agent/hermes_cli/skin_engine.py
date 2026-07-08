@@ -807,6 +807,22 @@ def init_skin_from_config(config: dict) -> None:
 # =============================================================================
 
 
+def ensure_skin_initialised() -> None:
+    """Idempotently initialise the active skin from config.yaml.
+
+    Non-chat entry points (status, doctor, version, wizards) render branding
+    before the interactive path's module-level init runs; call this first.
+    Never raises — on any config error the default skin stays active.
+    """
+    try:
+        if get_active_skin_name() == "default":
+            from hermes_cli.config import load_config  # local: config imports transitively reach status.py
+
+            init_skin_from_config(load_config())
+    except Exception:
+        pass
+
+
 def get_active_prompt_symbol(fallback: str = "❯") -> str:
     """Return the interactive prompt symbol with a single trailing space.
 

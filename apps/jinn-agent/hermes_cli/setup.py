@@ -194,16 +194,9 @@ def _setup_cli_names() -> tuple[str, str]:
     """
     cli = ""
     try:
-        from hermes_cli.skin_engine import (
-            get_active_skin,
-            get_active_skin_name,
-            init_skin_from_config,
-        )
+        from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
 
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
+        ensure_skin_initialised()
         cli = (get_active_skin().get_branding("cli_name", "") or "").strip()
     except Exception:
         cli = ""
@@ -219,18 +212,12 @@ def _ensure_skin_initialised() -> None:
     printed from entry points reached before ``cli.py``'s module-level
     ``init_skin_from_config`` runs, so ``get_active_skin()`` would otherwise
     silently return the default-skin fallback even when ``config.yaml`` says
-    otherwise. Bare ``try/except: pass`` — never blocks setup on a
-    config/skin error.
+    otherwise. Thin wrapper around the shared helper — kept as a private name
+    here since it's called throughout this module's wizard steps.
     """
-    try:
-        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
+    from hermes_cli.skin_engine import ensure_skin_initialised
 
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
+    ensure_skin_initialised()
 
 
 def print_noninteractive_setup_guidance(reason: str | None = None) -> None:

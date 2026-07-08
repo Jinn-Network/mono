@@ -7489,19 +7489,14 @@ def show_config():
     config = load_config()
 
     # `config` is reached without going through cli.py's module-level skin
-    # init — pick up config.yaml's skin choice on demand (idempotent,
-    # degrades to the upstream literal on any error). Mirrors setup.py's
+    # init — pick up config.yaml's skin choice on demand. Mirrors setup.py's
     # _setup_cli_names. titled_box/get_active_skin are imported locally:
     # hermes_cli.status imports from this module at top level, so a
     # module-level import here would be circular.
-    from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
     from hermes_cli.status import titled_box
 
-    try:
-        if get_active_skin_name() == "default":
-            init_skin_from_config(config)
-    except Exception:
-        pass
+    ensure_skin_initialised()
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
 
     print()

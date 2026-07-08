@@ -190,20 +190,11 @@ def format_nous_portal_entitlement_message(
 
     # This module is reachable from paths that never go through cli.py's
     # module-level skin init (e.g. `status`, `doctor`) — pick up config.yaml's
-    # skin choice on demand (idempotent, degrades to the upstream literal on
-    # any error). Mirrors status.py's _setup_cli_names-style guard.
-    try:
-        from hermes_cli.skin_engine import get_active_skin, get_active_skin_name, init_skin_from_config
+    # skin choice on demand. Mirrors status.py's _setup_cli_names-style guard.
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
 
-        if get_active_skin_name() == "default":
-            from hermes_cli.config import load_config
-
-            init_skin_from_config(load_config())
-        _skin = get_active_skin()
-    except Exception:
-        from hermes_cli.skin_engine import get_active_skin as _get_active_skin
-
-        _skin = _get_active_skin()
+    ensure_skin_initialised()
+    _skin = get_active_skin()
     _brand = _skin.get_branding("agent_name", "Hermes Agent")
     # `portal_label` is the FULL phrase ("Nous Portal" upstream, "Provider
     # Portal" under the jinn skin) — the portal is Nous Research's own
