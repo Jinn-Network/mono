@@ -275,7 +275,7 @@ def _check_version_consistency(issues: list[str]) -> None:
         _fail_and_issue(
             "Version mismatch between source files",
             f"(pyproject.toml {pyproject_version} != hermes_cli/__init__.py {init_version})",
-            "Re-sync version files (e.g. run 'hermes update', or set "
+            "Re-sync version files (e.g. run 'jinn-agent update', or set "
             "hermes_cli/__init__.py __version__ to match pyproject.toml)",
             issues,
         )
@@ -319,7 +319,7 @@ def _check_s6_supervision(issues: list[str]) -> None:
 
     profiles = mgr.list_profile_gateways()
     if not profiles:
-        check_info("No per-profile gateways registered yet — create one with `hermes profile create <name>`")
+        check_info("No per-profile gateways registered yet — create one with `jinn-agent profile create <name>`")
         return
 
     up_count = sum(1 for p in profiles if mgr.is_running(f"gateway-{p}"))
@@ -388,6 +388,97 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
         issues.append("Enable linger for the gateway user service: sudo loginctl enable-linger $USER")
     else:
         check_warn("Could not verify systemd linger", f"({linger_detail})")
+
+
+def _check_command_installation(
+    issues: list[str], manual_issues: list[str], should_fix: bool
+) -> int:
+    """Verify the venv entry point and the ``hermes`` command-link symlink
+    (mirrors install.sh logic). Returns the number of issues this check
+    auto-fixed (to be added to the caller's ``fixed_count``).
+
+    Extracted from ``run_doctor`` so the symlink-state branches (missing,
+    broken/foreign-target, on-PATH) can be unit-tested deterministically
+    against a fake ``Path.home()`` / venv layout, instead of only being
+    reachable by running the full doctor sweep against whatever
+    ``~/.local/bin/hermes`` happens to resolve to on the machine running
+    the tests (see tests/dehermes/test_command_installation.py).
+    """
+    fixed_count = 0
+    _section("Command Installation")
+    # Determine the venv entry point location
+    _venv_bin = None
+    for _venv_name in ("venv", ".venv"):
+        _candidate = PROJECT_ROOT / _venv_name / "bin" / "hermes"
+        if _candidate.exists():
+            _venv_bin = _candidate
+            break
+
+    # Determine the expected command link directory (mirrors install.sh logic)
+    _prefix = os.environ.get("PREFIX", "")
+    _is_termux_env = bool(os.environ.get("TERMUX_VERSION")) or "com.termux/files/usr" in _prefix
+    if _is_termux_env and _prefix:
+        _cmd_link_dir = Path(_prefix) / "bin"
+        _cmd_link_display = "$PREFIX/bin"
+    else:
+        _cmd_link_dir = Path.home() / ".local" / "bin"
+        _cmd_link_display = "~/.local/bin"
+    _cmd_link = _cmd_link_dir / "hermes"
+
+    if _venv_bin is None:
+        check_warn(
+            "Venv entry point not found",
+            "(venv/bin/hermes or .venv/bin/hermes not found — reinstall with pip install -e '.[all]')"
+        )
+        manual_issues.append(
+            f"Reinstall entry point: cd {PROJECT_ROOT} && source venv/bin/activate && pip install -e '.[all]'"
+        )
+    else:
+        check_ok(f"Venv entry point exists ({_venv_bin.relative_to(PROJECT_ROOT)})")
+
+        # Check the symlink at the command link location
+        if _cmd_link.is_symlink():
+            _target = _cmd_link.resolve()
+            _expected = _venv_bin.resolve()
+            if _target == _expected:
+                check_ok(f"{_cmd_link_display}/hermes → correct target")
+            else:
+                check_warn(
+                    f"{_cmd_link_display}/hermes points to wrong target",
+                    f"(→ {_target}, expected → {_expected})"
+                )
+                if should_fix:
+                    _cmd_link.unlink()
+                    _cmd_link.symlink_to(_venv_bin)
+                    check_ok(f"Fixed symlink: {_cmd_link_display}/hermes → {_venv_bin}")
+                    fixed_count += 1
+                else:
+                    issues.append(f"Broken symlink at {_cmd_link_display}/hermes — run 'jinn-agent doctor --fix'")
+        elif _cmd_link.exists():
+            # It's a regular file, not a symlink — possibly a wrapper script
+            check_ok(f"{_cmd_link_display}/hermes exists (non-symlink)")
+        else:
+            check_fail(
+                f"{_cmd_link_display}/hermes not found",
+                f"({_cmd_link_display}/hermes may not work outside the venv)"
+            )
+            if should_fix:
+                _cmd_link_dir.mkdir(parents=True, exist_ok=True)
+                _cmd_link.symlink_to(_venv_bin)
+                check_ok(f"Created symlink: {_cmd_link_display}/hermes → {_venv_bin}")
+                fixed_count += 1
+
+                # Check if the link dir is on PATH
+                _path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+                if str(_cmd_link_dir) not in _path_dirs:
+                    check_warn(
+                        f"{_cmd_link_display} is not on your PATH",
+                        "(add it to your shell config: export PATH=\"$HOME/.local/bin:$PATH\")"
+                    )
+                    manual_issues.append(f"Add {_cmd_link_display} to your PATH")
+            else:
+                issues.append(f"Missing {_cmd_link_display}/hermes symlink — run 'jinn-agent doctor --fix'")
+    return fixed_count
 
 
 _APIKEY_PROVIDERS_CACHE: list | None = None
@@ -595,7 +686,7 @@ def run_doctor(args):
                     f"Resolve security advisory {hit.advisory.id}: "
                     f"uninstall {hit.package}=={hit.installed_version} and "
                     f"rotate credentials, then run "
-                    f"`hermes doctor --ack {hit.advisory.id}`."
+                    f"`jinn-agent doctor --ack {hit.advisory.id}`."
                 )
             # Acked-but-still-installed: show as informational so the user
             # knows the package is still on disk after the ack.
@@ -713,7 +804,7 @@ def run_doctor(args):
             check_ok("API key or custom endpoint configured")
         else:
             check_warn(f"No API key found in {_DHH}/.env")
-            issues.append("Run 'hermes setup' to configure API keys")
+            issues.append("Run 'jinn-agent setup' to configure API keys")
     else:
         # Also check project root as fallback
         fallback_env = PROJECT_ROOT / '.env'
@@ -834,7 +925,7 @@ def run_doctor(args):
                         (
                             f"model.provider '{provider_raw}' is unknown. "
                             f"Valid providers: {known_list}. "
-                            f"Fix: run 'hermes config set model.provider <valid_provider>'"
+                            f"Fix: run 'jinn-agent config set model.provider <valid_provider>'"
                         ),
                         issues,
                     )
@@ -905,11 +996,11 @@ def run_doctor(args):
                     if not configured:
                         _fail_and_issue(
                             f"model.provider '{runtime_provider}' is set but no API key is configured",
-                            "(check ~/.hermes/.env or run 'hermes setup')",
+                            "(check ~/.hermes/.env or run 'jinn-agent setup')",
                             (
                                 f"No credentials found for provider '{runtime_provider}'. "
-                                f"Run 'hermes setup' or set the provider's API key in {_DHH}/.env, "
-                                f"or switch providers with 'hermes config set model.provider <name>'"
+                                f"Run 'jinn-agent setup' or set the provider's API key in {_DHH}/.env, "
+                                f"or switch providers with 'jinn-agent config set model.provider <name>'"
                             ),
                             issues,
                         )
@@ -997,7 +1088,7 @@ def run_doctor(args):
                     check_ok("Migrated stale root-level keys into model section")
                     fixed_count += 1
                 else:
-                    issues.append("Stale root-level provider/base_url in config.yaml — run 'hermes doctor --fix'")
+                    issues.append("Stale root-level provider/base_url in config.yaml — run 'jinn-agent doctor --fix'")
         except Exception:
             pass
 
@@ -1035,7 +1126,7 @@ def run_doctor(args):
                 check_warn(
                     f"HERMES_MAX_ITERATIONS={env_ghost} in .env shadows "
                     f"agent.max_turns={cfg_max_turns} in config.yaml",
-                    "(stale ghost from an earlier `hermes setup` run)",
+                    "(stale ghost from an earlier `jinn-agent setup` run)",
                 )
                 if should_fix:
                     if remove_env_value("HERMES_MAX_ITERATIONS"):
@@ -1053,7 +1144,7 @@ def run_doctor(args):
                 else:
                     issues.append(
                         "Stale HERMES_MAX_ITERATIONS in .env shadows config.yaml — "
-                        "run 'hermes doctor --fix'"
+                        "run 'jinn-agent doctor --fix'"
                     )
         except Exception:
             pass
@@ -1280,8 +1371,8 @@ def run_doctor(args):
                         )
                 else:
                     issues.append(
-                        "state.db FTS write corruption — run 'hermes doctor --fix' "
-                        "(or 'hermes sessions repair') to rebuild the FTS index"
+                        "state.db FTS write corruption — run 'jinn-agent doctor --fix' "
+                        "(or 'jinn-agent sessions repair') to rebuild the FTS index"
                     )
         except Exception as e:
             from hermes_state import is_malformed_db_error, repair_state_db_schema
@@ -1326,8 +1417,8 @@ def run_doctor(args):
                         )
                 else:
                     issues.append(
-                        "state.db schema malformed — run 'hermes doctor --fix' "
-                        "(or 'hermes sessions repair') to recover hidden sessions"
+                        "state.db schema malformed — run 'jinn-agent doctor --fix' "
+                        "(or 'jinn-agent sessions repair') to recover hidden sessions"
                     )
             else:
                 check_warn(f"{_DHH}/state.db exists but has issues: {e}")
@@ -1353,7 +1444,7 @@ def run_doctor(args):
                     check_ok(f"WAL checkpoint performed ({wal_size // 1024}K → {new_size // 1024}K)")
                     fixed_count += 1
                 else:
-                    issues.append("Large WAL file — run 'hermes doctor --fix' to checkpoint")
+                    issues.append("Large WAL file — run 'jinn-agent doctor --fix' to checkpoint")
             elif wal_size > 10 * 1024 * 1024:  # 10 MB
                 check_info(f"WAL file is {wal_size // (1024*1024)} MB (normal for active sessions)")
         except Exception:
@@ -1363,79 +1454,7 @@ def run_doctor(args):
     _check_s6_supervision(issues)
 
     if sys.platform != "win32":
-        _section("Command Installation")
-        # Determine the venv entry point location
-        _venv_bin = None
-        for _venv_name in ("venv", ".venv"):
-            _candidate = PROJECT_ROOT / _venv_name / "bin" / "hermes"
-            if _candidate.exists():
-                _venv_bin = _candidate
-                break
-
-        # Determine the expected command link directory (mirrors install.sh logic)
-        _prefix = os.environ.get("PREFIX", "")
-        _is_termux_env = bool(os.environ.get("TERMUX_VERSION")) or "com.termux/files/usr" in _prefix
-        if _is_termux_env and _prefix:
-            _cmd_link_dir = Path(_prefix) / "bin"
-            _cmd_link_display = "$PREFIX/bin"
-        else:
-            _cmd_link_dir = Path.home() / ".local" / "bin"
-            _cmd_link_display = "~/.local/bin"
-        _cmd_link = _cmd_link_dir / "hermes"
-
-        if _venv_bin is None:
-            check_warn(
-                "Venv entry point not found",
-                "(hermes not in venv/bin/ or .venv/bin/ — reinstall with pip install -e '.[all]')"
-            )
-            manual_issues.append(
-                f"Reinstall entry point: cd {PROJECT_ROOT} && source venv/bin/activate && pip install -e '.[all]'"
-            )
-        else:
-            check_ok(f"Venv entry point exists ({_venv_bin.relative_to(PROJECT_ROOT)})")
-
-            # Check the symlink at the command link location
-            if _cmd_link.is_symlink():
-                _target = _cmd_link.resolve()
-                _expected = _venv_bin.resolve()
-                if _target == _expected:
-                    check_ok(f"{_cmd_link_display}/hermes → correct target")
-                else:
-                    check_warn(
-                        f"{_cmd_link_display}/hermes points to wrong target",
-                        f"(→ {_target}, expected → {_expected})"
-                    )
-                    if should_fix:
-                        _cmd_link.unlink()
-                        _cmd_link.symlink_to(_venv_bin)
-                        check_ok(f"Fixed symlink: {_cmd_link_display}/hermes → {_venv_bin}")
-                        fixed_count += 1
-                    else:
-                        issues.append(f"Broken symlink at {_cmd_link_display}/hermes — run 'hermes doctor --fix'")
-            elif _cmd_link.exists():
-                # It's a regular file, not a symlink — possibly a wrapper script
-                check_ok(f"{_cmd_link_display}/hermes exists (non-symlink)")
-            else:
-                check_fail(
-                    f"{_cmd_link_display}/hermes not found",
-                    "(hermes command may not work outside the venv)"
-                )
-                if should_fix:
-                    _cmd_link_dir.mkdir(parents=True, exist_ok=True)
-                    _cmd_link.symlink_to(_venv_bin)
-                    check_ok(f"Created symlink: {_cmd_link_display}/hermes → {_venv_bin}")
-                    fixed_count += 1
-
-                    # Check if the link dir is on PATH
-                    _path_dirs = os.environ.get("PATH", "").split(os.pathsep)
-                    if str(_cmd_link_dir) not in _path_dirs:
-                        check_warn(
-                            f"{_cmd_link_display} is not on your PATH",
-                            "(add it to your shell config: export PATH=\"$HOME/.local/bin:$PATH\")"
-                        )
-                        manual_issues.append(f"Add {_cmd_link_display} to your PATH")
-                else:
-                    issues.append(f"Missing {_cmd_link_display}/hermes symlink — run 'hermes doctor --fix'")
+        fixed_count += _check_command_installation(issues, manual_issues, should_fix)
 
     _section("External Tools")
     # Git
@@ -1806,7 +1825,7 @@ def run_doctor(args):
                     [(color("✗", Colors.RED), "OpenRouter API",
                       color("(out of credits — payment required)", Colors.DIM))],
                     ["OpenRouter account has insufficient credits. "
-                     "Fix: run 'hermes config set model.provider <provider>' "
+                     "Fix: run 'jinn-agent config set model.provider <provider>' "
                      "to switch providers, or fund your OpenRouter account "
                      "at https://openrouter.ai/settings/credits"],
                 )
@@ -2286,14 +2305,14 @@ def run_doctor(args):
                         f"config file {_honcho_cfg_path} not found, using HONCHO_API_KEY env var",
                     )
                 else:
-                    check_warn("Honcho config not found", "run: hermes memory setup")
+                    check_warn("Honcho config not found", "run: jinn-agent memory setup")
             elif not hcfg.enabled:
                 check_info(f"Honcho disabled (set enabled: true in {_honcho_cfg_path} to activate)")
             elif not (hcfg.api_key or hcfg.base_url):
                 _fail_and_issue(
                     "Honcho API key or base URL not set",
-                    "run: hermes memory setup",
-                    "No Honcho API key — run 'hermes memory setup'",
+                    "run: jinn-agent memory setup",
+                    "No Honcho API key — run 'jinn-agent memory setup'",
                     issues,
                 )
             else:
@@ -2327,7 +2346,7 @@ def run_doctor(args):
             else:
                 _fail_and_issue(
                     "Mem0 API key not set",
-                    "(set MEM0_API_KEY in .env or run hermes memory setup)",
+                    "(set MEM0_API_KEY in .env or run jinn-agent memory setup)",
                     "Mem0 is set as memory provider but API key is missing",
                     issues,
                 )
@@ -2348,9 +2367,9 @@ def run_doctor(args):
             if _provider and _provider.is_available():
                 check_ok(f"{_active_memory_provider} provider active")
             elif _provider:
-                check_warn(f"{_active_memory_provider} configured but not available", "run: hermes memory status")
+                check_warn(f"{_active_memory_provider} configured but not available", "run: jinn-agent memory status")
             else:
-                check_warn(f"{_active_memory_provider} plugin not found", "run: hermes memory setup")
+                check_warn(f"{_active_memory_provider} plugin not found", "run: jinn-agent memory setup")
         except Exception as _e:
             check_warn(f"{_active_memory_provider} check failed", str(_e))
 
