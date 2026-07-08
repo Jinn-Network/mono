@@ -1,7 +1,12 @@
 # Distillation v1 — layer-1 evidence → layer-2 consumable skills
 
-- **Version:** 0.4 (v0.3 + the 2026-07-07 reconciliation with the shipped #1394/#1409 substrate —
-  see **Reconciliation** below; ratified with DR-2026-07-06)
+- **Version:** 0.5 (v0.4 + quality amendments from the skill-distillation literature review —
+  verified-counterfactual rule, contrastive mode, fixed skill skeleton, anti-triggers, bridged-evidence
+  enrichment + `patch-only` stratification, auditability fields, two §13 deferral records; 2026-07-08.
+  Note: the `ContributionActivityChecker` reconciliation previously earmarked "at v0.5" (§8) is NOT
+  taken up by this bump — it moves to a later amendment.)
+- **v0.4:** v0.3 + the 2026-07-07 reconciliation with the shipped #1394/#1409 substrate —
+  see **Reconciliation** below; ratified with DR-2026-07-06
 - **v0.3:** v0.2 + SkillRL / training-substrate framing, a failure→lessons axis,
   and an explicit build-distiller-vs-ship-retrieval fork (2026-07-06)
 - **v0.2:** design session + adversarial-review amendments (workflow `wf_063fe1aa`)
@@ -277,6 +282,10 @@ metadata:
       - <evidence-envelope-CID-3>
     distillPromptSha256: <hash>            # auditability (D4)
     distilledAt: <ISO-8601>
+    skillKind: strategic-pattern           # strategic-pattern | failure-lesson | contrastive (§7)
+    distillModel: <model-id>               # the model that ran distillation (quality is model-sensitive)
+    evidenceTokens: 4200                   # est. tokens of the distiller input (deterministic ceil(chars/4))
+    skillTokens: 350                       # est. tokens of the body — the compression ratio (SkillRL: 10–20×)
 ---
 # <the verified how-to body>
 ```
@@ -284,6 +293,20 @@ metadata:
 The provenance lives in frontmatter so it **travels with the package** (install-portable) *and* is
 anchored (the whole envelope is anchored — the claim "distilled from these N verified traces" is
 independently verifiable, Legibility).
+
+**Auditability fields (v0.5).** `distillModel`, `evidenceTokens`, `skillTokens` are additive optional
+fields on `SkillProvenanceSchema` / `SkillPackageMetaSchema`. Distillation quality is model-sensitive
+and was previously unrecorded; the token pair records the compression ratio the skill achieved
+(SkillRL operates at 10–20×). The token counts are **deterministic estimates** (`ceil(utf8 chars / 4)`
+over the serialized cluster input and the body) — the LLM port reports no usage, and an auditable
+estimate serves the ratio's purpose better than an unreproducible exact count.
+
+**Body skeleton (distilled skills, v0.5).** Distilled bodies use a **fixed anatomy** — `## When to
+use` / `## Strategy` / `## Steps` / `## Pitfalls` / `## Verify`, each section non-empty — enforced
+structurally at the distilled-publish gate (§7 step 6). Fixed structure keeps distiller output
+consistent, makes future admission rubrics checkable section-by-section, and gives the consuming
+agent predictable shape. Scoped to **distilled** output only: imported seeds are external skills and
+stay freeform.
 
 **Publish path.** A `publishSkill()` sibling to `publish()` anchors + wraps the skill. Two
 corrections the reference builder forces (verified against `client/packages/harness-layer/src/publish.ts`
@@ -337,8 +360,12 @@ already-distilled, not raw evidence), the source is **not in the held-out `cap-v
   established**, and a failed task still carries a tier (envelope-v0). Failures are abundant (§8) and
   compress 10–20× (SkillRL, §2.4), so this is the cheap half of the value that v0.2 dropped.
 
-A pattern and a lesson for the *same* `instance_id` are **complementary, not corroborating** — they
-distil into two different skills (a how-to and a what-not-to-do).
+A pattern and a lesson for the *same* `instance_id` are **complementary, not corroborating**. In v0.5
+they no longer distil into two separate skills: because both polarities exist for the instance, the
+clusterer folds them into **one contrastive skill** (§7, ExpeL) whose pattern is the pass↔fail delta
+and whose counterfactual is the verified pass — and that contrastive skill **suppresses** the
+pattern-only / lesson-only singles for that instance (precedence). A single-polarity instance still
+distils to its one pattern-only or lesson-only skill.
 
 **N-corroboration** is a documented knob, **default `N = 1`** for v1 (a single verified trace can
 seed a skill — operator direction). Two hygiene rules attach even at N=1, because the live supply is
@@ -380,13 +407,41 @@ A human-run script (`yarn distill --distribution coding`), **not** a SolverNet (
    for the first skills. Automated clustering beyond this is out of scope.
 3. **Distil — both polarities (SkillRL decomposition, D10).** Run **`jinn-skill-distill-prompt-v1`**
    (a new prompt, distinct from the session-derived task prompt) over each cluster's evidence —
-   `task.summary`, `outcome.summary`, step names, patches/diffs, `verifiabilityTier` — producing a
-   SKILL.md (frontmatter + body). The prompt has **two modes keyed to the cluster's tier (§6)**:
+   `task.summary`, `outcome.summary`, step names **and step content** (patches/diffs + the solver's
+   compressed step trace where available, §8), `verifiabilityTier` — producing a SKILL.md
+   (frontmatter + body). The cluster input handed to the LLM **carries the evidence content**
+   (patch / step-trace attributes), not step names only — a name-only projection under-feeds the
+   distiller. The prompt has **three modes keyed to the cluster's tier (§6)**:
    - **Pattern-eligible clusters → a strategic-pattern skill:** the critical decision points and
      generalizable behavior that made the solve work (`metadata.jinn.skillKind: 'strategic-pattern'`).
-   - **Lesson-eligible clusters → a failure-lesson skill:** the failure point and the correct
-     counterfactual action — *what not to do and what to do instead* (`skillKind: 'failure-lesson'`;
-     the `description` says *"Use when about to …"* so retrieval fires on the risky situation).
+   - **Lesson-eligible clusters → a failure-lesson skill** (`skillKind: 'failure-lesson'`; the
+     `description` says *"Use when about to …"* so retrieval fires on the risky situation), under the
+     **verified-counterfactual rule (v0.5):** the evidence verifies THAT the attempt failed — not
+     what would have worked. Publishing an LLM-speculated "do this instead" under an
+     evaluator-verified badge overstates the evidence. A lesson therefore states **diagnosis, not
+     prescription** ("this approach fails because X"); suggestions must be hypothesis-marked
+     ("likely", "consider"), never imperative. A counterfactual may be stated as fact ONLY when
+     corroborated by a verified pass on the same instance — i.e. in contrastive mode (below).
+     Enforcement is the prompt requirement plus a shallow lexical guard at the publish gate (step 6);
+     deep semantic judging of lesson quality is admission-checking, deferred (§13).
+   - **Both-polarity instances → ONE contrastive skill (v0.5, ExpeL).** When the same `instance_id`
+     carries both an evaluator-verified pass and a definitive FAIL (retries are common — §8's supply
+     is ~390 verdicts over ~92 instances), the delta between them is the most information-dense
+     signal: it isolates the causal decision, while content shared by both polarities is noise. The
+     clusterer pairs the polarities into a single `contrastive` cluster; the distiller runs a third
+     mode fed both traces, producing one skill whose pattern is the delta and whose counterfactual is
+     the **verified pass** — satisfying the verified-counterfactual rule by construction. Provenance
+     links BOTH evidence refs. **Precedence: contrastive > pattern-only/lesson-only** for that
+     instance — the singles are suppressed, not additionally emitted. `skillKind` gains
+     `'contrastive'`; the enum extension is additive for producers, but strict consumers
+     (`extractSkill`) reject the new value until upgraded — acceptable at testnet volume, named here.
+
+   All modes emit the **fixed skill skeleton** (§5: `## When to use` / `## Strategy` / `## Steps` /
+   `## Pitfalls` / `## Verify`, each non-empty) and a `description` carrying **both trigger and
+   anti-trigger**: *"Use when … **Not for:** …"* (v0.5 — CTIM-Rover's failure mode is
+   surface-similar retrieval firing in situationally-wrong cases; the anti-trigger names the
+   nearby-but-safe situation the skill must NOT fire on. For failure-lessons the trigger targets the
+   risky situation, the anti-trigger the safe lookalike). Both are enforced structurally at step 6.
 
    Single-shot and flat for v1 (no recursion, no General/Task-Specific hierarchy — that is v3). The
    prompt's **SHA-256 is published** in `metadata.jinn.distillPromptSha256` (auditability, mirrors
@@ -407,7 +462,15 @@ A human-run script (`yarn distill --distribution coding`), **not** a SolverNet (
    `instance_id`, PR number). **Freeze order:** distillation output must be produced/frozen *before*
    the slate draw, or re-scanned whenever a skill is authored after freeze; the remedy is **drop the
    skill** (the slate is pinned and cannot be re-cut). This is the third disjointness axis (§12).
-6. **Publish** — `publishSkill()` (§5): artifact + signed wrapper + `skill:<cid>` anchor; write the
+6. **Structural conformance gate (v0.5, publish-time).** Reject any distilled skill that does not
+   carry the fixed skeleton (all five `## ` sections present and non-empty) or whose `description`
+   lacks the `Not for:` anti-trigger clause. For lesson-mode skills, also reject bodies bearing an
+   **imperative counterfactual** ("… instead, do/use/run X"; "the correct fix is …") — the shallow
+   lexical realisation of the verified-counterfactual rule. These are **deterministic** checks (like
+   the contamination scan), not an LLM judge: judging whether a *well-formed* skill is actually
+   *good* is admission-checking, deferred (§13). A rejected skill costs one re-distill (check-mode,
+   §10) — it is never published defaced.
+7. **Publish** — `publishSkill()` (§5): artifact + signed wrapper + `skill:<cid>` anchor; write the
    `metadata.jinn.provenance` back-links to the source evidence refs.
 
 Output of v1: a small set of coding skills, each provenance-linked to evaluator-verified evidence,
@@ -449,8 +512,20 @@ to the actual ledger shape:
   - `environment.harness.name: 'jinn-execution-ledger-bridge'` (segmentation key; see below),
   - `task.summary` from the instance problem statement,
   - `task.distributionTags: ['coding', 'swe-rebench', <language>]`,
-  - `steps`: minimal — a patch step and a verdict step (bridged evidence is coarser than a native
-    trace: `(task, solution, verdict)`, not step-by-step reasoning — stated honestly).
+  - `steps`: a patch step and a verdict step — plus, **where the solution envelope carries the
+    solver's own trajectory ref** (`trajectory.sources[].cid`, or an artifact's
+    `metadata.producedBy.trajectoryCid`), a **solver-trajectory step** holding a compressed step
+    trace (span names + `jinn.span.kind`, capped). A patch shows *what* changed, not the decision
+    path; pattern-mode under-feeds without it. The trajectory content is placed in a step attribute
+    and therefore passes through **the same layer-2 scrub** `capture()` applies to every attribute
+    (§10) — it does **not** bypass the scrub.
+- **Evidence-richness stratification (`patch-only` tag, v0.5).** When the solver trajectory is
+  **unavailable** (older envelopes, or the ref does not resolve), the bridged layer-1 envelope's
+  freeform `distributionTags` gains **`'patch-only'`**, so the three-arm measurement (§11) can
+  stratify distillation quality by evidence richness (patch-only vs trajectory-enriched). This rides
+  the freeform tag array — **no frozen-envelope change** (§2.1); the tag count stays well under the
+  16-tag cap. Bridged evidence remains coarser than a native trace and this is stated honestly; the
+  trajectory enrichment narrows, not closes, the gap.
 - **Scrub at layer-2 altitude (D6), not trace-grade.** A verified swe-rebench solve is public-repo
   work, not raw private-machine activity, and its problem statements + patch identifiers are
   token-dense technical prose that #1409's trace-grade pipeline defaces — which the §6 guard would
@@ -466,8 +541,8 @@ to the actual ledger shape:
   swe-rebench solve rewarded once on-chain, then bridged as `contributed` evidence, could be counted
   **again** as an emissions-eligible contribution (double-count). v1 declares bridged evidence
   **emissions-ineligible** and names `environment.harness.name` as the field a future checker must
-  filter on (adding it to the checker contract — reconcile explicitly at v0.5). The
-  `ContributionActivityChecker` is v0.5, not in the v1 build order (§14), so this is not a v1
+  filter on (adding it to the checker contract — reconcile in a later amendment). The
+  `ContributionActivityChecker` reconciliation is deferred to a later amendment, not in the v1 build order (§14), so this is not a v1
   blocker — but the positive claim is corrected here rather than left wrong.
 
 ## 9. Consumption (option C — adopt the format, keep the substrate)
@@ -554,6 +629,12 @@ live search), all held-out-excluded identically:
   (un-distilled patch + verdict), mirroring the distilled arm's cluster coverage one-for-one so the
   contrast isolates the *distillation step*, not the underlying evidence.
 
+**Evidence-richness stratification (v0.5).** The bridge tags `patch-only` evidence (no solver
+trajectory, §8); where the pilot's discordant-pair count allows, report the distilled−raw contrast
+**stratified** by patch-only vs trajectory-enriched, so a null is attributable to thin evidence
+rather than a failed distillation step. This is a reporting cut, not a separate gate — at v1 volume
+it is descriptive (the pilot is unlikely to power a stratified test).
+
 **Model:** pinned **Haiku-class** (matches v0), with a **Sonnet-class replication that is
 load-bearing, not optional** — DR-2026-06-02-b and #986 produced Haiku-class nulls on exactly this
 pre-installed-lessons modality, so a Haiku null here is uninformative.
@@ -630,12 +711,15 @@ The held-out boundary is **owned and published by the capability-eval session** 
 
 **In scope (v1):** single distribution (coding); **retrieval-over-anchored-evidence as the shipped
 product baseline** (D11); the scripted distillation pipeline producing **success→patterns +
-failure→lessons** (D10) via `jinn-skill-distill-prompt-v1` + published hash; the execution-ledger
-bridge for swe-rebench sourcing **both passes and evaluator-confirmed failures** (layer-2 scrub); the
-`jinn.skill.v1` conformant-package format (+ additive optional `skillKind`) + provenance metadata +
-corrected publish/anchor path; the two-altitude scrub (§10) and the seed migration that fixes #1409
-go-forward; the **three-arm** measurement (the raw-evidence arm is both the product baseline and the
-D9 guardrail) + the pilot + the held-out interface.
+failure→lessons + both-polarity→contrastive** (D10 + v0.5) via `jinn-skill-distill-prompt-v1` +
+published hash, under the verified-counterfactual rule and the fixed-skeleton / anti-trigger
+structural gate (§7); the execution-ledger bridge for swe-rebench sourcing **both passes and
+evaluator-confirmed failures** (layer-2 scrub), enriched with the solver trajectory where available
+and `patch-only`-tagged where not; the `jinn.skill.v1` conformant-package format (+ additive optional
+`skillKind` / `distillModel` / `evidenceTokens` / `skillTokens`) + provenance metadata + corrected
+publish/anchor path; the two-altitude scrub (§10) and the seed migration that fixes #1409 go-forward;
+the **three-arm** measurement (the raw-evidence arm is both the product baseline and the D9
+guardrail) + the pilot + the held-out interface.
 
 **Out of scope:**
 
@@ -656,8 +740,18 @@ D9 guardrail) + the pilot + the held-out interface.
 - **Live-retrieval efficacy (recall@k)** — a separate later gate (§9, §16).
 - **Retroactive removal of #1409-defaced anchored records** — no mechanism exists (§10, §16).
 - **Multi-file skill packages** (`references/`, tarball) — single-file SKILL.md for v1.
+- **Admission-quality checking** (Voyager-style validate-before-admit; an LLM-judge rubric scoring a
+  distilled skill before it is admitted to the corpus) — **deferred to v3**. Admission-checking a
+  skill *is* evaluation work; when distillation becomes a network task (v3), skill admission becomes
+  an evaluator-verified job on the SolverNet, so a local judge built now would be replaced by the
+  network mechanism. v1's gate is **structural only** (§7 step 6: skeleton, anti-trigger, imperative-
+  counterfactual — deterministic, not judged). The interim risk (well-formed but low-value "junk"
+  skills passing the structural gate) is **accepted**: the three-arm gate (§11) catches net-negative
+  distillation in aggregate, and v1 volume is tiny.
+- **Skill dedup / merge** (library hygiene — collapsing near-duplicate skills, merging a lesson into
+  its contrastive sibling) — deferred, pre-v3.
 - **Any change to the frozen layer-1 envelope** (§2.1) or the `ContributionActivityChecker` contract
-  (§8 — a v0.5 concern).
+  (§8 — a later concern).
 
 ## 14. What v1 ships (minimal build order)
 
@@ -669,9 +763,13 @@ D9 guardrail) + the pilot + the held-out interface.
    product baseline, D11.)*
 3. The promotion gate + the corrected redaction-health guard, with **tiered eligibility**
    (pattern-eligible passes + lesson-eligible definitive-FAIL) (§6).
-4. `jinn-skill-distill-prompt-v1` (two modes: success→patterns, failure→lessons; D10) + the additive
-   optional `skillKind` field + the `yarn distill` script, incl. the **full-secret-net output scrub**
-   and the **publish-time lexical contamination scan** (§7).
+4. `jinn-skill-distill-prompt-v1` (**three modes**: success→patterns, failure→lessons under the
+   verified-counterfactual rule, and both-polarity→contrastive; D10 + v0.5) + the additive optional
+   `skillKind` (`strategic-pattern` | `failure-lesson` | `contrastive`), `distillModel`,
+   `evidenceTokens`, `skillTokens` fields + the `yarn distill` script, incl. the **full-secret-net
+   output scrub**, the **publish-time lexical contamination scan**, and the **structural conformance
+   gate** (fixed skeleton + anti-trigger + imperative-counterfactual guard) (§7). Distillation pins
+   the strongest available model (opus-class) by default (`JINN_DISTILL_MODEL`-overridable).
 5. Seed re-import onto the layer-2 path (fixes #1409 go-forward) (§10). *(Built — Plan A.)*
 6. The **three-arm** measurement wiring: pre-installed control / distilled / raw-evidence snapshots +
    the `cap-v0` slate run, **reusing** the capability-eval rig (`paired.ts`/`wilson.ts`/slate/grader;
@@ -695,7 +793,7 @@ Issue (mostly `feat`, one `fix` for #1409) with a TDD plan under `docs/superpowe
 | **Contamination via distilled prose** (skill from a non-slate repo encodes a slate task's gold-patch shape) | The publish-time lexical scan over distilled bodies is the third disjointness axis (§7 step 5, §12); instance_id + repo exclusion alone is insufficient because skills generalize across repos |
 | Secret leak through the weaker layer-2 pass | Layer-2 keeps the FULL secretlint stage incl. Pass-2 entropy fallback; distilled output gets the full net + drop-if-unexplained high-entropy tokens (§7, §10) |
 | #1409-defaced records persist after re-import | Fix is go-forward; retroactive removal is a named open question needing a mechanism that does not exist (§10, §16) |
-| Emissions double-count of bridged solves | Bridged evidence declared emissions-ineligible; `harness.name` named as the future checker filter (§8); checker is v0.5, not v1 |
+| Emissions double-count of bridged solves | Bridged evidence declared emissions-ineligible; `harness.name` named as the future checker filter (§8); checker reconciliation deferred to a later amendment, not v1 |
 | Bridged evidence too coarse to distil well | Honest limitation (§8); if `(task, patch, verdict)` under-distils, the fix is richer attempt envelopes upstream, not a bridge hack |
 | Forward-path resolver / 18+ agent reach may not be feasible | Contingent on an unverified `skills` CLI extension point (§9, §16, DR); v1 does not depend on it — corpus-native consumption stands alone |
 
@@ -714,7 +812,7 @@ Issue (mostly `feat`, one `fix` for #1409) with a TDD plan under `docs/superpowe
 - **#1409 residue** — go-forward fix only; retroactive removal of anchored defaced records needs a
   read-path exclusion / tombstone mechanism that does not exist (§10).
 - **Bridged-evidence emissions eligibility** — declared ineligible for v1; adding `harness.name` to
-  the `ContributionActivityChecker` contract is a v0.5 reconciliation (§8).
+  the `ContributionActivityChecker` contract is deferred to a later amendment (§8).
 - **`skills` CLI custom-source support** — gates the forward-path resolver only (§9); verify against
   the CLI source before building.
 - **skill envelope discriminator** — `role: 'capture'` (closed enum) + `solverType: 'distilled-skill'`
