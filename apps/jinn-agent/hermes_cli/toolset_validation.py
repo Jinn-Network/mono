@@ -55,7 +55,7 @@ def validate_platform_toolsets(
             if is_valid_toolset(name):
                 valid_count += 1
                 continue
-            suggestion = f"hermes-{platform}"
+            suggestion = f"jinn-{platform}"
             hint = (
                 f" — did you mean '{suggestion}'?"
                 if is_valid_toolset(suggestion)

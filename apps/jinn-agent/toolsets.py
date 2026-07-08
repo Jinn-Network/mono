@@ -26,6 +26,41 @@ Usage:
 from typing import List, Dict, Any, Set, Optional
 
 
+# Canonical prefix for the per-platform composite bundles (jinn-cli,
+# jinn-telegram, …). The upstream spelling ("hermes-") is still accepted
+# anywhere a toolset name is read — config files, -s flags,
+# disabled_toolsets — via canonical_toolset_name(), so configs written
+# before the rename (or shared with a stock upstream install through
+# HERMES_HOME) keep working.
+TOOLSET_BUNDLE_PREFIX = "jinn-"
+LEGACY_TOOLSET_BUNDLE_PREFIX = "hermes-"
+_BUNDLE_PREFIXES = (TOOLSET_BUNDLE_PREFIX, LEGACY_TOOLSET_BUNDLE_PREFIX)
+
+
+def canonical_toolset_name(name: str) -> str:
+    """Map a legacy ``hermes-*`` bundle name to its ``jinn-*`` equivalent.
+
+    Only maps when the jinn-spelled name is actually a static bundle, so a
+    registry/MCP toolset that happens to be named ``hermes-<something>``
+    is never hijacked.
+    """
+    if isinstance(name, str) and name.startswith(LEGACY_TOOLSET_BUNDLE_PREFIX):
+        candidate = TOOLSET_BUNDLE_PREFIX + name[len(LEGACY_TOOLSET_BUNDLE_PREFIX):]
+        if candidate in TOOLSETS:
+            return candidate
+    return name
+
+
+def is_platform_bundle_name(name: str) -> bool:
+    """True when ``name`` is spelled like a platform bundle (either prefix)."""
+    return isinstance(name, str) and name.startswith(_BUNDLE_PREFIXES)
+
+
+def platform_bundle_toolset(platform: str) -> str:
+    """Canonical bundle toolset name for a platform key (``jinn-<platform>``)."""
+    return TOOLSET_BUNDLE_PREFIX + platform
+
+
 # Shared tool list for CLI and all messaging platform toolsets.
 # Edit this once to update all platforms simultaneously.
 _HERMES_CORE_TOOLS = [
@@ -375,7 +410,7 @@ TOOLSETS = {
     # the `hermes send` CLI), not by the model deciding to send on its own.
     # ==========================================================================
 
-    "hermes-acp": {
+    "jinn-acp": {
         "description": "Editor integration (VS Code, Zed, JetBrains) — coding-focused tools without messaging, audio, or clarify UI",
         "tools": [
             "web_search", "web_extract",
@@ -394,7 +429,7 @@ TOOLSETS = {
         "includes": []
     },
 
-    "hermes-api-server": {
+    "jinn-api-server": {
         "description": "OpenAI-compatible API server — full agent tools accessible via HTTP (no interactive UI tools like clarify or send_message)",
         "tools": [
             # Web
@@ -427,30 +462,30 @@ TOOLSETS = {
         "includes": []
     },
     
-    "hermes-cli": {
+    "jinn-cli": {
         "description": "Full interactive CLI toolset - all default tools plus cronjob management",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-cron": {
-        # Mirrors hermes-cli so cron's "default" toolset is the same set of
+    "jinn-cron": {
+        # Mirrors jinn-cli so cron's "default" toolset is the same set of
         # core tools users see interactively — then `hermes tools` filters
         # them down per the platform config. _DEFAULT_OFF_TOOLSETS (moa,
         # homeassistant) are excluded by _get_platform_tools() unless
         # the user explicitly enables them.
-        "description": "Default cron toolset - same core tools as hermes-cli; gated by `hermes tools`",
+        "description": "Default cron toolset - same core tools as jinn-cli; gated by `hermes tools`",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-telegram": {
+    "jinn-telegram": {
         "description": "Telegram bot toolset - full access for personal use (terminal has safety checks)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
     
-    "hermes-discord": {
+    "jinn-discord": {
         "description": "Discord bot toolset - full access (terminal has safety checks via dangerous command approval)",
         "tools": _HERMES_CORE_TOOLS + [
             "discord",
@@ -459,61 +494,61 @@ TOOLSETS = {
         "includes": []
     },
     
-    "hermes-whatsapp": {
+    "jinn-whatsapp": {
         "description": "WhatsApp bot toolset - similar to Telegram (personal messaging, more trusted)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
     
-    "hermes-slack": {
+    "jinn-slack": {
         "description": "Slack bot toolset - full access for workspace use (terminal has safety checks)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
     
-    "hermes-signal": {
+    "jinn-signal": {
         "description": "Signal bot toolset - encrypted messaging platform (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-bluebubbles": {
+    "jinn-bluebubbles": {
         "description": "BlueBubbles iMessage bot toolset - Apple iMessage via local BlueBubbles server",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-homeassistant": {
+    "jinn-homeassistant": {
         "description": "Home Assistant bot toolset - smart home event monitoring and control",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-email": {
+    "jinn-email": {
         "description": "Email bot toolset - interact with Hermes via email (IMAP/SMTP)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-mattermost": {
+    "jinn-mattermost": {
         "description": "Mattermost bot toolset - self-hosted team messaging (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-matrix": {
+    "jinn-matrix": {
         "description": "Matrix bot toolset - decentralized encrypted messaging (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-dingtalk": {
+    "jinn-dingtalk": {
         "description": "DingTalk bot toolset - enterprise messaging platform (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-feishu": {
+    "jinn-feishu": {
         "description": "Feishu/Lark bot toolset - enterprise messaging via Feishu/Lark (full access)",
         "tools": _HERMES_CORE_TOOLS + [
             "feishu_doc_read",
@@ -525,31 +560,31 @@ TOOLSETS = {
         "includes": []
     },
 
-    "hermes-weixin": {
+    "jinn-weixin": {
         "description": "Weixin bot toolset - personal WeChat messaging via iLink (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-qqbot": {
+    "jinn-qqbot": {
         "description": "QQBot toolset - QQ messaging via Official Bot API v2 (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-wecom": {
+    "jinn-wecom": {
         "description": "WeCom bot toolset - enterprise WeChat messaging (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-wecom-callback": {
+    "jinn-wecom-callback": {
         "description": "WeCom callback toolset - enterprise self-built app messaging (full access)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-yuanbao": {
+    "jinn-yuanbao": {
         "description": "Yuanbao Bot 元宝消息平台工具集 - 群信息、成员查询、私聊、贴纸表情",
         "tools": _HERMES_CORE_TOOLS + [
             "yb_query_group_info",
@@ -562,22 +597,22 @@ TOOLSETS = {
         "includes": []
     },
 
-    "hermes-sms": {
+    "jinn-sms": {
         "description": "SMS bot toolset - interact with Hermes via SMS (Twilio)",
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
-    "hermes-webhook": {
+    "jinn-webhook": {
         "description": "Webhook toolset - receive and process external webhook events",
         "tools": _HERMES_WEBHOOK_SAFE_TOOLS,
         "includes": []
     },
 
-    "hermes-gateway": {
+    "jinn-gateway": {
         "description": "Gateway toolset - union of all messaging platform tools",
         "tools": [],
-        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-bluebubbles", "hermes-homeassistant", "hermes-email", "hermes-sms", "hermes-mattermost", "hermes-matrix", "hermes-dingtalk", "hermes-feishu", "hermes-wecom", "hermes-wecom-callback", "hermes-weixin", "hermes-qqbot", "hermes-webhook", "hermes-yuanbao"]
+        "includes": ["jinn-telegram", "jinn-discord", "jinn-whatsapp", "jinn-slack", "jinn-signal", "jinn-bluebubbles", "jinn-homeassistant", "jinn-email", "jinn-sms", "jinn-mattermost", "jinn-matrix", "jinn-dingtalk", "jinn-feishu", "jinn-wecom", "jinn-wecom-callback", "jinn-weixin", "jinn-qqbot", "jinn-webhook", "jinn-yuanbao"]
     }
 }
 
@@ -604,6 +639,7 @@ def get_toolset(name: str, *, include_registry: bool = True) -> Optional[Dict[st
             registry/MCP-only toolsets AND registry-derived aliases return None
             (they have no static counterpart).
     """
+    name = canonical_toolset_name(name)
     toolset = TOOLSETS.get(name)
 
     if not include_registry:
@@ -657,7 +693,7 @@ def get_toolset(name: str, *, include_registry: bool = True) -> Optional[Dict[st
 
 
 def bundle_non_core_tools(toolset_name: str) -> Set[str]:
-    """Return a ``hermes-*`` bundle's platform-specific tools, excluding core.
+    """Return a ``jinn-*`` bundle's platform-specific tools, excluding core.
 
     Platform bundles are defined as ``_HERMES_CORE_TOOLS + [platform extras]``.
     When a bundle name appears in ``disabled_toolsets``, subtracting the whole
@@ -667,7 +703,7 @@ def bundle_non_core_tools(toolset_name: str) -> Set[str]:
     one-level ``includes``), so disabling a bundle removes its platform tools
     while leaving core intact.
 
-    Bundle nesting is one level deep in practice (only ``hermes-gateway``
+    Bundle nesting is one level deep in practice (only ``jinn-gateway``
     includes other bundles, and those leaves don't nest further), so a single
     ``includes`` pass is sufficient. Unknown/garbage names fall back to the
     full resolution minus core — never re-introducing the core wipe.
@@ -707,6 +743,10 @@ def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bo
     if visited is None:
         visited = set()
 
+    # Unify legacy hermes-* spellings with their jinn-* bundles up front so
+    # cycle detection and includes-resolution see one name per bundle.
+    name = canonical_toolset_name(name)
+
     # Special aliases that represent all tools across every toolset
     # This ensures future toolsets are automatically included without changes.
     if name in {"all", "*"}:
@@ -728,13 +768,13 @@ def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bo
     # Get toolset definition
     toolset = get_toolset(name, include_registry=include_registry)
     if not toolset:
-        # Auto-generate a toolset for plugin platforms (hermes-<name>).
+        # Auto-generate a toolset for plugin platforms (jinn-<name>).
         # Gives them _HERMES_CORE_TOOLS plus any tools the plugin registered
         # into a toolset matching the platform name. This is a registry-derived
         # view, so it only applies when registry tools are requested; the static
         # view (include_registry=False) has no plugin-platform definition.
-        if include_registry and name.startswith("hermes-"):
-            platform_name = name[len("hermes-"):]
+        if include_registry and is_platform_bundle_name(name):
+            platform_name = name.split("-", 1)[1]
             try:
                 from gateway.platform_registry import platform_registry
                 if platform_registry.is_registered(platform_name):
@@ -872,7 +912,7 @@ def validate_toolset(name: str) -> bool:
     # Accept special alias names for convenience
     if name in {"all", "*"}:
         return True
-    if name in TOOLSETS:
+    if canonical_toolset_name(name) in TOOLSETS:
         return True
     if name in _get_plugin_toolset_names():
         return True

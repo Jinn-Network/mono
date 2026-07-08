@@ -61,7 +61,7 @@ class TestApiServerPlatformConfig:
     def test_platforms_dict_includes_api_server(self):
         from hermes_cli.tools_config import PLATFORMS
         assert "api_server" in PLATFORMS
-        assert PLATFORMS["api_server"]["default_toolset"] == "hermes-api-server"
+        assert PLATFORMS["api_server"]["default_toolset"] == "jinn-api-server"
 
     def test_default_api_server_includes_terminal_toolset(self):
         """Regression #49622: desktop-only read_terminal is registered into the

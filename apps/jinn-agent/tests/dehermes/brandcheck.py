@@ -4,22 +4,12 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[2]          # apps/jinn-agent/
 _BIN = _REPO / "bin" / "jinn-agent"
 
-# ``hermes-*`` toolset registry keys (hermes_cli/platforms.py:40 default_toolset
-# values; static bundle definition in toolsets.py). These are technical
-# identifiers, not branding: users type them verbatim in `-s <toolset>` flags
-# and reference them in config files. Renaming them is tracked separately
-# from CLI brand copy (Task 10 controller ruling) — listed explicitly (NOT a
-# broad `hermes-[a-z-]+` pattern) so this exemption can never accidentally
-# swallow the brand string "hermes-agent", which is not itself a toolset key.
-_TOOLSET_KEYS = (
-    "hermes-acp", "hermes-api-server", "hermes-bluebubbles", "hermes-cli",
-    "hermes-cron", "hermes-dingtalk", "hermes-discord", "hermes-email",
-    "hermes-feishu", "hermes-gateway", "hermes-homeassistant", "hermes-matrix",
-    "hermes-mattermost", "hermes-qqbot", "hermes-signal", "hermes-slack",
-    "hermes-sms", "hermes-telegram", "hermes-webhook", "hermes-wecom",
-    "hermes-wecom-callback", "hermes-weixin", "hermes-whatsapp", "hermes-yuanbao",
-)
-_TOOLSET_KEY_PATTERN = "|".join(re.escape(k) for k in _TOOLSET_KEYS)
+# NOTE: the former ``hermes-*`` toolset-key exemption (Task 10 controller
+# ruling) is gone: the toolset registry keys are now canonically ``jinn-*``
+# (toolsets.py TOOLSET_BUNDLE_PREFIX), so a ``hermes-<platform>`` string on
+# screen is once again a brand leak. Legacy ``hermes-*`` spellings are still
+# ACCEPTED on input (configs, -s flags) via canonical_toolset_name(), but the
+# CLI must never print them.
 
 # Technical tokens that are NOT branding and are allowed on screen:
 # (?:venv/|\.local/)?bin/hermes\b covers real on-disk paths — the venv entry
@@ -73,13 +63,13 @@ _TOOLSET_KEY_PATTERN = "|".join(re.escape(k) for k in _TOOLSET_KEYS)
 #     the hyphen (`hermes-plugin-\nchrome-profiles`), same tolerance as
 #     hermes-backup- above.
 # Word/hyphen-boundary anchor: `\b` alone treats `-` as a non-word
-# character, so it sits on *both* sides of a hyphen and happily matches
-# `hermes-cli` in the middle of `hermes-cli-extra` or `prefix-hermes-slack`
-# — stripping just the real key and leaving `-extra` / `prefix-` behind,
-# which then passes the brand check even though the surrounding text is
-# not a real toolset key. (?<![\w-]) / (?![\w-]) instead require the
-# character immediately outside the match to be neither a word char nor a
-# hyphen, so adjacent-hyphen spillover is left in place and still flagged.
+# character, so it sits on *both* sides of a hyphen and would let an
+# exemption match inside a longer hyphenated token (e.g. `--hermes-root`
+# inside `--hermes-root-extra`), stripping the exempt core and leaving a
+# fragment that then passes the brand check. (?<![\w-]) / (?![\w-]) instead
+# require the character immediately outside the match to be neither a word
+# char nor a hyphen, so adjacent-hyphen spillover is left in place and
+# still flagged.
 _TECHNICAL = re.compile(
     r"HERMES_[A-Z0-9_]+|\.hermes\b|hermes_[a-z0-9_]+|nous_[a-z0-9_]+"
     r"|(?:venv/|\.local/)?bin/hermes\b"
@@ -99,7 +89,6 @@ _TECHNICAL = re.compile(
     r"|nous or xai \(default: nous\)"
     r"|docs/hermes-\s*kanban-v1-spec\.pdf"
     r"|anpicasso/hermes-\s*plugin-\s*chrome-profiles"
-    rf"|(?<![\w-])(?:{_TOOLSET_KEY_PATTERN})(?![\w-])"
 )
 # "nous" as a bare substring also matches inside ordinary English words that
 # have nothing to do with the brand — e.g. "synchronous" (a real, legitimate

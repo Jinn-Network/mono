@@ -9,11 +9,11 @@ import pytest
 from hermes_cli.toolset_validation import validate_platform_toolsets
 
 # A representative set of real toolset names. `hermes` is deliberately absent —
-# that is the corruption #38798 reported (`hermes-cli` rewritten to `hermes`).
+# that is the corruption #38798 reported (the cli bundle rewritten to `hermes`).
 _KNOWN = {
-    "hermes-cli",
-    "hermes-telegram",
-    "hermes-discord",
+    "jinn-cli",
+    "jinn-telegram",
+    "jinn-discord",
     "terminal",
     "web",
 }
@@ -24,23 +24,23 @@ def _is_valid(name):
 
 
 def test_valid_config_produces_no_warnings():
-    cfg = {"cli": ["hermes-cli"], "telegram": ["hermes-telegram"]}
+    cfg = {"cli": ["jinn-cli"], "telegram": ["jinn-telegram"]}
     assert validate_platform_toolsets(cfg, _is_valid) == []
 
 
 def test_38798_corruption_warns_and_suggests_correct_name():
-    # The exact reported shape: cli holds 'hermes' instead of 'hermes-cli'.
+    # The exact reported shape: cli holds 'hermes' instead of the cli bundle.
     warnings = validate_platform_toolsets({"cli": ["hermes"]}, _is_valid)
     unknown = [w for w in warnings if "unknown toolset 'hermes'" in w]
     assert len(unknown) == 1
     # Actionable: points at the valid name the entry should have been.
-    assert "did you mean 'hermes-cli'?" in unknown[0]
+    assert "did you mean 'jinn-cli'?" in unknown[0]
     # And the zero-valid-toolsets safety net fires.
     assert any("zero valid toolsets" in w for w in warnings)
 
 
 def test_mixed_valid_and_invalid_flags_only_the_invalid():
-    cfg = {"cli": ["hermes-cli"], "discord": ["bogus"]}
+    cfg = {"cli": ["jinn-cli"], "discord": ["bogus"]}
     warnings = validate_platform_toolsets(cfg, _is_valid)
     # One valid entry exists, so no zero-valid warning.
     assert not any("zero valid toolsets" in w for w in warnings)
@@ -57,18 +57,18 @@ def test_unknown_without_valid_platform_default_omits_suggestion():
     assert "did you mean" not in unknown[0]
 
 
-@pytest.mark.parametrize("value", [None, {}, [], "hermes-cli", 42])
+@pytest.mark.parametrize("value", [None, {}, [], "jinn-cli", 42])
 def test_non_dict_or_empty_yields_no_warnings(value):
     assert validate_platform_toolsets(value, _is_valid) == []
 
 
 def test_scalar_toolset_value_is_accepted():
     # Some configs store the toolset as a bare string rather than a list.
-    assert validate_platform_toolsets({"cli": "hermes-cli"}, _is_valid) == []
+    assert validate_platform_toolsets({"cli": "jinn-cli"}, _is_valid) == []
 
 
 def test_non_string_entries_are_skipped_not_counted_invalid():
-    cfg = {"cli": [None, 123, "hermes-cli"]}
+    cfg = {"cli": [None, 123, "jinn-cli"]}
     # The junk entries are ignored; the valid one keeps it from being "zero".
     assert validate_platform_toolsets(cfg, _is_valid) == []
 
@@ -82,10 +82,12 @@ def test_all_invalid_reports_each_and_the_zero_state():
 
 def test_real_validate_toolset_treats_hermes_cli_valid_and_hermes_invalid():
     # Ties the helper to reality: the canonical registry check agrees that
-    # `hermes-cli` is the real toolset and `hermes` is not (the #38798 crux).
+    # `jinn-cli` is the real toolset (with `hermes-cli` accepted as its
+    # legacy alias) and bare `hermes` is not (the #38798 crux).
     from toolsets import validate_toolset
 
+    assert validate_toolset("jinn-cli") is True
     assert validate_toolset("hermes-cli") is True
     assert validate_toolset("hermes") is False
     warnings = validate_platform_toolsets({"cli": ["hermes"]}, validate_toolset)
-    assert any("did you mean 'hermes-cli'?" in w for w in warnings)
+    assert any("did you mean 'jinn-cli'?" in w for w in warnings)
