@@ -43,6 +43,8 @@ export interface PipelineDeps {
   /** Held-out slate (§12): excluded from the bridge AND the gate/cluster. */
   slate: { instanceIds: Set<string>; repos?: Set<string> };
   distribution?: string;
+  /** The distilling model, recorded in each skill's provenance (§5 auditability). */
+  distillModel?: string;
   limit?: number;
   now?: () => Date;
 }
@@ -94,6 +96,7 @@ export async function runDistillationPipeline(deps: PipelineDeps): Promise<Pipel
     publishSkill: deps.publishSkill,
     slate: deps.slate,
     ...(deps.distribution ? { distribution: deps.distribution } : {}),
+    ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
     ...(deps.now ? { now: deps.now } : {}),
   });
 

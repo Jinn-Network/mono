@@ -105,6 +105,10 @@ export function toSkillArtifactV1(
         : {}),
       distribution: pkg.jinn.distribution,
       verifiabilityTier: pkg.jinn.verifiabilityTier,
+      // Auditability (§5, v0.5): the distilling model + compression-ratio estimates.
+      ...(pkg.jinn.distillModel !== undefined ? { distillModel: pkg.jinn.distillModel } : {}),
+      ...(pkg.jinn.evidenceTokens !== undefined ? { evidenceTokens: pkg.jinn.evidenceTokens } : {}),
+      ...(pkg.jinn.skillTokens !== undefined ? { skillTokens: pkg.jinn.skillTokens } : {}),
     },
   });
 }

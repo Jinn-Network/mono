@@ -96,14 +96,14 @@ describe('createClaudeDistiller', () => {
     expect(calls[0]!.args).toContain('claude-sonnet-4-6');
   });
 
-  it('defaults to `claude` + the haiku model when unconfigured', async () => {
+  it('defaults to `claude` + the opus-class distiller model when unconfigured (§5, v0.5)', async () => {
     const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b' }) });
     const { spawn, calls } = makeSpawn(child);
     const distill = createClaudeDistiller({ spawnImpl: spawn });
 
     await distill(cluster);
     expect(calls[0]!.command).toBe('claude');
-    expect(calls[0]!.args).toContain('claude-haiku-4-5-20251001');
+    expect(calls[0]!.args).toContain('claude-opus-4-8');
   });
 
   it('keys the MODE off the cluster tier (lesson → failure-lesson)', async () => {
@@ -114,6 +114,16 @@ describe('createClaudeDistiller', () => {
     await distill({ ...cluster, tier: 'lesson' });
     const sent = (child as unknown as { writes: string[] }).writes.join('');
     expect(sent).toContain('MODE = failure-lesson');
+  });
+
+  it('keys the MODE off the cluster tier (contrastive → contrastive, §7 v0.5)', async () => {
+    const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b' }) });
+    const { spawn } = makeSpawn(child);
+    const distill = createClaudeDistiller({ spawnImpl: spawn });
+
+    await distill({ ...cluster, tier: 'contrastive' });
+    const sent = (child as unknown as { writes: string[] }).writes.join('');
+    expect(sent).toContain('MODE = contrastive');
   });
 
   it('throws when the model returns non-JSON', async () => {

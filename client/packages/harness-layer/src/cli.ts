@@ -46,7 +46,7 @@ import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
 import { createEvidenceFetcher } from './bridge-fetch-evidence.js';
-import { createClaudeDistiller } from './distill-llm.js';
+import { createClaudeDistiller, DEFAULT_MODEL as DEFAULT_DISTILL_MODEL } from './distill-llm.js';
 import { buildSkillMarkdown } from './skill-package.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput } from './distill.js';
@@ -106,7 +106,7 @@ Environment (publish — testnet anchor identity):
 Environment (distill — reads the testnet ledger + spends claude solves):
   JINN_DISCOVERY_URL       Ponder indexer base (default: testnet jinn-indexer)
   JINN_IPFS_GATEWAY_URL    IPFS gateway for envelope fetches (default: https://gateway.autonolas.tech)
-  JINN_DISTILL_MODEL       Distiller model (default: claude-haiku-4-5-20251001)
+  JINN_DISTILL_MODEL       Distiller model (default: claude-opus-4-8 — opus-class; §5)
   (publish env above)      distill also captures + anchors the bridged evidence on testnet
 `;
 
@@ -135,9 +135,6 @@ export interface RunJinnLayerCliOptions {
   distillDeps?: DistillCliDeps;
   writer?: { write: (s: string) => boolean };
 }
-
-/** Default distiller model — the daemon-wide cheap default (see CLAUDE.md config). */
-const DEFAULT_DISTILL_MODEL = 'claude-haiku-4-5-20251001';
 
 const DEFAULT_CLI_SEARCH_LIMIT = 20;
 
@@ -509,7 +506,10 @@ export async function runJinnLayerCli(
         });
       })();
 
-    const distill = dd.distill ?? createClaudeDistiller({ model: process.env['JINN_DISTILL_MODEL'] ?? DEFAULT_DISTILL_MODEL });
+    // Resolve the distiller model once — it drives BOTH the model call and the
+    // `distillModel` recorded in provenance (§5), so the record matches the run.
+    const distillModel = process.env['JINN_DISTILL_MODEL'] ?? DEFAULT_DISTILL_MODEL;
+    const distill = dd.distill ?? createClaudeDistiller({ model: distillModel });
     const publishDeps = dd.publishDeps ?? buildLivePublishDepsFromEnv();
 
     // Local-fs publishSkill: write <out>/<name>/SKILL.md (mirror distill-run-live.ts).
@@ -528,6 +528,7 @@ export async function runJinnLayerCli(
       publishSkill,
       slate: { instanceIds: slateInstanceIds },
       distribution: 'coding',
+      distillModel,
       ...(limit !== undefined ? { limit } : {}),
     });
 

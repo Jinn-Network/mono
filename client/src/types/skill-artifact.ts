@@ -78,8 +78,13 @@ export const SkillProvenanceSchema = z.object({
     .optional(),
   // --- distilled-skill fields (DR-2026-07-06, additive; producer is
   // publishSkill() in client/packages/harness-layer/src/publish-skill.ts) ---
-  /** Success→strategic-pattern vs failure→lesson (spec §7, D10). */
-  skillKind: z.enum(['strategic-pattern', 'failure-lesson']).optional(),
+  /**
+   * Success→strategic-pattern, failure→lesson, or both-polarity→contrastive
+   * (spec §7, D10 + v0.5). `contrastive` is an additive enum value: strict
+   * consumers (`extractSkill`) reject it until upgraded — acceptable at
+   * testnet volume, named in the spec.
+   */
+  skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive']).optional(),
   /** SHA-256 of the exact distill prompt that produced the skill (auditability, D4). */
   distillPromptSha256: z
     .string()
@@ -89,6 +94,20 @@ export const SkillProvenanceSchema = z.object({
   distribution: z.string().min(1).optional(),
   /** Verifiability tier of the source evidence (e.g. 'evaluator-verified'). */
   verifiabilityTier: z.string().min(1).optional(),
+  /**
+   * The model that ran distillation (spec §5, v0.5). Distillation quality is
+   * model-sensitive; recording it makes a skill's quality auditable.
+   */
+  distillModel: z.string().min(1).optional(),
+  /**
+   * Deterministic `ceil(utf8 chars / 4)` token estimates of the distiller
+   * input and the emitted body (spec §5, v0.5). The pair records the
+   * compression ratio (SkillRL operates at 10–20×); an auditable estimate
+   * serves that purpose better than an unreproducible exact count (the LLM
+   * port reports no usage).
+   */
+  evidenceTokens: z.number().int().nonnegative().optional(),
+  skillTokens: z.number().int().nonnegative().optional(),
 });
 
 /** Decoded size of a base64 string without decoding it. */

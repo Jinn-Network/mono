@@ -22,8 +22,13 @@ import type { DistillCluster, DistillLLMOutput } from './distill.js';
 
 /** Default `claude` executable (resolved from PATH), mirrors the daemon default. */
 const DEFAULT_CLAUDE_PATH = 'claude';
-/** Default distiller model — the daemon-wide cheap default (see CLAUDE.md config). */
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+/**
+ * Default distiller model — the strongest available (opus-class), NOT the
+ * daemon-wide cheap default (spec §5, v0.5). Distillation is offline, one-shot,
+ * and cheap relative to the measurement run, and its quality is model-sensitive
+ * — so it pins the best model. Overridable via `JINN_DISTILL_MODEL` at the CLI.
+ */
+export const DEFAULT_MODEL = 'claude-opus-4-8';
 
 /**
  * The subset of `node:child_process` a spawned child exposes that this port
@@ -41,14 +46,21 @@ export interface ChildLike {
 /** Minimal spawn signature: `(command, args) => child`. Satisfied by `child_process.spawn`. */
 export type SpawnLike = (command: string, args: readonly string[]) => ChildLike;
 
+/** The prompt MODE each cluster tier keys on (§7). */
+const MODE_BY_TIER = {
+  pattern: 'strategic-pattern',
+  lesson: 'failure-lesson',
+  contrastive: 'contrastive',
+} as const;
+
 /**
  * Serialize a cluster into the concrete model input appended after the prompt:
- * the MODE the prompt keys on (§6 tier → strategic-pattern / failure-lesson)
- * plus the cluster's evidence payload. Only tier + `input` are sent — refs and
- * instance ids are audit metadata the model must not echo into a body.
+ * the MODE the prompt keys on (§7 tier → strategic-pattern / failure-lesson /
+ * contrastive) plus the cluster's evidence payload. Only tier + `input` are
+ * sent — refs and instance ids are audit metadata the model must not echo.
  */
 function serializeCluster(cluster: DistillCluster): string {
-  const mode = cluster.tier === 'pattern' ? 'strategic-pattern' : 'failure-lesson';
+  const mode = MODE_BY_TIER[cluster.tier];
   const evidence = JSON.stringify(cluster.input, null, 2);
   return `MODE = ${mode}\n\nEVIDENCE (the cluster's verified traces):\n${evidence}`;
 }
@@ -133,7 +145,7 @@ function assertDistillOutput(parsed: unknown): DistillLLMOutput {
  * collect stdout, and parse the strict JSON output.
  *
  * @param opts.claudePath  Path to the `claude` executable (default `claude`).
- * @param opts.model       Model id (default `claude-haiku-4-5-20251001`).
+ * @param opts.model       Model id (default `claude-opus-4-8` — opus-class, §5).
  * @param opts.spawnImpl   Injected spawn (default `child_process.spawn`); tests
  *                         pass a fake so no real `claude` is invoked.
  */

@@ -47,13 +47,44 @@ interface ClusterInputItem {
   steps: Array<{ name: string; attributes?: Record<string, unknown> }>;
 }
 
+function projectInput(items: ClusterItem[]): ClusterInputItem[] {
+  return items.map((it) => ({
+    ref: it.ref,
+    instanceId: it.instanceId,
+    taskSummary: it.env.task.summary,
+    distributionTags: it.env.task.distributionTags,
+    outcome: { status: it.env.outcome.status, summary: it.env.outcome.summary },
+    steps: it.env.steps.map((s) => ({ name: s.name, attributes: s.attributes })),
+  }));
+}
+
+function buildCluster(
+  clusterId: string,
+  tier: DistillCluster['tier'],
+  instanceId: string,
+  items: ClusterItem[],
+): DistillCluster {
+  return {
+    clusterId,
+    tier,
+    evidenceRefs: items.map((it) => it.ref),
+    instanceIds: [instanceId],
+    input: projectInput(items),
+  };
+}
+
 /**
- * Group eligible layer-1 evidence into distill clusters, one per distinct
- * `(tier, instanceId)`. Ineligible items (per the gate) are dropped. The
- * returned clusters are sorted by `clusterId` for deterministic output.
+ * Group eligible layer-1 evidence into distill clusters. Ineligible items (per
+ * the gate) are dropped. An instance with a single polarity yields one
+ * `pattern:`/`lesson:` cluster; an instance carrying BOTH an
+ * (eligible) pattern and lesson folds into ONE `contrastive:` cluster whose
+ * evidence refs link both polarities, and the singles are suppressed (§7 v0.5,
+ * ExpeL). The returned clusters are sorted by `clusterId` for determinism.
  */
 export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {}): DistillCluster[] {
-  const groups = new Map<string, { tier: 'pattern' | 'lesson'; instanceId: string; items: ClusterItem[] }>();
+  // Bucket eligible items by (instanceId → polarity), preserving input order.
+  const byInstance = new Map<string, { pattern: ClusterItem[]; lesson: ClusterItem[]; order: number }>();
+  let order = 0;
 
   for (const item of items) {
     const result = evaluateEligibility(item.env, {
@@ -62,32 +93,27 @@ export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {})
     });
     if (!result.eligible || result.tier === null) continue;
 
-    const clusterId = `${result.tier}:${item.instanceId}`;
-    let group = groups.get(clusterId);
-    if (!group) {
-      group = { tier: result.tier, instanceId: item.instanceId, items: [] };
-      groups.set(clusterId, group);
+    let slot = byInstance.get(item.instanceId);
+    if (!slot) {
+      slot = { pattern: [], lesson: [], order: order++ };
+      byInstance.set(item.instanceId, slot);
     }
-    group.items.push(item);
+    slot[result.tier].push(item);
   }
 
   const clusters: DistillCluster[] = [];
-  for (const [clusterId, group] of groups) {
-    const input: ClusterInputItem[] = group.items.map((it) => ({
-      ref: it.ref,
-      instanceId: it.instanceId,
-      taskSummary: it.env.task.summary,
-      distributionTags: it.env.task.distributionTags,
-      outcome: { status: it.env.outcome.status, summary: it.env.outcome.summary },
-      steps: it.env.steps.map((s) => ({ name: s.name, attributes: s.attributes })),
-    }));
-    clusters.push({
-      clusterId,
-      tier: group.tier,
-      evidenceRefs: group.items.map((it) => it.ref),
-      instanceIds: [group.instanceId],
-      input,
-    });
+  for (const [instanceId, slot] of byInstance) {
+    const hasPattern = slot.pattern.length > 0;
+    const hasLesson = slot.lesson.length > 0;
+    if (hasPattern && hasLesson) {
+      // Precedence: the contrastive fold SUPPRESSES the pattern-only/lesson-only
+      // singles. Pattern refs precede lesson refs in the merged provenance.
+      clusters.push(buildCluster(`contrastive:${instanceId}`, 'contrastive', instanceId, [...slot.pattern, ...slot.lesson]));
+    } else if (hasPattern) {
+      clusters.push(buildCluster(`pattern:${instanceId}`, 'pattern', instanceId, slot.pattern));
+    } else if (hasLesson) {
+      clusters.push(buildCluster(`lesson:${instanceId}`, 'lesson', instanceId, slot.lesson));
+    }
   }
 
   clusters.sort((a, b) => (a.clusterId < b.clusterId ? -1 : a.clusterId > b.clusterId ? 1 : 0));

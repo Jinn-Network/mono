@@ -15,9 +15,10 @@ describe('jinn-skill-distill-prompt-v1', () => {
     const actual = createHash('sha256').update(JINN_SKILL_DISTILL_PROMPT_V1).digest('hex');
     expect(actual).toBe(JINN_SKILL_DISTILL_PROMPT_V1_SHA256);
   });
-  it('covers both polarities', () => {
+  it('covers all three modes (§7 v0.5)', () => {
     expect(JINN_SKILL_DISTILL_PROMPT_V1).toMatch(/strategic-pattern/);
     expect(JINN_SKILL_DISTILL_PROMPT_V1).toMatch(/failure-lesson/);
+    expect(JINN_SKILL_DISTILL_PROMPT_V1).toMatch(/contrastive/);
   });
 });
 
@@ -59,11 +60,31 @@ function deps(out: DistillLLMOutput, over: Partial<DistillDeps> = {}): DistillDe
   };
 }
 
-describe('distillClusters (both polarities, output scrub, contamination scan)', () => {
+/** A body that satisfies the v0.5 structural gate (five non-empty sections). */
+const CONFORMANT_BODY = [
+  '## When to use',
+  'A queryset returns duplicate rows after a join or prefetch.',
+  '',
+  '## Strategy',
+  'Collapse the duplicates at the ORM layer, close to the join that produced them.',
+  '',
+  '## Steps',
+  '1. Identify the join or prefetch that fans out rows.',
+  '2. Apply .distinct() (or distinct(*fields)) after that join.',
+  '',
+  '## Pitfalls',
+  'An order_by on a joined column can re-expand the rows distinct() collapsed.',
+  '',
+  '## Verify',
+  'Assert the returned row count equals the expected unique count.',
+  '',
+].join('\n');
+
+describe('distillClusters (three modes, output scrub, contamination scan, structural gate)', () => {
   const cleanOut: DistillLLMOutput = {
     name: 'orm-queryset-dedup',
-    description: 'Use when a queryset returns duplicate rows after a join.',
-    body: '# Dedup\n\nApply .distinct() after the join; verify with a count assertion.\n',
+    description: 'Use when a queryset returns duplicate rows after a join. Not for: single-table queries.',
+    body: CONFORMANT_BODY,
   };
 
   it('a pattern cluster publishes a strategic-pattern skill with prompt hash + provenance', async () => {
@@ -114,5 +135,58 @@ describe('distillClusters (both polarities, output scrub, contamination scan)', 
   it('returns an empty result for no clusters', async () => {
     const res = await distillClusters([], deps(cleanOut));
     expect(res).toEqual({ published: [], rejected: [], errors: [] });
+  });
+
+  it('a contrastive cluster publishes a contrastive skill (§7 v0.5)', async () => {
+    const d = deps(cleanOut);
+    const res = await distillClusters([cluster({ tier: 'contrastive', clusterId: 'contrastive:flask__flask-1' })], d);
+    expect(res.published).toHaveLength(1);
+    expect(res.published[0]!.skillKind).toBe('contrastive');
+    expect(d.published[0]!.jinn.skillKind).toBe('contrastive');
+  });
+
+  it('records auditability metadata: distillModel + token estimates (§5 v0.5)', async () => {
+    const d = deps(cleanOut, { distillModel: 'claude-opus-4-8' });
+    await distillClusters([cluster({ input: { some: 'evidence payload here' } })], d);
+    const jinn = d.published[0]!.jinn;
+    expect(jinn.distillModel).toBe('claude-opus-4-8');
+    expect(jinn.evidenceTokens).toBeGreaterThan(0);
+    expect(jinn.skillTokens).toBeGreaterThan(0);
+  });
+
+  it('drops a skill missing a required skeleton section (§7 step 6)', async () => {
+    const noVerify = CONFORMANT_BODY.replace(/## Verify[\s\S]*$/, '').trimEnd() + '\n';
+    const d = deps({ ...cleanOut, body: noVerify });
+    const res = await distillClusters([cluster()], d);
+    expect(res.published).toHaveLength(0);
+    expect(res.rejected[0]!.reason).toMatch(/skeleton: missing section "## Verify"/);
+  });
+
+  it('drops a skill whose description lacks the "Not for:" anti-trigger (§7 step 6)', async () => {
+    const d = deps({ ...cleanOut, description: 'Use when a queryset returns duplicate rows.' });
+    const res = await distillClusters([cluster()], d);
+    expect(res.published).toHaveLength(0);
+    expect(res.rejected[0]!.reason).toMatch(/Not for/);
+  });
+
+  it('drops a lesson body that states an imperative counterfactual as fact (verified-counterfactual rule)', async () => {
+    const prescriptive = CONFORMANT_BODY.replace(
+      'An order_by on a joined column can re-expand the rows distinct() collapsed.',
+      'Instead, use select_related() to avoid the fan-out entirely.',
+    );
+    const d = deps({ ...cleanOut, body: prescriptive });
+    const res = await distillClusters([cluster({ tier: 'lesson' })], d);
+    expect(res.published).toHaveLength(0);
+    expect(res.rejected[0]!.reason).toMatch(/counterfactual/);
+  });
+
+  it('allows the same prescriptive language in a CONTRASTIVE skill (its counterfactual is the verified pass)', async () => {
+    const prescriptive = CONFORMANT_BODY.replace(
+      'An order_by on a joined column can re-expand the rows distinct() collapsed.',
+      'Instead, use select_related() to avoid the fan-out entirely.',
+    );
+    const d = deps({ ...cleanOut, body: prescriptive });
+    const res = await distillClusters([cluster({ tier: 'contrastive' })], d);
+    expect(res.published).toHaveLength(1);
   });
 });

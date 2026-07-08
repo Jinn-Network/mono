@@ -48,34 +48,39 @@ describe('clusterEvidence (distinct-instance clustering by tier, §7)', () => {
     { ref: 'evB-p1', instanceId: 'instB', env: pattern() },
   ];
 
-  it('groups by (tier, instanceId): two pattern refs for A collapse into one cluster', () => {
-    const clusters = clusterEvidence(items);
-    const a = clusters.find((c) => c.clusterId === 'pattern:instA');
-    expect(a).toBeDefined();
-    expect(a!.tier).toBe('pattern');
-    expect(a!.instanceIds).toEqual(['instA']);
-    expect(a!.evidenceRefs).toEqual(['evA-p1', 'evA-p2']);
+  it('collapses multiple pattern refs for a single-polarity instance into one pattern cluster', () => {
+    const clusters = clusterEvidence([
+      { ref: 'p1', instanceId: 'instP', env: pattern() },
+      { ref: 'p2', instanceId: 'instP', env: pattern() },
+    ]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]!.clusterId).toBe('pattern:instP');
+    expect(clusters[0]!.tier).toBe('pattern');
+    expect(clusters[0]!.evidenceRefs).toEqual(['p1', 'p2']);
   });
 
-  it('a pattern and a lesson for the same instance are SEPARATE clusters', () => {
+  it('folds a both-polarity instance into ONE contrastive cluster, suppressing the singles (§7 v0.5)', () => {
+    // instA in the shared fixture carries pattern×2 + lesson×1 (+ an ineligible).
     const clusters = clusterEvidence(items);
-    const lessonA = clusters.find((c) => c.clusterId === 'lesson:instA');
-    expect(lessonA).toBeDefined();
-    expect(lessonA!.tier).toBe('lesson');
-    expect(lessonA!.instanceIds).toEqual(['instA']);
-    expect(lessonA!.evidenceRefs).toEqual(['evA-l1']);
+    const a = clusters.find((c) => c.instanceIds[0] === 'instA')!;
+    expect(a.clusterId).toBe('contrastive:instA');
+    expect(a.tier).toBe('contrastive');
+    // provenance links BOTH polarities' eligible refs (ineligible dropped)
+    expect(a.evidenceRefs.sort()).toEqual(['evA-l1', 'evA-p1', 'evA-p2']);
+    // the pattern-only / lesson-only singles are suppressed
+    expect(clusters.some((c) => c.clusterId === 'pattern:instA')).toBe(false);
+    expect(clusters.some((c) => c.clusterId === 'lesson:instA')).toBe(false);
   });
 
-  it('produces exactly 3 clusters and drops the ineligible item', () => {
+  it('produces exactly 2 clusters (one contrastive, one single) and drops the ineligible item', () => {
     const clusters = clusterEvidence(items);
-    expect(clusters).toHaveLength(3);
-    // the ineligible ref never appears in any cluster
+    expect(clusters).toHaveLength(2);
     const allRefs = clusters.flatMap((c) => c.evidenceRefs);
     expect(allRefs).not.toContain('evX-i1');
     expect(allRefs.sort()).toEqual(['evA-l1', 'evA-p1', 'evA-p2', 'evB-p1']);
   });
 
-  it('a distinct instance gets its own cluster', () => {
+  it('a single-polarity distinct instance stays its own pattern cluster', () => {
     const clusters = clusterEvidence(items);
     const b = clusters.find((c) => c.clusterId === 'pattern:instB');
     expect(b).toBeDefined();
@@ -85,7 +90,7 @@ describe('clusterEvidence (distinct-instance clustering by tier, §7)', () => {
 
   it('is deterministic — clusters sorted by clusterId', () => {
     const ids = clusterEvidence(items).map((c) => c.clusterId);
-    expect(ids).toEqual(['lesson:instA', 'pattern:instA', 'pattern:instB']);
+    expect(ids).toEqual(['contrastive:instA', 'pattern:instB']);
     // shuffling the input does not change the output ordering
     const shuffled = [...items].reverse();
     expect(clusterEvidence(shuffled).map((c) => c.clusterId)).toEqual(ids);

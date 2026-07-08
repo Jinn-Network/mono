@@ -2,9 +2,10 @@
  * The distillation step — evidence clusters → layer-2 skills
  * (spec/2026-07-06-distillation-v1.md §7, D4/D10).
  *
- * Scripted, single-shot, flat (recursion/hierarchy are v3). Two modes keyed to
- * the cluster's tier (§6): pattern-eligible → strategic-pattern skill;
- * lesson-eligible → failure-lesson skill. Each skill is:
+ * Scripted, single-shot, flat (recursion/hierarchy are v3). Three modes keyed to
+ * the cluster's tier (§7): pattern → strategic-pattern skill; lesson →
+ * failure-lesson skill (diagnosis, not prescription); contrastive → one skill
+ * from both polarities of an instance. Each skill is:
  *   1. distilled by an injected LLM port (`deps.distill`) using
  *      `jinn-skill-distill-prompt-v1` (the port owns the model call);
  *   2. **secret-scrubbed fail-closed** — the body is run through the layer-2
@@ -13,7 +14,12 @@
  *      AND never re-defaced, §7 step 4 / §10);
  *   3. **contamination-scanned** against the held-out slate (§12 axis 3) — a
  *      body naming a slate instance/repo/PR is dropped;
- *   4. published via `publishSkill()` with provenance back-links + the prompt SHA.
+ *   4. **structurally gated** (§7 step 6, v0.5) — the fixed skeleton (five
+ *      non-empty sections), the description anti-trigger ("Not for:"), and (for
+ *      lessons) the imperative-counterfactual guard, all DETERMINISTIC (a deep
+ *      quality judge is deferred admission-checking, §13);
+ *   5. published via `publishSkill()` with provenance back-links, the prompt
+ *      SHA, and the auditability fields (distill model + token estimates, §5).
  *
  * Clustering is upstream (human-curated for v1, §7) — this consumes pre-formed
  * clusters of eligible evidence.
@@ -29,8 +35,12 @@ import { JINN_SKILL_DISTILL_PROMPT_V1_SHA256 } from './distill-prompt.js';
 
 export interface DistillCluster {
   clusterId: string;
-  /** `pattern` (successes) or `lesson` (evaluator-confirmed failures). */
-  tier: 'pattern' | 'lesson';
+  /**
+   * `pattern` (successes), `lesson` (evaluator-confirmed failures), or
+   * `contrastive` (both polarities for one instance — the pass↔fail delta,
+   * §7 v0.5). A contrastive cluster carries evidence refs from BOTH polarities.
+   */
+  tier: 'pattern' | 'lesson' | 'contrastive';
   /** Source evidence envelope refs → `metadata.jinn.provenance`. */
   evidenceRefs: string[];
   /** The distinct instance ids in the cluster (audit / dedup upstream). */
@@ -53,12 +63,16 @@ export interface DistillDeps {
   /** The held-out slate for the contamination scan (§12). */
   slate: { instanceIds: Set<string>; repos?: Set<string> };
   distribution?: string;
+  /** The model that ran distillation — recorded in provenance (§5 auditability). */
+  distillModel?: string;
   scrubPipeline?: ScrubPipeline;
   now?: () => Date;
 }
 
+export type SkillKind = 'strategic-pattern' | 'failure-lesson' | 'contrastive';
+
 export interface DistillResult {
-  published: Array<{ clusterId: string; skillKind: 'strategic-pattern' | 'failure-lesson'; envelopeRef: string }>;
+  published: Array<{ clusterId: string; skillKind: SkillKind; envelopeRef: string }>;
   rejected: Array<{ clusterId: string; reason: string }>;
   errors: Array<{ clusterId: string; error: string }>;
 }
@@ -121,6 +135,74 @@ function sanitizeName(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+/** The fixed distilled-skill skeleton (§5, v0.5): each section must be non-empty. */
+const REQUIRED_SECTIONS = ['When to use', 'Strategy', 'Steps', 'Pitfalls', 'Verify'] as const;
+
+/**
+ * Extract the trimmed content under a `## <title>` heading (case-insensitive),
+ * up to the next `## ` heading or EOF. Returns null when the heading is absent.
+ * `### ` and deeper subheadings are content, not section boundaries.
+ */
+function sectionContent(md: string, title: string): string | null {
+  let capturing = false;
+  const captured: string[] = [];
+  for (const line of md.split('\n')) {
+    const h = /^##\s+(.+?)\s*$/.exec(line);
+    if (h) {
+      if (capturing) break; // next section heading ends this one
+      if (h[1]!.trim().toLowerCase() === title.toLowerCase()) capturing = true;
+      continue;
+    }
+    if (capturing) captured.push(line);
+  }
+  return capturing ? captured.join('\n').trim() : null;
+}
+
+/**
+ * Lexical markers of an IMPERATIVE counterfactual in a failure-lesson body
+ * (spec §7 v0.5 verified-counterfactual rule). Deliberately SHALLOW — a deep
+ * semantic judge of lesson quality is admission-checking, deferred (§13). The
+ * evidence verifies THAT an attempt failed; a lesson states diagnosis, and
+ * stating a prescription ("do X instead") as fact overstates that evidence.
+ */
+const LESSON_IMPERATIVE_COUNTERFACTUAL: RegExp[] = [
+  /\binstead[,:]?\s+(do|use|run|call|apply|prefer|switch|add|set|replace|write)\b/i,
+  /\bthe (correct|right)\s+\w+\s+is\b/i,
+];
+
+/**
+ * Deterministic structural conformance gate (spec §7 step 6, v0.5). Returns a
+ * rejection reason, or null when the output conforms:
+ *  - fixed skeleton: all five sections present and non-empty;
+ *  - description anti-trigger: a "Not for:" clause is present;
+ *  - (lesson tier only) no imperative counterfactual.
+ */
+function structuralRejection(out: DistillLLMOutput, tier: DistillCluster['tier']): string | null {
+  for (const title of REQUIRED_SECTIONS) {
+    const content = sectionContent(out.body, title);
+    if (content === null) return `skeleton: missing section "## ${title}"`;
+    if (content.length === 0) return `skeleton: empty section "## ${title}"`;
+  }
+  if (!/\bNot for\b/i.test(out.description)) {
+    return 'description missing "Not for:" anti-trigger clause';
+  }
+  if (tier === 'lesson' && LESSON_IMPERATIVE_COUNTERFACTUAL.some((re) => re.test(out.body))) {
+    return 'lesson counterfactual: unverified prescription (diagnosis only unless contrastive)';
+  }
+  return null;
+}
+
+/** Deterministic token estimate: ceil(utf8 bytes / 4) — the §5 compression metric. */
+function estimateTokens(s: string): number {
+  return Math.ceil(new TextEncoder().encode(s).length / 4);
+}
+
+const SKILL_KIND_BY_TIER: Record<DistillCluster['tier'], SkillKind> = {
+  pattern: 'strategic-pattern',
+  lesson: 'failure-lesson',
+  contrastive: 'contrastive',
+};
+
 export async function distillClusters(
   clusters: DistillCluster[],
   deps: DistillDeps,
@@ -157,6 +239,13 @@ export async function distillClusters(
         continue;
       }
 
+      // (4) deterministic structural conformance gate (§7 step 6, v0.5).
+      const structuralReason = structuralRejection(out, cluster.tier);
+      if (structuralReason) {
+        result.rejected.push({ clusterId: cluster.clusterId, reason: structuralReason });
+        continue;
+      }
+
       const name = sanitizeName(out.name);
       if (!name) {
         // An empty/all-symbol LLM name is a rejection (bad output), not an error.
@@ -164,7 +253,7 @@ export async function distillClusters(
         continue;
       }
       assertConformantName(name); // defensive; sanitizeName should already conform
-      const skillKind = cluster.tier === 'pattern' ? 'strategic-pattern' : 'failure-lesson';
+      const skillKind = SKILL_KIND_BY_TIER[cluster.tier];
       const pkg: SkillPackage = {
         name,
         description: out.description,
@@ -178,6 +267,9 @@ export async function distillClusters(
           distillPromptSha256: JINN_SKILL_DISTILL_PROMPT_V1_SHA256,
           distilledAt: now.toISOString(),
           skillKind,
+          ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
+          evidenceTokens: estimateTokens(JSON.stringify(cluster.input ?? '')),
+          skillTokens: estimateTokens(out.body),
         },
         body: out.body,
       };

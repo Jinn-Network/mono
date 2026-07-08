@@ -45,7 +45,12 @@ export const SkillPackageMetaSchema = z
     distillPromptSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
     distilledAt: z.string().optional(),
     seedSource: z.string().optional(),
-    skillKind: z.enum(['strategic-pattern', 'failure-lesson']).optional(),
+    skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive']).optional(),
+    // Auditability (spec §5, v0.5): the distilling model + a deterministic
+    // ceil(chars/4) token estimate of input vs body (the compression ratio).
+    distillModel: z.string().min(1).optional(),
+    evidenceTokens: z.number().int().nonnegative().optional(),
+    skillTokens: z.number().int().nonnegative().optional(),
   })
   // The exported frontmatter must not drift internally: the "distilled from N
   // traces" claim travels to the skills ecosystem, so N must equal the

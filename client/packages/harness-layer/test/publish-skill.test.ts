@@ -70,6 +70,25 @@ describe('toSkillArtifactV1 (SkillPackage → canonical #1394 artifact)', () => 
     expect(art.provenance.verifiabilityTier).toBe('evaluator-verified');
   });
 
+  it('maps the v0.5 auditability fields (distillModel + token estimates) and a contrastive skillKind', () => {
+    const auditPkg: SkillPackage = {
+      ...pkg,
+      jinn: {
+        ...pkg.jinn,
+        skillKind: 'contrastive',
+        distillModel: 'claude-opus-4-8',
+        evidenceTokens: 1200,
+        skillTokens: 90,
+      },
+    };
+    const art = toSkillArtifactV1(auditPkg, `0x${'1'.repeat(40)}`);
+    expect(() => SkillArtifactV1Schema.parse(art)).not.toThrow();
+    expect(art.provenance.skillKind).toBe('contrastive');
+    expect(art.provenance.distillModel).toBe('claude-opus-4-8');
+    expect(art.provenance.evidenceTokens).toBe(1200);
+    expect(art.provenance.skillTokens).toBe(90);
+  });
+
   it('anti-drift: the stored skillMd carries name/description but NOT the metadata.jinn block', () => {
     const art = toSkillArtifactV1(pkg, `0x${'1'.repeat(40)}`);
     expect(art.skill.skillMd).toContain('name: example-skill');
